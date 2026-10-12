@@ -71,6 +71,12 @@ jobs:
 
           $backendChanged = Test-SurfaceChanged -Name "backend" -PathPrefix "backend"
           $frontendChanged = Test-SurfaceChanged -Name "frontend" -PathPrefix "frontend"
+          # A reboot or a lost PM2 daemon leaves the frontend stopped while its
+          # marker still says "deployed"; redeploy it instead of skipping.
+          if (-not $frontendChanged -and -not (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue)) {
+            Write-Host "frontend: nothing is listening on port 3000; deploying."
+            $frontendChanged = $true
+          }
 
           "backend_changed=$($backendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
