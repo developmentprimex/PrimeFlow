@@ -17,6 +17,8 @@ from app.services.tomorrow_print_report import (
     _excel_table_attachment,
     _html_table,
     _meeting_rows,
+    _meeting_title,
+    _meeting_relation,
     _missing_blocked_initials,
     _missing_one_h_initials,
     _one_h_checklists_html,
@@ -1384,8 +1386,8 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert ">10:00</td>" in report_html
     assert "Today one-off 10:00" not in report_html
     assert "border-left:4px solid #2563EB" in report_html
-    assert report_html.count("border:2px solid #2563EB") == 6
-    assert report_html.count("border-top:4px solid #111827") == 8
+    assert report_html.count("border:2px solid #2563EB") == 8
+    assert report_html.count("border-top:4px solid #111827") == 10
     assert report_html.count('data-meeting-row="true"') == 3
     assert report_html.count('rowspan="2"') == 2
     assert 'bgcolor="#DCECFF"' in report_html
@@ -1407,6 +1409,21 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert "10:00" in values
     assert "1. Today one-off" in values
     assert "2. Today early internal" in values
+
+
+@pytest.mark.parametrize("link_field, prefix", [
+    ("preExternalMeetingId", "PARA"),
+    ("pre_external_meeting_id", "PARA"),
+    ("pairedExternalMeetingId", "PAS"),
+    ("paired_external_meeting_id", "PAS"),
+])
+def test_linked_meeting_title_uses_explicit_relationship(link_field, prefix) -> None:
+    item = {"title": "Client workshop", link_field: "external-id"}
+    assert _meeting_relation(item) == prefix
+    assert _meeting_title(item) == "Client workshop"
+    assert item["title"] == "Client workshop"
+    assert _meeting_title({"title": "Manual internal"}) == "Manual internal"
+    assert _meeting_relation({"title": "Manual internal"}) == ""
 
 
 def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge() -> None:
@@ -1447,8 +1464,8 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
     report_html = _dated_meetings_html(sections)
 
     assert report_html.count('data-calendar-meeting="true"') == 2
-    assert report_html.count('bgcolor="#CCEFF1"') == 6
-    assert report_html.count('bgcolor="#FFF4CC"') == 3
+    assert report_html.count('bgcolor="#CCEFF1"') == 8
+    assert report_html.count('bgcolor="#FFF4CC"') == 4
     assert report_html.count('data-meeting-users="true"') == 6
     assert report_html.count(">USER</th>") == 2
     assert "AK/DV" in report_html
@@ -1473,8 +1490,9 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
     }
     assert set(time_cells) == {"10:00 CAL", "10:30 CAL", "11:00 MANUAL"}
     assert time_cells["10:00 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
-    assert sheet.cell(time_cells["10:00 CAL"].row, 5).font.bold
-    assert not sheet.cell(time_cells["10:30 CAL"].row, 5).font.bold
+    assert sheet.cell(time_cells["10:00 CAL"].row, 6).font.bold
+    assert not sheet.cell(time_cells["10:30 CAL"].row, 6).font.bold
+    assert sheet.cell(time_cells["10:30 CAL"].row, 5).value == "PAS"
     assert time_cells["10:30 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
     assert time_cells["10:30 CAL"].font.color.rgb.endswith("64748B")
     assert sheet.cell(time_cells["10:30 CAL"].row, 4).value == "AK/DV"
@@ -1576,12 +1594,16 @@ def test_word_export_preserves_task_markers_and_unavailable_meeting_users() -> N
         target_date,
         meeting_sections=[(target_date, "SOT", [("TAK INT", [{
             "title": "Internal meeting",
+            "preExternalMeetingId": "external-id",
             "time": "11:00",
             "assignees": ["Luan Hoxha", "Dren Veliu"],
             "_unavailableUserInitials": ["LH"],
         }], False)])],
     )
     document = Document(BytesIO(content))
+    meeting_row = next(row for table in document.tables for row in table.rows if any("Internal meeting" in cell.text for cell in row.cells))
+    assert meeting_row.cells[3].text == "PARA"
+    assert meeting_row.cells[4].text == "1. Internal meeting"
     cells = [cell for table in document.tables for row in table.rows for cell in row.cells]
     task_cell = next(cell for cell in cells if "Task with marker" in cell.text)
     marker_run = next(run for paragraph in task_cell.paragraphs for run in paragraph.runs if "[?]" in run.text)
@@ -1630,6 +1652,13 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
                         {"title": "Today meeting", "date": "2026-08-24", "time": "10:00"},
                         {"title": "Tomorrow meeting", "date": "2026-08-25", "time": "11:00"},
                         {"title": "Following meeting", "date": "2026-08-26", "time": "12:00"},
+                    ],
+                    "internal": [
+                        {"title": "Preparation", "date": target_date.isoformat(), "time": "09:00",
+                         "preExternalMeetingId": "external-id"},
+                        {"title": "Follow-up", "date": target_date.isoformat(), "time": "13:00",
+                         "pairedExternalMeetingId": "external-id"},
+                        {"title": "Standalone internal", "date": target_date.isoformat(), "time": "14:00"},
                     ],
                 }
             }
@@ -1684,3 +1713,23 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     tomorrow_workbook = load_workbook(BytesIO(tomorrow["attachments"][0][1]))
     tomorrow_values = [str(cell.value or "") for row in tomorrow_workbook.active.iter_rows() for cell in row]
     assert not any("Done task for selected day" in value for value in tomorrow_values)
+    for result, cell_values in ((report, values), (tomorrow, tomorrow_values)):
+        assert result["html"].count(">PARA/PAS</th>") == 2
+        for relation, title in (("PARA", "Preparation"), ("PAS", "Follow-up")):
+            assert f">{relation}</td>" in result["html"]
+            assert re.search(rf'data-meeting-relation="true"[^>]*>{relation}</td><td data-meeting-cell="true"[^>]*>\d+\. {title}</td>', result["html"])
+            assert f">{relation}</td>" in result["content_html"]
+            assert f"[{relation}] {title}" in result["plain_text"]
+            assert relation in cell_values
+            assert any(title in value for value in cell_values)
+        assert "PARA TAK EXT -" not in result["html"]
+        assert "PAS TAK EXT -" not in result["html"]
+    for workbook in (workbook, tomorrow_workbook):
+        for row in workbook.active.iter_rows():
+            title = str(row[5].value or "")
+            if "Preparation" in title:
+                assert row[4].value == "PARA"
+            elif "Follow-up" in title:
+                assert row[4].value == "PAS"
+            elif "Standalone internal" in title:
+                assert row[4].value is None
