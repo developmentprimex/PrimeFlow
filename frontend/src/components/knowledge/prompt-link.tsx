@@ -1,12 +1,12 @@
 import Link from "next/link"
 import { ExternalLink } from "lucide-react"
 
-const PROMPT_LINK_RE = /\/knowledge\/prompts\?prompt=([0-9a-f-]{36})/i
+const PROMPT_LINK_RE = /\/knowledge\/(prompts|definime|rregullore)\?prompt=([0-9a-f-]{36})/i
 
 /** Prompt tasks (PROMPT: … / PROMPT: TESTO: …) carry only a link to the full prompt in their description. */
 export function promptHrefFromText(text?: string | null): string | null {
   const match = (text || "").match(PROMPT_LINK_RE)
-  return match ? `/knowledge/prompts?prompt=${match[1]}` : null
+  return match ? `/knowledge/${match[1].toLowerCase()}?prompt=${match[2]}` : null
 }
 
 export function PromptLinkButton({ text, compact = false }: { text?: string | null; compact?: boolean }) {
@@ -22,7 +22,7 @@ export function PromptLinkButton({ text, compact = false }: { text?: string | nu
       }
     >
       <ExternalLink className={compact ? "h-3 w-3 shrink-0" : "h-3.5 w-3.5"} />
-      Shiko promptin e plotë
+      {href.startsWith("/knowledge/definime") ? "Shiko definimin e plotë" : href.startsWith("/knowledge/rregullore") ? "Shiko rregulloren e plotë" : "Shiko promptin e plotë"}
     </Link>
   )
 }

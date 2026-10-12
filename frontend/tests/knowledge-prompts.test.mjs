@@ -25,6 +25,7 @@ function load(file, dependencies = {}) {
 
 const types = load("src/components/knowledge/prompt-types.ts")
 const search = load("src/components/knowledge/prompt-search.tsx")
+const config = load("src/components/knowledge/knowledge-config.tsx")
 
 function prompt(id, status, extra = {}) {
   return {
@@ -100,7 +101,7 @@ test("my-action filter includes both test and approval and preserves author/test
   assert.equal(types.promptMatchesFilter(approvalPrompt, "WAITING_FOR_ME", "staff", false), false)
 })
 
-function renderPage(view) {
+function renderPage(view, kind = "PROMPT") {
   const approved = prompt("approved", "APPROVED")
   const testing = prompt("testing", "PENDING_TEST", { source_note_id: "test", tester: { id: "manager" }, test_task_status: "TODO" })
   const approval = prompt("approval", "PENDING_APPROVAL", { source_note_id: "approval", tested_by: { id: "tester" } })
@@ -124,8 +125,9 @@ function renderPage(view) {
   }
   const passthrough = ({ children }) => React.createElement("div", null, children)
   const params = new URLSearchParams(view ? { view } : {})
-  const Page = load("src/app/(app)/knowledge/prompts/page.tsx", {
+  const Page = load("src/components/knowledge/knowledge-page.tsx", {
     react,
+    "./knowledge-config": config,
     "next/navigation": { usePathname: () => "/knowledge/prompts", useRouter: () => ({}), useSearchParams: () => params },
     "@/lib/auth": { useAuth: () => ({ user: { id: "manager", role: "MANAGER" }, apiFetch: () => {} }) },
     "@/lib/utils": { cn: (...values) => values.filter(Boolean).join(" ") },
@@ -137,7 +139,7 @@ function renderPage(view) {
     "@/components/ui/textarea": { Textarea: (props) => React.createElement("textarea", props) },
     "@/components/ui/select": Object.fromEntries(["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"].map((name) => [name, passthrough])),
   }).default
-  return renderToStaticMarkup(React.createElement(Page))
+  return renderToStaticMarkup(React.createElement(Page, { kind }))
 }
 
 test("default Prompts page renders notes, author/test tasks and testing/approval prompts immediately", () => {
@@ -163,3 +165,79 @@ test("existing Notes link still shows requests in test and confirmation", () => 
   assert.ok(html.includes("Request approval"))
   assert.ok(!html.includes("Content approved"))
 })
+
+for (const [kind, title, prefix] of [["DEFINITION", "Definime", "DEFINIM"], ["REGULATION", "Rregullore", "RREGULLORE"]]) {
+  test(`${title} uses the same notes and library with control labels`, () => {
+    const html = renderPage("notes", kind)
+    assert.ok(html.includes(title))
+    assert.ok(html.includes(`${prefix}: KONTROLLO: Prompt testing`))
+    assert.ok(html.includes("Në pritje të kontrollit"))
+    assert.ok(!html.includes("PROMPT: TESTO:"))
+    assert.ok(!html.includes("Në testim"))
+    // Stored titles/content retain their original text, even when they contain 'Prompt'.
+    assert.ok(html.includes("Prompt testing"))
+    const library = renderPage("library", kind)
+    assert.ok(library.includes("Content approved"))
+    assert.ok(!library.includes("Content testing"))
+  })
+}
+
+test("category interface copy distinguishes control from testing", () => {
+  for (const kind of ["DEFINITION", "REGULATION"]) {
+    assert.equal(config.knowledgeText(kind, "E testova"), "E kontrollova")
+    assert.equal(config.knowledgeText(kind, "Zgjidh personin që do ta testojë"), "Zgjidh personin që do ta kontrollojë")
+    assert.match(config.knowledgeText(kind, "Komenti i testimit (opsional)"), /kontrollit/)
+  }
+  assert.equal(config.knowledgeText("PROMPT", "E testova"), "E testova")
+})
+
+test("task links open the correct knowledge category", () => {
+  const links = load("src/components/knowledge/prompt-link.tsx", { "next/link": () => null })
+  const id = "12345678-1234-1234-1234-123456789abc"
+  for (const category of ["prompts", "definime", "rregullore"]) {
+    assert.equal(links.promptHrefFromText(`https://example.com/knowledge/${category}?prompt=${id}`), `/knowledge/${category}?prompt=${id}`)
+  }
+  assert.equal(links.promptHrefFromText("Regular task"), null)
+})
+
+for (const kind of ["DEFINITION", "REGULATION", "PROMPT"]) {
+  test(`${kind} review confirmation calls the appropriate action`, async () => {
+    const entry = prompt("review", "PENDING_TEST", { knowledge_type: kind, tester: { id: "reviewer" } })
+    const calls = []
+    const states = [false, "test", "Checked"]
+    const passthrough = ({ children }) => React.createElement("div", null, children)
+    const dialogs = load("src/components/knowledge/prompt-dialogs.tsx", {
+      react: { ...React, useState: () => [states.shift(), () => {}], useEffect: () => {} },
+      "./knowledge-config": { useKnowledge: () => ({ kind, text: (value) => config.knowledgeText(kind, value) }) },
+      "./prompt-types": types,
+      "@/lib/auth": { useAuth: () => ({ user: { id: "reviewer", role: "STAFF" }, apiFetch: async (path, options) => { calls.push({ path, options }); return { ok: true, json: async () => ({ ...entry, status: "PENDING_APPROVAL" }) } } }) },
+      "@/lib/utils": { cn: (...values) => values.filter(Boolean).join(" ") },
+      "@/lib/users-cache": {},
+      "@/components/ui/button": { Button: ({ children }) => React.createElement("button", null, children) },
+      "@/components/ui/badge": { Badge: passthrough },
+      "@/components/ui/input": { Input: () => null },
+      "@/components/ui/label": { Label: passthrough },
+      "@/components/ui/textarea": { Textarea: () => null },
+      "@/components/ui/select": Object.fromEntries(["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"].map((name) => [name, passthrough])),
+      "@/components/ui/dialog": Object.fromEntries(["Dialog", "DialogContent", "DialogDescription", "DialogFooter", "DialogHeader", "DialogTitle"].map((name) => [name, passthrough])),
+    })
+    let changed
+    const tree = dialogs.PromptDetailDialog({ prompt: entry, onClose() {}, onChanged(value) { changed = value }, onDeleted() {}, onEdit() {} })
+    const actionLabel = kind === "PROMPT" ? "Konfirmo testimin" : "Konfirmo kontrollin"
+    let confirm
+    function find(node) {
+      if (Array.isArray(node)) return node.forEach(find)
+      if (!React.isValidElement(node)) return
+      if (node.props.onClick && renderToStaticMarkup(node).includes(actionLabel)) confirm = node
+      find(node.props.children)
+    }
+    find(tree)
+    assert.ok(confirm, `Missing ${actionLabel}`)
+    await confirm.props.onClick()
+    // UI handlers launch the promise without returning it.
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(calls[0].path, `/knowledge/prompts/review/${kind === "PROMPT" ? "confirm-test" : "confirm-control"}`)
+    assert.equal(JSON.parse(calls[0].options.body).comment, "Checked")
+    assert.equal(changed.status, "PENDING_APPROVAL")
+  })
+}

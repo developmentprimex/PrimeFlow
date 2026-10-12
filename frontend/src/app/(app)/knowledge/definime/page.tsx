@@ -1,15 +1,7 @@
 "use client"
 
-import { BookA } from "lucide-react"
+import KnowledgePage from "@/components/knowledge/knowledge-page"
 
-import { KnowledgeComingSoon } from "@/components/knowledge/coming-soon"
-
-export default function KnowledgeDefinimePage() {
-  return (
-    <KnowledgeComingSoon
-      title="Definime"
-      icon={BookA}
-      description="Definimet dhe termat e përbashkët të PrimEx do të jenë këtu së shpejti."
-    />
-  )
+export default function Page() {
+  return <KnowledgePage kind="DEFINITION" />
 }

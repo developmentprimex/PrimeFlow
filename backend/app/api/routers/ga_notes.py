@@ -419,7 +419,7 @@ async def update_ga_note(
             marker_comment=payload.one_h_marker_comment,
         )
 
-    if payload.content is not None and payload.content != old_content and note.knowledge_type != "PROMPT":
+    if payload.content is not None and payload.content != old_content and note.knowledge_type not in ("PROMPT", "DEFINITION", "REGULATION"):
         # Knowledge PX prompt-note tasks keep their "PROMPT: <prompt title>" titles.
         new_task_title = _ga_note_task_title(note.content)
         old_default_description = _ga_note_default_task_description(old_content)
@@ -580,7 +580,7 @@ async def update_ga_note_task_bundle(
 
     title = (
         _ga_note_task_title(note.content)
-        if "content" in fields_set and note.knowledge_type != "PROMPT"
+        if "content" in fields_set and note.knowledge_type not in ("PROMPT", "DEFINITION", "REGULATION")
         else None
     )
     description_is_set = "description" in fields_set

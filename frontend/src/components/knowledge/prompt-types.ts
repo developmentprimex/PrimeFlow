@@ -7,6 +7,7 @@ export interface KnowledgeUserRef {
 }
 
 export interface KnowledgePrompt {
+  knowledge_type?: "PROMPT" | "DEFINITION" | "REGULATION"
   id: string
   title: string
   content: string
@@ -43,6 +44,7 @@ export interface PromptNoteTask {
 }
 
 export interface PromptNote {
+  knowledge_type?: "PROMPT" | "DEFINITION" | "REGULATION"
   id: string
   content: string
   status: "OPEN" | "CLOSED"

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useKnowledge } from "./knowledge-config"
 import {
   Check,
   CheckCircle2,
@@ -66,10 +67,11 @@ export async function copyText(text: string, label = "U kopjua") {
 }
 
 export function PromptStatusBadge({ status }: { status: PromptStatus }) {
+  const { text: t } = useKnowledge()
   const meta = PROMPT_STATUS_META[status]
   return (
     <Badge variant="outline" className={cn("font-medium", meta.className)}>
-      {meta.label}
+      {t(meta.label)}
     </Badge>
   )
 }
@@ -173,6 +175,7 @@ export function PromptFormDialog({
   sourceNote?: PromptNote | null
   onSaved: (prompt: KnowledgePrompt) => void
 }) {
+  const { kind, text: t } = useKnowledge()
   const { apiFetch, user } = useAuth()
   const [title, setTitle] = React.useState("")
   const [testerId, setTesterId] = React.useState("")
@@ -224,7 +227,7 @@ export function PromptFormDialog({
     if (!title.trim()) setTitle(next.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "))
     if (TEXT_FILE_RE.test(next.name) && next.size < 2 * 1024 * 1024) {
       const text = await next.text()
-      if (!content.trim() || window.confirm("Ta zëvendësoj tekstin e promptit me përmbajtjen e skedarit?")) {
+      if (!content.trim() || window.confirm(t("Ta zëvendësoj tekstin e promptit me përmbajtjen e skedarit?"))) {
         setContent(text)
       }
     }
@@ -289,12 +292,13 @@ export function PromptFormDialog({
   }
 
   const save = async () => {
-    if (title.trim().length < 2) return toast.error("Shkruaj titullin e promptit")
-    if (!content.trim() && !file && !hasExistingFile) return toast.error("Shto tekstin e promptit ose ngarko një skedar")
-    if (!filesPath.trim()) return toast.error("Zgjidh folderin ku do të ruhet prompti në Files PX")
-    if (!testerLocked && !testerId) return toast.error("Zgjidh testuesin e promptit")
+    if (title.trim().length < 2) return toast.error(t("Shkruaj titullin e promptit"))
+    if (!content.trim() && !file && !hasExistingFile) return toast.error(t("Shto tekstin e promptit ose ngarko një skedar"))
+    if (!filesPath.trim()) return toast.error(t("Zgjidh folderin ku do të ruhet prompti në Files PX"))
+    if (!testerLocked && !testerId) return toast.error(t("Zgjidh testuesin e promptit"))
     const form = new FormData()
     form.append("title", title.trim())
+    if (!prompt) form.append("knowledge_type", kind)
     form.append("content", content)
     form.append("keywords", keywords.join(", "))
     form.append("files_path", filesPath.trim())
@@ -309,14 +313,14 @@ export function PromptFormDialog({
         body: form,
       })
       if (!res.ok) {
-        toast.error(await readError(res, "Prompti nuk u ruajt"))
+        toast.error(await readError(res, t("Prompti nuk u ruajt")))
         return
       }
       const saved = (await res.json()) as KnowledgePrompt
       toast.success(
         saved.status === "PENDING_TEST"
-          ? `Prompti u ruajt · ${saved.tester?.full_name || "testuesi"} e ka detyrën "PROMPT: TESTO"`
-          : "Prompti u përditësua"
+          ? (t("Prompti u ruajt · ") + (saved.tester?.full_name || t("testuesi")) + t(" e ka detyrën \"PROMPT: TESTO\""))
+          : t("Prompti u përditësua")
       )
       onSaved(saved)
       onOpenChange(false)
@@ -330,11 +334,11 @@ export function PromptFormDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{prompt ? "Edito promptin" : "Shto promptin"}</DialogTitle>
+          <DialogTitle>{prompt ? t("Edito promptin") : t("Shto promptin")}</DialogTitle>
           <DialogDescription>
             {prompt && prompt.status === "APPROVED"
               ? "Ndryshimet ruhen direkt në librari."
-              : "Pas ruajtjes, prompti duhet të testohet nga një person tjetër dhe pastaj të aprovohet nga menaxheri."}
+              : t("Pas ruajtjes, prompti duhet të testohet nga një person tjetër dhe pastaj të aprovohet nga menaxheri.")}
           </DialogDescription>
         </DialogHeader>
 
@@ -343,20 +347,20 @@ export function PromptFormDialog({
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Kërkesa</p>
             <p className="mt-1 whitespace-pre-wrap">{sourceNote.content}</p>
             {!tasksDone ? (
-              <p className="mt-2 text-xs text-violet-700">Detyra jote mbyllet automatikisht sapo testuesi ta konfirmojë testimin.</p>
+              <p className="mt-2 text-xs text-violet-700">{t("Detyra jote mbyllet automatikisht sapo testuesi ta konfirmojë testimin.")}</p>
             ) : null}
           </div>
         ) : null}
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="kp-title">Titulli i promptit</Label>
-            <Input id="kp-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="p.sh. Amazon bulletpoints prompt" maxLength={300} />
+            <Label htmlFor="kp-title">{t("Titulli i promptit")}</Label>
+            <Input id="kp-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("p.sh. Amazon bulletpoints prompt")} maxLength={300} />
           </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="kp-content">Prompti</Label>
+              <Label htmlFor="kp-content">{t("Prompti")}</Label>
               <span className="text-xs text-muted-foreground">{content.length.toLocaleString()} karaktere</span>
             </div>
             <Textarea
@@ -369,7 +373,7 @@ export function PromptFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Ose ngarko skedarin e promptit</Label>
+            <Label>{t("Ose ngarko skedarin e promptit")}</Label>
             <input
               ref={fileRef}
               type="file"
@@ -399,7 +403,7 @@ export function PromptFormDialog({
                   </button>
                 </span>
               ) : (
-                <span className="text-xs text-muted-foreground">.txt / .md lexohen automatikisht në fushën e promptit</span>
+                <span className="text-xs text-muted-foreground">{t(".txt / .md lexohen automatikisht në fushën e promptit")}</span>
               )}
             </div>
           </div>
@@ -407,13 +411,13 @@ export function PromptFormDialog({
           <div className="space-y-2">
             <Label>Keywords</Label>
             <KeywordInput value={keywords} onChange={setKeywords} />
-            <p className="text-xs text-muted-foreground">Shtyp Enter ose presje pas çdo fjale. Këto fjalë e bëjnë promptin më të lehtë për t&apos;u gjetur.</p>
+            <p className="text-xs text-muted-foreground">{t("Shtyp Enter ose presje pas çdo fjale. Këto fjalë e bëjnë promptin më të lehtë për t'u gjetur.")}</p>
           </div>
 
           <div className="space-y-2">
-            <Label>Testuesi i promptit</Label>
+            <Label>{t("Testuesi i promptit")}</Label>
             <Select value={testerId || undefined} onValueChange={setTesterId} disabled={testerLocked}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh personin që do ta testojë" /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder={t("Zgjidh personin që do ta testojë")} /></SelectTrigger>
               <SelectContent>
                 {testerOptions.map((u) => (
                   <SelectItem key={u.id} value={u.id}>{u.full_name || u.username || u.email}</SelectItem>
@@ -422,8 +426,8 @@ export function PromptFormDialog({
             </Select>
             <p className="text-xs text-muted-foreground">
               {testerLocked
-                ? "Prompti është aprovuar; testuesi nuk ndryshohet më."
-                : "Personit i krijohet automatikisht detyra \u201cPROMPT: TESTO: Titulli\u201d. Kur klikon \u201cE testova\u201d, detyra mbyllet vetë."}
+                ? t("Prompti është aprovuar; testuesi nuk ndryshohet më.")
+                : t("Personit i krijohet automatikisht detyra “PROMPT: TESTO: Titulli”. Kur klikon “E testova”, detyra mbyllet vetë.")}
             </p>
           </div>
 
@@ -442,8 +446,7 @@ export function PromptFormDialog({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              PrimeFlow krijon skedarin .txt në folderin e zgjedhur dhe e përditëson kur editohet prompti.
-            </p>
+              {t(" PrimeFlow krijon skedarin .txt në folderin e zgjedhur dhe e përditëson kur editohet prompti. ")}</p>
           </div>
         </div>
 
@@ -453,7 +456,7 @@ export function PromptFormDialog({
           </Button>
           <Button onClick={() => void save()} disabled={saving}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            {prompt ? "Ruaj ndryshimet" : "Ruaj për testim"}
+            {prompt ? "Ruaj ndryshimet" : t("Ruaj për testim")}
           </Button>
         </DialogFooter>
         </DialogContent>
@@ -463,7 +466,7 @@ export function PromptFormDialog({
         <DialogContent className="max-h-[88vh] sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Zgjidh folderin në Files PX</DialogTitle>
-            <DialogDescription>Hap folderat e serverit dhe zgjidh ku do të ruhet prompti.</DialogDescription>
+            <DialogDescription>{t("Hap folderat e serverit dhe zgjidh ku do të ruhet prompti.")}</DialogDescription>
           </DialogHeader>
 
           <form
@@ -574,6 +577,7 @@ export function PromptDetailDialog({
   onDeleted: (id: string) => void
   onEdit: (prompt: KnowledgePrompt) => void
 }) {
+  const { kind, text: t } = useKnowledge()
   const { apiFetch, user } = useAuth()
   const [busy, setBusy] = React.useState(false)
   const [mode, setMode] = React.useState<ReviewMode>(null)
@@ -619,7 +623,7 @@ export function PromptDetailDialog({
   }
 
   const remove = async () => {
-    if (!window.confirm(`Ta fshij promptin "${prompt.title}"?`)) return
+    if (!window.confirm((t("Ta fshij promptin \"") + (prompt.title) + "\"?"))) return
     setBusy(true)
     try {
       const res = await apiFetch(`/knowledge/prompts/${prompt.id}`, { method: "DELETE" })
@@ -627,7 +631,7 @@ export function PromptDetailDialog({
         toast.error(await readError(res, "Fshirja dështoi"))
         return
       }
-      toast.success("Prompti u fshi")
+      toast.success(t("Prompti u fshi"))
       onDeleted(prompt.id)
     } finally {
       setBusy(false)
@@ -641,7 +645,7 @@ export function PromptDetailDialog({
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = prompt.file_original_name || "prompt"
+    a.download = prompt.file_original_name || t("prompt")
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -649,11 +653,11 @@ export function PromptDetailDialog({
   const steps = [
     { label: "Krijuar", who: prompt.created_by?.full_name, when: prompt.created_at, done: true },
     {
-      label: "Testuar",
+      label: t("Testuar"),
       who: prompt.tested_by?.full_name,
       when: prompt.tested_at,
       done: Boolean(prompt.tested_at),
-      pending: prompt.tester?.full_name ? `Testuesi: ${prompt.tester.full_name}` : undefined,
+      pending: prompt.tester?.full_name ? (t("Testuesi: ") + (prompt.tester.full_name) + "") : undefined,
     },
     { label: "Aprovuar", who: prompt.approved_by?.full_name, when: prompt.approved_at, done: Boolean(prompt.approved_at) },
   ]
@@ -679,20 +683,20 @@ export function PromptDetailDialog({
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
             <p className="font-semibold">Kthyer mbrapa nga {prompt.rejected_by?.full_name || "—"} · {formatDate(prompt.rejected_at)}</p>
             <p className="mt-1 whitespace-pre-wrap">{prompt.rejection_reason}</p>
-            {isAuthor ? <p className="mt-2 text-xs">Edito promptin dhe ruaje përsëri për ta dërguar në testim.</p> : null}
+            {isAuthor ? <p className="mt-2 text-xs">{t("Edito promptin dhe ruaje përsëri për ta dërguar në testim.")}</p> : null}
           </div>
         ) : null}
 
         <div className="relative rounded-lg border bg-muted/30">
           <div className="flex items-center justify-between border-b px-3 py-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Prompti</span>
-            <Button size="sm" variant="ghost" onClick={() => void copyText(prompt.content, "Prompti u kopjua")} disabled={!prompt.content}>
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("Prompti")}</span>
+            <Button size="sm" variant="ghost" onClick={() => void copyText(prompt.content, t("Prompti u kopjua"))} disabled={!prompt.content}>
               <ClipboardCopy className="h-4 w-4" />
               Kopjo
             </Button>
           </div>
           <pre className="max-h-[45vh] overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-[13px] leading-relaxed">
-            {prompt.content || <span className="text-muted-foreground">Prompti është vetëm në skedarin e bashkëngjitur.</span>}
+            {prompt.content || <span className="text-muted-foreground">{t("Prompti është vetëm në skedarin e bashkëngjitur.")}</span>}
           </pre>
         </div>
 
@@ -736,29 +740,28 @@ export function PromptDetailDialog({
           ))}
         </ol>
         {prompt.test_comment ? (
-          <p className="rounded-lg border bg-muted/30 p-3 text-sm"><span className="font-semibold">Komenti i testimit: </span>{prompt.test_comment}</p>
+          <p className="rounded-lg border bg-muted/30 p-3 text-sm"><span className="font-semibold">{t("Komenti i testimit: ")}</span>{prompt.test_comment}</p>
         ) : null}
 
         {mode ? (
           <div className="space-y-2 rounded-lg border p-3">
-            <Label htmlFor="kp-review-comment">{mode === "test" ? "Komenti i testimit (opsional)" : "Arsyeja e kthimit"}</Label>
+            <Label htmlFor="kp-review-comment">{mode === "test" ? t("Komenti i testimit (opsional)") : "Arsyeja e kthimit"}</Label>
             <Textarea
               id="kp-review-comment"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder={mode === "test" ? "p.sh. E testova me 5 produkte, rezultati OK" : "Çfarë duhet rregulluar?"}
+              placeholder={mode === "test" ? t("p.sh. E testova me 5 produkte, rezultati OK") : "Çfarë duhet rregulluar?"}
               className="min-h-20"
               autoFocus
             />
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setMode(null)} disabled={busy}>Anulo</Button>
               {mode === "test" ? (
-                <Button size="sm" disabled={busy} onClick={() => void act("confirm-test", { comment }, "Testimi u konfirmua · pret aprovimin e menaxherit")}>
-                  <FlaskConical className="h-4 w-4" />
-                  Konfirmo testimin
-                </Button>
+                <Button size="sm" disabled={busy} onClick={() => void act(kind === "PROMPT" ? "confirm-test" : "confirm-control", { comment }, t("Testimi u konfirmua · pret aprovimin e menaxherit"))}>
+                  {kind === "PROMPT" ? <FlaskConical className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                  {t(" Konfirmo testimin ")}</Button>
               ) : (
-                <Button size="sm" variant="destructive" disabled={busy || !comment.trim()} onClick={() => void act("reject", { comment }, "Prompti u kthye te autori")}>
+                <Button size="sm" variant="destructive" disabled={busy || !comment.trim()} onClick={() => void act("reject", { comment }, t("Prompti u kthye te autori"))}>
                   <Undo2 className="h-4 w-4" />
                   Kthe mbrapa
                 </Button>
@@ -791,12 +794,11 @@ export function PromptDetailDialog({
             ) : null}
             {canTest && !mode ? (
               <Button size="sm" onClick={() => setMode("test")} disabled={busy}>
-                <FlaskConical className="h-4 w-4" />
-                E testova
-              </Button>
+                {kind === "PROMPT" ? <FlaskConical className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                {t(" E testova ")}</Button>
             ) : null}
             {canApprove ? (
-              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => void act("approve", undefined, "Prompti u ruajt në Prompt Library")}>
+              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => void act("approve", undefined, t("Prompti u ruajt në Prompt Library"))}>
                 <ShieldCheck className="h-4 w-4" />
                 Aprovo në librari
               </Button>
@@ -805,15 +807,15 @@ export function PromptDetailDialog({
         </DialogFooter>
         {prompt.status === "PENDING_TEST" && isAuthor ? (
           <p className="text-right text-xs text-muted-foreground">
-            {prompt.tester?.full_name ? `Pret testimin nga ${prompt.tester.full_name}.` : "Testimin duhet ta konfirmojë një koleg tjetër."}
+            {prompt.tester?.full_name ? (t("Pret testimin nga ") + (prompt.tester.full_name) + ".") : t("Testimin duhet ta konfirmojë një koleg tjetër.")}
           </p>
         ) : null}
         {prompt.status === "PENDING_TEST" && !isAuthor && !isTester ? (
-          <p className="text-right text-xs text-muted-foreground">Testimin e konfirmon vetëm {prompt.tester?.full_name}.</p>
+          <p className="text-right text-xs text-muted-foreground">{t("Testimin e konfirmon vetëm ")}{prompt.tester?.full_name}.</p>
         ) : null}
         {prompt.status === "PENDING_APPROVAL" && !canApprove ? (
           <p className="text-right text-xs text-muted-foreground">
-            {isManager ? "Aprovimin duhet ta bëjë një menaxher tjetër nga autori dhe testuesi." : "Pret aprovimin e një menaxheri."}
+            {isManager ? t("Aprovimin duhet ta bëjë një menaxher tjetër nga autori dhe testuesi.") : "Pret aprovimin e një menaxheri."}
           </p>
         ) : null}
       </DialogContent>

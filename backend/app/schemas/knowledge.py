@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field
+from app.models.knowledge_kind import KnowledgeType
 
 
 class KnowledgeUserRef(BaseModel):
@@ -12,6 +13,7 @@ class KnowledgeUserRef(BaseModel):
 
 
 class KnowledgePromptOut(BaseModel):
+    knowledge_type: KnowledgeType = "PROMPT"
     id: uuid.UUID
     title: str
     content: str
@@ -39,6 +41,7 @@ class KnowledgePromptOut(BaseModel):
 
 
 class KnowledgePromptBrief(BaseModel):
+    knowledge_type: KnowledgeType = "PROMPT"
     id: uuid.UUID
     title: str
     status: str
@@ -59,6 +62,7 @@ class PromptNoteTaskOut(BaseModel):
 
 
 class PromptNoteOut(BaseModel):
+    knowledge_type: KnowledgeType = "PROMPT"
     id: uuid.UUID
     content: str
     status: str
@@ -75,6 +79,7 @@ class PromptNoteOut(BaseModel):
 
 
 class PromptNoteCreate(BaseModel):
+    knowledge_type: KnowledgeType = "PROMPT"
     content: str = Field(min_length=2, max_length=10000)
     department_id: uuid.UUID | None = None
     priority: str | None = Field(default=None, pattern=r"^(NORMAL|HIGH)$")

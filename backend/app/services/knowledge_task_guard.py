@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.models.ga_note import GaNote
 from app.models.knowledge_prompt import KnowledgePrompt
+from app.models.knowledge_kind import KNOWLEDGE_TYPES, KNOWLEDGE_ROUTES
 from app.models.task import Task
 
 KNOWLEDGE_TYPE_PROMPT = "PROMPT"
@@ -50,18 +51,23 @@ def _becomes_done(task: Task) -> bool:
 
 def locked_reason(session: Session, task: Task) -> str | None:
     """Why this task may not be completed manually right now (None = allowed)."""
-    test_prompt_status = session.execute(
-        select(KnowledgePrompt.status).where(KnowledgePrompt.test_task_id == task.id)
-    ).scalar_one_or_none()
-    if test_prompt_status in WAITING_TEST_STATUSES:
-        return TEST_TASK_LOCKED
+    review = session.execute(
+        select(KnowledgePrompt.status, KnowledgePrompt.knowledge_type).where(KnowledgePrompt.test_task_id == task.id)
+    ).one_or_none()
+    if review is not None and review.status in WAITING_TEST_STATUSES:
+        if review.knowledge_type == "PROMPT":
+            return TEST_TASK_LOCKED
+        return (
+            "Kjo detyrë mbyllet automatikisht kur e konfirmon kontrollin te Knowledge PX → "
+            f"{KNOWLEDGE_ROUTES[review.knowledge_type].capitalize()} (butoni \"E kontrollova\")."
+        )
 
     if task.ga_note_origin_id is None:
         return None
     note = session.execute(
         select(GaNote.knowledge_type, GaNote.status).where(GaNote.id == task.ga_note_origin_id)
     ).one_or_none()
-    if note is None or note.knowledge_type != KNOWLEDGE_TYPE_PROMPT:
+    if note is None or note.knowledge_type not in KNOWLEDGE_TYPES:
         return None
     if _status_value(note.status) == "CLOSED":
         return None
@@ -71,7 +77,14 @@ def locked_reason(session: Session, task: Task) -> str | None:
         .where(KnowledgePrompt.status.in_(TESTED_STATUSES))
         .limit(1)
     ).scalar_one_or_none()
-    return None if tested is not None else AUTHOR_TASK_LOCKED
+    if tested is not None:
+        return None
+    if note.knowledge_type == "PROMPT":
+        return AUTHOR_TASK_LOCKED
+    return (
+        "Kjo detyrë mbyllet automatikisht pasi materiali të kontrollohet nga kontrolluesi. "
+        f"Shto materialin te Knowledge PX → {KNOWLEDGE_ROUTES[note.knowledge_type].capitalize()} → Notes."
+    )
 
 
 @event.listens_for(Session, "before_flush")

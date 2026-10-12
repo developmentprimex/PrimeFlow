@@ -11,10 +11,10 @@ from app.db import Base
 
 
 class KnowledgePrompt(Base):
-    """A reusable prompt in the Knowledge PX prompt library.
+    """A reusable prompt, definition or regulation in Knowledge PX.
 
     Lifecycle (``status``):
-      PENDING_TEST      -> saved by the author, waiting for another person to test it
+      PENDING_TEST      -> waiting for another person to test a prompt or check other material
       PENDING_APPROVAL  -> tested and confirmed, waiting for a manager/admin
       APPROVED          -> visible in the Prompt Library
       REJECTED          -> sent back by the tester or manager (author edits -> PENDING_TEST)
@@ -24,6 +24,7 @@ class KnowledgePrompt(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
+    knowledge_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="PROMPT", index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     keywords: Mapped[list[str]] = mapped_column(ARRAY(String(100)), nullable=False, server_default="{}")
     files_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)

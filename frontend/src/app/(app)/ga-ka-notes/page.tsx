@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
+import { KNOWLEDGE_CONFIG, knowledgeText } from "@/components/knowledge/knowledge-config"
 import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/prompt-link"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
@@ -32,6 +33,14 @@ import { inferSkillCategory, SKILL_CATEGORIES } from "@/lib/skills"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
 import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCategory, SkillCategoryInference, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+
+function isKnowledgeNote(note: GaNote | null | undefined) {
+  return Boolean(note?.knowledge_type && KNOWLEDGE_CONFIG[note.knowledge_type])
+}
+
+function noteKnowledgeText(note: GaNote | null | undefined, text: string) {
+  return knowledgeText(note?.knowledge_type || "PROMPT", text)
+}
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -2567,7 +2576,7 @@ export default function GaKaNotesPage() {
     }
     const noteTitle = noteToTaskTitle(note.content || "")
     // Knowledge PX: the prompt creator's task is "PROMPT: …" (renamed to the prompt title once it is saved).
-    const defaultTitle = note.knowledge_type === "PROMPT" ? `PROMPT: ${noteTitle}` : noteTitle
+    const defaultTitle = isKnowledgeNote(note) ? `${KNOWLEDGE_CONFIG[note.knowledge_type || "PROMPT"].prefix}: ${noteTitle}` : noteTitle
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
     setTaskDescription("") // start empty so creator can add detailed description
@@ -2656,13 +2665,13 @@ export default function GaKaNotesPage() {
       toast.error("Select at least one assignee before creating the task")
       return
     }
-    const isPromptNote = note.knowledge_type === "PROMPT"
+    const isPromptNote = isKnowledgeNote(note)
     if (isPromptNote && !taskPromptTesterId) {
-      toast.error("Zgjidh testuesin e promptit")
+      toast.error(noteKnowledgeText(note, "Zgjidh testuesin e promptit"))
       return
     }
     if (isPromptNote && taskAssigneeIds.includes(taskPromptTesterId)) {
-      toast.error("Testuesi duhet të jetë person tjetër nga ai që e bën promptin")
+      toast.error(noteKnowledgeText(note, "Testuesi duhet të jetë person tjetër nga ai që e bën promptin"))
       return
     }
     const selectedPvAssignees = taskAssigneeIds
@@ -2750,7 +2759,7 @@ export default function GaKaNotesPage() {
         })
         if (!testerRes.ok) {
           const data = await testerRes.json().catch(() => null)
-          toast.error(typeof data?.detail === "string" ? data.detail : "Testuesi nuk u ruajt")
+          toast.error(typeof data?.detail === "string" ? data.detail : noteKnowledgeText(note, "Testuesi nuk u ruajt"))
           return
         }
         setNotes((prev) =>
@@ -4149,13 +4158,13 @@ export default function GaKaNotesPage() {
                                     {oneHMarkerLabel(note.one_h_marker, note.one_h_marker_by_ga)}
                                   </button>
                                 ) : null}
-                                {note.knowledge_type === "PROMPT" ? (
+                                {isKnowledgeNote(note) ? (
                                   <Link
-                                    href="/knowledge/prompts?view=notes"
+                                    href={`${KNOWLEDGE_CONFIG[note.knowledge_type || "PROMPT"].route}?view=notes`}
                                     className="inline-flex h-5 shrink-0 items-center rounded-md border border-violet-200 bg-violet-50 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 hover:bg-violet-100"
-                                    title="Kërkesë për prompt · Knowledge PX"
+                                    title={noteKnowledgeText(note, "Kërkesë për prompt · Knowledge PX")}
                                   >
-                                    Prompt
+                                    {noteKnowledgeText(note, "Prompt")}
                                   </Link>
                                 ) : null}
                                 <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
@@ -5022,7 +5031,7 @@ export default function GaKaNotesPage() {
               </div>
               <div className="space-y-2">
                 <Label>
-                  {taskDialogNote.knowledge_type === "PROMPT" ? "Assign to · Krijuesi i promptit" : "Assign to"}
+                  {isKnowledgeNote(taskDialogNote) ? noteKnowledgeText(taskDialogNote, "Assign to · Krijuesi i promptit") : "Assign to"}
                 </Label>
                 <div className="rounded-md border bg-white p-2">
                   <div className="flex flex-wrap gap-2 mb-2">
@@ -5089,12 +5098,12 @@ export default function GaKaNotesPage() {
                   <p className="text-xs text-muted-foreground">Select one or more departments to guide projects (optional).</p>
                 ) : null}
               </div>
-              {taskDialogNote.knowledge_type === "PROMPT" ? (
+              {isKnowledgeNote(taskDialogNote) ? (
                 <div className="space-y-2 rounded-md border border-violet-200 bg-violet-50/60 p-2">
-                  <Label>Testuesi i promptit</Label>
+                  <Label>{noteKnowledgeText(taskDialogNote, "Testuesi i promptit")}</Label>
                   <Select value={taskPromptTesterId || undefined} onValueChange={setTaskPromptTesterId}>
                     <SelectTrigger className="bg-white">
-                      <SelectValue placeholder="Zgjidh personin që do ta testojë promptin" />
+                      <SelectValue placeholder={noteKnowledgeText(taskDialogNote, "Zgjidh personin që do ta testojë promptin")} />
                     </SelectTrigger>
                     <SelectContent>
                       {taskAssigneeOptions
@@ -5107,8 +5116,7 @@ export default function GaKaNotesPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Kur shtohet prompti, testuesit i krijohet detyra &ldquo;PROMPT: TESTO: Titulli&rdquo;. Kjo detyrë
-                    mbyllet vetëm pasi testuesi ta konfirmojë testimin; atëherë mbyllen automatikisht të dyja detyrat.
+                    {noteKnowledgeText(taskDialogNote, 'Kur shtohet prompti, testuesit i krijohet detyra "PROMPT: TESTO: Titulli". Kjo detyrë mbyllet vetëm pasi testuesi ta konfirmojë testimin; atëherë mbyllen automatikisht të dyja detyrat.')}
                   </p>
                 </div>
               ) : null}
