@@ -4399,12 +4399,15 @@ export default function CommonViewPage() {
   React.useEffect(() => {
     if (!internalMeetingsOpen) return
     const run = async () => {
-      const meetingsRes = await apiFetch(
-        "/meetings?include_all_departments=true&meeting_type=internal"
-      )
-      if (meetingsRes?.ok) {
-        const meetings = (await meetingsRes.json()) as Meeting[]
-        setInternalMeetings(meetings)
+      const [internalRes, externalRes] = await Promise.all([
+        apiFetch("/meetings?include_all_departments=true&meeting_type=internal"),
+        apiFetch("/meetings?include_all_departments=true&meeting_type=external"),
+      ])
+      if (internalRes?.ok) {
+        setInternalMeetings((await internalRes.json()) as Meeting[])
+      }
+      if (externalRes?.ok) {
+        setExternalMeetings((await externalRes.json()) as Meeting[])
       }
     }
     void run()
@@ -7437,22 +7440,22 @@ export default function CommonViewPage() {
       let allowOneHConflict = false
       if (oneHConflicts.length) {
         setInternalMeetingAvailability(availability)
-        allowOneHConflict = await confirm({
-          title: "Konflikt me orarin 1H",
-          description: "Ky orar përputhet me 1H.",
-          confirmLabel: "Aprovo gjithsesi",
-          cancelLabel: "Ndrysho",
-        })
-        if (!allowOneHConflict) return
       }
-      if (participantConflicts.length) {
+      if (participantConflicts.length || oneHConflicts.length) {
         const approved = await confirm({
-          title: "Konflikte për pjesëmarrësit",
+          title: participantConflicts.length ? "Konflikte për pjesëmarrësit" : "Konflikt me orarin 1H",
           description: (
             <span className="block space-y-3 text-left">
-              <span className="block">
-                Personat e mëposhtëm nuk janë të lirë në orarin e zgjedhur. Kontrolloji para se të vazhdosh.
-              </span>
+              {oneHConflicts.length > 0 && (
+                <span className="block rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-950">
+                  Ky orar përputhet me 1H.
+                </span>
+              )}
+              {participantConflicts.length > 0 && (
+                <span className="block">
+                  Personat e mëposhtëm nuk janë të lirë në orarin e zgjedhur. Kontrolloji para se të vazhdosh.
+                </span>
+              )}
               {participantConflicts.map((conflict) => (
                 <span
                   key={conflict.userId}
@@ -7475,6 +7478,7 @@ export default function CommonViewPage() {
           cancelLabel: "Ndrysho",
         })
         if (!approved) return
+        allowOneHConflict = oneHConflicts.length > 0
       }
       const payload = {
         title: internalMeetingTitle.trim(),
