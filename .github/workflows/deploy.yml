@@ -694,7 +694,41 @@ jobs:
         shell: cmd
         run: |
           pm2 save
- 
+
+      - name: Register PM2 Boot Recovery
+        shell: powershell
+        run: |
+          # PM2 does not come back by itself after a Windows restart. This task
+          # restores the saved process list at boot so the site returns without
+          # waiting for the next deploy. It must never fail a deploy.
+          try {
+            $pm2Dir = Split-Path (Get-Command pm2 -ErrorAction Stop).Source
+            $nodeDir = Split-Path (Get-Command node -ErrorAction Stop).Source
+            $script = Join-Path $env:PM2_HOME "primeflow-resurrect.cmd"
+            $log = Join-Path $env:PM2_HOME "primeflow-resurrect.log"
+            $lines = @(
+              "@echo off",
+              "set PM2_HOME=$($env:PM2_HOME)",
+              "set RUNNER_TRACKING_ID=",
+              "set PATH=$pm2Dir;$nodeDir;%PATH%",
+              "echo %DATE% %TIME% boot resurrect >> ""$log""",
+              "call pm2 resurrect >> ""$log"" 2>&1"
+            )
+            Set-Content -Path $script -Value $lines -Encoding ascii
+
+            $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c ""$script"""
+            $trigger = New-ScheduledTaskTrigger -AtStartup
+            # Give PostgreSQL and Redis a moment to start first.
+            $trigger.Delay = "PT45S"
+            $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+            Register-ScheduledTask -TaskName "PrimeFlow PM2 Resurrect" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+            Write-Host "Boot recovery task registered: $script"
+          } catch {
+            Write-Host "::warning::Could not register the PM2 boot recovery task: $_"
+          }
+          exit 0
+
       - name: Deploy Observability
         if: ${{ failure() }}
         shell: cmd
