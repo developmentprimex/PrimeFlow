@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { createPortal } from "react-dom"
-import { Minus, Plus, RefreshCw, Save, Send, Settings } from "lucide-react"
+import { ChevronDown, Minus, Plus, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -43,7 +43,7 @@ type Preview = {
 }
 type FrozenHistory = { report_date: string; frozen_at: string; source_captured_at: string }
 type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT" | "SHARE"
-type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
+type TaskMarkerSelection = TaskMarker | "none"
 type TaskDueDateFilter = "all" | "today" | "deadline" | "starts_today"
 
 const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
@@ -62,6 +62,94 @@ const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
   { value: "F", label: "F" },
   { value: "BZ1N1", label: "BZ1N1" },
 ]
+
+function MarkerFilterControl({
+  selected,
+  onChange,
+}: {
+  selected: ReadonlySet<TaskMarkerSelection>
+  onChange: (next: Set<TaskMarkerSelection>) => void
+}) {
+  const detailsRef = React.useRef<HTMLDetailsElement | null>(null)
+  const allSymbolsSelected = taskMarkerOptions.every(({ value }) => selected.has(value))
+  const selectedLabels = [
+    ...(selected.has("none") ? ["No symbol"] : []),
+    ...taskMarkerOptions.filter(({ value }) => selected.has(value)).map(({ label }) => label),
+  ]
+  const label = selected.size === 0 || (allSymbolsSelected && selected.has("none")) ? "All"
+    : allSymbolsSelected ? "All with symbols"
+    : selectedLabels.length <= 2 ? selectedLabels.join(", ")
+    : `${selectedLabels.slice(0, 2).join(", ")} +${selectedLabels.length - 2}`
+
+  const update = (next: Set<TaskMarkerSelection>) => {
+    onChange(next.has("none") && taskMarkerOptions.every(({ value }) => next.has(value)) ? new Set() : next)
+  }
+
+  const toggle = (value: TaskMarkerSelection) => {
+    const next = new Set(selected)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+    update(next)
+  }
+
+  const toggleAllSymbols = () => {
+    const next = new Set(selected)
+    for (const { value } of taskMarkerOptions) {
+      if (allSymbolsSelected) next.delete(value)
+      else next.add(value)
+    }
+    update(next)
+  }
+
+  const optionStyle: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", cursor: "pointer",
+  }
+
+  return (
+    <details
+      ref={detailsRef}
+      data-symbol-filter-control="true"
+      className="relative rounded-md border border-blue-300 bg-blue-50 text-sm text-[#0F2A5F]"
+      style={{ position: "relative", border: "1px solid #93C5FD", borderRadius: 6, background: "#EFF6FF", color: "#0F2A5F", fontSize: 14 }}
+    >
+      <summary
+        className="flex h-8 min-w-44 cursor-pointer list-none items-center gap-2 px-3 [&::-webkit-details-marker]:hidden"
+        aria-label="Filter tasks by symbol"
+        style={{ display: "flex", height: 32, minWidth: 176, alignItems: "center", gap: 8, padding: "0 12px", cursor: "pointer", listStyle: "none" }}
+      >
+        <span>Symbol</span>
+        <strong className="min-w-0 flex-1 truncate" style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</strong>
+        <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" style={{ width: 16, height: 16, flexShrink: 0 }} />
+      </summary>
+      <div
+        className="absolute right-0 top-full z-[100] mt-1 max-h-80 w-56 overflow-y-auto rounded-md border border-blue-200 bg-white p-1 shadow-lg"
+        role="group"
+        aria-label="Symbols"
+        style={{ position: "absolute", right: 0, top: "100%", zIndex: 100, marginTop: 4, maxHeight: 320, width: 224, overflowY: "auto", border: "1px solid #BFDBFE", borderRadius: 6, background: "white", padding: 4, boxShadow: "0 8px 24px rgba(15, 23, 42, .15)" }}
+      >
+        <button type="button" className="w-full rounded px-2 py-1.5 text-left hover:bg-blue-50" style={{ display: "block", width: "100%", border: 0, background: "transparent", padding: "6px 8px", textAlign: "left", color: "inherit", cursor: "pointer" }} onClick={() => onChange(new Set())}>All</button>
+        <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-blue-50" style={optionStyle}>
+          <input type="checkbox" checked={allSymbolsSelected} onChange={toggleAllSymbols} />
+          <span>All with symbols</span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-blue-50" style={optionStyle}>
+          <input type="checkbox" checked={selected.has("none")} onChange={() => toggle("none")} />
+          <span>No symbol</span>
+        </label>
+        <div className="my-1 border-t border-blue-100" style={{ margin: "4px 0", borderTop: "1px solid #DBEAFE" }} />
+        {taskMarkerOptions.map(({ value, label: optionLabel }) => (
+          <label key={value} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-blue-50" style={optionStyle}>
+            <input type="checkbox" checked={selected.has(value)} onChange={() => toggle(value)} />
+            <span className="font-semibold" style={{ fontWeight: 600 }}>{optionLabel}</span>
+          </label>
+        ))}
+        <div className="sticky bottom-0 border-t border-blue-100 bg-white p-1 text-right" style={{ position: "sticky", bottom: 0, borderTop: "1px solid #DBEAFE", background: "white", padding: 4, textAlign: "right" }}>
+          <button type="button" className="rounded px-2 py-1 font-semibold hover:bg-blue-50" style={{ border: 0, background: "transparent", padding: "4px 8px", fontWeight: 600, color: "inherit", cursor: "pointer" }} onClick={() => { if (detailsRef.current) detailsRef.current.open = false }}>Done</button>
+        </div>
+      </div>
+    </details>
+  )
+}
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -107,7 +195,7 @@ export function PrintReportPage({
   const [preview, setPreview] = React.useState<Preview | null>(null)
   const [automaticEmailExpanded, setAutomaticEmailExpanded] = React.useState(false)
   const [reportIntroExpanded, setReportIntroExpanded] = React.useState(false)
-  const [markerFilter, setMarkerFilter] = React.useState<TaskMarkerFilter>("all")
+  const [markerFilters, setMarkerFilters] = React.useState<Set<TaskMarkerSelection>>(() => new Set())
   const [dueDateFilter, setDueDateFilter] = React.useState<TaskDueDateFilter>("all")
   const [history, setHistory] = React.useState<Delivery[]>([])
   const [loading, setLoading] = React.useState(true)
@@ -123,6 +211,38 @@ export function PrintReportPage({
   const markerModalCleanupRef = React.useRef<(() => void) | null>(null)
   const observedTodayDateRef = React.useRef("")
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
+
+  React.useEffect(() => {
+    if (!preview) return
+    const documents = [window.document, previewFrameRef.current?.contentDocument].filter(
+      (document): document is Document => Boolean(document)
+    )
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      for (const document of documents) {
+        document.querySelectorAll<HTMLDetailsElement>('details[data-symbol-filter-control="true"]').forEach((details) => {
+          if (!details.contains(target)) details.open = false
+        })
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      for (const document of documents) {
+        document.querySelectorAll<HTMLDetailsElement>('details[data-symbol-filter-control="true"]').forEach((details) => {
+          details.open = false
+        })
+      }
+    }
+    documents.forEach((document) => {
+      document.addEventListener("pointerdown", closeOutside)
+      document.addEventListener("keydown", closeOnEscape)
+    })
+    return () => documents.forEach((document) => {
+      document.removeEventListener("pointerdown", closeOutside)
+      document.removeEventListener("keydown", closeOnEscape)
+    })
+  }, [preview, previewFilterContainer])
 
   const applyReportIntroVisibility = React.useCallback(() => {
     const intro = previewFrameRef.current?.contentDocument?.querySelector<HTMLElement>('[data-report-intro="true"]')
@@ -343,11 +463,8 @@ export function PrintReportPage({
       taskCells.forEach((cell, index) => {
         const marker = cell.dataset.taskMarker || ""
         const isTaskCard = Boolean(cell.dataset.taskId)
-        const matchesMarker = markerFilter === "all" || (
-          isTaskCard && (
-            markerFilter === "with" ? Boolean(marker) :
-            markerFilter === "none" ? !marker : marker === markerFilter
-          )
+        const matchesMarker = markerFilters.size === 0 || (
+          isTaskCard && (marker ? markerFilters.has(marker as TaskMarker) : markerFilters.has("none"))
         )
         const legacyRedDeadline = cell.getAttribute("bgcolor")?.toUpperCase() === "#DC2626"
         const matchesDeadline = cell.dataset.taskDeadlineImportant === "true" || legacyRedDeadline
@@ -369,7 +486,7 @@ export function PrintReportPage({
         if (content) content.style.visibility = ""
       })
     })
-  }, [dueDateFilter, markerFilter, preview?.target_date])
+  }, [dueDateFilter, markerFilters, preview?.target_date])
 
   const setupPreviewMarkerControls = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
@@ -674,26 +791,7 @@ export function PrintReportPage({
 
   if (!authLoading && !user) return <div className="rounded-lg border bg-white p-8">Sign in to access {reportName}.</div>
 
-  const markerFilterControl = (
-    <label
-      className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-[#0F2A5F]"
-      style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #93C5FD", borderRadius: 6, background: "#EFF6FF", padding: "0 12px", fontSize: 14, fontWeight: 500, color: "#0F2A5F" }}
-    >
-      Symbol
-      <select
-        className="h-8 bg-transparent text-sm font-black text-[#0F2A5F] outline-none"
-        style={{ height: 32, border: 0, background: "transparent", fontSize: 14, fontWeight: 900, color: "#0F2A5F", outline: "none" }}
-        value={markerFilter}
-        onChange={(event) => setMarkerFilter(event.target.value as TaskMarkerFilter)}
-        aria-label="Filter tasks by symbol"
-      >
-        <option value="all">All</option>
-        <option value="with">All with symbols</option>
-        <option value="none">No symbol</option>
-        {taskMarkerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </label>
-  )
+  const markerFilterControl = () => <MarkerFilterControl selected={markerFilters} onChange={setMarkerFilters} />
 
   const dueDateFilterControl = (
     <label
@@ -754,7 +852,7 @@ export function PrintReportPage({
         className={`w-full rounded border bg-white ${embedded ? "h-[620px]" : "h-dvh min-h-dvh"}`}
       />
       {previewFilterContainer ? createPortal(
-        <>{dueDateFilterControl}{markerFilterControl}</>,
+        <>{dueDateFilterControl}{markerFilterControl()}</>,
         previewFilterContainer,
       ) : null}
     </div>
@@ -765,7 +863,7 @@ export function PrintReportPage({
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-center gap-2">
           {modeControl}
-          {preview ? <>{dueDateFilterControl}{markerFilterControl}</> : null}
+          {preview ? <>{dueDateFilterControl}{markerFilterControl()}</> : null}
           <Button
             variant="outline"
             onClick={() => void generateReport()}
@@ -788,7 +886,7 @@ export function PrintReportPage({
           <p className="text-sm text-muted-foreground">{today ? "Today's Common View tasks and meetings, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {preview ? <>{dueDateFilterControl}{markerFilterControl}</> : null}
+          {preview ? <>{dueDateFilterControl}{markerFilterControl()}</> : null}
           <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading || (today && (Boolean(preview?.is_frozen) || Boolean(selectedReportDate)))}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending || (today && Boolean(selectedReportDate))}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
