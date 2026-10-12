@@ -1122,6 +1122,32 @@ function capitalizeNoteFirstLetter(text: string): string {
   )
 }
 
+function normalizeNoteTextareaInput(textarea: HTMLTextAreaElement): string {
+  const previous = textarea.value
+  const normalized = capitalizeNoteFirstLetter(previous)
+  if (previous === normalized) return normalized
+
+  const { prefixLength, previousChangeEnd, nextChangeEnd } = getTextChangeBounds(previous, normalized)
+  const mapPosition = (position: number) => {
+    if (position <= prefixLength) return position
+    if (position >= previousChangeEnd) return position + nextChangeEnd - previousChangeEnd
+    return nextChangeEnd
+  }
+  const start = mapPosition(textarea.selectionStart)
+  const end = mapPosition(textarea.selectionEnd)
+  const direction = textarea.selectionDirection
+  const scrollTop = textarea.scrollTop
+  const scrollLeft = textarea.scrollLeft
+
+  // Keep the DOM value in sync before React updates the controlled field.
+  // Replacing it during the render would move the caret to the end.
+  textarea.value = normalized
+  textarea.setSelectionRange(start, end, direction)
+  textarea.scrollTop = scrollTop
+  textarea.scrollLeft = scrollLeft
+  return normalized
+}
+
 function noteToTaskTitle(content: string) {
   const cleaned = content
     .replace(/\r\n/g, "\n")
@@ -3333,7 +3359,7 @@ export default function GaKaNotesPage() {
             <Textarea
               ref={contentTextareaRef}
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(event) => setContent(normalizeNoteTextareaInput(event.currentTarget))}
               rows={4}
               className="min-h-[110px] md:min-h-[120px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
@@ -5221,8 +5247,8 @@ export default function GaKaNotesPage() {
                 ref={editTextareaRef}
                 value={editContent}
                 onChange={(event) => {
-                  handleEditContentChange(event.target.value)
-                  rememberEditDictationCursor(event.target)
+                  handleEditContentChange(normalizeNoteTextareaInput(event.currentTarget))
+                  rememberEditDictationCursor(event.currentTarget)
                 }}
                 onFocus={(event) => rememberEditDictationCursor(event.currentTarget)}
                 onSelect={(event) => rememberEditDictationCursor(event.currentTarget)}
