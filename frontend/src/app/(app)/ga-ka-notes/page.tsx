@@ -1116,6 +1116,12 @@ function formatApiDetail(detail: unknown, fallback: string): string {
   return fallback
 }
 
+function capitalizeNoteFirstLetter(text: string): string {
+  return text.replace(/^([^\p{L}\r\n]*)(\p{L})/u, (_, prefix: string, letter: string) =>
+    `${prefix}${letter.toUpperCase()}`
+  )
+}
+
 function noteToTaskTitle(content: string) {
   const cleaned = content
     .replace(/\r\n/g, "\n")
@@ -1199,9 +1205,14 @@ export default function GaKaNotesPage() {
   const urlProjectId = searchParams.get("project_id")
   const [departmentId, setDepartmentId] = React.useState(urlDepartmentId || "ALL")
   const [projectId, setProjectId] = React.useState(urlProjectId || "NONE")
-  const [content, setContent] = React.useState("")
-  const defaultNoteContent =
-    user?.email?.trim().toLowerCase() === GA_NOTE_TEMPLATE_EMAIL ? GA_NOTE_TEMPLATE : ""
+  const [content, setContentState] = React.useState("")
+  const setContent = React.useCallback((value: React.SetStateAction<string>) => {
+    setContentState((previous) => capitalizeNoteFirstLetter(
+      typeof value === "function" ? value(previous) : value
+    ))
+  }, [])
+  const isGaUser = user?.email?.trim().toLowerCase() === GA_NOTE_TEMPLATE_EMAIL
+  const defaultNoteContent = isGaUser ? GA_NOTE_TEMPLATE : ""
   const [noteOneHMarker, setNoteOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
   const [noteOneHMarkerComment, setNoteOneHMarkerComment] = React.useState("")
   const [noteType] = React.useState<NoteType>("GA")
@@ -1274,7 +1285,7 @@ export default function GaKaNotesPage() {
   React.useEffect(() => {
     if (!defaultNoteContent) return
     setContent((prev) => (prev ? prev : defaultNoteContent))
-  }, [defaultNoteContent])
+  }, [defaultNoteContent, setContent])
 
   React.useEffect(() => {
     if (!defaultNoteContent || content !== defaultNoteContent) return
@@ -1320,8 +1331,9 @@ export default function GaKaNotesPage() {
     const leadingSpace = before.length > 0 && !/\s$/.test(before) ? " " : ""
     const trailingSpace = after.length > 0 && !/^\s|^[,.;:!?]/.test(after) ? " " : ""
     const insertedText = `${leadingSpace}${transcript}${trailingSpace}`
-    const next = `${before}${insertedText}${after}`
-    const nextCursor = start + insertedText.length - trailingSpace.length
+    const insertedContent = `${before}${insertedText}${after}`
+    const next = capitalizeNoteFirstLetter(insertedContent)
+    const nextCursor = start + insertedText.length - trailingSpace.length + next.length - insertedContent.length
 
     setEditDoneRanges((ranges) => adjustTextRangesForTextChange(current, next, ranges))
     setEditAddedRanges((ranges) => addInsertedTextRange(current, next, ranges))
@@ -2016,7 +2028,7 @@ export default function GaKaNotesPage() {
       return
     }
     const contentWithProgress = synchronizeNumberedListProgress({
-      text: content.trim(),
+      text: capitalizeNoteFirstLetter(content.trim()),
       doneRanges: [],
       addedRanges: [],
     }).text
@@ -2123,17 +2135,20 @@ export default function GaKaNotesPage() {
         return
       }
       const parsedContent = parseMarkedNoteContentWithProgress(note.content)
+      const normalizedText = capitalizeNoteFirstLetter(parsedContent.text)
+      const doneRanges = adjustTextRangesForTextChange(parsedContent.text, normalizedText, parsedContent.doneRanges)
+      const addedRanges = adjustTextRangesForTextChange(parsedContent.text, normalizedText, parsedContent.addedRanges)
       setEditNoteId(note.id)
-      editContentLatestRef.current = parsedContent.text
+      editContentLatestRef.current = normalizedText
       editDictationSelectionRef.current = {
-        start: parsedContent.text.length,
-        end: parsedContent.text.length,
+        start: normalizedText.length,
+        end: normalizedText.length,
       }
-      setEditContent(parsedContent.text)
+      setEditContent(normalizedText)
       setEditNoteOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
       setEditNoteOneHMarkerComment(note.one_h_marker_comment || "")
-    setEditDoneRanges(parsedContent.doneRanges)
-      setEditAddedRanges(parsedContent.addedRanges)
+      setEditDoneRanges(doneRanges)
+      setEditAddedRanges(addedRanges)
       const taskInfo = freshTaskInfo.get(note.id)
       setEditDescription(taskInfo?.description || "")
       setEditTaskProjectId(taskInfo?.taskProjectId ?? note.project_id ?? "NONE")
@@ -2149,10 +2164,11 @@ export default function GaKaNotesPage() {
   }
 
   const handleEditContentChange = (nextContent: string) => {
-    setEditDoneRanges((current) => adjustTextRangesForTextChange(editContent, nextContent, current))
-    setEditAddedRanges((current) => addInsertedTextRange(editContent, nextContent, current))
-    editContentLatestRef.current = nextContent
-    setEditContent(nextContent)
+    const normalizedContent = capitalizeNoteFirstLetter(nextContent)
+    setEditDoneRanges((current) => adjustTextRangesForTextChange(editContent, normalizedContent, current))
+    setEditAddedRanges((current) => addInsertedTextRange(editContent, normalizedContent, current))
+    editContentLatestRef.current = normalizedContent
+    setEditContent(normalizedContent)
   }
 
   const rememberEditDictationCursor = React.useCallback((textarea: HTMLTextAreaElement) => {
@@ -2189,19 +2205,19 @@ export default function GaKaNotesPage() {
     applyTextEditToTextarea(contentTextareaRef.current, content, setContent, (value, selectionStart, selectionEnd) =>
       wrapSelectedText(value, selectionStart, selectionEnd, "**")
     )
-  }, [applyTextEditToTextarea, content])
+  }, [applyTextEditToTextarea, content, setContent])
 
   const applyNewNoteBullets = React.useCallback(() => {
     applyTextEditToTextarea(contentTextareaRef.current, content, setContent, (value, selectionStart, selectionEnd) =>
       prefixSelectedLines(value, selectionStart, selectionEnd, () => "• ")
     )
-  }, [applyTextEditToTextarea, content])
+  }, [applyTextEditToTextarea, content, setContent])
 
   const applyNewNoteNumbers = React.useCallback(() => {
     applyTextEditToTextarea(contentTextareaRef.current, content, setContent, (value, selectionStart, selectionEnd) =>
       prefixSelectedLines(value, selectionStart, selectionEnd, (lineIndex) => `${lineIndex + 1}. `)
     )
-  }, [applyTextEditToTextarea, content])
+  }, [applyTextEditToTextarea, content, setContent])
 
   const applyEditNoteBold = React.useCallback(() => {
     applyTextEditToTextarea(editTextareaRef.current, editContent, handleEditContentChange, (value, selectionStart, selectionEnd) =>
@@ -3400,15 +3416,19 @@ export default function GaKaNotesPage() {
               type="button"
               variant="outline"
               size="sm"
-              className="h-7 text-xs"
+              className="h-7 gap-2 text-xs"
+              aria-expanded={showLegend}
+              aria-controls="px-notes-symbol-legend px-notes-detail-legend"
+              aria-label={showLegend ? "Fshih legjendën" : "Shfaq legjendën"}
               onClick={() => setShowLegend((prev) => !prev)}
             >
-              {showLegend ? "Hide legend" : "Show legend"}
+              Legjenda <span className="text-base leading-none" aria-hidden="true">{showLegend ? "−" : "+"}</span>
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs text-[#0F2A5F]">
+          {showLegend ? (
+          <div id="px-notes-symbol-legend" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs text-[#0F2A5F]">
             <span className="font-bold uppercase">Legjenda:</span>
              <span><b className="text-base font-black text-red-600">?</b> - PYETJE/PAQARTESI</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
@@ -3438,8 +3458,9 @@ export default function GaKaNotesPage() {
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black text-red-600">BZ1N1</b></span>
           </div>
+          ) : null}
           {showLegend ? (
-            <div className="rounded-md border bg-white">
+            <div id="px-notes-detail-legend" className="rounded-md border bg-white">
               <div className="px-4 pt-4">
               <div className="text-xs font-semibold tracking-[0.18em] text-slate-500 uppercase">Legjenda</div>
               </div>
@@ -3566,10 +3587,10 @@ export default function GaKaNotesPage() {
               </div>
             </div>
           ) : null}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="space-y-1">
+          <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
+            <div className="min-w-0 space-y-1">
               <Select value={rangeFilter} onValueChange={(v) => setRangeFilter(v as "week" | "all")}>
-                <SelectTrigger className="h-9 w-[160px]">
+                <SelectTrigger className="h-9 w-full min-w-0 gap-1 px-2 text-xs sm:w-[160px] sm:gap-2 sm:px-3 sm:text-sm [&_[data-slot=select-value]]:min-w-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -3578,12 +3599,12 @@ export default function GaKaNotesPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Select
                 value={taskStatusFilter}
                 onValueChange={(v) => setTaskStatusFilter(v as TaskStatusFilter)}
               >
-                <SelectTrigger className="h-9 w-[180px]">
+                <SelectTrigger className="h-9 w-full min-w-0 gap-1 px-2 text-xs sm:w-[180px] sm:gap-2 sm:px-3 sm:text-sm [&_[data-slot=select-value]]:min-w-0">
                   <SelectValue placeholder="Tasks/Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -3634,12 +3655,12 @@ export default function GaKaNotesPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Select
                 value={contentFilter}
                 onValueChange={(v) => setContentFilter(v as ContentFilter)}
               >
-                <SelectTrigger className="h-9 w-[140px]">
+                <SelectTrigger className="h-9 w-full min-w-0 gap-1 px-2 text-xs sm:w-[140px] sm:gap-2 sm:px-3 sm:text-sm [&_[data-slot=select-value]]:min-w-0">
                   <SelectValue placeholder="Content" />
                 </SelectTrigger>
                 <SelectContent>
@@ -3648,12 +3669,12 @@ export default function GaKaNotesPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Select
                 value={oneHMarkerFilter}
                 onValueChange={(value) => setOneHMarkerFilter(value as OneHMarkerFilter)}
               >
-                <SelectTrigger className={`h-9 w-[170px] border-blue-300 bg-blue-50 font-black ${ONE_H_MARKER_OPTIONS.some((option) => option.value === oneHMarkerFilter) ? "text-red-600" : "text-[#0F2A5F]"}`}>
+                <SelectTrigger className={`h-9 w-full min-w-0 gap-1 border-blue-300 bg-blue-50 px-2 text-xs font-black sm:w-[170px] sm:gap-2 sm:px-3 sm:text-sm [&_[data-slot=select-value]]:min-w-0 ${ONE_H_MARKER_OPTIONS.some((option) => option.value === oneHMarkerFilter) ? "text-red-600" : "text-[#0F2A5F]"}`}>
                   <SelectValue placeholder="Symbols" />
                 </SelectTrigger>
                 <SelectContent className="font-black text-[#0F2A5F]">
@@ -3666,16 +3687,16 @@ export default function GaKaNotesPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
+            <div className="col-span-2 min-w-0 space-y-1">
               <Input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="Search notes..."
-                className="h-9 w-[220px]"
+                className="h-9 w-full sm:w-[220px]"
                 aria-label="Search notes"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="col-span-2 flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
@@ -5209,6 +5230,11 @@ export default function GaKaNotesPage() {
                 onKeyUp={(event) => rememberEditDictationCursor(event.currentTarget)}
                 className="min-h-[180px] max-h-[42vh] resize-y overflow-y-auto text-sm leading-normal"
               />
+              <div className="flex justify-end sm:hidden">
+                <Button type="button" onClick={() => void saveEditNote()} disabled={savingEdit}>
+                  {savingEdit ? "Saving..." : "Save changes"}
+                </Button>
+              </div>
               {isEditVoiceListening || isEditCloudRecording || isEditCloudTranscribing || editVoiceInterimText ? (
                 <div className="flex items-center gap-2 text-xs text-blue-700">
                   <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
@@ -5238,7 +5264,7 @@ export default function GaKaNotesPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
+              <div className={isGaUser ? "hidden space-y-1 sm:block" : "space-y-1"}>
                 <Label className="text-xs text-muted-foreground">Preview</Label>
                 <div className="min-h-[120px] max-h-[32vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-normal">
                   {(() => {
@@ -5542,7 +5568,7 @@ export default function GaKaNotesPage() {
               }}>
                 Cancel
               </Button>
-              <Button onClick={() => void saveEditNote()} disabled={savingEdit}>
+              <Button className="hidden sm:inline-flex" onClick={() => void saveEditNote()} disabled={savingEdit}>
                 {savingEdit ? "Saving..." : "Save changes"}
               </Button>
             </div>
