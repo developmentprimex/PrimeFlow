@@ -255,34 +255,20 @@ class TestCalDavFlow(unittest.TestCase):
         self.assertEqual(after["purple"].events, [])
         self.assertEqual(after["red"].events[0].name, f"ga-time-slot-{self.purple.id}-red.ics")
 
-    def test_external_meetings_get_their_time_table_tone(self) -> None:
-        imported = _meeting("KI-Agenten: PrimEx & Pelipal")
-        imported.meeting_type = "external"
-        imported.calendar_imported = True
-        weekly = _meeting("PX_TT_WEEKLY MEETING")
-        weekly.meeting_type = "external"
-        weekly.calendar_imported = True
-        weekly.calendar_categories = ["Weekly"]
-        hidden = _meeting("Cancelled")
-        hidden.meeting_type = "external"
-        hidden.calendar_sync_status = "cancelled"
-        # An internal meeting linked to a TAK EXT is not shown as its own row.
+    def test_external_meetings_stay_with_outlook(self) -> None:
+        # The phone already shows TAK EXT from its Outlook account; sending it too doubles every meeting.
+        external = _meeting("KI-Agenten: PrimEx & Pelipal")
+        external.meeting_type = "external"
+        external.calendar_imported = True
         linked = _meeting("Linked")
         linked.paired_external_meeting_id = uuid.uuid4()
 
-        calendars = {c.id: c for c in build_calendars([], [self.meeting, imported, weekly, hidden, linked])}
+        calendars = {c.id: c for c in build_calendars([], [self.meeting, external, linked])}
 
-        self.assertEqual((calendars["tak-ext-red"].name, calendars["tak-ext-red"].color), ("GA TAK EXT", "#E55361"))
-        self.assertEqual(calendars["tak-ext-brown"].color, "#8B623D")
-        self.assertIn("SUMMARY:TAK EXT: KI-Agenten: PrimEx & Pelipal", calendars["tak-ext-red"].events[0].ics)
-        self.assertEqual(len(calendars["tak-ext-brown"].events), 1)
+        self.assertEqual(set(calendars), {"default", "yellow", "purple", "red", "green", "blue", "tak-int"})
         self.assertEqual(len(calendars["tak-int"].events), 1)
         self.assertIn("SUMMARY:TAK INT:", calendars["tak-int"].events[0].ics)
-        # No folded UID lines, even with the longest calendar id.
-        for calendar in calendars.values():
-            for event in calendar.events:
-                uid_line = next(line for line in event.ics.split("\r\n") if line.startswith("UID:"))
-                self.assertTrue(uid_line.endswith("@primeflow"), uid_line)
+        self.assertTrue(all("TAK EXT" not in e.ics for c in calendars.values() for e in c.events))
 
     def test_profile_points_the_phone_at_the_account(self) -> None:
         profile = plistlib.loads(
