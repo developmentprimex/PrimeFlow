@@ -14,12 +14,18 @@ import html
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
+from app.models.meeting import Meeting
+from app.services.meeting_occurrence import meeting_occurs_on_date
+from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 
 FEED_TIMEZONE = "Europe/Tirane"
 FEED_NAME = "PrimeFlow GA Time Table"
+_FEED_TZ = ZoneInfo(FEED_TIMEZONE)
+_DEFAULT_MEETING_DURATION = timedelta(minutes=30)
 
 _ICS_DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
 
@@ -104,7 +110,89 @@ def _first_occurrence(entry: GaTimeSlotTemplate) -> date:
     return week_start + timedelta(days=entry.day_of_week)
 
 
-def build_ga_calendar(entries: list[GaTimeSlotTemplate]) -> str:
+def is_ga_time_table_meeting(meeting: Meeting) -> bool:
+    # Same rule as the time table: manual TAK INT only. Linked internal meetings
+    # follow their TAK EXT, which already reaches the phone through Outlook.
+    return (
+        str(meeting.meeting_type or "").lower() == "internal"
+        and meeting.paired_external_meeting_id is None
+        and meeting.pre_external_meeting_id is None
+        and meeting.starts_at is not None
+        and is_common_view_visible_meeting(meeting)
+    )
+
+
+def _meeting_rrule(meeting: Meeting, local_start: datetime) -> tuple[str | None, bool]:
+    """Return the RRULE (if any) and whether the meeting can be exported."""
+    recurrence = str(meeting.recurrence_type or "").lower()
+    if recurrence == "weekly":
+        days = sorted({day for day in (meeting.recurrence_days_of_week or []) if 0 <= day <= 6})
+        return (f"RRULE:FREQ=WEEKLY;BYDAY={','.join(_ICS_DAYS[day] for day in days)}", True) if days else (None, False)
+    if recurrence == "monthly":
+        days = sorted({day for day in (meeting.recurrence_days_of_month or []) if 1 <= day <= 31})
+        return (f"RRULE:FREQ=MONTHLY;BYMONTHDAY={','.join(map(str, days))}", True) if days else (None, False)
+    if recurrence == "yearly":
+        days = [day for day in (meeting.recurrence_days_of_month or []) if 1 <= day <= 31]
+        if not days:
+            return None, False
+        return f"RRULE:FREQ=YEARLY;BYMONTH={local_start.month};BYMONTHDAY={days[0]}", True
+    return None, True
+
+
+def _meeting_first_day(meeting: Meeting, local_start: datetime, has_rrule: bool) -> date | None:
+    # DTSTART has to be a real occurrence, otherwise iOS adds a stray first event.
+    start_day = local_start.date()
+    if not has_rrule:
+        return start_day
+    for offset in range(366 * 4 + 1):
+        day = start_day + timedelta(days=offset)
+        if meeting_occurs_on_date(meeting, day, local_timezone=_FEED_TZ):
+            return day
+    return None
+
+
+def _meeting_event_lines(meeting: Meeting) -> list[str]:
+    starts_at = meeting.starts_at
+    local_start = starts_at.astimezone(_FEED_TZ) if starts_at.tzinfo is not None else starts_at
+    rrule, exportable = _meeting_rrule(meeting, local_start)
+    if not exportable:
+        return []
+    first_day = _meeting_first_day(meeting, local_start, rrule is not None)
+    if first_day is None:
+        return []
+    duration = (meeting.ends_at - starts_at) if meeting.ends_at else timedelta(0)
+    if not timedelta(0) < duration < timedelta(days=1):
+        duration = _DEFAULT_MEETING_DURATION
+    start = datetime.combine(first_day, local_start.time().replace(microsecond=0))
+    title = f"TAK INT: {(meeting.title or 'Internal meeting').strip()}"
+    minutes_before = meeting.reminder_minutes_before or 0
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:ga-meeting-{meeting.id}@primeflow.primexeu.com",
+        f"DTSTAMP:{_utc_stamp(meeting.updated_at)}",
+        f"LAST-MODIFIED:{_utc_stamp(meeting.updated_at)}",
+        f"DTSTART;TZID={FEED_TIMEZONE}:{start.strftime('%Y%m%dT%H%M%S')}",
+        f"DTEND;TZID={FEED_TIMEZONE}:{(start + duration).strftime('%Y%m%dT%H%M%S')}",
+    ]
+    if rrule:
+        lines.append(rrule)
+    lines.append(f"SUMMARY:{_escape(title)}")
+    if meeting.platform:
+        lines.append(f"LOCATION:{_escape(meeting.platform.strip())}")
+    if meeting.meeting_url:
+        lines.append(f"URL:{meeting.meeting_url.strip()}")
+    lines += [
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        f"DESCRIPTION:{_escape(title)}",
+        f"TRIGGER:-PT{minutes_before}M" if minutes_before > 0 else "TRIGGER:PT0M",
+        "END:VALARM",
+        "END:VEVENT",
+    ]
+    return lines
+
+
+def build_ga_calendar(entries: list[GaTimeSlotTemplate], meetings: list[Meeting] | None = None) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -143,5 +231,8 @@ def build_ga_calendar(entries: list[GaTimeSlotTemplate]) -> str:
             "END:VALARM",
             "END:VEVENT",
         ]
+    for meeting in meetings or []:
+        if is_ga_time_table_meeting(meeting):
+            lines += _meeting_event_lines(meeting)
     lines.append("END:VCALENDAR")
     return "\r\n".join(_fold(line) for line in lines) + "\r\n"

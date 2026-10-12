@@ -13,6 +13,7 @@ from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
 from app.models.ga_time_slot_entry import GaTimeSlotEntry
 from app.models.ga_time_table_row import GaTimeTableRow
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
+from app.models.meeting import Meeting
 from app.models.user import User
 from app.schemas.ga_time_slot import (
     GaTimeSlotEntriesReorder,
@@ -1161,8 +1162,21 @@ async def get_ga_calendar_feed(token: str, db: AsyncSession = Depends(get_db)) -
             .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.sort_order)
         )
     ).scalars().all()
+    # The time table also shows the manual TAK INT meetings, so the phone gets them too.
+    meetings = (
+        await db.execute(
+            select(Meeting)
+            .where(
+                Meeting.meeting_type == "internal",
+                Meeting.paired_external_meeting_id.is_(None),
+                Meeting.pre_external_meeting_id.is_(None),
+                Meeting.starts_at.is_not(None),
+            )
+            .order_by(Meeting.starts_at)
+        )
+    ).scalars().all()
     return Response(
-        content=build_ga_calendar(list(entries)),
+        content=build_ga_calendar(list(entries), list(meetings)),
         media_type="text/calendar; charset=utf-8",
         headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="primeflow-ga.ics"'},
     )
