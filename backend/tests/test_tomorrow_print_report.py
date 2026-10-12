@@ -1276,6 +1276,57 @@ def test_done_tasks_are_excluded_but_other_statuses_remain() -> None:
     )
 
 
+def test_today_report_includes_only_tasks_completed_on_its_day(monkeypatch) -> None:
+    monkeypatch.setenv("PRIMEFLOW_REPORT_TIMEZONE", "Europe/Tirane")
+    report_day = date(2026, 8, 14)
+    def task(title: str, status: str, completed_at: str | None = None) -> dict:
+        return {
+            "title": title, "date": report_day.isoformat(), "status": status,
+            "oneHReportSlot": "10:00", "completed_at": completed_at,
+        }
+
+    items = {"oneH": [
+        task("Done today", "DONE", "2026-08-14T09:00:00+02:00"),
+        task("Completed today", "COMPLETED", "2026-08-13T22:30:00Z"),
+        task("Done yesterday", "DONE", "2026-08-13T12:00:00+02:00"),
+        task("Done tomorrow", "DONE", "2026-08-14T22:30:00Z"),
+        task("Done without timestamp", "DONE"),
+        task("Still open", "IN_PROGRESS"),
+    ]}
+    today_rows = _task_rows(items, report_day, include_completed_today=True)
+    today_titles = [item["title"] for item in today_rows[0][1]]
+    assert today_titles == ["Still open", "Completed today", "Done today"]
+
+    tomorrow_rows = _task_rows(items, report_day)
+    assert [item["title"] for item in tomorrow_rows[0][1]] == ["Still open"]
+
+    report = asyncio.run(build_today_print_report(report_day, payload={"items": items}))
+    assert "Done today" in report["html"]
+    assert "Completed today" in report["html"]
+    assert "Done yesterday" not in report["html"]
+    assert "Done without timestamp" not in report["html"]
+
+
+def test_today_report_places_done_tasks_after_open_tasks_without_changing_user_order(monkeypatch) -> None:
+    monkeypatch.setenv("PRIMEFLOW_REPORT_TIMEZONE", "Europe/Tirane")
+    report_day = date(2026, 8, 14)
+    items = {"oneH": [
+        {"title": "Alice done", "person": "Alice", "date": "2026-08-14", "status": "DONE",
+         "completed_at": "2026-08-14T10:00:00+02:00", "oneHReportSlot": "10:00"},
+        {"title": "Zoe open", "person": "Zoe", "date": "2026-08-14", "status": "TODO",
+         "oneHReportSlot": "10:00"},
+        {"title": "Bob done", "person": "Bob", "date": "2026-08-14", "status": "DONE",
+         "completed_at": "2026-08-14T11:00:00+02:00", "oneHReportSlot": "10:00"},
+        {"title": "Alice open", "person": "Alice", "date": "2026-08-14", "status": "TODO",
+         "oneHReportSlot": "10:00"},
+    ]}
+
+    rows = _task_rows(items, report_day, include_completed_today=True)
+    assert [item["title"] for item in rows[0][1]] == [
+        "Alice open", "Zoe open", "Alice done", "Bob done",
+    ]
+
+
 def test_same_task_details_for_separate_assignees_are_not_deduplicated() -> None:
     shared = {
         "title": "RA/EF: 2 FRG: RREG PRICELISTAT",

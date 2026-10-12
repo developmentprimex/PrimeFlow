@@ -27,7 +27,7 @@ from app.services.compact_report_questions import question_parts, layout_questio
 from app.config import settings
 from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
-from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL
+from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL, report_timezone
 from app.services.personal_task_owner import personal_task_owner
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.tomorrow_closing_sections import (
@@ -257,6 +257,21 @@ def _task_status(item: dict[str, Any]) -> str:
     if normalized in {"WAITING", "PENDING_CONFIRMATION", "WAITING_CONFIRMATION"}:
         return "WAITING_CONFIRMATION"
     return normalized if normalized in STATUS_COLORS else "TODO"
+
+
+def _completed_on_day(item: dict[str, Any], report_day: date) -> bool:
+    if _task_status(item) != "DONE":
+        return False
+    raw = item.get("completed_at") or item.get("completedAt")
+    if not raw:
+        return False
+    try:
+        completed_at = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if completed_at.tzinfo is not None:
+        completed_at = completed_at.astimezone(report_timezone())
+    return completed_at.date() == report_day
 
 
 def _task_period_label(item: dict[str, Any]) -> str:
@@ -869,7 +884,9 @@ def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _task_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list[dict[str, Any]], bool]]:
+def _task_rows(
+    items: dict[str, Any], target_date: date, *, include_completed_today: bool = False,
+) -> list[tuple[str, list[dict[str, Any]], bool]]:
     by_bucket = {
         name: [item for item in values if isinstance(item, dict) and _item_date(item) == target_date]
         for name, values in items.items()
@@ -904,13 +921,17 @@ def _task_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list
                 if _is_appended_wfc(item) and _confirmation_owner(item) == requested_value
             ]
             values = [*regular_personal, *waiting_confirmation]
-        # Today and Tomorrow 1H SHTYPI only show work that is still active.
-        # Keep every non-completed status (including WFE/WFC and in progress),
-        # but exclude whole tasks whose normalized status is DONE.
-        values = [item for item in values if _task_status(item) != "DONE"]
+        # Today's report also shows tasks completed on its report date.
+        # Tomorrow's report continues to show only unfinished work.
+        values = [
+            item for item in values
+            if _task_status(item) != "DONE"
+            or (include_completed_today and _completed_on_day(item, target_date))
+        ]
         values = _dedupe(values)
         values.sort(
             key=lambda item: (
+                _task_status(item) == "DONE",
                 _is_appended_wfc(item) if bucket == "personal" else False,
                 common_view_item_sort_key(item),
             )
@@ -3240,6 +3261,7 @@ async def _build_print_report(
     include_docx: bool = False,
     checklist_date: date | None = None,
     next_day_payload: dict[str, Any] | None = None,
+    include_completed_today: bool = False,
 ) -> dict[str, Any]:
     if payload is None:
         base_url = settings.PRIMEFLOW_API_BASE_URL
@@ -3262,7 +3284,7 @@ async def _build_print_report(
     missing_one_h_at_16_with_blocked = [
         value for value in missing_one_h_by_slot.get("16:00", []) if value not in missing_blocked_set
     ]
-    task_rows = _task_rows(items, target_date)
+    task_rows = _task_rows(items, target_date, include_completed_today=include_completed_today)
     meeting_dates = [target_date, next_working_day(target_date)] if include_meetings else []
     next_meeting_payload = next_day_payload or payload
     if len(meeting_dates) > 1 and payload.get("week_end"):
@@ -3471,6 +3493,7 @@ async def build_today_print_report(
         report_date, include_attachment=include_attachment, include_meetings=True,
         include_png=True, first_meeting_day_label="SOT", report_day_label="SOT",
         checklist_date=report_date, payload=payload, next_day_payload=next_day_payload,
+        include_completed_today=True,
     )
 
 
