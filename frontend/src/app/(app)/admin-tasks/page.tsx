@@ -2322,6 +2322,13 @@ export default function AdminTasksPage() {
   const [gaIcloudDialogOpen, setGaIcloudDialogOpen] = React.useState(false)
   const [gaCalendarDialogOpen, setGaCalendarDialogOpen] = React.useState(false)
   const [gaCalendarFeedUrl, setGaCalendarFeedUrl] = React.useState<string | null>(null)
+  const [gaCalendarAccount, setGaCalendarAccount] = React.useState<{
+    server: string
+    username: string
+    password: string
+    accountUrl: string
+    profileUrl: string
+  } | null>(null)
   const [gaIcloudConnection, setGaIcloudConnection] = React.useState<GaIcloudSyncConnection | null>(null)
   const [gaIcloudPairing, setGaIcloudPairing] = React.useState<GaIcloudSyncPairing | null>(null)
   const [gaIcloudLoading, setGaIcloudLoading] = React.useState(false)
@@ -2711,16 +2718,34 @@ export default function AdminTasksPage() {
 
   const openGaCalendarDialog = React.useCallback(async () => {
     setGaCalendarDialogOpen(true)
-    if (gaCalendarFeedUrl) return
+    if (gaCalendarFeedUrl && gaCalendarAccount) return
     try {
-      const res = await apiFetch("/ga-time-slots/calendar-feed")
-      if (!res.ok) throw new Error("Failed to load the calendar link.")
-      const data = (await res.json()) as { feed_path: string }
-      setGaCalendarFeedUrl(`${API_HTTP_URL}${data.feed_path}`)
+      const [feedRes, accountRes] = await Promise.all([
+        apiFetch("/ga-time-slots/calendar-feed"),
+        apiFetch("/ga-time-slots/calendar-account"),
+      ])
+      if (!feedRes.ok || !accountRes.ok) throw new Error("Failed to load the calendar details.")
+      const feed = (await feedRes.json()) as { feed_path: string }
+      const account = (await accountRes.json()) as {
+        username: string
+        password: string
+        principal_path: string
+        profile_path: string
+      }
+      // The calendar account lives on the API host itself, outside the /api prefix.
+      const apiOrigin = new URL(API_HTTP_URL, window.location.origin).origin
+      setGaCalendarFeedUrl(`${API_HTTP_URL}${feed.feed_path}`)
+      setGaCalendarAccount({
+        server: new URL(apiOrigin).host,
+        username: account.username,
+        password: account.password,
+        accountUrl: `${apiOrigin}${account.principal_path}`,
+        profileUrl: `${API_HTTP_URL}${account.profile_path}`,
+      })
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load the calendar link.")
+      toast.error(error instanceof Error ? error.message : "Failed to load the calendar details.")
     }
-  }, [apiFetch, gaCalendarFeedUrl])
+  }, [apiFetch, gaCalendarAccount, gaCalendarFeedUrl])
 
   const pairGaIcloudDevice = React.useCallback(async () => {
     const calendarName = gaIcloudCalendarName.trim()
@@ -8090,6 +8115,68 @@ export default function AdminTasksPage() {
                 </p>
               </DialogHeader>
               <div className="space-y-4 text-sm">
+                <div className="space-y-3 rounded-md border border-slate-200 p-3">
+                  <div>
+                    <p className="font-semibold text-slate-900">In the time table colours (recommended)</p>
+                    <p className="text-xs text-slate-500">
+                      One calendar account, set up once. Each time table colour becomes its own calendar on the iPhone,
+                      and new colours appear by themselves.
+                    </p>
+                  </div>
+                  {gaCalendarAccount ? (
+                    <Button asChild className="w-full">
+                      <a href={gaCalendarAccount.profileUrl}>Install on iPhone</a>
+                    </Button>
+                  ) : null}
+                  <ol className="list-decimal space-y-1 pl-5 text-slate-700">
+                    <li>
+                      On GA&apos;s iPhone, open this page in <b>Safari</b>, tap <b>Install on iPhone</b>, then <b>Allow</b>.
+                    </li>
+                    <li>
+                      Open <b>Settings</b>, tap <b>Profile Downloaded</b> at the top, then <b>Install</b>. The
+                      &quot;Not Signed&quot; notice is expected.
+                    </li>
+                    <li>
+                      If the old calendar link is already subscribed, remove it in <b>Settings → Apps → Calendar →
+                      Calendar Accounts → Subscribed Calendars</b>, otherwise every entry shows twice.
+                    </li>
+                    <li>
+                      Set <b>Calendar Accounts → Fetch New Data</b> to every 15 minutes so changes arrive quickly.
+                    </li>
+                  </ol>
+                  <details className="text-xs text-slate-600">
+                    <summary className="cursor-pointer font-medium">Set up by hand instead</summary>
+                    <p className="mt-2">
+                      <b>Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add CalDAV Account</b>,
+                      then enter:
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      {(
+                        [
+                          ["Server", gaCalendarAccount?.server],
+                          ["User Name", gaCalendarAccount?.username],
+                          ["Password", gaCalendarAccount?.password],
+                          ["Account URL (only if the server is not found)", gaCalendarAccount?.accountUrl],
+                        ] as const
+                      ).map(([label, value]) => (
+                        <div key={label} className="space-y-1">
+                          <Label>{label}</Label>
+                          <div className="flex gap-2">
+                            <Input readOnly value={value ?? "Loading…"} className="font-mono text-xs" />
+                            <Button
+                              variant="outline"
+                              disabled={!value}
+                              onClick={() => value && void copyGaIcloudValue(value, label)}
+                            >
+                              Copy
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+                <p className="font-semibold text-slate-900">Single calendar link (one colour)</p>
                 <div className="space-y-1.5">
                   <Label htmlFor="ga-calendar-feed-url">Calendar link (keep it private)</Label>
                   <div className="flex gap-2">

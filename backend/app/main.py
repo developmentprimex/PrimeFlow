@@ -11,6 +11,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from app.auth.security import ACCESS_TOKEN_TYPE, decode_token, require_token_type
 from app.api.routers import api_router
+from app.api.routers.ga_caldav import router as ga_caldav_router
 from app.config import settings
 from app.services.meetings_report_scheduler import run_meetings_report_scheduler_forever
 from app.services.m3_reporting_points_scheduler import run_m3_reporting_points_scheduler_forever
@@ -47,6 +48,8 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=3)
 
 app.include_router(api_router, prefix="/api")
+# CalDAV clients address the account by absolute path, so it lives at the site root.
+app.include_router(ga_caldav_router)
 
 listener_task: asyncio.Task | None = None
 scheduler_task: asyncio.Task | None = None

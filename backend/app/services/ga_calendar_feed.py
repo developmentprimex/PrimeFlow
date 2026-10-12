@@ -60,6 +60,11 @@ def is_valid_feed_token(token: str, user_id: uuid.UUID) -> bool:
     return hmac.compare_digest(token, feed_token(user_id))
 
 
+def caldav_password(user_id: uuid.UUID) -> str:
+    message = f"ga-caldav-account:{user_id}".encode()
+    return hmac.new(settings.JWT_SECRET.encode(), message, hashlib.sha256).hexdigest()[:24]
+
+
 def _plain_text(value: str) -> str:
     text = re.sub(r"<\s*br\s*/?>|</\s*(div|p|li)\s*>", "\n", value or "", flags=re.IGNORECASE)
     text = html.unescape(re.sub(r"<[^>]+>", "", text))
@@ -151,7 +156,7 @@ def _meeting_first_day(meeting: Meeting, local_start: datetime, has_rrule: bool)
     return None
 
 
-def _meeting_event_lines(meeting: Meeting) -> list[str]:
+def meeting_event_lines(meeting: Meeting, uid: str | None = None) -> list[str]:
     starts_at = meeting.starts_at
     local_start = starts_at.astimezone(_FEED_TZ) if starts_at.tzinfo is not None else starts_at
     rrule, exportable = _meeting_rrule(meeting, local_start)
@@ -168,7 +173,7 @@ def _meeting_event_lines(meeting: Meeting) -> list[str]:
     minutes_before = meeting.reminder_minutes_before or 0
     lines = [
         "BEGIN:VEVENT",
-        f"UID:ga-meeting-{meeting.id}@primeflow.primexeu.com",
+        f"UID:{uid or f'ga-meeting-{meeting.id}@primeflow.primexeu.com'}",
         f"DTSTAMP:{_utc_stamp(meeting.updated_at)}",
         f"LAST-MODIFIED:{_utc_stamp(meeting.updated_at)}",
         f"DTSTART;TZID={FEED_TIMEZONE}:{start.strftime('%Y%m%dT%H%M%S')}",
@@ -192,47 +197,53 @@ def _meeting_event_lines(meeting: Meeting) -> list[str]:
     return lines
 
 
-def build_ga_calendar(entries: list[GaTimeSlotTemplate], meetings: list[Meeting] | None = None) -> str:
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//PrimeFlow//GA Time Table//EN",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        f"X-WR-CALNAME:{FEED_NAME}",
-        f"X-WR-TIMEZONE:{FEED_TIMEZONE}",
-        "REFRESH-INTERVAL;VALUE=DURATION:PT15M",
-        "X-PUBLISHED-TTL:PT15M",
-        *_VTIMEZONE,
+def entry_event_lines(entry: GaTimeSlotTemplate, uid: str | None = None) -> list[str]:
+    summary = _plain_text(entry.content)
+    if not summary or not 0 <= entry.day_of_week <= 6:
+        return []
+    title = summary.splitlines()[0]
+    start_day = _first_occurrence(entry)
+    end_time = entry.end_time if entry.end_time > entry.start_time else entry.start_time
+    start = datetime.combine(start_day, entry.start_time).strftime("%Y%m%dT%H%M%S")
+    end = datetime.combine(start_day, end_time).strftime("%Y%m%dT%H%M%S")
+    return [
+        "BEGIN:VEVENT",
+        f"UID:{uid or f'ga-time-slot-{entry.id}@primeflow.primexeu.com'}",
+        f"DTSTAMP:{_utc_stamp(entry.updated_at)}",
+        f"LAST-MODIFIED:{_utc_stamp(entry.updated_at)}",
+        f"DTSTART;TZID={FEED_TIMEZONE}:{start}",
+        f"DTEND;TZID={FEED_TIMEZONE}:{end}",
+        f"RRULE:FREQ=WEEKLY;BYDAY={_ICS_DAYS[entry.day_of_week]}",
+        f"SUMMARY:{_escape(title)}",
+        f"DESCRIPTION:{_escape(summary)}",
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        f"DESCRIPTION:{_escape(title)}",
+        "TRIGGER:PT0M",
+        "END:VALARM",
+        "END:VEVENT",
     ]
-    for entry in entries:
-        summary = _plain_text(entry.content)
-        if not summary or not 0 <= entry.day_of_week <= 6:
-            continue
-        title = summary.splitlines()[0]
-        start_day = _first_occurrence(entry)
-        end_time = entry.end_time if entry.end_time > entry.start_time else entry.start_time
-        start = datetime.combine(start_day, entry.start_time).strftime("%Y%m%dT%H%M%S")
-        end = datetime.combine(start_day, end_time).strftime("%Y%m%dT%H%M%S")
+
+
+def wrap_calendar(event_lines: list[str], *, published_feed: bool = False) -> str:
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//PrimeFlow//GA Time Table//EN", "CALSCALE:GREGORIAN"]
+    if published_feed:
         lines += [
-            "BEGIN:VEVENT",
-            f"UID:ga-time-slot-{entry.id}@primeflow.primexeu.com",
-            f"DTSTAMP:{_utc_stamp(entry.updated_at)}",
-            f"LAST-MODIFIED:{_utc_stamp(entry.updated_at)}",
-            f"DTSTART;TZID={FEED_TIMEZONE}:{start}",
-            f"DTEND;TZID={FEED_TIMEZONE}:{end}",
-            f"RRULE:FREQ=WEEKLY;BYDAY={_ICS_DAYS[entry.day_of_week]}",
-            f"SUMMARY:{_escape(title)}",
-            f"DESCRIPTION:{_escape(summary)}",
-            "BEGIN:VALARM",
-            "ACTION:DISPLAY",
-            f"DESCRIPTION:{_escape(title)}",
-            "TRIGGER:PT0M",
-            "END:VALARM",
-            "END:VEVENT",
+            "METHOD:PUBLISH",
+            f"X-WR-CALNAME:{FEED_NAME}",
+            f"X-WR-TIMEZONE:{FEED_TIMEZONE}",
+            "REFRESH-INTERVAL;VALUE=DURATION:PT15M",
+            "X-PUBLISHED-TTL:PT15M",
         ]
+    lines += [*_VTIMEZONE, *event_lines, "END:VCALENDAR"]
+    return "\r\n".join(_fold(line) for line in lines) + "\r\n"
+
+
+def build_ga_calendar(entries: list[GaTimeSlotTemplate], meetings: list[Meeting] | None = None) -> str:
+    events: list[str] = []
+    for entry in entries:
+        events += entry_event_lines(entry)
     for meeting in meetings or []:
         if is_ga_time_table_meeting(meeting):
-            lines += _meeting_event_lines(meeting)
-    lines.append("END:VCALENDAR")
-    return "\r\n".join(_fold(line) for line in lines) + "\r\n"
+            events += meeting_event_lines(meeting)
+    return wrap_calendar(events, published_feed=True)

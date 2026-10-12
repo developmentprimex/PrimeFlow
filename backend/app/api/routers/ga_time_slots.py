@@ -42,7 +42,8 @@ from app.services.ga_time_table import (
     format_ga_time_label,
     get_ga_time_table_rows,
 )
-from app.services.ga_calendar_feed import build_ga_calendar, feed_token, is_valid_feed_token
+from app.services.ga_caldav import CALDAV_USERNAME, PRINCIPAL_HREF, build_caldav_profile
+from app.services.ga_calendar_feed import build_ga_calendar, caldav_password, feed_token, is_valid_feed_token
 from app.services.ga_icloud_sync import (
     TimeRow,
     connection_id_from_token,
@@ -1134,6 +1135,72 @@ async def import_icloud_timetable_data(
     )
 
 
+async def load_ga_calendar_sources(
+    db: AsyncSession, ga_user: User
+) -> tuple[list[GaTimeSlotTemplate], list[Meeting]]:
+    """Everything the phone calendar shows: typed rows plus the manual TAK INT meetings."""
+    entries = (
+        await db.execute(
+            select(GaTimeSlotTemplate)
+            .where(GaTimeSlotTemplate.user_id == ga_user.id)
+            .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.sort_order)
+        )
+    ).scalars().all()
+    meetings = (
+        await db.execute(
+            select(Meeting)
+            .where(
+                Meeting.meeting_type == "internal",
+                Meeting.paired_external_meeting_id.is_(None),
+                Meeting.pre_external_meeting_id.is_(None),
+                Meeting.starts_at.is_not(None),
+            )
+            .order_by(Meeting.starts_at)
+        )
+    ).scalars().all()
+    return list(entries), list(meetings)
+
+
+@router.get("/calendar-account")
+async def get_ga_calendar_account(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Sign-in details for the coloured CalDAV account on GA's iPhone."""
+    _ensure_can_edit(current_user)
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "username": CALDAV_USERNAME,
+        "password": caldav_password(ga_user.id),
+        # Both relative to the API host; the frontend knows the public host name.
+        "principal_path": PRINCIPAL_HREF,
+        "profile_path": f"/ga-time-slots/calendar-account/{feed_token(ga_user.id)}.mobileconfig",
+    }
+
+
+@router.get("/calendar-account/{token}.mobileconfig")
+async def get_ga_calendar_account_profile(
+    token: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> Response:
+    # Public for the same reason as the feed: Safari on the phone cannot send a login.
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None or not is_valid_feed_token(token, ga_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    host = request.url.hostname or ""
+    use_ssl = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    port = request.url.port or (443 if use_ssl else 80)
+    profile = build_caldav_profile(host=host, port=port, use_ssl=use_ssl, password=caldav_password(ga_user.id))
+    return Response(
+        content=profile,
+        media_type="application/x-apple-aspen-config",
+        headers={"Cache-Control": "no-store", "Content-Disposition": 'attachment; filename="primeflow-ga.mobileconfig"'},
+    )
+
+
 @router.get("/calendar-feed")
 async def get_ga_calendar_feed_path(
     response: Response,
@@ -1155,28 +1222,9 @@ async def get_ga_calendar_feed(token: str, db: AsyncSession = Depends(get_db)) -
     ga_user = await _resolve_ga_user(db)
     if ga_user is None or not is_valid_feed_token(token, ga_user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    entries = (
-        await db.execute(
-            select(GaTimeSlotTemplate)
-            .where(GaTimeSlotTemplate.user_id == ga_user.id)
-            .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.sort_order)
-        )
-    ).scalars().all()
-    # The time table also shows the manual TAK INT meetings, so the phone gets them too.
-    meetings = (
-        await db.execute(
-            select(Meeting)
-            .where(
-                Meeting.meeting_type == "internal",
-                Meeting.paired_external_meeting_id.is_(None),
-                Meeting.pre_external_meeting_id.is_(None),
-                Meeting.starts_at.is_not(None),
-            )
-            .order_by(Meeting.starts_at)
-        )
-    ).scalars().all()
+    entries, meetings = await load_ga_calendar_sources(db, ga_user)
     return Response(
-        content=build_ga_calendar(list(entries), list(meetings)),
+        content=build_ga_calendar(entries, meetings),
         media_type="text/calendar; charset=utf-8",
         headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="primeflow-ga.ics"'},
     )
