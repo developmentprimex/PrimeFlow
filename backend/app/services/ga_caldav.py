@@ -25,6 +25,7 @@ from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.meeting import Meeting
 from app.services.ga_calendar_feed import (
     entry_event_lines,
+    is_ga_time_table_external_meeting,
     is_ga_time_table_meeting,
     meeting_event_lines,
     wrap_calendar,
@@ -68,6 +69,47 @@ _DEFAULT_CALENDAR = ("default", "GA", "#64748B")
 # Manual TAK INT rows are #fff4cc with a #d6b44c border; iOS lightens the calendar
 # colour itself, so the border colour is the one that ends up looking the same.
 _MEETING_CALENDAR = ("tak-int", "GA TAK INT", "#D6B44C")
+
+# TAK EXT rows use the Outlook legend tones (meeting-tone.ts); the border colour
+# is used for the same reason as TAK INT.
+_EXTERNAL_TONES = {
+    "red": ("GA TAK EXT", "#E55361"),
+    "brown": ("GA TAK EXT Weekly", "#8B623D"),
+    "yellow": ("GA TAK EXT Yellow", "#E6AD00"),
+    "orange": ("GA TAK EXT Orange", "#E87922"),
+    "teal": ("GA TAK EXT Event", "#35ABB4"),
+    "violet": ("GA TAK EXT Violet", "#7167D9"),
+    "blue": ("GA TAK EXT Blue", "#5B9FE8"),
+}
+
+
+def external_meeting_tone(meeting: Meeting) -> str:
+    """Same rules as ``meetingLegendTone`` in the frontend, for an external meeting."""
+    categories = [str(category).strip().lower() for category in (meeting.calendar_categories or [])]
+
+    def has(*needles: str) -> bool:
+        return any(needle in category for category in categories for needle in needles)
+
+    if has("daily", "weekly", "standup", "brown"):
+        return "brown"
+    if has("red", "online"):
+        return "red"
+    if "tak int" in categories or has("yellow"):
+        return "yellow"
+    if has("orange"):
+        return "orange"
+    if has("event", "evvent", "fizik"):
+        return "teal"
+    if has("purple", "violet"):
+        return "violet"
+    if has("blue"):
+        return "blue"
+    if meeting.calendar_imported or meeting.microsoft_event_id:
+        return "red"
+    if str(meeting.recurrence_type or "").strip().lower() in {"weekly", "daily"}:
+        return "brown"
+    return "blue"
+
 
 # Older rows were saved with pale colours that the time table now shows as strong ones.
 _STRONG_BACKGROUNDS = {
@@ -201,7 +243,8 @@ def build_calendars(entries: list[GaTimeSlotTemplate], meetings: list[Meeting]) 
     """Group the time table into one calendar per colour.
 
     The palette calendars always exist, so the phone's calendar list stays
-    stable; a calendar for an unusual colour appears only while it is in use.
+    stable; a calendar for an unusual colour or a TAK EXT tone appears only
+    while it is in use.
     """
     fixed = [_DEFAULT_CALENDAR, *_PALETTE, _MEETING_CALENDAR]
     calendars: dict[str, DavCalendar] = {
@@ -222,12 +265,22 @@ def build_calendars(entries: list[GaTimeSlotTemplate], meetings: list[Meeting]) 
             calendar.events.append(event)
     meeting_calendar = calendars[_MEETING_CALENDAR[0]]
     for meeting in meetings:
-        if not is_ga_time_table_meeting(meeting):
+        if is_ga_time_table_meeting(meeting):
+            calendar = meeting_calendar
+        elif is_ga_time_table_external_meeting(meeting):
+            tone = external_meeting_tone(meeting)
+            cal_id = f"tak-ext-{tone}"
+            calendar = calendars.get(cal_id)
+            if calendar is None:
+                name, color = _EXTERNAL_TONES[tone]
+                calendar = calendars[cal_id] = DavCalendar(id=cal_id, name=name, color=color, order=len(calendars) + 1)
+        else:
             continue
-        resource = f"ga-meeting-{meeting.id}-{meeting_calendar.id}"
+        # "m" keeps the UID line short enough for the longest calendar id.
+        resource = f"ga-m-{meeting.id}-{calendar.id}"
         event = _event(resource, meeting_event_lines(meeting, uid=f"{resource}@primeflow"))
         if event:
-            meeting_calendar.events.append(event)
+            calendar.events.append(event)
     return list(calendars.values())
 
 

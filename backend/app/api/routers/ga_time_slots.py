@@ -3,7 +3,7 @@ import hmac
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -1138,7 +1138,7 @@ async def import_icloud_timetable_data(
 async def load_ga_calendar_sources(
     db: AsyncSession, ga_user: User
 ) -> tuple[list[GaTimeSlotTemplate], list[Meeting]]:
-    """Everything the phone calendar shows: typed rows plus the manual TAK INT meetings."""
+    """Everything the phone calendar shows: typed rows, manual TAK INT and TAK EXT meetings."""
     entries = (
         await db.execute(
             select(GaTimeSlotTemplate)
@@ -1146,14 +1146,28 @@ async def load_ga_calendar_sources(
             .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.sort_order)
         )
     ).scalars().all()
+    # Outlook history would grow the phone's sync without end: one-time TAK EXT
+    # older than a month is left out, recurring ones always stay.
+    external_cutoff = datetime.now(timezone.utc) - timedelta(days=31)
     meetings = (
         await db.execute(
             select(Meeting)
             .where(
-                Meeting.meeting_type == "internal",
-                Meeting.paired_external_meeting_id.is_(None),
-                Meeting.pre_external_meeting_id.is_(None),
                 Meeting.starts_at.is_not(None),
+                or_(
+                    and_(
+                        Meeting.meeting_type == "internal",
+                        Meeting.paired_external_meeting_id.is_(None),
+                        Meeting.pre_external_meeting_id.is_(None),
+                    ),
+                    and_(
+                        Meeting.meeting_type == "external",
+                        or_(
+                            Meeting.starts_at >= external_cutoff,
+                            func.coalesce(Meeting.recurrence_type, "none") != "none",
+                        ),
+                    ),
+                ),
             )
             .order_by(Meeting.starts_at)
         )

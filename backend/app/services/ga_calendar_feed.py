@@ -127,6 +127,15 @@ def is_ga_time_table_meeting(meeting: Meeting) -> bool:
     )
 
 
+def is_ga_time_table_external_meeting(meeting: Meeting) -> bool:
+    # TAK EXT rows of the time table: every external meeting Common View shows.
+    return (
+        str(meeting.meeting_type or "").lower() == "external"
+        and meeting.starts_at is not None
+        and is_common_view_visible_meeting(meeting)
+    )
+
+
 def _meeting_rrule(meeting: Meeting, local_start: datetime) -> tuple[str | None, bool]:
     """Return the RRULE (if any) and whether the meeting can be exported."""
     recurrence = str(meeting.recurrence_type or "").lower()
@@ -165,11 +174,17 @@ def meeting_event_lines(meeting: Meeting, uid: str | None = None) -> list[str]:
     first_day = _meeting_first_day(meeting, local_start, rrule is not None)
     if first_day is None:
         return []
+    is_external = str(meeting.meeting_type or "").lower() == "external"
     duration = (meeting.ends_at - starts_at) if meeting.ends_at else timedelta(0)
-    if not timedelta(0) < duration < timedelta(days=1):
+    # TAK INT stays on its start day; a TAK EXT from Outlook may really span several days.
+    if not timedelta(0) < duration < timedelta(days=31 if is_external else 1):
         duration = _DEFAULT_MEETING_DURATION
     start = datetime.combine(first_day, local_start.time().replace(microsecond=0))
-    title = f"TAK INT: {(meeting.title or 'Internal meeting').strip()}"
+    title = (
+        f"TAK EXT: {(meeting.title or 'External meeting').strip()}"
+        if is_external
+        else f"TAK INT: {(meeting.title or 'Internal meeting').strip()}"
+    )
     minutes_before = meeting.reminder_minutes_before or 0
     lines = [
         "BEGIN:VEVENT",
