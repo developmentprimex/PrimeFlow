@@ -7288,7 +7288,11 @@ export default function CommonViewPage() {
         }
       }
 
-      for (const meeting of internalMeetings) {
+      const meetingsToCheck = [
+        ...internalMeetings.map((meeting) => ({ meeting, label: "TAK INT" })),
+        ...externalMeetings.map((meeting) => ({ meeting, label: "TAK EXT" })),
+      ]
+      for (const { meeting, label } of meetingsToCheck) {
         if (
           !meeting.starts_at
           || meeting.calendar_sync_status === "cancelled"
@@ -7319,7 +7323,13 @@ export default function CommonViewPage() {
           0,
           0
         )
-        const durationMs = meetingDurationMinutes * 60 * 1000
+        const sourceEnd = meeting.ends_at ? new Date(meeting.ends_at) : null
+        const externalDurationMs = label === "TAK EXT" && sourceEnd
+          ? sourceEnd.getTime() - sourceStart.getTime()
+          : 0
+        const durationMs = externalDurationMs > 0
+          ? externalDurationMs
+          : meetingDurationMinutes * 60 * 1000
         const occurrenceEnd = new Date(occurrenceStart.getTime() + durationMs)
         if (!(proposedStart < occurrenceEnd && occurrenceStart < proposedEnd)) continue
         if (meetingOccurrenceStatuses.get(occurrenceStatusKey(meeting.id, targetDate))?.status === "canceled") {
@@ -7332,7 +7342,7 @@ export default function CommonViewPage() {
           if (!participant) continue
           addConflict(
             participant,
-            `Në TAK INT “${meeting.title}” (${clockLabel(occurrenceStart)}–${clockLabel(occurrenceEnd)})`
+            `Në ${label} “${meeting.title}” (${clockLabel(occurrenceStart)}–${clockLabel(occurrenceEnd)})`
           )
         }
       }
@@ -7346,6 +7356,7 @@ export default function CommonViewPage() {
       commonData.externalHoliday,
       commonData.late,
       commonData.leave,
+      externalMeetings,
       internalMeetingParticipantIds,
       internalMeetings,
       meetingOccurrenceStatuses,
