@@ -517,6 +517,12 @@ type InternalItem = {
   linked_external_recurrence_type?: string | null
 }
 
+const internalMeetingRelation = (meeting: InternalItem): "PARA" | "PAS" | undefined => {
+  if (meeting.preExternalMeetingId || meeting.pre_external_meeting_id) return "PARA"
+  if (meeting.pairedExternalMeetingId || meeting.paired_external_meeting_id) return "PAS"
+  return undefined
+}
+
 const expandExternalMeetingDates = (meeting: Meeting, start: Date | null): Date[] => {
   if (!start) return []
   if (
@@ -917,6 +923,7 @@ const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
 type SwimlaneCell = {
   title: string
   meetingTimeLabel?: string
+  meetingRelation?: "PARA" | "PAS"
   isManualInternalMeeting?: boolean
   isCalendarMeeting?: boolean
   subtitle?: string
@@ -8270,6 +8277,7 @@ export default function CommonViewPage() {
       : sortByTime(filtered.internal, (x) => x.time, (x) => x.title)
     const internalItems: SwimlaneCell[] = internalSource.map((x) => ({
       title: x.title,
+      meetingRelation: internalMeetingRelation(x),
       meetingTimeLabel: formatTimeLabel(x.time) || undefined,
       isManualInternalMeeting: isManualInternalMeeting(x),
       isCalendarMeeting: isCalendarLinkedInternalMeeting(x),
@@ -11729,6 +11737,23 @@ export default function CommonViewPage() {
           line-height: 1;
           letter-spacing: 0.06em;
           white-space: nowrap;
+        }
+        .meeting-relation-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 20px;
+          padding: 0 7px;
+          border: 1px solid #475569;
+          border-radius: 999px;
+          background: #f8fafc;
+          color: #0f172a;
+          font-size: 9px;
+          font-weight: 900;
+          line-height: 1;
+          white-space: nowrap;
+          flex: 0 0 auto;
+          margin-right: 5px;
         }
         .meeting-origin-row {
           display: inline-flex;
@@ -16415,6 +16440,11 @@ export default function CommonViewPage() {
                               </span>
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
+                                {internalMeetingRelation(e) ? (
+                                  <span className="meeting-relation-badge" title={`${internalMeetingRelation(e) === "PARA" ? "Para" : "Pas"} takimit extern`}>
+                                    {internalMeetingRelation(e)}
+                                  </span>
+                                ) : null}
                                 {commonPrintTitleLine(e.title)}
                               </span>
                             </div>
@@ -16970,7 +17000,7 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
                                         {(row.id === "external" || row.id === "internal") &&
-                                        (cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting) ? (
+                                        (cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting || cell.meetingRelation) ? (
                                           <span className="meeting-origin-row">
                                             {cell.meetingTimeLabel ? <span className="meeting-time-chip">{cell.meetingTimeLabel}</span> : null}
                                             {row.id === "internal" && cell.isManualInternalMeeting ? (
@@ -17010,7 +17040,7 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
                                         {(row.id === "external" || row.id === "internal") &&
-                                        (cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting) ? (
+                                        (cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting || cell.meetingRelation) ? (
                                           <span className="meeting-origin-row">
                                             {cell.meetingTimeLabel ? <span className="meeting-time-chip">{cell.meetingTimeLabel}</span> : null}
                                             {row.id === "internal" && cell.isManualInternalMeeting ? (
@@ -17031,7 +17061,7 @@ export default function CommonViewPage() {
                                     ) : (row.id === "external" || row.id === "internal") ? (
                                       <div className="swimlane-assignees">
                                         {renderSwimlaneMeetingStatusControl(cell)}
-                                        {cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting ? (
+                                        {cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting || cell.meetingRelation ? (
                                           <span className="meeting-origin-row">
                                             {cell.meetingTimeLabel ? <span className="meeting-time-chip">{cell.meetingTimeLabel}</span> : null}
                                             {row.id === "internal" && cell.isManualInternalMeeting ? (
@@ -17051,6 +17081,7 @@ export default function CommonViewPage() {
                                       {!cell.assignees?.length && !cell.assigneeLabels?.length ? taskStatusIndicator : null}
                                       {isFastTaskRowId(row.id) ? <TaskMarkerComment comment={cell.oneHMarkerComment} taskId={cell.taskId} /> : null}
                                       <span className="swimlane-print-title">
+                                        {cell.meetingRelation ? <span className="meeting-relation-badge" title={`${cell.meetingRelation === "PARA" ? "Para" : "Pas"} takimit extern`}>{cell.meetingRelation}</span> : null}
                                         {commonPrintTitleLine(
                                           `${cell.title}${cell.meetingTimeLabel ? ` ${cell.meetingTimeLabel}` : ""}`,
                                         )}
@@ -17062,6 +17093,7 @@ export default function CommonViewPage() {
                                           isTitleRowOpen ? "expanded" : "",
                                         ].filter(Boolean).join(" ")}
                                       >
+                                        {cell.meetingRelation ? <span className="meeting-relation-badge" title={`${cell.meetingRelation === "PARA" ? "Para" : "Pas"} takimit extern`}>{cell.meetingRelation}</span> : null}
                                         {isTitleRowOpen
                                           ? highlightWfcReactNode(renderMarkedNoteContent(stripInitialsPrefix(cell.title), cell.title))
                                           : renderCommonMarkedTitleLine(cell.title)}
