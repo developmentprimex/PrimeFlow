@@ -90,6 +90,8 @@ function automaticAnswer(question: RealizationQuestion, timeline?: RealizationPe
 function ManualQuestion({ number, label, draft, disabled, onChange, onSaveComment }: {
   number: number; label: string; draft: QuestionDraft; disabled: boolean; onChange: (next: QuestionDraft) => void; onSaveComment: () => void
 }) {
+  const commentRequired = draft.values.includes("YES")
+  const commentMissing = commentRequired && !draft.comment.trim()
   return <tr className="border-b border-slate-200 align-top even:bg-slate-50/50 hover:bg-blue-50/40 focus-within:bg-blue-50/40">
     <td className="px-2 py-3 text-center text-xs tabular-nums text-slate-500">{number}</td>
     <th scope="row" className="border-l border-slate-200 px-3 py-3 text-left text-sm font-medium leading-5 text-slate-800">{label}</th>
@@ -100,8 +102,9 @@ function ManualQuestion({ number, label, draft, disabled, onChange, onSaveCommen
     </td>
     <td className="border-l border-slate-200 px-3 py-2">
       <div className="flex flex-col items-stretch gap-1.5">
-        <Textarea aria-label={`Komenti për ${label}`} className="min-h-9 resize-y bg-white px-2 py-2 text-xs" rows={1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder="Shto koment (opsional)…" />
-        {draft.touched && !disabled ? <Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" onClick={onSaveComment}>Ruaj përgjigjen</Button> : null}
+        <Textarea aria-label={`Komenti për ${label}`} required={commentRequired} aria-required={commentRequired} className="min-h-9 resize-y bg-white px-2 py-2 text-xs" rows={1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder={commentRequired ? "Shto koment (i detyrueshëm)…" : "Shto koment (opsional)…"} />
+        {commentMissing ? <p className="text-[11px] text-amber-700">Komenti është i detyrueshëm kur përgjigjja është Po.</p> : null}
+        {draft.touched && !disabled ? <Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" disabled={commentMissing} onClick={onSaveComment}>Ruaj përgjigjen</Button> : null}
       </div>
     </td>
   </tr>
@@ -237,6 +240,16 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
 
   const save = async ({ closeDialog = true, saveQuestions = true, confirmLevel }: { closeDialog?: boolean; saveQuestions?: boolean; confirmLevel?: RealizationLevel } = {}) => {
     if (!hasUnsavedChanges && !confirmLevel) return
+    if (saveQuestions) {
+      const missingComment = manualQuestions.find(question => {
+        const draft = drafts[question.key]
+        return draft?.touched && draft.values.includes("YES") && !draft.comment.trim()
+      })
+      if (missingComment) {
+        toast.error(`Komenti është i detyrueshëm kur përgjigjja është Po: ${questionLabel(missingComment)}`)
+        return
+      }
+    }
     setSaving(true)
     try {
       if (saveQuestions) {

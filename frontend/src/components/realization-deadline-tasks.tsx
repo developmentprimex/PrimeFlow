@@ -141,10 +141,18 @@ export function RealizationDeadlineTasksPopover({ tasks, title, children }: {
           >
             {isDeadlineAlarm(task) ? "Alarm" : "Important"}
           </span> : null}
-          <span className="min-w-0 flex-1 text-xs leading-4 text-slate-800">
+          <div className="min-w-0 flex-1 text-xs leading-4 text-slate-800">
             {task.person ? <b className="mr-1 text-slate-900">{task.person}:</b> : null}
             {firstLineTitle(task.title)}
-          </span>
+            {task.history?.length ? <details className="mt-1 text-[11px] text-slate-500">
+              <summary className="cursor-pointer">Historiku i afateve ({task.history.length})</summary>
+              <ol className="mt-1 space-y-1">
+                {task.history.map((entry, historyIndex) => <li key={entry.day ?? historyIndex}>
+                  {dayLabel(entry.day) || "Pa datë"} · {stateLabels[entry.state]}{entry.critical ? " · Important" : ""}
+                </li>)}
+              </ol>
+            </details> : null}
+          </div>
           {task.day ? <span className="shrink-0 whitespace-nowrap text-[10px] tabular-nums text-slate-500">{dayLabel(task.day)}</span> : null}
         </li>)}
       </ul>

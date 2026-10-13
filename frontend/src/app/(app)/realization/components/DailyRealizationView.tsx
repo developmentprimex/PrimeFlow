@@ -151,6 +151,10 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
   const save = async (question: RealizationQuestion) => {
     const draft = drafts[question.key]
     if (!draft) return
+    if (draft.value === "YES" && !draft.comment.trim()) {
+      toast.error("Komenti është i detyrueshëm kur përgjigjja është Po")
+      return
+    }
     setSaving(question.key)
     try {
       const value = draft.value === "YES"
@@ -216,7 +220,7 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
                               {saving === question.key ? "Duke ruajtur…" : "Ruaj përgjigjen ditore"}
                             </Button>
                           </div>
-                          {draft.value === "YES" ? <Textarea rows={2} value={draft.comment} disabled={saving !== null} onChange={event => updateDraft(question.key, { comment: event.target.value })} placeholder="Shkruaj komentin e detyrueshëm për përgjigjen Po…" /> : null}
+                          {draft.value === "YES" ? <div className="space-y-1"><Label htmlFor={`daily-question-comment-${question.key}`}>Komenti (i detyrueshëm)</Label><Textarea id={`daily-question-comment-${question.key}`} rows={2} required value={draft.comment} disabled={saving !== null} onChange={event => updateDraft(question.key, { comment: event.target.value })} placeholder="Shkruaj komentin e detyrueshëm për përgjigjen Po…" /></div> : null}
                         </div>
                       ) : (
                         <p className="text-sm text-slate-700">

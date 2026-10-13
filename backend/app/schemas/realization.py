@@ -385,6 +385,12 @@ class RealizationQuestionAnswerCreate(RealizationSchema):
     comment: str | None = Field(default=None, max_length=4000)
     evidence_ids: list[uuid.UUID] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def require_comment_for_yes(self) -> "RealizationQuestionAnswerCreate":
+        if not self.clear and self.value is True and not (self.comment and self.comment.strip()):
+            raise ValueError("Komenti është i detyrueshëm kur përgjigjja është Po")
+        return self
+
 
 class RealizationQuestionAnswerOut(RealizationSchema):
     id: uuid.UUID

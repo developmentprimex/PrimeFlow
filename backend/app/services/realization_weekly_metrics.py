@@ -58,6 +58,14 @@ def _is_in_progress(task: dict) -> bool:
     )
 
 
+def _deadline_state(task: dict) -> str:
+    if task.get("deadline_completed"):
+        return "COMPLETED"
+    if task.get("postponed_today"):
+        return "POSTPONED"
+    return "IN_PROGRESS" if _is_in_progress(task) else "NO_PROGRESS"
+
+
 def _created_on_or_after(task: dict, week_start: date) -> bool | None:
     raw = str(task.get("created_date") or "")[:10]
     if not raw:
@@ -199,21 +207,31 @@ def build_weekly_task_metrics(
     planned_no_progress = pending_planned - planned_postponed - planned_in_progress
     quantity_planned = sum(int(item.get("planned") or 0) for item in quantity_occurrences.values())
     quantity_completed = sum(int(item.get("completed") or 0) for item in quantity_occurrences.values())
+    deadlines_by_task: dict[str, list[tuple[str, dict]]] = {}
+    for (day, task_key), task in sorted(deadline_occurrences.items()):
+        deadlines_by_task.setdefault(task_key, []).append((day, task))
     deadline_cards = []
-    for (day, _task_key), task in deadline_occurrences.items():
-        if task.get("deadline_completed"):
-            state = "COMPLETED"
-        elif task.get("postponed_today"):
-            state = "POSTPONED"
-        else:
-            state = "IN_PROGRESS" if _is_in_progress(task) else "NO_PROGRESS"
-        deadline_cards.append(deadline_task_card(task, state=state, day=day or None))
+    for task_key, occurrences in deadlines_by_task.items():
+        day, task = occurrences[-1]
+        # The weekly total counts tasks. Earlier missed/moved deadlines remain
+        # dated history, even when the task was completed later in the week.
+        state = "COMPLETED" if task_key in completed_keys else _deadline_state(task)
+        card = deadline_task_card(task, state=state, day=day or None)
+        card["critical"] = any(item.get("deadline_critical") for _, item in occurrences)
+        if task.get("match_key"):
+            card["match_key"] = str(task["match_key"])
+        card["history"] = [
+            {"day": occurrence_day or None, "state": _deadline_state(item),
+             "critical": bool(item.get("deadline_critical"))}
+            for occurrence_day, item in occurrences
+        ]
+        deadline_cards.append(card)
     deadlines_completed = sum(1 for card in deadline_cards if card["state"] == "COMPLETED")
     deadlines_postponed = sum(1 for card in deadline_cards if card["state"] == "POSTPONED")
     deadlines_in_progress = sum(1 for card in deadline_cards if card["state"] == "IN_PROGRESS")
     deadlines_no_progress = sum(1 for card in deadline_cards if card["state"] == "NO_PROGRESS")
-    critical_deadlines = [task for task in deadline_occurrences.values() if task.get("deadline_critical")]
-    critical_deadlines_completed = sum(1 for task in critical_deadlines if task.get("deadline_completed"))
+    critical_deadlines = [card for card in deadline_cards if card["critical"]]
+    critical_deadlines_completed = sum(1 for card in critical_deadlines if card["state"] == "COMPLETED")
 
     metrics: dict[str, object] = {
         "weekly_deadline_tasks": sort_deadline_cards(deadline_cards),
@@ -239,7 +257,7 @@ def build_weekly_task_metrics(
         "weekly_quantity_planned_count": quantity_planned,
         "weekly_quantity_completed_count": quantity_completed,
         "weekly_quantity_delta": quantity_completed - quantity_planned,
-        "weekly_deadline_count": len(deadline_occurrences),
+        "weekly_deadline_count": len(deadline_cards),
         "weekly_deadline_completed_count": deadlines_completed,
         "weekly_deadline_postponed_count": deadlines_postponed,
         "weekly_deadline_in_progress_count": deadlines_in_progress,

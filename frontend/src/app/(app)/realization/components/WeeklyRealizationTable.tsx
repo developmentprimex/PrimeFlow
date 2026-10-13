@@ -10,6 +10,7 @@ import type { RealizationDeadlineTask, RealizationPersonResult, RealizationWeekl
 import { compareRealizationDepartments, realizationDepartmentTag } from "@/lib/department-name"
 import { cn } from "@/lib/utils"
 import { weeklyRealizationPercent } from "@/lib/weekly-realization-percent"
+import { mergeWeeklyDeadlineTasks, weeklyDeadlineTotals } from "@/lib/weekly-realization-deadlines"
 import { compareWeeklyPlannerUsers, type WeeklyPlannerSortOrder } from "@/lib/weekly-planner-user-order"
 
 export function weeklyMetrics(person: RealizationPersonResult) {
@@ -92,7 +93,8 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
     sum.deadlineTasks.push(...value.deadlineTasks.map((task) => ({ ...task, person: person.user_name })))
     return sum
   }, { planned: 0, completed: 0, extra: 0, extraCompleted: 0, extraProgress: 0, extraPostponed: 0, extraTodo: 0, extraDeferred: 0, progress: 0, postponed: 0, penaltyPoints: 0, noProgress: 0, quantityTasks: 0, quantityPlanned: 0, quantityCompleted: 0, quantityDelta: 0, deadlines: 0, deadlinesCompleted: 0, deadlinesPostponed: 0, deadlinesInProgress: 0, deadlinesNoProgress: 0, criticalDeadlines: 0, criticalDeadlinesCompleted: 0, wfe: 0, deadlineTasks: [] as RealizationDeadlineTask[] })
-  total.deadlineTasks = sortDeadlineTasks(total.deadlineTasks)
+  total.deadlineTasks = sortDeadlineTasks(mergeWeeklyDeadlineTasks(total.deadlineTasks))
+  Object.assign(total, weeklyDeadlineTotals(total.deadlineTasks))
   const totalPercent = weeklyRealizationPercent(total.planned, total.completed, total.extra, total.penaltyPoints, total.wfe)
 
   const planCell = (value: ReturnType<typeof weeklyMetrics> | typeof total) => <>
@@ -187,7 +189,7 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
     <div className="grid gap-px border-t bg-slate-200 text-[11px] text-slate-500 md:grid-cols-3">
       <p className="bg-white px-3 py-2"><b className="text-slate-700">Plan:</b> detyrat unike të gjithë javës + ekstra = ngarkesa totale. E njëjta detyrë nuk numërohet përsëri çdo ditë.</p>
       <p className="bg-white px-3 py-2"><b className="text-slate-700">Ekstra:</b> detyrat e krijuara gjatë kësaj jave, të mbledhura nga të gjitha ditët dhe të ndara në kryer, progres, shtyrë dhe pa progres. Ato që u shtuan, mbetën pa u nisur dhe u shtynë për më vonë shfaqen veçmas si <b className="text-slate-700">shtyrë</b> dhe nuk hyjnë në ngarkesën e javës.</p>
-      <p className="bg-white px-3 py-2"><b className="text-slate-700">Sasia dhe deadline:</b> totalet e të gjitha ditëve të javës; afatet me prioritet dallohen me border të kuq, kurse kutia me unazë të kuqe mban sipër numrin e kuq të atyre që janë deadline important. Kliko qelizën e afateve për të parë cilat detyra ishin dhe çfarë ndodhi me secilën.</p>
+      <p className="bg-white px-3 py-2"><b className="text-slate-700">Sasia:</b> totalet e të gjitha ditëve të javës. <b className="text-slate-700">Deadline:</b> çdo detyrë numërohet një herë gjatë javës, edhe te Të gjithë. Kliko qelizën për statusin javor dhe historikun e afateve. Detyrat important të pambyllura dallohen me të kuqe.</p>
     </div>
     </section>
   </>

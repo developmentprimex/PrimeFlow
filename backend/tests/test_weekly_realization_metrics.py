@@ -211,6 +211,81 @@ def test_weekly_deadline_tasks_carry_their_day_and_state():
     ]
 
 
+@pytest.mark.parametrize("completed", [False, True])
+def test_repeated_deadlines_count_one_task_and_preserve_dated_history(completed):
+    postponed = {**task("A", "planned_today", "POSTPONED_UNAPPROVED"),
+                 "deadline_was_today": True, "postponed_today": True, "deadline_critical": True}
+    timeline = [
+        {"date": "2026-10-12", "tasks": [postponed, postponed]},
+        {"date": "2026-10-13", "tasks": [postponed]},
+    ]
+    if completed:
+        timeline.append({"date": "2026-10-14", "tasks": [
+            {**task("A", "planned_today", "REALIZED_AS_PLANNED"),
+             "deadline_was_today": True, "deadline_completed": True},
+        ]})
+    metrics = build_weekly_task_metrics([], list(reversed(timeline)))
+    assert metrics["weekly_planned_count"] == 1
+    assert metrics["weekly_deadline_count"] == 1
+    assert metrics["weekly_deadline_completed_count"] == int(completed)
+    assert metrics["weekly_deadline_postponed_count"] == int(not completed)
+    assert metrics["weekly_critical_deadline_count"] == 1
+    assert metrics["weekly_critical_deadline_completed_count"] == int(completed)
+    assert metrics["weekly_penalty_points"] == (0 if completed else 60)
+    card, = metrics["weekly_deadline_tasks"]
+    assert card["state"] == ("COMPLETED" if completed else "POSTPONED")
+    assert card["critical"] is True
+    assert [entry["day"] for entry in card["history"]] == [day["date"] for day in timeline]
+    assert [entry["state"] for entry in card["history"]] == ["POSTPONED", "POSTPONED"] + (["COMPLETED"] if completed else [])
+
+
+def test_completion_after_last_deadline_updates_weekly_status_without_rewriting_history():
+    metrics = build_weekly_task_metrics([], [
+        {"date": "2026-10-12", "tasks": [
+            {**task("A", "planned_today"), "deadline_was_today": True},
+        ]},
+        {"date": "2026-10-13", "tasks": [task("A", "planned_today", "COMPLETED_LATE")]},
+    ])
+    assert metrics["weekly_deadline_count"] == 1
+    assert metrics["weekly_deadline_completed_count"] == 1
+    assert metrics["weekly_deadline_no_progress_count"] == 0
+    assert metrics["weekly_deadline_tasks"][0]["history"][0]["state"] == "NO_PROGRESS"
+
+
+def test_latest_deadline_outcome_replaces_earlier_postponement():
+    metrics = build_weekly_task_metrics([], [
+        {"date": "2026-10-13", "tasks": [
+            {**task("A", "planned_today"), "deadline_was_today": True},
+        ]},
+        {"date": "2026-10-12", "tasks": [
+            {**task("A", "planned_today", "POSTPONED_UNAPPROVED"),
+             "deadline_was_today": True, "postponed_today": True},
+        ]},
+    ])
+    assert metrics["weekly_deadline_count"] == 1
+    assert metrics["weekly_deadline_postponed_count"] == 0
+    assert metrics["weekly_deadline_no_progress_count"] == 1
+    assert metrics["weekly_deadline_tasks"][0]["day"] == "2026-10-13"
+
+
+def test_distinct_tasks_with_the_same_title_keep_separate_weekly_deadlines():
+    metrics = build_weekly_task_metrics([], [{"date": "2026-10-12", "tasks": [
+        {**task(task_id, "planned_today"), "title": "Raporti", "deadline_was_today": True}
+        for task_id in ["A", "B"]
+    ]}])
+    assert metrics["weekly_deadline_count"] == 2
+    assert metrics["weekly_planned_count"] == 2
+
+
+def test_deadline_progress_keeps_weekly_status_and_delta_detection():
+    metrics = build_weekly_task_metrics([], [{"date": "2026-10-12", "tasks": [
+        {**task("A", "planned_today"), "current_status": "IN_PROGRESS", "deadline_was_today": True},
+        {**task("B", "planned_today"), "completed_delta": 1, "deadline_was_today": True},
+    ]}])
+    assert metrics["weekly_deadline_in_progress_count"] == 2
+    assert metrics["weekly_deadline_no_progress_count"] == 0
+
+
 def test_weekly_extra_answer_splits_completed_progress_and_no_progress():
     metrics = build_weekly_task_metrics([
         task("A", "additional_owner", "additional_completed"),

@@ -899,14 +899,23 @@ export interface RealizationManagerReviewResponse {
 
 export type RealizationDeadlineState = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS"
 
+export interface RealizationDeadlineOccurrence {
+  day: string | null
+  state: RealizationDeadlineState
+  critical: boolean
+}
+
 export interface RealizationDeadlineTask {
   task_id: string | null
+  match_key?: string
   title: string
   day: string | null
   state: RealizationDeadlineState
   critical: boolean
   /** Filled in by the table when several people's deadlines are pooled. */
   person?: string
+  /** Earlier deadline outcomes, separate from the task's weekly status. */
+  history?: RealizationDeadlineOccurrence[]
 }
 
 export type RealizationItemKind = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS" | "REASSIGNED_OUT" | "EXTRA_COMPLETED" | "EXTRA_OPEN" | "WFE" | "EXTRA_WFE"

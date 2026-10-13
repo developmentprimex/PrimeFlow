@@ -570,7 +570,7 @@ function PromptNotes({
             <th className={cn(TH, "w-[48px] border-l-2 border-l-slate-800")}>NR</th>
             <th className={cn(TH, "w-[28%]")}>Kërkesa</th>
             <th className={cn(TH, "w-[20%]")}>Detyra</th>
-            <th className={cn(TH, kind === "PROMPT" ? "w-[72px]" : "w-[100px]")} title={t("Kush e bën promptin / kush e teston")}>{t("Për / Test")}</th>
+            <th className={cn(TH, kind === "PROMPT" ? "w-[72px]" : "w-[100px]")} title={t("Kush e bën promptin / kush e teston")}>{kind === "PROMPT" ? "Për / Test" : "PER / KO"}</th>
             <th className={cn(TH, "w-[118px]")}>Statusi</th>
             <th className={cn(TH, "w-[16%]")}>{t("Prompti")}</th>
             <th className={cn(TH, "w-[56px]")}>Nga</th>

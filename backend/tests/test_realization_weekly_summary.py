@@ -246,9 +246,9 @@ def test_user_question_route_rejects_staff_without_creating_results():
     assert error.value.status_code == 403
 
 
-@pytest.mark.parametrize("value", [True, False])
+@pytest.mark.parametrize("value", [False])
 @pytest.mark.parametrize("comment", [None, "", "   "])
-def test_boolean_question_can_be_saved_without_comment(value, comment):
+def test_no_answer_can_be_saved_without_comment(value, comment):
     from app.api.routers.realization import save_question_answer
 
     period = SimpleNamespace(id=uuid.uuid4(), period_type="WEEKLY", department_id=uuid.uuid4(), status="OPEN")
@@ -266,3 +266,19 @@ def test_boolean_question_can_be_saved_without_comment(value, comment):
     assert added[0].value_json == {"value": value}
     assert saved.comment is None
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.parametrize("comment", [None, "", "   ", "\n\t"])
+def test_yes_answer_requires_nonblank_comment(comment):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="Komenti është i detyrueshëm"):
+        RealizationQuestionAnswerCreate(value=True, comment=comment)
+
+
+def test_yes_answer_accepts_comment_and_clear_does_not_require_comment():
+    answer = RealizationQuestionAnswerCreate(value=True, comment="Ndihmoi kolegun")
+    assert answer.value is True
+    assert answer.comment == "Ndihmoi kolegun"
+    cleared = RealizationQuestionAnswerCreate(value=True, clear=True)
+    assert cleared.clear is True

@@ -478,11 +478,11 @@ function QuestionRow({
                 />
                 {draft.value === "YES" ? "Po" : "Jo"}
               </label>
-              <Button size="sm" variant="outline" onClick={onSave} disabled={saving}>
+              <Button size="sm" variant="outline" onClick={onSave} disabled={saving || (draft.value === "YES" && !draft.comment.trim())}>
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck2 className="h-3.5 w-3.5" />} Ruaj përgjigjen e javës
               </Button>
             </div>
-            {draft.value === "YES" ? <Textarea rows={2} value={draft.comment} disabled={saving} onChange={(event) => onDraft({ ...draft, comment: event.target.value })} placeholder="Shto koment (opsional)…" /> : null}
+            {draft.value === "YES" ? <div className="space-y-1"><Label htmlFor={`weekly-question-comment-${question.key}`}>Komenti (i detyrueshëm)</Label><Textarea id={`weekly-question-comment-${question.key}`} rows={2} required value={draft.comment} disabled={saving} onChange={(event) => onDraft({ ...draft, comment: event.target.value })} placeholder="Shkruaj komentin e detyrueshëm për përgjigjen Po…" /></div> : null}
           </div>
         ) : (
           <p className={cn("text-sm leading-6 whitespace-pre-line", needsConfirmation && finalValue == null ? "font-medium text-amber-700" : "text-slate-700")}>{visibleValue}</p>
@@ -753,6 +753,10 @@ function WeeklyRealizationView() {
     const draft = manualDrafts[question.key]
     if (!draft) return
     const value = draft.value === "YES"
+    if (value && !draft.comment.trim()) {
+      toast.error("Komenti është i detyrueshëm kur përgjigjja është Po")
+      return
+    }
     await run(
       `question-${question.key}`,
       `/realization/periods/${data.period.id}/results/${selected.id}/questions/${question.key}`,
