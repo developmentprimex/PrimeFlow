@@ -1211,6 +1211,8 @@ export default function GaKaNotesPage() {
     const value = searchParams.get("returnTo")
     return value && value.startsWith("/") && !value.startsWith("//") ? value : null
   }, [searchParams])
+  // Opened from the iPhone home screen icon: skip the banner so the note box is first.
+  const quickMode = searchParams.get("quick") === "1"
   const deepLinkTaskStateRef = React.useRef<"idle" | "open" | "done">("idle")
   const [notes, setNotes] = React.useState<GaNotesTableNote[]>([])
   const notesRef = React.useRef<GaNotesTableNote[]>([])
@@ -3263,7 +3265,7 @@ export default function GaKaNotesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border bg-gradient-to-r from-amber-50 via-indigo-50 to-cyan-50 p-6 shadow-sm">
+      <div className={`rounded-2xl border bg-gradient-to-r from-amber-50 via-indigo-50 to-cyan-50 p-6 shadow-sm${quickMode ? " hidden" : ""}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-xs font-semibold tracking-[0.18em] text-primary/80 uppercase">Notes for all</div>

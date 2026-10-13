@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
+import { isHomeScreenApp, PX_NOTES_QUICK_URL } from "@/lib/px-notes-quick"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -24,7 +25,8 @@ export default function LoginPage() {
     setError(null)
     try {
       await login(email, password)
-      router.push("/dashboard")
+      // The home screen icon is the PX Notes app, so signing in there returns to it.
+      router.push(isHomeScreenApp() ? PX_NOTES_QUICK_URL : "/dashboard")
     } catch (error) {
       if (error instanceof Error && error.message === "network_error") {
         setError("Server unavailable. Make sure the backend is running.")

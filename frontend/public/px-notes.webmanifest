@@ -1,0 +1,16 @@
+{
+  "name": "PX Notes",
+  "short_name": "PX Notes",
+  "description": "PrimeFlow PX Notes",
+  "id": "/ga-ka-notes?quick=1",
+  "start_url": "/ga-ka-notes?quick=1",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "/px-notes-icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/px-notes-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -3,6 +3,8 @@
 import * as React from "react"
 import { usePathname } from "next/navigation"
 
+import { isPxNotesQuickLaunch } from "@/lib/px-notes-quick"
+
 interface SidebarContextType {
   isOpen: boolean
   isDesktop: boolean
@@ -25,6 +27,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     const syncSidebarForViewport = (event?: MediaQueryListEvent) => {
       const nextIsDesktop = mediaQuery.matches
       setIsDesktop(nextIsDesktop)
+
+      // The PX Notes home screen icon opens straight at the note box, so the
+      // menu stays closed. The top bar button opens it.
+      if (isPxNotesQuickLaunch()) {
+        setIsOpen(false)
+        return
+      }
 
       if (!nextIsDesktop) {
         // Rotating a phone back to portrait must not throw the menu over the
