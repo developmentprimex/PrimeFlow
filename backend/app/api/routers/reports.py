@@ -22,6 +22,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
+from app.services.meeting_system_tasks import TAK_INT_ONE_H_TASK_KINDS
 from app.services.one_h_slots import effective_slot_date
 from app.services.task_marker import active_one_h_marker
 from app.models.task_user_comment import TaskUserComment
@@ -375,6 +376,15 @@ async def daily_report(
             )
         ).all()
         one_h_slot_map = {task_id: slot for task_id, slot in rows}
+        # TAK INT 1H tasks take their slot from the meeting, so the 16:00 rollover must not blank it
+        # on the slot day itself. On any other day the slot stays empty.
+        for t in tasks:
+            if (
+                t.meeting_system_task_kind in TAK_INT_ONE_H_TASK_KINDS
+                and t.one_h_report_slot
+                and t.meeting_occurrence_date == day
+            ):
+                one_h_slot_map.setdefault(t.id, t.one_h_report_slot)
 
     assignee_ids_by_task: dict[uuid.UUID, set[uuid.UUID]] = {tid: set() for tid in task_ids}
     if task_ids:
