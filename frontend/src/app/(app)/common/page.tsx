@@ -610,7 +610,7 @@ type BzItem = {
 }
 type DiamondItem = {
   reviewId: string
-  taskId: string
+  taskId: string | null
   userId: string
   person: string
   taskTitle: string
@@ -2330,7 +2330,9 @@ export default function CommonViewPage() {
             taskId: row.task_id,
             userId: row.reviewee_user_id,
             person: row.reviewee_name,
-            taskTitle: getPlainMarkedText(row.task_title).trim() || "Untitled task",
+            taskTitle: row.source === "REALIZATION_PROPOSAL"
+              ? `${row.task_title} — ${row.review.comment || ""}`
+              : getPlainMarkedText(row.task_title).trim() || "Untitled task",
             date: [
               completedAt.getFullYear(),
               String(completedAt.getMonth() + 1).padStart(2, "0"),
@@ -4976,7 +4978,7 @@ export default function CommonViewPage() {
   const diamondReviewByTaskUser = React.useMemo(() => {
     const map = new Map<string, TaskReview>()
     diamondItems.forEach((item) => {
-      map.set(`${item.taskId}:${item.userId}`, item.review)
+      if (item.taskId) map.set(`${item.taskId}:${item.userId}`, item.review)
     })
     return map
   }, [diamondItems])
@@ -8383,7 +8385,7 @@ export default function CommonViewPage() {
       title: `${item.person} — ${item.taskTitle}`,
       dateLabel: formatDateHuman(item.date),
       accentClass: "swimlane-accent diamond",
-      taskId: item.taskId,
+      taskId: item.taskId ?? undefined,
       userId: item.userId,
       entryDate: item.date,
     }))

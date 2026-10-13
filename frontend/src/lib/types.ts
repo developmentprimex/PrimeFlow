@@ -372,6 +372,8 @@ export interface Task {
 export interface TaskReview {
   id: string
   task_id?: string | null
+  source?: "TASK" | "REALIZATION_PROPOSAL"
+  realization_period_id?: string | null
   reviewee_user_id: string
   reviewee_name: string
   reviewer_user_id?: string | null
@@ -386,7 +388,9 @@ export interface TaskReview {
 }
 
 export interface TaskReviewOverviewRow {
-  task_id: string
+  task_id: string | null
+  source?: "TASK" | "REALIZATION_PROPOSAL"
+  realization_period_id?: string | null
   task_title: string
   project_id?: string | null
   project_title?: string | null
@@ -407,6 +411,7 @@ export interface TaskReviewUserSummary {
   unreviewed_count: number
   late_count: number
   diamonds_total: number
+  proposal_count?: number
 }
 
 export interface TaskReviewOverview {
@@ -414,6 +419,7 @@ export interface TaskReviewOverview {
   reviewed_count: number
   unreviewed_count: number
   diamonds_total: number
+  proposal_count?: number
   users: TaskReviewUserSummary[]
   rows: TaskReviewOverviewRow[]
 }
@@ -1109,6 +1115,7 @@ export interface RealizationQuestion {
 }
 
 export interface RealizationManualAnswer {
+  diamond_score?: number
   id: string
   value: boolean | string | null
   comment?: string | null
@@ -1146,6 +1153,11 @@ export interface RealizationPersonResult {
       complete: boolean
     }
     weekly_progress_percent?: number
+    /** Awarded task and proposal diamonds for the report's selected week. */
+    weekly_diamond_count?: number
+    weekly_task_diamond_count?: number
+    weekly_proposal_diamond_count?: number
+    weekly_diamonds?: TaskReviewOverviewRow[]
     daily_progress_percent?: number
     daily_planned_count?: number
     daily_completed_count?: number

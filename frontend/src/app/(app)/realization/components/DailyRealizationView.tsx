@@ -3,6 +3,7 @@
 import * as React from "react"
 import { DailyStaffTable } from "./DailyStaffTable"
 import { RealizationDailyPersonComment } from "@/components/realization-daily-person-comment"
+import { RealizationProposalNotice } from "@/components/realization-proposal-notice"
 import { compareRealizationDepartments } from "@/lib/department-name"
 import { dailyExtraTaskState } from "@/lib/realization-extras"
 import { AlertTriangle, ArrowLeft, CalendarDays, History, RefreshCw } from "lucide-react"
@@ -198,17 +199,19 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
               <div className="divide-y">
                 {rows.map(question => {
                   const manual = question.source_status.startsWith("MANUAL")
+                  const proposal = question.key === "gave_proposal"
                   const answered = question.source_status === "MANUAL_ANSWERED"
                   const draft = drafts[question.key] || { value: "", comment: "" }
                   const label = weeklyChecklistLabels[question.key] || dailyQuestionLabels[question.key] || question.label
                   return (
-                    <div key={question.key} className="space-y-2 p-3">
+                    <div key={question.key} className={cn("space-y-2 p-3", proposal && "border-y-2 border-cyan-300 bg-cyan-50/70")}>
                       <div className="flex items-start justify-between gap-2">
-                        <Label htmlFor={manual ? `daily-question-${question.key}` : undefined} className="text-sm font-medium">{label}</Label>
+                        <Label htmlFor={manual ? `daily-question-${question.key}` : undefined} className={cn("text-sm", proposal ? "font-bold text-cyan-950" : "font-medium")}>{label}</Label>
                         <Badge variant={manual && !answered ? "destructive" : "secondary"} className="shrink-0 text-[9px]">
                           {manual ? answered ? "INPUT · Ruajtur" : "INPUT" : question.source_status === "AUTO_NEEDS_CONFIRMATION" ? "AUTO · Konfirmo" : "AUTO"}
                         </Badge>
                       </div>
+                      {proposal ? <RealizationProposalNotice yes={draft.value === "YES"} saved={answered && !dirtyKeys.current.has(question.key) && Boolean(draft.comment.trim())} /> : null}
                       {manual && canEdit ? (
                         <div className="space-y-2 rounded-md border bg-white px-3 py-2">
                           <div className="flex items-center justify-between gap-3">
@@ -220,7 +223,7 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
                               {saving === question.key ? "Duke ruajtur…" : "Ruaj përgjigjen ditore"}
                             </Button>
                           </div>
-                          {draft.value === "YES" ? <div className="space-y-1"><Label htmlFor={`daily-question-comment-${question.key}`}>Komenti (i detyrueshëm)</Label><Textarea id={`daily-question-comment-${question.key}`} rows={2} required value={draft.comment} disabled={saving !== null} onChange={event => updateDraft(question.key, { comment: event.target.value })} placeholder="Shkruaj komentin e detyrueshëm për përgjigjen Po…" /></div> : null}
+                          {draft.value === "YES" ? <div className="space-y-1"><Label htmlFor={`daily-question-comment-${question.key}`}>{proposal ? "Propozimi dhe përfitimi (i detyrueshëm)" : "Komenti (i detyrueshëm)"}</Label><Textarea id={`daily-question-comment-${question.key}`} rows={proposal ? 3 : 2} required value={draft.comment} disabled={saving !== null} onChange={event => updateDraft(question.key, { comment: event.target.value })} placeholder={proposal ? "Përshkruaj propozimin dhe përfitimin…" : "Shkruaj komentin e detyrueshëm për përgjigjen Po…"} /></div> : null}
                         </div>
                       ) : (
                         <p className="text-sm text-slate-700">

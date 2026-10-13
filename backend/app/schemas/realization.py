@@ -399,6 +399,7 @@ class RealizationQuestionAnswerOut(RealizationSchema):
     question_key: str
     value: bool | str | None
     comment: str | None
+    diamond_score: int = 0
     evidence_ids: list[uuid.UUID]
     answered_by: uuid.UUID
     answered_by_name: str | None = None

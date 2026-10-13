@@ -56,7 +56,7 @@ export function TaskReviewDialog({
   }, [open, row])
 
   const save = React.useCallback(async () => {
-    if (!row) return
+    if (!row || row.source === "REALIZATION_PROPOSAL" || !row.task_id) return
     setSaving(true)
     try {
       const existing = row.review

@@ -22,6 +22,8 @@ class TaskReviewUpdate(BaseModel):
 class TaskReviewOut(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID | None
+    source: Literal["TASK", "REALIZATION_PROPOSAL"] = "TASK"
+    realization_period_id: uuid.UUID | None = None
     reviewee_user_id: uuid.UUID
     reviewee_name: str
     reviewer_user_id: uuid.UUID | None
@@ -36,7 +38,9 @@ class TaskReviewOut(BaseModel):
 
 
 class TaskReviewOverviewRow(BaseModel):
-    task_id: uuid.UUID
+    task_id: uuid.UUID | None
+    source: Literal["TASK", "REALIZATION_PROPOSAL"] = "TASK"
+    realization_period_id: uuid.UUID | None = None
     task_title: str
     project_id: uuid.UUID | None = None
     project_title: str | None = None
@@ -57,6 +61,7 @@ class TaskReviewUserSummary(BaseModel):
     unreviewed_count: int = 0
     late_count: int = 0
     diamonds_total: int = 0
+    proposal_count: int = 0
 
 
 class TaskReviewOverviewOut(BaseModel):
@@ -64,6 +69,7 @@ class TaskReviewOverviewOut(BaseModel):
     reviewed_count: int = 0
     unreviewed_count: int = 0
     diamonds_total: int = 0
+    proposal_count: int = 0
     users: list[TaskReviewUserSummary] = Field(default_factory=list)
     rows: list[TaskReviewOverviewRow] = Field(default_factory=list)
 

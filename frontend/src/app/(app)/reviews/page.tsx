@@ -189,7 +189,7 @@ export default function ReviewsPage() {
             Reviews
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review completed work with diamonds. Weekly Planner is not required.
+            Diamonds for completed work and improvement proposals recorded in Realization.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -253,7 +253,7 @@ export default function ReviewsPage() {
             <Select value={reviewStatus} onValueChange={(value) => setReviewStatus(value as typeof reviewStatus)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All completed</SelectItem>
+                <SelectItem value="all">All tasks and proposals</SelectItem>
                 <SelectItem value="unreviewed">Without review</SelectItem>
                 <SelectItem value="reviewed">Reviewed</SelectItem>
               </SelectContent>
@@ -278,14 +278,15 @@ export default function ReviewsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Completed tasks</CardTitle>
+          <CardTitle className="text-base">Completed tasks and improvement proposals</CardTitle>
+          {overview.proposal_count ? <p className="text-xs text-cyan-800">{overview.proposal_count} propozime për përmirësim · 1 diamant për propozim</p> : null}
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="py-10 text-center text-sm text-muted-foreground">Loading completed tasks...</div>
           ) : overview.rows.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
-              No completed tasks match these filters.
+              No tasks or improvement proposals match these filters.
             </div>
           ) : (
             <div className="overflow-x-auto rounded-md border">
@@ -293,25 +294,26 @@ export default function ReviewsPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[5%]">Nr.</TableHead>
-                    <TableHead className="w-[39%]">Task</TableHead>
+                    <TableHead className="w-[39%]">Task / Proposal</TableHead>
                     <TableHead className="w-[14%]">User</TableHead>
-                    <TableHead className="w-[12%]">Completed</TableHead>
+                    <TableHead className="w-[12%]">Date</TableHead>
                     <TableHead className="w-[18%]">Review</TableHead>
                     <TableHead className="w-[12%] text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {overview.rows.map((row, index) => (
-                    <TableRow key={`${row.task_id}:${row.reviewee_user_id}`}>
+                    <TableRow key={`${row.source || "TASK"}:${row.task_id || row.review?.id}:${row.reviewee_user_id}`}>
                       <TableCell className="align-top tabular-nums text-muted-foreground">{index + 1}</TableCell>
                       <TableCell className="max-w-0 align-top">
                         <Link
-                          href={`/tasks/${row.task_id}?returnTo=${encodeURIComponent("/reviews")}`}
+                          href={row.source === "REALIZATION_PROPOSAL" || !row.task_id ? "/realization" : `/tasks/${row.task_id}?returnTo=${encodeURIComponent("/reviews")}`}
                           className="line-clamp-2 whitespace-normal font-medium [overflow-wrap:anywhere] hover:underline"
                           title={getPlainMarkedText(row.task_title)}
                         >
                           {getPlainMarkedText(row.task_title)}
                         </Link>
+                        {row.source === "REALIZATION_PROPOSAL" ? <Badge variant="outline" className="mt-1 border-cyan-300 bg-cyan-50 text-cyan-900">Propozim · Realizimi</Badge> : null}
                         {row.project_title ? (
                           <div className="truncate text-xs text-muted-foreground" title={row.project_title}>
                             {row.project_title}
@@ -339,7 +341,9 @@ export default function ReviewsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                          {row.reviewee_user_id === user?.id ? (
+                          {row.source === "REALIZATION_PROPOSAL" ? (
+                            <Link href="/realization" className="text-xs font-medium text-cyan-800 hover:underline">Shih te Realizimi</Link>
+                          ) : row.reviewee_user_id === user?.id ? (
                             <span className="text-xs text-muted-foreground">Self-review disabled</span>
                           ) : (
                             <div className="flex justify-end gap-2">

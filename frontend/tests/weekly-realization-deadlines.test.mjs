@@ -92,6 +92,7 @@ test("the weekly table uses unique deadline counts in its All row", () => {
   const { WeeklyRealizationTable } = load("../src/app/(app)/realization/components/WeeklyRealizationTable.tsx", {
     "@/components/realization-review-cells": { RealizationReviewCells: empty },
     "@/components/realization-weekly-days": { RealizationWeeklyDays: empty },
+    "@/components/realization-weekly-diamonds": { RealizationWeeklyDiamonds: empty },
     "@/components/realization-quantity": { RealizationQuantityDelta: empty, RealizationQuantitySummary: empty },
     "@/components/realization-plan-summary": { RealizationPlanSummary: empty },
     "@/components/realization-plan-status-grid": {

@@ -29,6 +29,7 @@ from app.schemas.task_review import (
     TaskReviewUserSummary,
 )
 from app.services.audit import add_audit_log
+from app.services.realization_proposal_diamonds import load_proposal_diamonds
 
 
 router = APIRouter()
@@ -142,9 +143,6 @@ async def review_overview(
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
     tasks = (await db.execute(task_stmt)).scalars().all()
-    if not tasks:
-        return TaskReviewOverviewOut()
-
     task_ids = [task.id for task in tasks]
     assignment_rows = (
         await db.execute(
@@ -210,6 +208,12 @@ async def review_overview(
                 )
             )
 
+    if review_status != "unreviewed":
+        rows.extend(await load_proposal_diamonds(
+            db, date_from=date_from, date_to=date_to, department_id=department_id,
+            reviewee_user_id=reviewee_user_id, app_timezone=app_timezone,
+        ))
+    rows.sort(key=lambda row: row.completed_at.replace(tzinfo=timezone.utc) if row.completed_at.tzinfo is None else row.completed_at, reverse=True)
     summary_state: dict[uuid.UUID, dict] = {}
     for row in rows:
         state = summary_state.setdefault(
@@ -221,13 +225,16 @@ async def review_overview(
                 "reviewed_count": 0,
                 "late_count": 0,
                 "diamonds_total": 0,
+                "proposal_count": 0,
             },
         )
-        state["completed_count"] += 1
+        proposal = row.source == "REALIZATION_PROPOSAL"
+        state["proposal_count"] += int(proposal)
+        state["completed_count"] += int(not proposal)
         if row.is_late:
             state["late_count"] += 1
         if row.review is not None:
-            state["reviewed_count"] += 1
+            state["reviewed_count"] += int(not proposal)
             state["diamonds_total"] += row.review.diamond_score
 
     user_summaries = [
@@ -240,11 +247,13 @@ async def review_overview(
     user_summaries.sort(key=lambda item: item.user_name.casefold())
     reviewed_count = sum(item.reviewed_count for item in user_summaries)
     diamonds_total = sum(item.diamonds_total for item in user_summaries)
+    completed_count = sum(item.completed_count for item in user_summaries)
     return TaskReviewOverviewOut(
-        completed_count=len(rows),
+        completed_count=completed_count,
         reviewed_count=reviewed_count,
-        unreviewed_count=len(rows) - reviewed_count,
+        unreviewed_count=completed_count - reviewed_count,
         diamonds_total=diamonds_total,
+        proposal_count=sum(item.proposal_count for item in user_summaries),
         users=user_summaries,
         rows=rows,
     )

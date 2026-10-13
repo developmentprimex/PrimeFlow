@@ -41,10 +41,15 @@ export function weeklyMetrics(person: RealizationPersonResult) {
   const criticalDeadlinesCompleted = facts.weekly_critical_deadline_completed_count ?? 0
   const deadlineTasks = facts.weekly_deadline_tasks ?? []
   const wfe = facts.weekly_wfe_count ?? 0
+  const diamonds = facts.weekly_diamond_count ?? 0
+  const taskDiamonds = facts.weekly_task_diamond_count ?? 0
+  const proposalDiamonds = facts.weekly_proposal_diamond_count ?? 0
+  const diamondAwards = facts.weekly_diamonds ?? []
   return {
     planned, completed, extra, extraCompleted, extraProgress, extraPostponed, extraTodo, extraDeferred,
     progress, postponed, penaltyPoints, noProgress, quantityTasks, quantityPlanned, quantityCompleted, quantityDelta,
     deadlines, deadlinesCompleted, deadlinesPostponed, deadlinesInProgress, deadlinesNoProgress, criticalDeadlines, criticalDeadlinesCompleted, deadlineTasks, wfe,
+    diamonds, taskDiamonds, proposalDiamonds, diamondAwards,
     percent: weeklyRealizationPercent(planned, completed, extra, penaltyPoints, wfe),
   }
 }
@@ -72,6 +77,7 @@ export function hasWeeklyActivity(person: RealizationPersonResult) {
     value.deadlinesPostponed,
     value.deadlinesInProgress,
     value.deadlinesNoProgress,
+    value.diamonds,
   ].some((metric) => metric !== 0)
 }
 

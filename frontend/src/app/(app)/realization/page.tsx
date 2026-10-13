@@ -2,6 +2,8 @@
 
 import * as React from "react"
 import { WeeklyRealizationTable, weeklyMetrics } from "./components/WeeklyRealizationTable"
+import { RealizationProposalNotice } from "@/components/realization-proposal-notice"
+import { RealizationWeeklyDiamonds } from "@/components/realization-weekly-diamonds"
 import { DailyRealizationView } from "./components/DailyRealizationView"
 import { MonthlyRealizationView } from "./components/MonthlyRealizationView"
 import { RealizationManagerReview } from "@/components/realization-manager-review"
@@ -443,6 +445,7 @@ function QuestionRow({
   editable?: boolean
 }) {
   const manual = question.source_status.startsWith("MANUAL")
+  const proposal = question.key === "gave_proposal"
   const explicitlyAnswered = question.source_status === "MANUAL_ANSWERED"
   const finalValue = explicitlyAnswered ? question.final_value : (question.final_value ?? question.auto_value)
   const needsConfirmation = manual
@@ -452,9 +455,10 @@ function QuestionRow({
     ? "Për konfirmim nga menaxheri"
     : explicitlyAnswered && finalValue == null ? "Nuk aplikohet / Nuk dihet" : displayValue(finalValue)
   return (
-    <div className="grid gap-2 border-b border-slate-100 py-4 last:border-b-0 md:grid-cols-[minmax(220px,0.9fr)_minmax(260px,1.4fr)]">
+    <div className={cn("grid gap-2 border-b border-slate-100 py-4 last:border-b-0 md:grid-cols-[minmax(220px,0.9fr)_minmax(260px,1.4fr)]", proposal && "rounded-md border-y-2 border-cyan-300 bg-cyan-50/70 px-3")}>
       <div>
-        <p className="text-sm font-medium text-slate-900">{question.label}</p>
+        <p className={cn("text-sm", proposal ? "font-bold text-cyan-950" : "font-medium text-slate-900")}>{question.label}</p>
+        {proposal ? <RealizationProposalNotice yes={(draft ? draft.value === "YES" : finalValue === true)} saved={explicitlyAnswered && finalValue === true && Boolean(question.manager_comment?.trim()) && (!draft || (draft.value === "YES" && draft.comment === question.manager_comment))} /> : null}
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <Badge variant={needsConfirmation ? "destructive" : "secondary"} className="text-[10px]">
             {manual ? (needsConfirmation ? "MANUAL — Pa plotësuar" : "MANUAL — Plotësuar") : "AUTO FAKT"}
@@ -482,7 +486,7 @@ function QuestionRow({
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck2 className="h-3.5 w-3.5" />} Ruaj përgjigjen e javës
               </Button>
             </div>
-            {draft.value === "YES" ? <div className="space-y-1"><Label htmlFor={`weekly-question-comment-${question.key}`}>Komenti (i detyrueshëm)</Label><Textarea id={`weekly-question-comment-${question.key}`} rows={2} required value={draft.comment} disabled={saving} onChange={(event) => onDraft({ ...draft, comment: event.target.value })} placeholder="Shkruaj komentin e detyrueshëm për përgjigjen Po…" /></div> : null}
+            {draft.value === "YES" ? <div className="space-y-1"><Label htmlFor={`weekly-question-comment-${question.key}`}>{proposal ? "Propozimi dhe përfitimi (i detyrueshëm)" : "Komenti (i detyrueshëm)"}</Label><Textarea id={`weekly-question-comment-${question.key}`} rows={proposal ? 3 : 2} required value={draft.comment} disabled={saving} onChange={(event) => onDraft({ ...draft, comment: event.target.value })} placeholder={proposal ? "Përshkruaj propozimin dhe përfitimin…" : "Shkruaj komentin e detyrueshëm për përgjigjen Po…"} /></div> : null}
           </div>
         ) : (
           <p className={cn("text-sm leading-6 whitespace-pre-line", needsConfirmation && finalValue == null ? "font-medium text-amber-700" : "text-slate-700")}>{visibleValue}</p>
@@ -1362,6 +1366,13 @@ function WeeklyRealizationView() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-7 py-6">
+                {detailsOpen ? <RealizationWeeklyDiamonds
+                  count={selected.facts_json.weekly_diamond_count ?? 0}
+                  taskCount={selected.facts_json.weekly_task_diamond_count ?? 0}
+                  proposalCount={selected.facts_json.weekly_proposal_diamond_count ?? 0}
+                  awards={selected.facts_json.weekly_diamonds ?? []}
+                  person={selected.user_name}
+                /> : null}
                 <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>

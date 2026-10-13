@@ -278,3 +278,43 @@ def test_export_uses_daily_percent_and_dated_comments_and_confirmed_letter():
     assert book["Komentet ditore"]["F5"].value == "=not a formula"
     assert book["Komentet ditore"]["F5"].data_type == "s"
     assert book["Përmbledhje"]["H5"].value == "B"
+
+
+def test_weekly_export_preserves_all_daily_comment_sources_and_dates():
+    days = [
+        {"date": "2026-10-12", "daily_progress_percent": 50,
+         "person_comment": {"comment": "Komenti i së hënës\nRreshti i dytë", "author": "Përgjegjësi"},
+         "manual_answers": {"gave_proposal": {"value": True, "comment": "Propozoi automatizim", "answered_by_name": "Manager"}},
+         "close_event": {"daily_comment": "Mbyllja e së hënës"},
+         "tasks": [{"title": "Detyra A", "daily_report_comment": "Detyra e së hënës"}]},
+        {"date": "2026-10-13", "daily_progress_percent": 80,
+         "person_comment": {"comment": "Komenti i së martës", "author": "Përgjegjësi"},
+         "manual_answers": {"helped_colleague": {"value": True, "comment": "Ndihmoi kolegun", "answered_by_name": "Manager"}},
+         "close_event": {"daily_comment": "Mbyllja e së martës"},
+         "tasks": [{"title": "Detyra A", "daily_report_comment": "=Komenti i detyrës të martën"}]},
+    ]
+    person = {"user_name": "Elsa", "facts_json": {"daily_timeline": days}}
+    book = load_workbook(io.BytesIO(build_realization_workbook(
+        week_start="2026-10-12", week_end="2026-10-16",
+        departments=[{"name": "DEV", "report_mode": "LIVE_DAILY", "people": [person]}],
+    )), data_only=False)
+    entries = list(book["Komentet ditore"].iter_rows(min_row=5, values_only=True))
+    assert len(entries) == 8
+    by_comment = {entry[5]: entry for entry in entries}
+    expected = [
+        ("Komenti i së hënës\nRreshti i dytë", "2026-10-12", "Komenti ditor", "Përgjegjësi"),
+        ("Propozoi automatizim", "2026-10-12", QUESTION_LABELS["gave_proposal"], "Manager"),
+        ("Mbyllja e së hënës", "2026-10-12", "Mbyllja ditore", None),
+        ("Detyra e së hënës", "2026-10-12", "Detyra A", None),
+        ("Komenti i së martës", "2026-10-13", "Komenti ditor", "Përgjegjësi"),
+        ("Ndihmoi kolegun", "2026-10-13", QUESTION_LABELS["helped_colleague"], "Manager"),
+        ("Mbyllja e së martës", "2026-10-13", "Mbyllja ditore", None),
+        ("=Komenti i detyrës të martën", "2026-10-13", "Detyra A", None),
+    ]
+    person_sheet = "\n".join(str(cell.value or "") for row in book["DEV"].iter_rows() for cell in row)
+    for comment, day, source, author in expected:
+        assert by_comment[comment] == ("DEV", "Elsa", day, source, author, comment)
+        assert comment in person_sheet
+    formula_comment = next(cell for row in book["Komentet ditore"].iter_rows() for cell in row
+                           if cell.value == "=Komenti i detyrës të martën")
+    assert formula_comment.data_type == "s"
