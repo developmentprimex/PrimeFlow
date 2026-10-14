@@ -1,4 +1,4 @@
-"""Deliver M2 and M3 reporting points using their saved email settings."""
+"""Deliver M1, M2 and M3 reporting points using their saved email settings."""
 from __future__ import annotations
 
 import asyncio
@@ -6,12 +6,12 @@ import logging
 from datetime import datetime
 
 from app.db import SessionLocal
-from app.services import m2_reporting_points as m2, m3_reporting_points as m3
+from app.services import m1_reporting_points as m1, m2_reporting_points as m2, m3_reporting_points as m3
 from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import get_delivery_settings
 
 logger = logging.getLogger(__name__)
-REPORT_SERVICES = (("M2", m2), ("M3", m3))
+REPORT_SERVICES = (("M1", m1), ("M2", m2), ("M3", m3))
 
 
 async def run_reporting_points_auto_scheduler_once(now: datetime | None = None) -> bool:

@@ -13,7 +13,7 @@ from app.services.audit import add_audit_log
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 
-DEFAULT_TIMES = {"M2": time(12, 15), "M3": time(16, 20)}
+DEFAULT_TIMES = {"M1": time(8, 35), "M2": time(12, 15), "M3": time(16, 20)}
 
 
 class RecipientSettings(BaseModel):
@@ -48,7 +48,7 @@ class DeliverySettingsPayload(BaseModel):
 
 def default_settings(report_type: str):
     return ReportingPointsSettings(
-        report_type=report_type, is_active=True, send_time=DEFAULT_TIMES[report_type],
+        report_type=report_type, is_active=report_type != "M1", send_time=DEFAULT_TIMES[report_type],
         weekdays=[0, 1, 2, 3, 4],
         recipients={"to": ["ga@primexeu.com", "info@primexeu.com"], "cc": [], "bcc": []},
         manual_recipients=None,
@@ -73,6 +73,8 @@ async def get_delivery_settings(db, report_type: str, *, lock: bool = False, wai
 async def manual_recipients(db, report_type: str, settings) -> dict:
     if settings.manual_recipients is not None:
         return normalize_recipients(settings.manual_recipients)
+    if report_type == "M1":
+        return normalize_recipients(settings.recipients)
     legacy_model = AfterBreakReportSettings if report_type == "M2" else MeetingsReportSettings
     legacy = (await db.execute(select(legacy_model).order_by(legacy_model.created_at))).scalars().first()
     return normalize_recipients(legacy.recipients if legacy else settings.recipients)
@@ -91,6 +93,8 @@ async def read_settings(db, report_type: str) -> dict:
 
 
 async def save_settings(db, report_type: str, payload: DeliverySettingsPayload, user_id) -> dict:
+    if report_type == "M1" and payload.send_time < time(8, 30):
+        raise ValueError("Dërgimi automatik i M1 duhet të jetë në 08:30 ose më vonë.")
     if report_type == "M3" and payload.send_time < time(16, 15):
         raise ValueError("Dërgimi automatik i M3 duhet të jetë në 16:15 ose më vonë, pasi merret realizimi.")
     await settings_lock(db, report_type)

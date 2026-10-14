@@ -38,6 +38,7 @@ from app.api.routers.primeflow_1h_reports import router as primeflow_1h_reports_
 from app.api.routers.meetings_report import router as meetings_report_router
 from app.api.routers.m3_reporting_points import router as m3_reporting_points_router
 from app.api.routers.m2_reporting_points import router as m2_reporting_points_router
+from app.api.routers.m1_reporting_points import router as m1_reporting_points_router
 from app.api.routers.after_break_report import router as after_break_report_router
 from app.api.routers.end_week_bz_report import router as end_week_bz_report_router
 from app.api.routers.morning_report import router as morning_report_router
@@ -91,6 +92,7 @@ api_router.include_router(primeflow_1h_reports_router, prefix="/admin/primeflow-
 api_router.include_router(meetings_report_router, prefix="/meetings-report", tags=["meetings-report"])
 api_router.include_router(m3_reporting_points_router, prefix="/m3-reporting-points", tags=["m3-reporting-points"])
 api_router.include_router(m2_reporting_points_router, prefix="/m2-reporting-points", tags=["m2-reporting-points"])
+api_router.include_router(m1_reporting_points_router, prefix="/m1-reporting-points", tags=["m1-reporting-points"])
 api_router.include_router(after_break_report_router, prefix="/after-break-report", tags=["after-break-report"])
 api_router.include_router(end_week_bz_report_router, prefix="/end-week-bz-report", tags=["end-week-bz-report"])
 api_router.include_router(morning_report_router, prefix="/morning-report", tags=["morning-report"])

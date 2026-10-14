@@ -34,6 +34,7 @@ from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.m3_reporting_points import M3ReportingPointsReport
 from app.models.m2_reporting_points import M2ReportingPointsReport
+from app.models.m1_reporting_points import M1ReportingPointsReport
 from app.models.reporting_points_settings import ReportingPointsSettings
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
@@ -147,6 +148,7 @@ __all__ = [
     "MeetingsReportSettings",
     "M3ReportingPointsReport",
     "M2ReportingPointsReport",
+    "M1ReportingPointsReport",
     "AfterBreakReportDraft",
     "AfterBreakReportSettings",
     "EndWeekBzReportDraft",
