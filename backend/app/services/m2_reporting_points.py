@@ -22,12 +22,15 @@ from app.services.primeflow_report import GmailService, report_timezone
 from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga, one_h_marker_label
 
 TITLE = "PIKAT PER RAPORTIM M2"
-MANUAL_POINTS = {"reorganization": "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?"}
+MANUAL_POINTS = {
+    "ga_reply": "1. (GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
+    "reorganization": "2. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?",
+}
 AUTO_TITLES = {
-    "unfinished_priority": f"2. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",
-    "postponed": "3. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
-    "ga_progress": "4. PROGRESI I DET ME GA (AM)",
-    "delivery": "5. SA PER DOREZIM M2?",
+    "unfinished_priority": f"3. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",
+    "postponed": "4. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
+    "ga_progress": "5. PROGRESI I DET ME GA (AM)",
+    "delivery": "6. SA PER DOREZIM M2?",
 }
 DELIVERY_MARKERS = {"M2", "M2_M3"}
 
@@ -166,9 +169,10 @@ def table_value(report, row, column, index, movement):
 
 def export_blocks(report):
     blocks = [{"kind": "text", "text": TITLE, "level": 1},
-              {"kind": "text", "text": f"Data: {report['report_date']}", "level": 0},
-              {"kind": "text", "text": MANUAL_POINTS["reorganization"], "level": 2},
-              {"kind": "text", "text": report.get("manual_answers", {}).get("reorganization") or "Pa pergjigje", "level": 0}]
+              {"kind": "text", "text": f"Data: {report['report_date']}", "level": 0}]
+    for key, title in MANUAL_POINTS.items():
+        blocks.extend([{"kind": "text", "text": title, "level": 2},
+                       {"kind": "text", "text": report.get("manual_answers", {}).get(key) or "Pa pergjigje", "level": 0}])
     for key, title in AUTO_TITLES.items():
         blocks.append({"kind": "text", "text": title, "level": 2})
         if key == "delivery":

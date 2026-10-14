@@ -6,8 +6,11 @@ import { Label } from "@/components/ui/label"
 import { reportDate, type TaskRow } from "@/components/m3-reporting-points-view"
 
 export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
-export const MANUAL_POINTS = { reorganization: "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?" } as const
-export type ManualKey = "reorganization" | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}`
+export const MANUAL_POINTS = {
+  ga_reply: "1. (GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
+  reorganization: "2. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?",
+} as const
+export type ManualKey = keyof typeof MANUAL_POINTS | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 export type UnfinishedPriorityRow = {
   assignees: string; department: string; am_pm: string; status: string
@@ -77,10 +80,13 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
   </div>
 
   return <div className="space-y-7">
+    <section className="space-y-3" aria-labelledby="m2-ga-reply"><Label id="m2-ga-reply" htmlFor="ga_reply" className="text-lg font-bold">{MANUAL_POINTS.ga_reply}</Label>
+      <Textarea id="ga_reply" value={answers.ga_reply || ""} disabled={disabled} maxLength={10000} className="min-h-28" placeholder="Shëno nëse ka përgjigje nga GA." onChange={(event) => onAnswerChange("ga_reply", event.target.value)} />
+    </section>
     <section className="space-y-3" aria-labelledby="m2-reorganization"><Label id="m2-reorganization" htmlFor="reorganization" className="text-lg font-bold">{MANUAL_POINTS.reorganization}</Label>
       <Textarea id="reorganization" value={answers.reorganization || ""} disabled={disabled} maxLength={10000} className="min-h-28" placeholder="Shëno përgjigjjen për riorganizimin." onChange={(event) => onAnswerChange("reorganization", event.target.value)} />
     </section>
-    <section className="space-y-3" aria-labelledby="m2-unfinished-priority"><h2 id="m2-unfinished-priority" className="text-lg font-bold">2. DET TE PAKRYERA, 08:00/DEADLINE/AM</h2>
+    <section className="space-y-3" aria-labelledby="m2-unfinished-priority"><h2 id="m2-unfinished-priority" className="text-lg font-bold">3. DET TE PAKRYERA, 08:00/DEADLINE/AM</h2>
       <div className="overflow-x-auto border">
         <table className="w-full min-w-[900px] border-collapse text-xs">
           <thead className="bg-slate-100"><tr>{["NR", ...unfinishedColumns.map(([, title]) => title)].map((title) => <th key={title} className="border px-2 py-2 text-left">{title}</th>)}</tr></thead>
@@ -98,12 +104,12 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
         {!unfinishedRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
       </div>
     </section>
-    <section className="space-y-3" aria-labelledby="m2-postponed"><h2 id="m2-postponed" className="text-lg font-bold">3. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?</h2>
+    <section className="space-y-3" aria-labelledby="m2-postponed"><h2 id="m2-postponed" className="text-lg font-bold">4. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?</h2>
       <p className="text-sm text-muted-foreground">Shtyrjet e bëra sot për detyrat Deadline Important ose të krijuara, filluara dhe planifikuara për sot.</p>
       <p className="text-sm font-bold">Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></p>
       {[["start_due", "SHTYRË START DHE DUE DATE"], ["due", "SHTYRË DUE DATE"], ["start", "SHTYRË START DATE"]].map(([kind, title]) => <div key={kind} className="space-y-2"><h3 className="text-sm font-semibold">{title}</h3>{renderTable((report.data.postponed || []).filter((row) => row.postponement_kind === kind), false)}</div>)}
     </section>
-    <section className="space-y-3" aria-labelledby="m2-ga-progress"><h2 id="m2-ga-progress" className="text-lg font-bold">4. PROGRESI I DET ME GA (AM)</h2>
+    <section className="space-y-3" aria-labelledby="m2-ga-progress"><h2 id="m2-ga-progress" className="text-lg font-bold">5. PROGRESI I DET ME GA (AM)</h2>
       <p className="text-sm text-muted-foreground">Detyrat AM dhe AM/PM me simbolin F ose GA dhe detyrat personale me GA, brenda intervalit start–due të datës së raportit.</p>
       <div className="overflow-x-auto border">
         <table className="w-full min-w-[900px] border-collapse text-xs">
@@ -118,7 +124,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
         {!progressRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
       </div>
     </section>
-    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">5. SA PER DOREZIM M2?</h2>
+    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">6. SA PER DOREZIM M2?</h2>
       <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">SA/TOTALI: <span className="text-2xl font-extrabold tabular-nums">{deliveredCount}/{deliveryRows.length}</span></span></div>
       <p className="text-sm text-muted-foreground">Detyrat me simbolet M2 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
       {renderTable(deliveryRows, true)}

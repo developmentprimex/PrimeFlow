@@ -170,7 +170,7 @@ def test_ga_progress_exports_task_columns_before_delivery():
     assert headers == ["nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title"]
     assert cells["marker"]["text"] == "GA"
     html = service.render_html(value)
-    assert html.index("4. PROGRESI I DET ME GA (AM)") < html.index("5. SA PER DOREZIM M2?")
+    assert html.index("5. PROGRESI I DET ME GA (AM)") < html.index("6. SA PER DOREZIM M2?")
     attachments = service.report_attachments(value)
     word = Document(io.BytesIO(attachments[0][1]))
     assert word.tables[0].rows[0].cells[-1].text == "TITULLI"
@@ -312,7 +312,7 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         value = {"report_date": DAY.isoformat(), "manual_answers": {}, "data": data}
         blocks = service.export_blocks(value)
         titles = [block["text"] for block in blocks if block["kind"] == "text" and block["level"] == 2]
-        assert titles == [service.MANUAL_POINTS["reorganization"], *service.AUTO_TITLES.values()]
+        assert titles == [*service.MANUAL_POINTS.values(), *service.AUTO_TITLES.values()]
         table = next(block for block in blocks if block["kind"] == "table")
         assert [column[1] for column in table["columns"]] == ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TIPI", "TITULLI", "DUE DATE"]
         assert all(cell["fill"] == "#dc2626" and cell["eight_am"] for cell in table["rows"][1])
@@ -492,3 +492,24 @@ def test_migration_creates_separate_m2_storage_without_changing_m3():
     assert "manual_answers JSONB" in sql
     assert "UNIQUE (report_date)" in sql
     assert "m3_reporting_points_reports" not in sql
+
+
+def test_ga_reply_question_saves_and_exports_before_reorganization():
+    async def scenario():
+        row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY,
+            manual_answers={"reorganization": "Ruaj riorganizimin"}, data={}, status="DRAFT")
+        db = AsyncMock()
+        payload = api.ManualAnswersPayload(manual_answers={"ga_reply": "Po, GA u përgjigj <test>"})
+        with (patch.object(api, "_by_id", new=AsyncMock(return_value=row)),
+              patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log")):
+            result = await api.save_answers(row.id, payload, db, SimpleNamespace(id=uuid.uuid4()))
+        assert result["manual_answers"] == {"reorganization": "Ruaj riorganizimin", "ga_reply": "Po, GA u përgjigj <test>"}
+        html = service.render_html(result)
+        assert html.index("1. (GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?") < html.index("2. RIORGANIZIM?")
+        assert "Po, GA u përgjigj &lt;test&gt;" in html
+        word = Document(io.BytesIO(service.report_attachments(result)[0][1]))
+        text = "\n".join(p.text for p in word.paragraphs)
+        assert "Po, GA u përgjigj <test>" in text
+        assert text.index("A KA REPLY NGA GA") < text.index("RIORGANIZIM?")
+    import asyncio
+    asyncio.run(scenario())
