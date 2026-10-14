@@ -7,21 +7,27 @@ from datetime import date, datetime
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.ga_note import GaNote
+from app.models.plan_note import PlanNote
+from app.models.task import Task
 from app.models.m2_reporting_points import M2ReportingPointsReport
 from app.services.after_break_report import UNFINISHED_PRIORITY_TABLE_LABEL, build_unfinished_priority_task_rows
 from app.services.daily_realization_events import semantic_local_day
 from app.services import m3_reporting_points as m3
 from app.services.meetings_report import _clean_task_title, _m3_am_pm_label, _m3_task_type_label
+from app.services.note_markup import parse_marked_note_content
+from app.services.personal_task_owner import personal_task_owner
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga, one_h_marker_label
 
 TITLE = "PIKAT PER RAPORTIM M2"
-MANUAL_POINTS = {"reorganization": "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES ,TAKIM INT, NDARJE E DET?"}
+MANUAL_POINTS = {"reorganization": "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?"}
 AUTO_TITLES = {
-    "unfinished_priority": f"2. {UNFINISHED_PRIORITY_TABLE_LABEL}",
+    "unfinished_priority": f"2. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",
     "postponed": "3. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
-    "delivery": "4. A JANE DORZUAR TE GJITHA CKA ESHTE DASHUR M2?",
+    "ga_progress": "4. PROGRESI I DET ME GA (AM)",
+    "delivery": "5. SA PER DOREZIM M2?",
 }
 DELIVERY_MARKERS = {"M2", "M2_M3"}
 
@@ -30,34 +36,53 @@ def subject_for(day: date) -> str:
     return f"{TITLE} - {day:%d.%m.%Y}"
 
 
-def select_task_sections(tasks, events, day: date) -> dict:
-    sections = {"postponed": m3.select_task_sections(tasks, events, day)["ga_postponed"], "delivery": []}
+def select_task_sections(tasks, events, day: date, *, personal_titles: dict | None = None) -> dict:
+    sections = {"postponed": m3.select_task_sections(tasks, events, day)["ga_postponed"],
+                "ga_progress": [], "delivery": []}
     for task in tasks:
         marker = active_one_h_marker(task, day)
-        if marker not in DELIVERY_MARKERS:
+        system = bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))
+        title = _clean_task_title(task.title, is_system_task=system)
+        personal_title = parse_marked_note_content(
+            (personal_titles or {}).get(getattr(task, "ga_note_origin_id", None))
+            or (personal_titles or {}).get(getattr(task, "plan_note_origin_id", None)) or title
+        ).text.strip()
+        personal_ga = bool(getattr(task, "is_personal", False) and personal_task_owner(personal_title) == "GA")
+        am_pm = _m3_am_pm_label(task)
+        ga_progress = am_pm in {"AM", "AM/PM"} and (marker in {"F", "FLAG"} or personal_ga)
+        if marker not in DELIVERY_MARKERS and not ga_progress:
             continue
         start, due, created, completed = (semantic_local_day(getattr(task, field, None))
                                          for field in ("start_date", "due_date", "created_at", "completed_at"))
         status = str(getattr(task.status, "value", task.status)).upper()
-        # Membership is determined by the saved symbol and inclusive planning
-        # interval, regardless of completion status.
+        # Membership uses the inclusive planning interval, including completed tasks.
         if (created and created > day) or start is None or due is None or not start <= day <= due:
             continue
-        system = bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))
-        sections["delivery"].append({
-            "task_id": str(task.id), "title": _clean_task_title(task.title, is_system_task=system),
+        row = {
+            "task_id": str(task.id), "title": title,
             "status": status, "progress": task.progress_percentage or 0,
-            "start_date": start.isoformat() if start else None, "due_date": due.isoformat() if due else None,
+            "start_date": start.isoformat(), "due_date": due.isoformat(),
             "created_date": created.isoformat() if created else None, "completed_date": completed.isoformat() if completed else None,
-            "am_pm": _m3_am_pm_label(task), "task_type": _m3_task_type_label(task),
+            "am_pm": am_pm, "task_type": _m3_task_type_label(task),
             "deadline_important": bool(task.is_deadline_important), "is_system_task": system,
             "marker": one_h_marker_label(marker, active_one_h_marker_by_ga(task, day)),
-        })
+        }
+        if ga_progress:
+            sections["ga_progress"].append(dict(row, title=personal_title if personal_ga else parse_marked_note_content(title).text))
+        if marker in DELIVERY_MARKERS:
+            sections["delivery"].append(row)
     return sections
 
 
 async def build_task_data(db: AsyncSession, day: date) -> dict:
-    data = await m3.build_task_data(db, day, section_selector=select_task_sections)
+    # Common View classifies note-based personal tasks using the original note text.
+    personal_titles = {}
+    for model, origin in ((GaNote, Task.ga_note_origin_id), (PlanNote, Task.plan_note_origin_id)):
+        personal_titles.update((await db.execute(select(model.id, model.content).join(
+            Task, origin == model.id,
+        ).where(Task.is_active.is_(True), Task.is_personal.is_(True)))).all())
+    data = await m3.build_task_data(db, day, section_selector=lambda tasks, events, report_day:
+        select_task_sections(tasks, events, report_day, personal_titles=personal_titles))
     rows = await build_unfinished_priority_task_rows(db, day)
     data["unfinished_priority"] = [
         {"assignees": row[1], "department": row[2], "am_pm": row[3], "status": row[4],
@@ -113,6 +138,10 @@ def table_columns(key, movement=""):
         return [("nr", "NR", 28), ("assignees", "KUSH", 72), ("department", "DEP", 44),
                 ("am_pm", "AM/PM", 60), ("priority", "LLOJI", 120), ("task_type", "TIPI", 48),
                 ("title", "TITULLI", 450), ("due_label", "DUE DATE", 80)]
+    if key == "ga_progress":
+        return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
+                ("project", "PRJK", 96), ("am_pm", "AM/PM", 60), ("task_type", "LLOJI", 48),
+                ("marker", "SIMBOLI", 60), ("title", "TITULLI", 450)]
     if key == "postponed":
         return [(field, label, 60 if field == "am_pm" else width) for field, label, width in m3.report_table_columns("ga_postponed", movement)
                 if field not in {"reason", "comment", "category"}] + [("manual_comment", "KOMENT MANUAL", 220)]
@@ -145,7 +174,7 @@ def export_blocks(report):
         if key == "delivery":
             rows = report.get("data", {}).get("delivery", [])
             delivered = sum(report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") == "PO" for row in rows)
-            blocks.append({"kind": "text", "text": f"TOTALI/DËRGUAR: {len(rows)}/{delivered}", "level": 3, "font_size": 14})
+            blocks.append({"kind": "text", "text": f"SA/TOTALI: {delivered}/{len(rows)}", "level": 3, "font_size": 14})
         if key == "postponed":
             blocks.append({"kind": "legend", "runs": [
                 ("Shtyrjet e bëra gjatë ditës. ", None, "#000000"),

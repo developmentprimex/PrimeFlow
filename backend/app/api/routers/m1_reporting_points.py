@@ -20,7 +20,7 @@ from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
 from app.services.m1_reporting_points import (
-    MANUAL_POINTS, backfill_saved_note_authors, get_settings, locked_report, refresh_report,
+    MANUAL_POINTS, backfill_saved_note_authors, excluded_note_ids, get_settings, locked_report, refresh_report,
     reorder_saved_report_tasks, render_html,
     render_plain_text, report_payload, send_report, report_attachments,
 )
@@ -76,6 +76,10 @@ async def _refresh_saved_metadata(db: AsyncSession, row: M1ReportingPointsReport
     return row
 
 
+async def _current_payload(db: AsyncSession, row: M1ReportingPointsReport) -> dict:
+    return report_payload(row, excluded_note_ids=await excluded_note_ids(db, row))
+
+
 @router.get("/recipients")
 async def recipients(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)) -> dict:
     settings = await get_settings(db)
@@ -99,7 +103,7 @@ async def get_report(report_date: date, db: AsyncSession = Depends(get_db),
     if row is None:
         raise HTTPException(404, "Raporti nuk eshte gjeneruar per kete date.")
     row = await _refresh_saved_metadata(db, row)
-    return report_payload(row)
+    return await _current_payload(db, row)
 
 
 @router.post("/generate")
@@ -113,7 +117,7 @@ async def generate(report_date: date, db: AsyncSession = Depends(get_db),
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m1_reporting_points", entity_id=row.id,
                   action="GENERATE", after={"report_date": report_date.isoformat()})
     await db.commit()
-    return report_payload(row)
+    return await _current_payload(db, row)
 
 
 @router.put("/{report_id}/answers")
@@ -128,13 +132,13 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m1_reporting_points", entity_id=row.id,
                   action="SAVE_ANSWERS", before=before, after=row.manual_answers)
     await db.commit()
-    return report_payload(row)
+    return await _current_payload(db, row)
 
 
 @router.get("/{report_id}/preview")
 async def preview(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                   _: User = Depends(get_current_user)) -> dict:
-    report = report_payload(await _by_id(db, report_id))
+    report = await _current_payload(db, await _by_id(db, report_id))
     return {"html": render_html(report), "plain_text": render_plain_text(report)}
 
 
@@ -158,13 +162,13 @@ async def send(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(502, "Dergimi deshtoi. Kontrollo konfigurimin e email-it ose provo perseri.") from exc
-    return report_payload(row)
+    return await _current_payload(db, row)
 
 
 @router.get("/{report_id}/download/{format}")
 async def download(report_id: uuid.UUID, format: Literal["docx", "png", "xlsx", "txt", "html"],
                    db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    report = report_payload(await _by_id(db, report_id))
+    report = await _current_payload(db, await _by_id(db, report_id))
     filename = f"pikat_m1_{report['report_date']}.{format}"
     if format in {"docx", "png", "xlsx"}:
         attachments = await asyncio.to_thread(report_attachments, report)

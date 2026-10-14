@@ -52,14 +52,15 @@ const answerKey = `delivery:${taskId}`
 const row = { task_id: taskId, title: "Detyra <script>", assignees: "EF", department: "DEV", project: "P", status: "TODO", progress: 0, am_pm: "AM", task_type: "1H", marker: "M2/3" }
 const report = { id: "report", report_date: "2026-10-06", manual_answers: {}, data: { delivery: [row] }, status: "DRAFT" }
 
-test("M2 presents all four points with a final per-task manual answer", () => {
+test("M2 presents all five points with a final per-task manual answer", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: { reorganization: "Riorganizo", [answerKey]: "Dorezuar", [`delivery_choice:${taskId}`]: "PO" }, disabled: false, onAnswerChange: () => {},
   }))
   assert.match(html, /1\. RIORGANIZIM\?/)
-  assert.match(html, /2\. DET TE PAKRYERA, 08:00\/DEADLINE/)
+  assert.match(html, /2\. DET TE PAKRYERA, 08:00\/DEADLINE\/AM/)
   assert.match(html, /3\. A KA DET/)
-  assert.match(html, /4\. A JAN. DOR.ZUAR/)
+  assert.match(html, /4\. PROGRESI I DET ME GA \(AM\)/)
+  assert.match(html, /5\. SA PER DOREZIM M2\?/)
   assert.equal((html.match(/<textarea/g) || []).length, 2)
   assert.match(html, /Dorezuar/)
   assert.match(html, /M2\/3/)
@@ -103,9 +104,9 @@ test("delivery totals count only PO answers for tasks currently in the report", 
   const props = { report: { ...report, data: { delivery: rows } }, disabled: false, onAnswerChange: () => {} }
   const answers = { [`delivery_choice:${taskId}`]: "PO", "delivery_choice:second": "JO", "delivery_choice:removed": "PO" }
   let html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, { ...props, answers }))
-  assert.match(html, /TOTALI\/DËRGUAR: <span[^>]*>3\/1<\/span>/)
+  assert.match(html, /SA\/TOTALI: <span[^>]*>1\/3<\/span>/)
   html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, { ...props, answers: { ...answers, "delivery_choice:second": "PO" } }))
-  assert.match(html, /TOTALI\/DËRGUAR: <span[^>]*>3\/2<\/span>/)
+  assert.match(html, /SA\/TOTALI: <span[^>]*>2\/3<\/span>/)
 })
 
 test("each postponement table has a saved manual comment per task", () => {
@@ -366,4 +367,23 @@ test("a failed automatic save preserves the entered answers and the reload draft
   await reloaded.flush()
   assert.equal(reloaded.answers()[answerKey], "Mos e humb përgjigjen")
   reloaded.unmount()
+})
+
+
+test("GA morning tasks appear after postponements with matching colors and eight columns", () => {
+  const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+    report: { ...report, data: { ...report.data, ga_progress: [
+      { ...row, marker: "GA", progress: 37.5, start_date: "2026-10-01", due_date: "2026-10-09", status: "IN_PROGRESS" },
+      { ...row, task_id: "done", marker: "F", progress: 100, status: "DONE" },
+    ] } }, answers: {}, disabled: false, onAnswerChange: () => {},
+  }))
+  assert.ok(html.indexOf('id="m2-postponed"') < html.indexOf('id="m2-ga-progress"'))
+  assert.ok(html.indexOf('id="m2-ga-progress"') < html.indexOf('id="m2-delivery"'))
+  const section = html.slice(html.indexOf('id="m2-ga-progress"'), html.indexOf('aria-labelledby="m2-delivery"'))
+  assert.equal((section.match(/<th /g) || []).length, 8)
+  assert.doesNotMatch(section, /START DATE|DUE DATE|PROGRESI<\/th>|37.5%|100%/)
+  assert.match(section, /background:#FFFF00/)
+  assert.match(section, /background:#C4FDC4/)
+  assert.match(section, />GA<\/td>/)
+  assert.doesNotMatch(section, /<textarea|<select/)
 })

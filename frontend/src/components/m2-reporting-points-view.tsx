@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 import { reportDate, type TaskRow } from "@/components/m3-reporting-points-view"
 
 export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
-export const MANUAL_POINTS = { reorganization: "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES ,TAKIM INT, NDARJE E DET?" } as const
+export const MANUAL_POINTS = { reorganization: "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?" } as const
 export type ManualKey = "reorganization" | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 export type UnfinishedPriorityRow = {
@@ -16,9 +16,11 @@ export type UnfinishedPriorityRow = {
 }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
-  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; delivery?: TaskRow[] }
+  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; ga_progress?: TaskRow[]; delivery?: TaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
+
+const TASK_COLORS: Record<string, string> = { TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", DONE: "#C4FDC4", WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#FFEDD5" }
 
 function text(row: TaskRow, key: keyof TaskRow) { return String(row[key] ?? "—") }
 function dateChange(row: TaskRow, old: boolean) {
@@ -34,6 +36,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
 }) {
   const deliveryRows = report.data.delivery || []
   const unfinishedRows = report.data.unfinished_priority || []
+  const progressRows = report.data.ga_progress || []
   const unfinishedColumns: [keyof UnfinishedPriorityRow, string][] = [
     ["assignees", "KUSH"], ["department", "DEP"], ["am_pm", "AM/PM"], ["priority", "LLOJI"],
     ["task_type", "TIPI"], ["title", "TITULLI"], ["due_label", "DUE DATE"],
@@ -49,8 +52,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
         const key: ManualKey = `delivery:${row.task_id}`
         const choiceKey: ManualKey = `delivery_choice:${row.task_id}`
         const commentKey: ManualKey = `postponed_comment:${row.task_id}`
-        const colors: Record<string, string> = { TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", DONE: "#C4FDC4", WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#FFEDD5" }
-        return <tr key={row.task_id} style={{ background: row.deadline_important ? "#dc2626" : colors[row.status] || "white", color: row.deadline_important ? "white" : "black" }}>
+        return <tr key={row.task_id} style={{ background: row.deadline_important ? "#dc2626" : TASK_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }}>
           <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
           {common.map(([field]) => <td key={field} className="w-px whitespace-nowrap border p-2 align-top">{text(row, field)}</td>)}
           {!delivery ? <><td className="w-px whitespace-pre border p-2 align-top">{dateChange(row, true)}</td><td className="w-px whitespace-pre border p-2 align-top">{dateChange(row, false)}</td></> : null}
@@ -78,7 +80,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
     <section className="space-y-3" aria-labelledby="m2-reorganization"><Label id="m2-reorganization" htmlFor="reorganization" className="text-lg font-bold">{MANUAL_POINTS.reorganization}</Label>
       <Textarea id="reorganization" value={answers.reorganization || ""} disabled={disabled} maxLength={10000} className="min-h-28" placeholder="Shëno përgjigjjen për riorganizimin." onChange={(event) => onAnswerChange("reorganization", event.target.value)} />
     </section>
-    <section className="space-y-3" aria-labelledby="m2-unfinished-priority"><h2 id="m2-unfinished-priority" className="text-lg font-bold">2. DET TE PAKRYERA, 08:00/DEADLINE</h2>
+    <section className="space-y-3" aria-labelledby="m2-unfinished-priority"><h2 id="m2-unfinished-priority" className="text-lg font-bold">2. DET TE PAKRYERA, 08:00/DEADLINE/AM</h2>
       <div className="overflow-x-auto border">
         <table className="w-full min-w-[900px] border-collapse text-xs">
           <thead className="bg-slate-100"><tr>{["NR", ...unfinishedColumns.map(([, title]) => title)].map((title) => <th key={title} className="border px-2 py-2 text-left">{title}</th>)}</tr></thead>
@@ -101,8 +103,23 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
       <p className="text-sm font-bold">Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></p>
       {[["start_due", "SHTYRË START DHE DUE DATE"], ["due", "SHTYRË DUE DATE"], ["start", "SHTYRË START DATE"]].map(([kind, title]) => <div key={kind} className="space-y-2"><h3 className="text-sm font-semibold">{title}</h3>{renderTable((report.data.postponed || []).filter((row) => row.postponement_kind === kind), false)}</div>)}
     </section>
-    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">4. A JANË DORËZUAR TË GJITHA ÇKA ËSHTË DASHUR M2?</h2>
-      <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">TOTALI/DËRGUAR: <span className="text-2xl font-extrabold tabular-nums">{deliveryRows.length}/{deliveredCount}</span></span></div>
+    <section className="space-y-3" aria-labelledby="m2-ga-progress"><h2 id="m2-ga-progress" className="text-lg font-bold">4. PROGRESI I DET ME GA (AM)</h2>
+      <p className="text-sm text-muted-foreground">Detyrat AM dhe AM/PM me simbolin F ose GA dhe detyrat personale me GA, brenda intervalit start–due të datës së raportit.</p>
+      <div className="overflow-x-auto border">
+        <table className="w-full min-w-[900px] border-collapse text-xs">
+          <thead className="bg-slate-100"><tr>{["NR", ...common.map(([, title]) => title), "SIMBOLI", "TITULLI"].map((title) => <th key={title} className="border px-2 py-2 text-left whitespace-nowrap">{title}</th>)}</tr></thead>
+          <tbody>{progressRows.map((row, index) => <tr key={row.task_id} style={{ background: row.deadline_important ? "#dc2626" : TASK_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }}>
+            <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
+            {common.map(([field]) => <td key={field} className="w-px whitespace-nowrap border p-2 align-top">{text(row, field)}</td>)}
+            <td className="w-px whitespace-nowrap border p-2 align-top font-bold">{row.marker || "—"}</td>
+            <td className="min-w-[280px] border p-2 align-top">{row.title}</td>
+          </tr>)}</tbody>
+        </table>
+        {!progressRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
+      </div>
+    </section>
+    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">5. SA PER DOREZIM M2?</h2>
+      <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">SA/TOTALI: <span className="text-2xl font-extrabold tabular-nums">{deliveredCount}/{deliveryRows.length}</span></span></div>
       <p className="text-sm text-muted-foreground">Detyrat me simbolet M2 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
       {renderTable(deliveryRows, true)}
     </section>

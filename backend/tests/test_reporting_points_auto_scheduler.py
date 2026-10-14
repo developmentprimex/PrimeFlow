@@ -28,6 +28,7 @@ def row_for(model):
 
 class SchedulerTests(unittest.IsolatedAsyncioTestCase):
     def setup_scheduler(self, stack):
+        stack.enter_context(patch.object(scheduler, "REPORT_SERVICES", (("M2", m2), ("M3", m3))))
         self.rows = {m2: row_for(M2ReportingPointsReport), m3: row_for(M3ReportingPointsReport)}
         self.db = AsyncMock()
         context = MagicMock()
@@ -228,3 +229,56 @@ def test_auto_send_migration_preserves_existing_reports_and_manual_answers():
                     assert "auto_sent_at" not in {column["name"] for column in sa.inspect(connection).get_columns(table)}
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("stamp, expected", [
+    ("2026-10-05T08:29:59+02:00", False),
+    ("2026-10-05T08:30:00+02:00", True),
+    ("2026-10-05T06:30:00+00:00", True),
+    ("2026-01-05T07:30:00+00:00", True),
+    ("2026-10-03T08:30:00+02:00", False),
+])
+def test_m1_automatic_delivery_is_due_at_0830_local_and_independent_of_manual_send(stamp, expected):
+    import asyncio
+    from app.models.m1_reporting_points import M1ReportingPointsReport
+    from app.services import m1_reporting_points as m1
+    async def scenario():
+        now = datetime.fromisoformat(stamp)
+        row = row_for(M1ReportingPointsReport)
+        row.report_date = now.date()
+        db = AsyncMock()
+        db.execute.return_value = MagicMock()
+        db.execute.return_value.scalars.return_value.all.return_value = []
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        deliveries = []
+        async def send_verified(subject, recipients, plain, html, **kwargs):
+            deliveries.append((subject, recipients, plain, html, kwargs))
+            return {"id": "m1-automatic"}
+        gmail = SimpleNamespace(send_verified=send_verified)
+        async def refresh(db, current, capture):
+            current.data = {"captured_until": capture.isoformat()}
+            current.generated_at = capture
+        with (
+            patch.object(scheduler, "REPORT_SERVICES", (("M1", m1),)),
+            patch.object(scheduler, "SessionLocal", return_value=context),
+            patch.object(scheduler, "get_delivery_settings", new=AsyncMock(return_value=default_settings("M1"))),
+            patch.object(m1, "locked_report", new=AsyncMock(return_value=row)),
+            patch.object(m1, "refresh_report", side_effect=refresh),
+            patch.object(m1, "GmailService", return_value=gmail),
+        ):
+            assert await scheduler.run_reporting_points_auto_scheduler_once(now) is expected
+            if expected:
+                assert row.auto_sent_at is not None and row.status == "SENT"
+                assert row.manual_answers == {"reorganization": "Përgjigje e ruajtur"}
+                assert deliveries[0][1] == {"to": ["ga@primexeu.com", "info@primexeu.com"], "cc": [], "bcc": []}
+                assert "Përgjigje e ruajtur" in deliveries[0][2]
+                assert {name.rsplit(".", 1)[-1] for name, _, _ in deliveries[0][4]["attachments"]} == {"html", "docx", "png", "xlsx"}
+                assert not await scheduler.run_reporting_points_auto_scheduler_once(now)
+                assert len(deliveries) == 1
+                await m1.send_report(db, row, deliveries[0][1])
+                assert len(deliveries) == 2 and row.auto_sent_at is not None
+            else:
+                assert not deliveries and row.auto_sent_at is None
+    asyncio.run(scenario())

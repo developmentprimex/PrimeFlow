@@ -82,16 +82,20 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
         data = exports.render_docx(report)
         document = Document(io.BytesIO(data))
         paragraphs = "\n".join(p.text for p in document.paragraphs)
-        for title in (report_service.M3_TITLE, report_service.GA_TITLE, *report_service.MANUAL_POINTS.values(), *report_service.AUTO_TITLES.values()):
+        for title in (report_service.M3_TITLE, *(title for key, title in report_service.MANUAL_POINTS.items() if not key.startswith("ga_")), *(title for key, title in report_service.AUTO_TITLES.items() if not key.startswith("ga_"))):
             self.assertIn(title, paragraphs)
-        for answer in report["manual_answers"].values():
-            self.assertIn(answer, paragraphs)
+        for key, answer in report["manual_answers"].items():
+            if key.startswith("ga_"):
+                self.assertNotIn(answer, paragraphs)
+            else:
+                self.assertIn(answer, paragraphs)
+        self.assertNotIn(report_service.GA_TITLE, paragraphs)
         self.assertIn("62%", paragraphs)
         self.assertIn("16:15", paragraphs)
         table_text = "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
-        for rows in report["data"].values():
+        for key, rows in report["data"].items():
             for row in rows:
-                if row["title"] == "DONE në fund":
+                if key.startswith("ga_") or row["title"] == "DONE në fund":
                     self.assertNotIn(row["title"], table_text)
                     continue
                 self.assertIn(row["title"], table_text)
@@ -99,7 +103,7 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
                 self.assertIn(row["comment"], table_text)
         self.assertIn("Aktive përpara DONE", table_text)
         self.assertNotIn("DONE në fund", table_text)
-        self.assertEqual(len(document.tables), 8)
+        self.assertEqual(len(document.tables), 7)
         self.assertIn("DETYRAT E SISTEMIT PA PROGRES:", paragraphs)
         self.assertIn("DET FT DHE PRJK PA PROGRES:", paragraphs)
         self.assertIn("75%", table_text)
@@ -122,7 +126,7 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
             self.assertIn(f'w:fill="{color.lstrip("#").lower()}"', xml)
         self.assertIn('w:sz="18"', xml)
         self.assertIn('w:color="000000"', xml)
-        self.assertEqual(xml.count("<w:tblheader"), 8)
+        self.assertEqual(xml.count("<w:tblheader"), 7)
         self.assertIn('w:color="dc2626"', xml)
         page = document.sections[0]
         self.assertGreater(page.page_width, page.page_height)
@@ -132,7 +136,7 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
     def test_png_renders_complete_report_without_clipping_long_text_and_keeps_colors(self):
         report = sample_report()
         report["manual_answers"]["underload"] = "Përgjigje e gjatë " * 70 + "FUNDI MANUAL"
-        report["data"]["ga_postponed"][0]["comment"] = "X" * 150 + " FUND KOMENTI"
+        report["data"]["postponed"][0]["comment"] = "X" * 150 + " FUND KOMENTI"
         calls = []
         original = ImageDraw.ImageDraw.text
 
@@ -149,7 +153,9 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
         visible = "".join(value for _, value, _ in calls)
         self.assertNotIn("CREATION / START / DUE", visible)
         self.assertNotIn("DONE në fund", visible)
-        for title in (*report_service.AUTO_TITLES.values(), report_service.GA_TITLE, "FUNDI MANUAL", "FUND KOMENTI", "62%", "75%", "25%", "DET FT DHE PRJK PA PROGRES:", "DETYRAT E SISTEMIT PA PROGRES:"):
+        self.assertNotIn(report_service.GA_TITLE, visible)
+        self.assertNotIn("DEADLINE IMPORTANT për GA", visible)
+        for title in (*(title for key, title in report_service.AUTO_TITLES.items() if not key.startswith("ga_")), "FUNDI MANUAL", "FUND KOMENTI", "62%", "75%", "25%", "DET FT DHE PRJK PA PROGRES:", "DETYRAT E SISTEMIT PA PROGRES:"):
             self.assertIn(title.replace(" ", ""), visible.replace(" ", ""))
         self.assertIn("X" * 150, visible.replace(" ", ""))
         probe = ImageDraw.Draw(image)
@@ -167,7 +173,7 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
     def test_attachment_formats_and_names(self):
         attachments = exports.report_attachments(sample_report())
         self.assertEqual([item[2] for item in attachments], [exports.DOCX_MIME, "image/png", XLSX_MIME])
-        self.assertEqual([item[0] for item in attachments], ["PrimeFlow-PIKAT-M3-GA-2026-10-02.docx", "PrimeFlow-PIKAT-M3-GA-2026-10-02.png", "PrimeFlow-PIKAT-M3-GA-2026-10-02.xlsx"])
+        self.assertEqual([item[0] for item in attachments], ["PrimeFlow-PIKAT-M3-2026-10-02.docx", "PrimeFlow-PIKAT-M3-2026-10-02.png", "PrimeFlow-PIKAT-M3-2026-10-02.xlsx"])
         self.assertTrue(attachments[0][1].startswith(b"PK"))
         self.assertTrue(attachments[1][1].startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertTrue(attachments[2][1].startswith(b"PK"))

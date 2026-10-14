@@ -28,6 +28,10 @@ from app.services.meetings_report import (
     _m3_task_type_label, _task_owners, apply_weekly_planner_task_order,
     common_view_task_sort_key, _render_table_cell_html,
 )
+from app.services.m3_unheld_meetings import (
+    MEETING_COLUMNS, MEETING_TITLE, add_saved_meeting_appearance, build_unheld_meetings,
+    meeting_cells, meeting_groups, meeting_values,
+)
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.tomorrow_print_report import STATUS_COLORS
@@ -39,14 +43,14 @@ GA_TITLE = "PIKAT PER RAPORTIM PER GA"
 MANUAL_POINTS = {
     "underload": "1. NENNGARKESE",
     "overload": "2. MBINGARKESE",
-    "reorganization": "3. RIORGANIZIM? (PARA PAUZES) - PAS PAUZES, TAKIM INT, NDARJE E DET?",
+    "reorganization": "3. RIORGANIZIM NESER?",
     "ga_reorganization": "1. A KA NEVOJE PER RIORGANIZIM?",
 }
 AUTO_TITLES = {
     "postponed": "1. DET QE JANE SHTY NGA KJO JAVE NE JAVEN TJETER / BRENDA JAVES",
     "untouched": "2. PSE PA PREK TERE DITEN?",
-    "same_day": "3. SOT PER SOT - PROGRESI?",
-    "realization": "4. REALIZIMI - A MBERRIHET?",
+    "same_day": "3. SOT PËR SOT/DEADLINE - PROGRESI?",
+    "realization": "5. REALIZIMI - A MBERRIHET?",
     "ga_postponed": "2. A KA DET QE SHTYHET (SOT/SOT) OSE DEADLINE?",
 }
 DATE_ACTIONS = {"task.due_date_changed": "due_date", "task.start_date_changed": "start_date"}
@@ -56,7 +60,7 @@ REALIZATION_CAPTURE_TIME = time(16, 15)
 
 
 def subject_for(day: date) -> str:
-    return f"{M3_TITLE} / PER GA - {day:%d.%m.%Y}"
+    return f"{M3_TITLE} - {day:%d.%m.%Y}"
 
 
 def postponement_risk(original: date, moved_to: date) -> tuple[str, str]:
@@ -303,7 +307,9 @@ async def refresh_report(db: AsyncSession, row: M3ReportingPointsReport, now: da
     now = (now or datetime.now(report_timezone())).astimezone(report_timezone())
     if row.report_date != now.date():
         raise ValueError("Raportet historike perdorin te dhenat e ruajtura te asaj dite.")
-    row.data = await build_task_data(db, row.report_date)
+    data = await build_task_data(db, row.report_date)
+    data["unheld_meetings"] = await build_unheld_meetings(db, row.report_date)
+    row.data = data
     row.realization = await build_realization_capture(db, row.report_date)
     if now.time().replace(tzinfo=None) >= REALIZATION_CAPTURE_TIME:
         row.realization_captured_at = now
@@ -321,6 +327,12 @@ def report_payload(row: M3ReportingPointsReport) -> dict:
             "realization_captured_at": row.realization_captured_at.isoformat() if row.realization_captured_at else None,
             "generated_at": row.generated_at.isoformat() if row.generated_at else None, "status": row.status,
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
+
+
+async def current_report_payload(db: AsyncSession, row: M3ReportingPointsReport) -> dict:
+    payload = report_payload(row)
+    payload["data"] = await add_saved_meeting_appearance(db, payload["data"])
+    return payload
 
 
 def _cell(value: Any) -> str:
@@ -464,6 +476,45 @@ def render_html(report: dict) -> str:
             parts.append(f"<div style='overflow-x:auto'><table width='100%' border='1' cellpadding='0' cellspacing='0' style='width:100%;min-width:{sum(width for _, _, width in columns)}px;table-layout:fixed;border-collapse:collapse;border:1px solid #000;font-size:12px;line-height:1.5'><colgroup>{colgroup}</colgroup><thead><tr>{header}</tr></thead><tbody>{''.join(body)}</tbody></table></div>")
         return "".join(parts)
 
+    meeting_html = f"<h3>{MEETING_TITLE}</h3>"
+    for label, meetings in meeting_groups(report):
+        meeting_html += f"<h4 style='background:#f8fafc;padding:8px 12px;margin:0'>{label}</h4>"
+        headers = "".join(f"<th style='{cell_style};background:#e2e8f0;width:{width}px'>{_cell(title)}</th>"
+                          for _, title, width in MEETING_COLUMNS)
+        body = []
+        for index, row in enumerate(meetings, 1):
+            cells = []
+            for column, cell in enumerate(meeting_cells(row, index)):
+                frame = ""
+                if cell["meeting_highlight"]:
+                    frame = ";border-top:3px solid #2563eb;border-bottom:3px solid #2563eb"
+                    if cell["first"]:
+                        frame += ";border-left:3px solid #2563eb"
+                    if cell["last"]:
+                        frame += ";border-right:3px solid #2563eb"
+                value = _cell(cell["text"])
+                if column == 3:
+                    value = _cell(row.get("title"))
+                    if row.get("origin"):
+                        badge = "background:#0d9488;color:#fff" if row["origin"] == "CAL" else "background:#FFF4CC;color:#78350f;border:1px solid #D6B44C"
+                        value = f"<strong style='{badge};border-radius:12px;padding:1px 5px;font-size:9px;margin-right:6px'>{row['origin']}</strong>" + value
+                    if row.get("meeting_relation") in {"PARA", "PAS"}:
+                        value = ("<strong style='border:1px solid #334155;background:#fff;color:#0f172a;border-radius:12px;padding:1px 5px;font-size:9px;margin-right:6px'>"
+                                 + row["meeting_relation"] + "</strong>" + value)
+                style = f"{cell_style};background:{cell['fill']};color:{cell['color']};white-space:pre-wrap{frame}"
+                if cell["bold"]:
+                    style += ";font-weight:bold"
+                if column == 2:
+                    style += ";text-align:center"
+                cells.append(f"<td bgcolor='{cell['fill']}' style='{style}'>{value}</td>")
+            body.append("<tr>" + "".join(cells) + "</tr>")
+        table_width = sum(width for _, _, width in MEETING_COLUMNS)
+        meeting_html += (f"<table width='{table_width}' border='1' cellpadding='0' cellspacing='0' "
+                         f"style='width:{table_width}px;max-width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px'>"
+                         f"<thead><tr>{headers}</tr></thead><tbody>{''.join(body)}</tbody></table>")
+        if not meetings:
+            meeting_html += "<p>Asnjë takim i anuluar për këtë datë.</p>"
+
     realization = report.get("realization")
     if realization:
         percent = realization.get("percent")
@@ -487,17 +538,24 @@ def render_html(report: dict) -> str:
             + f"<h1>{M3_TITLE}</h1><p>Data: {_cell(report['report_date'])}</p>"
             + manual(("underload", "overload", "reorganization"))
             + "".join(table(key) for key in ("postponed", "untouched", "same_day"))
-            + f"<h3>{AUTO_TITLES['realization']}</h3>{realization_html}"
-            + f"<h1>{GA_TITLE}</h1>" + manual(("ga_reorganization",)) + table("ga_postponed") + "</body></html>")
+            + meeting_html
+            + f"<h3>{AUTO_TITLES['realization']}</h3>{realization_html}" + "</body></html>")
 
 
 def render_plain_text(report: dict) -> str:
     lines = [M3_TITLE, report["report_date"]]
     for key in ("underload", "overload", "reorganization"):
         lines += [MANUAL_POINTS[key], report["manual_answers"].get(key) or "Pa pergjigje"]
-    for key in ("postponed", "untouched", "same_day", "realization", "ga_postponed"):
-        if key == "ga_postponed":
-            lines += [GA_TITLE, MANUAL_POINTS["ga_reorganization"], report["manual_answers"].get("ga_reorganization") or "Pa pergjigje"]
+    for key in ("postponed", "untouched", "same_day", "unheld_meetings", "realization"):
+        if key == "unheld_meetings":
+            lines.append(MEETING_TITLE)
+            for label, meetings in meeting_groups(report):
+                lines.append(label)
+                lines.extend(" | ".join(f"{label}: {value}" for (_, label, _), value in zip(MEETING_COLUMNS, meeting_values(row, index)))
+                             for index, row in enumerate(meetings, 1))
+                if not meetings:
+                    lines.append("Asnjë takim i anuluar për këtë datë.")
+            continue
         lines.append(AUTO_TITLES[key])
         if key == "postponed":
             lines.append("Shtyrjet e bëra gjatë ditës. Brenda javës: OK. Për të premten ose javën tjetër: RREZIK.")
@@ -524,7 +582,7 @@ async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To perpara dergimit.")
-    report = report_payload(row)
+    report = await current_report_payload(db, row)
     try:
         gmail = GmailService()
         html_body = render_html(report)
@@ -534,7 +592,7 @@ async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients
         # Keep every row in a standalone copy as well as in the email body.
         message = await gmail.send_verified(report["subject"], recipients,
                                              render_plain_text(report), html_body,
-                                             attachments=[(f"pikat_m3_ga_{row.report_date.isoformat()}.html",
+                                             attachments=[(f"pikat_m3_{row.report_date.isoformat()}.html",
                                                            html_body.encode("utf-8"), "text/html"), *attachments])
     except Exception as exc:
         row.status, row.last_error = "FAILED", str(exc)[:2000]

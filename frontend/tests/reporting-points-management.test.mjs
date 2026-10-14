@@ -11,7 +11,7 @@ import ts from "typescript"
 
 const require = createRequire(import.meta.url)
 const src = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src")
-const fixture = (kind) => ({ report_type: kind, is_active: true, send_time: kind === "M2" ? "12:15" : "16:20",
+const fixture = (kind) => ({ report_type: kind, is_active: true, send_time: kind === "M1" ? "08:30" : kind === "M2" ? "12:15" : "16:20",
   weekdays: [0, 1, 2, 3, 4], timezone: "Europe/Tirane",
   recipients: { to: ["ga@primexeu.com", "info@primexeu.com"], cc: [], bcc: [] },
   manual_recipients: { to: ["manual@example.com"], cc: [], bcc: [] } })
@@ -78,7 +78,7 @@ function mount(kind, api, canManage = true) {
   }
 }
 
-for (const kind of ["M2", "M3"]) {
+for (const kind of ["M1", "M2", "M3"]) {
   test(`${kind} management starts collapsed and contains all controls and saved delivery details`, async () => {
     const page = mount(kind, async () => ({ ok: true, json: async () => fixture(kind) }))
     await page.flush()
@@ -93,8 +93,8 @@ for (const kind of ["M2", "M3"]) {
     assert.match(html, /Marrësit e dërgimit manual/)
     assert.match(html, /ga@primexeu.com, info@primexeu.com/)
     assert.match(html, /manual@example.com/)
-    assert.equal(page.input(`${kind}-send-time`).props.value, kind === "M2" ? "12:15" : "16:20")
-    assert.equal(page.input(`${kind}-send-time`).props.min, kind === "M3" ? "16:15" : undefined)
+    assert.equal(page.input(`${kind}-send-time`).props.value, kind === "M1" ? "08:30" : kind === "M2" ? "12:15" : "16:20")
+    assert.equal(page.input(`${kind}-send-time`).props.min, kind === "M3" ? "16:15" : kind === "M1" ? "08:30" : undefined)
   })
 
   test(`${kind} saves editable recipients and time, updates manual send recipients and survives reload`, async () => {

@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from app.api.routers import m3_reporting_points as api
 from app.models.enums import UserRole
+from app.models.enums import UserRole
 from app.models.m3_reporting_points import M3ReportingPointsReport
 from app.services import m3_reporting_points as service
 from app.services import m3_reporting_points_scheduler as scheduler
@@ -203,11 +204,11 @@ class RenderingTests(unittest.TestCase):
                 "data": {"postponed": rows}, "realization": {"percent": 62.0, "comment": service.realization_comment(62)},
                 "realization_captured_at": "2026-10-05T16:15:00+02:00"}
 
-    def test_email_retains_daily_reasons_comments_colors_manual_answers_and_both_blocks(self):
+    def test_email_retains_m3_reasons_comments_colors_and_manual_answers_without_ga(self):
         report = self.report()
         result = service.render_html(report)
         self.assertIn(service.M3_TITLE, result)
-        self.assertIn(service.GA_TITLE, result)
+        self.assertNotIn(service.GA_TITLE, result)
         self.assertIn("background:#fee2e2", result)
         self.assertIn("background:#dcfce7", result)
         self.assertIn("Ne pritje te klientit", result)
@@ -484,6 +485,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
                               manual_answers={"ga_reorganization": "Jo"}, realization={"percent": 62},
                               realization_captured_at=datetime.fromisoformat("2026-10-05T16:15:00+02:00"), data={}, generated_at=None)
         with (patch.object(service, "build_task_data", new=AsyncMock(return_value={"untouched": [{"title": "TODO"}]})),
+              patch.object(service, "build_unheld_meetings", new=AsyncMock(return_value=[])),
               patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 71}))):
             await service.refresh_report(AsyncMock(), row, now)
         self.assertEqual(row.manual_answers, {"ga_reorganization": "Jo"})
@@ -495,6 +497,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         row = SimpleNamespace(report_date=now.date(), manual_answers={}, realization=None,
                               realization_captured_at=None, data={}, generated_at=None)
         with (patch.object(service, "build_task_data", new=AsyncMock(return_value={})),
+              patch.object(service, "build_unheld_meetings", new=AsyncMock(return_value=[])),
               patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 25.6}))):
             await service.refresh_report(AsyncMock(), row, now)
         self.assertEqual(row.realization, {"percent": 25.6})
@@ -532,7 +535,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Fillimi", gmail.send_verified.call_args_list[0].args[2])
         for call in gmail.send_verified.call_args_list[1:]:
             self.assertIn("Ndryshimi", call.args[2])
-            self.assertIn("GA e re", call.args[2])
+            self.assertNotIn("GA e re", call.args[2])
         self.assertEqual((row.status, row.gmail_message_id), ("SENT", "new-2"))
         self.assertGreaterEqual(row.sent_at, first_sent_at)
         self.assertEqual(db.commit.await_count, 3)
@@ -547,6 +550,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(api, "datetime") as clock, patch.object(service, "datetime") as service_clock, \
              patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log"), \
              patch.object(service, "build_task_data", new=AsyncMock(return_value={"untouched": []})), \
+             patch.object(service, "build_unheld_meetings", new=AsyncMock(return_value=[])), \
              patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 71})):
             clock.now.return_value = service_clock.now.return_value = now
             result = await api.generate(DAY, db, SimpleNamespace(id=uuid.uuid4()))
@@ -646,7 +650,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         excel_values = [cell.value for line in excel for cell in line]
         self.assertIn("Detyrë e paprekur 119", excel_values)
         self.assertIn("Përgjigje me ë dhe ç", excel_values)
-        self.assertEqual(attachments[3].get_filename(), "PrimeFlow-PIKAT-M3-GA-2026-10-05.xlsx")
+        self.assertEqual(attachments[3].get_filename(), "PrimeFlow-PIKAT-M3-2026-10-05.xlsx")
         attachment = attachments[0]
         attached_html = attachment.get_payload(decode=True).decode("utf-8")
         self.assertEqual(inline_html.strip(), expected_html.strip())
@@ -688,7 +692,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         db = SimpleNamespace(get=AsyncMock(return_value=row), refresh=AsyncMock(), commit=AsyncMock(), add=MagicMock())
         with patch.object(api, "locked_report", new=AsyncMock(return_value=row)):
             result = await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={"ga_reorganization": "Jo"}),
-                                             db, SimpleNamespace(id=uuid.uuid4()))
+                                             db, SimpleNamespace(id=uuid.uuid4(), role=UserRole.MANAGER, full_name="Manager"))
         self.assertEqual(result["manual_answers"], {"underload": "Ruaj kete", "ga_reorganization": "Jo"})
         self.assertEqual(result["realization"], {"percent": 62})
         self.assertEqual(result["status"], "DRAFT")
