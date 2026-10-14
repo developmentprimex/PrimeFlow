@@ -3,13 +3,18 @@ from __future__ import annotations
 import io
 import re
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from app.services.realization_calculator import QUESTION_LABELS, REPORT_QUESTION_SECTIONS
+from app.config import settings
 
 
 NAVY = "17365D"
@@ -19,6 +24,7 @@ AMBER = "FFE699"
 RED = "F4CCCC"
 WHITE = "FFFFFF"
 GRAY = "E7E6E6"
+CYAN = "CFFAFE"
 LEVEL_COLORS = {
     "A+": "00B050",
     "A": "70AD47",
@@ -147,6 +153,35 @@ def _weekly_comments(day: dict) -> list[tuple[str, str, str]]:
     return rows
 
 
+def _diamond_date(value: Any) -> str:
+    try:
+        stamp = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.astimezone(ZoneInfo(settings.APP_TIMEZONE)).date().isoformat()
+    except (ValueError, TypeError):
+        return str(value or "")[:10]
+
+
+def _diamond_counts(person: dict) -> tuple[int, int, int]:
+    facts = person.get("facts_json") or {}
+    return tuple(int(facts.get(key) or 0) for key in (
+        "weekly_diamond_count", "weekly_task_diamond_count", "weekly_proposal_diamond_count",
+    ))
+
+
+def _diamond_arguments(person: dict) -> str:
+    lines = []
+    for award in (person.get("facts_json") or {}).get("weekly_diamonds") or []:
+        review = award.get("review") or {}
+        source = "Propozim për përmirësim" if award.get("source") == "REALIZATION_PROPOSAL" else "Taskë e vlerësuar"
+        line = f"{_diamond_date(award.get('completed_at'))} · {source} · {_clean_task_title(award.get('task_title'))}"
+        if review.get("comment"):
+            line += f": {review['comment']}"
+        lines.append(line)
+    return "\n".join(lines) or "Nuk ka diamanta për këtë javë."
+
+
 def build_realization_workbook(
     *,
     week_start: str,
@@ -166,11 +201,12 @@ def build_realization_workbook(
         summary,
         "RAPORTI I REALIZIMIT JAVOR",
         f"{week_start} — {week_end} | {report_label}",
-        10,
+        13,
     )
     headers = [
         "Departamenti", "Personi", "Në planin javor", "Të mbyllura", "Me vonesë (FINAL)",
         "Shtesë gjatë javës", "Progresi javor", "Vlerësimi", "Simboli", "Statusi",
+        "Diamanta gjithsej", "Diamanta nga taskat", "Diamanta nga propozimet",
     ]
     for column, label in enumerate(headers, 1):
         summary.cell(4, column, label)
@@ -195,6 +231,7 @@ def build_realization_workbook(
                 grade,
                 "—" if is_live else person.get("final_symbol") or person.get("suggested_symbol") or "—",
                 "AKTUAL" if is_live else department.get("status", "—"),
+                *_diamond_counts(person),
             ]
             for column, value in enumerate(values, 1):
                 cell = summary.cell(row, column, value)
@@ -210,13 +247,13 @@ def build_realization_workbook(
             summary.row_dimensions[row].height = 30
             row += 1
     if row == 5:
-        summary.merge_cells(start_row=5, start_column=1, end_row=5, end_column=10)
+        summary.merge_cells(start_row=5, start_column=1, end_row=5, end_column=13)
         summary.cell(5, 1, "Nuk ka snapshot ditor ose rezultat FINAL për personat e përzgjedhur.")
         summary.cell(5, 1).alignment = Alignment(horizontal="center")
         summary.cell(5, 1).fill = PatternFill("solid", fgColor=AMBER)
     summary.freeze_panes = "A5"
-    summary.auto_filter.ref = f"A4:J{max(4, row - 1)}"
-    widths = [22, 24, 16, 14, 17, 16, 16, 22, 10, 16]
+    summary.auto_filter.ref = f"A4:M{max(4, row - 1)}"
+    widths = [22, 24, 16, 14, 17, 16, 16, 22, 10, 16, 18, 20, 23]
     for index, width in enumerate(widths, 1):
         summary.column_dimensions[get_column_letter(index)].width = width
 
@@ -434,6 +471,7 @@ def build_realization_workbook(
             }
         )
         for daily_date in daily_dates:
+            daily_row_height = 100
             ws.cell(current_row, 1, f"Snapshot ditor — {daily_date}")
             ws.cell(current_row, 1).font = Font(bold=True)
             ws.cell(current_row, 1).fill = PatternFill("solid", fgColor=GREEN)
@@ -462,16 +500,25 @@ def build_realization_workbook(
                         "Sot: "
                         f"{snapshot.get('completed_count', 0)}/"
                         f"{snapshot.get('planned_count', 0)} "
-                        f"({snapshot.get('daily_progress_percent', 0)}%) | "
+                        f"({str(daily_percent) + '%' if daily_percent is not None else '—'}) | "
                         f"Shtesë sot: {snapshot.get('additional_count', 0)} | "
                         f"Prezenca: {', '.join(str(item.get('type')) for item in attendance) or 'OK'}",
                     )
                     comments = _weekly_comments(snapshot)
                     if comments:
-                        ws.cell(current_row, col + 1).value += "\n" + "\n".join(
+                        comment_text = "KOMENTET E DITËS\n" + "\n\n".join(
                             f"{daily_date} · {label}{' · ' + author if author else ''}: {comment}"
                             for label, author, comment in comments
                         )
+                        argument = ws.cell(current_row, col + 1)
+                        metrics_text = argument.value
+                        argument.value = CellRichText([
+                            TextBlock(InlineFont(b=True, color="075985", sz=12), comment_text),
+                            TextBlock(InlineFont(color="64748B", sz=10), f"\n\nTË DHËNAT E SNAPSHOT-IT\n{metrics_text}"),
+                        ])
+                        argument.fill = PatternFill("solid", fgColor=CYAN)
+                        comment_lines = sum(max(1, (len(line) + 37) // 38) for line in comment_text.split("\n"))
+                        daily_row_height = max(daily_row_height, min(400, 18 * comment_lines + 72))
                 else:
                     ws.cell(current_row, col, "—")
                     ws.cell(current_row, col + 1, "Pa snapshot")
@@ -479,7 +526,7 @@ def build_realization_workbook(
                     target.alignment = Alignment(vertical="top", wrap_text=True)
                     target.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
             ws.cell(current_row, 1).border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-            ws.row_dimensions[current_row].height = 100
+            ws.row_dimensions[current_row].height = daily_row_height
             current_row += 1
 
         project_keys = sorted(
@@ -562,6 +609,18 @@ def build_realization_workbook(
             return person.get("final_level") or person.get("suggested_level")
 
         evaluation_rows = [
+            (
+                "Diamanta gjithsej", lambda person: _diamond_counts(person)[0],
+                _diamond_arguments, False, True,
+            ),
+            (
+                "Diamanta nga taskat", lambda person: _diamond_counts(person)[1],
+                lambda person: "Diamantat e dhënë nga vlerësimi i taskave.", False, False,
+            ),
+            (
+                "Diamanta nga propozimet", lambda person: _diamond_counts(person)[2],
+                lambda person: "Po me koment; përgjigjja javore nuk shpërblen propozimin ditor përsëri.", False, False,
+            ),
             (
                 "Propozimi për nivelin e vlerësimit",
                 lambda person: (
@@ -676,6 +735,16 @@ def build_realization_workbook(
                         left=THIN, right=THIN, top=THIN, bottom=THIN
                     )
             ws.row_dimensions[evaluation_row].height = 46 if is_tall else 32
+            if label.startswith("Diamanta"):
+                for cell in ws[evaluation_row]:
+                    cell.fill = PatternFill("solid", fgColor=CYAN)
+                if label == "Diamanta gjithsej":
+                    for index, person in enumerate(people):
+                        col = 2 + index * 2
+                        ws.cell(evaluation_row, col).font = Font(bold=True, color="075985", size=14)
+                        text = str(ws.cell(evaluation_row, col + 1).value or "")
+                        lines = sum(max(1, (len(line) + 47) // 48) for line in text.split("\n"))
+                        ws.row_dimensions[evaluation_row].height = max(ws.row_dimensions[evaluation_row].height, min(400, 15 * (lines + 2)))
         last_row = grade_row + len(evaluation_rows)
 
         # 6. PAGA — filled in manually by the board/HR after the level is confirmed;
@@ -1137,6 +1206,35 @@ def build_realization_workbook(
         comments_sheet.column_dimensions[get_column_letter(column)].width = width
     comments_sheet.freeze_panes = "C5"
     comments_sheet.auto_filter.ref = f"A4:F{max(4, comment_row - 1)}"
+
+    diamonds_sheet = workbook.create_sheet(_sheet_name("Diamantat", set(workbook.sheetnames)))
+    diamond_headers = ["Departamenti", "Punonjësi", "Data", "Burimi", "Taska / Propozimi", "Diamanta", "Komenti", "Dhënë nga", "ID e taskës / Realizimit"]
+    _title(diamonds_sheet, "DIAMANTAT E JAVËS", f"{week_start} — {week_end}", len(diamond_headers))
+    for column, label in enumerate(diamond_headers, 1):
+        _header(diamonds_sheet.cell(4, column, label))
+    diamond_row = 5
+    for department in departments:
+        for person in department.get("people") or []:
+            for award in (person.get("facts_json") or {}).get("weekly_diamonds") or []:
+                review = award.get("review") or {}
+                values = [
+                    department["name"], person["user_name"], _diamond_date(award.get("completed_at")),
+                    "Propozim për përmirësim" if award.get("source") == "REALIZATION_PROPOSAL" else "Taskë e vlerësuar",
+                    _clean_task_title(award.get("task_title")), int(review.get("diamond_score") or 0),
+                    review.get("comment") or "", review.get("reviewer_name") or "",
+                    award.get("task_id") or award.get("realization_period_id") or "",
+                ]
+                for column, value in enumerate(values, 1):
+                    cell = diamonds_sheet.cell(diamond_row, column, value)
+                    cell.alignment = Alignment(vertical="top", wrap_text=True)
+                    cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+                comment = str(review.get("comment") or "")
+                diamonds_sheet.row_dimensions[diamond_row].height = min(400, max(48, 15 * (len(comment) // 75 + comment.count("\n") + 2)))
+                diamond_row += 1
+    for column, width in enumerate([24, 26, 15, 30, 50, 12, 90, 26, 40], 1):
+        diamonds_sheet.column_dimensions[get_column_letter(column)].width = width
+    diamonds_sheet.freeze_panes = "C5"
+    diamonds_sheet.auto_filter.ref = f"A4:I{max(4, diamond_row - 1)}"
 
     for ws in workbook.worksheets:
         # Treat user comments as text, including comments beginning with '='.
