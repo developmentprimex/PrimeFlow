@@ -3,6 +3,8 @@
 import * as React from "react"
 import { ChevronRight, Loader2 } from "lucide-react"
 import { RealizationWeeklyDays } from "@/components/realization-weekly-days"
+import { RealizationProposalNotice } from "@/components/realization-proposal-notice"
+import { RealizationWeeklyDiamonds } from "@/components/realization-weekly-diamonds"
 import { RealizationWeeklyPostponements, weeklyPostponements } from "@/components/realization-weekly-postponements"
 import { toast } from "sonner"
 
@@ -87,14 +89,17 @@ function automaticAnswer(question: RealizationQuestion, timeline?: RealizationPe
   return { answer: typeof value === "boolean" ? yesNo(value) : "Përmbledhje", detail: typeof value === "boolean" ? "" : automaticValue(value) }
 }
 
-function ManualQuestion({ number, label, draft, disabled, onChange, onSaveComment }: {
-  number: number; label: string; draft: QuestionDraft; disabled: boolean; onChange: (next: QuestionDraft) => void; onSaveComment: () => void
+function ManualQuestion({ number, label, draft, disabled, onChange, onSaveComment, proposal = false }: {
+  number: number; label: string; draft: QuestionDraft; disabled: boolean; onChange: (next: QuestionDraft) => void; onSaveComment: () => void; proposal?: boolean
 }) {
   const commentRequired = draft.values.includes("YES")
   const commentMissing = commentRequired && !draft.comment.trim()
-  return <tr className="border-b border-slate-200 align-top even:bg-slate-50/50 hover:bg-blue-50/40 focus-within:bg-blue-50/40">
+  return <tr className={cn("border-b border-slate-200 align-top hover:bg-blue-50/40 focus-within:bg-blue-50/40", proposal ? "border-y-2 border-cyan-300 bg-cyan-50/70" : "even:bg-slate-50/50")}>
     <td className="px-2 py-3 text-center text-xs tabular-nums text-slate-500">{number}</td>
-    <th scope="row" className="border-l border-slate-200 px-3 py-3 text-left text-sm font-medium leading-5 text-slate-800">{label}</th>
+    <th scope="row" className={cn("border-l border-slate-200 px-3 py-3 text-left text-sm leading-5", proposal ? "font-bold text-cyan-950" : "font-medium text-slate-800")}>
+      {label}
+      {proposal ? <RealizationProposalNotice yes={commentRequired} saved={!draft.touched && commentRequired && !commentMissing} /> : null}
+    </th>
     <td className="border-l border-slate-200 px-2 py-2">
       <select aria-label={label} disabled={disabled} value={draft.values[0] || ""} onChange={event => onChange({ ...draft, values: event.target.value ? [event.target.value] : [], touched: true })} className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-xs focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-60">
         <option value="">E paplotësuar</option><option value="YES">Po</option><option value="NO">Jo</option>
@@ -102,7 +107,7 @@ function ManualQuestion({ number, label, draft, disabled, onChange, onSaveCommen
     </td>
     <td className="border-l border-slate-200 px-3 py-2">
       <div className="flex flex-col items-stretch gap-1.5">
-        <Textarea aria-label={`Komenti për ${label}`} required={commentRequired} aria-required={commentRequired} className="min-h-9 resize-y bg-white px-2 py-2 text-xs" rows={1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder={commentRequired ? "Shto koment (i detyrueshëm)…" : "Shto koment (opsional)…"} />
+        <Textarea aria-label={`Komenti për ${label}`} required={commentRequired} aria-required={commentRequired} className="min-h-9 resize-y bg-white px-2 py-2 text-xs" rows={proposal && commentRequired ? 3 : 1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder={commentRequired ? proposal ? "Përshkruaj propozimin dhe përfitimin (i detyrueshëm)…" : "Shto koment (i detyrueshëm)…" : "Shto koment (opsional)…"} />
         {commentMissing ? <p className="text-[11px] text-amber-700">Komenti është i detyrueshëm kur përgjigjja është Po.</p> : null}
         {draft.touched && !disabled ? <Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" disabled={commentMissing} onClick={onSaveComment}>Ruaj përgjigjen</Button> : null}
       </div>
@@ -362,7 +367,10 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
         {savedLevel ? <p className="mt-1 text-xs text-slate-500">Ruajtur nga {data?.realization?.created_by_name}. Ndryshimet e të dhënave nuk e mbishkruajnë këtë zgjedhje.</p> : null}
         {data?.history.some(item => item.level) ? <details className="mt-2 text-xs"><summary className="cursor-pointer">Historiku i shkronjës</summary>{data.history.filter(item => item.dimension === "REALIZATION" && item.level).map(item => <p key={item.id}>{new Date(item.created_at).toLocaleString("sq-AL")} · {item.created_by_name}: {item.level}{item.active ? " · Aktuale" : ""}</p>)}</details> : null}
       </section> : null}
-      {scope === "weekly" && result ? <section><p className="mb-2 text-sm font-semibold">Ditët dhe komentet e javës</p><RealizationWeeklyDays result={result} /></section> : null}
+      {scope === "weekly" && result ? <>
+        <RealizationWeeklyDiamonds count={result.facts_json.weekly_diamond_count ?? 0} taskCount={result.facts_json.weekly_task_diamond_count ?? 0} proposalCount={result.facts_json.weekly_proposal_diamond_count ?? 0} awards={result.facts_json.weekly_diamonds ?? []} person={userName} />
+        <section><p className="mb-2 text-sm font-semibold">Ditët dhe komentet e javës</p><RealizationWeeklyDays result={result} /></section>
+      </> : null}
       {result ? (
         <section aria-label="Pyetjet dhe përgjigjet">
           <div className="mb-3">
@@ -399,6 +407,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
                   <ManualQuestion
                     number={automaticQuestions.length + index + 1}
                     label={questionLabel(question)}
+                    proposal={question.key === "gave_proposal"}
                     draft={drafts[question.key] || { values: [], comment: "", touched: false }}
                     disabled={!canEdit || saving}
                     onChange={(next) => updateQuestionDraft(question.key, next)}

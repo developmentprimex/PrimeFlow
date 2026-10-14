@@ -178,11 +178,13 @@ async def _latest_question_answers(
 
 
 def _answer_payload(row: RealizationQuestionAnswer, name: str | None = None) -> dict:
+    from app.services.realization_proposal_diamonds import proposal_diamond_score
     stored = row.value_json or {}
     return {
         "id": str(row.id),
         "value": stored.get("value"),
         "comment": row.comment,
+        "diamond_score": proposal_diamond_score(row),
         "evidence_ids": [str(item) for item in (row.evidence_ids_json or [])],
         "answered_by": str(row.answered_by),
         "answered_by_name": name,
@@ -595,6 +597,8 @@ async def _weekly_response(
     user: User,
     department_name: str | None,
 ) -> RealizationWeeklyOut:
+    from app.api.routers.task_reviews import review_overview
+    from app.services.realization_weekly_diamonds import empty_weekly_diamonds, group_weekly_diamonds
     raw_rows = (
         await db.execute(
             select(RealizationPersonResult).where(
@@ -744,9 +748,20 @@ async def _weekly_response(
             continue
         visible.append(daily_result)
         visible_user_ids.add(person_id)
+    # Awards can exist before any weekly/daily task result has been prepared.
+    diamond_overview = await review_overview(
+        date_from=period.start_date, date_to=period.end_date,
+        department_id=period.department_id,
+        reviewee_user_id=user.id if user.role == UserRole.STAFF else None,
+        review_status="reviewed", db=db, current_user=user,
+    )
+    diamonds_by_user = group_weekly_diamonds(diamond_overview.rows)
+    for person_id in diamonds_by_user:
+        if person_id in eligible_user_ids and person_id not in visible_user_ids:
+            visible.append(_away_person_result(period, user_id=person_id, status=None))
+            visible_user_ids.add(person_id)
     # Somebody on leave for the whole week has neither a weekly nor a daily
-    # result, so the week used to drop them silently. An empty row is the wrong
-    # answer too: the week has to say they were away, not that they did nothing.
+    # result, so the week has to say they were away, not that they did nothing.
     away_statuses = full_period_availability_statuses(
         common_leave, working_days=working_days
     )
@@ -1605,6 +1620,7 @@ async def _weekly_response(
                 question["source_status"] = "MANUAL_UNANSWERED"
         apply_checklist_answers(facts, direct_answers=direct_answers)
         facts["weekly_evaluation"] = suggest_weekly_level(facts)
+        facts.update(diamonds_by_user.get(row.user_id, empty_weekly_diamonds()))
         facts["manager_review_comment"] = row.manager_comment
         payload["facts_json"] = facts
         if user.role == UserRole.STAFF:
