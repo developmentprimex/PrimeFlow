@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 
 export type DeliveryRecipients = { to: string[]; cc: string[]; bcc: string[] }
 export type DeliverySettings = {
-  report_type: "M2" | "M3"; is_active: boolean; send_time: string; weekdays: number[]
+  report_type: "M1" | "M2" | "M3"; is_active: boolean; send_time: string; weekdays: number[]
   timezone: string; recipients: DeliveryRecipients; manual_recipients: DeliveryRecipients
 }
 type EditableSettings = Omit<DeliverySettings, "recipients" | "manual_recipients"> & {
@@ -29,7 +29,7 @@ function editSettings(settings: DeliverySettings): EditableSettings {
 }
 
 export function ReportingPointsManagement({ api, reportType, canManage, onRecipientsChange, children }: {
-  api: string; reportType: "M2" | "M3"; canManage: boolean
+  api: string; reportType: "M1" | "M2" | "M3"; canManage: boolean
   onRecipientsChange: (value: DeliveryRecipients) => void; children: React.ReactNode
 }) {
   const { apiFetch } = useAuth()
@@ -113,11 +113,12 @@ export function ReportingPointsManagement({ api, reportType, canManage, onRecipi
             <label className="flex min-h-9 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={draft.is_active}
               onChange={(event) => change({ is_active: event.target.checked })} />Dërgim automatik aktiv</label>
             <div><Label htmlFor={`${reportType}-send-time`}>Ora e dërgimit automatik</Label>
-              <input id={`${reportType}-send-time`} type="time" required value={draft.send_time} min={reportType === "M3" ? "16:15" : undefined}
+              <input id={`${reportType}-send-time`} type="time" required value={draft.send_time} min={reportType === "M3" ? "16:15" : reportType === "M1" ? "08:30" : undefined}
                 onChange={(event) => change({ send_time: event.target.value })} className={inputClass} /></div>
             <p className="pb-2 text-xs text-muted-foreground">Ora lokale: {draft.timezone}</p>
           </div>
           {reportType === "M3" ? <p className="text-xs text-muted-foreground">M3 mund të dërgohet automatikisht nga ora 16:15, pasi merret realizimi.</p> : null}
+          {reportType === "M1" ? <p className="text-xs text-muted-foreground">M1 mund të dërgohet automatikisht nga ora 08:30. Plotëso komentet manuale para dërgimit.</p> : null}
           <fieldset className="space-y-2"><legend className="text-sm font-medium">Ditët e dërgimit automatik</legend>
             <div className="flex flex-wrap gap-3">{DAYS.map((label, day) => <label key={day} className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={draft.weekdays.includes(day)} onChange={(event) => change({ weekdays: event.target.checked
