@@ -2256,10 +2256,10 @@ async def export_all_tasks_report_xlsx(
             (r.kohaBz or "-"),
             (r.department or "-"),
             (r.period or "-"),
-            (r.title or "-"),
+            (_strip_html_keep_breaks(html.unescape(r.title or "")) or "-"),
             *([(r.frequency or "-")] if show_frequency_column else []),
-            (r.description or ""),
-            (r.details or ""),
+            _strip_html_keep_breaks(html.unescape(r.description or "")),
+            _strip_html_keep_breaks(html.unescape(r.details or "")),
             (r.status or "-"),
             (r.userInitials or "-"),
         ]
