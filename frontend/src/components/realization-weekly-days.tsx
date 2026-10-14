@@ -31,7 +31,7 @@ export function RealizationWeeklyDays({ result, compact = false }: Props) {
   const panelId = React.useId()
   const days = result.facts_json.daily_timeline || []
   if (!days.length) return <p className="text-xs text-slate-400">Pa të dhëna ditore</p>
-  return <div className={compact ? "mt-2 flex flex-wrap gap-1" : "grid grid-cols-2 gap-2 sm:grid-cols-5"}>
+  return <div className={compact ? "mt-2 flex flex-wrap gap-1" : "space-y-2"}>
     {days.map(day => {
       const comments: Array<{ label: string; text: string; author?: string | null }> = [
         ...(day.person_comment ? [{ label: "Komenti ditor", author: day.person_comment.author, text: day.person_comment.comment }] : []),
@@ -92,14 +92,15 @@ export function RealizationWeeklyDays({ result, compact = false }: Props) {
           aria-expanded={selected}
           aria-controls={id}
           onClick={() => setSelectedDate(selected ? null : day.date)}
-          className={`min-w-0 rounded-lg border p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${selected ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"}`}
+          className={`grid w-full min-w-0 grid-cols-[5rem_5rem_5rem_minmax(0,1fr)_0.75rem] items-center gap-2 rounded-lg border p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 sm:grid-cols-[6rem_6rem_6rem_minmax(0,1fr)_0.75rem] sm:gap-3 ${selected ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"}`}
         >
           <span className="block text-xs font-semibold text-slate-800">{weekdayNames[weekday]}</span>
-          <span className="mt-1 block text-[10px] text-slate-500">{dateLabel}</span>
-          <span className={`mt-2 block text-lg font-semibold ${day.on_leave || day.future || day.daily_progress_percent == null ? "text-slate-500" : day.daily_progress_percent >= 100 ? "text-emerald-700" : "text-amber-700"}`}>{label}</span>
-          <span className="mt-1 flex items-center justify-between text-[10px] text-slate-500"><span>{comments.length ? `${comments.length} komente` : "Pa komente"}</span><span aria-hidden="true">{selected ? "▴" : "▾"}</span></span>
+          <span className="text-xs tabular-nums text-slate-500">{dateLabel}</span>
+          <span className={`text-sm font-semibold ${day.on_leave || day.future || day.daily_progress_percent == null ? "text-slate-500" : day.daily_progress_percent >= 100 ? "text-emerald-700" : "text-amber-700"}`}>{label}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-words text-sm text-slate-700">{comments.length ? comments.map(comment => comment.text).join("\n") : "Pa komente"}</span>
+          <span aria-hidden="true" className="text-xs text-slate-500">{selected ? "▴" : "▾"}</span>
         </button>
-        <div id={id} role="region" aria-labelledby={`${id}-button`} hidden={!selected} className="order-last col-span-full min-w-0 rounded-lg border border-blue-200 bg-white p-3 text-xs">
+        <div id={id} role="region" aria-labelledby={`${id}-button`} hidden={!selected} className="min-w-0 rounded-lg border border-blue-200 bg-white p-3 text-xs">
           <p className="mb-3 font-semibold text-slate-800">{weekdayNames[weekday]} · {dateLabel} · {label}</p>
           {content}
         </div>

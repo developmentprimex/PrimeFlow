@@ -33,6 +33,72 @@ from app.services.tomorrow_print_report import (
 )
 
 
+@pytest.mark.parametrize("tomorrow", [False, True])
+@pytest.mark.parametrize("absence", [
+    {"date": "2026-09-08", "from": "8:00", "to": "16:00"},
+    {"date": "2026-09-08"},
+    {"startDate": "2026-09-07", "endDate": "2026-09-09", "fullDay": True},
+])
+def test_full_day_absence_hides_tasks_in_both_reports(tomorrow, absence) -> None:
+    bucket = "leave" if "startDate" in absence else "absent"
+    items = {
+        name: [{
+            "title": f"Hidden {name} work", "date": "2026-09-08", "user_id": "ef",
+            "assignees": ["Era Fana"], "oneHReportSlot": "10:00",
+        }] for name in ("oneH", "blocked", "important", "r1", "personal")
+    }
+    items["oneH"].extend([
+        {"title": "Present work", "date": "2026-09-08", "userId": "ra", "oneHReportSlot": "10:00"},
+        {"title": "Shared work", "date": "2026-09-08", "userId": "ef",
+         "assignees": ["Era Fana", "Rina Aliu"], "oneHReportSlot": "11:00"},
+    ])
+    items[bucket] = [{**absence, "userId": "ef"}]
+    payload = {"items": items, "users": [
+        {"id": "ef", "full_name": "Era Fana", "role": "STAFF"},
+        {"id": "ra", "full_name": "Rina Aliu", "role": "STAFF"},
+    ]}
+    build = build_tomorrow_print_report if tomorrow else build_today_print_report
+    report = asyncio.run(build(date(2026, 9, 7) if tomorrow else date(2026, 9, 8),
+                              payload=payload, include_attachment=True))
+    assert "Hidden" not in report["html"]
+    assert "Present work" in report["html"]
+    assert "Shared work" in report["html"]
+    workbook = load_workbook(BytesIO(report["attachments"][0][1]))
+    exported = "\n".join(str(cell.value or "") for row in workbook.active for cell in row)
+    assert "Hidden" not in exported
+    assert "Present work" in exported
+    assert "Shared work" in exported
+    assert _missing_one_h_initials(payload, date(2026, 9, 8))["14:20"] == ["RA"]
+    assert _missing_blocked_initials(payload, date(2026, 9, 8)) == ["RA"]
+
+
+@pytest.mark.parametrize("bucket, absence", [
+    ("absent", {"date": "2026-09-08", "from": "08:00", "to": "12:00"}),
+    ("absent", {"date": "2026-09-09", "from": "08:00", "to": "23:00"}),
+    ("leave", {"startDate": "2026-09-08", "endDate": "2026-09-08",
+               "fullDay": False, "from": "08:00", "to": "12:00"}),
+])
+def test_partial_or_other_day_absence_keeps_tasks_and_missing_slots(bucket, absence) -> None:
+    payload = {"users": [{"id": "ef", "full_name": "Era Fana", "role": "STAFF"}],
+               "items": {bucket: [{**absence, "userId": "ef", "person": "Era Fana"}],
+                         "oneH": [{"title": "Visible work", "date": "2026-09-08",
+                                   "userId": "ef", "oneHReportSlot": "10:00"}]}}
+    report = asyncio.run(build_today_print_report(date(2026, 9, 8), payload=payload))
+    assert "Visible work" in report["html"]
+    assert _missing_one_h_initials(payload, date(2026, 9, 8))["14:20"] == ["EF"]
+
+
+def test_full_day_absence_matches_legacy_person_and_all_users_leave() -> None:
+    items = {"oneH": [{"title": "Legacy work", "date": "2026-09-08",
+                       "person": "Era Fana", "oneHReportSlot": "10:00"}],
+             "absent": [{"date": "2026-09-08", "person": "Era Fana"}]}
+    assert all(not tasks for _, tasks, _ in _task_rows(items, date(2026, 9, 8)))
+    items["absent"] = []
+    items["leave"] = [{"startDate": "2026-09-08", "endDate": "2026-09-08",
+                       "fullDay": True, "isAllUsers": True}]
+    assert all(not tasks for _, tasks, _ in _task_rows(items, date(2026, 9, 8)))
+
+
 def test_task_marker_legend_explains_the_report_symbols() -> None:
     legend_html = _task_marker_legend_html()
 

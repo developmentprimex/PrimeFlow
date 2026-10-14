@@ -377,7 +377,6 @@ def _missing_task_initials(
     payload: dict[str, Any], target_date: date, *, bucket: str, slots: tuple[str, ...]
 ) -> dict[str, list[str]]:
     """Return active, present non-admin users missing work in each requested slot."""
-    target_iso = target_date.isoformat()
     users = [row for row in payload.get("users") or [] if isinstance(row, dict)]
     items = payload.get("items") or {}
     department_codes = {
@@ -433,26 +432,12 @@ def _missing_task_initials(
             if value:
                 user_id_by_name[value.casefold()] = user_id
 
-    def covers_target(entry: dict[str, Any]) -> bool:
-        start = str(entry.get("startDate") or entry.get("start_date") or "")[:10]
-        end = str(entry.get("endDate") or entry.get("end_date") or start)[:10]
-        return bool(start and start <= target_iso <= (end or start))
-
-    leave_items = [row for row in items.get("leave") or [] if isinstance(row, dict) and covers_target(row)]
-    if any(row.get("isAllUsers") or row.get("is_all_users") for row in leave_items):
+    all_unavailable, unavailable_ids, unavailable_names = _full_day_unavailable(items, target_date)
+    if all_unavailable:
         return {slot: [] for slot in slots}
-    unavailable_ids = {
-        str(row.get("userId") or row.get("user_id"))
-        for row in leave_items
-        if row.get("userId") or row.get("user_id")
-    }
-    for row in items.get("absent") or []:
-        if not isinstance(row, dict) or str(row.get("date") or "")[:10] != target_iso:
-            continue
-        if str(row.get("from") or "23:59") <= "08:00" and str(row.get("to") or "00:00") >= "16:30":
-            user_id = row.get("userId") or row.get("user_id")
-            if user_id:
-                unavailable_ids.add(str(user_id))
+    unavailable_ids.update(
+        user_id_by_name[name] for name in unavailable_names if name in user_id_by_name
+    )
 
     users_by_slot = {slot: set() for slot in slots}
     for item in items.get(bucket) or []:
@@ -884,11 +869,71 @@ def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def _full_day_unavailable(
+    items: dict[str, Any], target_date: date,
+) -> tuple[bool, set[str], set[str]]:
+    """Use the Common View workday (08:00-16:00) for full-day absences."""
+    target_iso = target_date.isoformat()
+    user_ids: set[str] = set()
+    names: set[str] = set()
+    all_users = False
+    for bucket in ("absent", "leave"):
+        for row in items.get(bucket) or []:
+            if not isinstance(row, dict):
+                continue
+            if bucket == "leave":
+                start = str(row.get("startDate") or row.get("start_date") or "")[:10]
+                end = str(row.get("endDate") or row.get("end_date") or start)[:10]
+                if not start or not start <= target_iso <= end:
+                    continue
+            elif str(row.get("date") or "")[:10] != target_iso:
+                continue
+            full_day = row.get("fullDay", row.get("full_day"))
+            start_minutes = _clock_minutes(row.get("from"))
+            end_minutes = _clock_minutes(row.get("to"))
+            if full_day is not True and not (
+                (start_minutes is None and end_minutes is None and full_day is not False)
+                or (start_minutes is not None and end_minutes is not None
+                    and start_minutes <= 8 * 60 and end_minutes >= 16 * 60)
+            ):
+                continue
+            all_users = all_users or bool(row.get("isAllUsers") or row.get("is_all_users"))
+            user_id = row.get("userId") or row.get("user_id")
+            if user_id:
+                user_ids.add(str(user_id))
+            name = str(row.get("person") or row.get("owner") or "").strip().casefold()
+            if name:
+                names.add(name)
+    return all_users, user_ids, names
+
+
 def _task_rows(
     items: dict[str, Any], target_date: date, *, include_completed_today: bool = False,
+    users: list[dict[str, Any]] | None = None,
 ) -> list[tuple[str, list[dict[str, Any]], bool]]:
+    all_unavailable, unavailable_ids, unavailable_names = _full_day_unavailable(items, target_date)
+    for user in users or []:
+        if str(user.get("id")) in unavailable_ids:
+            unavailable_names.update(
+                str(user[key]).strip().casefold()
+                for key in ("full_name", "username", "email") if user.get(key)
+            )
+
+    def available(item: dict[str, Any]) -> bool:
+        if all_unavailable:
+            return False
+        user_id = item.get("userId") or item.get("user_id")
+        assignees = item.get("assignees") or []
+        if assignees:
+            if len(assignees) == 1 and str(user_id) in unavailable_ids:
+                return False
+            # Shared work stays visible while at least one assignee is present.
+            return any(str(name).strip().casefold() not in unavailable_names for name in assignees)
+        name = str(item.get("person") or item.get("owner") or "").strip().casefold()
+        return str(user_id) not in unavailable_ids and name not in unavailable_names
+
     by_bucket = {
-        name: [item for item in values if isinstance(item, dict) and _item_date(item) == target_date]
+        name: [item for item in values if isinstance(item, dict) and _item_date(item) == target_date and available(item)]
         for name, values in items.items()
         if isinstance(values, list)
     }
@@ -3284,7 +3329,7 @@ async def _build_print_report(
     missing_one_h_at_16_with_blocked = [
         value for value in missing_one_h_by_slot.get("16:00", []) if value not in missing_blocked_set
     ]
-    task_rows = _task_rows(items, target_date, include_completed_today=include_completed_today)
+    task_rows = _task_rows(items, target_date, include_completed_today=include_completed_today, users=payload.get("users"))
     meeting_dates = [target_date, next_working_day(target_date)] if include_meetings else []
     next_meeting_payload = next_day_payload or payload
     if len(meeting_dates) > 1 and payload.get("week_end"):

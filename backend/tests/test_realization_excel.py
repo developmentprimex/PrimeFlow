@@ -159,7 +159,7 @@ class TestRealizationExcel(unittest.TestCase):
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
         self.assertEqual(
             workbook.sheetnames,
-            ["Përmbledhje", "Development", "Evidenca", "Udhëzuesi", "Udhëzuesi i Vlerësimit", "Komentet ditore"],
+            ["Përmbledhje", "Development", "Evidenca", "Udhëzuesi", "Udhëzuesi i Vlerësimit", "Komentet ditore", "Diamantat"],
         )
         values = " ".join(
             str(cell.value or "")
@@ -318,3 +318,87 @@ def test_weekly_export_preserves_all_daily_comment_sources_and_dates():
     formula_comment = next(cell for row in book["Komentet ditore"].iter_rows() for cell in row
                            if cell.value == "=Komenti i detyrës të martën")
     assert formula_comment.data_type == "s"
+
+
+def test_excel_exports_task_and_proposal_diamonds_in_totals_and_details():
+    task_award = {"task_id": "task-1", "task_title": "[[b]]Raporti[[/b]]", "source": "TASK",
+                  "completed_at": "2026-10-12T12:00:00+02:00",
+                  "review": {"id": "review-1", "diamond_score": 1, "comment": "Punë e mirë", "reviewer_name": "Manager"}}
+    proposal = {"task_id": None, "realization_period_id": "period-1", "task_title": "Propozim për përmirësim",
+                "source": "REALIZATION_PROPOSAL", "completed_at": "2026-10-13T12:00:00+02:00",
+                "review": {"id": "result-1", "diamond_score": 1, "comment": "=Propozimi\nKursen 20 minuta", "reviewer_name": "Admin"}}
+    people = [
+        {"user_name": "Elsa", "facts_json": {"weekly_diamond_count": 2, "weekly_task_diamond_count": 1,
+                                              "weekly_proposal_diamond_count": 1, "weekly_diamonds": [task_award, proposal]}},
+        {"user_name": "Rinesa", "facts_json": {}},
+    ]
+    for report_mode in ["LIVE_DAILY", "FINAL_WEEKLY"]:
+        book = load_workbook(io.BytesIO(build_realization_workbook(
+            week_start="2026-10-12", week_end="2026-10-16",
+            departments=[{"name": "DEV", "report_mode": report_mode, "people": people}],
+        )), data_only=False)
+        assert [book["Përmbledhje"].cell(4, col).value for col in [11, 12, 13]] == [
+            "Diamanta gjithsej", "Diamanta nga taskat", "Diamanta nga propozimet"]
+        assert [book["Përmbledhje"].cell(5, col).value for col in [11, 12, 13]] == [2, 1, 1]
+        assert [book["Përmbledhje"].cell(6, col).value for col in [11, 12, 13]] == [0, 0, 0]
+        assert book["Përmbledhje"].auto_filter.ref == "A4:M6"
+        rows = {row[0].value: row for row in book["DEV"].iter_rows() if row[0].value}
+        assert rows["Diamanta gjithsej"][1].value == 2
+        assert rows["Diamanta nga taskat"][1].value == 1
+        assert rows["Diamanta nga propozimet"][1].value == 1
+        assert "Punë e mirë" in rows["Diamanta gjithsej"][2].value
+        assert "Kursen 20 minuta" in rows["Diamanta gjithsej"][2].value
+        assert rows["Diamanta gjithsej"][3].value == 0
+        details = list(book["Diamantat"].iter_rows(min_row=5, values_only=True))
+        assert len(details) == 2
+        assert details[0] == ("DEV", "Elsa", "2026-10-12", "Taskë e vlerësuar", "Raporti", 1, "Punë e mirë", "Manager", "task-1")
+        assert details[1] == ("DEV", "Elsa", "2026-10-13", "Propozim për përmirësim", "Propozim për përmirësim", 1,
+                              "=Propozimi\nKursen 20 minuta", "Admin", "period-1")
+        assert book["Diamantat"]["G6"].data_type == "s"
+        assert book["Diamantat"]["G6"].alignment.wrap_text
+        assert sum(entry[5] for entry in details) == sum(book["Përmbledhje"].cell(row, 11).value for row in [5, 6])
+
+
+def test_snapshot_argument_highlights_comments_before_metrics_and_grows_to_fit():
+    comment = "Koment i rëndësishëm për këtë ditë\n" + "Sqarim i plotë për progresin. " * 20
+    person = {"user_name": "Elsa", "facts_json": {"daily_timeline": [
+        {"date": "2026-10-12", "daily_progress_percent": 75,
+         "person_comment": {"comment": comment, "author": "Admin"}},
+        {"date": "2026-10-13", "on_leave": True, "daily_progress_percent": None},
+    ]}}
+    book = load_workbook(io.BytesIO(build_realization_workbook(
+        week_start="2026-10-12", week_end="2026-10-16",
+        departments=[{"name": "DEV", "people": [person]}],
+    )), rich_text=True)
+    rows = {row[0].value: row for row in book["DEV"].iter_rows() if row[0].value}
+    highlighted = rows["Snapshot ditor — 2026-10-12"][2]
+    assert str(highlighted.value).startswith("KOMENTET E DITËS\n")
+    assert str(highlighted.value).index(comment) < str(highlighted.value).index("Java deri atë ditë")
+    assert highlighted.value[0].font.b is True
+    assert highlighted.value[0].font.color.rgb == "00075985"
+    assert highlighted.value[0].font.sz == 12
+    assert highlighted.value[1].font.sz == 10
+    assert highlighted.fill.fgColor.rgb == "00CFFAFE"
+    assert highlighted.alignment.wrap_text
+    assert book["DEV"].row_dimensions[highlighted.row].height > 100
+    leave = rows["Snapshot ditor — 2026-10-13"][2]
+    assert "None%" not in str(leave.value)
+    assert "KOMENTET E DITËS" not in str(leave.value)
+    assert len(book["Komentet ditore"]["F5"].value) == len(comment)
+
+
+def test_diamond_detail_date_uses_application_timezone():
+    from unittest.mock import patch
+    from app.services.realization_excel import _diamond_date
+
+    with patch("app.services.realization_excel.settings.APP_TIMEZONE", "Europe/Budapest"):
+        assert _diamond_date("2026-10-12T22:30:00Z") == "2026-10-13"
+
+
+def test_export_without_awards_keeps_an_empty_diamond_details_sheet():
+    book = load_workbook(io.BytesIO(build_realization_workbook(
+        week_start="2026-10-12", week_end="2026-10-16", departments=[],
+    )))
+    assert book["Diamantat"].max_row == 4
+    assert book["Diamantat"].auto_filter.ref == "A4:I4"
+    assert book["Përmbledhje"].max_column == 13
