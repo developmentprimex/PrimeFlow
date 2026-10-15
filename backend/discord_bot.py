@@ -34,6 +34,26 @@ def actor(user_id: int, guild_id: int, channel_id: int) -> dict:
     return {"discord_user_id": str(user_id), "guild_id": str(guild_id), "channel_id": str(channel_id)}
 
 
+def overwrite_signature(overwrites) -> dict:
+    """Compare Discord identities and bits, independent of the member cache.
+
+    Without the privileged members intent, channel overwrites can be keyed by
+    Object(type=User) while fetch_member returns Member. Those Python objects
+    compare unequal despite representing the same Discord user.
+    """
+    result = {}
+    for target, overwrite in overwrites.items():
+        is_role = isinstance(target, discord.Role) or (isinstance(target, discord.Object) and target.type is discord.Role)
+        allow, deny = overwrite.pair()
+        result[("role" if is_role else "member", target.id)] = (allow.value, deny.value)
+    return result
+
+
+def task_label(title: str) -> str:
+    plain = re.sub(r"\[\[.*?\]\]", "", title, flags=re.S)
+    return (re.sub(r"\s+", " ", plain).strip() or "Detyrë")[:100]
+
+
 def task_view(task_id: str, fingerprint: str = "") -> discord.ui.View:
     view = discord.ui.View(timeout=None)
     view.add_item(discord.ui.Select(custom_id=f"pf:action:{task_id}:{fingerprint}", placeholder="Çfarë dëshiron të bësh?",
@@ -49,7 +69,7 @@ def task_pages(task_list: list[dict], title: str):
         chunk = task_list[offset:offset + 25]
         view = discord.ui.View(timeout=None)
         view.add_item(discord.ui.Select(custom_id="pf:task", placeholder="Zgjidh detyrën për raportim",
-            options=[discord.SelectOption(label=(re.sub(r"\[\[.*?\]\]", "", task["title"]).strip() or "Detyrë")[:100], value=task["id"],
+            options=[discord.SelectOption(label=task_label(task["title"]), value=task["id"],
                 description=f"{task.get('status', '')} · 1H {task.get('one_h_report_slot') or '—'} · {task.get('finish_period') or '—'}"[:100]) for task in chunk]))
         names = [re.sub(r"\s+", " ", task["title"])[:100] for task in chunk]
         lines = [f"{offset + i}. {name} — {task.get('status')}" for i, (name, task) in enumerate(zip(names, chunk), 1)]
@@ -141,10 +161,18 @@ class PrimeFlowBot(discord.Client):
         self.clear_ready_status()
 
     @staticmethod
-    def error_message(exc):
+    def error_message(exc, *, read_only=False):
         if isinstance(exc, ValueError):
             return str(exc)[:1800]
-        log.error("Discord operation failed: %s", type(exc).__name__)
+        log.error("Discord operation failed: %s status=%s code=%s", type(exc).__name__, getattr(exc, "status", None), getattr(exc, "code", None))
+        if isinstance(exc, discord.Forbidden):
+            return "Discord e refuzoi veprimin për shkak të lejeve të botit. Administratori duhet të kontrollojë lejet e kanalit privat."
+        if isinstance(exc, discord.HTTPException) and exc.code == 50035:
+            return "Discord e refuzoi formatin e mesazhit. Administratori duhet të kontrollojë formatimin e listës së detyrave."
+        if isinstance(exc, httpx.TimeoutException):
+            return "PrimeFlow nuk u përgjigj në kohë. Provo /detyrat përsëri." if read_only else "PrimeFlow nuk u përgjigj në kohë. Kontrollo detyrën para se ta ridërgosh komandën."
+        if read_only:
+            return "Lista e detyrave nuk u shfaq. Nuk u kërkua asnjë ndryshim në detyra; provo përsëri ose njofto administratorin."
         return "Veprimi nuk u përfundua. Kontrollo PrimeFlow para se ta ridërgosh."
 
     async def private_channel(self, guild_id, channel_id, user_id):
@@ -162,7 +190,9 @@ class PrimeFlowBot(discord.Client):
         expected = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)}
-        if channel.overwrites != expected:
+        if overwrite_signature(channel.overwrites) != overwrite_signature(expected):
+            if not channel.permissions_for(guild.me).manage_roles:
+                raise ValueError("Lejet e kanalit privat kanë ndryshuar. Për t'i korrigjuar, botit i duhet leja Manage Roles në Discord.")
             await channel.edit(overwrites=expected, reason="PrimeFlow personal channel privacy")
         return channel
 
@@ -211,7 +241,7 @@ class PrimeFlowBot(discord.Client):
                 for text, view in task_pages(data["tasks"], "Detyrat e tua për sot"):
                     await interaction.followup.send(text, view=view or discord.utils.MISSING)
             except Exception as exc:
-                await interaction.followup.send(self.error_message(exc), ephemeral=True)
+                await interaction.followup.send(self.error_message(exc, read_only=True), ephemeral=True)
 
         @self.tree.command(name="pyet", description="Jep udhëzim për detyrën që ke zgjedhur", guild=guild)
         async def ask(interaction: discord.Interaction, udhezimi: str):

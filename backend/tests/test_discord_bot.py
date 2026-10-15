@@ -97,7 +97,9 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_privacy_is_repaired_before_returning_channel(self):
         instance = object.__new__(bot.PrimeFlowBot)
-        member, everyone, me = Mock(), Mock(), Mock()
+        member = Mock(spec=discord.Member, id=20)
+        everyone = Mock(spec=discord.Role, id=123)
+        me = Mock(spec=discord.Member, id=99)
         guild = Mock(default_role=everyone, me=me)
         guild.get_member.return_value = member
         channel = Mock(spec=discord.TextChannel)
@@ -112,6 +114,55 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(grants[everyone].view_channel)
         self.assertTrue(grants[member].view_channel)
         self.assertEqual(set(grants), {everyone, member, me})
+
+    async def test_uncached_members_do_not_trigger_permission_rewrite(self):
+        instance = object.__new__(bot.PrimeFlowBot)
+        member = Mock(spec=discord.Member, id=20)
+        everyone = Mock(spec=discord.Role, id=123)
+        me = Mock(spec=discord.Member, id=99)
+        guild = Mock(default_role=everyone, me=me)
+        guild.get_member.return_value = None
+        guild.fetch_member = AsyncMock(return_value=member)
+        channel = Mock(spec=discord.TextChannel)
+        channel.topic = "PrimeFlow personal workspace: 20"
+        channel.overwrites = {
+            everyone: discord.PermissionOverwrite(view_channel=False),
+            discord.Object(id=20, type=discord.User): discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            discord.Object(id=99, type=discord.User): discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True),
+        }
+        channel.edit = AsyncMock(side_effect=AssertionError("Unnecessary overwrite requires extra Discord permissions"))
+        guild.get_channel.return_value = channel
+        with patch.object(bot.settings, "DISCORD_GUILD_ID", "123"), patch.object(bot.PrimeFlowBot, "get_guild", return_value=guild):
+            self.assertIs(await instance.private_channel(123, 10, 20), channel)
+        channel.edit.assert_not_called()
+
+    async def test_real_privacy_drift_without_manage_roles_stays_closed(self):
+        instance = object.__new__(bot.PrimeFlowBot)
+        member = Mock(spec=discord.Member, id=20)
+        everyone = Mock(spec=discord.Role, id=123)
+        me = Mock(spec=discord.Member, id=99)
+        guild = Mock(default_role=everyone, me=me)
+        guild.get_member.return_value = member
+        channel = Mock(spec=discord.TextChannel)
+        channel.topic, channel.overwrites = "PrimeFlow personal workspace: 20", {}
+        channel.permissions_for.return_value = discord.Permissions.none()
+        channel.edit = AsyncMock()
+        guild.get_channel.return_value = channel
+        with patch.object(bot.settings, "DISCORD_GUILD_ID", "123"), patch.object(bot.PrimeFlowBot, "get_guild", return_value=guild):
+            with self.assertRaisesRegex(ValueError, "Manage Roles"):
+                await instance.private_channel(123, 10, 20)
+        channel.edit.assert_not_called()
+
+    async def test_multiline_task_labels_are_single_line_and_keep_task_ids(self):
+        tasks = [{"id": str(uuid.uuid4()), "title": "Heading\n1. [[done]]Point A[[/done]]\n2. Point B", "status": "TODO"}]
+        option = bot.task_pages(tasks, "Today")[0][1].children[0].options[0]
+        self.assertEqual(option.label, "Heading 1. Point A 2. Point B")
+        self.assertEqual(option.value, tasks[0]["id"])
+
+    async def test_read_timeout_message_does_not_imply_a_task_was_modified(self):
+        import httpx
+        message = bot.PrimeFlowBot.error_message(httpx.ReadTimeout("timeout"), read_only=True)
+        self.assertIn("Provo /detyrat", message)
 
 
 if __name__ == "__main__":

@@ -23,14 +23,13 @@ from app.services.task_marker import active_one_h_marker, active_one_h_marker_by
 
 TITLE = "PIKAT PER RAPORTIM M2"
 MANUAL_POINTS = {
-    "ga_reply": "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
-    "reorganization": "2. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?",
+    "reorganization": "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
 }
 AUTO_TITLES = {
-    "unfinished_priority": f"3. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",
-    "postponed": "4. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
-    "ga_progress": "5. PROGRESI I DET ME GA (AM)",
-    "delivery": "6. SA PER DOREZIM M2?",
+    "unfinished_priority": f"2. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",
+    "postponed": "3. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
+    "ga_progress": "4. PROGRESI I DET ME GA (AM)",
+    "delivery": "5. SA PER DOREZIM M2?",
 }
 DELIVERY_MARKERS = {"M2", "M2_M3"}
 
@@ -127,7 +126,8 @@ async def refresh_report(db: AsyncSession, row: M2ReportingPointsReport, now: da
 
 def report_payload(row: M2ReportingPointsReport) -> dict:
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
-            "manual_answers": row.manual_answers or {}, "data": row.data or {}, "status": row.status,
+            "manual_answers": {key: value for key, value in (row.manual_answers or {}).items() if key != "ga_reply"},
+            "data": row.data or {}, "status": row.status,
             "generated_at": row.generated_at.isoformat() if row.generated_at else None,
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
 
