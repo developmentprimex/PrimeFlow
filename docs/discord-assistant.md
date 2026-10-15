@@ -12,6 +12,9 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 2. Ftoje aplikacionin në server me scopes `bot` dhe `applications.commands`.
    Lejo `View Channels`, `Send Messages`, `Read Message History` dhe `Manage Channels`.
    Nuk kërkohet leja `Administrator`. Mund të krijosh një kategori për kanalet personale.
+   Nëse ndryshohen lejet e një kanali ekzistues, riparimi automatik kërkon
+   `Manage Roles`; pa të, boti ndalon dërgimin në atë kanal dhe kërkon korrigjim.
+   Leximi normal i detyrave nuk rishkruan lejet që janë tashmë të sakta.
 3. Kopjo server ID (Developer Mode në Discord). Ruaj bot token vetëm në
    `backend/.env` të serverit ose në menaxherin e sekreteve; mos e commit-o.
 4. Vendos në mjedisin e API-së dhe worker-it:
@@ -140,7 +143,7 @@ komandat refuzohen. Revokimi nuk fshin mesazhet historike në Discord.
 ## Verifikimi lokal
 
 `python -m unittest discover -s tests -p "test_discord*.py" -v`, nga `backend`,
-mbulon 44 teste pa lidhje me Discord/OpenAI/databazën. Instalo varësitë opsionale
+mbulon 48 teste pa lidhje me Discord/OpenAI/databazën. Instalo varësitë opsionale
 për të përfshirë testet e worker-it. `npm run build` dhe lint-i i faqes së re
 kaluan. Kontrolli i plotë TypeScript dhe lint-i i sidebar-it raportojnë gabime
 ekzistuese jashtë integrimit. Migrimi nuk është aplikuar në databazën reale;
