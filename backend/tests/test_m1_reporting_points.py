@@ -14,6 +14,41 @@ from app.api.routers.m1_reporting_points import ManualAnswersPayload
 DAY = date(2026, 10, 13)
 
 
+def ga_task(**changes):
+    return SimpleNamespace(**{
+        "id": uuid.uuid4(), "title": "EF: Detyre", "status": "TODO", "progress_percentage": 0,
+        "created_at": DAY, "start_date": DAY, "due_date": DAY, "finish_period": "AM",
+        "completed_at": None, "is_deadline_important": False, "one_h_marker": None, **changes,
+    })
+
+
+def test_ga_tasks_keep_personal_symbols_and_m2_delivery_in_separate_tables():
+    origin = uuid.uuid4()
+    tasks = [ga_task(one_h_marker="F"), ga_task(one_h_marker="FLAG"),
+             ga_task(one_h_marker="M2", finish_period="PM"),
+             ga_task(one_h_marker="M2_M3", finish_period="PM"),
+             ga_task(one_h_marker="M2", is_personal=True, ga_note_origin_id=origin)]
+    excluded = [ga_task(one_h_marker="M3"), ga_task(one_h_marker="M2", due_date=date(2026, 10, 12)),
+                ga_task(one_h_marker="F", finish_period="PM")]
+    sections = service.select_ga_tasks(tasks + excluded, [], DAY,
+                                      personal_titles={origin: "EF/GA: Personal"})
+    rows = sections["ga_progress"]
+    assert {row["task_id"] for row in rows} == {str(tasks[index].id) for index in (0, 1, 4)}
+    assert {row["task_id"] for row in sections["delivery"]} == {str(tasks[index].id) for index in (2, 3, 4)}
+    assert len(rows) == 3
+    assert next(row for row in rows if row["task_id"] == str(tasks[-1].id))["title"] == "EF/GA: Personal"
+    report = {"report_date": DAY.isoformat(), "data": sections, "manual_answers": {}}
+    tables = [block for block in service.export_blocks(report) if block["kind"] == "table"]
+    assert len(tables) == 2
+    table = tables[0]
+    assert [column[0] for column in table["columns"]] == [
+        "nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title"]
+    assert len(table["rows"]) == 3
+    assert len(tables[1]["rows"]) == 3
+    assert "M2/3" in service.render_html(report)
+    assert "EF/GA: Personal" in service.render_plain_text(report)
+
+
 def at(day, hour, minute=0):
     return datetime(day.year, day.month, day.day, hour, minute, tzinfo=service.report_timezone())
 
@@ -52,6 +87,24 @@ def test_new_tasks_include_meetings_owner_department_period_and_type():
     assert (row["assignees"], row["department"], row["am_pm"], row["task_type"]) == ("AT", "DEV", "PM", "FT")
 
 
+@pytest.mark.parametrize("due,label", [
+    (DAY, "Sot"), (date(2026, 10, 14), "Nesër"),
+    (date(2026, 10, 19), "19.10.2026"), (None, "Pa afat"),
+])
+def test_new_tasks_split_due_dates_and_marker_into_export_columns(due, label):
+    task = ga_task(created_at=at(DAY, 8), due_date=due, one_h_marker="FLAG")
+    data = service.select_sections([], [], [], [task], DAY, now=at(DAY, 10))
+    row = data["tasks"][0]
+    assert row["marker"] == "GA"
+    assert row["planned_for"] == label
+    report = {"report_date": DAY.isoformat(), "data": data}
+    cells = service._table_rows(report, "tasks")[0]
+    assert len(cells) == len(service.TABLE_COLUMNS["tasks"])
+    exported = dict(zip([column[0] for column in service.TABLE_COLUMNS["tasks"]], cells))
+    assert exported["marker"]["text"] == "GA"
+    assert exported["planned_for"]["text"] == label
+
+
 def test_new_notes_include_only_px_notes():
     yesterday = date(2026, 10, 12)
     ga_note = SimpleNamespace(id="ga", content="PX note", created_at=at(yesterday, 17), created_by="ada")
@@ -61,6 +114,30 @@ def test_new_notes_include_only_px_notes():
     data = service.select_sections([], [ga_note], [plan_note], [], DAY, now=at(DAY, 10), users=users)
 
     assert [(row["source"], row["author"]) for row in data["notes"]] == [("PX Notes", "Ada Test")]
+
+
+def test_sent_report_backfills_only_missing_planning_and_preserves_saved_values():
+    from unittest.mock import AsyncMock, MagicMock
+    today = datetime.now(service.report_timezone()).date()
+    item = ga_task(due_date=today)
+    saved = {"id": str(item.id), "title": "Saved title", "marker": "F"}
+    existing = {"id": str(uuid.uuid4()), "planned_for": "Nesër", "marker": "M2"}
+    row = SimpleNamespace(report_date=today, data={"tasks": [saved, existing]},
+                          sent_at=at(today, 8), manual_answers={"reorganization": "Jo"})
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [item]
+    db = AsyncMock()
+    db.execute.return_value = result
+    assert asyncio.run(service.backfill_saved_task_planning(db, row))
+    assert row.data["tasks"] == [{**saved, "planned_for": "Sot"}, existing]
+    assert row.sent_at == at(today, 8)
+    assert row.manual_answers == {"reorganization": "Jo"}
+    assert not asyncio.run(service.backfill_saved_task_planning(db, row))
+    db.execute.assert_awaited_once()
+    row.report_date = date(2020, 1, 1)
+    row.data = {"tasks": [saved]}
+    assert not asyncio.run(service.backfill_saved_task_planning(db, row))
+    db.execute.assert_awaited_once()
 
 
 def test_notes_converted_to_tasks_are_excluded_from_new_reports():
@@ -104,7 +181,11 @@ def test_build_data_queries_only_open_unconverted_notes(monkeypatch):
     async def context(db, tasks):
         return tasks, [], {}, {}
 
+    async def ga_context(db, day, cutoff):
+        return {"ga_progress": []}
+
     monkeypatch.setattr(service, "prepare_task_context", context)
+    monkeypatch.setattr(service, "build_ga_task_data", ga_context)
     asyncio.run(service.build_data(Db(), DAY, now=at(DAY, 10)))
 
     notes_query = statements[1]
@@ -280,12 +361,12 @@ def test_report_tables_keep_meetings_columns_and_category_colors():
         ["NR", "PERSONI", "ORA"],
         ["NR", "PERSONI", "ORA"],
         ["NR", "KUSH", "NOTE", "KRIJUAR"],
-        ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "DETYRA", "KRIJUAR"],
+        ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "DETYRA", "SIMBOLI", "PËR KUR", "KRIJUAR"],
     ]
     assert [cell["text"] for cell in tables[3]["rows"][0][1:5]] == ["AT", "DEV", "PM", "FT"]
     assert [cell["text"] for cell in tables[2]["rows"][0][1:]] == ["AT", "Shënim i ri", "13.10.2026 08:00"]
     assert tables[3]["rows"][0][5]["text"] == "Detyrë e re"
-    assert tables[3]["rows"][0][6]["text"] == "13.10.2026 08:00"
+    assert tables[3]["rows"][0][8]["text"] == "13.10.2026 08:00"
     assert [len(table["rows"][0]) for table in tables[:2]] == [3, 3]
     assert [table["rows"][0][0]["fill"] for table in tables] == ["#fee2e2", "#fef3c7", "#dbeafe", "#ffff00"]
     html = service.render_html(report)
@@ -356,7 +437,11 @@ def test_generate_reloads_all_automatic_sections_and_preserves_manual_answers(mo
     async def context(db, tasks):
         return tasks, [], {}, {}
 
+    async def ga_context(db, day, cutoff):
+        return {"ga_progress": [], "delivery": []}
+
     monkeypatch.setattr(service, "prepare_task_context", context)
+    monkeypatch.setattr(service, "build_ga_task_data", ga_context)
     answers = {"plan_changes": "Plani aktual", "reorganization": "Po"}
     report = SimpleNamespace(report_date=DAY, data={}, manual_answers=answers, generated_at=None)
     db = Db()

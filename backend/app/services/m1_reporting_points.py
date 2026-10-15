@@ -13,6 +13,7 @@ from app.models.common_entry import CommonEntry
 from app.models.department import Department
 from app.models.enums import CommonCategory, GaNoteStatus
 from app.models.ga_note import GaNote
+from app.models.plan_note import PlanNote
 from app.models.m1_reporting_points import M1ReportingPointsReport
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
@@ -24,6 +25,9 @@ from app.services.meetings_report import (
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.report_rich_text import marked_note_runs, runs_html
+from app.services import m2_reporting_points as m2, m3_reporting_points as m3
+from app.services.daily_realization_events import semantic_local_day
+from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga, one_h_marker_label
 
 TITLE = "PIKAT PER RAPORTIM M1"
 POINTS = (
@@ -33,6 +37,8 @@ POINTS = (
     ("notes", "4. NOTES TË REJA?"),
     ("tasks", "5. DETYRA TË REJA TË KRIJUARA SOT?"),
     ("reorganization", "6. A DUHET RIORGANIZIM?"),
+    ("ga_progress", "7. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA"),
+    ("delivery", "8. SA PER DOREZIM M2?"),
 )
 MANUAL_POINTS = {key: title for key, title in POINTS if key in {"plan_changes", "reorganization"}}
 
@@ -79,6 +85,16 @@ def _done_last(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: str(row.get("status") or "").upper() == "DONE")
 
 
+def _task_planning_columns(task, day: date) -> dict:
+    due = semantic_local_day(getattr(task, "due_date", None))
+    tomorrow = day + timedelta(days=1)
+    return {
+        "planned_for": ("Sot" if due == day else "Nesër" if due == tomorrow else
+                        due.strftime("%d.%m.%Y") if due else "Pa afat"),
+        "marker": one_h_marker_label(active_one_h_marker(task, day), active_one_h_marker_by_ga(task, day)),
+    }
+
+
 def select_sections(entries, ga_notes, _plan_notes, tasks, day: date, *, now: datetime | None = None,
                     users=None, departments=None, assignees=None) -> dict:
     users = users or {}
@@ -122,7 +138,8 @@ def select_sections(entries, ga_notes, _plan_notes, tasks, day: date, *, now: da
                                   "created_at": _local(task.created_at).isoformat(),
                                   "assignees": _task_owners(task, names, assignees) if hasattr(task, "assigned_to") else "-",
                                   "department": _m3_department_label(task, departments),
-                                  "am_pm": _m3_am_pm_label(task), "task_type": _m3_task_type_label(task)})
+                                  "am_pm": _m3_am_pm_label(task), "task_type": _m3_task_type_label(task),
+                                  **_task_planning_columns(task, day)})
     for key in ("absences", "delays"):
         data[key].sort(key=lambda row: (row["person"].casefold(), row["id"]))
     data["notes"] = _newest_notes_first(data["notes"])
@@ -221,6 +238,51 @@ async def reorder_saved_report_tasks(db: AsyncSession, row: M1ReportingPointsRep
     return True
 
 
+def needs_saved_task_planning(row: M1ReportingPointsReport) -> bool:
+    return row.report_date == datetime.now(report_timezone()).date() and any(
+        not task.get("planned_for") for task in (row.data or {}).get("tasks") or [])
+
+
+async def backfill_saved_task_planning(db: AsyncSession, row: M1ReportingPointsReport) -> bool:
+    if not needs_saved_task_planning(row):
+        return False
+    saved_rows = (row.data or {}).get("tasks") or []
+    ids = set()
+    for saved in saved_rows:
+        if not saved.get("planned_for"):
+            try:
+                ids.add(uuid.UUID(str(saved["id"])))
+            except (KeyError, TypeError, ValueError):
+                pass
+    tasks = (await db.execute(select(Task).where(Task.id.in_(ids)))).scalars().all() if ids else []
+    by_id = {str(task.id): task for task in tasks}
+    updated = []
+    for saved in saved_rows:
+        task = by_id.get(str(saved.get("id")))
+        if not saved.get("planned_for"):
+            planning = _task_planning_columns(task, row.report_date) if task else {"planned_for": "Pa të dhëna"}
+            saved = {**saved, "planned_for": planning["planned_for"]}
+        updated.append(saved)
+    row.data = {**row.data, "tasks": updated}
+    return True
+
+
+def select_ga_tasks(tasks, events, day: date, *, personal_titles: dict | None = None) -> dict:
+    sections = m2.select_task_sections(tasks, events, day, personal_titles=personal_titles)
+    return {key: sections[key] for key in ("ga_progress", "delivery")}
+
+
+async def build_ga_task_data(db: AsyncSession, day: date, cutoff: datetime) -> dict:
+    personal_titles = {}
+    for model, origin in ((GaNote, Task.ga_note_origin_id), (PlanNote, Task.plan_note_origin_id)):
+        personal_titles.update((await db.execute(select(model.id, model.content).join(
+            Task, origin == model.id,
+        ).where(Task.is_active.is_(True), Task.is_personal.is_(True)))).all())
+    return await m3.build_task_data(db, day, section_selector=lambda tasks, events, report_day:
+        select_ga_tasks([task for task in tasks if _local(task.created_at) <= cutoff], events, report_day,
+                        personal_titles=personal_titles))
+
+
 async def build_data(db: AsyncSession, day: date, now: datetime | None = None) -> dict:
     note_start, task_start, cutoff = reporting_windows(day, now)
     week_start = day - timedelta(days=day.weekday())
@@ -242,6 +304,7 @@ async def build_data(db: AsyncSession, day: date, now: datetime | None = None) -
     data["captured_until"] = cutoff.isoformat()
     data["task_order_version"] = 1
     data["note_author_version"] = 1
+    data.update(await build_ga_task_data(db, day, cutoff))
     return data
 
 
@@ -293,7 +356,8 @@ TABLE_COLUMNS = {
               ("created", "KRIJUAR", 135)],
     "tasks": [("nr", "NR", 32), ("assignees", "KUSH", 58), ("department", "DEP", 55),
               ("am_pm", "AM/PM", 65), ("task_type", "LLOJI", 65),
-              ("title", "DETYRA", 490), ("created", "KRIJUAR", 135)],
+              ("title", "DETYRA", 490), ("marker", "SIMBOLI", 60),
+              ("planned_for", "PËR KUR", 100), ("created", "KRIJUAR", 135)],
 }
 TASK_FILLS = {"TODO": "#ffc4ed", "IN_PROGRESS": "#ffff00", "DONE": "#c4fdc4",
               "WAITING_CLIENT": "#e2c15b", "WAITING_CONFIRMATION": "#ffedd5"}
@@ -336,6 +400,8 @@ def _table_rows(report: dict, key: str) -> list[list[dict]]:
         else:
             values = [str(index), row.get("assignees") or "-", row.get("department") or "-",
                       row.get("am_pm") or "-", row.get("task_type") or "-", _task_title(row.get("title")),
+                      row.get("marker") or "-",
+                      row.get("planned_for") or "-",
                       _created_label(row.get("created_at"))]
             fill = TASK_FILLS.get(str(row.get("status") or "").upper(), "#ffffff")
         rendered.append([{"text": str(value), "fill": fill, "color": "#000000",
@@ -358,6 +424,16 @@ def export_blocks(report: dict) -> list[dict]:
         blocks.append({"kind": "text", "text": title, "level": 2})
         if key in MANUAL_POINTS:
             blocks.append({"kind": "text", "text": report.get("manual_answers", {}).get(key) or "Pa përgjigje", "level": 0})
+        elif key in {"ga_progress", "delivery"}:
+            columns = m2.table_columns("ga_progress")
+            rows = []
+            for index, row in enumerate(report.get("data", {}).get(key) or [], 1):
+                fill, color, _ = m3.task_row_appearance(row)
+                rows.append([{"text": str(m2.table_value(report, row, column, index, "")),
+                              "fill": fill, "color": color, "bold": column in {"title", "marker"},
+                              "divider": False} for column, _, _ in columns])
+            blocks.append({"kind": "table", "columns": columns, "rows": rows} if rows else
+                          {"kind": "text", "text": "Asnjë detyrë.", "level": 0})
         else:
             rows = _table_rows(report, key)
             blocks.append({"kind": "table", "compact": key in {"absences", "delays"}, "columns": TABLE_COLUMNS[key], "rows": rows} if rows else

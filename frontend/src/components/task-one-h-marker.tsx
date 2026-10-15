@@ -16,6 +16,14 @@ export function taskOneHMarkerLabel(marker?: Task["one_h_marker"], markerByGa = 
   return markerByGa ? `(${symbol})` : symbol
 }
 
+export function TaskOneHMarkerFromLabel({ label }: { label?: string | null }) {
+  const markerByGa = Boolean(label?.startsWith("(") && label.endsWith(")"))
+  const symbol = markerByGa ? label?.slice(1, -1) : label
+  const marker = (Object.keys(SYMBOLS) as Array<NonNullable<Task["one_h_marker"]>>)
+    .find((key) => SYMBOLS[key] === symbol)
+  return marker ? <TaskOneHMarker marker={marker} markerByGa={markerByGa} /> : <>{label || "—"}</>
+}
+
 export function TaskOneHMarker({ marker, markerByGa, comment, className }: {
   marker?: Task["one_h_marker"]
   markerByGa?: boolean

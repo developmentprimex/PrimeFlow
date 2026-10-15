@@ -508,7 +508,7 @@ def test_removed_ga_reply_is_ignored_when_saving_and_exporting_old_reports():
         html = service.render_html(result)
         assert "A KA REPLY NGA GA" not in html
         assert "Pergjigje e vjeter" not in html
-        assert "1. RIORGANIZIM?" in html
+        assert "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET" in html
         titles = [block["text"] for block in service.export_blocks(result) if block["kind"] == "text" and block["level"] == 2]
         assert [title.split(". ")[0] for title in titles] == ["1", "2", "3", "4", "5"]
         plain = service.render_plain_text(result)
@@ -516,6 +516,6 @@ def test_removed_ga_reply_is_ignored_when_saving_and_exporting_old_reports():
         word = Document(io.BytesIO(service.report_attachments(result)[0][1]))
         text = "\n".join(p.text for p in word.paragraphs)
         assert "A KA REPLY NGA GA" not in text and "Pergjigje e vjeter" not in text
-        assert "1. RIORGANIZIM?" in text
+        assert service.MANUAL_POINTS["reorganization"] in text
     import asyncio
     asyncio.run(scenario())

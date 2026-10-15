@@ -394,7 +394,7 @@ test("removed GA reply stays hidden and is ignored in old drafts", () => {
     report, answers: { ga_reply: "GA u përgjigj" }, disabled: false, onAnswerChange: () => {},
   }))
   assert.doesNotMatch(html, /A KA REPLY NGA GA|m2-ga-reply|ga_reply|GA u përgjigj/)
-  assert.match(html, /1\. RIORGANIZIM\?/)
+  assert.match(html, /1\. RIORGANIZIM\? \(PARA PAUZES- PAS KO TE DET PM\)- PAS PAUZES, TAKIM INT, NDARJE E DET/)
   const map = new Map()
   const storage = { getItem: (key) => map.get(key) || null, setItem: (key, value) => map.set(key, value) }
   writeManualDraft(storage, "u1", report.report_date, { ga_reply: "GA u përgjigj", reorganization: "Po" })

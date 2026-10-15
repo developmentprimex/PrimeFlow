@@ -23,7 +23,7 @@ from app.services.task_marker import active_one_h_marker, active_one_h_marker_by
 
 TITLE = "PIKAT PER RAPORTIM M2"
 MANUAL_POINTS = {
-    "reorganization": "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?",
+    "reorganization": "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
 }
 AUTO_TITLES = {
     "unfinished_priority": f"2. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",

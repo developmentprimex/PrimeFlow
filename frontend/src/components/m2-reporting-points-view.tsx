@@ -7,7 +7,7 @@ import { reportDate, type TaskRow } from "@/components/m3-reporting-points-view"
 
 export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
 export const MANUAL_POINTS = {
-  reorganization: "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?",
+  reorganization: "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
 } as const
 export type ManualKey = keyof typeof MANUAL_POINTS | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>

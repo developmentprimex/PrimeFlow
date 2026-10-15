@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from app.services.compact_report_questions import question_parts, questions_html, layout_question_parts
 from app.config import settings
+from app.services.one_h_ga_summary import GaTaskCounts, build_ga_summary, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
 
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
@@ -252,6 +253,7 @@ class ReportDocument(BaseModel):
     board_reminders: list[ReportReminderQuestion] = Field(default_factory=_board_reminder_questions)
     reminders: list[ReportReminderQuestion] = Field(default_factory=list)
     undiscussed_notes: list[ReportUndiscussedNote] = Field(default_factory=list)
+    ga_task_summary: list[GaTaskCounts] = Field(default_factory=list)
     truncated: bool = False
 
     @property
@@ -657,6 +659,11 @@ def build_report_document(
         board_reminders=_board_reminder_questions(report_day),
         reminders=list(reminders or []),
         undiscussed_notes=list(undiscussed_notes or []),
+        ga_task_summary=build_ga_summary(data, [
+            (task, bucket == "personal")
+            for bucket in ("oneH", "blocked", "important", "r1", "personal")
+            for task in filter_tasks(one_h if bucket == "oneH" else items.get(bucket) or [], report_day)
+        ]),
     )
 
 
@@ -681,6 +688,8 @@ def render_plain_text(document: ReportDocument) -> str:
                 if question.guidance:
                     reminder_lines.append(f"   {question.guidance}")
         blocks.append("\n".join(reminder_lines))
+    if document.ga_task_summary:
+        blocks.append(GA_SUMMARY_TITLE + "\n" + summary_text(document.ga_task_summary))
     if document.undiscussed_notes:
         note_lines = [UNDISCUSSED_NOTES_SECTION_TITLE, "NR | NOTE | KUSH | DATA"]
         for index, note in enumerate(document.undiscussed_notes, 1):
@@ -993,6 +1002,7 @@ def render_html(
     elif document.reminders:
         body_chunks.append(reminder_column(REMINDER_SECTION_TITLE, document.reminders, show_extra=False))
 
+    body_chunks.append(summary_html(document.ga_task_summary))
     if document.undiscussed_notes:
         body_chunks.append(section_title_block(UNDISCUSSED_NOTES_SECTION_TITLE))
         body_chunks.append(undiscussed_notes_table(document.undiscussed_notes))
@@ -1223,6 +1233,13 @@ def render_docx(document: ReportDocument) -> bytes:
                 cell.text = value
                 for run in cell.paragraphs[0].runs:
                     run.font.size = Pt(9)
+    if document.ga_task_summary:
+        doc.add_paragraph(GA_SUMMARY_TITLE)
+        summary_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(summary_cell, "#eff6ff")
+        run = summary_cell.paragraphs[0].add_run(summary_text(document.ga_task_summary))
+        run.font.size = Pt(9)
+        run.bold = True
     for section in document.sections:
         doc.add_paragraph()
         section_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
@@ -1295,6 +1312,7 @@ def render_png(document: ReportDocument) -> bytes:
 
     estimated_lines = (
         15
+        + (4 + len(textwrap.wrap(summary_text(document.ga_task_summary), 105)) if document.ga_task_summary else 0)
         + len(document.sections) * 3
         + sum(
             2 + len(textwrap.wrap(question.text, 90)) + len(textwrap.wrap(question.guidance or "", 95))
@@ -1468,6 +1486,15 @@ def render_png(document: ReportDocument) -> bytes:
         y += 14
 
     draw_undiscussed_notes()
+    if document.ga_task_summary:
+        draw.text((margin + 8, y), GA_SUMMARY_TITLE, fill="#0f172a", font=bold)
+        y += 36
+        lines = textwrap.wrap(summary_text(document.ga_task_summary), 105)
+        row_height = 20 + len(lines) * 28
+        draw.rectangle((margin, y, width - margin, y + row_height), fill="#eff6ff", outline="#cbd5e1")
+        for index, line in enumerate(lines):
+            draw.text((margin + 10, y + 10 + index * 28), line, fill="#0f172a", font=font)
+        y += row_height + 18
     for section in document.sections:
         draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
         draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
