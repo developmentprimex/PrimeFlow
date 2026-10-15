@@ -47,6 +47,8 @@ class ManualAnswersPayload(BaseModel):
     @field_validator("manual_answers")
     @classmethod
     def validate_answers(cls, value: dict[str, str]) -> dict[str, str]:
+        # Ignore the removed point from tabs or drafts loaded before the update.
+        value = {key: answer for key, answer in value.items() if key != "ga_reply"}
         for key in value:
             if key in MANUAL_POINTS:
                 continue
