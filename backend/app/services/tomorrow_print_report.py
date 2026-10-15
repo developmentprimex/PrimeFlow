@@ -373,6 +373,29 @@ def _one_h_slot_from_label(label: str) -> str | None:
     return slot if slot in VALID_1H_SLOTS else None
 
 
+def _project_covered_initials(payload: dict[str, Any], target_date: date) -> dict[str, list[str]]:
+    from app.services.one_h_project_coverage import is_project_coverage_department
+
+    departments = {str(row.get("id")): row for row in payload.get("departments") or []}
+    users = {str(row.get("id")): _initials(str(row.get("full_name") or row.get("username") or row.get("email") or ""))
+             for row in payload.get("users") or []}
+    covered: dict[str, list[str]] = {slot: [] for slot in (*sorted(VALID_1H_SLOTS), "BLL")}
+    for project in (payload.get("items") or {}).get("priority") or []:
+        if _item_date(project) != target_date:
+            continue
+        department = departments.get(str(project.get("department_id")), {})
+        if not is_project_coverage_department(department.get("code"), project.get("department_name") or department.get("name")):
+            continue
+        periods = project.get("projectTaskAssigneesByPeriod") or {}
+        for slot in covered:
+            period = "AM" if slot in {"10:00", "11:00", "11:50"} else "PM"
+            for user_id in periods.get(period) or []:
+                initials = users.get(str(user_id))
+                if initials and initials not in covered[slot]:
+                    covered[slot].append(initials)
+    return covered
+
+
 def _missing_task_initials(
     payload: dict[str, Any], target_date: date, *, bucket: str, slots: tuple[str, ...]
 ) -> dict[str, list[str]]:
@@ -1352,6 +1375,7 @@ def _html_table(
     missing_blocked_initials: list[str] | None = None,
     missing_blocked_with_one_h_at_16_initials: list[str] | None = None,
     missing_one_h_at_16_with_blocked_initials: list[str] | None = None,
+    project_covered_by_slot: dict[str, list[str]] | None = None,
 ) -> str:
     header = "MEETING" if meeting else "TASK"
     label_header = "LLOJI" if meeting else "LLOJI DHE SLOTI"
@@ -1367,11 +1391,14 @@ def _html_table(
         label_html = "<br>".join(escaped_lines)
         if label.splitlines()[0].strip().upper() == "BLL":
             with_one_h_at_16 = set(missing_blocked_with_one_h_at_16_initials or [])
+            with_project = set((project_covered_by_slot or {}).get("BLL", []))
+            with_one_h_at_16.update(with_project)
             red_initials = [value for value in missing_blocked_initials or [] if value not in with_one_h_at_16]
             green_initials = [value for value in missing_blocked_initials or [] if value in with_one_h_at_16]
             for initials, attribute, color in (
                 (red_initials, "data-missing-blocked-users", "#DC2626"),
-                (green_initials, "data-missing-blocked-with-one-h-at-16-users", "#15803D"),
+                ([v for v in green_initials if v not in with_project], "data-missing-blocked-with-one-h-at-16-users", "#15803D"),
+                ([v for v in green_initials if v in with_project], "data-missing-blocked-with-project-users", "#15803D"),
             ):
                 if not initials:
                     continue
@@ -1385,11 +1412,14 @@ def _html_table(
         missing = (missing_one_h_by_slot or {}).get(slot or "", [])
         if missing:
             with_blocked = set(missing_one_h_at_16_with_blocked_initials or []) if slot == "16:00" else set()
+            with_project = set((project_covered_by_slot or {}).get(slot or "", []))
+            with_blocked.update(with_project)
             red_initials = [value for value in missing if value not in with_blocked]
             green_initials = [value for value in missing if value in with_blocked]
             for initials, attribute, color in (
                 (red_initials, "data-missing-one-h-users", "#DC2626"),
-                (green_initials, "data-missing-one-h-with-blocked-users", "#15803D"),
+                ([v for v in green_initials if v not in with_project], "data-missing-one-h-with-blocked-users", "#15803D"),
+                ([v for v in green_initials if v in with_project], "data-missing-one-h-with-project-users", "#15803D"),
             ):
                 if not initials:
                     continue
@@ -1842,6 +1872,7 @@ def _excel_table_attachment(
     checklist_date: date | None = None,
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
     report_day_label: str = "SOT",
+    project_covered_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Create the same printable grid as an XLSX attachment for email recipients."""
     workbook = Workbook()
@@ -2106,14 +2137,14 @@ def _excel_table_attachment(
                             TextBlock(InlineFont(b=True, sz=14), personal_time),
                         ])
                     else:
-                        slot = _one_h_slot_from_label(label)
+                        slot = _one_h_slot_from_label(label) or ("BLL" if label.strip() == "BLL" else None)
                         missing = (missing_one_h_by_slot or {}).get(slot or "", [])
                         if missing:
-                            label_value = CellRichText([
-                                TextBlock(InlineFont(b=True, sz=10), label),
-                                "\n",
-                                TextBlock(InlineFont(b=True, sz=10, color="DC2626"), " • ".join(missing)),
-                            ])
+                            covered = set((project_covered_by_slot or {}).get(slot or "", []))
+                            label_value = CellRichText([TextBlock(InlineFont(b=True, sz=10), label)])
+                            for group, color in (([x for x in missing if x not in covered], "DC2626"), ([x for x in missing if x in covered], "15803D")):
+                                if group:
+                                    label_value.extend(["\n", TextBlock(InlineFont(b=True, sz=10, color=color), " • ".join(group))])
                     label_cell = sheet.cell(row_number, 2, label_value)
                     label_cell.font = Font(bold=True, size=10)
                     if personal:
@@ -2371,6 +2402,7 @@ def _docx_table_attachment(
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
     report_day_label: str = "SOT",
     checklist_date: date | None = None,
+    project_covered_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Create a landscape Word report from the same rows and colours as HTML."""
     document = Document()
@@ -2603,14 +2635,18 @@ def _docx_table_attachment(
             set_cell(row.cells[0], str(number) if chunk_index == 0 else "", center=True)
             set_cell(row.cells[1], label if chunk_index == 0 else "", bold=True)
             if chunk_index == 0:
-                slot = _one_h_slot_from_label(label)
+                slot = _one_h_slot_from_label(label) or ("BLL" if label.strip() == "BLL" else None)
                 missing = (missing_one_h_by_slot or {}).get(slot or "", [])
                 if missing:
-                    missing_run = row.cells[1].paragraphs[0].add_run(f"\n{' • '.join(missing)}")
-                    missing_run.font.name = "Arial"
-                    missing_run.font.size = Pt(7.5)
-                    missing_run.bold = True
-                    missing_run.font.color.rgb = RGBColor(220, 38, 38)
+                    covered = set((project_covered_by_slot or {}).get(slot or "", []))
+                    for group, color in (([x for x in missing if x not in covered], RGBColor(220, 38, 38)), ([x for x in missing if x in covered], RGBColor(21, 128, 61))):
+                        if not group:
+                            continue
+                        missing_run = row.cells[1].paragraphs[0].add_run(f"\n{' • '.join(group)}")
+                        missing_run.font.name = "Arial"
+                        missing_run.font.size = Pt(7.5)
+                        missing_run.bold = True
+                        missing_run.font.color.rgb = color
             for item_index in range(6):
                 if item_index >= len(chunk):
                     set_cell(row.cells[item_index + 2], "")
@@ -2693,6 +2729,7 @@ def _core_png_table_attachment(
     report_day_label: str = "SOT",
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
     checklist_date: date | None = None,
+    project_covered_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Render the Today SHTYPI task grid with the same task-state colours."""
     margin = 28
@@ -2727,10 +2764,13 @@ def _core_png_table_attachment(
         chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
         for chunk_index, chunk in enumerate(chunks):
             label_line_count = len(wrap(label, bold, column_widths[1] - 12))
-            slot = _one_h_slot_from_label(label)
+            slot = _one_h_slot_from_label(label) or ("BLL" if label.strip() == "BLL" else None)
             missing = (missing_one_h_by_slot or {}).get(slot or "", [])
             if missing:
-                label_line_count += len(wrap(" • ".join(missing), small_bold, column_widths[1] - 12))
+                covered = set((project_covered_by_slot or {}).get(slot or "", []))
+                for group in ([v for v in missing if v not in covered], [v for v in missing if v in covered]):
+                    if group:
+                        label_line_count += len(wrap(" • ".join(group), small_bold, column_widths[1] - 12))
             line_counts = [label_line_count]
             for item in chunk:
                 # AM/PM and 08:00 share the top badge row. A deadline date
@@ -2867,17 +2907,17 @@ def _core_png_table_attachment(
                 for line_index, line in enumerate(label_lines):
                     draw.text((x + 6, y + 6 + line_index * 20), line, fill="#111827", font=bold)
                 if column == 1 and chunk_index == 0:
-                    slot = _one_h_slot_from_label(label)
+                    slot = _one_h_slot_from_label(label) or ("BLL" if label.strip() == "BLL" else None)
                     missing = (missing_one_h_by_slot or {}).get(slot or "", [])
-                    for missing_index, missing_line in enumerate(
-                        wrap(" • ".join(missing), small_bold, column_widths[column] - 12)
-                    ):
-                        draw.text(
-                            (x + 6, y + 8 + (len(label_lines) + missing_index) * 20),
-                            missing_line,
-                            fill=DEADLINE_COLOR,
-                            font=small_bold,
-                        )
+                    covered = set((project_covered_by_slot or {}).get(slot or "", []))
+                    missing_index = 0
+                    for group, color in (([v for v in missing if v not in covered], DEADLINE_COLOR), ([v for v in missing if v in covered], "#15803D")):
+                        for missing_line in wrap(" • ".join(group), small_bold, column_widths[column] - 12) if group else []:
+                            draw.text(
+                                (x + 6, y + 8 + (len(label_lines) + missing_index) * 20),
+                                missing_line, fill=color, font=small_bold,
+                            )
+                            missing_index += 1
             x = right
         for item_index in range(6):
             right = x + column_widths[2 + item_index]
@@ -3168,6 +3208,7 @@ def _png_table_attachment(
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
     report_day_label: str = "SOT",
     checklist_date: date | None = None,
+    project_covered_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Render one PNG containing the closing tables and the canonical task grid."""
     filename, core_bytes, mime_type = _core_png_table_attachment(
@@ -3178,6 +3219,7 @@ def _png_table_attachment(
         report_day_label,
         missing_one_h_by_slot,
         checklist_date,
+        project_covered_by_slot=project_covered_by_slot,
     )
     if not closing_sections:
         return filename, core_bytes, mime_type
@@ -3322,6 +3364,7 @@ async def _build_print_report(
     items = payload.get("items") or {}
     comment_initials = _comment_user_initials(payload)
     missing_one_h_by_slot = _missing_one_h_initials(payload, target_date)
+    project_covered_by_slot = _project_covered_initials(payload, target_date)
     missing_blocked_users = _missing_blocked_initials(payload, target_date)
     missing_at_16 = set(missing_one_h_by_slot.get("16:00", []))
     missing_blocked_with_one_h_at_16 = [value for value in missing_blocked_users if value not in missing_at_16]
@@ -3377,7 +3420,7 @@ async def _build_print_report(
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div data-report-intro="true">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users, missing_blocked_with_one_h_at_16_initials=missing_blocked_with_one_h_at_16, missing_one_h_at_16_with_blocked_initials=missing_one_h_at_16_with_blocked)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users, missing_blocked_with_one_h_at_16_initials=missing_blocked_with_one_h_at_16, missing_one_h_at_16_with_blocked_initials=missing_one_h_at_16_with_blocked, project_covered_by_slot=project_covered_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
@@ -3432,9 +3475,15 @@ async def _build_print_report(
         "TASKS",
     ])
     for label, values, personal in task_rows:
-        slot = _one_h_slot_from_label(label)
-        missing = missing_one_h_by_slot.get(slot or "", [])
-        missing_label = f" [PA 1H: {', '.join(missing)}]" if missing else ""
+        slot = _one_h_slot_from_label(label) or ("BLL" if label.strip() == "BLL" else None)
+        missing = missing_blocked_users if slot == "BLL" else missing_one_h_by_slot.get(slot or "", [])
+        covered = set(project_covered_by_slot.get(slot or "", []))
+        unjustified = [value for value in missing if value not in covered]
+        justified = [value for value in missing if value in covered]
+        missing_label = f" [PA {'BLL' if slot == 'BLL' else '1H'}: {', '.join(unjustified)}]" if unjustified else ""
+        if justified:
+            period = "AM" if slot in {"10:00", "11:00", "11:50"} else "PM"
+            missing_label += f" [ME DETYRË PROJEKTI {period}: {', '.join(justified)}]"
         plain_rows.append(
             f"{label}{missing_label}: "
             + "; ".join(
@@ -3472,13 +3521,18 @@ async def _build_print_report(
         "plain_text": "\n".join(plain_rows),
     }
     if include_attachment:
+        attachment_missing_by_slot = {**missing_one_h_by_slot, "BLL": missing_blocked_users}
+        attachment_covered_by_slot = {key: list(values) for key, values in project_covered_by_slot.items()}
+        attachment_covered_by_slot["BLL"].extend(missing_blocked_with_one_h_at_16)
+        attachment_covered_by_slot["16:00"].extend(missing_one_h_at_16_with_blocked)
         attachments = [
             _excel_table_attachment(
                 task_rows, meeting_rows, target_date, include_meetings=include_meetings,
                 comment_initials=comment_initials, meeting_sections=meeting_sections,
                 closing_sections=closing_sections,
                 checklist_date=checklist_date,
-                missing_one_h_by_slot=missing_one_h_by_slot,
+                missing_one_h_by_slot=attachment_missing_by_slot,
+                project_covered_by_slot=attachment_covered_by_slot,
                 report_day_label=report_day_label,
             )
         ]
@@ -3490,9 +3544,10 @@ async def _build_print_report(
                     comment_initials,
                     meeting_sections,
                     closing_sections,
-                    missing_one_h_by_slot,
+                    attachment_missing_by_slot,
                     report_day_label,
                     checklist_date,
+                    project_covered_by_slot=attachment_covered_by_slot,
                 )
             )
         if include_docx:
@@ -3503,7 +3558,8 @@ async def _build_print_report(
                     closing_sections=closing_sections,
                     meeting_sections=meeting_sections,
                     comment_initials=comment_initials,
-                    missing_one_h_by_slot=missing_one_h_by_slot,
+                    missing_one_h_by_slot=attachment_missing_by_slot,
+                    project_covered_by_slot=attachment_covered_by_slot,
                     report_day_label=report_day_label,
                     checklist_date=checklist_date,
                 )

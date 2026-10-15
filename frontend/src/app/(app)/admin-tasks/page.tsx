@@ -4855,10 +4855,8 @@ export default function AdminTasksPage() {
       }
     }
 
-    // Build hidden-users-per-date map for full-day PV/Feste or full-day Mungese.
-    // A Mungese is considered full-day when its time range covers the whole work
-    // day (from <= 08:00 and to >= 16:30); this also matches the backend default
-    // of 08:00-23:00 used when no explicit range is stored.
+    // Match 1H SHTYPI: explicit full-day leave or a PV/MUNG range covering
+    // 08:00-16:00 hides the user's work for that date.
     const hiddenUsersByDate = new Map<string, Set<string>>()
     const addHidden = (dateStr: string, uid: string | undefined | null) => {
       if (!uid) return
@@ -4870,7 +4868,9 @@ export default function AdminTasksPage() {
       set.add(uid)
     }
     for (const lv of commonData.leave) {
-      if (!lv.fullDay || !lv.userId) continue
+      const start = parseTimeToMinutes(lv.from)
+      const end = parseTimeToMinutes(lv.to)
+      if (!lv.userId || (!lv.fullDay && !(start !== null && end !== null && start <= 8 * 60 && end >= 16 * 60))) continue
       for (const d of datesToUse) {
         if (d >= lv.startDate && d <= lv.endDate) {
           addHidden(d, lv.userId)
@@ -4879,7 +4879,9 @@ export default function AdminTasksPage() {
     }
     for (const ab of commonData.absent) {
       if (!ab.userId) continue
-      if (ab.from <= "08:00" && ab.to >= "16:30") {
+      const start = parseTimeToMinutes(ab.from)
+      const end = parseTimeToMinutes(ab.to)
+      if (start !== null && end !== null && start <= 8 * 60 && end >= 16 * 60) {
         addHidden(ab.date, ab.userId)
       }
     }
