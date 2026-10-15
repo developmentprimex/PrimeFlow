@@ -17,7 +17,7 @@ type TaskRow = { id: string; title: string; status: string; created_at: string; 
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
-  data: { absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[] }
+  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -71,7 +71,7 @@ function Created({ rows, kind }: { rows: NoteRow[] | TaskRow[]; kind: "note" | "
   return <Grid name={kind === "note" ? "Notes të reja" : "Detyrat e reja"} flexColumnIndex={kind === "note" ? 2 : 5}
     labels={kind === "note" ? ["NR", "KUSH", "NOTE", "KRIJUAR"] : ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "DETYRA", "KRIJUAR"]}
     widths={kind === "note" ? [32, 48, 510, 150] : [32, 58, 55, 65, 65, 510, 150]}
-    empty={kind === "note" ? "Asnjë note e re në këtë interval." : "Asnjë detyrë e krijuar deri në 08:30."}
+    empty={kind === "note" ? "Asnjë note e re në këtë interval." : "Asnjë detyrë e krijuar në këtë interval."}
     rows={rows.map((row, index) => ({ id: row.id, fill: kind === "note" ? "#dbeafe" : STATUS_COLORS[(row as TaskRow).status] || "#ffffff", cells: kind === "note" ? [
       index + 1, <strong key="author">{noteAuthorInitials((row as NoteRow).author)}</strong>,
       <div key="note" className="whitespace-pre-wrap">{renderMarkedNoteContent((row as NoteRow).content)}</div>,
@@ -88,6 +88,7 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
   report: ReportingPointsReport; answers: ManualAnswers; disabled: boolean
   onAnswerChange: (key: ManualKey, value: string) => void
 }) {
+  const cutoffTime = report.data.captured_until ? reportTime(report.data.captured_until) : "08:30"
   const manual = (key: ManualKey, title: string) => <Point id={`m1-${key}`} title={title}>
     <div className="space-y-2 p-5"><Label htmlFor={`m1-answer-${key}`} className="text-sm">Përgjigjja / komenti</Label>
       <Textarea id={`m1-answer-${key}`} value={answers[key] || ""} disabled={disabled} maxLength={10000} autoResize
@@ -95,12 +96,12 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
     </div>
   </Point>
   return <div className="space-y-5">
-    <div><h2 className="text-xl font-bold">PIKAT PËR RAPORTIM M1</h2><p className="mt-1 text-sm text-muted-foreground">Gjendja e mëngjesit për {reportDate(report.report_date)}.</p></div>
+    <div><h2 className="text-xl font-bold">PIKAT PËR RAPORTIM M1</h2><p className="mt-1 text-sm text-muted-foreground">Gjendja për {reportDate(report.report_date)} deri në {cutoffTime}.</p></div>
     <Point id="m1-absences" title="1. MUNGESA" count={(report.data.absences || []).length}><Attendance rows={report.data.absences || []} kind="absence" /></Point>
     <Point id="m1-delays" title="2. VONESA" count={(report.data.delays || []).length}><Attendance rows={report.data.delays || []} kind="delay" /></Point>
     {manual("plan_changes", "3. A KA NDRYSHIM TË PLANIT / PRIORITETEVE?")}
-    <Point id="m1-notes" title="4. NOTES TË REJA?" count={(report.data.notes || []).length} description="Të krijuara nga dje 16:30 deri sot 08:30."><Created rows={report.data.notes || []} kind="note" /></Point>
-    <Point id="m1-tasks" title="5. DETYRA TË REJA TË KRIJUARA SOT?" count={(report.data.tasks || []).length} description="Të krijuara sot nga 00:00 deri në 08:30."><Created rows={report.data.tasks || []} kind="task" /></Point>
+    <Point id="m1-notes" title="4. NOTES TË REJA?" count={(report.data.notes || []).length} description={`Të krijuara nga dje 16:30 deri sot ${cutoffTime}.`}><Created rows={report.data.notes || []} kind="note" /></Point>
+    <Point id="m1-tasks" title="5. DETYRA TË REJA TË KRIJUARA SOT?" count={(report.data.tasks || []).length} description={`Të krijuara sot nga 00:00 deri në ${cutoffTime}.`}><Created rows={report.data.tasks || []} kind="task" /></Point>
     {manual("reorganization", "6. A DUHET RIORGANIZIM?")}
   </div>
 }

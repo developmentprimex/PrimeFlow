@@ -52,15 +52,16 @@ const answerKey = `delivery:${taskId}`
 const row = { task_id: taskId, title: "Detyra <script>", assignees: "EF", department: "DEV", project: "P", status: "TODO", progress: 0, am_pm: "AM", task_type: "1H", marker: "M2/3" }
 const report = { id: "report", report_date: "2026-10-06", manual_answers: {}, data: { delivery: [row] }, status: "DRAFT" }
 
-test("M2 presents all four points with a final per-task manual answer", () => {
+test("M2 presents all six points with a final per-task manual answer", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: { reorganization: "Riorganizo", [answerKey]: "Dorezuar", [`delivery_choice:${taskId}`]: "PO" }, disabled: false, onAnswerChange: () => {},
   }))
-  assert.match(html, /1\. RIORGANIZIM\?/)
-  assert.match(html, /2\. DET TE PAKRYERA, 08:00\/DEADLINE/)
-  assert.match(html, /3\. A KA DET/)
-  assert.match(html, /4\. A JAN. DOR.ZUAR/)
-  assert.equal((html.match(/<textarea/g) || []).length, 2)
+  assert.match(html, /2\. RIORGANIZIM\?/)
+  assert.match(html, /3\. DET TE PAKRYERA, 08:00\/DEADLINE\/AM/)
+  assert.match(html, /4\. A KA DET/)
+  assert.match(html, /5\. PROGRESI I DET ME GA \(AM\)/)
+  assert.match(html, /6\. SA PER DOREZIM M2\?/)
+  assert.equal((html.match(/<textarea/g) || []).length, 3)
   assert.match(html, /Dorezuar/)
   assert.match(html, /M2\/3/)
   assert.match(html, />SIMBOLI<\/th><th[^>]*>TITULLI<\/th>/)
@@ -74,7 +75,7 @@ test("M2 presents all four points with a final per-task manual answer", () => {
   assert.match(html, /P.RGJIGJJA MANUALE<\/th><\/tr>/)
 })
 
-test("unfinished priority tasks appear second with due labels and priority styling", () => {
+test("unfinished priority tasks appear third with due labels and priority styling", () => {
   const priority = { assignees: "ER", department: "GD", am_pm: "AM", status: "IN_PROGRESS", priority: "DEADLINE / 08:00",
     task_type: "PRJK", title: "08:00 Detyre <test>", due_label: "SOT", deadline_important: true, eight_am: true }
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
@@ -91,11 +92,11 @@ test("unfinished priority tasks appear second with due labels and priority styli
   assert.doesNotMatch(section, /<textarea|<select|>STATUS<\/th>/)
 })
 
-test("read-only reports keep both manual fields disabled", () => {
+test("read-only reports keep all manual fields disabled", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: {}, disabled: true, onAnswerChange: () => {},
   }))
-  assert.equal((html.match(/<textarea[^>]*disabled/g) || []).length, 2)
+  assert.equal((html.match(/<textarea[^>]*disabled/g) || []).length, 3)
 })
 
 test("delivery totals count only PO answers for tasks currently in the report", () => {
@@ -103,9 +104,9 @@ test("delivery totals count only PO answers for tasks currently in the report", 
   const props = { report: { ...report, data: { delivery: rows } }, disabled: false, onAnswerChange: () => {} }
   const answers = { [`delivery_choice:${taskId}`]: "PO", "delivery_choice:second": "JO", "delivery_choice:removed": "PO" }
   let html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, { ...props, answers }))
-  assert.match(html, /TOTALI\/DËRGUAR: <span[^>]*>3\/1<\/span>/)
+  assert.match(html, /SA\/TOTALI: <span[^>]*>1\/3<\/span>/)
   html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, { ...props, answers: { ...answers, "delivery_choice:second": "PO" } }))
-  assert.match(html, /TOTALI\/DËRGUAR: <span[^>]*>3\/2<\/span>/)
+  assert.match(html, /SA\/TOTALI: <span[^>]*>2\/3<\/span>/)
 })
 
 test("each postponement table has a saved manual comment per task", () => {
@@ -366,4 +367,37 @@ test("a failed automatic save preserves the entered answers and the reload draft
   await reloaded.flush()
   assert.equal(reloaded.answers()[answerKey], "Mos e humb përgjigjen")
   reloaded.unmount()
+})
+
+
+test("GA morning tasks appear after postponements with matching colors and eight columns", () => {
+  const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+    report: { ...report, data: { ...report.data, ga_progress: [
+      { ...row, marker: "GA", progress: 37.5, start_date: "2026-10-01", due_date: "2026-10-09", status: "IN_PROGRESS" },
+      { ...row, task_id: "done", marker: "F", progress: 100, status: "DONE" },
+    ] } }, answers: {}, disabled: false, onAnswerChange: () => {},
+  }))
+  assert.ok(html.indexOf('id="m2-postponed"') < html.indexOf('id="m2-ga-progress"'))
+  assert.ok(html.indexOf('id="m2-ga-progress"') < html.indexOf('id="m2-delivery"'))
+  const section = html.slice(html.indexOf('id="m2-ga-progress"'), html.indexOf('aria-labelledby="m2-delivery"'))
+  assert.equal((section.match(/<th /g) || []).length, 8)
+  assert.doesNotMatch(section, /START DATE|DUE DATE|PROGRESI<\/th>|37.5%|100%/)
+  assert.match(section, /background:#FFFF00/)
+  assert.match(section, /background:#C4FDC4/)
+  assert.match(section, />GA<\/td>/)
+  assert.doesNotMatch(section, /<textarea|<select/)
+})
+
+
+test("GA reply is the first manual point and its draft survives reload", () => {
+  const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+    report, answers: { ga_reply: "GA u përgjigj" }, disabled: false, onAnswerChange: () => {},
+  }))
+  assert.match(html, /1\. \(GA\) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA\?/)
+  assert.ok(html.indexOf('id="m2-ga-reply"') < html.indexOf('id="m2-reorganization"'))
+  assert.match(html, /<textarea[^>]*id="ga_reply"[^>]*>GA u përgjigj<\/textarea>/)
+  const map = new Map()
+  const storage = { getItem: (key) => map.get(key) || null, setItem: (key, value) => map.set(key, value) }
+  writeManualDraft(storage, "u1", report.report_date, { ga_reply: "GA u përgjigj" })
+  assert.equal(readManualDraft(storage, "u1", report.report_date).ga_reply, "GA u përgjigj")
 })

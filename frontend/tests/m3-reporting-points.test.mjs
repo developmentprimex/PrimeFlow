@@ -46,22 +46,21 @@ function render(overrides = {}, answers = {}, disabled = false) {
   }))
 }
 
-test("both report blocks contain four separate editable manual answers", () => {
+test("M3 contains three editable manual answers without the removed GA section", () => {
   const html = render({}, { underload: "Përgjigje e ruajtur", ga_reorganization: "Riorganizo ekipin" })
   assert.match(html, /PIKAT PËR RAPORTIM M3/)
-  assert.match(html, /PIKAT PËR RAPORTIM PËR GA/)
-  assert.equal((html.match(/<textarea/g) || []).length, 4)
+  assert.doesNotMatch(html, /PIKAT PËR RAPORTIM PËR GA/)
+  assert.equal((html.match(/<textarea/g) || []).length, 3)
   assert.match(html, /Përgjigje e ruajtur/)
-  assert.match(html, /Riorganizo ekipin/)
+  assert.doesNotMatch(html, /Riorganizo ekipin/)
   assert.match(html, /brenda intervalit Start–Due/)
 })
 
-test("GA filter shows only its two points and retains the manual answer", () => {
-  const html = renderToStaticMarkup(React.createElement(M3ReportingPointsView, { report, answers: { underload: "Hidden answer", ga_reorganization: "GA saved answer" }, onAnswerChange: () => {}, gaOnly: true }))
-  assert.equal((html.match(/<textarea/g) || []).length, 1)
-  assert.match(html, /GA saved answer/)
-  assert.match(html, /2\. A KA DET QË SHTYHET/)
-  assert.doesNotMatch(html, /Hidden answer|NËNNGARKESË|PSE PA PREK|REALIZIMI — A MBËRRIHET/)
+test("legacy GA rows and answers stay out of the report and the GA filter is removed", () => {
+  const html = render({ data: { ga_postponed: [{ ...row, title: "Old GA-only task" }] } }, { ga_reorganization: "GA saved answer" })
+  assert.doesNotMatch(html, /GA saved answer|Old GA-only task|ga-points-title/)
+  const page = renderToStaticMarkup(React.createElement(Page))
+  assert.doesNotMatch(page, />GA<\/button>|M3 \/ GA/)
 })
 
 test("untouched splits SYS tasks and priority styling overrides status colors", () => {
@@ -97,8 +96,8 @@ test("realization includes saved department percentages and missing data", () =>
 })
 
 test("postponement cells carry risk colors and My View comments while status stays implicit", () => {
-  const rows = [{ ...row, task_id: "safe", risk: "OK", comment: "Klienti kërkoi ndryshim" },
-                { ...row, task_id: "risky", risk: "RREZIK", comment: "Për të premten" }]
+  const rows = [{ ...row, task_id: "safe", postponement_kind: "start_due", risk: "OK", comment: "Klienti kërkoi ndryshim" },
+                { ...row, task_id: "risky", postponement_kind: "start_due", risk: "RREZIK", comment: "Për të premten" }]
   const html = renderToStaticMarkup(React.createElement(ReportingTaskTable, { rows, kind: "postponed" }))
   assert.match(html, /<td[^>]*bg-green-100[^>]*>OK<\/td>/)
   assert.match(html, /<td[^>]*bg-red-100[^>]*>RREZIK<\/td>/)
@@ -177,8 +176,7 @@ test("manual questions are stacked and the header matches the M3 workspace struc
   assert.match(page, /role="tab"/)
   assert.match(page, /Raporti/)
   assert.match(page, /Historiku/)
-  assert.match(page, /aria-pressed="false"[^>]*>GA<\/button>/)
-  assert.match(page, /bg-violet-100 text-violet-900/)
+  assert.doesNotMatch(page, />GA<\/button>/)
 })
 
 test("manual draft survives a reload, stays scoped to user and day, and protects newer edits", () => {
@@ -214,7 +212,7 @@ test("the stored realization is displayed and missing data never becomes zero", 
 
 test("view-only reports keep manual fields disabled", () => {
   const html = render({ status: "SENT" }, {}, true)
-  assert.equal((html.match(/<textarea[^>]*disabled=""/g) || []).length, 4)
+  assert.equal((html.match(/<textarea[^>]*disabled=""/g) || []).length, 3)
 })
 
 test("staff can open the report and generate it while management actions remain restricted", () => {
@@ -235,7 +233,7 @@ test("report managers retain manual answers and send controls", () => {
 })
 
 // Exercise the page's save effects and user events without browser dependencies.
-function mountPage(storage, apiFetch) {
+function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" }) {
   const state = [], callbacks = [], effects = [], pending = [], timers = new Map()
   let cursor = 0, effectCursor = 0, callbackCursor = 0, timerId = 0, changed = true, tree
   const same = (left, right) => left && right && left.length === right.length && left.every((value, index) => Object.is(value, right[index]))
@@ -267,7 +265,7 @@ function mountPage(storage, apiFetch) {
   const pageModule = { exports: {} }
   vm.runInNewContext(compiled, {
     module: pageModule, exports: pageModule.exports,
-    require: (name) => name === "react" ? hooks : name === "@/lib/auth" ? { useAuth: () => ({ user: { id: "manager", role: "MANAGER" }, loading: false, apiFetch }) } : load(name),
+    require: (name) => name === "react" ? hooks : name === "@/lib/auth" ? { useAuth: () => ({ user, loading: false, apiFetch }) } : load(name),
     window: { localStorage: storage,
       setTimeout: (callback) => { const id = ++timerId; timers.set(id, callback); return id },
       clearTimeout: (id) => timers.delete(id), setInterval: () => -1, clearInterval: () => {},
@@ -300,6 +298,7 @@ function mountPage(storage, apiFetch) {
     edit(key, value) { findView(tree).props.onAnswerChange(key, value) },
     answers() { return findView(tree).props.answers },
     viewDisabled() { return findView(tree).props.disabled },
+    meetingCommentsDisabled() { return findView(tree).props.meetingCommentsDisabled },
     buttonDisabled(label) { return !!button(label).props.disabled },
     click(label) { const node = button(label); assert.ok(!node.props.disabled); return node.props.onClick() },
     fireSave() {
@@ -469,4 +468,161 @@ test("a failed automatic save preserves the entered answers and the reload draft
   await reloaded.flush()
   assert.equal(reloaded.answers().underload, "Mos e humb përgjigjen")
   reloaded.unmount()
+})
+
+
+test("M3 shows only canceled meetings in separate EXT and INT tables with M3 RAP columns and colours", () => {
+  const intId = "11111111-1111-4111-8111-111111111111"
+  const extId = "22222222-2222-4222-8222-222222222222"
+  const data = { unheld_meetings: [
+    { meeting_id: intId, meeting_type: "INT", occurrence_date: report.report_date, title: "Team sync", time: "10:00", status: "canceled", status_label: "Anuluar", origin: "MANUAL", fill: "#FFF4CC", highlighted: true },
+    { meeting_id: extId, meeting_type: "EXT", occurrence_date: report.report_date, title: "Client call", time: "15:00", status: "canceled", status_label: "Anuluar", origin: "CAL", fill: "#C9A98A", highlighted: true },
+    { meeting_id: "held", occurrence_date: report.report_date, meeting_type: "INT", title: "Already held", status: "held" },
+    { meeting_id: "unmarked", occurrence_date: report.report_date, meeting_type: "INT", title: "Not marked yet", status: "" },
+    { meeting_id: "yesterday", occurrence_date: "2026-10-04", meeting_type: "EXT", title: "Canceled yesterday", status: "canceled" },
+  ] }
+  const answers = { ["meeting_plan:" + intId]: "Nesër 10:00", ["meeting_plan:" + extId]: "Të premten" }
+  const html = render({ data }, answers)
+  assert.match(html, /4\. TAK INT\/EXT TË ANULUARA/)
+  assert.match(html, /Kur planifikohen\?/)
+  assert.match(html, /Nesër 10:00/)
+  assert.match(html, /Të premten/)
+  assert.match(html, /aria-label="TAK EXTERNE"/)
+  assert.match(html, /aria-label="TAK INTERNE"/)
+  assert.match(html, />KOHA<\/th>/)
+  assert.match(html, />MBAJTUR\?<\/th>/)
+  assert.match(html, /background-color:#FFF4CC/)
+  assert.match(html, /background-color:#C9A98A/)
+  assert.match(html, /border-y-blue-600/)
+  assert.match(html, />CAL<\/strong>/)
+  assert.match(html, />MANUAL<\/strong>/)
+  assert.ok(html.indexOf("Client call") < html.indexOf("Team sync"))
+  assert.doesNotMatch(html, /Already held|Not marked yet|Canceled yesterday|>TIPI<\/th>|>STATUSI<\/th>/)
+  assert.equal((html.match(/<textarea/g) || []).length, 5)
+  assert.equal((render({ data }, answers, true).match(/<textarea[^>]*disabled=""/g) || []).length, 5)
+})
+
+
+test("meeting planning comments survive reload, autosave, and Generate independently", async () => {
+  const values = new Map()
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  const key = "meeting_plan:11111111-1111-4111-8111-111111111111"
+  const secondKey = "meeting_plan:22222222-2222-4222-8222-222222222222"
+  let server = { ...report, report_date: day, generated_at: new Date().toISOString(), manual_answers: { [secondKey]: "Pasnesër" } }
+  const api = async (url, options) => {
+    if (options?.method === "PUT") server = { ...server, manual_answers: JSON.parse(options.body).manual_answers }
+    return { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: [], cc: [], bcc: [] } } : { ...server } }
+  }
+  const first = mountPage(storage, api)
+  await first.flush()
+  first.edit(key, "Nesër 10:00")
+  await first.flush()
+  first.unmount()
+  const reloaded = mountPage(storage, api)
+  await reloaded.flush()
+  assert.equal(reloaded.answers()[key], "Nesër 10:00")
+  assert.equal(reloaded.answers()[secondKey], "Pasnesër")
+  await reloaded.fireSave()
+  await reloaded.flush()
+  assert.equal(server.manual_answers[key], "Nesër 10:00")
+  assert.equal(server.manual_answers[secondKey], "Pasnesër")
+  assert.equal(values.size, 0)
+  await reloaded.click("Gjenero raportin")
+  await reloaded.flush()
+  assert.equal(reloaded.answers()[key], "Nesër 10:00")
+  reloaded.unmount()
+})
+
+
+test("staff meeting comments are editable and autosave only comments after reload", async () => {
+  const values = new Map()
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
+  const key = "meeting_plan:11111111-1111-4111-8111-111111111111"
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  const user = { id: "staff", role: "STAFF", full_name: "Staff" }
+  let server = { ...report, report_date: day, status: "SENT", manual_answers: { underload: "Manager answer" } }
+  const api = async (url, options) => {
+    if (options?.method === "PUT") {
+      const changed = JSON.parse(options.body).manual_answers
+      assert.deepEqual(Object.keys(changed), [key])
+      server = { ...server, manual_answers: { ...server.manual_answers, ...changed } }
+    }
+    return { ok: true, status: 200, json: async () => ({ ...server }) }
+  }
+  const first = mountPage(storage, api, user)
+  await first.flush()
+  assert.equal(first.viewDisabled(), true)
+  assert.equal(first.meetingCommentsDisabled(), false)
+  first.edit(key, "Nesër pas pauzës")
+  await first.flush()
+  first.unmount()
+  const reloaded = mountPage(storage, api, user)
+  await reloaded.flush()
+  assert.equal(reloaded.answers()[key], "Nesër pas pauzës")
+  await reloaded.fireSave()
+  await reloaded.flush()
+  assert.equal(server.manual_answers[key], "Nesër pas pauzës")
+  assert.equal(server.manual_answers.underload, "Manager answer")
+  assert.equal(values.size, 0)
+  reloaded.unmount()
+})
+
+
+test("meeting comments stay editable during Generate and newer text survives its response", async () => {
+  const values = new Map()
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
+  const key = "meeting_plan:11111111-1111-4111-8111-111111111111"
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  let server = { ...report, report_date: day }, finishGenerate
+  const api = async (url, options) => {
+    if (url.includes("/generate?")) await new Promise((resolve) => { finishGenerate = resolve })
+    if (options?.method === "PUT") server = { ...server, manual_answers: JSON.parse(options.body).manual_answers }
+    return { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: [], cc: [], bcc: [] } } : { ...server } }
+  }
+  const page = mountPage(storage, api)
+  await page.flush()
+  const generating = page.click("Gjenero raportin")
+  await page.flush()
+  assert.equal(page.viewDisabled(), true)
+  assert.equal(page.meetingCommentsDisabled(), false)
+  page.edit(key, "Koment gjatë gjenerimit")
+  await page.flush()
+  finishGenerate()
+  await generating
+  await page.flush()
+  assert.equal(page.answers()[key], "Koment gjatë gjenerimit")
+  await page.fireSave()
+  await page.flush()
+  assert.equal(server.manual_answers[key], "Koment gjatë gjenerimit")
+  page.unmount()
+})
+
+
+test("meeting textarea remains enabled while manager question fields are locked", () => {
+  const data = { unheld_meetings: [{ meeting_id: "11111111-1111-4111-8111-111111111111", occurrence_date: report.report_date,
+    meeting_type: "INT", title: "Canceled meeting", time: "10:00", status: "canceled", status_label: "Anuluar" }] }
+  const html = renderToStaticMarkup(React.createElement(M3ReportingPointsView, {
+    report: { ...report, data }, answers: {}, disabled: true, meetingCommentsDisabled: false, onAnswerChange: () => {},
+  }))
+  const fields = html.match(/<textarea[^>]*>/g) || []
+  assert.equal(fields.length, 4)
+  assert.equal(fields.filter((field) => field.includes('disabled=""')).length, 3)
+  const comment = fields.find((field) => field.includes('aria-label="Kur planifikohen?'))
+  assert.ok(comment)
+  assert.doesNotMatch(comment, /\sdisabled(?:=|\s|>)/)
+})
+
+
+test("INT meetings display Common View PARA and PAS badges without labeling standalone meetings", () => {
+  const rows = [
+    { meeting_id: "before", meeting_type: "INT", occurrence_date: report.report_date, title: "Prep", time: "12:00", status: "canceled", meeting_relation: "PARA", origin: "CAL", fill: "#C9A98A" },
+    { meeting_id: "after", meeting_type: "INT", occurrence_date: report.report_date, title: "Follow-up", time: "14:20", status: "canceled", meeting_relation: "PAS", origin: "CAL", fill: "#C9A98A" },
+    { meeting_id: "manual", meeting_type: "INT", occurrence_date: report.report_date, title: "Standalone", time: "14:14", status: "canceled", meeting_relation: null, origin: "MANUAL", fill: "#FFF4CC" },
+  ]
+  const html = render({ data: { unheld_meetings: rows } })
+  assert.match(html, /title="Para takimit extern">PARA<\/span>/)
+  assert.match(html, /title="Pas takimit extern">PAS<\/span>/)
+  assert.equal((html.match(/takimit extern/g) || []).length, 2)
+  assert.match(html, /Standalone/)
 })

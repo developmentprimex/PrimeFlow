@@ -1,4 +1,4 @@
-"""Complete native Word and PNG exports of the M3 / GA reporting points.
+"""Complete native Word and PNG exports of the M3 reporting points.
 
 Like M2/M3, these use python-docx and Pillow. They consume the same columns
 and task values as the email, without converting through an ASCII table.
@@ -10,6 +10,8 @@ import os
 import re
 from functools import lru_cache
 from typing import Any
+
+from app.services.report_rich_text import wrapped_runs
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 GREEN, GREEN_TEXT = "#dcfce7", "#14532d"
@@ -54,9 +56,11 @@ def _text(value: Any) -> str:
 
 def export_blocks(report: dict) -> list[dict]:
     from app.services.m3_reporting_points import (
-        AUTO_TITLES, GA_TITLE, M3_TITLE, MANUAL_POINTS,
+        AUTO_TITLES, M3_TITLE, MANUAL_POINTS,
         report_table_columns, report_table_value, task_table_groups, task_row_appearance, realization_department_rows,
     )
+
+    from app.services.m3_unheld_meetings import MEETING_COLUMNS, MEETING_TITLE, meeting_cells, meeting_groups
 
     blocks: list[dict] = []
 
@@ -106,6 +110,15 @@ def export_blocks(report: dict) -> list[dict]:
         manual(key)
     for key in ("postponed", "untouched", "same_day"):
         tasks(key)
+    text(MEETING_TITLE, 2)
+    for label, meetings in meeting_groups(report):
+        text(label, 3)
+        if meetings:
+            blocks.append({"kind": "table", "compact": True, "columns": MEETING_COLUMNS, "rows": [
+                meeting_cells(row, index) for index, row in enumerate(meetings, 1)
+            ]})
+        else:
+            text("Asnjë takim i anuluar për këtë datë.")
     text(AUTO_TITLES["realization"], 2)
     realization = report.get("realization")
     if realization:
@@ -126,9 +139,6 @@ def export_blocks(report: dict) -> list[dict]:
             blocks.append({"kind": "table", "compact": True, "columns": [("code", "DEP", 48), ("percent", "REALIZIMI", 88), ("comment", "VLERËSIMI", 136)], "rows": departments})
     else:
         text("Vlera e realizimit merret ne 16:15. Nuk ka vlere te ruajtur per kete date.")
-    text(GA_TITLE, 1)
-    manual("ga_reorganization")
-    tasks("ga_postponed")
     return blocks
 
 
@@ -168,7 +178,7 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
         shading.set(qn("w:fill"), fill.lstrip("#"))
         properties.append(shading)
 
-    def write_cell(cell, value, fill, color="#000000", bold=False, divider=False, eight_am=False, first=False, last=False, marker=None):
+    def write_cell(cell, value, fill, color="#000000", bold=False, divider=False, eight_am=False, first=False, last=False, marker=None, meeting_highlight=False, runs=None):
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
         properties = cell._tc.get_or_add_tcPr()
         shade(properties, fill)
@@ -176,7 +186,8 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
         for name in ("top", "left", "bottom", "right"):
             border = OxmlElement(f"w:{name}")
             red_edge = eight_am and (name in {"top", "bottom"} or name == "left" and first or name == "right" and last)
-            for attr, item in (("val", "single"), ("sz", "18" if red_edge else "6"), ("color", "DC2626" if red_edge else "000000")):
+            blue_edge = meeting_highlight and (name in {"top", "bottom"} or name == "left" and first or name == "right" and last)
+            for attr, item in (("val", "single"), ("sz", "18" if red_edge or blue_edge else "6"), ("color", "DC2626" if red_edge else "2563EB" if blue_edge else "000000")):
                 border.set(qn(f"w:{attr}"), item)
             borders.append(border)
         properties.append(borders)
@@ -185,7 +196,14 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
             paragraph = cell.paragraphs[0] if index == 0 else cell.add_paragraph()
             paragraph.paragraph_format.space_after = Pt(2 if divider else 0)
             paragraph.paragraph_format.keep_with_next = divider and index == 0
-            if marker and line.startswith(marker + " "):
+            if runs:
+                for item in runs:
+                    rich_run = paragraph.add_run(item["text"])
+                    font(rich_run, bold=bold, color=item.get("color", color))
+                    rich_run.font.strike = bool(item.get("strike"))
+                    if item.get("fill"):
+                        shade(rich_run._element.get_or_add_rPr(), item["fill"])
+            elif marker and line.startswith(marker + " "):
                 marker_run = paragraph.add_run(marker + " ")
                 font(marker_run, bold=True, color="#ffffff" if color == "#ffffff" else "#dc2626", size=10)
                 if "👁" in marker:
@@ -244,7 +262,7 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
                 for index, value in enumerate(values):
                     cell = row.cells[index]
                     cell.width = Twips(widths[index])
-                    write_cell(cell, **{key: value[key] for key in ("fill", "color", "bold", "divider", "eight_am", "first", "last", "marker") if key in value}, value=value["text"])
+                    write_cell(cell, **{key: value[key] for key in ("fill", "color", "bold", "divider", "eight_am", "first", "last", "marker", "meeting_highlight", "runs") if key in value}, value=value["text"])
             document.add_paragraph().paragraph_format.space_after = Pt(3)
     output = io.BytesIO()
     document.save(output)
@@ -310,7 +328,8 @@ def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
                     font = fonts["bold" if value["bold"] else "normal"]
                     lines = wrap(value["text"], font, max(10, widths[index] - 12))
                     divider_after = len(wrap(value["text"].split("\n", 1)[0], font, max(10, widths[index] - 12))) if value["divider"] else None
-                    cells.append({**value, "lines": lines, "font": font, "divider_after": divider_after})
+                    cells.append({**value, "lines": lines, "font": font, "divider_after": divider_after,
+                                  "rich_lines": wrapped_runs(value["runs"], lines) if value.get("runs") else None})
                 height = max(len(cell["lines"]) * 24 + 14 + (8 if cell["divider"] else 0) for cell in cells)
                 layout.append({"kind": "row", "cells": cells, "widths": widths, "height": height})
             layout.append({"kind": "space", "height": 18})
@@ -333,7 +352,18 @@ def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
                     after_divider = cell["divider_after"] is not None and index >= cell["divider_after"]
                     text_y = y + 6 + index * 24 + (8 if after_divider else 0)
                     marker = cell.get("marker")
-                    if index == 0 and marker and line.startswith(marker + " "):
+                    if cell.get("rich_lines") is not None:
+                        run_x = x + 6
+                        for item in cell["rich_lines"][index]:
+                            run_width = draw.textlength(item["text"], font=cell["font"])
+                            if item.get("fill"):
+                                draw.rectangle((run_x, text_y, run_x + run_width, text_y + 22), fill=item["fill"])
+                            run_color = item.get("color", cell["color"])
+                            draw.text((run_x, text_y), item["text"], font=cell["font"], fill=run_color)
+                            if item.get("strike"):
+                                draw.line((run_x, text_y + 11, run_x + run_width, text_y + 11), fill=run_color, width=2)
+                            run_x += run_width
+                    elif index == 0 and marker and line.startswith(marker + " "):
                         marker_text = marker + " "
                         marker_color = "#ffffff" if cell["color"] == "#ffffff" else "#dc2626"
                         if "👁" in marker:
@@ -355,8 +385,9 @@ def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
                     line_y = y + 6 + cell["divider_after"] * 24
                     draw.line((x + 3, line_y, right - 3, line_y), fill="black", width=3)
                 x = right
-            if any(cell.get("eight_am") for cell in block["cells"]):
-                draw.rectangle((margin, y, margin + content_width, y + block["height"]), outline="#dc2626", width=3)
+            if any(cell.get("eight_am") or cell.get("meeting_highlight") for cell in block["cells"]):
+                outline = "#dc2626" if any(cell.get("eight_am") for cell in block["cells"]) else "#2563eb"
+                draw.rectangle((margin, y, margin + sum(block["widths"]), y + block["height"]), outline=outline, width=3)
         y += block["height"]
     output = io.BytesIO()
     # Default lossless compression avoids the extra optimization pass. Pixels
@@ -368,7 +399,7 @@ def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
 def report_attachments(report: dict) -> list[tuple[str, bytes, str]]:
     from app.services.reporting_points_excel import render_xlsx, XLSX_MIME
 
-    filename = f"PrimeFlow-PIKAT-M3-GA-{report['report_date']}"
+    filename = f"PrimeFlow-PIKAT-M3-{report['report_date']}"
     return [(filename + ".docx", render_docx(report), DOCX_MIME),
             (filename + ".png", render_png(report), "image/png"),
-            (filename + ".xlsx", render_xlsx(export_blocks(report), sheet_name="PIKAT M3 dhe GA"), XLSX_MIME)]
+            (filename + ".xlsx", render_xlsx(export_blocks(report), sheet_name="PIKAT M3"), XLSX_MIME)]

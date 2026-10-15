@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { clearSavedManualDraft, readManualDraft, writeManualDraft } from "@/lib/m3-reporting-points-draft"
 import { ReportingPointsManagement } from "@/components/reporting-points-management"
-import { M3ReportingPointsView, MANUAL_POINTS, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m3-reporting-points-view"
+import { M3ReportingPointsView, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m3-reporting-points-view"
 
 const API = "/m3-reporting-points"
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
@@ -32,6 +32,10 @@ async function responseJson<T>(response: Response): Promise<T> {
   return body as T
 }
 
+function commentAnswers(values: ManualAnswers): ManualAnswers {
+  return Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith("meeting_plan:")))
+}
+
 export default function M3ReportingPointsPage() {
   const { user, loading: authLoading, apiFetch } = useAuth()
   const [day, setDay] = React.useState(today)
@@ -45,16 +49,16 @@ export default function M3ReportingPointsPage() {
   const [history, setHistory] = React.useState<HistoryRow[] | null>(null)
   const [sendOpen, setSendOpen] = React.useState(false)
   const [tab, setTab] = React.useState("report")
-  const [gaOnly, setGaOnly] = React.useState(false)
   const [savingAnswers, setSavingAnswers] = React.useState(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
   const canAccess = !!user
   const canManage = !!user && (["ADMIN", "MANAGER"].includes(user.role) || (user.full_name || "").trim().toLowerCase() === "laurent hoxha")
-  const dirty = !!report && (Object.keys(MANUAL_POINTS) as ManualKey[]).some((key) => (answers[key] || "") !== (report.manual_answers[key] || ""))
+  const dirty = !!report && (Array.from(new Set([...Object.keys(answers), ...Object.keys(report.manual_answers)])) as ManualKey[]).some((key) => (answers[key] || "") !== (report.manual_answers[key] || ""))
 
   const acceptReport = React.useCallback((value: ReportingPointsReport) => {
     setReport(value)
-    const local = canManage && user?.id ? readManualDraft(draftStorage(), user.id, value.report_date) : null
+    const draft = user?.id ? readManualDraft(draftStorage(), user.id, value.report_date) : null
+    const local = canManage ? draft : commentAnswers(draft || {})
     setAnswers({ ...value.manual_answers, ...local })
     setError(null)
     setSaveError(null)
@@ -101,9 +105,9 @@ export default function M3ReportingPointsPage() {
   }, [apiFetch, day, canAccess, dirty, busy, savingAnswers, acceptReport])
 
   React.useEffect(() => {
-    if (!report || !dirty || !canManage || savingAnswers || busy || saveError) return
+    if (!report || !dirty || !canAccess || savingAnswers || busy || saveError) return
     const reportId = report.id
-    const savedAnswers = { ...answers }
+    const savedAnswers = canManage ? { ...answers } : commentAnswers(answers)
     const savedDay = report.report_date
     const timer = window.setTimeout(async () => {
       setSavingAnswers(true)
@@ -119,7 +123,7 @@ export default function M3ReportingPointsPage() {
       } finally { setSavingAnswers(false) }
     }, 700)
     return () => window.clearTimeout(timer)
-  }, [answers, apiFetch, report, dirty, canManage, savingAnswers, busy, saveError, user?.id])
+  }, [answers, apiFetch, report, dirty, canAccess, canManage, savingAnswers, busy, saveError, user?.id])
 
   const action = async (name: string, work: () => Promise<void>) => {
     setBusy(name)
@@ -142,12 +146,13 @@ export default function M3ReportingPointsPage() {
 
   const save = () => action("save", async () => {
     if (!report) return
+    const savedAnswers = canManage ? answers : commentAnswers(answers)
     const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${report.id}/answers`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: answers }),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: savedAnswers }),
     }))
-    if (user?.id) clearSavedManualDraft(draftStorage(), user.id, day, answers)
+    if (user?.id) clearSavedManualDraft(draftStorage(), user.id, day, savedAnswers)
     acceptReport(value)
-    toast.success("Përgjigjet u ruajtën.")
+    toast.success(canManage ? "Përgjigjet u ruajtën." : "Komentet u ruajtën.")
   })
 
   const preview = () => action("preview", async () => {
@@ -161,8 +166,9 @@ export default function M3ReportingPointsPage() {
   })
 
   const changeAnswer = (key: ManualKey, value: string) => {
+    if (!canManage && !key.startsWith("meeting_plan:")) return
     const next = { ...answers, [key]: value }
-    if (user?.id) writeManualDraft(draftStorage(), user.id, day, next)
+    if (user?.id) writeManualDraft(draftStorage(), user.id, day, canManage ? next : commentAnswers(next))
     setSaveError(null)
     setAnswers(next)
   }
@@ -182,7 +188,7 @@ export default function M3ReportingPointsPage() {
     <header className="flex flex-wrap items-center justify-between gap-4 border-b pb-5">
       <div className="flex items-center gap-3">
         <div className="flex size-11 items-center justify-center rounded-md bg-slate-900 text-white"><Mail className="size-5" /></div>
-        <div><h1 className="text-2xl font-semibold">Pikat për raportim M3 / GA</h1><p className="text-sm text-muted-foreground">Hapësira e raportit ditor</p></div>
+        <div><h1 className="text-2xl font-semibold">Pikat për raportim M3</h1><p className="text-sm text-muted-foreground">Hapësira e raportit ditor</p></div>
       </div>
       <div className="flex gap-2">
         <Button variant="outline" onClick={refresh} disabled={!!busy || loading || dirty || savingAnswers}><RefreshCw className={busy === "refresh" ? "animate-spin" : ""} />Rifresko</Button>
@@ -192,7 +198,7 @@ export default function M3ReportingPointsPage() {
     {error ? <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</p> : null}
     {report?.last_error ? <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">Dërgimi i fundit dështoi. Kontrollo konfigurimin e email-it dhe provo përsëri.</p> : null}
     <Tabs value={tab} onValueChange={(value) => { setTab(value); if (value === "history") void loadHistory() }} className="gap-5">
-      <div className="flex flex-wrap items-center gap-2"><TabsList className="h-10 rounded-md"><TabsTrigger value="report"><Pencil />Raporti</TabsTrigger><TabsTrigger value="history"><History />Historiku</TabsTrigger></TabsList>{tab === "report" ? <Button variant={gaOnly ? "default" : "outline"} className={gaOnly ? "border-violet-700 bg-violet-700 text-white hover:bg-violet-800" : "border-violet-300 bg-violet-100 text-violet-900 hover:bg-violet-200"} aria-pressed={gaOnly} onClick={() => setGaOnly((value) => !value)}>GA</Button> : null}</div>
+      <div className="flex flex-wrap items-center gap-2"><TabsList className="h-10 rounded-md"><TabsTrigger value="report"><Pencil />Raporti</TabsTrigger><TabsTrigger value="history"><History />Historiku</TabsTrigger></TabsList></div>
       <TabsContent value="report" className="space-y-5">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button variant="outline" onClick={preview} disabled={!report || !!busy || savingAnswers || dirty}><Eye />Pamja e email-it</Button>
@@ -204,7 +210,7 @@ export default function M3ReportingPointsPage() {
             onChange={(event) => { if (dirty) toast.error("Prit ruajtjen e përgjigjeve përpara ndryshimit të datës."); else if (event.target.value) setDay(event.target.value) }} /></div>
           <div><Label htmlFor="report-subject">Titulli i email-it</Label><input id="report-subject" readOnly value={report?.subject || ""} placeholder="Gjenero raportin" className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm shadow-xs" /></div>
           <div className="flex flex-wrap items-end gap-2">
-            {canManage ? <Button variant="outline" onClick={save} disabled={!report || !!busy || savingAnswers || !dirty}><Save />Ruaj përgjigjet</Button> : null}
+            {canAccess ? <Button variant="outline" onClick={save} disabled={!report || !!busy || savingAnswers || !dirty}><Save />{canManage ? "Ruaj përgjigjet" : "Ruaj komentet"}</Button> : null}
           </div>
         </div>
         {report ? <div className="grid border md:grid-cols-4">
@@ -222,11 +228,11 @@ export default function M3ReportingPointsPage() {
           })}
         </div> : null}
         </ReportingPointsManagement>
-        {canManage && report ? <p role="status" className={`text-xs ${saveError ? "text-red-700" : "text-muted-foreground"}`}>
-          {saveError ? `Ruajtja automatike dështoi: ${saveError} Provo Ruaj përgjigjet.` : savingAnswers || dirty ? "Duke ruajtur përgjigjet…" : "Përgjigjet ruhen automatikisht për datën e këtij raporti."}
+        {canAccess && report ? <p role="status" className={`text-xs ${saveError ? "text-red-700" : "text-muted-foreground"}`}>
+          {saveError ? `Ruajtja automatike dështoi: ${saveError} Provo ${canManage ? "Ruaj përgjigjet" : "Ruaj komentet"}.` : savingAnswers || dirty ? "Duke ruajtur përgjigjet…" : "Përgjigjet ruhen automatikisht për datën e këtij raporti."}
         </p> : null}
     {loading ? <p className="py-10 text-center text-muted-foreground">Duke ngarkuar raportin…</p> : report ? <>
-      <M3ReportingPointsView report={report} answers={answers} disabled={!canManage || !!busy} onAnswerChange={changeAnswer} gaOnly={gaOnly} />
+      <M3ReportingPointsView report={report} answers={answers} disabled={!canManage || !!busy} meetingCommentsDisabled={!canAccess} onAnswerChange={changeAnswer} />
       {!report.realization_captured_at ? <p className="text-sm text-muted-foreground">Dërgimi aktivizohet pasi të ruhet realizimi i orës 16:15. Pas 16:15, &quot;Gjenero raportin&quot; merr realizimin e fundit.</p> : null}
     </> : <div className="rounded-xl border border-dashed p-12 text-center"><h2 className="font-semibold">Nuk ka raport të ruajtur për {reportDate(day)}.</h2><p className="mt-2 text-sm text-muted-foreground">{day === today() ? "Gjenero raportin për të plotësuar përgjigjet dhe për të parë pikat automatike." : "Zgjidh një datë nga historiku për të parë të dhënat e ruajtura."}</p></div>}
       </TabsContent>
@@ -239,7 +245,7 @@ export default function M3ReportingPointsPage() {
       </TabsContent>
     </Tabs>
 
-    <Dialog open={previewHtml !== null} onOpenChange={(open) => { if (!open) setPreviewHtml(null) }}><DialogContent className="max-w-[95vw] sm:max-w-[95vw]"><DialogHeader><DialogTitle>Pamja e raportit në email</DialogTitle></DialogHeader><iframe title="Pikat për raportim M3 / GA" sandbox="" srcDoc={previewHtml || ""} className="h-[75vh] w-full rounded border bg-white" /></DialogContent></Dialog>
-    <Dialog open={sendOpen} onOpenChange={(open) => { if (!busy) setSendOpen(open) }}><DialogContent><DialogHeader><DialogTitle>Dërgo raportin M3 / GA</DialogTitle></DialogHeader><p className="text-sm">Raporti i datës {reportDate(day)} dërgohet te marrësit aktualë të M3. Pikat automatike dhe realizimi i raportit të sotëm përditësohen në momentin e dërgimit; përgjigjet ruhen. Çdo dërgim krijon një email të ri.</p><div className="space-y-2 rounded-lg bg-muted p-3 text-sm">{recipients ? (Object.entries(recipients) as [string, string[]][]).filter(([, values]) => values.length).map(([key, values]) => <p key={key}><strong>{key.toUpperCase()}:</strong> {values.join(", ")}</p>) : null}</div><Button onClick={send} disabled={!!busy}><Send className="mr-2 h-4 w-4" />{busy === "send" ? "Duke dërguar…" : "Dërgo raportin"}</Button></DialogContent></Dialog>
+    <Dialog open={previewHtml !== null} onOpenChange={(open) => { if (!open) setPreviewHtml(null) }}><DialogContent className="max-w-[95vw] sm:max-w-[95vw]"><DialogHeader><DialogTitle>Pamja e raportit në email</DialogTitle></DialogHeader><iframe title="Pikat për raportim M3" sandbox="" srcDoc={previewHtml || ""} className="h-[75vh] w-full rounded border bg-white" /></DialogContent></Dialog>
+    <Dialog open={sendOpen} onOpenChange={(open) => { if (!busy) setSendOpen(open) }}><DialogContent><DialogHeader><DialogTitle>Dërgo raportin M3</DialogTitle></DialogHeader><p className="text-sm">Raporti i datës {reportDate(day)} dërgohet te marrësit aktualë të M3. Pikat automatike dhe realizimi i raportit të sotëm përditësohen në momentin e dërgimit; përgjigjet ruhen. Çdo dërgim krijon një email të ri.</p><div className="space-y-2 rounded-lg bg-muted p-3 text-sm">{recipients ? (Object.entries(recipients) as [string, string[]][]).filter(([, values]) => values.length).map(([key, values]) => <p key={key}><strong>{key.toUpperCase()}:</strong> {values.join(", ")}</p>) : null}</div><Button onClick={send} disabled={!!busy}><Send className="mr-2 h-4 w-4" />{busy === "send" ? "Duke dërguar…" : "Dërgo raportin"}</Button></DialogContent></Dialog>
   </div>
 }

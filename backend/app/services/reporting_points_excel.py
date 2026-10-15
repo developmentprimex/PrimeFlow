@@ -24,7 +24,7 @@ GRID_COLUMNS = 120
 GRID_PIXELS = 12
 
 
-def render_xlsx(blocks: list[dict], *, sheet_name: str) -> bytes:
+def render_xlsx(blocks: list[dict], *, sheet_name: str, preview_png: bytes | None = None) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = sheet_name
@@ -41,6 +41,7 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str) -> bytes:
 
     thin = Side(style="thin", color="000000")
     red = Side(style="thick", color="DC2626")
+    blue = Side(style="thick", color="2563EB")
     divider = Side(style="thick", color="000000")
     measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
 
@@ -68,7 +69,7 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str) -> bytes:
         return start + count - 1
 
     def write(start: int, end: int, left: int, right: int, value, *, fill="FFFFFF",
-              color="000000", bold=False, size=10, border=None, marker=None, number_format=None):
+              color="000000", bold=False, size=10, border=None, marker=None, number_format=None, runs=None):
         if isinstance(value, str):
             value = _text(value)
             if len(value) > 32767:
@@ -78,7 +79,13 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str) -> bytes:
         # User-entered answers/titles are literal text, even if they begin '='.
         if isinstance(value, str):
             cell.data_type = "s"
-        if marker and isinstance(value, str) and value.startswith(marker + " "):
+        if runs:
+            cell.value = CellRichText(*[
+                TextBlock(InlineFont(rFont="Arial", sz=size, b=bold,
+                                    color=item.get("color", color).lstrip("#"), strike=bool(item.get("strike"))), item["text"])
+                for item in runs if item["text"]
+            ])
+        elif marker and isinstance(value, str) and value.startswith(marker + " "):
             cell.value = CellRichText(
                 TextBlock(InlineFont(rFont="Arial", sz=size, b=True,
                                      color="FFFFFF" if color.lstrip("#").upper() == "FFFFFF" else "DC2626"), marker + " "),
@@ -154,9 +161,11 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str) -> bytes:
                 end = row_space(first_end + 1, heights[1]) if split else first_end
                 for (key, _, _), value, (left, right) in zip(columns, values, positions):
                     eight_am = value.get("eight_am")
-                    top = bottom = red if eight_am else thin
-                    left_edge = red if eight_am and value.get("first") else thin
-                    right_edge = red if eight_am and value.get("last") else thin
+                    highlighted = value.get("meeting_highlight")
+                    outline = red if eight_am else blue if highlighted else thin
+                    top = bottom = outline
+                    left_edge = outline if (eight_am or highlighted) and value.get("first") else thin
+                    right_edge = outline if (eight_am or highlighted) and value.get("last") else thin
                     text = _text(value["text"])
                     parts = text.split("\n", 1) if value.get("divider") and split else [text]
                     for index, part in enumerate(parts):
@@ -169,7 +178,7 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str) -> bytes:
                             cell_value, number_format = float(part[:-1]) / 100, "0.##%"
                         write(start, stop, left, right, cell_value,
                               fill=value.get("fill", "FFFFFF"), color=value.get("color", "000000"),
-                              bold=value.get("bold", False), marker=value.get("marker"), number_format=number_format,
+                              bold=value.get("bold", False), marker=value.get("marker"), number_format=number_format, runs=value.get("runs"),
                               border=Border(left=left_edge, right=right_edge,
                                             top=divider if index else top,
                                             bottom=divider if len(parts) == 2 and index == 0 else bottom))
@@ -178,6 +187,19 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str) -> bytes:
             current += 1
 
     sheet.print_area = f"A1:{get_column_letter(GRID_COLUMNS)}{current - 1}"
+    if preview_png is not None:
+        # Excel cannot highlight individual characters. Keep editable rich text
+        # above and provide the exact colored report on a separate visual sheet.
+        from openpyxl.drawing.image import Image as ExcelImage
+        preview = workbook.create_sheet("PAMJA M1")
+        preview.sheet_view.showGridLines = False
+        picture = ExcelImage(io.BytesIO(preview_png))
+        ratio = min(1, 1440 / picture.width)
+        picture.width, picture.height = round(picture.width * ratio), round(picture.height * ratio)
+        preview.add_image(picture, "A1")
+        preview.page_setup.orientation = "landscape"
+        preview.sheet_properties.pageSetUpPr.fitToPage = True
+        preview.page_setup.fitToWidth, preview.page_setup.fitToHeight = 1, 0
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()

@@ -102,6 +102,84 @@ def test_future_tasks_old_completed_tasks_and_unrelated_markers_are_excluded():
     assert service.select_task_sections(rows, [], DAY)["delivery"] == []
 
 
+@pytest.mark.parametrize("marker", ["F", "FLAG"])
+@pytest.mark.parametrize("period", ["AM", "AM/PM"])
+def test_ga_progress_symbols_include_morning_tasks_with_live_progress(marker, period):
+    item = task(one_h_marker=marker, finish_period=period, progress_percentage=37.5)
+    rows = service.select_task_sections([item], [], DAY)["ga_progress"]
+    assert len(rows) == 1 and rows[0]["progress"] == 37.5
+    assert rows[0]["marker"] == ("GA" if marker == "FLAG" else "F")
+
+
+def test_ga_progress_personal_owner_uses_common_view_note_text_and_deduplicates():
+    origin = uuid.uuid4()
+    personal = task(title="EF: Copy", is_personal=True, ga_note_origin_id=origin, finish_period="AM")
+    flagged = task(title="EF/GA: Test", is_personal=True, one_h_marker="FLAG", finish_period="AM")
+    other = task(title="EF/KA/GA: Test", is_personal=True, finish_period="AM")
+    rows = service.select_task_sections([personal, flagged, other], [], DAY,
+        personal_titles={origin: "EF/GA: Personal note"})["ga_progress"]
+    assert [row["task_id"] for row in rows] == [str(personal.id), str(flagged.id)]
+    assert rows[0]["title"] == "EF/GA: Personal note"
+
+
+@pytest.mark.parametrize("origin_field", ["ga_note_origin_id", "plan_note_origin_id"])
+@pytest.mark.parametrize("content", ["[[added]]HS/[[/added]]GA: HC",
+    "[[added]]DV: GA: RRJEDHA E DITES [[/added]]", "FG[[added]]/GA[[/added]]: Test"])
+def test_personal_ga_classification_uses_visible_note_prefix(origin_field, content):
+    origin = uuid.uuid4()
+    item = task(title="Copied title without GA", is_personal=True, finish_period="AM",
+                **{origin_field: origin})
+    rows = service.select_task_sections([item], [], DAY, personal_titles={origin: content})["ga_progress"]
+    assert len(rows) == 1
+    assert "[[" not in rows[0]["title"]
+    assert "GA" in rows[0]["title"]
+
+
+def test_markup_is_removed_before_personal_owner_priority_and_does_not_imply_ga():
+    items = [task(title=title, is_personal=True, finish_period="AM") for title in (
+        "[[added]]HS/[[/added]]GA: HC", "[[added]]FG/KA/[[/added]]GA: KA task",
+        "FG/[[added]]GT/[[/added]]GA: Genti task", "[[added]]HS:[[/added]] BORXH HC")]
+    rows = service.select_task_sections(items, [], DAY)["ga_progress"]
+    assert [row["task_id"] for row in rows] == [str(items[0].id)]
+
+
+def test_ga_progress_requires_morning_period_and_inclusive_planning_interval():
+    selected = [task(one_h_marker="F", finish_period="AM", start_date=date(2026, 10, 1)),
+                task(one_h_marker="FLAG", finish_period="AM/PM", due_date=date(2026, 10, 9)),
+                task(title="GA: Done", is_personal=True, finish_period="AM", status="DONE", progress_percentage=100)]
+    excluded = [task(one_h_marker="F", finish_period=period) for period in ("PM", None)] + [
+        task(one_h_marker="F", finish_period="AM", **change) for change in (
+            {"start_date": None}, {"due_date": None}, {"due_date": date(2026, 10, 5)},
+            {"start_date": date(2026, 10, 7)}, {"created_at": date(2026, 10, 7)},
+            {"start_date": date(2026, 10, 9), "due_date": date(2026, 10, 1)})]
+    excluded += [task(title="EF/GA: Nonpersonal", finish_period="AM"), task(one_h_marker="M3", finish_period="AM")]
+    rows = service.select_task_sections(selected + excluded, [], DAY)["ga_progress"]
+    assert [row["task_id"] for row in rows] == [str(item.id) for item in selected]
+    assert rows[-1]["progress"] == 100
+
+
+def test_ga_progress_exports_task_columns_before_delivery():
+    item = task(one_h_marker="FLAG", finish_period="AM", progress_percentage=0)
+    data = service.select_task_sections([item], [], DAY)
+    value = {"report_date": DAY.isoformat(), "manual_answers": {}, "data": data}
+    blocks = service.export_blocks(value)
+    assert list(service.AUTO_TITLES).index("ga_progress") < list(service.AUTO_TITLES).index("delivery")
+    table = next(block for block in blocks if block["kind"] == "table")
+    headers = [column[0] for column in table["columns"]]
+    cells = dict(zip(headers, table["rows"][0]))
+    assert headers == ["nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title"]
+    assert cells["marker"]["text"] == "GA"
+    html = service.render_html(value)
+    assert html.index("5. PROGRESI I DET ME GA (AM)") < html.index("6. SA PER DOREZIM M2?")
+    attachments = service.report_attachments(value)
+    word = Document(io.BytesIO(attachments[0][1]))
+    assert word.tables[0].rows[0].cells[-1].text == "TITULLI"
+    assert len(word.tables[0].columns) == 8
+    sheet = load_workbook(io.BytesIO(next(content for name, content, _ in attachments if name.endswith(".xlsx")))).active
+    assert "SIMBOLI" in [cell.value for row in sheet for cell in row]
+    assert not {"START DATE", "DUE DATE", "PROGRESI"}.intersection(cell.value for row in sheet for cell in row)
+
+
 def report(row):
     return {"report_date": DAY.isoformat(), "manual_answers": {
         "reorganization": "Ndaj detyrat <script>test</script>", f"delivery:{row['task_id']}": "Po, dorëzuar te GA"},
@@ -147,7 +225,7 @@ def test_complete_exports_have_matching_colors_and_complete_content():
         assert cells["choice"]["fill"] == fill
         assert cells["answer"]["fill"] == "#ffffff"
     html = service.render_html(value)
-    assert "TOTALI/DËRGUAR: 4/2" in html
+    assert "SA/TOTALI: 2/4" in html
     assert "border-bottom:2px solid #000" in html
     attachments = service.report_attachments(value)
     word = Document(io.BytesIO(attachments[0][1]))
@@ -158,7 +236,7 @@ def test_complete_exports_have_matching_colors_and_complete_content():
     for fill in ("16a34a", "dc2626", "dcfce7", "fee2e2"):
         assert f'w:fill="{fill}"' in xml
         assert f"background:{fill if fill.startswith('#') else '#' + fill}" in html
-    assert "TOTALI/DËRGUAR: 4/2" in "\n".join(p.text for p in word.paragraphs)
+    assert "SA/TOTALI: 2/4" in "\n".join(p.text for p in word.paragraphs)
     assert all("Rreshti i dytë" in table.rows[1].cells[-1].text for table in word.tables[:3])
     with Image.open(io.BytesIO(attachments[1][1])) as image:
         colors = {color for _, color in image.getcolors(image.width * image.height)}
@@ -172,7 +250,7 @@ def test_preview_and_native_exports_preserve_last_manual_column_and_escape_text(
     value = report(item)
     value["manual_answers"][f"delivery_choice:{item['task_id']}"] = "PO"
     value["manual_answers"][f"delivery_choice:{uuid.uuid4()}"] = "PO"
-    assert "TOTALI/DËRGUAR: 1/1" in service.render_plain_text(value)
+    assert "SA/TOTALI: 1/1" in service.render_plain_text(value)
     assert service.table_columns("delivery")[-1][0] == "answer"
     html = service.render_html(value)
     assert "<script>test</script>" not in html
@@ -219,6 +297,8 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
             ["2", "EF", "DEV", "AM/PM", "IN_PROGRESS", "DEADLINE / 08:00", "1H", "08:00 EF: Test <task>", "SOT"],
         ]
         db = AsyncMock()
+        db.execute.return_value = MagicMock()
+        db.execute.return_value.all.return_value = []
         with patch.object(service.m3, "build_task_data", new=AsyncMock(return_value={"postponed": [], "delivery": []})), \
              patch.object(service, "build_unfinished_priority_task_rows", new=AsyncMock(return_value=rows)) as shared_rows:
             data = await service.build_task_data(db, DAY)
@@ -232,7 +312,7 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         value = {"report_date": DAY.isoformat(), "manual_answers": {}, "data": data}
         blocks = service.export_blocks(value)
         titles = [block["text"] for block in blocks if block["kind"] == "text" and block["level"] == 2]
-        assert titles == [service.MANUAL_POINTS["reorganization"], *service.AUTO_TITLES.values()]
+        assert titles == [*service.MANUAL_POINTS.values(), *service.AUTO_TITLES.values()]
         table = next(block for block in blocks if block["kind"] == "table")
         assert [column[1] for column in table["columns"]] == ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TIPI", "TITULLI", "DUE DATE"]
         assert all(cell["fill"] == "#dc2626" and cell["eight_am"] for cell in table["rows"][1])
@@ -253,12 +333,12 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
             await service.send_report(db, row, {"to": ["test@example.com"], "cc": [], "bcc": []})
         args = gmail.send_verified.call_args.args
         attachments = gmail.send_verified.call_args.kwargs["attachments"]
-        assert "TOTALI/DËRGUAR: 4/2" in args[2] and "TOTALI/DËRGUAR: 4/2" in args[3]
+        assert "SA/TOTALI: 2/4" in args[2] and "SA/TOTALI: 2/4" in args[3]
         assert {name.rsplit(".", 1)[-1] for name, _, _ in attachments} == {"html", "docx", "png", "xlsx"}
         name, content, mime = next(item for item in attachments if item[0].endswith(".xlsx"))
         assert name == f"pikat_m2_{DAY.isoformat()}.xlsx" and mime == XLSX_MIME
         sheet = load_workbook(io.BytesIO(content)).active
-        assert "TOTALI/DËRGUAR: 4/2" in [cell.value for row in sheet for cell in row]
+        assert "SA/TOTALI: 2/4" in [cell.value for row in sheet for cell in row]
         assert next(content for name, content, _ in attachments if name.endswith(".html")).decode("utf-8") == args[3]
         assert row.status == "SENT" and row.gmail_message_id == "mock-message"
         db.commit.assert_awaited_once()
@@ -412,3 +492,24 @@ def test_migration_creates_separate_m2_storage_without_changing_m3():
     assert "manual_answers JSONB" in sql
     assert "UNIQUE (report_date)" in sql
     assert "m3_reporting_points_reports" not in sql
+
+
+def test_ga_reply_question_saves_and_exports_before_reorganization():
+    async def scenario():
+        row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY,
+            manual_answers={"reorganization": "Ruaj riorganizimin"}, data={}, status="DRAFT")
+        db = AsyncMock()
+        payload = api.ManualAnswersPayload(manual_answers={"ga_reply": "Po, GA u përgjigj <test>"})
+        with (patch.object(api, "_by_id", new=AsyncMock(return_value=row)),
+              patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log")):
+            result = await api.save_answers(row.id, payload, db, SimpleNamespace(id=uuid.uuid4()))
+        assert result["manual_answers"] == {"reorganization": "Ruaj riorganizimin", "ga_reply": "Po, GA u përgjigj <test>"}
+        html = service.render_html(result)
+        assert html.index("1. (GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?") < html.index("2. RIORGANIZIM?")
+        assert "Po, GA u përgjigj &lt;test&gt;" in html
+        word = Document(io.BytesIO(service.report_attachments(result)[0][1]))
+        text = "\n".join(p.text for p in word.paragraphs)
+        assert "Po, GA u përgjigj <test>" in text
+        assert text.index("A KA REPLY NGA GA") < text.index("RIORGANIZIM?")
+    import asyncio
+    asyncio.run(scenario())

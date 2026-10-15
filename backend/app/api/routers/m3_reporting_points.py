@@ -17,8 +17,9 @@ from app.services.audit import add_audit_log
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
+from app.services.m3_unheld_meetings import is_meeting_comment_key
 from app.services.m3_reporting_points import (
-    MANUAL_POINTS, get_settings, locked_report, refresh_report, render_html,
+    MANUAL_POINTS, current_report_payload, get_settings, locked_report, refresh_report, render_html,
     render_plain_text, report_payload, send_report,
 )
 
@@ -45,7 +46,7 @@ class ManualAnswersPayload(BaseModel):
     @field_validator("manual_answers")
     @classmethod
     def validate_answers(cls, value: dict[str, str]) -> dict[str, str]:
-        if set(value) - set(MANUAL_POINTS):
+        if any(key not in MANUAL_POINTS and not is_meeting_comment_key(key) for key in value):
             raise ValueError("Pike manuale e panjohur.")
         if any(len(answer) > 10000 for answer in value.values()):
             raise ValueError("Pergjigjja nuk mund te kete mbi 10000 karaktere.")
@@ -86,7 +87,7 @@ async def get_report(report_date: date, db: AsyncSession = Depends(get_db),
     ))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Raporti nuk eshte gjeneruar per kete date.")
-    return report_payload(row)
+    return await current_report_payload(db, row)
 
 
 @router.post("/generate")
@@ -102,12 +103,14 @@ async def generate(report_date: date, db: AsyncSession = Depends(get_db),
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m3_reporting_points", entity_id=row.id,
                   action="GENERATE", after={"report_date": report_date.isoformat()})
     await db.commit()
-    return report_payload(row)
+    return await current_report_payload(db, row)
 
 
 @router.put("/{report_id}/answers")
 async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
-                       db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)) -> dict:
+                       db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    if any(not is_meeting_comment_key(key) for key in payload.manual_answers):
+        await require_report_manager(user)
     existing = await _by_id(db, report_id)
     row = await locked_report(db, existing.report_date)
     await db.refresh(row)
@@ -118,13 +121,13 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m3_reporting_points", entity_id=row.id,
                   action="SAVE_ANSWERS", before=before, after=row.manual_answers)
     await db.commit()
-    return report_payload(row)
+    return await current_report_payload(db, row)
 
 
 @router.get("/{report_id}/preview")
 async def preview(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                   _: User = Depends(get_current_user)) -> dict:
-    report = report_payload(await _by_id(db, report_id))
+    report = await current_report_payload(db, await _by_id(db, report_id))
     return {"html": render_html(report), "plain_text": render_plain_text(report)}
 
 
@@ -152,4 +155,4 @@ async def send(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(502, "Dergimi deshtoi. Kontrollo konfigurimin e email-it ose provo perseri.") from exc
-    return report_payload(row)
+    return await current_report_payload(db, row)

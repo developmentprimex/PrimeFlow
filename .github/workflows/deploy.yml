@@ -5,6 +5,14 @@ on:
     branches: [ main ]
   workflow_dispatch:
  
+permissions:
+  contents: read
+
+# The same Windows workspace serves traffic and must never be synced by two jobs.
+concurrency:
+  group: primeflow-production-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: self-hosted
@@ -15,10 +23,57 @@ jobs:
       RUNNER_TRACKING_ID: ""
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          clean: false
-          fetch-depth: 0
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location -LiteralPath $env:GITHUB_WORKSPACE
+          $repositoryUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
+          if (-not $env:GH_TOKEN -or $env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw "A checkout token and a valid deployment commit are required."
+          }
+
+          # Live PM2 processes use this workspace as their working directory.
+          # actions/checkout can delete it even with clean:false when .git is
+          # missing or origin differs. Sync tracked files in place instead.
+          function Invoke-DeployGit {
+            param([string[]]$GitArguments)
+            & git -c "http.$env:GITHUB_SERVER_URL/.extraheader=" --config-env="http.$env:GITHUB_SERVER_URL/.extraheader=GIT_AUTH_HEADER" -c "credential.helper=" @GitArguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "Deployment git command failed: $($GitArguments[0]) (exit $LASTEXITCODE)."
+            }
+          }
+
+          # Keep authentication in this step's environment, never in .git/config.
+          $credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("x-access-token:$env:GH_TOKEN"))
+          Write-Host "::add-mask::$credential"
+          $env:GIT_TERMINAL_PROMPT = "0"
+          $env:GIT_CONFIG_COUNT = "1"
+          $env:GIT_CONFIG_KEY_0 = "safe.directory"
+          $env:GIT_CONFIG_VALUE_0 = $env:GITHUB_WORKSPACE
+          $env:GIT_AUTH_HEADER = "AUTHORIZATION: basic $credential"
+          try {
+            Invoke-DeployGit -GitArguments @("init", ".")
+            $remotes = @(Invoke-DeployGit -GitArguments @("remote"))
+            if ($remotes -contains "origin") {
+              Invoke-DeployGit -GitArguments @("remote", "set-url", "origin", $repositoryUrl)
+            } else {
+              Invoke-DeployGit -GitArguments @("remote", "add", "origin", $repositoryUrl)
+            }
+            $fetchArguments = @("fetch", "--force", "--tags", "--no-recurse-submodules")
+            $shallow = Invoke-DeployGit -GitArguments @("rev-parse", "--is-shallow-repository")
+            if ($shallow -eq "true") { $fetchArguments += "--unshallow" }
+            $fetchArguments += @("origin", "+refs/heads/main:refs/remotes/origin/main", $env:GITHUB_SHA)
+            Invoke-DeployGit -GitArguments $fetchArguments
+            # Deploy the event's commit even if main has moved since this job queued.
+            Invoke-DeployGit -GitArguments @("checkout", "--force", "--detach", $env:GITHUB_SHA)
+            $actual = Invoke-DeployGit -GitArguments @("rev-parse", "HEAD")
+            if ($actual -ne $env:GITHUB_SHA) { throw "Checkout commit differs from deployment commit." }
+            Write-Host "Deployment checkout ready: $actual"
+          } finally {
+            Remove-Item Env:GH_TOKEN, Env:GIT_TERMINAL_PROMPT, Env:GIT_CONFIG_COUNT, Env:GIT_CONFIG_KEY_0, Env:GIT_CONFIG_VALUE_0, Env:GIT_AUTH_HEADER -ErrorAction SilentlyContinue
+          }
  
       - name: Configure Server Tooling
         shell: powershell
@@ -28,12 +83,13 @@ jobs:
       - name: Force Sync with GitHub
         shell: cmd
         run: |
-          git fetch origin main
-          git reset --hard origin/main
+          REM Checkout Code already fetched and selected the exact deployment SHA.
           REM The self-hosted runner keeps ignored deployment state, but stale
           REM untracked migration files must never participate in Alembic's graph.
           git clean -f -- backend/alembic/versions
+          if errorlevel 1 exit /b 1
           git status --short -- backend/alembic/versions
+          if errorlevel 1 exit /b 1
  
       - name: Detect Changed Files
         id: changes
