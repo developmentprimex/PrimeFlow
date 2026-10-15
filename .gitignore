@@ -7,6 +7,7 @@ __pycache__/
 *.pyd
 .pytest_cache/
 .mypy_cache/
+.codex_tmp/discord-deps/
 
 # Node dependencies in any directory
 node_modules/

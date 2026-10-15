@@ -256,6 +256,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/platforms", label: "PrimexEU Links", icon: Shield },
       { href: "/file-access", label: "File Access", icon: FolderLock },
+      { href: "/discord", label: "Asistenti Discord", icon: Sparkles },
       { href: "/users", label: "Users", icon: Users, roles: ["ADMIN", "MANAGER"] },
       { href: "/settings", label: "Settings", icon: Settings, roles: ["ADMIN", "MANAGER"] },
     ],
