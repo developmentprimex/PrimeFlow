@@ -47,6 +47,10 @@ def test_single_row_follows_planner_order_and_deduplicates_overlapping_categorie
     assert markup.count("<tr>") == 1
     assert markup.count("<td ") == 2
     assert markup.index("<strong>EF</strong>") < markup.index("<strong>FG</strong>")
+    assert "(ZHV)" not in markup and "(DSG)" not in markup and "NR DET ME GA" not in markup
+    assert "<strong>FG</strong> - F:1" in markup
+    assert "<strong>EF</strong> - F:1 GA:1 P:1 M2:1" in markup
+    assert "P:0" not in markup and "<br>" not in markup
 
 
 def test_inactive_and_admin_owners_are_excluded():
@@ -69,9 +73,9 @@ def test_rap_1h_summary_is_present_in_html_text_word_and_png():
     assert document.ga_task_summary[0].total == 3
     markup = render_html(document)
     assert 'data-ga-task-summary="true"' in markup
-    assert "P 1 · GA 1 · M2 1 · F 0 · NR 3" in render_plain_text(document)
+    assert "EF - GA:1 P:1 M2:1" in render_plain_text(document)
     word = Document(BytesIO(render_docx(document)))
-    assert any("EF (ZHV): P 1" in cell.text for table in word.tables for row in table.rows for cell in row.cells)
+    assert any("EF - GA:1 P:1 M2:1" in cell.text for table in word.tables for row in table.rows for cell in row.cells)
     assert render_png(document).startswith(b"\x89PNG")
 
 
@@ -83,9 +87,9 @@ def test_shtypi_summary_has_one_row_and_matches_excel_and_word():
     assert report["ga_task_summary"][0]["total"] == 3
     summary = report["html"].split('data-ga-task-summary="true"', 1)[1].split("</table>", 1)[0]
     assert summary.count("<tr>") == 1
-    assert "EF (ZHV): P 1 · GA 1 · M2 1 · F 0 · NR 3" in report["plain_text"]
+    assert "EF - GA:1 P:1 M2:1" in report["plain_text"]
     excel = load_workbook(BytesIO(report["attachments"][0][1]))
-    assert any("EF (ZHV): P 1" in str(cell.value) for row in excel.active for cell in row)
+    assert any("EF - GA:1 P:1 M2:1" in str(cell.value) for row in excel.active for cell in row)
     attachment = next(item for item in report["attachments"] if item[0].endswith(".docx"))
     word = Document(BytesIO(attachment[1]))
-    assert any("EF (ZHV): P 1" in cell.text for table in word.tables for row in table.rows for cell in row.cells)
+    assert any("EF - GA:1 P:1 M2:1" in cell.text for table in word.tables for row in table.rows for cell in row.cells)

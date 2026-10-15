@@ -3459,8 +3459,8 @@ async def _build_print_report(
     )
     report_date = target_date.strftime("%d.%m.%Y")
     summary_sections = [ClosingSection(title=GA_SUMMARY_TITLE, tables=[ClosingTable(
-        label="P: personale me GA · NR: detyra unike me GA",
-        columns=["PERSONAT (ZHV, DSG, PCM)"],
+        label="F / GA / P / M2",
+        columns=["PERSONAT"],
         rows=[ClosingTableRow(values=[summary_text(ga_summary)])],
     )])] if ga_summary else []
     attachment_sections = [*summary_sections, *closing_sections]

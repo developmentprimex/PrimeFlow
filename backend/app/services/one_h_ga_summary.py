@@ -10,7 +10,7 @@ from app.services.note_markup import parse_marked_note_content
 from app.services.personal_task_owner import personal_task_owner
 
 
-TITLE = "DET ME GA SIPAS PERSONAVE — P / GA / M2 / F / NR"
+TITLE = "DET ME GA SIPAS PERSONAVE"
 
 
 class GaTaskCounts(BaseModel):
@@ -119,8 +119,14 @@ def build_ga_summary(payload: dict, entries: Iterable[tuple[dict, bool]]) -> lis
             if person["sets"].get("total")]
 
 
+def _counts_text(row: GaTaskCounts) -> str:
+    return " ".join(f"{label}:{count}" for label, count in (
+        ("F", row.physical), ("GA", row.ga), ("P", row.personal), ("M2", row.m2),
+    ) if count)
+
+
 def person_counts_text(row: GaTaskCounts) -> str:
-    return f"{row.person} ({row.department}): P {row.personal} · GA {row.ga} · M2 {row.m2} · F {row.physical} · NR {row.total}"
+    return f"{row.person} - {_counts_text(row)}"
 
 
 def summary_text(rows: list[GaTaskCounts]) -> str:
@@ -133,9 +139,7 @@ def summary_html(rows: list[GaTaskCounts]) -> str:
     cells = "".join(
         '<td style="border:1px solid #cbd5e1;padding:7px 9px;vertical-align:top;white-space:nowrap;'
         'font-family:Arial,sans-serif;font-size:11px;background:#eff6ff;color:#0f172a;">'
-        f'<strong>{html.escape(row.person)}</strong> <span style="color:#64748b">({html.escape(row.department)})</span><br>'
-        f'P {row.personal} · GA {row.ga} · M2 {row.m2} · F {row.physical}<br>'
-        f'<strong>NR DET ME GA: {row.total}</strong></td>' for row in rows)
+        f'<strong>{html.escape(row.person)}</strong> - {html.escape(_counts_text(row))}</td>' for row in rows)
     return ('<div data-ga-task-summary="true" style="margin:12px 0;overflow-x:auto;">'
             f'<div style="font:bold 12px Arial,sans-serif;margin-bottom:5px;">{html.escape(TITLE)}</div>'
             f'<table style="border-collapse:collapse;"><tbody><tr>{cells}</tr></tbody></table></div>')
