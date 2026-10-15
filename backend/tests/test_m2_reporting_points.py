@@ -170,7 +170,7 @@ def test_ga_progress_exports_task_columns_before_delivery():
     assert headers == ["nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title"]
     assert cells["marker"]["text"] == "GA"
     html = service.render_html(value)
-    assert html.index("5. PROGRESI I DET ME GA (AM)") < html.index("6. SA PER DOREZIM M2?")
+    assert html.index("4. PROGRESI I DET ME GA (AM)") < html.index("5. SA PER DOREZIM M2?")
     attachments = service.report_attachments(value)
     word = Document(io.BytesIO(attachments[0][1]))
     assert word.tables[0].rows[0].cells[-1].text == "TITULLI"
@@ -494,22 +494,28 @@ def test_migration_creates_separate_m2_storage_without_changing_m3():
     assert "m3_reporting_points_reports" not in sql
 
 
-def test_ga_reply_question_saves_and_exports_before_reorganization():
+def test_removed_ga_reply_is_ignored_when_saving_and_exporting_old_reports():
     async def scenario():
         row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY,
-            manual_answers={"reorganization": "Ruaj riorganizimin"}, data={}, status="DRAFT")
+            manual_answers={"reorganization": "Ruaj riorganizimin", "ga_reply": "Pergjigje e vjeter"}, data={}, status="DRAFT")
         db = AsyncMock()
         payload = api.ManualAnswersPayload(manual_answers={"ga_reply": "Po, GA u përgjigj <test>"})
         with (patch.object(api, "_by_id", new=AsyncMock(return_value=row)),
               patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log")):
             result = await api.save_answers(row.id, payload, db, SimpleNamespace(id=uuid.uuid4()))
-        assert result["manual_answers"] == {"reorganization": "Ruaj riorganizimin", "ga_reply": "Po, GA u përgjigj <test>"}
+        assert result["manual_answers"] == {"reorganization": "Ruaj riorganizimin"}
+        assert payload.manual_answers == {}
         html = service.render_html(result)
-        assert html.index("1. (GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?") < html.index("2. RIORGANIZIM?")
-        assert "Po, GA u përgjigj &lt;test&gt;" in html
+        assert "A KA REPLY NGA GA" not in html
+        assert "Pergjigje e vjeter" not in html
+        assert "1. RIORGANIZIM?" in html
+        titles = [block["text"] for block in service.export_blocks(result) if block["kind"] == "text" and block["level"] == 2]
+        assert [title.split(". ")[0] for title in titles] == ["1", "2", "3", "4", "5"]
+        plain = service.render_plain_text(result)
+        assert "A KA REPLY NGA GA" not in plain and "Pergjigje e vjeter" not in plain
         word = Document(io.BytesIO(service.report_attachments(result)[0][1]))
         text = "\n".join(p.text for p in word.paragraphs)
-        assert "Po, GA u përgjigj <test>" in text
-        assert text.index("A KA REPLY NGA GA") < text.index("RIORGANIZIM?")
+        assert "A KA REPLY NGA GA" not in text and "Pergjigje e vjeter" not in text
+        assert "1. RIORGANIZIM?" in text
     import asyncio
     asyncio.run(scenario())

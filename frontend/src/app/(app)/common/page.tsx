@@ -14,7 +14,7 @@ import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
-import { isProjectCoverageDepartment, projectUsersForOneHSlot, type ProjectTaskCoverage } from "@/lib/one-h-project-coverage"
+import { isProjectCoverageDepartment, personalUsersForOneHSlot, projectUsersForOneHSlot, type ProjectTaskCoverage } from "@/lib/one-h-project-coverage"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
 import {
   internalMeetingLegendTone,
@@ -8554,26 +8554,30 @@ export default function CommonViewPage() {
       if (!selectedOneHDate || !slot) return []
       const usersWithSlot = usersWithOneHSlot(slot)
       const projectUsers = projectUsersForOneHSlot(commonData.priority, selectedOneHDate, slot)
+      const personalUsers = personalUsersForOneHSlot(commonData.personal, selectedOneHDate, slot, oneHUserIdByName)
       return oneHEligibleUsers
         .filter((userEntry) => !usersWithSlot.has(userEntry.id))
         .map((userEntry) => {
           const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
           const hasProjectTask = projectUsers.has(userEntry.id)
+          const hasPersonalTask = personalUsers.has(userEntry.id)
           const hasBlockedTask = slot === "16:00" && usersWithBlockedTask.has(userEntry.id)
           const period = slot === "10:00" || slot === "11:00" || slot === "11:50" ? "AM" : "PM"
-          return { id: userEntry.id, label, initials: initials(label), isCovered: hasProjectTask || hasBlockedTask, coverageReason: hasProjectTask ? `Detyrë projekti ${period}` : hasBlockedTask ? "BLL" : "" }
+          return { id: userEntry.id, label, initials: initials(label), isCovered: hasProjectTask || hasPersonalTask || hasBlockedTask, coverageReason: hasProjectTask ? `Detyrë projekti ${period}` : hasPersonalTask ? `Detyrë personale ${period}` : hasBlockedTask ? "BLL" : "" }
         })
     }
     const missingBlockedUsers = selectedOneHDate
       ? (() => {
           const usersWithOneHAt16 = usersWithOneHSlot("16:00")
           const projectUsersPm = projectUsersForOneHSlot(commonData.priority, selectedOneHDate, "16:00")
+          const personalUsersPm = personalUsersForOneHSlot(commonData.personal, selectedOneHDate, "16:00", oneHUserIdByName)
           return oneHEligibleUsers
             .filter((userEntry) => !usersWithBlockedTask.has(userEntry.id))
             .map((userEntry) => {
               const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
               const hasProjectTask = projectUsersPm.has(userEntry.id)
-              return { id: userEntry.id, label, initials: initials(label), isCovered: usersWithOneHAt16.has(userEntry.id) || hasProjectTask, coverageReason: hasProjectTask ? "Detyrë projekti PM" : "1H 16:00" }
+              const hasPersonalTask = personalUsersPm.has(userEntry.id)
+              return { id: userEntry.id, label, initials: initials(label), isCovered: usersWithOneHAt16.has(userEntry.id) || hasProjectTask || hasPersonalTask, coverageReason: hasProjectTask ? "Detyrë projekti PM" : hasPersonalTask ? "Detyrë personale PM" : "1H 16:00" }
             })
         })()
       : []
@@ -16884,7 +16888,7 @@ export default function CommonViewPage() {
                                 {row.missingBlockedUsers?.some((entry) => !entry.isCovered) ? (
                                   <div
                                     className="oneh-missing-users"
-                                    aria-label={`Pa BLL, pa 1H 16:00 dhe pa detyrë projekti PM: ${row.missingBlockedUsers.filter((entry) => !entry.isCovered).map((entry) => entry.label).join(", ")}`}
+                                    aria-label={`Pa BLL dhe pa mbulim PM nga 1H 16:00, projekt ose detyrë personale: ${row.missingBlockedUsers.filter((entry) => !entry.isCovered).map((entry) => entry.label).join(", ")}`}
                                   >
                                     {row.missingBlockedUsers.filter((entry) => !entry.isCovered).map((entry) => (
                                       <span key={entry.id} className="oneh-missing-user" title={entry.label}>

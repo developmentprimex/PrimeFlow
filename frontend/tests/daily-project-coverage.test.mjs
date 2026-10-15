@@ -32,6 +32,17 @@ test("Development projects do not replace required slots or BLL", () => {
   assert.equal(notices.every(x => !x.covered), true)
 })
 
+test("personal tasks justify missing slots and BLL in every department", () => {
+  for (const department of ["DEV", "PCM", "GD"]) {
+    const am = dailyCoverageNotices([{ typeLabel: "FT", subtype: "P", period: "AM" }], department, display)
+    assert.equal(am.find(x => x.key === "am").covered, true)
+    assert.match(am.find(x => x.key === "am").text, /personale/)
+    assert.equal(am.find(x => x.key === "bll").covered, false)
+    const both = dailyCoverageNotices([{ typeLabel: "FT", subtype: "P:", period: "AM/PM" }], department, display)
+    assert.equal(both.every(x => x.covered), true)
+  }
+})
+
 test("existing slots and BLL suppress missing notices and 16:00 justifies BLL", () => {
   const notices = dailyCoverageNotices([{ subtype: "1H", oneHReportSlot: "10:00", period: "AM" }, { subtype: "BLL", period: "PM" }], "DEV", display)
   assert.equal(notices.length, 0)

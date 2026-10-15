@@ -4,6 +4,7 @@ from zipfile import ZipFile
 
 from app.services.one_h_project_coverage import is_project_coverage_department, project_task_periods
 from app.services.tomorrow_print_report import _project_covered_initials, _html_table, _excel_table_attachment, _docx_table_attachment, _core_png_table_attachment
+from app.services.tomorrow_print_report import _personal_covered_initials
 
 
 def test_only_pcm_and_design_project_departments_qualify():
@@ -63,3 +64,23 @@ def test_project_coverage_is_green_in_excel_word_and_png():
     _, png, _ = _core_png_table_attachment(rows, date(2026, 10, 15), missing_one_h_by_slot=missing, project_covered_by_slot=covered)
     colors = Image.open(BytesIO(png)).convert("RGB").getcolors(20_000_000)
     assert any(color == (21, 128, 61) for _, color in colors)
+
+
+def test_personal_coverage_respects_date_period_and_excludes_confirmation_only_rows():
+    payload = {
+        "users": [{"id": "am", "full_name": "Enesa Sharku"}, {"id": "both", "full_name": "Diellza Muja"}, {"id": "other", "full_name": "Elza Preniqi"}],
+        "items": {"personal": [
+            {"date": "2026-10-15", "userId": "am", "finish_period": "AM", "is_personal_task": True},
+            {"date": "2026-10-15", "userId": "both", "finish_period": None, "assignees": ["Elza Preniqi"], "is_personal_task": True},
+            {"date": "2026-10-15", "userId": "am", "finish_period": "PM", "is_personal_task": False},
+            {"date": "2026-10-16", "userId": "am", "finish_period": "PM", "is_personal_task": True},
+        ]},
+    }
+    covered = _personal_covered_initials(payload, date(2026, 10, 15))
+    assert set(covered["10:00"]) == {"ES", "DM", "EP"}
+    assert set(covered["16:00"]) == {"DM", "EP"}
+    assert set(covered["BLL"]) == {"DM", "EP"}
+    rendered = _html_table([("1H\n10:00", [], False), ("BLL", [], False)], missing_one_h_by_slot={"10:00": ["ES"]}, missing_blocked_initials=["DM"], personal_covered_by_slot=covered)
+    assert 'data-missing-one-h-with-personal-users="true"' in rendered
+    assert 'data-missing-blocked-with-personal-users="true"' in rendered
+    assert 'data-missing-one-h-users="true"' not in rendered

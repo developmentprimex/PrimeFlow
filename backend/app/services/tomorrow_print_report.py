@@ -396,6 +396,39 @@ def _project_covered_initials(payload: dict[str, Any], target_date: date) -> dic
     return covered
 
 
+def _personal_covered_initials(payload: dict[str, Any], target_date: date) -> dict[str, list[str]]:
+    from app.services.one_h_project_coverage import project_task_periods
+
+    users = {str(row.get("id")): row for row in payload.get("users") or []}
+    users_by_name = {
+        str(value).strip().casefold(): user_id
+        for user_id, user in users.items()
+        for value in (user.get("full_name"), user.get("username"), user.get("email")) if value
+    }
+    covered: dict[str, list[str]] = {slot: [] for slot in (*sorted(VALID_1H_SLOTS), "BLL")}
+    for item in (payload.get("items") or {}).get("personal") or []:
+        if _item_date(item) != target_date or item.get("is_personal_task", item.get("isPersonalTask", True)) is False:
+            continue
+        user_ids = {str(item.get("userId") or item.get("user_id") or "")}
+        for name in item.get("assignees") or [item.get("person") or item.get("owner")]:
+            user_id = users_by_name.get(str(name or "").strip().casefold())
+            if user_id:
+                user_ids.add(user_id)
+        periods = project_task_periods(item.get("finishPeriod") or item.get("finish_period"))
+        for slot in covered:
+            period = "AM" if slot in {"10:00", "11:00", "11:50"} else "PM"
+            if period not in periods:
+                continue
+            for user_id in user_ids:
+                user = users.get(user_id)
+                if not user:
+                    continue
+                initials = _initials(str(user.get("full_name") or user.get("username") or user.get("email") or ""))
+                if initials and initials not in covered[slot]:
+                    covered[slot].append(initials)
+    return covered
+
+
 def _missing_task_initials(
     payload: dict[str, Any], target_date: date, *, bucket: str, slots: tuple[str, ...]
 ) -> dict[str, list[str]]:
@@ -1376,6 +1409,7 @@ def _html_table(
     missing_blocked_with_one_h_at_16_initials: list[str] | None = None,
     missing_one_h_at_16_with_blocked_initials: list[str] | None = None,
     project_covered_by_slot: dict[str, list[str]] | None = None,
+    personal_covered_by_slot: dict[str, list[str]] | None = None,
 ) -> str:
     header = "MEETING" if meeting else "TASK"
     label_header = "LLOJI" if meeting else "LLOJI DHE SLOTI"
@@ -1392,13 +1426,16 @@ def _html_table(
         if label.splitlines()[0].strip().upper() == "BLL":
             with_one_h_at_16 = set(missing_blocked_with_one_h_at_16_initials or [])
             with_project = set((project_covered_by_slot or {}).get("BLL", []))
+            with_personal = set((personal_covered_by_slot or {}).get("BLL", []))
             with_one_h_at_16.update(with_project)
+            with_one_h_at_16.update(with_personal)
             red_initials = [value for value in missing_blocked_initials or [] if value not in with_one_h_at_16]
             green_initials = [value for value in missing_blocked_initials or [] if value in with_one_h_at_16]
             for initials, attribute, color in (
                 (red_initials, "data-missing-blocked-users", "#DC2626"),
-                ([v for v in green_initials if v not in with_project], "data-missing-blocked-with-one-h-at-16-users", "#15803D"),
+                ([v for v in green_initials if v not in with_project and v not in with_personal], "data-missing-blocked-with-one-h-at-16-users", "#15803D"),
                 ([v for v in green_initials if v in with_project], "data-missing-blocked-with-project-users", "#15803D"),
+                ([v for v in green_initials if v in with_personal and v not in with_project], "data-missing-blocked-with-personal-users", "#15803D"),
             ):
                 if not initials:
                     continue
@@ -1413,13 +1450,16 @@ def _html_table(
         if missing:
             with_blocked = set(missing_one_h_at_16_with_blocked_initials or []) if slot == "16:00" else set()
             with_project = set((project_covered_by_slot or {}).get(slot or "", []))
+            with_personal = set((personal_covered_by_slot or {}).get(slot or "", []))
             with_blocked.update(with_project)
+            with_blocked.update(with_personal)
             red_initials = [value for value in missing if value not in with_blocked]
             green_initials = [value for value in missing if value in with_blocked]
             for initials, attribute, color in (
                 (red_initials, "data-missing-one-h-users", "#DC2626"),
-                ([v for v in green_initials if v not in with_project], "data-missing-one-h-with-blocked-users", "#15803D"),
+                ([v for v in green_initials if v not in with_project and v not in with_personal], "data-missing-one-h-with-blocked-users", "#15803D"),
                 ([v for v in green_initials if v in with_project], "data-missing-one-h-with-project-users", "#15803D"),
+                ([v for v in green_initials if v in with_personal and v not in with_project], "data-missing-one-h-with-personal-users", "#15803D"),
             ):
                 if not initials:
                     continue
@@ -3365,6 +3405,7 @@ async def _build_print_report(
     comment_initials = _comment_user_initials(payload)
     missing_one_h_by_slot = _missing_one_h_initials(payload, target_date)
     project_covered_by_slot = _project_covered_initials(payload, target_date)
+    personal_covered_by_slot = _personal_covered_initials(payload, target_date)
     missing_blocked_users = _missing_blocked_initials(payload, target_date)
     missing_at_16 = set(missing_one_h_by_slot.get("16:00", []))
     missing_blocked_with_one_h_at_16 = [value for value in missing_blocked_users if value not in missing_at_16]
@@ -3420,7 +3461,7 @@ async def _build_print_report(
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div data-report-intro="true">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users, missing_blocked_with_one_h_at_16_initials=missing_blocked_with_one_h_at_16, missing_one_h_at_16_with_blocked_initials=missing_one_h_at_16_with_blocked, project_covered_by_slot=project_covered_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users, missing_blocked_with_one_h_at_16_initials=missing_blocked_with_one_h_at_16, missing_one_h_at_16_with_blocked_initials=missing_one_h_at_16_with_blocked, project_covered_by_slot=project_covered_by_slot, personal_covered_by_slot=personal_covered_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
@@ -3477,13 +3518,13 @@ async def _build_print_report(
     for label, values, personal in task_rows:
         slot = _one_h_slot_from_label(label) or ("BLL" if label.strip() == "BLL" else None)
         missing = missing_blocked_users if slot == "BLL" else missing_one_h_by_slot.get(slot or "", [])
-        covered = set(project_covered_by_slot.get(slot or "", []))
+        covered = set(project_covered_by_slot.get(slot or "", [])) | set(personal_covered_by_slot.get(slot or "", []))
         unjustified = [value for value in missing if value not in covered]
         justified = [value for value in missing if value in covered]
         missing_label = f" [PA {'BLL' if slot == 'BLL' else '1H'}: {', '.join(unjustified)}]" if unjustified else ""
         if justified:
             period = "AM" if slot in {"10:00", "11:00", "11:50"} else "PM"
-            missing_label += f" [ME DETYRË PROJEKTI {period}: {', '.join(justified)}]"
+            missing_label += f" [ME DETYRË PROJEKTI/PERSONALE {period}: {', '.join(justified)}]"
         plain_rows.append(
             f"{label}{missing_label}: "
             + "; ".join(
@@ -3522,7 +3563,7 @@ async def _build_print_report(
     }
     if include_attachment:
         attachment_missing_by_slot = {**missing_one_h_by_slot, "BLL": missing_blocked_users}
-        attachment_covered_by_slot = {key: list(values) for key, values in project_covered_by_slot.items()}
+        attachment_covered_by_slot = {key: list(dict.fromkeys([*values, *personal_covered_by_slot.get(key, [])])) for key, values in project_covered_by_slot.items()}
         attachment_covered_by_slot["BLL"].extend(missing_blocked_with_one_h_at_16)
         attachment_covered_by_slot["16:00"].extend(missing_one_h_at_16_with_blocked)
         attachments = [
