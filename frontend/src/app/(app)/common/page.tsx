@@ -2890,6 +2890,7 @@ export default function CommonViewPage() {
         : Boolean(internalMeetingStartTime)
     )
   const internalOneHConflicts = internalMeetingAvailability?.conflicts.filter((conflict) => conflict.source === "one_h") || []
+  const internalCalendarConflicts = internalMeetingAvailability?.conflicts.filter((conflict) => conflict.source !== "one_h") || []
   const applyInternalSuggestedSlot = () => {
     const suggested = internalMeetingAvailability?.suggested_slot
     if (!suggested) return
@@ -5608,6 +5609,11 @@ export default function CommonViewPage() {
       printWindow.document.close()
       printWindow.document.title = report.subject || `1H SHTYPI SOT (Shiko simbolet) - ${reportDate}`
 
+      // Lay out against paper dimensions, never the popup's screen width.
+      // Keep that width after zooming so text does not reflow in print preview.
+      const dpi = 96
+      const printableWidthPx = (11 - 0.5) * dpi
+      const printableHeightPx = (8.27 - 0.5) * dpi
       const style = printWindow.document.createElement("style")
       style.textContent = `
         @page { size: landscape; margin: 0.25in; }
@@ -5617,7 +5623,7 @@ export default function CommonViewPage() {
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
-        .common-view-today-print-fit { width: 100%; transform-origin: top left; }
+        .common-view-today-print-fit { width: ${printableWidthPx}px; max-width: none; transform-origin: top left; }
       `
       printWindow.document.head.appendChild(style)
 
@@ -5631,13 +5637,15 @@ export default function CommonViewPage() {
       await printWindow.document.fonts?.ready
       await new Promise<void>((resolve) => printWindow.setTimeout(resolve, 100))
 
-      const dpi = 96
-      const printableWidthPx = (11 - 0.5) * dpi
-      const printableHeightPx = (8.27 - 0.5) * dpi
-      const naturalWidth = Math.max(1, wrapper.scrollWidth)
-      const naturalHeight = Math.max(1, wrapper.scrollHeight)
-      const fitScale = Math.min(1, printableWidthPx / naturalWidth, printableHeightPx / naturalHeight)
-      wrapper.style.setProperty("zoom", String(Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1))
+      const fitReportToPage = () => {
+        wrapper.style.setProperty("zoom", "1")
+        const naturalWidth = Math.max(1, wrapper.scrollWidth)
+        const naturalHeight = Math.max(1, wrapper.scrollHeight)
+        const fitScale = Math.min(1, printableWidthPx / naturalWidth, printableHeightPx / naturalHeight)
+        wrapper.style.setProperty("zoom", String(Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1))
+      }
+      fitReportToPage()
+      printWindow.addEventListener("beforeprint", fitReportToPage)
       printWindow.print()
     } catch (error) {
       console.error("Failed to print the canonical Today report", error)
@@ -6474,6 +6482,7 @@ export default function CommonViewPage() {
         project_id: null,
         standard_id: null,
         participant_ids: params.participantIds,
+        check_all_meetings: params.meetingType === "internal",
       }),
     })
     if (!response.ok) return null
@@ -7183,11 +7192,13 @@ export default function CommonViewPage() {
     const departmentId = internalMeetingDepartmentId || user?.department_id || ""
     if (!internalMeetingProposedStart || !departmentId || !internalMeetingParticipantIds.length) {
       setInternalMeetingAvailability(null)
+      setCheckingInternalMeetingAvailability(false)
       return
     }
     let active = true
+    setInternalMeetingAvailability(null)
+    setCheckingInternalMeetingAvailability(true)
     const timeout = window.setTimeout(() => {
-      setCheckingInternalMeetingAvailability(true)
       void requestMeetingAvailability({
         title: internalMeetingTitle,
         meetingType: "internal",
@@ -7446,13 +7457,12 @@ export default function CommonViewPage() {
         participantIds: internalMeetingParticipantIds,
       })
       const oneHConflicts = availability?.conflicts.filter((conflict) => conflict.source === "one_h") || []
+      const calendarConflicts = availability?.conflicts.filter((conflict) => conflict.source !== "one_h") || []
       let allowOneHConflict = false
-      if (oneHConflicts.length) {
-        setInternalMeetingAvailability(availability)
-      }
-      if (participantConflicts.length || oneHConflicts.length) {
+      setInternalMeetingAvailability(availability)
+      if (participantConflicts.length || oneHConflicts.length || calendarConflicts.length) {
         const approved = await confirm({
-          title: participantConflicts.length ? "Konflikte për pjesëmarrësit" : "Konflikt me orarin 1H",
+          title: calendarConflicts.length ? "Takime në të njëjtin interval" : participantConflicts.length ? "Konflikte për pjesëmarrësit" : "Konflikt me orarin 1H",
           description: (
             <span className="block space-y-3 text-left">
               {oneHConflicts.length > 0 && (
@@ -7476,6 +7486,12 @@ export default function CommonViewPage() {
                       • {reason}
                     </span>
                   ))}
+                </span>
+              ))}
+              {calendarConflicts.map((conflict, index) => (
+                <span key={`${conflict.source}-${conflict.starts_at}-${index}`} className="block rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950">
+                  <strong className="block">{conflict.source === "tak_int" ? "TAK INT" : conflict.source === "tak_ext" ? "TAK EXT" : "Kalendar"}: {conflict.title}</strong>
+                  <span className="block text-xs">{new Date(conflict.starts_at).toLocaleString("sq-AL")} – {toLocalTimeInput(conflict.ends_at)}</span>
                 </span>
               ))}
               <span className="block text-xs text-slate-500">
@@ -15391,14 +15407,14 @@ export default function CommonViewPage() {
                   {internalMeetingRecurrenceType === "none" ? "Date and time" : "Time"}
                   {internalMeetingRecurrenceType === "none" ? (
                     <input
-                      className={`input ${internalOneHConflicts.length ? "border-red-500 bg-red-50 text-red-800" : ""}`}
+                      className={`input ${internalOneHConflicts.length || internalCalendarConflicts.length ? "border-red-500 bg-red-50 text-red-800" : ""}`}
                       type="datetime-local"
                       value={internalMeetingStartsAt}
                       onChange={(e) => setInternalMeetingStartsAt(e.target.value)}
                     />
                   ) : (
                     <input
-                      className={`input ${internalOneHConflicts.length ? "border-red-500 bg-red-50 text-red-800" : ""}`}
+                      className={`input ${internalOneHConflicts.length || internalCalendarConflicts.length ? "border-red-500 bg-red-50 text-red-800" : ""}`}
                       type="time"
                       value={internalMeetingStartTime}
                       onChange={(e) => setInternalMeetingStartTime(e.target.value)}
@@ -15417,6 +15433,23 @@ export default function CommonViewPage() {
                     ) : null}
                   </div>
                 ) : null}
+                {!checkingInternalMeetingAvailability && internalCalendarConflicts.length > 0 && (
+                  <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                    <strong className="block">Në këtë interval ka takime, edhe për përdorues të tjerë:</strong>
+                    {internalCalendarConflicts.map((conflict, index) => (
+                      <div key={`${conflict.source}-${conflict.starts_at}-${index}`}>
+                        <strong>{conflict.source === "tak_int" ? "TAK INT" : conflict.source === "tak_ext" ? "TAK EXT" : "Kalendar"}: {conflict.title}</strong>
+                        <div>{new Date(conflict.starts_at).toLocaleString("sq-AL")} – {toLocalTimeInput(conflict.ends_at)}</div>
+                        {(conflict.participant_ids?.length || 0) > 0 && (
+                          <div>{(conflict.participant_ids || []).map((id) => {
+                            const person = users.find((candidate) => candidate.id === id)
+                            return person?.full_name || person?.username || person?.email || "Përdorues tjetër"
+                          }).join(", ")}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {internalMeetingRecurrenceType === "weekly" ? (
                   <>
                     <div className="external-meeting-row" style={{ justifyContent: "flex-start" }}>

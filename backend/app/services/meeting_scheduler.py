@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.meeting import Meeting, MeetingParticipant
+from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.common_entry import CommonEntry
 from app.models.enums import CommonCategory
 from app.models.meeting_schedule_request import (
@@ -203,10 +204,11 @@ def meeting_occurrence_window(meeting: Meeting, target: datetime) -> tuple[datet
         return None
     start_local = datetime.combine(target_local.date(), source_local.timetz(), tzinfo=tz)
     start = start_local.astimezone(timezone.utc)
+    default_duration = timedelta(minutes=30) if getattr(meeting, "meeting_type", None) == "internal" else DEFAULT_EXISTING_MEETING_DURATION
     duration = (
         meeting.ends_at - meeting.starts_at
         if meeting.ends_at is not None and meeting.ends_at > meeting.starts_at
-        else DEFAULT_EXISTING_MEETING_DURATION
+        else default_duration
     )
     return start, start + duration
 
@@ -287,24 +289,31 @@ async def validate_meeting_schedule(
     local_day = starts_at.astimezone(_app_timezone()).date()
     local_day_start = datetime.combine(local_day, time.min, tzinfo=_app_timezone()).astimezone(timezone.utc)
     local_day_end = (datetime.combine(local_day, time.min, tzinfo=_app_timezone()) + timedelta(days=1)).astimezone(timezone.utc)
-    meeting_rows = (
-        await db.execute(
-            select(Meeting, MeetingParticipant.user_id)
-            .join(MeetingParticipant, MeetingParticipant.meeting_id == Meeting.id)
-            .where(
-                MeetingParticipant.user_id.in_(participant_ids),
-                MeetingParticipant.assignment_source == "manual",
-            )
-            .where(Meeting.starts_at.is_not(None))
+    check_all_meetings = payload.meeting_type == "internal" and getattr(payload, "check_all_meetings", False)
+    meeting_stmt = select(Meeting, MeetingParticipant.user_id).where(Meeting.starts_at.is_not(None))
+    if check_all_meetings:
+        # Manual TAK INT checks the shared calendar, including other users
+        # and meetings that have no manually assigned participants.
+        meeting_stmt = meeting_stmt.outerjoin(MeetingParticipant, MeetingParticipant.meeting_id == Meeting.id)
+        meeting_stmt = meeting_stmt.where(~select(MeetingOccurrenceStatus.id).where(
+            MeetingOccurrenceStatus.meeting_id == Meeting.id,
+            MeetingOccurrenceStatus.occurrence_date == local_day,
+            MeetingOccurrenceStatus.status == "canceled",
+        ).exists())
+    else:
+        meeting_stmt = meeting_stmt.join(MeetingParticipant, MeetingParticipant.meeting_id == Meeting.id).where(
+            MeetingParticipant.user_id.in_(participant_ids),
+            MeetingParticipant.assignment_source == "manual",
         )
-    ).all()
+    meeting_rows = (await db.execute(meeting_stmt)).all()
     meeting_participants: dict[uuid.UUID, set[uuid.UUID]] = {}
     meetings: dict[uuid.UUID, Meeting] = {}
     for meeting, participant_id in meeting_rows:
         if not _blocks_meeting_schedule(meeting):
             continue
         meetings[meeting.id] = meeting
-        meeting_participants.setdefault(meeting.id, set()).add(participant_id)
+        if participant_id is not None:
+            meeting_participants.setdefault(meeting.id, set()).add(participant_id)
 
     # A single shared organizer cannot host overlapping TAK EXT meetings.
     # Check every TAK EXT, regardless of whether participants overlap.
@@ -329,13 +338,14 @@ async def validate_meeting_schedule(
     for meeting_id, meeting in meetings.items():
         window = meeting_occurrence_window(meeting, starts_at)
         if window and _overlaps(conflict_window_start, conflict_window_end, *window):
+            source = "primeflow"
+            if check_all_meetings:
+                source = "tak_ext" if meeting.meeting_type == "external" else "tak_int"
+            elif payload.meeting_type == "external" and meeting.meeting_type == "external":
+                source = "tak_ext"
             conflicts.append(
                 MeetingScheduleConflict(
-                    source=(
-                        "tak_ext"
-                        if payload.meeting_type == "external" and meeting.meeting_type == "external"
-                        else "primeflow"
-                    ),
+                    source=source,
                     title=meeting.title,
                     starts_at=window[0],
                     ends_at=window[1],
@@ -433,7 +443,7 @@ async def validate_meeting_schedule(
         (conflict for conflict in conflicts if conflict.source in {"tak_ext", "tak_ext_request"}),
         None,
     )
-    if external_conflict is not None:
+    if external_conflict is not None and payload.meeting_type == "external":
         conflict_start = external_conflict.starts_at.astimezone(_app_timezone()).strftime("%d.%m.%Y %H:%M")
         conflict_end = external_conflict.ends_at.astimezone(_app_timezone()).strftime("%H:%M")
         errors.append(
@@ -442,6 +452,8 @@ async def validate_meeting_schedule(
         )
     elif one_h_conflicts:
         errors.append("Ky orar përputhet me 1H.")
+    elif check_all_meetings and conflicts:
+        errors.append("Në këtë interval ka TAK INT ose TAK EXT në kalendar.")
     elif conflicts:
         errors.append("Një ose më shumë pjesëmarrës janë të zënë në këtë orar.")
 

@@ -39,8 +39,10 @@ class _Result:
 class _ValidationDb:
     def __init__(self, results):
         self.results = iter(results)
+        self.statements = []
 
     async def execute(self, _statement):
+        self.statements.append(str(_statement))
         return _Result(next(self.results))
 
 
@@ -94,6 +96,7 @@ def test_microsoft_account_email_falls_back_to_user_principal_name() -> None:
 
 def test_weekly_meeting_occurrence_preserves_time_and_duration() -> None:
     meeting = SimpleNamespace(
+        meeting_type="external",
         starts_at=datetime(2026, 9, 1, 9, 30, tzinfo=timezone.utc),
         ends_at=datetime(2026, 9, 1, 10, 15, tzinfo=timezone.utc),
         recurrence_type="weekly",
@@ -160,7 +163,7 @@ def test_microsoft_pv_item_is_visible_calendar_info_not_a_conflict() -> None:
 
 
 def test_primeflow_pv_meeting_does_not_block_external_meeting() -> None:
-    start = datetime.now(timezone.utc) + timedelta(days=10)
+    start = (datetime.now(timezone.utc) + timedelta(days=10)).replace(hour=6, minute=0, second=0, microsecond=0)
     pv = Meeting(
         title="DV PV 07.09-20.09.2026",
         meeting_type="external",
@@ -194,7 +197,7 @@ def test_primeflow_pv_meeting_does_not_block_external_meeting() -> None:
 
 
 def test_external_meeting_blocks_overlapping_external_without_shared_participants() -> None:
-    start = datetime.now(timezone.utc) + timedelta(days=10)
+    start = (datetime.now(timezone.utc) + timedelta(days=10)).replace(hour=6, minute=0, second=0, microsecond=0)
     existing = Meeting(
         title="TAK EXT | Existing client",
         meeting_type="external",
@@ -248,6 +251,51 @@ def test_global_one_h_conflict_uses_fifteen_minute_window_and_boundaries() -> No
         ends_at=datetime(2026, 9, 21, 8, 45, tzinfo=timezone.utc),
     ))
     assert conflicts == []
+
+
+@pytest.mark.parametrize("meeting_type", ["internal", "external"])
+@pytest.mark.parametrize("has_participant", [True, False])
+def test_manual_internal_checks_other_users_and_unassigned_meetings(meeting_type, has_participant) -> None:
+    start = (datetime.now(timezone.utc) + timedelta(days=10)).replace(hour=6, minute=0, second=0, microsecond=0)
+    selected_id, other_id = uuid.uuid4(), uuid.uuid4()
+    existing = Meeting(
+        id=uuid.uuid4(), title="Existing meeting", meeting_type=meeting_type,
+        starts_at=start, ends_at=start + timedelta(minutes=30),
+        department_id=uuid.uuid4(),
+    )
+    participant = SimpleNamespace(id=selected_id, is_active=True)
+    db = _ValidationDb([[participant], [(existing, other_id if has_participant else None)], []])
+    payload = MeetingScheduleValidationIn(**_base_payload(
+        meeting_type="internal", participant_ids=[selected_id], check_all_meetings=True,
+        starts_at=start + timedelta(minutes=15), ends_at=start + timedelta(minutes=45),
+    ))
+    result = asyncio.run(validate_meeting_schedule(db, payload))
+    assert len(result.conflicts) == 1
+    assert result.conflicts[0].source == ("tak_int" if meeting_type == "internal" else "tak_ext")
+    assert result.conflicts[0].participant_ids == ([other_id] if has_participant else [])
+    assert "LEFT OUTER JOIN" in db.statements[1]
+    assert "NOT (EXISTS" in db.statements[1]
+    assert "meeting_occurrence_statuses.status" in db.statements[1]
+    assert "meeting_participants.user_id IN" not in db.statements[1]
+    assert not any("Nuk mund të krijohet TAK EXT" in error for error in result.errors)
+
+
+@pytest.mark.parametrize("offset, cancelled", [(30, False), (15, True)])
+def test_manual_internal_ignores_adjacent_and_cancelled_meetings(offset, cancelled) -> None:
+    start = (datetime.now(timezone.utc) + timedelta(days=10)).replace(hour=6, minute=0, second=0, microsecond=0)
+    selected_id = uuid.uuid4()
+    existing = Meeting(
+        id=uuid.uuid4(), title="Existing internal", meeting_type="internal",
+        starts_at=start, department_id=uuid.uuid4(),
+        calendar_sync_status="cancelled" if cancelled else None,
+    )
+    db = _ValidationDb([[SimpleNamespace(id=selected_id, is_active=True)], [(existing, uuid.uuid4())], []])
+    payload = MeetingScheduleValidationIn(**_base_payload(
+        meeting_type="internal", participant_ids=[selected_id], check_all_meetings=True,
+        starts_at=start + timedelta(minutes=offset), ends_at=start + timedelta(minutes=offset + 30),
+    ))
+    result = asyncio.run(validate_meeting_schedule(db, payload))
+    assert result.conflicts == []
 
 
 def test_suggestion_moves_in_fifteen_minute_steps_until_free() -> None:
