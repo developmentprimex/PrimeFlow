@@ -1,5 +1,6 @@
 "use client"
 
+import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
@@ -7681,18 +7682,9 @@ export default function DepartmentKanban() {
                   </div>
                 </div>
                 <TaskOneHMarkerLegend className="mt-3" />
-                {!loadingDailyReport && dailyReport?.day === selectedAllReportIso &&
-                  !dailyUserReportRows.some((row) => getDailyReportOneHSlotDisplay(row) === "10:00") ? (
-                    <p role="status" className="mt-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
-                      Nuk ka detyrë me slot në 10:00 për këtë ditë.
-                    </p>
-                  ) : null}
-                {!loadingDailyReport && dailyReport?.day === selectedAllReportIso &&
-                  !dailyUserReportRows.some((row) => ["PM", "AM/PM"].includes(row.period?.trim().toUpperCase())) ? (
-                    <p role="status" className="mt-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
-                      Nuk ka detyrë në PM për këtë ditë.
-                    </p>
-                  ) : null}
+                {!loadingDailyReport && dailyReport?.day === selectedAllReportIso ? (
+                  <DailyProjectCoverageNotices rows={dailyUserReportRows} department="DEV" slotDisplay={getDailyReportOneHSlotDisplay} />
+                ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                   <span className="font-medium text-slate-600">Period:</span>
                   <button

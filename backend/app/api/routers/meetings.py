@@ -39,7 +39,6 @@ from app.services.meeting_system_tasks import (
     reconcile_pim_image_test_task_for_meeting,
     reconcile_tak_int_one_h_tasks,
     reconcile_tak_int_one_h_tasks_for_meeting,
-    sync_tak_int_one_h_tasks_with_held_status,
 )
 from app.services.meeting_scheduler import one_h_schedule_conflicts
 from app.services.audit import add_audit_log
@@ -229,14 +228,10 @@ async def update_meeting_occurrence_status(
             occurrence_date=payload.occurrence_date,
         )
         db.add(row)
-    was_held = row.status == "held"
     row.status = payload.status
     row.note = payload.note
     row.checked_by_user_id = user.id
     row.checked_at = datetime.now().astimezone()
-    is_held = payload.status == "held"
-    if is_held != was_held:
-        await sync_tak_int_one_h_tasks_with_held_status(db, meeting, held=is_held)
     await db.commit()
     await db.refresh(row)
     return _occurrence_status_out(row)

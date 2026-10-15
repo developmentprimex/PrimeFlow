@@ -1,6 +1,9 @@
 """Requires the optional requirements-discord.txt dependencies; never logs in."""
 import importlib.util
 import os
+import json
+import tempfile
+from pathlib import Path
 import unittest
 import uuid
 from types import SimpleNamespace
@@ -72,6 +75,25 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(request.headers["X-Primeflow-Discord-Secret"], "x" * 32)
             finally:
                 await instance.close()
+
+    async def test_ready_status_requires_membership_and_contains_no_credentials(self):
+        instance = object.__new__(bot.PrimeFlowBot)
+        with tempfile.TemporaryDirectory() as directory:
+            module_path = Path(directory) / "discord_bot.py"
+            status_path = module_path.with_name(".discord-worker-status.json")
+            with patch.object(bot, "Path", return_value=module_path), patch.object(bot.settings, "DISCORD_GUILD_ID", "123"), \
+                 patch.dict(os.environ, {"APP_BUILD_SHA": "test-build"}), patch.object(bot.PrimeFlowBot, "get_guild", return_value=Mock()):
+                instance.publish_ready_status()
+                result = json.loads(status_path.read_text())
+                self.assertEqual(result["guild_id"], "123")
+                self.assertEqual(result["build"], "test-build")
+                self.assertEqual(set(result), {"guild_id", "pid", "build", "connected_at"})
+                instance.clear_ready_status()
+                self.assertFalse(status_path.exists())
+            with patch.object(bot, "Path", return_value=module_path), patch.object(bot.settings, "DISCORD_GUILD_ID", "123"), \
+                 patch.object(bot.PrimeFlowBot, "get_guild", return_value=None):
+                instance.publish_ready_status()
+                self.assertFalse(status_path.exists())
 
     async def test_privacy_is_repaired_before_returning_channel(self):
         instance = object.__new__(bot.PrimeFlowBot)

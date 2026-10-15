@@ -126,6 +126,8 @@ jobs:
           }
 
           $backendChanged = Test-SurfaceChanged -Name "backend" -PathPrefix "backend"
+          # Re-running manually must apply changed Discord secrets/settings too.
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") { $backendChanged = $true }
           $frontendChanged = Test-SurfaceChanged -Name "frontend" -PathPrefix "frontend"
           # A reboot or a lost PM2 daemon leaves the frontend stopped while its
           # marker still says "deployed"; redeploy it instead of skipping.
@@ -208,12 +210,28 @@ jobs:
           echo WEEKLY_PLANNING_AUDIT_AI_MODEL=gpt-5.2 >> backend\.env
           echo WEEKLY_PLANNING_AUDIT_AI_TIMEOUT_SECONDS=90 >> backend\.env
  
+      - name: Configure Discord Assistant
+        shell: powershell
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+          DISCORD_BRIDGE_SECRET: ${{ secrets.DISCORD_BRIDGE_SECRET }}
+          DISCORD_ASSISTANT_ENABLED: ${{ vars.DISCORD_ASSISTANT_ENABLED }}
+          DISCORD_CATEGORY_ID: ${{ vars.DISCORD_CATEGORY_ID }}
+          DISCORD_MESSAGE_CONTENT_ENABLED: ${{ vars.DISCORD_MESSAGE_CONTENT_ENABLED }}
+          DISCORD_AI_MODEL: ${{ vars.DISCORD_AI_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" backend/scripts/configure_discord.py
+          if ($LASTEXITCODE -ne 0) { throw "Discord configuration failed. Check the required Actions secrets." }
+
       - name: Prepare Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
         run: |
           cd backend
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements-discord.txt
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m py_compile mcp_server.py app\api\routers\search.py app\schemas\search.py
           if errorlevel 1 exit /b 1
@@ -222,6 +240,8 @@ jobs:
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "from app.main import app; print('Backend application import: OK')"
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server tests.test_migration_graph
+          if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_discord_assistant tests.test_discord_bot tests.test_discord_deploy
           if errorlevel 1 exit /b 1
 
       - name: Apply Database Migrations
@@ -254,6 +274,7 @@ jobs:
 
           # Prevent the legacy scheduler from reloading rows while migrations run.
           cmd /c "pm2 stop primeflow-report-scheduler || ver > NUL" | Out-Host
+          cmd /c "pm2 stop primeflow-discord || ver > NUL" | Out-Host
 
           & $python -m alembic upgrade head
           if ($LASTEXITCODE -ne 0) {
@@ -319,6 +340,7 @@ jobs:
           REM scheduler supervised and PM2 immediately respawns it after it is killed.
           call pm2 delete primex-backend || ver > NUL
           call pm2 delete primeflow-mcp || ver > NUL
+          call pm2 delete primeflow-discord || ver > NUL
           call pm2 delete primeflow-report-scheduler || ver > NUL
           call pm2 delete primex-tomorrow-shtypi-scheduler || ver > NUL
           call pm2 delete celery_worker || ver > NUL
@@ -406,6 +428,40 @@ jobs:
             exit 1
           }
           Write-Host "Backend health check: OK ($uri) serving build $expected"
+
+      - name: Start Discord Assistant
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        env:
+          APP_BUILD_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location backend
+          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+          $discordConfig = (& $python scripts/configure_discord.py --status) | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Unable to read Discord configuration." }
+          if (-not $discordConfig.enabled) {
+            Write-Host "Discord assistant is disabled; no bot process started."
+            exit 0
+          }
+          Remove-Item -LiteralPath ".discord-worker-status.json" -Force -ErrorAction SilentlyContinue
+          cmd /c "pm2 start ecosystem.config.cjs --only primeflow-discord --update-env" | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Unable to start the Discord bot." }
+          $ready = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            if (Test-Path -LiteralPath ".discord-worker-status.json") {
+              $status = Get-Content -LiteralPath ".discord-worker-status.json" -Raw | ConvertFrom-Json
+              if ($status.build -eq $env:APP_BUILD_SHA -and $status.guild_id -eq $discordConfig.guild_id) {
+                $ready = $true
+                break
+              }
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ready) {
+            throw "Discord bot did not connect. Check DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, the bot's server membership and Message Content Intent."
+          }
+          Write-Host "Discord assistant connected and slash commands registered."
 
       - name: Wait for MCP Readiness
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}

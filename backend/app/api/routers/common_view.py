@@ -37,6 +37,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.one_h_slots import effective_slot_date
+from app.services.one_h_project_coverage import is_project_coverage_department, project_task_periods
 from app.services.meeting_occurrence import meeting_display_dates, meeting_occurs_on_date
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.system_task_schedule import matches_template_date
@@ -71,7 +72,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "19"
+COMMON_VIEW_CACHE_VERSION = "20"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -1084,6 +1085,7 @@ async def get_common_view(
                     entry = {
                         "project": project_name,
                         "assignees_by_date": {},
+                        "task_assignees_by_date_period": {},
                         "dates": set(),
                     }
                     priority_map[t.project_id] = entry
@@ -1091,6 +1093,13 @@ async def get_common_view(
                     entry["dates"].add(task_date)
                     date_key = task_date.isoformat()
                     entry["assignees_by_date"].setdefault(date_key, set()).update(assignee_names)
+                    project_department = departments_map.get(project.department_id)
+                    if project_department and is_project_coverage_department(project_department.code, project_department.name):
+                        for period in project_task_periods(t.finish_period):
+                            period_users = entry["task_assignees_by_date_period"].setdefault(date_key, {}).setdefault(period, set())
+                            period_users.update(str(user_id) for user_id in assignee_ids)
+                            if t.assigned_to:
+                                period_users.add(str(t.assigned_to))
 
         expanded_priority: list[dict[str, Any]] = []
         for project_id, entry in priority_map.items():
@@ -1140,6 +1149,10 @@ async def get_common_view(
                         "project": entry["project"],
                         "date": date_key,
                         "assignees": assignees,
+                        "projectTaskAssigneesByPeriod": {
+                            period: sorted(user_ids)
+                            for period, user_ids in entry["task_assignees_by_date_period"].get(date_key, {}).items()
+                        },
                         "department_id": str(dept_id) if dept_id else None,
                         "department_name": dept_name,
                     }
