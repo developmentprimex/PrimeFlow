@@ -53,7 +53,7 @@ PIM_IMAGE_MEETING_TASK_DESCRIPTION = (
 
 # 1H tasks for every person assigned on a one-time TAK EXT: one in the 1H slot
 # before the meeting (TAK INT para) and one in the slot right after it
-# (TAK INT pas). Both close automatically when the linked TAK INT is held.
+# (TAK INT pas). Both are completed manually, independently of meeting status.
 # These are plain 1H tasks, not system tasks: no template or system slot.
 TAK_INT_PRE_ONE_H_TASK_KIND = "tak_int_pre_one_h"
 TAK_INT_POST_ONE_H_TASK_KIND = "tak_int_post_one_h"
@@ -62,11 +62,11 @@ TAK_INT_PRE_ONE_H_TASK_TITLE = "TAK INT PARA TAK EXT"
 TAK_INT_POST_ONE_H_TASK_TITLE = "TAK INT PAS TAK EXT"
 TAK_INT_PRE_ONE_H_TASK_DESCRIPTION = (
     "TAK INT para takimit ekstern. Përgatitet takimi dhe diskutohen pikat që do të "
-    "prezantohen. Detyra mbyllet automatikisht kur TAK INT shënohet si i mbajtur."
+    "prezantohen. Detyra mbyllet manualisht, pavarësisht statusit të takimit."
 )
 TAK_INT_POST_ONE_H_TASK_DESCRIPTION = (
     "TAK INT pas takimit ekstern. Diskutohen rezultatet dhe hapat e ardhshëm të takimit. "
-    "Detyra mbyllet automatikisht kur TAK INT shënohet si i mbajtur."
+    "Detyra mbyllet manualisht, pavarësisht statusit të takimit."
 )
 TAK_INT_ONE_H_SLOTS: tuple[tuple[time, str], ...] = (
     (time(10, 0), "10:00"),
@@ -637,26 +637,6 @@ async def _post_internal_meeting(db: AsyncSession, external_meeting_id: uuid.UUI
     ).scalars().first()
 
 
-async def _linked_internal_meeting_ids(
-    db: AsyncSession,
-    external_meeting_id: uuid.UUID,
-) -> tuple[uuid.UUID | None, uuid.UUID | None]:
-    rows = (
-        await db.execute(
-            select(Meeting.id, Meeting.pre_external_meeting_id, Meeting.paired_external_meeting_id).where(
-                Meeting.meeting_type == "internal",
-                or_(
-                    Meeting.pre_external_meeting_id == external_meeting_id,
-                    Meeting.paired_external_meeting_id == external_meeting_id,
-                ),
-            )
-        )
-    ).all()
-    pre_id = next((row_id for row_id, pre, _ in rows if pre == external_meeting_id), None)
-    post_id = next((row_id for row_id, _, paired in rows if paired == external_meeting_id), None)
-    return pre_id, post_id
-
-
 async def _resolve_external_meeting(db: AsyncSession, meeting: Meeting) -> Meeting | None:
     if meeting.meeting_type == "external":
         return meeting
@@ -898,50 +878,4 @@ async def reconcile_tak_int_one_h_tasks(
     changed = 0
     for meeting in meetings:
         changed += await reconcile_tak_int_one_h_tasks_for_meeting(db, meeting, now_utc=now_utc)
-    return changed
-
-
-async def sync_tak_int_one_h_tasks_with_held_status(
-    db: AsyncSession,
-    meeting: Meeting,
-    *,
-    held: bool,
-    now_utc: datetime | None = None,
-) -> int:
-    """Close (or reopen) the TAK INT 1H tasks when a TAK INT is marked held.
-
-    A TAK EXT without a TAK INT before it closes its own "para" tasks.
-    """
-    if meeting.pre_external_meeting_id is not None:
-        external_id, task_kind = meeting.pre_external_meeting_id, TAK_INT_PRE_ONE_H_TASK_KIND
-    elif meeting.paired_external_meeting_id is not None:
-        external_id, task_kind = meeting.paired_external_meeting_id, TAK_INT_POST_ONE_H_TASK_KIND
-    elif meeting.meeting_type == "external":
-        pre_internal_id, _ = await _linked_internal_meeting_ids(db, meeting.id)
-        if pre_internal_id is not None:
-            return 0
-        external_id, task_kind = meeting.id, TAK_INT_PRE_ONE_H_TASK_KIND
-    else:
-        return 0
-
-    now_utc = now_utc or datetime.now(timezone.utc)
-    tasks = (
-        await db.execute(
-            select(Task)
-            .where(Task.meeting_origin_id == external_id)
-            .where(Task.meeting_system_task_kind == task_kind)
-            .where(Task.is_active.is_(True))
-        )
-    ).scalars().all()
-    changed = 0
-    for task in tasks:
-        is_done = task.status == TaskStatus.DONE
-        if held and not is_done:
-            task.status = TaskStatus.DONE.value
-            task.completed_at = now_utc
-            changed += 1
-        elif not held and is_done:
-            task.status = TaskStatus.TODO.value
-            task.completed_at = None
-            changed += 1
     return changed
