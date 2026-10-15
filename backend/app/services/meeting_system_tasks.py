@@ -19,6 +19,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.meeting_participants import manual_participant_ids
+from app.services.microsoft_calendar_sync import is_routine_external_meeting
 
 EXTERNAL_MEETING_TASK_KIND = "external_meeting_prepare"
 EXTERNAL_MEETING_TRIGGER_TYPE = "EXTERNAL_MEETING_ONCE"
@@ -680,6 +681,11 @@ async def reconcile_tak_int_one_h_tasks_for_meeting(
         return 0
 
     qualifies = qualifies_for_tak_int_one_h_tasks(external)
+    # Weekly/routine calendar meetings have only a follow-up TAK INT. Keep
+    # their tasks consistent, including deactivating old open preparation tasks.
+    needs_preparation = qualifies and not is_routine_external_meeting(
+        getattr(external, "calendar_categories", None), external.recurrence_type
+    )
     participant_ids: list[uuid.UUID] = []
     post_internal: Meeting | None = None
     if qualifies:
@@ -692,7 +698,7 @@ async def reconcile_tak_int_one_h_tasks_for_meeting(
             TAK_INT_PRE_ONE_H_TASK_KIND,
             TAK_INT_PRE_ONE_H_TASK_TITLE,
             TAK_INT_PRE_ONE_H_TASK_DESCRIPTION,
-            tak_int_pre_one_h_slot(external) if qualifies else None,
+            tak_int_pre_one_h_slot(external) if needs_preparation else None,
         ),
         (
             TAK_INT_POST_ONE_H_TASK_KIND,

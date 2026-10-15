@@ -14,6 +14,7 @@ import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
+import { isProjectCoverageDepartment, projectUsersForOneHSlot, type ProjectTaskCoverage } from "@/lib/one-h-project-coverage"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
 import {
   internalMeetingLegendTone,
@@ -593,7 +594,7 @@ type FeedbackItem = {
   everyday?: boolean
   createdDate?: string
 }
-type PriorityItem = {
+type PriorityItem = ProjectTaskCoverage & {
   project: string
   date: string
   assignees: string[]
@@ -965,8 +966,8 @@ type SwimlaneRow = {
   badgeClass: string
   badges?: { value: number; className: string; label?: string }[]
   headerBreakdown?: { value: number; label: string; className?: string }[]
-  missingOneHUsers?: { id: string; label: string; initials: string; hasBlockedTask: boolean }[]
-  missingBlockedUsers?: { id: string; label: string; initials: string; hasOneHAt16: boolean }[]
+  missingOneHUsers?: { id: string; label: string; initials: string; isCovered: boolean; coverageReason: string }[]
+  missingBlockedUsers?: { id: string; label: string; initials: string; isCovered: boolean; coverageReason: string }[]
   items: SwimlaneCell[]
 }
 
@@ -3813,6 +3814,7 @@ export default function CommonViewPage() {
             project: string; 
             assigneesByDate: Map<string, Set<string>>; // Track assignees per date
             dates: Set<string>;
+            taskAssigneesByDatePeriod: Map<string, Partial<Record<"AM" | "PM", Set<string>>>>;
           }>()
 
           // Second pass: process tasks for date-specific data and other categories
@@ -4053,6 +4055,7 @@ export default function CommonViewPage() {
                   project: projectName,
                   assigneesByDate: new Map<string, Set<string>>(),
                   dates: new Set<string>(),
+                  taskAssigneesByDatePeriod: new Map(),
                 })
               }
               
@@ -4067,6 +4070,18 @@ export default function CommonViewPage() {
                   entry.assigneesByDate.set(taskDate, new Set<string>())
                 }
                 const dateAssignees = entry.assigneesByDate.get(taskDate)!
+                const projectDepartment = projectInfoById.get(t.project_id)?.department_id
+                if (isProjectCoverageDepartment(projectDepartment ? departmentNameById.get(projectDepartment) : null)) {
+                  const periods = entry.taskAssigneesByDatePeriod.get(taskDate) || {}
+                  const taskPeriods: Array<"AM" | "PM"> = t.finish_period === "AM" || t.finish_period === "PM" ? [t.finish_period] : ["AM", "PM"]
+                  for (const period of taskPeriods) {
+                    const periodUsers = periods[period] ?? new Set<string>()
+                    for (const user of t.assignees || []) periodUsers.add(user.id)
+                    if (assigneeId) periodUsers.add(assigneeId)
+                    periods[period] = periodUsers
+                  }
+                  entry.taskAssigneesByDatePeriod.set(taskDate, periods)
+                }
                 
                 // Add assignees to this date only
                 for (const name of assigneeNames) {
@@ -4159,6 +4174,9 @@ export default function CommonViewPage() {
                 project: entry.project,
                 date: date,
                 assignees: Array.from(dateAssignees),
+                projectTaskAssigneesByPeriod: Object.fromEntries(
+                  Object.entries(entry.taskAssigneesByDatePeriod.get(date) || {}).map(([period, ids]) => [period, Array.from(ids)])
+                ),
                 department_id: departmentId,
                 department_name: departmentName,
               })
@@ -4646,10 +4664,8 @@ export default function CommonViewPage() {
       }
     }
 
-    // Build hidden-users-per-date map for full-day PV/Feste or full-day Mungese.
-    // A Mungese is considered full-day when its time range covers the whole work
-    // day (from <= 08:00 and to >= 16:30); this also matches the backend default
-    // of 08:00-23:00 used when no explicit range is stored.
+    // Match 1H SHTYPI: explicit full-day leave or a PV/MUNG range covering
+    // 08:00-16:00 hides the user's work for that date.
     const hiddenUsersByDate = new Map<string, Set<string>>()
     const addHidden = (dateStr: string, uid: string | undefined | null) => {
       if (!uid) return
@@ -4661,7 +4677,9 @@ export default function CommonViewPage() {
       set.add(uid)
     }
     for (const lv of commonData.leave) {
-      if (!lv.fullDay || !lv.userId) continue
+      const start = parseTimeToMinutes(lv.from)
+      const end = parseTimeToMinutes(lv.to)
+      if (!lv.userId || (!lv.fullDay && !(start !== null && end !== null && start <= 8 * 60 && end >= 16 * 60))) continue
       for (const d of datesToUse) {
         if (d >= lv.startDate && d <= lv.endDate) {
           addHidden(d, lv.userId)
@@ -4670,7 +4688,9 @@ export default function CommonViewPage() {
     }
     for (const ab of commonData.absent) {
       if (!ab.userId) continue
-      if (ab.from <= "08:00" && ab.to >= "16:30") {
+      const start = parseTimeToMinutes(ab.from)
+      const end = parseTimeToMinutes(ab.to)
+      if (start !== null && end !== null && start <= 8 * 60 && end >= 16 * 60) {
         addHidden(ab.date, ab.userId)
       }
     }
@@ -4913,7 +4933,7 @@ export default function CommonViewPage() {
       fullyCoveredDates,
       hiddenUsersByDate,
     }
-  }, [colorFilter, commonData, kaGentFilterActive, newTaskCategoryFilters, oneHMarkerFilters, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
+  }, [colorFilter, commonData, kaGentFilterActive, newTaskCategoryFilters, oneHMarkerFilters, parseTimeToMinutes, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
 
   const allUsersLeaveByDate = React.useMemo(() => {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
@@ -8533,21 +8553,27 @@ export default function CommonViewPage() {
     const buildMissingOneHUsers = (slot: OneHReportSlot | null) => {
       if (!selectedOneHDate || !slot) return []
       const usersWithSlot = usersWithOneHSlot(slot)
+      const projectUsers = projectUsersForOneHSlot(commonData.priority, selectedOneHDate, slot)
       return oneHEligibleUsers
         .filter((userEntry) => !usersWithSlot.has(userEntry.id))
         .map((userEntry) => {
           const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
-          return { id: userEntry.id, label, initials: initials(label), hasBlockedTask: slot === "16:00" && usersWithBlockedTask.has(userEntry.id) }
+          const hasProjectTask = projectUsers.has(userEntry.id)
+          const hasBlockedTask = slot === "16:00" && usersWithBlockedTask.has(userEntry.id)
+          const period = slot === "10:00" || slot === "11:00" || slot === "11:50" ? "AM" : "PM"
+          return { id: userEntry.id, label, initials: initials(label), isCovered: hasProjectTask || hasBlockedTask, coverageReason: hasProjectTask ? `Detyrë projekti ${period}` : hasBlockedTask ? "BLL" : "" }
         })
     }
     const missingBlockedUsers = selectedOneHDate
       ? (() => {
           const usersWithOneHAt16 = usersWithOneHSlot("16:00")
+          const projectUsersPm = projectUsersForOneHSlot(commonData.priority, selectedOneHDate, "16:00")
           return oneHEligibleUsers
             .filter((userEntry) => !usersWithBlockedTask.has(userEntry.id))
             .map((userEntry) => {
               const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
-              return { id: userEntry.id, label, initials: initials(label), hasOneHAt16: usersWithOneHAt16.has(userEntry.id) }
+              const hasProjectTask = projectUsersPm.has(userEntry.id)
+              return { id: userEntry.id, label, initials: initials(label), isCovered: usersWithOneHAt16.has(userEntry.id) || hasProjectTask, coverageReason: hasProjectTask ? "Detyrë projekti PM" : "1H 16:00" }
             })
         })()
       : []
@@ -16831,49 +16857,49 @@ export default function CommonViewPage() {
                                   </span>
                                   {badges}
                                 </div>
-                                {row.missingOneHUsers?.some((entry) => !entry.hasBlockedTask) ? (
+                                {row.missingOneHUsers?.some((entry) => !entry.isCovered) ? (
                                   <div
                                     className="oneh-missing-users"
-                                    aria-label={`Pa slot ${headerSubtext}: ${row.missingOneHUsers.filter((entry) => !entry.hasBlockedTask).map((entry) => entry.label).join(", ")}`}
+                                    aria-label={`Pa slot ${headerSubtext}: ${row.missingOneHUsers.filter((entry) => !entry.isCovered).map((entry) => entry.label).join(", ")}`}
                                   >
-                                    {row.missingOneHUsers.filter((entry) => !entry.hasBlockedTask).map((entry) => (
+                                    {row.missingOneHUsers.filter((entry) => !entry.isCovered).map((entry) => (
                                       <span key={entry.id} className="oneh-missing-user" title={entry.label}>
                                         {entry.initials}
                                       </span>
                                     ))}
                                   </div>
                                 ) : null}
-                                {row.missingOneHUsers?.some((entry) => entry.hasBlockedTask) ? (
+                                {row.missingOneHUsers?.some((entry) => entry.isCovered) ? (
                                   <div
                                     className="oneh-missing-users oneh-missing-users-covered"
-                                    aria-label={`Pa 1H 16:00, me BLL: ${row.missingOneHUsers.filter((entry) => entry.hasBlockedTask).map((entry) => entry.label).join(", ")}`}
+                                    aria-label={`Pa slot ${headerSubtext}, të arsyetuar: ${row.missingOneHUsers.filter((entry) => entry.isCovered).map((entry) => `${entry.label} (${entry.coverageReason})`).join(", ")}`}
                                   >
-                                    {row.missingOneHUsers.filter((entry) => entry.hasBlockedTask).map((entry) => (
-                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
+                                    {row.missingOneHUsers.filter((entry) => entry.isCovered).map((entry) => (
+                                      <span key={entry.id} className="oneh-missing-user" title={`${entry.label}: ${entry.coverageReason}`}>
                                         {entry.initials}
                                       </span>
                                     ))}
                                   </div>
                                 ) : null}
-                                {row.missingBlockedUsers?.some((entry) => !entry.hasOneHAt16) ? (
+                                {row.missingBlockedUsers?.some((entry) => !entry.isCovered) ? (
                                   <div
                                     className="oneh-missing-users"
-                                    aria-label={`Pa BLL dhe pa 1H 16:00: ${row.missingBlockedUsers.filter((entry) => !entry.hasOneHAt16).map((entry) => entry.label).join(", ")}`}
+                                    aria-label={`Pa BLL, pa 1H 16:00 dhe pa detyrë projekti PM: ${row.missingBlockedUsers.filter((entry) => !entry.isCovered).map((entry) => entry.label).join(", ")}`}
                                   >
-                                    {row.missingBlockedUsers.filter((entry) => !entry.hasOneHAt16).map((entry) => (
+                                    {row.missingBlockedUsers.filter((entry) => !entry.isCovered).map((entry) => (
                                       <span key={entry.id} className="oneh-missing-user" title={entry.label}>
                                         {entry.initials}
                                       </span>
                                     ))}
                                   </div>
                                 ) : null}
-                                {row.missingBlockedUsers?.some((entry) => entry.hasOneHAt16) ? (
+                                {row.missingBlockedUsers?.some((entry) => entry.isCovered) ? (
                                   <div
                                     className="oneh-missing-users oneh-missing-users-covered"
-                                    aria-label={`Pa BLL, me 1H 16:00: ${row.missingBlockedUsers.filter((entry) => entry.hasOneHAt16).map((entry) => entry.label).join(", ")}`}
+                                    aria-label={`Pa BLL, të arsyetuar: ${row.missingBlockedUsers.filter((entry) => entry.isCovered).map((entry) => `${entry.label} (${entry.coverageReason})`).join(", ")}`}
                                   >
-                                    {row.missingBlockedUsers.filter((entry) => entry.hasOneHAt16).map((entry) => (
-                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
+                                    {row.missingBlockedUsers.filter((entry) => entry.isCovered).map((entry) => (
+                                      <span key={entry.id} className="oneh-missing-user" title={`${entry.label}: ${entry.coverageReason}`}>
                                         {entry.initials}
                                       </span>
                                     ))}

@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import unittest
+import uuid
 from datetime import date, datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 from app.services.meeting_system_tasks import (
+    TAK_INT_POST_ONE_H_TASK_KIND,
+    TAK_INT_PRE_ONE_H_TASK_KIND,
+    _reconcile_tak_int_one_h_task_kind,
     qualifies_for_tak_int_one_h_tasks,
+    reconcile_tak_int_one_h_tasks_for_meeting,
     tak_int_post_one_h_slot,
     tak_int_pre_one_h_slot,
 )
+from app.models.task import Task
+from app.models.enums import TaskStatus
 
 TZ = ZoneInfo("Europe/Budapest")
 
@@ -73,6 +80,53 @@ class TestTakIntOneHSlots(unittest.TestCase):
         self.assertFalse(qualifies_for_tak_int_one_h_tasks(_meeting(start, meeting_type="internal")))
         self.assertFalse(qualifies_for_tak_int_one_h_tasks(_meeting(start, recurrence_type="weekly")))
         self.assertFalse(qualifies_for_tak_int_one_h_tasks(_meeting(start, calendar_sync_status="cancelled")))
+
+
+@patch("app.services.meeting_system_tasks.settings.APP_TIMEZONE", "Europe/Budapest")
+class TestTakIntOneHReconciliation(unittest.IsolatedAsyncioTestCase):
+    async def test_weekly_category_creates_only_post_tasks_and_regular_meeting_keeps_both(self) -> None:
+        for categories, expects_pre in ((["Weekly"], False), (["Team WEEKLY"], False), (["Online"], True)):
+            with self.subTest(categories=categories):
+                external = _meeting(
+                    datetime(2026, 10, 15, 13, 0, tzinfo=TZ),
+                    id=uuid.uuid4(), title="Team meeting", calendar_categories=categories,
+                )
+                participant_id = uuid.uuid4()
+                internal = SimpleNamespace(starts_at=datetime(2026, 10, 15, 14, 20, tzinfo=TZ))
+                with (
+                    patch("app.services.meeting_system_tasks._resolve_external_meeting", new=AsyncMock(return_value=external)),
+                    patch("app.services.meeting_system_tasks.manual_participant_ids", new=AsyncMock(return_value={external.id: [participant_id]})),
+                    patch("app.services.meeting_system_tasks._post_internal_meeting", new=AsyncMock(return_value=internal)),
+                    patch("app.services.meeting_system_tasks._reconcile_tak_int_one_h_task_kind", new=AsyncMock(return_value=0)) as reconcile,
+                ):
+                    await reconcile_tak_int_one_h_tasks_for_meeting(AsyncMock(), external)
+
+                pre, post = reconcile.await_args_list
+                self.assertEqual(pre.kwargs["task_kind"], TAK_INT_PRE_ONE_H_TASK_KIND)
+                self.assertEqual(pre.kwargs["slot"] is not None, expects_pre)
+                self.assertEqual(post.kwargs["task_kind"], TAK_INT_POST_ONE_H_TASK_KIND)
+                self.assertEqual(post.kwargs["slot"], (date(2026, 10, 15), "14:20"))
+                self.assertEqual(post.kwargs["participant_ids"], [participant_id])
+
+    async def test_unneeded_preparation_deactivates_open_tasks_and_preserves_completed_tasks(self) -> None:
+        participant_id = uuid.uuid4()
+        tasks = [
+            Task(id=uuid.uuid4(), assigned_to=participant_id, status=status, is_active=True)
+            for status in (TaskStatus.TODO.value, TaskStatus.DONE.value)
+        ]
+        result = Mock()
+        result.scalars.return_value.all.return_value = tasks
+        db = AsyncMock()
+        db.execute.return_value = result
+        await _reconcile_tak_int_one_h_task_kind(
+            db, SimpleNamespace(id=uuid.uuid4()),
+            task_kind=TAK_INT_PRE_ONE_H_TASK_KIND, task_title="Preparation",
+            description="", slot=None, participant_ids=[participant_id],
+            now_utc=datetime(2026, 10, 15, 8, 0, tzinfo=TZ),
+        )
+        self.assertFalse(tasks[0].is_active)
+        self.assertTrue(tasks[1].is_active)
+        self.assertEqual(db.execute.await_count, 1)
 
 
 if __name__ == "__main__":
