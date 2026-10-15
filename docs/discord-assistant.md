@@ -45,8 +45,16 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
    pm2 save
    ```
 
-   Worker-i është proces më vete; nuk nis automatikisht nga API-ja. Konfigurimi
-   ekzistues i deploy-it nuk e shton këtë proces dhe nuk provisionon sekretet Discord.
+   Worker-i është proces më vete; nuk nis nga API-ja. GitHub Actions e
+   konfiguron dhe e nis automatikisht pasi API-ja të jetë gati, kur ekzistojnë
+   Repository secrets `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` dhe
+   `DISCORD_BRIDGE_SECRET`. Kërkohet edhe `OPENAI_API_KEY`.
+   Biseda e lirë aktivizohet si parazgjedhje: aktivizo Message Content Intent
+   edhe në Developer Portal. Deploy-i pret lidhjen reale dhe regjistrimin e komandave.
+   Për ndryshime sekretesh, përdor Actions → Primex Auto Deploy → Run workflow
+   pasi ky version i workflow-it të jetë publikuar. Variable opsionale
+   `DISCORD_ASSISTANT_ENABLED=false` e çaktivizon asistentin në deploy-in vijues;
+   `DISCORD_MESSAGE_CONTENT_ENABLED=false` e kufizon në dropdown dhe /pyet.
    Përdor vetëm një worker. API-ja mund të ketë disa procese.
 7. Hape `/discord`, gjenero kodin, pastaj përdor `/lidh` në Discord. Rifresko
    faqen për ta parë lidhjen dhe për ta hapur kanalin personal.
@@ -132,7 +140,7 @@ komandat refuzohen. Revokimi nuk fshin mesazhet historike në Discord.
 ## Verifikimi lokal
 
 `python -m unittest discover -s tests -p "test_discord*.py" -v`, nga `backend`,
-mbulon 35 teste pa lidhje me Discord/OpenAI/databazën. Instalo varësitë opsionale
+mbulon 44 teste pa lidhje me Discord/OpenAI/databazën. Instalo varësitë opsionale
 për të përfshirë testet e worker-it. `npm run build` dhe lint-i i faqes së re
 kaluan. Kontrolli i plotë TypeScript dhe lint-i i sidebar-it raportojnë gabime
 ekzistuese jashtë integrimit. Migrimi nuk është aplikuar në databazën reale;

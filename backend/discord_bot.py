@@ -4,7 +4,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import json
+import os
 import re
+from datetime import datetime, timezone
+from pathlib import Path
 
 import discord
 import httpx
@@ -105,6 +109,36 @@ class PrimeFlowBot(discord.Client):
                 detail = "PrimeFlow nuk është i disponueshëm."
             raise ValueError(str(detail)[:1500])
         return response.json()
+
+    def clear_ready_status(self):
+        path = Path(__file__).with_name(".discord-worker-status.json")
+        try:
+            if json.loads(path.read_text(encoding="utf-8")).get("pid") == os.getpid():
+                path.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+
+    def publish_ready_status(self):
+        if not self.get_guild(int(settings.DISCORD_GUILD_ID)):
+            self.clear_ready_status()
+            log.error("Bot connected but is not a member of the configured Discord server")
+            return
+        path = Path(__file__).with_name(".discord-worker-status.json")
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps({"guild_id": settings.DISCORD_GUILD_ID,
+            "pid": os.getpid(), "build": os.getenv("APP_BUILD_SHA", "unknown"),
+            "connected_at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
+        temporary.replace(path)
+        log.info("Discord bot connected; slash commands registered")
+
+    async def on_ready(self):
+        self.publish_ready_status()
+
+    async def on_resumed(self):
+        self.publish_ready_status()
+
+    async def on_disconnect(self):
+        self.clear_ready_status()
 
     @staticmethod
     def error_message(exc):
@@ -299,6 +333,7 @@ class PrimeFlowBot(discord.Client):
         await self.wait_until_ready()
 
     async def close(self):
+        self.clear_ready_status()
         self.reminders.cancel()
         await self.http_bridge.aclose()
         await super().close()

@@ -129,6 +129,17 @@ module.exports = {
     },
     {
       ...apiProcess,
+      name: "primeflow-discord",
+      args: "discord_bot.py",
+      // The worker reads its Discord secrets from backend/.env. Never put
+      // those secrets in command-line arguments or the ecosystem source.
+      env: {
+        ...sharedEnv,
+        PRIMEFLOW_API_BASE_URL: "http://127.0.0.1:8000",
+      },
+    },
+    {
+      ...apiProcess,
       name: "primeflow-report-scheduler",
       args: "report_scheduler.py",
       env: {
