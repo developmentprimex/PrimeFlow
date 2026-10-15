@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from app.api.routers.discord_assistant import router as discord_assistant_router
 
 from app.api.routers.auth import router as auth_router
 from app.api.routers.checklist_items import router as checklist_items_router
@@ -54,6 +55,7 @@ from app.api.routers.knowledge import router as knowledge_router
 
 
 api_router = APIRouter()
+api_router.include_router(discord_assistant_router, prefix="/discord", tags=["discord"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(checklist_items_router, prefix="/checklist-items", tags=["checklist-items"])
 api_router.include_router(checklists_router, prefix="/checklists", tags=["checklists"])

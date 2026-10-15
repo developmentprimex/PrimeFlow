@@ -104,6 +104,15 @@ class Settings(BaseSettings):
     GA_NOTES_MAX_FILE_MB: int = 25
 
     OPENAI_API_KEY: str | None = None
+    # Opt-in Discord worker; never starts or sends messages from the API process.
+    DISCORD_ASSISTANT_ENABLED: bool = False
+    DISCORD_BRIDGE_SECRET: str | None = None
+    DISCORD_BOT_TOKEN: str | None = None
+    DISCORD_GUILD_ID: str | None = None
+    DISCORD_CATEGORY_ID: str | None = None
+    DISCORD_MESSAGE_CONTENT_ENABLED: bool = False
+    DISCORD_AI_MODEL: str = "gpt-5.4-mini"
+    DISCORD_AI_TIMEOUT_SECONDS: int = 45
     SKILLS_AI_MODEL: str = "gpt-5.4-nano"
     SKILLS_AI_TIMEOUT_SECONDS: int = 20
     SPEECH_TRANSCRIBE_MODEL: str = "whisper-1"
