@@ -7,7 +7,7 @@ import { reportDate, type TaskRow } from "@/components/m3-reporting-points-view"
 
 export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
 export const MANUAL_POINTS = {
-  ga_reply: "1. (GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
+  ga_reply: "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
   reorganization: "2. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?",
 } as const
 export type ManualKey = keyof typeof MANUAL_POINTS | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}`
@@ -81,7 +81,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
 
   return <div className="space-y-7">
     <section className="space-y-3" aria-labelledby="m2-ga-reply"><Label id="m2-ga-reply" htmlFor="ga_reply" className="text-lg font-bold">{MANUAL_POINTS.ga_reply}</Label>
-      <Textarea id="ga_reply" value={answers.ga_reply || ""} disabled={disabled} maxLength={10000} className="min-h-28" placeholder="Shëno nëse ka përgjigje nga GA." onChange={(event) => onAnswerChange("ga_reply", event.target.value)} />
+      <Textarea id="ga_reply" value={answers.ga_reply || ""} disabled={disabled} maxLength={10000} className="min-h-28" placeholder="Shëno përgjigjjen për riorganizimin." onChange={(event) => onAnswerChange("ga_reply", event.target.value)} />
     </section>
     <section className="space-y-3" aria-labelledby="m2-reorganization"><Label id="m2-reorganization" htmlFor="reorganization" className="text-lg font-bold">{MANUAL_POINTS.reorganization}</Label>
       <Textarea id="reorganization" value={answers.reorganization || ""} disabled={disabled} maxLength={10000} className="min-h-28" placeholder="Shëno përgjigjjen për riorganizimin." onChange={(event) => onAnswerChange("reorganization", event.target.value)} />

@@ -20,7 +20,8 @@ from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
 from app.services.m1_reporting_points import (
-    MANUAL_POINTS, backfill_saved_note_authors, excluded_note_ids, get_settings, locked_report, refresh_report,
+    MANUAL_POINTS, backfill_saved_note_authors, backfill_saved_task_planning, needs_saved_task_planning,
+    excluded_note_ids, get_settings, locked_report, refresh_report,
     reorder_saved_report_tasks, render_html,
     render_plain_text, report_payload, send_report, report_attachments,
 )
@@ -65,13 +66,15 @@ async def _by_id(db: AsyncSession, report_id: uuid.UUID) -> M1ReportingPointsRep
 
 async def _refresh_saved_metadata(db: AsyncSession, row: M1ReportingPointsReport) -> M1ReportingPointsReport:
     data = row.data or {}
-    if data.get("note_author_version") == 1 and (row.sent_at or data.get("task_order_version") == 1):
+    if (data.get("note_author_version") == 1 and (row.sent_at or data.get("task_order_version") == 1)
+            and not needs_saved_task_planning(row)):
         return row
     row = await locked_report(db, row.report_date)
     await db.refresh(row)
     notes_changed = await backfill_saved_note_authors(db, row)
     tasks_changed = await reorder_saved_report_tasks(db, row)
-    if notes_changed or tasks_changed:
+    planning_changed = await backfill_saved_task_planning(db, row)
+    if notes_changed or tasks_changed or planning_changed:
         await db.commit()
     return row
 

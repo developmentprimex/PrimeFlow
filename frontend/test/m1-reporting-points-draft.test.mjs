@@ -34,7 +34,8 @@ test("M1 refreshes today's unsent report when task columns or order are old", ()
   assert.equal(shouldRegenerateTaskData(report, "2026-10-13"), true)
   assert.equal(shouldRegenerateTaskData(report, "2026-10-14"), false)
   assert.equal(shouldRegenerateTaskData({ ...report, sent_at: "2026-10-13T09:00:00Z" }, "2026-10-13"), false)
-  const enriched = { ...report, data: { tasks: [{ id: "task", assignees: "AT", department: "DEV", am_pm: "PM", task_type: "FT" }] } }
+  const enriched = { ...report, data: { tasks: [{ id: "task", assignees: "AT", department: "DEV", am_pm: "PM", task_type: "FT", marker: "F", planned_for: "Sot" }] } }
   assert.equal(shouldRegenerateTaskData(enriched, "2026-10-13"), true)
-  assert.equal(shouldRegenerateTaskData({ ...enriched, data: { ...enriched.data, task_order_version: 1 } }, "2026-10-13"), false)
+  assert.equal(shouldRegenerateTaskData({ ...enriched, data: { ...enriched.data, task_order_version: 1 } }, "2026-10-13"), true)
+  assert.equal(shouldRegenerateTaskData({ ...enriched, data: { ...enriched.data, task_order_version: 1, ga_progress: [], delivery: [] } }, "2026-10-13"), false)
 })

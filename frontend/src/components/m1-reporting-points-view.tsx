@@ -4,8 +4,10 @@ import type { ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { TaskOneHMarkerFromLabel } from "@/components/task-one-h-marker"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { reportDate, reportTime } from "@/components/m3-reporting-points-view"
+import type { TaskRow as GaTaskRow } from "@/components/m3-reporting-points-view"
 
 export { reportDate, reportTime }
 export type ManualKey = "plan_changes" | "reorganization"
@@ -13,11 +15,11 @@ export type ManualAnswers = Partial<Record<ManualKey, string>>
 
 type AttendanceRow = { id: string; person: string; note?: string | null; from?: string; to?: string; start?: string; until?: string }
 type NoteRow = { id: string; author?: string; content: string; created_at: string }
-type TaskRow = { id: string; title: string; status: string; created_at: string; assignees?: string; department?: string; am_pm?: string; task_type?: string }
+type TaskRow = { id: string; title: string; status: string; created_at: string; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
-  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[] }
+  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -69,8 +71,8 @@ function Attendance({ rows, kind }: { rows: AttendanceRow[]; kind: "absence" | "
 
 function Created({ rows, kind }: { rows: NoteRow[] | TaskRow[]; kind: "note" | "task" }) {
   return <Grid name={kind === "note" ? "Notes të reja" : "Detyrat e reja"} flexColumnIndex={kind === "note" ? 2 : 5}
-    labels={kind === "note" ? ["NR", "KUSH", "NOTE", "KRIJUAR"] : ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "DETYRA", "KRIJUAR"]}
-    widths={kind === "note" ? [32, 48, 510, 150] : [32, 58, 55, 65, 65, 510, 150]}
+    labels={kind === "note" ? ["NR", "KUSH", "NOTE", "KRIJUAR"] : ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "DETYRA", "SIMBOLI", "PËR KUR", "KRIJUAR"]}
+    widths={kind === "note" ? [32, 48, 510, 150] : [32, 58, 55, 65, 65, 510, 60, 100, 150]}
     empty={kind === "note" ? "Asnjë note e re në këtë interval." : "Asnjë detyrë e krijuar në këtë interval."}
     rows={rows.map((row, index) => ({ id: row.id, fill: kind === "note" ? "#dbeafe" : STATUS_COLORS[(row as TaskRow).status] || "#ffffff", cells: kind === "note" ? [
       index + 1, <strong key="author">{noteAuthorInitials((row as NoteRow).author)}</strong>,
@@ -80,6 +82,8 @@ function Created({ rows, kind }: { rows: NoteRow[] | TaskRow[]; kind: "note" | "
       index + 1, (row as TaskRow).assignees || "—", (row as TaskRow).department || "—",
       (row as TaskRow).am_pm || "—", (row as TaskRow).task_type || "—",
       <strong key="task">{taskTitle((row as TaskRow).title)}</strong>,
+      <TaskOneHMarkerFromLabel key="marker" label={(row as TaskRow).marker} />,
+      (row as TaskRow).planned_for || "—",
       `${reportDate(row.created_at)} ${reportTime(row.created_at)}`,
     ] }))} />
 }
@@ -103,5 +107,18 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
     <Point id="m1-notes" title="4. NOTES TË REJA?" count={(report.data.notes || []).length} description={`Të krijuara nga dje 16:30 deri sot ${cutoffTime}.`}><Created rows={report.data.notes || []} kind="note" /></Point>
     <Point id="m1-tasks" title="5. DETYRA TË REJA TË KRIJUARA SOT?" count={(report.data.tasks || []).length} description={`Të krijuara sot nga 00:00 deri në ${cutoffTime}.`}><Created rows={report.data.tasks || []} kind="task" /></Point>
     {manual("reorganization", "6. A DUHET RIORGANIZIM?")}
+    {(["ga_progress", "delivery"] as const).map((key) => <Point key={key} id={`m1-${key}`}
+      title={key === "ga_progress" ? "7. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA" : "8. SA PER DOREZIM M2?"}
+      count={(report.data[key] || []).length}
+      description={key === "ga_progress" ? "Detyrat AM dhe AM/PM personale me GA ose me simbolet F/GA, brenda intervalit start–due." : "Detyrat me simbolet M2 dhe M2/3, AM dhe PM, brenda intervalit start–due, si te M2."}>
+      <Grid name={key === "ga_progress" ? "Detyrat me GA" : "Detyrat për dorëzim M2"} labels={["NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "SIMBOLI", "TITULLI"]}
+        widths={[32, 58, 55, 96, 65, 65, 60, 450]} empty="Asnjë detyrë."
+        rows={(report.data[key] || []).map((row, index) => ({ id: row.task_id,
+          fill: row.deadline_important ? "#dc2626" : STATUS_COLORS[row.status] || "#ffffff",
+          cells: [index + 1, row.assignees || "—", row.department || "—", row.project || "—", row.am_pm || "—",
+            row.task_type || "—", <TaskOneHMarkerFromLabel key="marker" label={row.marker} />, <strong key="title">{row.title}</strong>]
+            .map((cell, column) => <span key={column} style={{ color: row.deadline_important ? "white" : "black" }}>{cell}</span>),
+        }))} />
+    </Point>)}
   </div>
 }

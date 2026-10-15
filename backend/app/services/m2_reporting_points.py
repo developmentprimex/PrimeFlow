@@ -23,7 +23,7 @@ from app.services.task_marker import active_one_h_marker, active_one_h_marker_by
 
 TITLE = "PIKAT PER RAPORTIM M2"
 MANUAL_POINTS = {
-    "ga_reply": "1. (GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
+    "ga_reply": "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
     "reorganization": "2. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES, TAK INT/NDARJA E DET?",
 }
 AUTO_TITLES = {

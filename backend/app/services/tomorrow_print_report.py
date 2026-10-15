@@ -29,6 +29,7 @@ from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL, report_timezone
 from app.services.personal_task_owner import personal_task_owner
+from app.services.one_h_ga_summary import build_ga_summary, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.tomorrow_closing_sections import (
     ClosingSection,
@@ -3414,6 +3415,7 @@ async def _build_print_report(
         value for value in missing_one_h_by_slot.get("16:00", []) if value not in missing_blocked_set
     ]
     task_rows = _task_rows(items, target_date, include_completed_today=include_completed_today, users=payload.get("users"))
+    ga_summary = build_ga_summary(payload, [(item, personal) for _, values, personal in task_rows for item in values])
     meeting_dates = [target_date, next_working_day(target_date)] if include_meetings else []
     next_meeting_payload = next_day_payload or payload
     if len(meeting_dates) > 1 and payload.get("week_end"):
@@ -3456,12 +3458,18 @@ async def _build_print_report(
         else []
     )
     report_date = target_date.strftime("%d.%m.%Y")
+    summary_sections = [ClosingSection(title=GA_SUMMARY_TITLE, tables=[ClosingTable(
+        label="P: personale me GA · NR: detyra unike me GA",
+        columns=["PERSONAT (ZHV, DSG, PCM)"],
+        rows=[ClosingTableRow(values=[summary_text(ga_summary)])],
+    )])] if ga_summary else []
+    attachment_sections = [*summary_sections, *closing_sections]
     report_title = subject_for(target_date, report_day_label)
     board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div data-report-intro="true">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users, missing_blocked_with_one_h_at_16_initials=missing_blocked_with_one_h_at_16, missing_one_h_at_16_with_blocked_initials=missing_one_h_at_16_with_blocked, project_covered_by_slot=project_covered_by_slot, personal_covered_by_slot=personal_covered_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{summary_html(ga_summary)}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users, missing_blocked_with_one_h_at_16_initials=missing_blocked_with_one_h_at_16, missing_one_h_at_16_with_blocked_initials=missing_one_h_at_16_with_blocked, project_covered_by_slot=project_covered_by_slot, personal_covered_by_slot=personal_covered_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
@@ -3500,7 +3508,7 @@ async def _build_print_report(
         *plain_checklist_lines(ONE_H_BOARD_PRIMARY_CHECKLIST),
         "",
     ]
-    plain_rows.extend(_closing_sections_plain_text(closing_sections))
+    plain_rows.extend(_closing_sections_plain_text(attachment_sections))
     plain_rows.extend([
         "",
         "LEGJENDA: ? - PYETJE/PAQARTESI / "
@@ -3560,6 +3568,7 @@ async def _build_print_report(
         "html": html_body,
         "content_html": content_html,
         "plain_text": "\n".join(plain_rows),
+        "ga_task_summary": [row.model_dump() for row in ga_summary],
     }
     if include_attachment:
         attachment_missing_by_slot = {**missing_one_h_by_slot, "BLL": missing_blocked_users}
@@ -3570,7 +3579,7 @@ async def _build_print_report(
             _excel_table_attachment(
                 task_rows, meeting_rows, target_date, include_meetings=include_meetings,
                 comment_initials=comment_initials, meeting_sections=meeting_sections,
-                closing_sections=closing_sections,
+                closing_sections=attachment_sections,
                 checklist_date=checklist_date,
                 missing_one_h_by_slot=attachment_missing_by_slot,
                 project_covered_by_slot=attachment_covered_by_slot,
@@ -3584,7 +3593,7 @@ async def _build_print_report(
                     target_date,
                     comment_initials,
                     meeting_sections,
-                    closing_sections,
+                    attachment_sections,
                     attachment_missing_by_slot,
                     report_day_label,
                     checklist_date,
@@ -3596,7 +3605,7 @@ async def _build_print_report(
                 _docx_table_attachment(
                     task_rows,
                     target_date,
-                    closing_sections=closing_sections,
+                    closing_sections=attachment_sections,
                     meeting_sections=meeting_sections,
                     comment_initials=comment_initials,
                     missing_one_h_by_slot=attachment_missing_by_slot,

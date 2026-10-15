@@ -505,11 +505,11 @@ def test_ga_reply_question_saves_and_exports_before_reorganization():
             result = await api.save_answers(row.id, payload, db, SimpleNamespace(id=uuid.uuid4()))
         assert result["manual_answers"] == {"reorganization": "Ruaj riorganizimin", "ga_reply": "Po, GA u përgjigj <test>"}
         html = service.render_html(result)
-        assert html.index("1. (GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?") < html.index("2. RIORGANIZIM?")
+        assert html.index("1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET") < html.index("2. RIORGANIZIM?")
         assert "Po, GA u përgjigj &lt;test&gt;" in html
         word = Document(io.BytesIO(service.report_attachments(result)[0][1]))
         text = "\n".join(p.text for p in word.paragraphs)
         assert "Po, GA u përgjigj <test>" in text
-        assert text.index("A KA REPLY NGA GA") < text.index("RIORGANIZIM?")
+        assert text.index(service.MANUAL_POINTS["ga_reply"]) < text.index(service.MANUAL_POINTS["reorganization"])
     import asyncio
     asyncio.run(scenario())

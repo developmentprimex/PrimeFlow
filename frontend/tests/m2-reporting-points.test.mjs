@@ -393,7 +393,7 @@ test("GA reply is the first manual point and its draft survives reload", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: { ga_reply: "GA u përgjigj" }, disabled: false, onAnswerChange: () => {},
   }))
-  assert.match(html, /1\. \(GA\) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA\?/)
+  assert.match(html, /1\. RIORGANIZIM\? \(PARA PAUZES- PAS KO TE DET PM\)- PAS PAUZES, TAKIM INT, NDARJE E DET/)
   assert.ok(html.indexOf('id="m2-ga-reply"') < html.indexOf('id="m2-reorganization"'))
   assert.match(html, /<textarea[^>]*id="ga_reply"[^>]*>GA u përgjigj<\/textarea>/)
   const map = new Map()
