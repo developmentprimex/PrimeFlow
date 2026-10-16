@@ -12,6 +12,7 @@ import { MeetingDetailsDialog } from "@/components/meeting-details-dialog"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
+import { fitReportToSinglePage } from "@/lib/print-report-fit"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { isProjectCoverageDepartment, personalUsersForOneHSlot, projectUsersForOneHSlot, type ProjectTaskCoverage } from "@/lib/one-h-project-coverage"
@@ -5629,21 +5630,25 @@ export default function CommonViewPage() {
       printWindow.document.close()
       printWindow.document.title = report.subject || `1H SHTYPI SOT (Shiko simbolet) - ${reportDate}`
 
-      // Lay out against paper dimensions, never the popup's screen width.
-      // Keep that width after zooming so text does not reflow in print preview.
-      const dpi = 96
-      const printableWidthPx = (11 - 0.5) * dpi
-      const printableHeightPx = (8.27 - 0.5) * dpi
+      const printableWidthPx = (11 - 0.5) * 96
+      const printableHeightPx = (8.5 - 0.5) * 96 - 2
       const style = printWindow.document.createElement("style")
       style.textContent = `
-        @page { size: landscape; margin: 0.25in; }
-        html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+        @page { size: letter landscape; margin: 0.25in; }
+        html, body { width: 100% !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
         *, *::before, *::after {
           box-sizing: border-box;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
         .common-view-today-print-fit { width: ${printableWidthPx}px; max-width: none; transform-origin: top left; }
+        .common-view-today-print-fit table { max-width: 100%; }
+        .common-view-today-print-fit th, .common-view-today-print-fit td { overflow-wrap: anywhere; }
+        @media print {
+          .common-view-today-print-fit { transform: none !important; break-inside: avoid; }
+          thead { display: table-header-group; }
+          tr { break-inside: avoid; }
+        }
       `
       printWindow.document.head.appendChild(style)
 
@@ -5653,17 +5658,20 @@ export default function CommonViewPage() {
         wrapper.appendChild(printWindow.document.body.firstChild)
       }
       printWindow.document.body.appendChild(wrapper)
+      // Keep slot labels compact when the report layout widens for a one-page fit.
+      // Percentage widths would expand this mostly empty column along with it.
+      wrapper.querySelectorAll("table").forEach((table) => {
+        if (!Array.from(table.querySelectorAll("thead th")).some((heading) => heading.textContent?.trim() === "TASKS")) return
+        table.querySelectorAll<HTMLElement>("colgroup > col").forEach((column, index) => {
+          column.removeAttribute("width")
+          column.style.width = index === 0 ? "32px" : index === 1 ? "110px" : "auto"
+        })
+      })
       printWindow.focus()
       await printWindow.document.fonts?.ready
       await new Promise<void>((resolve) => printWindow.setTimeout(resolve, 100))
 
-      const fitReportToPage = () => {
-        wrapper.style.setProperty("zoom", "1")
-        const naturalWidth = Math.max(1, wrapper.scrollWidth)
-        const naturalHeight = Math.max(1, wrapper.scrollHeight)
-        const fitScale = Math.min(1, printableWidthPx / naturalWidth, printableHeightPx / naturalHeight)
-        wrapper.style.setProperty("zoom", String(Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1))
-      }
+      const fitReportToPage = () => fitReportToSinglePage(wrapper, printableWidthPx, printableHeightPx)
       fitReportToPage()
       printWindow.addEventListener("beforeprint", fitReportToPage)
       printWindow.print()

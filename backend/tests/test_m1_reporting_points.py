@@ -87,6 +87,27 @@ def test_new_tasks_include_meetings_owner_department_period_and_type():
     assert (row["assignees"], row["department"], row["am_pm"], row["task_type"]) == ("AT", "DEV", "PM", "FT")
 
 
+def test_created_tasks_split_by_local_start_day_independently_of_due_date():
+    tasks = [
+        ga_task(title="Start today", created_at=at(DAY, 8),
+                start_date=datetime(2026, 10, 12, 22, 30, tzinfo=timezone.utc), due_date=date(2026, 10, 20)),
+        ga_task(title="Start tomorrow", created_at=at(DAY, 8), start_date=date(2026, 10, 14), due_date=DAY),
+        ga_task(title="Start yesterday", created_at=at(DAY, 8), start_date=date(2026, 10, 12)),
+        ga_task(title="No start", created_at=at(DAY, 8), start_date=None),
+    ]
+    data = service.select_sections([], [], [], tasks, DAY, now=at(DAY, 9))
+    assert [row["start_date"] for row in data["tasks"]] == [DAY.isoformat(), "2026-10-14", "2026-10-12", None]
+    report = {"report_date": DAY.isoformat(), "data": data, "manual_answers": {}}
+    blocks = service.export_blocks(report)
+    headings = [block["text"] for block in blocks if block["kind"] == "text" and block.get("level") == 3]
+    assert headings == ["1. TË KRIJUARA SOT ME START DATE SOT", "2. TË KRIJUARA SOT ME START DATE NË DITË TJETËR"]
+    tables = [block for block in blocks if block["kind"] == "table"]
+    assert [[row[5]["text"] for row in table["rows"]] for table in tables] == [
+        ["Start today"], ["Start tomorrow", "Start yesterday", "No start"]]
+    assert [row[0]["text"] for row in tables[1]["rows"]] == ["1", "2", "3"]
+    assert "Përfshihen edhe detyrat pa Start Date." in service.render_plain_text(report)
+
+
 @pytest.mark.parametrize("due,label", [
     (DAY, "Sot"), (date(2026, 10, 14), "Nesër"),
     (date(2026, 10, 19), "19.10.2026"), (None, "Pa afat"),
@@ -129,7 +150,8 @@ def test_sent_report_backfills_only_missing_planning_and_preserves_saved_values(
     db = AsyncMock()
     db.execute.return_value = result
     assert asyncio.run(service.backfill_saved_task_planning(db, row))
-    assert row.data["tasks"] == [{**saved, "planned_for": "Sot"}, existing]
+    assert row.data["tasks"] == [{**saved, "planned_for": "Sot", "start_date": DAY.isoformat()},
+                                 {**existing, "start_date": None}]
     assert row.sent_at == at(today, 8)
     assert row.manual_answers == {"reorganization": "Jo"}
     assert not asyncio.run(service.backfill_saved_task_planning(db, row))

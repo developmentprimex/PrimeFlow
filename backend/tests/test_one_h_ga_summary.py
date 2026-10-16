@@ -44,6 +44,8 @@ def test_single_row_follows_planner_order_and_deduplicates_overlapping_categorie
     assert rows[1].physical == rows[1].total == 1
     assert all(row.total > 0 for row in rows)
     markup = summary_html(rows)
+    assert 'data-ga-summary-user="EF"' in markup
+    assert 'data-ga-summary-user="FG"' in markup
     assert markup.count("<tr>") == 1
     assert markup.count("<td ") == 2
     assert markup.index("<strong>EF</strong>") < markup.index("<strong>FG</strong>")

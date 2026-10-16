@@ -30,6 +30,22 @@ def _initials(value: str) -> str:
     return "".join(part[0] for part in re.findall(r"[^\W\d_]+", value, flags=re.UNICODE)).upper()
 
 
+def ga_task_categories(item: dict, personal_bucket: bool) -> list[str]:
+    marker = str(item.get("one_h_marker") or item.get("oneHMarker") or "").upper()
+    title = parse_marked_note_content(str(item.get("title") or item.get("task_title") or "")).text
+    is_personal = personal_bucket and item.get("is_personal_task", item.get("isPersonalTask", True)) is not False
+    categories = []
+    if is_personal and personal_task_owner(title) == "GA":
+        categories.append("personal")
+    if marker in {"FLAG", "GA"}:
+        categories.append("ga")
+    if marker in {"M2", "M2_M3"}:
+        categories.append("m2")
+    if marker == "F":
+        categories.append("physical")
+    return categories
+
+
 def build_ga_summary(payload: dict, entries: Iterable[tuple[dict, bool]]) -> list[GaTaskCounts]:
     # Use the same department aliases and Weekly Planner order as Common View.
     from app.services.meetings_report import _weekly_planner_department_code, WEEKLY_PLANNER_DEPARTMENT_ORDER
@@ -65,18 +81,7 @@ def build_ga_summary(payload: dict, entries: Iterable[tuple[dict, bool]]) -> lis
                 aliases[str(value).strip().casefold()] = key
 
     for item, personal_bucket in entries:
-        marker = str(item.get("one_h_marker") or item.get("oneHMarker") or "").upper()
-        title = parse_marked_note_content(str(item.get("title") or item.get("task_title") or "")).text
-        is_personal = personal_bucket and item.get("is_personal_task", item.get("isPersonalTask", True)) is not False
-        categories = []
-        if is_personal and personal_task_owner(title) == "GA":
-            categories.append("personal")
-        if marker in {"FLAG", "GA"}:
-            categories.append("ga")
-        if marker in {"M2", "M2_M3"}:
-            categories.append("m2")
-        if marker == "F":
-            categories.append("physical")
+        categories = ga_task_categories(item, personal_bucket)
         if not categories:
             continue
         owners = item.get("assignees")
@@ -137,7 +142,7 @@ def summary_html(rows: list[GaTaskCounts]) -> str:
     if not rows:
         return ""
     cells = "".join(
-        '<td style="border:1px solid #cbd5e1;padding:7px 9px;vertical-align:top;white-space:nowrap;'
+        f'<td data-ga-summary-user="{html.escape(row.person, quote=True)}" style="border:1px solid #cbd5e1;padding:7px 9px;vertical-align:top;white-space:nowrap;'
         'font-family:Arial,sans-serif;font-size:11px;background:#eff6ff;color:#0f172a;">'
         f'<strong>{html.escape(row.person)}</strong> - {html.escape(_counts_text(row))}</td>' for row in rows)
     return ('<div data-ga-task-summary="true" style="margin:12px 0;overflow-x:auto;">'

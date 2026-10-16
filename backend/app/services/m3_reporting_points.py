@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import asyncio
 import uuid
+from types import SimpleNamespace
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -48,6 +49,7 @@ MANUAL_POINTS = {
 }
 AUTO_TITLES = {
     "postponed": "1. DET QE JANE SHTY NGA KJO JAVE NE JAVEN TJETER / BRENDA JAVES",
+    "postponed_today": "DET QE JANE SHTYER SOT AM DHE PM",
     "untouched": "2. PSE PA PREK TERE DITEN?",
     "same_day": "3. SOT PËR SOT/DEADLINE - PROGRESI?",
     "realization": "5. REALIZIMI - A MBERRIHET?",
@@ -70,12 +72,50 @@ def postponement_risk(original: date, moved_to: date) -> tuple[str, str]:
     return "OK", "#dcfce7"
 
 
-def select_task_sections(tasks: list[Any], events: list[Any], day: date) -> dict[str, list[dict]]:
+def planned_for_report_day(row: dict, day: date) -> bool:
+    start = semantic_local_day(row.get("original_day_start_date", row.get("old_start_date")))
+    due = semantic_local_day(row.get("original_day_due_date", row.get("old_due_date")))
+    if start and due and start <= due:
+        return start <= day <= due
+    return start == day or due == day
+
+
+def planned_for_report_week(row: dict, day: date) -> bool:
+    week_start = day - timedelta(days=day.weekday())
+    week_end = week_start + timedelta(days=6)
+    start = semantic_local_day(row.get("old_start_date"))
+    due = semantic_local_day(row.get("old_due_date"))
+    if start and due and start <= due:
+        return start <= week_end and due >= week_start
+    return any(value is not None and week_start <= value <= week_end for value in (start, due))
+
+
+def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, postponement_period: str | None = None) -> dict[str, list[dict]]:
     """Classify today's tasks using current status and pre-change planning dates."""
     events_by_task: dict[Any, list[Any]] = defaultdict(list)
     for event in events:
         if event.action in DATE_ACTIONS and semantic_local_day(event.created_at) == day:
             events_by_task[event.entity_id].append(event)
+    if postponement_period:
+        # AM ends when the operational lunch break starts at 12:00 local time.
+        # Replay AM as it stood before lunch, even when PM edits followed it.
+        def period(event):
+            stamp = event.created_at
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            return "AM" if stamp.astimezone(report_timezone()).time() < time(12) else "PM"
+
+        window_tasks = []
+        for task in tasks:
+            snapshot = SimpleNamespace(**vars(task))
+            if postponement_period == "AM":
+                for event in sorted(events_by_task.get(task.id, []), key=lambda item: (item.created_at, str(item.id)), reverse=True):
+                    if period(event) == "PM":
+                        setattr(snapshot, DATE_ACTIONS[event.action], (event.before or {}).get("value"))
+            window_tasks.append(snapshot)
+        tasks = window_tasks
+        events_by_task = {task_id: [event for event in changes if period(event) == postponement_period]
+                          for task_id, changes in events_by_task.items()}
     sections: dict[str, list[dict]] = {key: [] for key in ("postponed", "untouched", "same_day", "ga_postponed")}
     for task in tasks:
         task_events = sorted(events_by_task.get(task.id, []), key=lambda event: (event.created_at, str(event.id)))
@@ -135,17 +175,11 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date) -> dict
                "old_due_date": old_due.isoformat() if old_due else None,
                "postponement_kind": "start_due" if len(moved_fields) == 2 else "start" if moved_fields[0][0] == "start_date" else "due",
                "from_date": before.isoformat(), "to_date": after.isoformat(), "risk": risk, "risk_color": color,
+               "postponement_period": postponement_period,
                "change_reason": next((str((event.after or {}).get("reason") or "") for event in reversed(task_events)
                                       if (event.after or {}).get("reason")), "")}
-        # The original planning interval must overlap the report's week.
-        week_start = day - timedelta(days=day.weekday())
-        week_end = week_start + timedelta(days=6)
-        old_start = original["start_date"]
-        planned_this_week = (old_start <= week_end and old_due >= week_start
-                             if old_start and old_due and old_start <= old_due
-                             else any(week_start <= old <= week_end for _, old, _ in moved_fields))
-        if planned_this_week:
-            sections["postponed"].append(dict(row))
+        # The audit day determines membership, regardless of the original planning week.
+        sections["postponed"].append(dict(row))
         if task.is_deadline_important or originally_same_day:
             if originally_same_day:
                 row["old_start_date"] = row["old_due_date"] = day.isoformat()
@@ -153,6 +187,18 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date) -> dict
                 (bool(task.is_deadline_important), "Deadline Important"), (originally_same_day, "SOT/SOT"),
             ) if flag)
             sections["ga_postponed"].append(row)
+    if postponement_period is None:
+        original_plans = {row["task_id"]: row for row in sections["postponed"]}
+        daily_rows = []
+        for period in ("AM", "PM"):
+            for row in select_task_sections(tasks, events, day, postponement_period=period)["postponed"]:
+                original = original_plans.get(row["task_id"], row)
+                row = {**row, "original_day_start_date": original.get("old_start_date"),
+                       "original_day_due_date": original.get("old_due_date")}
+                if planned_for_report_day(row, day):
+                    daily_rows.append(row)
+        sections["postponed_today"] = daily_rows
+        sections["postponed"] = [row for row in sections["postponed"] if planned_for_report_week(row, day)]
     return sections
 
 
@@ -322,7 +368,8 @@ def report_payload(row: M3ReportingPointsReport) -> dict:
         realization = {**realization, "departments": realization_department_rows(realization)}
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
             "manual_answers": row.manual_answers or {},
-            "data": {key: [item for item in rows if item.get("status") != "DONE"] if key == "same_day" else rows
+            "data": {key: [item for item in rows if item.get("status") != "DONE"] if key == "same_day" else
+                     [item for item in rows if planned_for_report_day(item, row.report_date)] if key == "postponed_today" else rows
                      for key, rows in (row.data or {}).items()}, "realization": realization,
             "realization_captured_at": row.realization_captured_at.isoformat() if row.realization_captured_at else None,
             "generated_at": row.generated_at.isoformat() if row.generated_at else None, "status": row.status,
@@ -353,8 +400,14 @@ def task_table_groups(rows: list[dict], key: str) -> list[tuple[str, str, list[d
     if key == "untouched":
         return [("DET FT DHE PRJK PA PROGRES", "", [row for row in rows if not is_system_row(row)]),
                 ("DETYRAT E SISTEMIT PA PROGRES", "", [row for row in rows if is_system_row(row)])]
-    if key not in {"postponed", "ga_postponed"}:
+    if key not in {"postponed", "ga_postponed", "postponed_today"}:
         return [("", "", rows)]
+    if key == "postponed_today":
+        periods = ["AM", "PM"] + (["-"] if any(not row.get("postponement_period") for row in rows) else [])
+        return [(f"{period} - {caption}", movement, group)
+                for period in periods
+                for caption, movement, group in task_table_groups(
+                    [row for row in rows if (row.get("postponement_period") or "-") == period], "ga_postponed")]
     groups = [("SHTYER START DHE DUE DATE", "start_due"), ("SHTYER DUE DATE", "due")]
     if any(postponement_kind(row) == "start" for row in rows):
         groups.append(("SHTYER START DATE", "start"))
@@ -373,6 +426,8 @@ def task_row_appearance(row: dict) -> tuple[str, str, bool]:
 
 
 def report_table_columns(key: str, movement: str = "") -> list[tuple[str, str, int]]:
+    if key == "postponed_today":
+        key = "postponed"
     columns = [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
                ("project", "PRJK", 96), ("am_pm", "AM/PM", 48), ("task_type", "LLOJI", 48)]
     if key in {"postponed", "ga_postponed"}:
@@ -537,7 +592,7 @@ def render_html(report: dict) -> str:
     return ("<!doctype html><html><head><meta charset='utf-8'></head><body style='font-family:Arial,sans-serif;color:#0f172a'>"
             + f"<h1>{M3_TITLE}</h1><p>Data: {_cell(report['report_date'])}</p>"
             + manual(("underload", "overload", "reorganization"))
-            + "".join(table(key) for key in ("postponed", "untouched", "same_day"))
+            + "".join(table(key) for key in ("postponed", "postponed_today", "untouched", "same_day"))
             + meeting_html
             + f"<h3>{AUTO_TITLES['realization']}</h3>{realization_html}" + "</body></html>")
 
@@ -546,7 +601,7 @@ def render_plain_text(report: dict) -> str:
     lines = [M3_TITLE, report["report_date"]]
     for key in ("underload", "overload", "reorganization"):
         lines += [MANUAL_POINTS[key], report["manual_answers"].get(key) or "Pa pergjigje"]
-    for key in ("postponed", "untouched", "same_day", "unheld_meetings", "realization"):
+    for key in ("postponed", "postponed_today", "untouched", "same_day", "unheld_meetings", "realization"):
         if key == "unheld_meetings":
             lines.append(MEETING_TITLE)
             for label, meetings in meeting_groups(report):

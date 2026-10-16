@@ -129,7 +129,8 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     before = dict(row.manual_answers or {})
     valid_keys = {f"{prefix}:{item['task_id']}" for item in (row.data or {}).get("delivery", [])
                   for prefix in ("delivery", "delivery_choice")}
-    valid_keys.update(f"postponed_comment:{item['task_id']}" for item in (row.data or {}).get("postponed", []))
+    valid_keys.update(f"postponed_comment:{item['task_id']}" for section in ("postponed", "postponed_am")
+                      for item in (row.data or {}).get(section, []))
     if any(key not in MANUAL_POINTS and key not in valid_keys and key not in before for key in payload.manual_answers):
         raise HTTPException(422, "Detyra nuk gjendet ne kete raport.")
     row.manual_answers = {**before, **payload.manual_answers}
