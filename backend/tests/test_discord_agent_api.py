@@ -13,7 +13,7 @@ from app.services import discord_agents as service
 from app.services import discord_task_tools as tools
 from app.api.routers import discord_assistant as bridge
 from app.models.discord_agent_run import DiscordAgentRun
-from app.schemas.discord_agent import AgentActor, AgentCreate, AgentAccept
+from app.schemas.discord_agent import AgentActor, AgentCreate, AgentAccept, AgentDelivery, AgentReceipt
 
 TASK = {"id": str(uuid.uuid4()), "title": "Task", "description": "• Same\n• Same", "user_comment": None}
 ACTOR = dict(discord_user_id="12", guild_id="123", channel_id="44")
@@ -151,3 +151,57 @@ class AgentApiTests(unittest.IsolatedAsyncioTestCase):
         with identity, owned, self.assertRaises(HTTPException):
             await create(self.db, payload)
         self.db.add.assert_not_called()
+
+    async def test_delivery_requires_matching_live_lease_and_actor(self):
+        delivery = self.function("delivery_run")
+        from datetime import timedelta
+        token = uuid.uuid4()
+        identity, owned = self.setup_actor(run_fixture(delivery_token=token, delivery_until=datetime.now(timezone.utc)+timedelta(minutes=2)))
+        with identity, owned:
+            result = await delivery(self.db, self.run.id, AgentDelivery(**ACTOR, lease_token=token))
+        self.assertEqual(result["id"], str(self.run.id))
+        for token_value, until in ((uuid.uuid4(), self.run.delivery_until), (token, datetime.now(timezone.utc)-timedelta(seconds=1))):
+            self.run.delivery_until = until
+            identity, owned = self.setup_actor(self.run)
+            with identity, owned, self.assertRaises(HTTPException) as error:
+                await delivery(self.db, self.run.id, AgentDelivery(**ACTOR, lease_token=token_value))
+            self.assertEqual(error.exception.status_code, 409)
+
+    async def test_ack_is_idempotent_and_stale_token_cannot_overwrite(self):
+        ack = self.function("ack_delivery")
+        from datetime import timedelta
+        token = uuid.uuid4()
+        identity, owned = self.setup_actor(run_fixture(delivery_token=token, delivery_until=datetime.now(timezone.utc)+timedelta(minutes=2)))
+        receipt = AgentReceipt(**ACTOR, lease_token=token, message_ids=["123"])
+        with identity, owned:
+            await ack(self.db, self.run.id, receipt)
+            await ack(self.db, self.run.id, receipt)
+        self.assertEqual(self.run.message_ids, ["123"])
+        self.assertIsNotNone(self.run.delivered_at)
+        identity, owned = self.setup_actor(self.run)
+        with identity, owned, self.assertRaises(HTTPException):
+            await ack(self.db, self.run.id, AgentReceipt(**ACTOR, lease_token=uuid.uuid4(), message_ids=["456"]))
+        self.assertEqual(self.run.message_ids, ["123"])
+
+    async def test_delivery_claims_only_authorized_runs_without_exposing_results(self):
+        claim = self.function("claim_deliveries")
+        identity, owned = self.setup_actor()
+        self.link.discord_user_id, self.link.guild_id, self.link.channel_id = "12", "123", "44"
+        self.db.execute.return_value = Mock(all=Mock(return_value=[(self.run, self.link)]))
+        with identity, owned:
+            result = await claim(self.db)
+        job = result["jobs"][0]
+        self.assertEqual(job["run_id"], str(self.run.id))
+        self.assertNotIn("result_text", job)
+        self.assertEqual(job["lease_token"], str(self.run.delivery_token))
+        from sqlalchemy.dialects import postgresql
+        sql = str(self.db.execute.call_args.args[0].compile(dialect=postgresql.dialect()))
+        self.assertIn("SKIP LOCKED", sql)
+        self.assertIn("delivered_at IS NULL", sql)
+        self.assertIn("discord_links.enabled IS true", sql)
+
+    async def test_revocation_between_delivery_claim_and_read_blocks_result(self):
+        delivery = self.function("delivery_run")
+        identity, owned = self.setup_actor()
+        with patch.object(bridge, "identity", AsyncMock(side_effect=HTTPException(403, "revoked"))), owned, self.assertRaises(HTTPException):
+            await delivery(self.db, self.run.id, AgentDelivery(**ACTOR, lease_token=uuid.uuid4()))

@@ -9,10 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.routers import discord_assistant as bridge
 from app.db import get_db
 from app.models.discord_agent_run import DiscordAgentRun
-from app.schemas.discord_agent import AgentActor, AgentCreate, AgentAccept
+from app.schemas.discord_agent import AgentActor, AgentCreate, AgentAccept, AgentDelivery, AgentReceipt
 from app.services import discord_agents as service
 
 router = APIRouter(dependencies=[Depends(bridge.require_bot)])
+
+
+@router.post("/deliveries/claim")
+async def claim(db: AsyncSession = Depends(get_db)):
+    return await service.claim_deliveries(db)
 
 
 @router.post("/runs")
@@ -44,3 +49,13 @@ async def cancel(run_id: uuid.UUID, payload: AgentActor, db: AsyncSession = Depe
 @router.post("/runs/{run_id}/accept")
 async def accept(run_id: uuid.UUID, payload: AgentAccept, db: AsyncSession = Depends(get_db)):
     return await service.accept_run(db, run_id, payload)
+
+
+@router.post("/runs/{run_id}/delivery")
+async def delivery(run_id: uuid.UUID, payload: AgentDelivery, db: AsyncSession = Depends(get_db)):
+    return await service.delivery_run(db, run_id, payload)
+
+
+@router.post("/runs/{run_id}/ack")
+async def ack(run_id: uuid.UUID, payload: AgentReceipt, db: AsyncSession = Depends(get_db)):
+    return await service.ack_delivery(db, run_id, payload)

@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import uuid
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.api.routers import discord_assistant as bridge
 from app.config import settings
 from app.models.discord_agent_run import DiscordAgentRun
-from app.models.discord_assistant import DiscordAction
+from app.models.discord_assistant import DiscordAction, DiscordLink
+from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
+from app.models.user import User
 from app.services import discord_task_tools as tools
 from app.services.task_strike_events import _point_entries
 
@@ -147,4 +150,50 @@ async def accept_run(db, run_id, payload):
     run.accepted_at, run.acceptance_status = datetime.now(timezone.utc), "POINT_DONE"
     await db.commit()
     return {"run": serialize_run(run), "task_detail": task_detail(result["task"]) if result.get("task") else task_detail(task)}
+
+
+async def claim_deliveries(db):
+    now = datetime.now(timezone.utc)
+    assigned = select(TaskAssignee.task_id).where(TaskAssignee.task_id == Task.id,
+        TaskAssignee.user_id == DiscordAgentRun.user_id).correlate(Task, DiscordAgentRun).exists()
+    stmt = select(DiscordAgentRun, DiscordLink).join(DiscordLink, DiscordLink.id == DiscordAgentRun.link_id)\
+        .join(User, User.id == DiscordAgentRun.user_id).join(Task, Task.id == DiscordAgentRun.task_id).where(
+            DiscordAgentRun.status.in_(TERMINAL), DiscordAgentRun.delivered_at.is_(None),
+            or_(DiscordAgentRun.delivery_until.is_(None), DiscordAgentRun.delivery_until < now),
+            DiscordLink.enabled.is_(True), DiscordLink.channel_id.is_not(None),
+            DiscordLink.guild_id == settings.DISCORD_GUILD_ID, DiscordLink.user_id == User.id,
+            User.is_active.is_(True), Task.is_active.is_(True), or_(Task.assigned_to == User.id, assigned))\
+        .order_by(DiscordAgentRun.created_at).limit(10).with_for_update(skip_locked=True, of=DiscordAgentRun)
+    rows = (await db.execute(stmt)).all()
+    jobs = []
+    for run, link in rows:
+        run.delivery_token, run.delivery_until = uuid.uuid4(), now + timedelta(minutes=2)
+        jobs.append({"run_id": str(run.id), "lease_token": str(run.delivery_token),
+            "discord_user_id": link.discord_user_id, "guild_id": link.guild_id, "channel_id": link.channel_id})
+    await db.commit()
+    return {"jobs": jobs}
+
+
+def _check_delivery(run, payload, *, receipt=False):
+    if run.delivery_token != payload.lease_token or run.status not in TERMINAL:
+        raise HTTPException(409, "Rezervimi i dërgimit ndryshoi; provo nga lista e rezultateve.")
+    if receipt and run.delivered_at:
+        return
+    if not run.delivery_until or run.delivery_until <= datetime.now(timezone.utc):
+        raise HTTPException(409, "Rezervimi i dërgimit skadoi; do të provohet përsëri.")
+
+
+async def delivery_run(db, run_id, payload):
+    run, _, _, _ = await authorized_run(db, payload, run_id)
+    _check_delivery(run, payload)
+    return serialize_run(run)
+
+
+async def ack_delivery(db, run_id, payload):
+    run, _, _, _ = await authorized_run(db, payload, run_id, lock=True)
+    _check_delivery(run, payload, receipt=True)
+    if not run.delivered_at:
+        run.delivered_at, run.message_ids = datetime.now(timezone.utc), payload.message_ids
+    await db.commit()
+    return {"ok": True}
 
