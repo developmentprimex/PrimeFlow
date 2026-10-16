@@ -86,9 +86,11 @@ def _done_last(rows: list[dict]) -> list[dict]:
 
 
 def _task_planning_columns(task, day: date) -> dict:
+    start = semantic_local_day(getattr(task, "start_date", None))
     due = semantic_local_day(getattr(task, "due_date", None))
     tomorrow = day + timedelta(days=1)
     return {
+        "start_date": start.isoformat() if start else None,
         "planned_for": ("Sot" if due == day else "Nesër" if due == tomorrow else
                         due.strftime("%d.%m.%Y") if due else "Pa afat"),
         "marker": one_h_marker_label(active_one_h_marker(task, day), active_one_h_marker_by_ga(task, day)),
@@ -240,7 +242,7 @@ async def reorder_saved_report_tasks(db: AsyncSession, row: M1ReportingPointsRep
 
 def needs_saved_task_planning(row: M1ReportingPointsReport) -> bool:
     return row.report_date == datetime.now(report_timezone()).date() and any(
-        not task.get("planned_for") for task in (row.data or {}).get("tasks") or [])
+        not task.get("planned_for") or "start_date" not in task for task in (row.data or {}).get("tasks") or [])
 
 
 async def backfill_saved_task_planning(db: AsyncSession, row: M1ReportingPointsReport) -> bool:
@@ -249,7 +251,7 @@ async def backfill_saved_task_planning(db: AsyncSession, row: M1ReportingPointsR
     saved_rows = (row.data or {}).get("tasks") or []
     ids = set()
     for saved in saved_rows:
-        if not saved.get("planned_for"):
+        if not saved.get("planned_for") or "start_date" not in saved:
             try:
                 ids.add(uuid.UUID(str(saved["id"])))
             except (KeyError, TypeError, ValueError):
@@ -262,6 +264,8 @@ async def backfill_saved_task_planning(db: AsyncSession, row: M1ReportingPointsR
         if not saved.get("planned_for"):
             planning = _task_planning_columns(task, row.report_date) if task else {"planned_for": "Pa të dhëna"}
             saved = {**saved, "planned_for": planning["planned_for"]}
+        if "start_date" not in saved:
+            saved = {**saved, "start_date": _task_planning_columns(task, row.report_date)["start_date"] if task else None}
         updated.append(saved)
     row.data = {**row.data, "tasks": updated}
     return True
@@ -424,6 +428,18 @@ def export_blocks(report: dict) -> list[dict]:
         blocks.append({"kind": "text", "text": title, "level": 2})
         if key in MANUAL_POINTS:
             blocks.append({"kind": "text", "text": report.get("manual_answers", {}).get(key) or "Pa përgjigje", "level": 0})
+        elif key == "tasks":
+            tasks = report.get("data", {}).get("tasks") or []
+            day = date.fromisoformat(report["report_date"])
+            for today, caption in ((True, "1. TË KRIJUARA SOT ME START DATE SOT"),
+                                   (False, "2. TË KRIJUARA SOT ME START DATE NË DITË TJETËR")):
+                group = [task for task in tasks if (semantic_local_day(task.get("start_date")) == day) == today]
+                blocks.append({"kind": "text", "text": caption, "level": 3})
+                if not today and any(not task.get("start_date") for task in group):
+                    blocks.append({"kind": "text", "text": "Përfshihen edhe detyrat pa Start Date.", "level": 0})
+                rows = _table_rows({**report, "data": {"tasks": group}}, "tasks")
+                blocks.append({"kind": "table", "columns": TABLE_COLUMNS["tasks"], "rows": rows} if rows else
+                              {"kind": "text", "text": "Asnjë detyrë.", "level": 0})
         elif key in {"ga_progress", "delivery"}:
             columns = m2.table_columns("ga_progress")
             rows = []

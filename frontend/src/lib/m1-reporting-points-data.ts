@@ -5,6 +5,7 @@ type TaskMetadata = {
   task_type?: string
   marker?: string
   planned_for?: string
+  start_date?: string | null
 }
 
 type SavedReport = {
@@ -18,5 +19,5 @@ export function shouldRegenerateTaskData(report: SavedReport, currentDay: string
     (!Object.hasOwn(report.data, "ga_progress") || !Object.hasOwn(report.data, "delivery") || report.data.task_order_version !== 1 || (report.data.tasks || []).some((task) =>
       !Object.hasOwn(task, "assignees") || !Object.hasOwn(task, "department") ||
       !Object.hasOwn(task, "am_pm") || !Object.hasOwn(task, "task_type") ||
-      !Object.hasOwn(task, "marker") || !Object.hasOwn(task, "planned_for")))
+      !Object.hasOwn(task, "marker") || !Object.hasOwn(task, "planned_for") || !Object.hasOwn(task, "start_date")))
 }

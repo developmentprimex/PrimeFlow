@@ -28,6 +28,7 @@ export type TaskRow = {
   eight_am?: boolean
   marker?: string
   postponement_kind?: "start_due" | "due" | "start"
+  postponement_period?: "AM" | "PM" | null
   created_date?: string | null
   start_date?: string | null
   due_date?: string | null
@@ -56,7 +57,7 @@ export type ReportingPointsReport = {
   subject: string
   status: string
   manual_answers: ManualAnswers
-  data: Partial<Record<"postponed" | "untouched" | "same_day" | "ga_postponed", TaskRow[]>> & { unheld_meetings?: UnheldMeetingRow[] }
+  data: Partial<Record<"postponed" | "postponed_today" | "untouched" | "same_day" | "ga_postponed", TaskRow[]>> & { unheld_meetings?: UnheldMeetingRow[] }
   realization: {
     percent: number | null
     employees: number
@@ -162,7 +163,14 @@ function TaskGrid({ rows, kind, movement }: { rows: TaskRow[]; kind: TableKind; 
   </div>
 }
 
-export function ReportingTaskTable({ rows, kind }: { rows: TaskRow[]; kind: TableKind }) {
+export function ReportingTaskTable({ rows, kind, splitPeriods = true }: { rows: TaskRow[]; kind: TableKind; splitPeriods?: boolean }) {
+  if (kind === "postponed" && splitPeriods) {
+    const periods = ["AM", "PM", ...(rows.some((row) => !row.postponement_period) ? ["-"] : [])]
+    return <div>{periods.map((period) => <div key={period}>
+      <h4 className="border-b bg-slate-100 px-3 py-2 text-sm font-bold">{period === "-" ? "PA ORË TË SHTYRJES" : period === "AM" ? "AM — PARA PAUZËS" : "PM — PAS PAUZËS"}</h4>
+      <ReportingTaskTable rows={rows.filter((row) => (row.postponement_period || "-") === period)} kind={kind} splitPeriods={false} />
+    </div>)}</div>
+  }
   if (kind === "untouched") return <div>{[
     { label: "DET FT DHE PRJK PA PROGRES", system: false }, { label: "DETYRAT E SISTEMIT PA PROGRES", system: true },
   ].map(({ label, system }) => <div key={label}><h4 className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-950">{label}:</h4><TaskGrid rows={rows.filter((row) => !!(row.is_system_task || row.task_type === "SYS") === system)} kind={kind} /></div>)}</div>
@@ -177,10 +185,10 @@ export function ReportingTaskTable({ rows, kind }: { rows: TaskRow[]; kind: Tabl
   </div>)}</div>
 }
 
-function Point({ title, note, rows, kind }: { title: string; note: React.ReactNode; rows: TaskRow[]; kind: Parameters<typeof ReportingTaskTable>[0]["kind"] }) {
+function Point({ title, note, rows, kind, splitPeriods = false }: { title: string; note: React.ReactNode; rows: TaskRow[]; kind: Parameters<typeof ReportingTaskTable>[0]["kind"]; splitPeriods?: boolean }) {
   return <section className="overflow-hidden rounded-xl border bg-card">
     <div className="border-b px-5 py-4"><div className="flex items-center gap-3"><h3 className="font-semibold">{title}</h3><Badge variant="secondary">{rows.length}</Badge></div><p className={kind === "postponed" ? "mt-2 text-sm font-bold leading-6 text-slate-950" : "mt-1 text-xs text-muted-foreground"}>{note}</p></div>
-    <ReportingTaskTable rows={rows} kind={kind} />
+    <ReportingTaskTable rows={rows} kind={kind} splitPeriods={splitPeriods} />
   </section>
 }
 
@@ -242,6 +250,7 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
         {manual("underload")}{manual("overload")}{manual("reorganization")}
       </div>
       <Point title="1. DET QË JANË SHTY NGA KJO JAVË NË JAVËN TJETËR / BRENDA JAVËS" note={<>Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></>} rows={data.postponed || []} kind="postponed" />
+      <Point title="DET QË JANË SHTYER SOT AM DHE PM" note="Të gjitha shtyrjet e bëra sot, të ndara sipas orës së ndryshimit: para 12:00 dhe nga 12:00." rows={data.postponed_today || []} kind="postponed" splitPeriods />
       <Point title="2. PSE PA PREK TËRË DITËN?" note="Detyrat TODO ku data e raportit është brenda intervalit Start–Due, pavarësisht progresit të mëparshëm." rows={data.untouched || []} kind="untouched" />
       <Point title="3. SOT PËR SOT/DEADLINE - PROGRESI?" note="Vetëm detyrat që nuk janë DONE dhe kanë Creation Date, Start Date dhe Due Date në datën e këtij raporti." rows={(data.same_day || []).filter((row) => row.status !== "DONE")} kind="same_day" />
       <UnheldMeetings rows={data.unheld_meetings || []} reportDay={report.report_date} answers={answers} disabled={meetingCommentsDisabled} onAnswerChange={onAnswerChange} />

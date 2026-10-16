@@ -27,7 +27,7 @@ def task(**changes):
     return SimpleNamespace(**{
         "id": uuid.uuid4(), "title": "EF: Detyre", "status": "TODO", "progress_percentage": 0,
         "created_at": DAY, "start_date": DAY, "due_date": DAY,
-        "completed_at": None, "is_deadline_important": False, "one_h_marker": None, **changes,
+        "completed_at": None, "is_deadline_important": False, "one_h_marker": None, "finish_period": "AM", **changes,
     })
 
 
@@ -45,7 +45,6 @@ def test_original_same_day_task_is_selected_for_each_postponement(field):
     selected = service.select_task_sections([row], events, DAY)["postponed"]
     assert len(selected) == 1
     assert selected[0]["postponement_kind"] == field
-    assert selected[0]["category"] == "SOT/SOT"
 
 
 def test_deadline_postponements_do_not_require_creation_today():
@@ -53,15 +52,25 @@ def test_deadline_postponements_do_not_require_creation_today():
                due_date=date(2026, 10, 7), is_deadline_important=True)
     selected = service.select_task_sections([row], [event(row)], DAY)["postponed"]
     assert len(selected) == 1
-    assert selected[0]["category"] == "Deadline Important"
 
 
-def test_regular_old_tasks_and_completion_date_normalization_are_not_postponements():
+def test_regular_old_tasks_are_included_but_completion_normalization_is_not():
     old = task(created_at=date(2026, 9, 1), due_date=date(2026, 10, 7))
     done = task(created_at=date(2026, 9, 1), due_date=DAY, completed_at=DAY,
                 status="DONE", is_deadline_important=True)
     rows = service.select_task_sections([old, done], [event(old), event(done, before=date(2026, 10, 5), after=DAY)], DAY)
     assert rows["postponed"] == []
+    assert [row["task_id"] for row in rows["postponed_am"]] == [str(old.id)]
+
+
+@pytest.mark.parametrize("period", ["AM", "PM", "AM/PM", None])
+@pytest.mark.parametrize("hour", [9, 10, 14])
+def test_postponements_use_local_audit_time_and_not_task_period(period, hour):
+    item = task(created_at=date(2026, 9, 1), finish_period=period, due_date=date(2026, 10, 7))
+    change = event(item)
+    change.created_at = datetime(2026, 10, 6, hour, tzinfo=timezone.utc)
+    selected = service.select_task_sections([item], [change], DAY)["postponed_am"]
+    assert len(selected) == (1 if hour == 9 else 0)
 
 
 @pytest.mark.parametrize("status", ["TODO", "IN_PROGRESS", "DONE"])
@@ -72,6 +81,7 @@ def test_postponements_only_include_outstanding_tasks(status):
     events = [event(item, field) for field in ("start_date", "due_date")]
     sections = service.select_task_sections([item], events, DAY)
     assert len(sections["postponed"]) == (0 if status == "DONE" else 1)
+    assert len(sections["postponed_am"]) == (0 if status == "DONE" else 1)
 
 
 @pytest.mark.parametrize("status", ["TODO", "DONE"])
@@ -317,6 +327,21 @@ def test_delivery_dropdown_accepts_supported_choices(choice):
 
 
 class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_added_morning_table_preserves_original_and_accepts_comments_for_new_tasks(self):
+        original = task(due_date=date(2026, 10, 7), is_deadline_important=True)
+        regular = task(created_at=date(2026, 9, 1), due_date=date(2026, 10, 7), finish_period="PM")
+        data = service.select_task_sections([original, regular], [event(original), event(regular)], DAY)
+        assert [item["task_id"] for item in data["postponed"]] == [str(original.id)]
+        assert [item["task_id"] for item in data["postponed_am"]] == [str(original.id), str(regular.id)]
+        key = f"postponed_comment:{regular.id}"
+        row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data=data, status="DRAFT")
+        with patch.object(api, "_by_id", new=AsyncMock(return_value=row)), patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log"):
+            result = await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={key: "Vetem tabela e re"}), AsyncMock(), SimpleNamespace(id=uuid.uuid4()))
+        html = service.render_html(result)
+        assert service.AUTO_TITLES["postponed"] in html
+        assert service.AUTO_TITLES["postponed_am"] in html
+        assert "Vetem tabela e re" in html
+
     async def test_unfinished_priority_reuses_after_break_rows_and_preserves_existing_sections(self):
         rows = [
             ["1", "ER", "GD", "AM", "TODO", "DUE SOT", "PRJK", "ER: Detyre", "SOT"],
@@ -536,7 +561,8 @@ def test_removed_ga_reply_is_ignored_when_saving_and_exporting_old_reports():
         assert "Pergjigje e vjeter" not in html
         assert "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET" in html
         titles = [block["text"] for block in service.export_blocks(result) if block["kind"] == "text" and block["level"] == 2]
-        assert [title.split(". ")[0] for title in titles] == ["1", "2", "3", "4", "5"]
+        assert [title.split(". ")[0] for title in titles if ". " in title] == ["1", "2", "3", "4", "5"]
+        assert service.AUTO_TITLES["postponed_am"] in titles
         plain = service.render_plain_text(result)
         assert "A KA REPLY NGA GA" not in plain and "Pergjigje e vjeter" not in plain
         word = Document(io.BytesIO(service.report_attachments(result)[0][1]))

@@ -28,6 +28,7 @@ MANUAL_POINTS = {
 AUTO_TITLES = {
     "unfinished_priority": f"2. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",
     "postponed": "3. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
+    "postponed_am": "DET QE JANE SHTYER SOT AM - PARA PAUZES",
     "ga_progress": "4. PROGRESI I DET ME GA (AM)",
     "delivery": "5. SA PER DOREZIM M2?",
 }
@@ -42,6 +43,8 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
     # M2 reports outstanding postponements; completed tasks no longer need follow-up.
     sections = {"postponed": [row for row in m3.select_task_sections(tasks, events, day)["ga_postponed"]
                               if row["status"] != "DONE"],
+                "postponed_am": [row for row in m3.select_task_sections(tasks, events, day, postponement_period="AM")["postponed"]
+                                 if row["status"] != "DONE"],
                 "ga_progress": [], "delivery": []}
     for task in tasks:
         marker = active_one_h_marker(task, day)
@@ -135,7 +138,7 @@ def report_payload(row: M2ReportingPointsReport) -> dict:
 
 
 def table_groups(report, key):
-    return m3.task_table_groups(report.get("data", {}).get(key, []), "ga_postponed" if key == "postponed" else key)
+    return m3.task_table_groups(report.get("data", {}).get(key, []), "ga_postponed" if key in {"postponed", "postponed_am"} else key)
 
 
 def table_columns(key, movement=""):
@@ -147,7 +150,7 @@ def table_columns(key, movement=""):
         return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
                 ("project", "PRJK", 96), ("am_pm", "AM/PM", 60), ("task_type", "LLOJI", 48),
                 ("marker", "SIMBOLI", 60), ("title", "TITULLI", 450)]
-    if key == "postponed":
+    if key in {"postponed", "postponed_am"}:
         return [(field, label, 60 if field == "am_pm" else width) for field, label, width in m3.report_table_columns("ga_postponed", movement)
                 if field not in {"reason", "comment", "category"}] + [("manual_comment", "KOMENT MANUAL", 220)]
     return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
@@ -181,7 +184,7 @@ def export_blocks(report):
             rows = report.get("data", {}).get("delivery", [])
             delivered = sum(report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") == "PO" for row in rows)
             blocks.append({"kind": "text", "text": f"SA/TOTALI: {delivered}/{len(rows)}", "level": 3, "font_size": 14})
-        if key == "postponed":
+        if key in {"postponed", "postponed_am"}:
             blocks.append({"kind": "legend", "runs": [
                 ("Shtyrjet e bëra gjatë ditës. ", None, "#000000"),
                 ("Brenda javës: OK.", "#dcfce7", "#14532d"),
@@ -209,7 +212,7 @@ def export_blocks(report):
                         cell_fill, cell_color = ("#fee2e2", "#7f1d1d") if value == "RREZIK" else ("#dcfce7", "#14532d")
                     cells.append({
                         "text": value, "fill": cell_fill, "color": cell_color,
-                        "bold": column in {"title", "marker", "choice", "risk"}, "marker": row.get("marker") if key == "postponed" and column == "title" else None,
+                        "bold": column in {"title", "marker", "choice", "risk"}, "marker": row.get("marker") if key in {"postponed", "postponed_am"} and column == "title" else None,
                         "eight_am": eight_am, "first": column_index == 0, "last": column_index == len(columns) - 1,
                         "divider": column in {"from", "to"} and movement == "start_due",
                     })

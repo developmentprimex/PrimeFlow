@@ -18,7 +18,7 @@ export type UnfinishedPriorityRow = {
 }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
-  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; ga_progress?: TaskRow[]; delivery?: TaskRow[] }
+  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; postponed_am?: TaskRow[]; ga_progress?: TaskRow[]; delivery?: TaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -100,11 +100,14 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
         {!unfinishedRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
       </div>
     </section>
-    <section className="space-y-3" aria-labelledby="m2-postponed"><h2 id="m2-postponed" className="text-lg font-bold">3. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?</h2>
-      <p className="text-sm text-muted-foreground">Shtyrjet e bëra sot për detyrat Deadline Important ose të krijuara, filluara dhe planifikuara për sot.</p>
+    {([
+      ["postponed", "3. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?"],
+      ["postponed_am", "DET QË JANË SHTYER SOT AM — PARA PAUZËS"],
+    ] as const).map(([section, title]) => <section key={section} className="space-y-3" aria-labelledby={`m2-${section}`}><h2 id={`m2-${section}`} className="text-lg font-bold">{title}</h2>
+      <p className="text-sm text-muted-foreground">{section === "postponed" ? "Shtyrjet e bëra sot për detyrat Deadline Important ose të krijuara, filluara dhe planifikuara për sot." : "Të gjitha shtyrjet e bëra sot para orës 12:00, pavarësisht periudhës së detyrës."}</p>
       <p className="text-sm font-bold">Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></p>
-      {[["start_due", "SHTYRË START DHE DUE DATE"], ["due", "SHTYRË DUE DATE"], ["start", "SHTYRË START DATE"]].map(([kind, title]) => <div key={kind} className="space-y-2"><h3 className="text-sm font-semibold">{title}</h3>{renderTable((report.data.postponed || []).filter((row) => row.postponement_kind === kind), false)}</div>)}
-    </section>
+      {[["start_due", "SHTYRË START DHE DUE DATE"], ["due", "SHTYRË DUE DATE"], ["start", "SHTYRË START DATE"]].map(([kind, title]) => <div key={kind} className="space-y-2"><h3 className="text-sm font-semibold">{title}</h3>{renderTable((report.data[section] || []).filter((row) => row.postponement_kind === kind), false)}</div>)}
+    </section>)}
     <section className="space-y-3" aria-labelledby="m2-ga-progress"><h2 id="m2-ga-progress" className="text-lg font-bold">4. PROGRESI I DET ME GA (AM)</h2>
       <p className="text-sm text-muted-foreground">Detyrat AM dhe AM/PM me simbolin F ose GA dhe detyrat personale me GA, brenda intervalit start–due të datës së raportit.</p>
       <div className="overflow-x-auto border">

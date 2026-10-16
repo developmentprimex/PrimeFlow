@@ -46,6 +46,27 @@ def event(item, field="due_date", before="2026-10-05", after="2026-10-06", **cha
 
 
 class SelectionTests(unittest.TestCase):
+    def test_postponements_are_split_by_local_change_time_not_task_period(self):
+        morning = task(finish_period="PM", due_date=date(2026, 10, 6))
+        afternoon = task(finish_period="AM", due_date=date(2026, 10, 6))
+        changes = [event(morning, created_at=datetime(2026, 10, 5, 9, 59, tzinfo=timezone.utc)),
+                   event(afternoon, created_at=datetime(2026, 10, 5, 10, 0, tzinfo=timezone.utc))]
+        rows = service.select_task_sections([morning, afternoon], changes, DAY)["postponed_today"]
+        self.assertEqual([(row["task_id"], row["postponement_period"]) for row in rows],
+                         [(str(morning.id), "AM"), (str(afternoon.id), "PM")])
+        groups = service.task_table_groups(rows, "postponed_today")
+        self.assertEqual([(caption, group[0]["task_id"]) for caption, _, group in groups if group],
+                         [("AM - SHTYER DUE DATE", str(morning.id)), ("PM - SHTYER DUE DATE", str(afternoon.id))])
+
+    def test_am_snapshot_preserves_morning_dates_when_task_is_postponed_again_in_pm(self):
+        item = task(due_date=date(2026, 10, 7))
+        changes = [event(item), event(item, before="2026-10-06", after="2026-10-07",
+                                      created_at=datetime(2026, 10, 5, 14, tzinfo=timezone.utc))]
+        rows = service.select_task_sections([item], changes, DAY)["postponed_today"]
+        self.assertEqual([(row["postponement_period"], row["from_date"], row["to_date"]) for row in rows],
+                         [("AM", "2026-10-05", "2026-10-06"), ("PM", "2026-10-06", "2026-10-07")])
+        self.assertEqual(item.due_date, date(2026, 10, 7))
+
     def test_todo_requires_today_within_start_due_interval_even_with_prior_progress(self):
         rows = [task(title="Me progres", progress_percentage=65),
                 task(title="Intervali", start_date=date(2026, 10, 2), due_date=date(2026, 10, 8)),
@@ -56,7 +77,7 @@ class SelectionTests(unittest.TestCase):
         sections = service.select_task_sections(rows, [], DAY)
         self.assertEqual([row["title"] for row in sections["untouched"]], ["Me progres", "Intervali"])
 
-    def test_postponed_uses_original_week_interval_excluding_future_and_past_weeks(self):
+    def test_weekly_table_is_preserved_alongside_all_changes_today(self):
         rows = [task(title="Kjo jave", start_date=date(2026, 10, 12), due_date=date(2026, 10, 14)),
                 task(title="Mbulon javen", start_date=date(2026, 9, 28), due_date=date(2026, 10, 14)),
                 task(title="Future", start_date=date(2026, 10, 12), due_date=date(2026, 10, 15)),
@@ -67,8 +88,9 @@ class SelectionTests(unittest.TestCase):
                   event(rows[1], before="2026-10-12", after="2026-10-14"),
                   event(rows[2], before="2026-10-14", after="2026-10-15"),
                   event(rows[3], before="2026-09-25", after="2026-10-07")]
-        result = service.select_task_sections(rows, events, DAY)["postponed"]
-        self.assertEqual([row["title"] for row in result], ["Kjo jave", "Mbulon javen"])
+        sections = service.select_task_sections(rows, events, DAY)
+        self.assertEqual([row["title"] for row in sections["postponed"]], ["Kjo jave", "Mbulon javen"])
+        self.assertEqual([row["title"] for row in sections["postponed_today"]], ["Kjo jave", "Mbulon javen", "Future", "E kaluar"])
 
     def test_task_title_uses_existing_report_cleanup_without_description(self):
         row = task(title="[[added]]DT: Titulli i detyres due 16:00[[/added]]\n1. Pershkrimi i plote\n2. Hapi tjeter")
@@ -98,7 +120,7 @@ class SelectionTests(unittest.TestCase):
         rows = service.select_task_sections([due, both, start], events, DAY)["postponed"]
         self.assertEqual([row["postponement_kind"] for row in rows], ["due", "start_due", "start"])
         groups = service.task_table_groups(rows, "postponed")
-        self.assertEqual([len(group[2]) for group in groups], [1, 1, 1])
+        self.assertEqual([len(group[2]) for group in groups if group[2]], [1, 1, 1])
         self.assertEqual(len({row["task_id"] for _, _, rows in groups for row in rows}), 3)
 
     def test_am_pm_and_task_type_use_the_existing_m3_rules(self):
