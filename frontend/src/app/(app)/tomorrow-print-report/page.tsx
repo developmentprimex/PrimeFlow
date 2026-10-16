@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
+import { reportTaskUsers, reportSummaryUser, reportUserOptions, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
 
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type SettingsState = {
@@ -197,6 +198,9 @@ export function PrintReportPage({
   const [reportIntroExpanded, setReportIntroExpanded] = React.useState(false)
   const [markerFilters, setMarkerFilters] = React.useState<Set<TaskMarkerSelection>>(() => new Set())
   const [dueDateFilter, setDueDateFilter] = React.useState<TaskDueDateFilter>("all")
+  const [userFilter, setUserFilter] = React.useState("")
+  const [summaryOnly, setSummaryOnly] = React.useState(false)
+  const [reportUsers, setReportUsers] = React.useState<string[]>([])
   const [history, setHistory] = React.useState<Delivery[]>([])
   const [loading, setLoading] = React.useState(true)
   const [snapshotLoading, setSnapshotLoading] = React.useState(true)
@@ -475,7 +479,8 @@ export function PrintReportPage({
           dueDateFilter === "today" ? dueToday :
           dueDateFilter === "deadline" ? matchesDeadline : startsToday
         ))
-        const matches = matchesMarker && matchesDueDate
+        const matchesUser = !userFilter || reportTaskUsers(cell).includes(userFilter)
+        const matches = matchesMarker && matchesDueDate && matchesUser && (!summaryOnly || isReportSummaryTask(cell))
         cell.style.display = matches ? "" : "none"
         cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
         if (dateCells[index]) dateCells[index].style.display = matches ? "" : "none"
@@ -486,7 +491,19 @@ export function PrintReportPage({
         if (content) content.style.visibility = ""
       })
     })
-  }, [dueDateFilter, markerFilters, preview?.target_date])
+    collapseEmptyReportTaskRows(document, Boolean(userFilter || summaryOnly || markerFilters.size || dueDateFilter !== "all"))
+    document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"] td').forEach((cell) => {
+      cell.style.display = ""
+      const active = summaryOnly && reportSummaryUser(cell) === userFilter
+      cell.setAttribute("aria-pressed", String(active))
+      cell.title = active ? "Show all tasks" : `Show ${reportSummaryUser(cell)}'s tasks in this summary`
+      cell.style.outline = active ? "2px solid #2563EB" : ""
+      cell.style.outlineOffset = "-2px"
+    })
+    document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"]').forEach((summary) => {
+      summary.style.display = ""
+    })
+  }, [dueDateFilter, markerFilters, userFilter, summaryOnly, preview?.target_date])
 
   const setupPreviewMarkerControls = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
@@ -757,6 +774,30 @@ export function PrintReportPage({
   const setupPreviewFilters = () => {
     const document = previewFrameRef.current?.contentDocument
     if (!document) return
+    const users = reportUserOptions(document)
+    setReportUsers(users)
+    if (userFilter && !users.includes(userFilter)) setUserFilter("")
+    document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"] td').forEach((cell) => {
+      const person = reportSummaryUser(cell)
+      if (!person) return
+      const select = () => {
+        const active = cell.getAttribute("aria-pressed") === "true"
+        cell.setAttribute("aria-pressed", String(!active))
+        setUserFilter(active ? "" : person)
+        setSummaryOnly(!active)
+        setMarkerFilters(new Set())
+        setDueDateFilter("all")
+      }
+      cell.setAttribute("role", "button")
+      cell.tabIndex = 0
+      cell.title = `Show ${person}'s tasks in this summary`
+      cell.style.cursor = "pointer"
+      cell.onclick = select
+      cell.onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select() }
+      }
+    })
+    applyPreviewMarkerFilter()
     // Saved reports also need the controls, including tables with no tasks.
     const taskTable = Array.from(document.querySelectorAll("table")).find((table) =>
       Array.from(table.querySelectorAll("thead th")).some((heading) => heading.textContent?.trim() === "TASKS")
@@ -792,6 +833,19 @@ export function PrintReportPage({
   if (!authLoading && !user) return <div className="rounded-lg border bg-white p-8">Sign in to access {reportName}.</div>
 
   const markerFilterControl = () => <MarkerFilterControl selected={markerFilters} onChange={setMarkerFilters} />
+  const userFilterControl = <>
+    <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-slate-50 px-3 text-sm font-medium"
+      style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #CBD5E1", borderRadius: 6, background: "#F8FAFC", padding: "0 12px", fontSize: 14, color: "#0F172A" }}>
+      User
+      <select aria-label="Filter report by user" value={userFilter} onChange={(event) => { setUserFilter(event.target.value); setSummaryOnly(false) }}
+        className="h-8 bg-transparent text-sm font-bold outline-none" style={{ height: 32, border: 0, background: "transparent", fontWeight: 700 }}>
+        <option value="">All</option>
+        {reportUsers.map((initials) => <option key={initials} value={initials}>{initials}</option>)}
+      </select>
+    </label>
+    {summaryOnly ? <button type="button" onClick={() => { setSummaryOnly(false); setUserFilter(""); setMarkerFilters(new Set()); setDueDateFilter("all") }}
+      style={{ border: "1px solid #93C5FD", borderRadius: 6, background: "#EFF6FF", padding: "0 10px", fontSize: 13, color: "#1D4ED8" }}>Show all tasks</button> : null}
+  </>
 
   const dueDateFilterControl = (
     <label
@@ -863,7 +917,7 @@ export function PrintReportPage({
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-center gap-2">
           {modeControl}
-          {preview ? <>{dueDateFilterControl}{markerFilterControl()}</> : null}
+          {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}</> : null}
           <Button
             variant="outline"
             onClick={() => void generateReport()}
@@ -886,7 +940,7 @@ export function PrintReportPage({
           <p className="text-sm text-muted-foreground">{today ? "Today's Common View tasks and meetings, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {preview ? <>{dueDateFilterControl}{markerFilterControl()}</> : null}
+          {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}</> : null}
           <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading || (today && (Boolean(preview?.is_frozen) || Boolean(selectedReportDate)))}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending || (today && Boolean(selectedReportDate))}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
