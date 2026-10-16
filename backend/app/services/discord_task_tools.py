@@ -40,6 +40,33 @@ def text_points(value: str | None, field: str) -> list[dict]:
             for i, (point, _, _) in enumerate(_point_entries(value, field_name=field.upper()), 1)]
 
 
+async def with_source_note(user, task: dict) -> dict:
+    """Include canonical PX text in the version checked before Discord writes."""
+    task = dict(task)
+    for key, collection in (("ga_note_origin_id", "ga-notes"), ("plan_note_origin_id", "plan-notes")):
+        if task.get(key):
+            note = await user_api(user, "GET", f"/api/{collection}/{task[key]}")
+            # Knowledge tasks intentionally have independent titles.
+            if note.get("knowledge_type") not in {"PROMPT", "DEFINITION", "REGULATION"}:
+                task["_px_note"] = {"id": str(task[key]), "collection": collection, "content": note["content"]}
+            break
+    return task
+
+
+def point_text(task: dict, field: str):
+    note = task.get("_px_note")
+    if note and (field == "title" or mirrors_note(task)):
+        return note["content"]
+    return task.get(field)
+
+
+def mirrors_note(task: dict) -> bool:
+    note = task.get("_px_note")
+    normalize = lambda value: (value or "").replace("\r\n", "\n").strip()
+    return bool(note and normalize(task.get("description")) in {
+        normalize(task.get("title")), normalize(note["content"])})
+
+
 def set_text_points(value: str | None, field: str, numbers: list[int], done: bool, now: datetime) -> str:
     """Preserve other points and their timestamps, including duplicate bullets."""
     raw = value or ""
@@ -154,8 +181,8 @@ Mos përdor UUID jashtë kontekstit. Mos ndrysho project_id, department_id ose d
 referenca nuk është UUID ekzakt e dhënë nga përdoruesi. Për zhvendosje sloti përdor slot, jo update_task.
 """
     context = {"now": now.isoformat(), "task": task,
-               "title_points": text_points(task.get("title"), "title"),
-               "description_points": text_points(task.get("description"), "description"),
+               "title_points": text_points(point_text(task, "title"), "title"),
+               "description_points": text_points(point_text(task, "description"), "description"),
                "checklists": checklists, "users": users, "editable_fields": sorted(EDITABLE_FIELDS)}
     payload = {"model": settings.DISCORD_AI_MODEL, "store": False,
                "input": [{"role": "system", "content": system},
@@ -187,6 +214,7 @@ def compile_actions(plan: TaskPlan, task: dict, checklists: list, users: list, i
     base = f"/api/tasks/{task_id}"
     patch: dict = {}
     point_changes: dict = {}
+    note_content = None
     operations: list[dict] = []
     valid_users = {str(user["id"]) for user in users}
     item_ids = {str(item["id"]) for checklist in checklists for item in checklist.get("items", [])}
@@ -214,7 +242,10 @@ def compile_actions(plan: TaskPlan, task: dict, checklists: list, users: list, i
             if args.keys() != {"field", "numbers", "done"} or args["field"] not in {"title", "description"} or type(args["done"]) is not bool or not isinstance(args["numbers"], list):
                 raise ValueError("Zgjidh fushën dhe pikat që duhen shënuar.")
             field = args["field"]
-            point_changes[field] = set_text_points(point_changes.get(field, task.get(field)), field, args["numbers"], args["done"], now)
+            if task.get("_px_note") and (field == "title" or mirrors_note(task)):
+                note_content = set_text_points(note_content if note_content is not None else point_text(task, field), field, args["numbers"], args["done"], now)
+            else:
+                point_changes[field] = set_text_points(point_changes.get(field, task.get(field)), field, args["numbers"], args["done"], now)
         elif action.tool == "comment":
             if args.keys() != {"comment"} or not isinstance(args["comment"], str) or not args["comment"].strip():
                 raise ValueError("Shkruaj tekstin e komentit.")
@@ -263,6 +294,14 @@ def compile_actions(plan: TaskPlan, task: dict, checklists: list, users: list, i
                 operations.append({"method": "DELETE" if action.tool == "delete" else "POST", "path": base + ("/deactivate" if action.tool == "deactivate" else ""), "label": "Detyra u fshi" if action.tool == "delete" else "Detyra u deaktivizua"})
     if patch.keys() & point_changes.keys():
         raise ValueError("Ndryshimi i tekstit dhe strike mbi të njëjtën fushë duhen bërë veçmas.")
+    if note_content is not None:
+        if "title" in patch or ("description" in patch and mirrors_note(task)):
+            raise ValueError("Ndryshimi i tekstit dhe strike duhen bërë veçmas.")
+        note = task["_px_note"]
+        # Use exactly the endpoint used by manual strike in PX Notes. It owns
+        # synchronization of linked tasks and their append-only strike events.
+        operations.append({"method": "PATCH", "path": f"/api/{note['collection']}/{note['id']}",
+                           "body": {"content": note_content}, "label": "Strike u ruajt në PX Notes"})
     patch.update(point_changes)
     if patch:
         TaskUpdate.model_validate(patch)

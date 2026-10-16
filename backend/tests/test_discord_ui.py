@@ -26,14 +26,28 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
                 "title_points": [{"number": i + 1, "text": f"{i + 1}. [[added]]Point {i + 1}[[/added]]", "done": i % 3 == 0} for i in range(count)],
                 "description_points": []}
 
-    def test_five_cards_fit_discord_embed_budget_and_show_planning(self):
-        tasks = [self.task("Title\n" + "Long point " * 1000) for _ in range(5)]
-        cards = ui.overview_embeds(tasks, 0)
-        self.assertEqual(len(cards), 5)
-        self.assertLessEqual(sum(len(card) for card in cards), 6000)
-        self.assertTrue(all(len(card.title) <= 256 and len(card.description) <= 4096 for card in cards))
-        self.assertEqual(cards[0].fields[1].value, "1H 11:50 · AM")
-        self.assertNotIn("[[", json.dumps([card.to_dict() for card in cards]))
+    def test_initial_list_has_only_titles_and_no_detail_embeds(self):
+        tasks = [self.task("Title\n1. PRIVATE DETAIL") for _ in range(12)]
+        tasks[0]["description"] = "LONG DESCRIPTION"
+        pages = bot.task_pages(tasks, "Sot")
+        self.assertEqual(len(pages), 2)
+        self.assertEqual(ui.overview_embeds(tasks, 0), [])
+        text, view = pages[0]
+        self.assertIn("1. Title", text)
+        self.assertNotIn("PRIVATE DETAIL", text)
+        self.assertNotIn("LONG DESCRIPTION", text)
+        self.assertTrue(all(option.description is None for option in view.children[0].options))
+
+    def test_detail_hides_html_and_duplicate_note_description(self):
+        detail = self.detail()
+        detail["task"]["description"] = detail["task"]["title"]
+        detail["title_points"][0]["text"] = "1. First<br><strong>Second &amp; third</strong>"
+        detail["description_points"] = detail["title_points"]
+        embed = ui.card(detail["task"], detail=detail)
+        self.assertNotIn("<br>", embed.description)
+        self.assertNotIn("<strong>", embed.description)
+        self.assertIn("Second & third", embed.description)
+        self.assertNotIn("Pikat e përshkrimit", embed.description)
 
     def test_detail_shows_completed_points_without_editor_markers(self):
         detail = self.detail()
@@ -118,6 +132,19 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
         existing.edit.assert_awaited_once()
         self.assertTrue(interaction.followup.send.call_args.kwargs["ephemeral"])
         self.assertEqual(client.task_details[key]["fingerprint"], detail["fingerprint"])
+
+    async def test_saved_strike_refreshes_picker_version_for_next_selection(self):
+        client = object.__new__(bot.PrimeFlowBot)
+        result = {**self.detail(), "status": "DONE"}
+        client.bridge = AsyncMock(return_value=result)
+        client.private_channel = AsyncMock()
+        client.show_result = AsyncMock()
+        interaction = SimpleNamespace(guild_id=123, channel_id=456, user=SimpleNamespace(id=789), id=999,
+            data={"custom_id": "pf:pointset:previous"}, message=SimpleNamespace(edit=AsyncMock()))
+        await client.run_direct(interaction, result["task"]["id"], "b" * 16, [], "Strike")
+        view = interaction.message.edit.call_args.kwargs["view"]
+        self.assertTrue(all(result["fingerprint"] in item.custom_id for item in view.children))
+        client.show_result.assert_awaited_once_with(interaction, result)
 
 
 if __name__ == "__main__":

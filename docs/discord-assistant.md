@@ -65,8 +65,8 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 
 ## Biseda dhe dropdown
 
-`/detyrat` dhe kujtesat shfaqin karta me ngjyrën e statusit, slotin/AM–PM,
-progresin dhe përmbledhjen e pikave, me nga 5 detyra për mesazh. Zgjedhja nga
+`/detyrat` dhe kujtesat shfaqin vetëm titujt e detyrave, deri në 10 për mesazh.
+Përshkrimi, pikat dhe statuset hapen vetëm pas zgjedhjes. Zgjedhja nga
 dropdown hap kartën e plotë me butona për To Do, Në progres, WFE, Mbylle,
 Konfirmim, Pikat/Strike, Edito, Koment, Slot/AM–PM dhe Rifresko.
 
@@ -76,6 +76,11 @@ Te Pikat mund të zgjidhen disa pika njëherësh për strike ose heqje strike;
 listat e gjata kanë faqe prej 25 pikash. Konfirmimi zgjedh personin nga përdoruesit
 aktivë. Edito hap titullin, përshkrimin, progresin, afatin dhe AM/PM; shënimet e
 strike-ve ruhen për tekstin e pandryshuar. Pas ruajtjes përditësohet karta aktive.
+Për detyrat me origjinë PX Notes/PX JAV, pikat merren nga shënimi burimor dhe
+strike ruhet përmes `PATCH /ga-notes/{id}` ose `PATCH /plan-notes/{id}`, njësoj si
+strike manual. Këto rrugë sinkronizojnë detyrat e lidhura dhe historikun e strike-ve.
+Përshkrimet e veçanta dhe detyrat pa shënim ruajnë ndryshimet te detyra.
+Versioni përfshin tekstin e shënimit; menuja e pikave rifreskohet pas çdo ndryshimi.
 Mbyllja mund të shoqërohet me komentin e rezultatit dhe backend-i zbaton kushtet.
 
 Dropdown-i "AI dhe ndryshime të tjera" dhe `/pyet udhezimi:...` mbeten për kërkesa

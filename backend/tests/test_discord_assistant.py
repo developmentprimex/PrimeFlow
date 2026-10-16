@@ -106,6 +106,34 @@ class PlanTests(unittest.TestCase):
         ops = self.compile(plan(("update_task", {"status": "WAITING_CLIENT"})))
         self.assertEqual(ops[0]["body"]["status"], "WAITING_CLIENT")
 
+    def test_px_strike_uses_manual_note_endpoint_for_both_sources_and_mirror_fields(self):
+        for collection in ("ga-notes", "plan-notes"):
+            for field in ("title", "description"):
+                self.task.update(title="Heading\n1. A\n2. B", description="Heading\n1. A\n2. B",
+                    _px_note={"collection": collection, "id": USER_ID, "content": "Heading\n1. A\n2. B"})
+                ops = self.compile(plan(("set_points", {"field": field, "numbers": [2], "done": True})))
+                self.assertEqual(len(ops), 1)
+                self.assertEqual(ops[0]["path"], f"/api/{collection}/{USER_ID}")
+                self.assertEqual([p["done"] for p in tools.text_points(ops[0]["body"]["content"], "title")], [False, True])
+                self.assertIn("09:50 15.10", ops[0]["body"]["content"])
+
+    def test_custom_description_still_uses_task_endpoint(self):
+        self.task["_px_note"] = {"collection": "ga-notes", "id": USER_ID, "content": "Heading\n1. Note point"}
+        ops = self.compile(plan(("set_points", {"field": "description", "numbers": [1], "done": True})))
+        self.assertEqual(ops[0]["path"], f"/api/tasks/{TASK_ID}")
+        self.assertNotIn("content", ops[0]["body"])
+
+    def test_full_source_note_is_used_when_task_title_is_old(self):
+        self.task["_px_note"] = {"collection": "ga-notes", "id": USER_ID, "content": "Heading\n1. Source A\n2. Source B"}
+        self.assertEqual(tools.point_text(self.task, "title"), self.task["_px_note"]["content"])
+        ops = self.compile(plan(("set_points", {"field": "title", "numbers": [2], "done": True})))
+        self.assertIn("Source B[[/done]]", ops[0]["body"]["content"])
+
+    def test_source_note_change_invalidates_displayed_fingerprint(self):
+        first = {**self.task, "_px_note": {"content": "1. A"}}
+        second = {**self.task, "_px_note": {"content": "1. Changed"}}
+        self.assertNotEqual(tools.fingerprint(first), tools.fingerprint(second))
+
     def test_comment_is_appended_before_completion(self):
         ops = self.compile(plan(("update_task", {"status": "DONE"}), ("comment", {"comment": "Finished"})))
         self.assertTrue(ops[0]["path"].endswith("/comment"))
@@ -183,6 +211,44 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_px_note_strike_and_reopen_follow_real_manual_route_and_emit_events(self):
+        from app.api.routers import ga_notes
+        from app.schemas.ga_note import GaNoteUpdate
+
+        original = "Heading\n1. [[added]]A[[/added]]\n2. B"
+        for desired in (True, False):
+            old = original if desired else tools.set_text_points(original, "title", [1], True, NOW)
+            task = {"id": TASK_ID, "title": old, "description": old,
+                    "_px_note": {"collection": "ga-notes", "id": USER_ID, "content": old}}
+            operation = tools.compile_actions(plan(("set_points", {"field": "title", "numbers": [1], "done": desired})), task, [], [], "", NOW)[0]
+            note = SimpleNamespace(id=uuid.UUID(USER_ID), content=old, knowledge_type=None)
+            linked = SimpleNamespace(id=uuid.UUID(TASK_ID), title=old, description=old)
+            first, second = Mock(), Mock()
+            first.scalar_one_or_none.return_value = note
+            second.scalars.return_value.all.return_value = [linked]
+            db = SimpleNamespace(execute=AsyncMock(side_effect=[first, second]), add=Mock(), commit=AsyncMock(), refresh=AsyncMock())
+            with patch.object(ga_notes, "_note_out", return_value=note):
+                await ga_notes.update_ga_note(note.id, GaNoteUpdate(**operation["body"]), db, SimpleNamespace(id=uuid.UUID(USER_ID)))
+            self.assertEqual(note.content, linked.title)
+            self.assertEqual(note.content, linked.description)
+            self.assertEqual([p["done"] for p in tools.text_points(note.content, "title")], [desired, False])
+            events = [call.args[0] for call in db.add.call_args_list]
+            self.assertEqual(len(events), 2)
+            self.assertEqual({event.field_name for event in events}, {"TITLE", "DESCRIPTION"})
+            self.assertTrue(all(event.action == ("STRUCK" if desired else "UNSTRUCK") for event in events))
+            db.commit.assert_awaited_once()
+
+    async def test_snapshot_fetches_canonical_source_and_keeps_knowledge_titles_independent(self):
+        task = {"id": TASK_ID, "title": "Old task copy", "ga_note_origin_id": USER_ID}
+        with patch.object(tools, "user_api", new_callable=AsyncMock, return_value={"content": "1. Current PX text"}) as request:
+            snapshot = await tools.with_source_note(SimpleNamespace(), task)
+            self.assertEqual(request.call_args.args[2], f"/api/ga-notes/{USER_ID}")
+            self.assertEqual(tools.point_text(snapshot, "title"), "1. Current PX text")
+            self.assertNotIn("_px_note", task)
+        with patch.object(tools, "user_api", new_callable=AsyncMock, return_value={"content": "Prompt", "knowledge_type": "PROMPT"}):
+            snapshot = await tools.with_source_note(SimpleNamespace(), task)
+            self.assertNotIn("_px_note", snapshot)
+
     async def test_direct_action_without_displayed_version_is_rejected(self):
         payload = api.Command(discord_user_id="12", guild_id="123", channel_id="44", request_id="999", instruction="WFE",
             task_id=uuid.UUID(TASK_ID), direct_actions=plan(("update_task", {"status": "WAITING_CLIENT"})).actions)
