@@ -59,6 +59,13 @@ class DiscordDeployTests(unittest.TestCase):
         result = subprocess.run(["node", "-e", script], cwd=backend, capture_output=True, text=True, check=True)
         self.assertEqual(json.loads(result.stdout), [{"args": "discord_bot.py", "instances": 1, "mode": "fork", "url": "http://127.0.0.1:8000"}])
 
+    def test_agent_model_and_all_discord_tests_reach_deploy(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+        self.assertIn("DISCORD_AGENT_MODEL: ${{ vars.DISCORD_AGENT_MODEL }}", workflow)
+        self.assertIn('unittest discover -s tests -p "test_discord*.py"', workflow)
+        self.assertEqual(build_config(self.env())["DISCORD_AGENT_MODEL"], "gpt-6-luna")
+        self.assertEqual(build_config({**self.env(), "DISCORD_AGENT_MODEL": "gpt-6-luna"})["DISCORD_AGENT_MODEL"], "gpt-6-luna")
+
 
 if __name__ == "__main__":
     unittest.main()

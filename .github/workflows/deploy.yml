@@ -220,6 +220,7 @@ jobs:
           DISCORD_CATEGORY_ID: ${{ vars.DISCORD_CATEGORY_ID }}
           DISCORD_MESSAGE_CONTENT_ENABLED: ${{ vars.DISCORD_MESSAGE_CONTENT_ENABLED }}
           DISCORD_AI_MODEL: ${{ vars.DISCORD_AI_MODEL }}
+          DISCORD_AGENT_MODEL: ${{ vars.DISCORD_AGENT_MODEL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           $ErrorActionPreference = "Stop"
@@ -241,7 +242,7 @@ jobs:
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server tests.test_migration_graph
           if errorlevel 1 exit /b 1
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_discord_assistant tests.test_discord_bot tests.test_discord_deploy tests.test_discord_ui
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest discover -s tests -p "test_discord*.py"
           if errorlevel 1 exit /b 1
 
       - name: Apply Database Migrations
