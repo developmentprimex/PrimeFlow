@@ -1,6 +1,6 @@
 # Discord Task Agents Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Delegate a task or one title/description point to GPT-6 Luna from Discord, persist research/drafts and let its owner review and accept the result.
 
@@ -60,16 +60,16 @@
 - Model columns follow the spec; add unique request ID, nullable response ID, nullable target identity, processing lease, delivery lease/token, message IDs, acceptance request ID/status and timestamps. Task deletion uses SET NULL for history; access is refused when the task no longer exists.
 - `Settings.DISCORD_AGENT_MODEL` and deploy config default to `gpt-6-luna`; interpretation-model settings stay independent.
 
-- [ ] Write tests for full-task/title/description target resolution and invalid fields/numbers. Include this assertion for duplicate bullets:
+- [x] Write tests for full-task/title/description target resolution and invalid fields/numbers. Include this assertion for duplicate bullets:
   ```python
   task = {"title": "Task", "description": "• Same\n• Same"}
   self.assertNotEqual(resolve_target(task, "description", 1)["key"],
                       resolve_target(task, "description", 2)["key"])
   ```
-- [ ] Add tests asserting snapshots exclude other users' data, config defaults to `gpt-6-luna`, request IDs are unique and migration graph has a single head.
-- [ ] Run `python -m unittest tests.test_discord_agent_model tests.test_discord_deploy -v` from `backend`; confirm failures exercise missing behavior, then implement the interfaces/model/migration/config.
-- [ ] Repeat that command and `python -m unittest tests.test_migration_graph -v`; expect all applicable tests passing. Check migration SQL against model fields without connecting to production.
-- [ ] Commit this deliverable and its passing tests.
+- [x] Add tests asserting snapshots exclude other users' data, config defaults to `gpt-6-luna`, request IDs are unique and migration graph has a single head.
+- [x] Run `python -m unittest tests.test_discord_agent_model tests.test_discord_deploy -v` from `backend`; confirm failures exercise missing behavior, then implement the interfaces/model/migration/config.
+- [x] Repeat that command and `python -m unittest tests.test_migration_graph -v`; expect all applicable tests passing. Check migration SQL against model fields without connecting to production.
+- [x] Commit this deliverable and its passing tests.
 
 ### Task 2: Authorized lifecycle routes and result acceptance
 
@@ -85,11 +85,11 @@
 - Creation snapshots the currently displayed version. A revision validates its parent run belongs to the same actor/task/target and adds the parent result to the new snapshot; parent data is immutable.
 - Plain acceptance records acceptance without task mutation. Point acceptance calls the existing `discord_assistant.command` direct-action path with `set_points`, the saved fingerprint and request ID. Persist acceptance only after a successful reply. Reserve/reuse the mutation request ID across retries, so a lost successful reply cannot apply a second mutation; ambiguous reservations need explicit reconciliation, not blind replay.
 
-- [ ] Write API tests for wrong guild/channel/user, disabled/revoked link, reassignment, stale fingerprint, invalid parent, duplicate creation, and no mutation during creation/plain acceptance.
-- [ ] Add tests for duplicate/reordered point acceptance and normal-API rejection; assert failed strike never sets accepted, and repeated acceptance uses the reserved command request ID.
-- [ ] Run `python -m unittest tests.test_discord_agent_api -v`; confirm intended failures, implement the routes and service logic, then rerun to pass.
-- [ ] Add cancellation tests: queued -> cancelled without provider access, running -> cancel requested with response ID retained, ready result cannot be presented as stopped retroactively. Revocation blocks read/delivery/acceptance and schedules cancellation during worker processing.
-- [ ] Run `python -m unittest tests.test_discord_agent_api tests.test_discord_assistant -v`; expect passing tests and commit.
+- [x] Write API tests for wrong guild/channel/user, disabled/revoked link, reassignment, stale fingerprint, invalid parent, duplicate creation, and no mutation during creation/plain acceptance.
+- [x] Add tests for duplicate/reordered point acceptance and normal-API rejection; assert failed strike never sets accepted, and repeated acceptance uses the reserved command request ID.
+- [x] Run `python -m unittest tests.test_discord_agent_api -v`; confirm intended failures, implement the routes and service logic, then rerun to pass.
+- [x] Add cancellation tests: queued -> cancelled without provider access, running -> cancel requested with response ID retained, ready result cannot be presented as stopped retroactively. Revocation blocks read/delivery/acceptance and schedules cancellation during worker processing.
+- [x] Run `python -m unittest tests.test_discord_agent_api tests.test_discord_assistant -v`; expect passing tests and commit.
 
 ### Task 3: OpenAI execution and recoverable background processing
 
@@ -105,7 +105,7 @@
 - Treat provider `queued`/`in_progress` as running; `completed` with valid content as ready; `failed`/`incomplete` as failed; confirmed `cancelled` as cancelled. Invalid/deleted/expired response IDs fail clearly without regeneration.
 - Before submission and result delivery, recheck ownership/link. Lost ownership/revocation requests cancellation; provider cleanup may continue with the stored response ID while result access remains blocked.
 
-- [ ] Write payload tests with these assertions:
+- [x] Write payload tests with these assertions:
   ```python
   self.assertEqual(payload["model"], "gpt-6-luna")
   self.assertEqual(payload["reasoning"], {"effort": "medium"})
@@ -114,10 +114,10 @@
   self.assertNotIn("max_output_tokens", payload)
   self.assertNotIn("max_tool_calls", payload)
   ```
-- [ ] Add research/draft separation, multi-segment output, citations, prompt-injection-as-data, empty output and provider error-redaction tests.
-- [ ] Add job tests for competing workers, restart with ID, ambiguous submit, cancellation during submit and completion, revocation, transient polling failure and unsupported model. Assert no second submit for existing/ambiguous work.
-- [ ] Run `python -m unittest tests.test_discord_agent_openai tests.test_discord_agent_jobs -v`; confirm intended failures, implement the adapter/jobs/schedule and rerun to pass.
-- [ ] Verify settings and async-loop disposal via mocked Celery wrapper tests; commit.
+- [x] Add research/draft separation, multi-segment output, citations, prompt-injection-as-data, empty output and provider error-redaction tests.
+- [x] Add job tests for competing workers, restart with ID, ambiguous submit, cancellation during submit and completion, revocation, transient polling failure and unsupported model. Assert no second submit for existing/ambiguous work.
+- [x] Run `python -m unittest tests.test_discord_agent_openai tests.test_discord_agent_jobs -v`; confirm intended failures, implement the adapter/jobs/schedule and rerun to pass.
+- [x] Verify settings and async-loop disposal via mocked Celery wrapper tests; commit.
 
 ### Task 4: Durable notification handoff
 
@@ -129,9 +129,9 @@
 - `POST /runs/{run_id}/ack` with actor, lease token and message IDs -> `{ok:true}`. ACK must match the current delivery lease; store all IDs and delivery time. If lease expired after a valid send, retry can discover/deduplicate the existing Discord message before ACKing the renewed lease.
 - Deliveries use a 2-minute lease. Stable message nonce derives from run ID and message part. Save no raw results in claim responses; retrieve only after private-channel validation.
 
-- [ ] Write tests for competing claims, stale lease tokens, repeat ACK, task deletion/reassignment and link revocation between claim/read/ACK.
-- [ ] Run `python -m unittest tests.test_discord_agent_api -v`; confirm intended failures, implement delivery operations and rerun to pass.
-- [ ] Verify lost ACK reclaims only undelivered jobs and preserves stable run identity; commit.
+- [x] Write tests for competing claims, stale lease tokens, repeat ACK, task deletion/reassignment and link revocation between claim/read/ACK.
+- [x] Run `python -m unittest tests.test_discord_agent_api -v`; confirm intended failures, implement delivery operations and rerun to pass.
+- [x] Verify lost ACK reclaims only undelivered jobs and preserves stable run identity; commit.
 
 ### Task 5: Discord delegation and result controls
 
@@ -147,11 +147,11 @@
 - Add a 30-second notification loop started in `setup_hook`, waiting for readiness and cancelled in `close`. Each delivery reuses `private_channel`, then reads authorized result, sends stable-nonce parts and ACKs. No event-loop blocking while model runs.
 - Status refresh/listing retrieves persisted runs after restart; newest-first history is paginated, not held solely in memory. Accept-with-strike refreshes the task card with returned detail. Revision creates a new run; cancellation shows actual returned state.
 
-- [ ] Write UI tests for whole task, both fields, duplicate points, pages 0/1/last with 90 points, unique IDs and row/label/custom-ID limits.
-- [ ] Add interaction tests for research/draft creation, revision parent, cancellation, result history and acceptance; assert private-channel validation precedes result reads/sends.
-- [ ] Add delivery tests for expired initial interaction, bot restart, lost ACK, source preservation, Unicode and oversized output; assert regular bot sends and stable run/part nonce.
-- [ ] Run `python -m unittest tests.test_discord_agent_ui -v`; confirm intended failures, implement modules/integration and rerun to pass.
-- [ ] Run `python -m unittest tests.test_discord_bot tests.test_discord_ui tests.test_discord_agent_ui -v`; expect passing tests and commit.
+- [x] Write UI tests for whole task, both fields, duplicate points, pages 0/1/last with 90 points, unique IDs and row/label/custom-ID limits.
+- [x] Add interaction tests for research/draft creation, revision parent, cancellation, result history and acceptance; assert private-channel validation precedes result reads/sends.
+- [x] Add delivery tests for expired initial interaction, bot restart, lost ACK, source preservation, Unicode and oversized output; assert regular bot sends and stable run/part nonce.
+- [x] Run `python -m unittest tests.test_discord_agent_ui -v`; confirm intended failures, implement modules/integration and rerun to pass.
+- [x] Run `python -m unittest tests.test_discord_bot tests.test_discord_ui tests.test_discord_agent_ui -v`; expect passing tests and commit.
 
 ### Task 6: Deploy wiring, documentation and final verification
 
@@ -159,16 +159,16 @@
 
 **Interfaces:** Workflow passes `DISCORD_AGENT_MODEL` to `configure_discord.py`, defaulting to the requested model, and discovers all `test_discord*.py` tests instead of omitting new modules. Existing Celery worker/beat and single Discord worker remain the deployed process topology.
 
-- [ ] Add deploy tests asserting model propagation, 30-second job schedule, required new modules included in test discovery, and no extra worker process.
-- [ ] Run `python -m unittest tests.test_discord_deploy -v`; confirm failures, implement wiring and document commands, permissions, lifecycle, storage, model, no application budget, acceptance and ambiguous-submission recovery.
-- [ ] Install existing pinned requirements in an isolated local environment if needed; do not change the dependency pins just to accommodate a test host. Document any unavailable dependencies.
-- [ ] Run `python -m unittest discover -s tests -p "test_discord*.py" -v` and `python -m unittest tests.test_migration_graph -v` from `backend`; require all relevant tests executed, not skipped for missing Discord dependencies.
-- [ ] With test-only `DATABASE_URL`/`JWT_SECRET`, import the complete ASGI app and run `alembic heads`; require successful import and a single `0149_discord_agent_runs` head. Use a disposable PostgreSQL database for migration round-trip if available; otherwise explicitly report that limitation.
-- [ ] Run `git diff --check`; inspect all mutations, state transitions, acceptance and startup/close hooks against the five Review Focus items and every spec section. Fix issues and rerun only affected checks plus the final Discord suite.
-- [ ] Commit the completed deliverable. Report changed behavior, checks and the remaining live-server migration/OpenAI/Discord smoke test; do not claim deployment or live verification.
+- [x] Add deploy tests asserting model propagation, 30-second job schedule, required new modules included in test discovery, and no extra worker process.
+- [x] Run `python -m unittest tests.test_discord_deploy -v`; confirm failures, implement wiring and document commands, permissions, lifecycle, storage, model, no application budget, acceptance and ambiguous-submission recovery.
+- [x] Install existing pinned requirements in an isolated local environment if needed; do not change the dependency pins just to accommodate a test host. Document any unavailable dependencies.
+- [x] Run `python -m unittest discover -s tests -p "test_discord*.py" -v` and `python -m unittest tests.test_migration_graph -v` from `backend`; require all relevant tests executed, not skipped for missing Discord dependencies.
+- [x] With test-only `DATABASE_URL`/`JWT_SECRET`, import the complete ASGI app and run `alembic heads`; require successful import and a single `0149_discord_agent_runs` head. Use a disposable PostgreSQL database for migration round-trip if available; otherwise explicitly report that limitation.
+- [x] Run `git diff --check`; inspect all mutations, state transitions, acceptance and startup/close hooks against the five Review Focus items and every spec section. Fix issues and rerun only affected checks plus the final Discord suite.
+- [x] Commit the completed deliverable. Report changed behavior, checks and the remaining live-server migration/OpenAI/Discord smoke test; do not claim deployment or live verification.
 
 ## Handoff
 
 Plan self-review: spec requirements map to Tasks 1–6; all five Review Focus cases have explicit tests. No new product dependencies, external messaging, database changes or paid API calls have been executed during planning.
 
-Recommended execution: **Native**, implementing tasks sequentially in this session; shared lifecycle, ownership and delivery contracts benefit from one implementation context. A final independent review can follow if selected/authorized. Product implementation awaits review of this plan and execution-method selection, as required by the planning skill.
+Recommended execution: **Native**, implementing tasks sequentially in this session; shared lifecycle, ownership and delivery contracts benefit from one implementation context. A final independent review can follow if selected/authorized. Native implementation was authorized by the user and is complete. See the validation record for checks, review fixes and live-server limitations.

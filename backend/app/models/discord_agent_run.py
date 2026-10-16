@@ -28,6 +28,7 @@ class DiscordAgentRun(Base):
     context: Mapped[dict] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(24), default="QUEUED", index=True)
     response_id: Mapped[str | None] = mapped_column(String(128))
+    cleanup_response_id: Mapped[str | None] = mapped_column(String(128))
     result_text: Mapped[str | None] = mapped_column(Text)
     sources: Mapped[list | None] = mapped_column(JSONB)
     usage: Mapped[dict | None] = mapped_column(JSONB)

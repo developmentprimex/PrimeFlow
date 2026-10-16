@@ -126,6 +126,14 @@ class AgentApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(self.run.accepted_at)
             if changed: command.assert_not_called()
 
+    async def test_removed_point_is_a_stale_conflict_not_server_error(self):
+        identity, owned = self.setup_actor()
+        with identity, patch.object(bridge, "owned_task", AsyncMock(return_value=TASK | {"description": ""})), patch.object(bridge, "command", AsyncMock()) as command:
+            with self.assertRaises(HTTPException) as error:
+                await service.accept_run(self.db, self.run.id, AgentAccept(**ACTOR, request_id="2000", mark_point_done=True))
+        self.assertEqual(error.exception.status_code, 409)
+        command.assert_not_called()
+
     async def test_pending_acceptance_cannot_start_second_write(self):
         accept = self.function("accept_run")
         identity, owned = self.setup_actor(run_fixture(acceptance_request_id="2000", acceptance_status="APPLYING"))

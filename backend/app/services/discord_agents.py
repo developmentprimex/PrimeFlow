@@ -132,9 +132,14 @@ async def accept_run(db, run_id, payload):
         if not result:
             raise HTTPException(409, "Pranimi është në përpunim ose kërkon kontroll në PrimeFlow; nuk përsëritet.")
     else:
-        current_target = resolve_target(task, run.target["field"], run.target["number"])
-        if tools.fingerprint(task) != run.fingerprint or current_target["key"] != run.target["key"]:
+        if tools.fingerprint(task) != run.fingerprint:
             raise HTTPException(409, "Detyra ose pika ndryshoi. Kontrollo rezultatin dhe pikën aktuale në PrimeFlow.")
+        try:
+            current_target = resolve_target(task, run.target["field"], run.target["number"])
+        except ValueError as exc:
+            raise HTTPException(409, "Pika nuk ekziston më. Kontrollo detyrën aktuale në PrimeFlow.") from exc
+        if current_target["key"] != run.target["key"]:
+            raise HTTPException(409, "Pika ndryshoi. Kontrollo detyrën aktuale në PrimeFlow.")
         run.acceptance_request_id, run.acceptance_status = payload.request_id, "APPLYING"
         await db.commit()
         command = bridge.Command(**payload.model_dump(include={"discord_user_id", "guild_id", "channel_id"}),

@@ -140,4 +140,6 @@ me çelësin e serverit dhe migrimi në databazën reale raportohen veçmas.
 
 ## Statusi
 
-Specifikimi është përgatitur për rishikim. Kodi i produktit nuk është ndryshuar.
+Specifikimi u miratua dhe u implementua në degën `feat/discord-task-agents`.
+Verifikimi lokal dhe kufizimet e provës reale dokumentohen te
+`docs/superpowers/plans/2026-10-16-discord-task-agents-validation.md`.

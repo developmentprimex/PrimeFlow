@@ -25,6 +25,7 @@ def upgrade():
         sa.Column("context", pg.JSONB(), nullable=False),
         sa.Column("status", sa.String(24), nullable=False),
         sa.Column("response_id", sa.String(128)),
+        sa.Column("cleanup_response_id", sa.String(128)),
         sa.Column("result_text", sa.Text()),
         sa.Column("sources", pg.JSONB()),
         sa.Column("usage", pg.JSONB()),

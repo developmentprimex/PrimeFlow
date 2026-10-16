@@ -3,8 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
+import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 from fastapi import HTTPException
@@ -19,10 +24,99 @@ from app.services.discord_agent_openai import build_request, extract_result
 from app.services.discord_agents import TERMINAL
 
 log = logging.getLogger(__name__)
+RECOVERY_DIR = Path(__file__).resolve().parents[2] / ".discord-agent-recovery"
+
+
+class MissingRun(LookupError):
+    pass
+
+
+def spool_response(work, response_id):
+    """Keep only recovery IDs on disk before touching the database again."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", response_id):
+        raise ValueError("OpenAI ktheu ID të pavlefshme për punën.")
+    RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
+    path = RECOVERY_DIR / f"{work.id}.{response_id}.json"
+    temporary = RECOVERY_DIR / f"{uuid.uuid4()}.tmp"
+    with temporary.open("w", encoding="utf-8") as stream:
+        json.dump({"run_id": str(work.id), "response_id": response_id,
+            "lease_token": str(work.lease_token) if work.lease_token else None}, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(path)
+    return path
+
+
+async def remember_response(work, response_id):
+    """Persist remote identity even if the original processing lease is gone."""
+    async with SessionLocal() as db:
+        current = await db.get(DiscordAgentRun, work.id, with_for_update=True, populate_existing=True)
+        if not current:
+            raise MissingRun(str(work.id))
+        known = current.response_id == response_id
+        owned = current.lease_token == work.lease_token and current.status not in TERMINAL
+        if not current.response_id:
+            current.response_id = response_id
+        if not owned and not (known and current.status in {"RUNNING", "CANCEL_REQUESTED", "READY"}):
+            current.cleanup_response_id = response_id
+        elif owned and current.status == "SUBMITTING":
+            current.status = "RUNNING"
+        await db.commit()
+        return owned
+
+
+async def cancel_response(response_id):
+    try:
+        return await provider.cancel(response_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 400:
+            raise
+        return await provider.retrieve(response_id)
+
+
+async def recover_responses():
+    if not RECOVERY_DIR.exists():
+        return
+    for path in RECOVERY_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            response_id = data["response_id"]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", response_id):
+                raise ValueError("Invalid recovery ID")
+            work = SimpleNamespace(id=uuid.UUID(data["run_id"]),
+                lease_token=uuid.UUID(data["lease_token"]) if data.get("lease_token") else None)
+            try:
+                await remember_response(work, response_id)
+            except MissingRun:
+                # Deleting a linked account must not orphan its provider work.
+                response = await cancel_response(response_id)
+                if response.get("status") not in {"completed", "cancelled", "failed", "incomplete"}:
+                    continue
+            path.unlink(missing_ok=True)
+        except Exception as exc:
+            log.warning("Agent response recovery pending: %s", type(exc).__name__)
+
+
+async def finish_cleanup(work):
+    async with SessionLocal() as db:
+        current = await db.get(DiscordAgentRun, work.id, with_for_update=True)
+        if current and current.lease_token == work.lease_token and current.cleanup_response_id == work.cleanup_response_id:
+            current.cleanup_response_id = None
+            await db.commit()
+
+
+async def process_cleanup(work):
+    try:
+        response = await cancel_response(work.cleanup_response_id)
+        if response.get("status") in {"completed", "cancelled", "failed", "incomplete"}:
+            await finish_cleanup(work)
+    except (httpx.HTTPError, ValueError):
+        # The ID stays durable and claimable even when the public run is FAILED.
+        log.warning("Agent response cleanup will retry for run %s", work.id)
 
 
 def claim_query(now):
-    return select(DiscordAgentRun).where(DiscordAgentRun.status.not_in(TERMINAL),
+    return select(DiscordAgentRun).where(or_(DiscordAgentRun.status.not_in(TERMINAL), DiscordAgentRun.cleanup_response_id.is_not(None)),
         or_(DiscordAgentRun.lease_until.is_(None), DiscordAgentRun.lease_until < now))\
         .order_by(DiscordAgentRun.created_at).limit(10).with_for_update(skip_locked=True)
 
@@ -87,6 +181,9 @@ async def _apply_response(work, response):
 
 
 async def process_claim(work):
+    if work.cleanup_response_id:
+        await process_cleanup(work)
+        return
     submitting = False
     try:
         allowed = await is_authorized(work)
@@ -95,12 +192,7 @@ async def process_claim(work):
             if work.response_id:
                 work.status = "CANCEL_REQUESTED"
                 await save_claim(work, {"status": "CANCEL_REQUESTED"})
-                try:
-                    response = await provider.cancel(work.response_id)
-                except httpx.HTTPStatusError as exc:
-                    if exc.response.status_code != 400:
-                        raise
-                    response = await provider.retrieve(work.response_id)
+                response = await cancel_response(work.response_id)
                 await _apply_response(work, response)
             elif work.status == "SUBMITTING" or work.started_at:
                 await save_claim(work, {"status": "FAILED", "error": "Nisja është e paqartë; kontrollo OpenAI para se të nisësh punë të re.", "finished_at": datetime.now(timezone.utc)})
@@ -120,11 +212,16 @@ async def process_claim(work):
         response_id = response.get("id")
         if not response_id:
             raise ValueError("OpenAI nuk ktheu ID për punën; nisja është e paqartë.")
-        if not await save_claim(work, {"response_id": response_id, "status": "RUNNING"}):
-            # A late response must not become an orphan generating silently.
-            await provider.cancel(response_id)
-            return
         work.response_id = response_id
+        path = spool_response(work, response_id)
+        owned = await remember_response(work, response_id)
+        path.unlink(missing_ok=True)
+        if not owned:
+            return
+        if not await save_claim(work, {"status": "RUNNING"}):
+            # A terminal transition after remembering the ID still needs cleanup.
+            await remember_response(work, response_id)
+            return
         await _apply_response(work, response)
     except (httpx.HTTPError, ValueError) as exc:
         transient = isinstance(exc, (httpx.TimeoutException, httpx.TransportError)) or (
@@ -149,6 +246,7 @@ async def _release(work):
 
 
 async def process_agent_runs():
+    await recover_responses()
     rows = await claim_runs()
     async def process(row):
         try:

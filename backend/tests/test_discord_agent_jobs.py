@@ -24,7 +24,9 @@ class AgentJobTests(unittest.IsolatedAsyncioTestCase):
             self.saves.append(dict(values))
             for k, v in values.items(): setattr(run, k, v)
             return True
-        with patch.object(job, "save_claim", side_effect=save), patch.object(job, "is_authorized", AsyncMock(return_value=not revoked)), patch.object(job, "provider", self.remote):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder, patch.object(job, "RECOVERY_DIR", Path(folder)), patch.object(job, "remember_response", AsyncMock(return_value=True)), patch.object(job, "save_claim", side_effect=save), patch.object(job, "is_authorized", AsyncMock(return_value=not revoked)), patch.object(job, "provider", self.remote):
             await job.process_claim(run)
         return run
 
@@ -99,3 +101,61 @@ class AgentJobTests(unittest.IsolatedAsyncioTestCase):
             result = celery_tasks.process_discord_agent_runs()
             wrapper.call_args.args[0].close()
         self.assertEqual(result, {"processed": 1})
+
+    async def test_late_response_id_is_durable_even_after_lease_reclaimed(self):
+        job = self.job()
+        self.assertTrue(callable(getattr(job, "remember_response", None)), "Missing lease-independent response persistence")
+        run = run_fixture(status="FAILED", response_id=None, lease_token=__import__("uuid").uuid4())
+        original = SimpleNamespace(id=run.id, lease_token=__import__("uuid").uuid4())
+        db = SimpleNamespace(get=AsyncMock(return_value=run), commit=AsyncMock())
+        context = AsyncMock()
+        context.__aenter__.return_value = db
+        with patch.object(job, "SessionLocal", return_value=context):
+            owned = await job.remember_response(original, "resp_late")
+        self.assertFalse(owned)
+        self.assertEqual(run.response_id, "resp_late")
+        self.assertEqual(run.cleanup_response_id, "resp_late")
+        self.assertEqual(run.status, "FAILED")
+        db.commit.assert_awaited_once()
+
+    async def test_cleanup_timeout_remains_retryable_on_terminal_run(self):
+        job = self.job()
+        self.assertTrue(callable(getattr(job, "process_cleanup", None)), "Missing durable cleanup")
+        import httpx
+        run = run_fixture(status="FAILED", response_id="resp_late")
+        run.cleanup_response_id = "resp_late"
+        with patch.object(job.provider, "cancel", AsyncMock(side_effect=httpx.ReadTimeout("timeout"))), patch.object(job, "finish_cleanup", AsyncMock()) as finished:
+            await job.process_cleanup(run)
+        finished.assert_not_called()
+        self.assertEqual(run.cleanup_response_id, "resp_late")
+        from sqlalchemy.dialects import postgresql
+        sql = str(job.claim_query(datetime.now(timezone.utc)).compile(dialect=postgresql.dialect()))
+        self.assertIn("cleanup_response_id IS NOT NULL", sql)
+
+    async def test_provider_id_is_spooled_before_database_failure_and_recovered(self):
+        job = self.job()
+        self.assertTrue(callable(getattr(job, "recover_responses", None)), "Missing response recovery")
+        import tempfile
+        from pathlib import Path
+        run = run_fixture(status="QUEUED", response_id=None)
+        with tempfile.TemporaryDirectory() as folder, patch.object(job, "RECOVERY_DIR", Path(folder)), patch.object(job, "save_claim", AsyncMock(return_value=True)), patch.object(job, "is_authorized", AsyncMock(return_value=True)), patch.object(job.provider, "submit", AsyncMock(return_value={"id": "resp_late", "status": "queued"})), patch.object(job, "remember_response", AsyncMock(side_effect=RuntimeError("database offline"))):
+            await job.process_claim(run)
+            self.assertEqual(len(list(Path(folder).glob("*.json"))), 1)
+            with patch.object(job, "remember_response", AsyncMock(return_value=False)) as remember:
+                await job.recover_responses()
+            self.assertEqual(remember.call_args.args[1], "resp_late")
+            self.assertEqual(list(Path(folder).glob("*.json")), [])
+
+    async def test_late_response_never_overwrites_completed_result(self):
+        job = self.job()
+        self.assertTrue(callable(getattr(job, "remember_response", None)), "Missing lease-independent response persistence")
+        run = run_fixture(status="READY", response_id="resp_original", result_text="Keep result")
+        db = SimpleNamespace(get=AsyncMock(return_value=run), commit=AsyncMock())
+        context = AsyncMock()
+        context.__aenter__.return_value = db
+        with patch.object(job, "SessionLocal", return_value=context):
+            await job.remember_response(SimpleNamespace(id=run.id, lease_token=__import__("uuid").uuid4()), "resp_late")
+        self.assertEqual(run.status, "READY")
+        self.assertEqual(run.response_id, "resp_original")
+        self.assertEqual(run.result_text, "Keep result")
+        self.assertEqual(run.cleanup_response_id, "resp_late")

@@ -152,7 +152,11 @@ Revokimi i lidhjes ose heqja e caktimit ndalon aksesin/dorëzimin dhe kërkon
 anulimin e punëve aktive. Rinisja vazhdon leximin e OpenAI response ID ekzistues.
 Nëse nisja mbetet e paqartë pas timeout-it pa response ID të ruajtur, puna nuk
 përsëritet automatikisht: kontrollo aktivitetin e projektit OpenAI para se të
-nisësh një punë të re. Kjo shmang kërkesa të dyfishta me pagesë. Dorëzimi përdor
+nisësh një punë të re. Kjo shmang kërkesa të dyfishta me pagesë. ID-të që mbërrijnë
+vonë ruhen për anulim të riprovueshëm. Celery duhet të ketë akses shkrimi në
+`backend/.discord-agent-recovery/`; kjo dosje ruan vetëm ID rikuperimi dhe duhet
+të ruhet gjatë rinisjeve/deploy-it, që ndërprerjet e databazës të mos humbin ID-të.
+Dorëzimi përdor
 nonce dhe marker të qëndrueshëm në mesazhet e botit për rikuperimin pas ACK të
 humbur; nuk premtohet exactly-once në çdo gabim platforme.
 
