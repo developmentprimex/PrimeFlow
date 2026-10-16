@@ -46,6 +46,19 @@ def event(item, field="due_date", before="2026-10-05", after="2026-10-06", **cha
 
 
 class SelectionTests(unittest.TestCase):
+    def test_am_and_pm_daily_tables_exclude_tasks_originally_planned_for_another_day(self):
+        for hour, period in ((8, "AM"), (14, "PM")):
+            with self.subTest(period=period):
+                current = task(start_date=date(2026, 10, 8), due_date=date(2026, 10, 8))
+                tomorrow = task(start_date=date(2026, 10, 8), due_date=date(2026, 10, 8))
+                changes = [event(item, field, before=before, after="2026-10-08",
+                                 created_at=datetime(2026, 10, 5, hour, tzinfo=timezone.utc))
+                           for item, before in ((current, "2026-10-05"), (tomorrow, "2026-10-06"))
+                           for field in ("start_date", "due_date")]
+                rows = service.select_task_sections([current, tomorrow], changes, DAY)["postponed_today"]
+                self.assertEqual([(row["task_id"], row["postponement_period"]) for row in rows],
+                                 [(str(current.id), period)])
+
     def test_postponements_are_split_by_local_change_time_not_task_period(self):
         morning = task(finish_period="PM", due_date=date(2026, 10, 6))
         afternoon = task(finish_period="AM", due_date=date(2026, 10, 6))
@@ -90,7 +103,7 @@ class SelectionTests(unittest.TestCase):
                   event(rows[3], before="2026-09-25", after="2026-10-07")]
         sections = service.select_task_sections(rows, events, DAY)
         self.assertEqual([row["title"] for row in sections["postponed"]], ["Kjo jave", "Mbulon javen"])
-        self.assertEqual([row["title"] for row in sections["postponed_today"]], ["Kjo jave", "Mbulon javen", "Future", "E kaluar"])
+        self.assertEqual([row["title"] for row in sections["postponed_today"]], ["Kjo jave", "Mbulon javen"])
 
     def test_task_title_uses_existing_report_cleanup_without_description(self):
         row = task(title="[[added]]DT: Titulli i detyres due 16:00[[/added]]\n1. Pershkrimi i plote\n2. Hapi tjeter")

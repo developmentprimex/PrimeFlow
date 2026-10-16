@@ -14,6 +14,7 @@ from app.models.m2_reporting_points import M2ReportingPointsReport
 from app.services.after_break_report import UNFINISHED_PRIORITY_TABLE_LABEL, build_unfinished_priority_task_rows
 from app.services.daily_realization_events import semantic_local_day
 from app.services import m3_reporting_points as m3
+from app.services.m3_reporting_points import planned_for_report_day
 from app.services.meetings_report import _clean_task_title, _m3_am_pm_label, _m3_task_type_label
 from app.services.note_markup import parse_marked_note_content
 from app.services.personal_task_owner import personal_task_owner
@@ -44,7 +45,7 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
     sections = {"postponed": [row for row in m3.select_task_sections(tasks, events, day)["ga_postponed"]
                               if row["status"] != "DONE"],
                 "postponed_am": [row for row in m3.select_task_sections(tasks, events, day, postponement_period="AM")["postponed"]
-                                 if row["status"] != "DONE" and m3.planned_for_report_week(row, day)],
+                                 if row["status"] != "DONE" and planned_for_report_day(row, day)],
                 "ga_progress": [], "delivery": []}
     for task in tasks:
         marker = active_one_h_marker(task, day)
@@ -133,7 +134,7 @@ def report_payload(row: M2ReportingPointsReport) -> dict:
     data = dict(row.data or {})
     if "postponed_am" in data:
         data["postponed_am"] = [item for item in data["postponed_am"]
-                                if m3.planned_for_report_week(item, row.report_date)]
+                                if planned_for_report_day(item, row.report_date)]
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
             "manual_answers": {key: value for key, value in (row.manual_answers or {}).items() if key != "ga_reply"},
             "data": data, "status": row.status,

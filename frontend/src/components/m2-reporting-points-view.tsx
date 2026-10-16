@@ -104,7 +104,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
       ["postponed", "3. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?"],
       ["postponed_am", "DET QË JANË SHTYER SOT AM — PARA PAUZËS"],
     ] as const).map(([section, title]) => <section key={section} className="space-y-3" aria-labelledby={`m2-${section}`}><h2 id={`m2-${section}`} className="text-lg font-bold">{title}</h2>
-      <p className="text-sm text-muted-foreground">{section === "postponed" ? "Shtyrjet e bëra sot për detyrat Deadline Important ose të krijuara, filluara dhe planifikuara për sot." : "Shtyrjet e bëra sot para orës 12:00 për detyrat që, para shtyrjes, ishin të planifikuara për javën e raportit."}</p>
+      <p className="text-sm text-muted-foreground">{section === "postponed" ? "Shtyrjet e bëra sot për detyrat Deadline Important ose të krijuara, filluara dhe planifikuara për sot." : "Shtyrjet e bëra sot para orës 12:00 për detyrat që, para shtyrjes, ishin të planifikuara për ditën e raportit (brenda intervalit Start–Due)."}</p>
       <p className="text-sm font-bold">Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></p>
       {[["start_due", "SHTYRË START DHE DUE DATE"], ["due", "SHTYRË DUE DATE"], ["start", "SHTYRË START DATE"]].map(([kind, title]) => <div key={kind} className="space-y-2"><h3 className="text-sm font-semibold">{title}</h3>{renderTable((report.data[section] || []).filter((row) => row.postponement_kind === kind), false)}</div>)}
     </section>)}

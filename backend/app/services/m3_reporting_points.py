@@ -72,6 +72,14 @@ def postponement_risk(original: date, moved_to: date) -> tuple[str, str]:
     return "OK", "#dcfce7"
 
 
+def planned_for_report_day(row: dict, day: date) -> bool:
+    start = semantic_local_day(row.get("original_day_start_date", row.get("old_start_date")))
+    due = semantic_local_day(row.get("original_day_due_date", row.get("old_due_date")))
+    if start and due and start <= due:
+        return start <= day <= due
+    return start == day or due == day
+
+
 def planned_for_report_week(row: dict, day: date) -> bool:
     week_start = day - timedelta(days=day.weekday())
     week_end = week_start + timedelta(days=6)
@@ -180,8 +188,16 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, post
             ) if flag)
             sections["ga_postponed"].append(row)
     if postponement_period is None:
-        sections["postponed_today"] = [row for period in ("AM", "PM")
-                                 for row in select_task_sections(tasks, events, day, postponement_period=period)["postponed"]]
+        original_plans = {row["task_id"]: row for row in sections["postponed"]}
+        daily_rows = []
+        for period in ("AM", "PM"):
+            for row in select_task_sections(tasks, events, day, postponement_period=period)["postponed"]:
+                original = original_plans.get(row["task_id"], row)
+                row = {**row, "original_day_start_date": original.get("old_start_date"),
+                       "original_day_due_date": original.get("old_due_date")}
+                if planned_for_report_day(row, day):
+                    daily_rows.append(row)
+        sections["postponed_today"] = daily_rows
         sections["postponed"] = [row for row in sections["postponed"] if planned_for_report_week(row, day)]
     return sections
 
@@ -352,7 +368,8 @@ def report_payload(row: M3ReportingPointsReport) -> dict:
         realization = {**realization, "departments": realization_department_rows(realization)}
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
             "manual_answers": row.manual_answers or {},
-            "data": {key: [item for item in rows if item.get("status") != "DONE"] if key == "same_day" else rows
+            "data": {key: [item for item in rows if item.get("status") != "DONE"] if key == "same_day" else
+                     [item for item in rows if planned_for_report_day(item, row.report_date)] if key == "postponed_today" else rows
                      for key, rows in (row.data or {}).items()}, "realization": realization,
             "realization_captured_at": row.realization_captured_at.isoformat() if row.realization_captured_at else None,
             "generated_at": row.generated_at.isoformat() if row.generated_at else None, "status": row.status,

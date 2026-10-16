@@ -250,7 +250,7 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
         {manual("underload")}{manual("overload")}{manual("reorganization")}
       </div>
       <Point title="1. DET QË JANË SHTY NGA KJO JAVË NË JAVËN TJETËR / BRENDA JAVËS" note={<>Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></>} rows={data.postponed || []} kind="postponed" />
-      <Point title="DET QË JANË SHTYER SOT AM DHE PM" note="Të gjitha shtyrjet e bëra sot, të ndara sipas orës së ndryshimit: para 12:00 dhe nga 12:00." rows={data.postponed_today || []} kind="postponed" splitPeriods />
+      <Point title="DET QË JANË SHTYER SOT AM DHE PM" note="Detyrat që para shtyrjes ishin të planifikuara për ditën e raportit (brenda intervalit Start–Due). Shtyrjet ndahen sipas orës së ndryshimit: para 12:00 dhe nga 12:00." rows={data.postponed_today || []} kind="postponed" splitPeriods />
       <Point title="2. PSE PA PREK TËRË DITËN?" note="Detyrat TODO ku data e raportit është brenda intervalit Start–Due, pavarësisht progresit të mëparshëm." rows={data.untouched || []} kind="untouched" />
       <Point title="3. SOT PËR SOT/DEADLINE - PROGRESI?" note="Vetëm detyrat që nuk janë DONE dhe kanë Creation Date, Start Date dhe Due Date në datën e këtij raporti." rows={(data.same_day || []).filter((row) => row.status !== "DONE")} kind="same_day" />
       <UnheldMeetings rows={data.unheld_meetings || []} reportDay={report.report_date} answers={answers} disabled={meetingCommentsDisabled} onAnswerChange={onAnswerChange} />

@@ -87,11 +87,13 @@ def test_postponements_only_include_outstanding_tasks(status):
 @pytest.mark.parametrize("created", [DAY, date(2026, 9, 1)])
 @pytest.mark.parametrize("start,due,included", [
     (date(2026, 10, 5), date(2026, 10, 9), True),
-    (date(2026, 9, 28), date(2026, 10, 5), True),
+    (date(2026, 10, 6), date(2026, 10, 6), True),
+    (date(2026, 9, 28), date(2026, 10, 5), False),
+    (date(2026, 10, 7), date(2026, 10, 9), False),
     (date(2026, 10, 12), date(2026, 10, 16), False),
     (date(2026, 9, 28), date(2026, 10, 2), False),
 ])
-def test_morning_postponements_require_original_plan_in_report_week(created, start, due, included):
+def test_morning_postponements_require_original_plan_for_report_day(created, start, due, included):
     moved = date(2026, 10, 23)
     item = task(created_at=created, start_date=moved, due_date=moved)
     changes = [event(item, "start_date", before=start, after=moved),
@@ -100,9 +102,9 @@ def test_morning_postponements_require_original_plan_in_report_week(created, sta
     assert [row["task_id"] for row in rows] == ([str(item.id)] if included else [])
 
 
-def test_saved_report_excludes_future_week_postponements_without_changing_other_sections():
+def test_saved_report_excludes_other_days_without_changing_other_sections():
     current = {"task_id": "current", "old_start_date": "2026-10-05", "old_due_date": "2026-10-09"}
-    future = {"task_id": "future", "old_start_date": "2026-10-12", "old_due_date": "2026-10-16"}
+    future = {"task_id": "future", "old_start_date": "2026-10-07", "old_due_date": "2026-10-09"}
     data = {"postponed_am": [current, future], "postponed": [future], "delivery": [future]}
     row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data=data, status="DRAFT")
     result = service.report_payload(row)
