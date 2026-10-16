@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+import json
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -136,7 +137,7 @@ async def accept_run(db, run_id, payload):
         command = bridge.Command(**payload.model_dump(include={"discord_user_id", "guild_id", "channel_id"}),
             request_id=run.acceptance_request_id, task_id=run.task_id,
             expected_fingerprint=run.fingerprint[:16], instruction="Prano rezultatin e agjentit dhe shëno pikën të kryer.",
-            direct_actions=[tools.ToolAction(tool="set_points", arguments_json=__import__("json").dumps({
+            direct_actions=[tools.ToolAction(tool="set_points", arguments_json=json.dumps({
                 "field": run.target["field"], "numbers": [run.target["number"]], "done": True}))])
         result = await bridge.command(command, db)
     if result.get("status") != "DONE":

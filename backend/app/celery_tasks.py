@@ -54,6 +54,12 @@ def _run_async(awaitable: Awaitable[T]) -> T:
     return asyncio.run(_run_with_fresh_pool())
 
 
+@celery_app.task(name="app.celery_tasks.process_discord_agent_runs")
+def process_discord_agent_runs() -> dict[str, int]:
+    from app.jobs.discord_agents import process_agent_runs
+    return _run_async(process_agent_runs())
+
+
 @celery_app.task(name="app.celery_tasks.generate_system_tasks")
 def generate_system_tasks() -> int:
     return _run_async(_generate_system_tasks())
