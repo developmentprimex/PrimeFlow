@@ -72,6 +72,16 @@ def postponement_risk(original: date, moved_to: date) -> tuple[str, str]:
     return "OK", "#dcfce7"
 
 
+def planned_for_report_week(row: dict, day: date) -> bool:
+    week_start = day - timedelta(days=day.weekday())
+    week_end = week_start + timedelta(days=6)
+    start = semantic_local_day(row.get("old_start_date"))
+    due = semantic_local_day(row.get("old_due_date"))
+    if start and due and start <= due:
+        return start <= week_end and due >= week_start
+    return any(value is not None and week_start <= value <= week_end for value in (start, due))
+
+
 def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, postponement_period: str | None = None) -> dict[str, list[dict]]:
     """Classify today's tasks using current status and pre-change planning dates."""
     events_by_task: dict[Any, list[Any]] = defaultdict(list)
@@ -172,15 +182,7 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, post
     if postponement_period is None:
         sections["postponed_today"] = [row for period in ("AM", "PM")
                                  for row in select_task_sections(tasks, events, day, postponement_period=period)["postponed"]]
-        week_start = day - timedelta(days=day.weekday())
-        week_end = week_start + timedelta(days=6)
-        def planned_this_week(row):
-            start = semantic_local_day(row.get("old_start_date"))
-            due = semantic_local_day(row.get("old_due_date"))
-            if start and due and start <= due:
-                return start <= week_end and due >= week_start
-            return any(value and week_start <= value <= week_end for value in (start, due))
-        sections["postponed"] = [row for row in sections["postponed"] if planned_this_week(row)]
+        sections["postponed"] = [row for row in sections["postponed"] if planned_for_report_week(row, day)]
     return sections
 
 

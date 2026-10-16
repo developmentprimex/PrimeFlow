@@ -44,7 +44,7 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
     sections = {"postponed": [row for row in m3.select_task_sections(tasks, events, day)["ga_postponed"]
                               if row["status"] != "DONE"],
                 "postponed_am": [row for row in m3.select_task_sections(tasks, events, day, postponement_period="AM")["postponed"]
-                                 if row["status"] != "DONE"],
+                                 if row["status"] != "DONE" and m3.planned_for_report_week(row, day)],
                 "ga_progress": [], "delivery": []}
     for task in tasks:
         marker = active_one_h_marker(task, day)
@@ -130,9 +130,13 @@ async def refresh_report(db: AsyncSession, row: M2ReportingPointsReport, now: da
 
 
 def report_payload(row: M2ReportingPointsReport) -> dict:
+    data = dict(row.data or {})
+    if "postponed_am" in data:
+        data["postponed_am"] = [item for item in data["postponed_am"]
+                                if m3.planned_for_report_week(item, row.report_date)]
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
             "manual_answers": {key: value for key, value in (row.manual_answers or {}).items() if key != "ga_reply"},
-            "data": row.data or {}, "status": row.status,
+            "data": data, "status": row.status,
             "generated_at": row.generated_at.isoformat() if row.generated_at else None,
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
 
