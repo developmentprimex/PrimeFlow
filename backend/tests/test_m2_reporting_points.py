@@ -64,6 +64,32 @@ def test_regular_old_tasks_and_completion_date_normalization_are_not_postponemen
     assert rows["postponed"] == []
 
 
+@pytest.mark.parametrize("status", ["TODO", "IN_PROGRESS", "DONE"])
+def test_postponements_only_include_outstanding_tasks(status):
+    moved = date(2026, 10, 7)
+    item = task(status=status, start_date=moved, due_date=moved,
+                completed_at=DAY if status == "DONE" else None, one_h_marker="M2")
+    events = [event(item, field) for field in ("start_date", "due_date")]
+    sections = service.select_task_sections([item], events, DAY)
+    assert len(sections["postponed"]) == (0 if status == "DONE" else 1)
+
+
+@pytest.mark.parametrize("status", ["TODO", "DONE"])
+def test_reverted_postponement_is_excluded_even_after_completion(status):
+    moved = date(2026, 10, 7)
+    item = task(status=status, completed_at=DAY if status == "DONE" else None,
+                one_h_marker="M2", is_deadline_important=True)
+    events = []
+    for field in ("start_date", "due_date"):
+        events.append(event(item, field, after=moved))
+        reverted = event(item, field, before=moved, after=DAY)
+        reverted.created_at = datetime(2026, 10, 6, 9, tzinfo=timezone.utc)
+        events.append(reverted)
+    sections = service.select_task_sections([item], events, DAY)
+    assert sections["postponed"] == []
+    assert [row["task_id"] for row in sections["delivery"]] == [str(item.id)]
+
+
 @pytest.mark.parametrize("marker", ["M2", "M2_M3"])
 def test_all_requested_markers_include_tasks_inside_the_planning_interval(marker):
     rows = [task(one_h_marker=marker), task(one_h_marker=marker, created_at=date(2026, 10, 1),

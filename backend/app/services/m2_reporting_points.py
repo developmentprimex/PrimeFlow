@@ -39,7 +39,9 @@ def subject_for(day: date) -> str:
 
 
 def select_task_sections(tasks, events, day: date, *, personal_titles: dict | None = None) -> dict:
-    sections = {"postponed": m3.select_task_sections(tasks, events, day)["ga_postponed"],
+    # M2 reports outstanding postponements; completed tasks no longer need follow-up.
+    sections = {"postponed": [row for row in m3.select_task_sections(tasks, events, day)["ga_postponed"]
+                              if row["status"] != "DONE"],
                 "ga_progress": [], "delivery": []}
     for task in tasks:
         marker = active_one_h_marker(task, day)
