@@ -23,10 +23,11 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
     async def test_dropdown_pages_are_valid_and_keep_every_task(self):
         tasks = [{"id": str(uuid.uuid4()), "title": "x" * 500, "status": "IN_PROGRESS"} for _ in range(63)]
         pages = bot.task_pages(tasks, "Raportimi")
-        self.assertEqual(len(pages), 3)
+        self.assertEqual(len(pages), 13)
         ids = []
         for text, view in pages:
             self.assertLessEqual(len(text), 2000)
+            self.assertNotIn("IN_PROGRESS", text)
             select = view.children[0]
             self.assertLessEqual(len(select.options), 25)
             self.assertTrue(all(len(option.label) <= 100 for option in select.options))
@@ -36,7 +37,8 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
     async def test_action_menu_persistent_and_modal_defaults(self):
         view = bot.task_view(str(uuid.uuid4()))
         self.assertTrue(view.is_persistent())
-        self.assertLessEqual(len(view.children[0].options), 25)
+        menu = next(item for item in view.children if isinstance(item, discord.ui.Select))
+        self.assertLessEqual(len(menu.options), 25)
         modal = bot.InstructionModal(Mock(), str(uuid.uuid4()), 5)
         self.assertEqual(modal.instruction.default, "Bëje WFE.")
 
@@ -156,7 +158,7 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
     async def test_multiline_task_labels_are_single_line_and_keep_task_ids(self):
         tasks = [{"id": str(uuid.uuid4()), "title": "Heading\n1. [[done]]Point A[[/done]]\n2. Point B", "status": "TODO"}]
         option = bot.task_pages(tasks, "Today")[0][1].children[0].options[0]
-        self.assertEqual(option.label, "Heading 1. Point A 2. Point B")
+        self.assertEqual(option.label, "1. Heading")
         self.assertEqual(option.value, tasks[0]["id"])
 
     async def test_read_timeout_message_does_not_imply_a_task_was_modified(self):

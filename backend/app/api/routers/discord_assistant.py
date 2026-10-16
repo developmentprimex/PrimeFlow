@@ -60,6 +60,7 @@ class Command(Actor):
     task_id: uuid.UUID | None = None
     instruction: str = Field(min_length=1, max_length=4000)
     expected_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
+    direct_actions: list[tools.ToolAction] | None = Field(default=None, min_length=1, max_length=20)
 
 
 async def identity(db: AsyncSession, actor: Actor, *, lock: bool = False):
@@ -209,8 +210,19 @@ async def select_task(payload: Selection, db: AsyncSession = Depends(get_db)):
         "url": f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{payload.task_id}"}
 
 
+@router.post("/bot/people", dependencies=[Depends(require_bot)])
+async def people_for_actor(payload: Selection, db: AsyncSession = Depends(get_db)):
+    _, user = await identity(db, payload)
+    await owned_task(db, user, payload.task_id)
+    people = await tools.user_api(user, "GET", "/api/users")
+    return {"people": [{"id": person["id"], "full_name": person["full_name"]}
+                       for person in people if person.get("is_active", True)]}
+
+
 @router.post("/bot/command", dependencies=[Depends(require_bot)])
 async def command(payload: Command, db: AsyncSession = Depends(get_db)):
+    if payload.direct_actions is not None and (not payload.task_id or not payload.expected_fingerprint):
+        raise HTTPException(422, "Veprimi direkt kërkon detyrën dhe versionin e shfaqur.")
     link, user = await identity(db, payload, lock=True)
     old = await db.get(DiscordAction, payload.request_id)
     if old:
@@ -245,7 +257,10 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             checklists = []  # Task text points remain editable for staff.
         users = await tools.user_api(user, "GET", "/api/users")
         users = [{k: u.get(k) for k in ("id", "full_name", "username", "email")} for u in users if u.get("is_active", True)]
-        plan = await tools.interpret(payload.instruction, before, checklists, users, history)
+        # Buttons and forms already specify the exact change. They use the same
+        # validation/audit/idempotency path, without asking AI to reinterpret it.
+        plan = (tools.TaskPlan(question=None, actions=payload.direct_actions) if payload.direct_actions is not None
+                else await tools.interpret(payload.instruction, before, checklists, users, history))
         if plan.question:
             link.selected_task_id, link.selected_at = task_id, datetime.now(timezone.utc)
             link.pending_instruction = ((history + "\n") if history else "") + payload.instruction + "\nPyetja: " + plan.question
@@ -272,6 +287,8 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
                 link.selected_task_id, link.selected_fingerprint = None, None
             result = {"status": "DONE", "message": "; ".join(op["label"] for op in applied) or "Nuk u kërkua ndryshim.",
                 "task": after, "fingerprint": tools.fingerprint(after)[:16] if after else None,
+                "title_points": tools.text_points(after.get("title"), "title") if after else [],
+                "description_points": tools.text_points(after.get("description"), "description") if after else [],
                 "url": f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{task_id}"}
         action.result, action.status = {"reply": result, "before": before, "operations": applied}, result["status"]
         await db.commit()

@@ -183,7 +183,14 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
-    async def run_command(self, parsed_plan, *, fail_comment=False, changed=False, displayed_changed=False, require_comment=False):
+    async def test_direct_action_without_displayed_version_is_rejected(self):
+        payload = api.Command(discord_user_id="12", guild_id="123", channel_id="44", request_id="999", instruction="WFE",
+            task_id=uuid.UUID(TASK_ID), direct_actions=plan(("update_task", {"status": "WAITING_CLIENT"})).actions)
+        with self.assertRaises(HTTPException) as error:
+            await api.command(payload, None)
+        self.assertEqual(error.exception.status_code, 422)
+
+    async def run_command(self, parsed_plan, *, fail_comment=False, changed=False, displayed_changed=False, require_comment=False, direct=False):
         self.link = SimpleNamespace(id=uuid.uuid4(), selected_task_id=uuid.UUID(TASK_ID), pending_instruction=None, selected_at=None, selected_fingerprint=None)
         user = SimpleNamespace(id=uuid.UUID(USER_ID))
         self.action = None
@@ -208,12 +215,29 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
                 raise HTTPException(409, {"code": "RLZ_TASK_COMMENT_REQUIRED", "message": "Shto komentin e rezultatit."})
             return task
         payload = api.Command(discord_user_id="12", guild_id="123", channel_id="44", request_id="999", instruction="Lëre në progres dhe shto koment")
+        if direct:
+            payload.task_id = uuid.UUID(TASK_ID)
+            payload.expected_fingerprint = tools.fingerprint(task)[:16]
+            payload.direct_actions = parsed_plan.actions
         owned = [task, {**task, "title": "Changed elsewhere"} if changed else task] + [task] * 20
         with patch.object(api, "identity", new_callable=AsyncMock, return_value=(self.link, user)), \
              patch.object(api, "owned_task", new_callable=AsyncMock, side_effect=owned), \
              patch.object(tools, "user_api", side_effect=request), \
-             patch.object(tools, "interpret", new_callable=AsyncMock, return_value=parsed_plan):
-            return await api.command(payload, db)
+             patch.object(tools, "interpret", new_callable=AsyncMock, return_value=parsed_plan) as interpret:
+            result = await api.command(payload, db)
+            if direct:
+                interpret.assert_not_called()
+            return result
+
+    async def test_direct_buttons_skip_ai_but_use_task_api_and_audit(self):
+        result = await self.run_command(plan(("update_task", {"status": "WAITING_CLIENT"})), direct=True)
+        self.assertEqual(result["status"], "DONE")
+        self.assertEqual(self.action.result["operations"][0]["body"]["status"], "WAITING_CLIENT")
+
+    async def test_direct_points_still_reject_changed_task(self):
+        result = await self.run_command(plan(("set_points", {"field": "description", "numbers": [1, 2], "done": True})), direct=True, changed=True)
+        self.assertEqual(result["status"], "ERROR")
+        self.assertFalse(any(method != "GET" for method, _, _ in self.requests))
 
     async def test_command_executes_normal_endpoint_and_records_actor_result(self):
         result = await self.run_command(plan(("set_points", {"field": "description", "numbers": [1], "done": True}), ("update_task", {"status": "IN_PROGRESS"})))

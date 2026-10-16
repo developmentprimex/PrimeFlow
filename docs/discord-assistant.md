@@ -10,7 +10,8 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 1. Krijo serverin e ekipit në Discord dhe një aplikacion/bot në
    [Discord Developer Portal](https://discord.com/developers/applications).
 2. Ftoje aplikacionin në server me scopes `bot` dhe `applications.commands`.
-   Lejo `View Channels`, `Send Messages`, `Read Message History` dhe `Manage Channels`.
+   Lejo `View Channels`, `Send Messages`, `Read Message History`, `Embed Links`
+   (për kartat e detyrave) dhe `Manage Channels`.
    Nuk kërkohet leja `Administrator`. Mund të krijosh një kategori për kanalet personale.
    Nëse ndryshohen lejet e një kanali ekzistues, riparimi automatik kërkon
    `Manage Roles`; pa të, boti ndalon dërgimin në atë kanal dhe kërkon korrigjim.
@@ -64,10 +65,23 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 
 ## Biseda dhe dropdown
 
-`/detyrat` shfaq detyrat e hapura për sot. Dropdown-i ndahet në faqe prej 25
-detyrash. Pas përzgjedhjes shfaqen detajet, pikat e titullit/përshkrimit dhe një
-dropdown me veprimet. Veprimi hap formularin e udhëzimit. `/pyet udhezimi:...`
-punon edhe pa Message Content Intent. Pyetjet sqaruese ruhen për detyrën aktive.
+`/detyrat` dhe kujtesat shfaqin karta me ngjyrën e statusit, slotin/AM–PM,
+progresin dhe përmbledhjen e pikave, me nga 5 detyra për mesazh. Zgjedhja nga
+dropdown hap kartën e plotë me butona për To Do, Në progres, WFE, Mbylle,
+Konfirmim, Pikat/Strike, Edito, Koment, Slot/AM–PM dhe Rifresko.
+
+Statuset, formularët dhe zgjedhja e pikave nuk kërkojnë interpretim AI: ndryshimi
+i saktë kalon në të njëjtat kontrolle të API-së, versionit të detyrës dhe auditimit.
+Te Pikat mund të zgjidhen disa pika njëherësh për strike ose heqje strike;
+listat e gjata kanë faqe prej 25 pikash. Konfirmimi zgjedh personin nga përdoruesit
+aktivë. Edito hap titullin, përshkrimin, progresin, afatin dhe AM/PM; shënimet e
+strike-ve ruhen për tekstin e pandryshuar. Pas ruajtjes përditësohet karta aktive.
+Mbyllja mund të shoqërohet me komentin e rezultatit dhe backend-i zbaton kushtet.
+
+Dropdown-i "AI dhe ndryshime të tjera" dhe `/pyet udhezimi:...` mbeten për kërkesa
+të lira. `/pyet` punon edhe pa Message Content Intent. Pyetjet sqaruese ruhen
+për detyrën aktive. Tekstet shumë të gjata kanë link për hapje në PrimeFlow;
+zgjedhja e pikave vazhdon të përfshijë të gjitha pikat përmes faqeve.
 
 Për mesazhe të zakonshme në kanal, aktivizo **Message Content Intent** në Bot
 settings të Developer Portal dhe vendos `DISCORD_MESSAGE_CONTENT_ENABLED=true`.
@@ -143,7 +157,8 @@ komandat refuzohen. Revokimi nuk fshin mesazhet historike në Discord.
 ## Verifikimi lokal
 
 `python -m unittest discover -s tests -p "test_discord*.py" -v`, nga `backend`,
-mbulon 48 teste pa lidhje me Discord/OpenAI/databazën. Instalo varësitë opsionale
+mbulon testet e botit, kartave, veprimeve direkte dhe deploy-it pa lidhje me
+Discord/OpenAI/databazën. Instalo varësitë opsionale
 për të përfshirë testet e worker-it. `npm run build` dhe lint-i i faqes së re
 kaluan. Kontrolli i plotë TypeScript dhe lint-i i sidebar-it raportojnë gabime
 ekzistuese jashtë integrimit. Migrimi nuk është aplikuar në databazën reale;

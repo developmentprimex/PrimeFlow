@@ -16,6 +16,7 @@ from discord import app_commands
 from discord.ext import tasks
 
 from app.config import settings
+import discord_ui as ui
 
 log = logging.getLogger("primeflow.discord")
 ACTION_CHOICES = [
@@ -49,35 +50,31 @@ def overwrite_signature(overwrites) -> dict:
     return result
 
 
+def display_text(value: str) -> str:
+    """Hide PrimeFlow editor markers in Discord without changing stored text."""
+    return re.sub(r"\[\[\s*/?\s*(?:added|done)(?::(?:blue|green|grey))?\s*\]\]", "", value, flags=re.I)
+
+
 def task_label(title: str) -> str:
-    plain = re.sub(r"\[\[.*?\]\]", "", title, flags=re.S)
+    plain = display_text(title)
     return (re.sub(r"\s+", " ", plain).strip() or "Detyrë")[:100]
 
 
 def task_view(task_id: str, fingerprint: str = "") -> discord.ui.View:
-    view = discord.ui.View(timeout=None)
-    view.add_item(discord.ui.Select(custom_id=f"pf:action:{task_id}:{fingerprint}", placeholder="Çfarë dëshiron të bësh?",
-        options=[discord.SelectOption(label=label, value=str(i)) for i, (label, _) in enumerate(ACTION_CHOICES)]))
-    return view
+    return ui.controls(task_id, fingerprint, ACTION_CHOICES)
 
 
 def task_pages(task_list: list[dict], title: str):
     if not task_list:
         return [(f"{title}\nNuk ke detyra të hapura për këtë periudhë.", None)]
     pages = []
-    for offset in range(0, len(task_list), 25):
-        chunk = task_list[offset:offset + 25]
+    for offset in range(0, len(task_list), ui.TASKS_PER_PAGE):
+        chunk = task_list[offset:offset + ui.TASKS_PER_PAGE]
         view = discord.ui.View(timeout=None)
         view.add_item(discord.ui.Select(custom_id="pf:task", placeholder="Zgjidh detyrën për raportim",
-            options=[discord.SelectOption(label=task_label(task["title"]), value=task["id"],
-                description=f"{task.get('status', '')} · 1H {task.get('one_h_report_slot') or '—'} · {task.get('finish_period') or '—'}"[:100]) for task in chunk]))
-        names = [re.sub(r"\s+", " ", task["title"])[:100] for task in chunk]
-        lines = [f"{offset + i}. {name} — {task.get('status')}" for i, (name, task) in enumerate(zip(names, chunk), 1)]
-        # Full titles and points are displayed after selection; keep each panel
-        # within Discord's content limit even when there are 25 long task names.
-        content = f"{title} · {offset + 1}–{offset + len(chunk)} / {len(task_list)}\nZgjidh detyrën nga dropdown."
-        if len("\n".join(lines)) + len(content) < 1900:
-            content += "\n" + "\n".join(lines)
+            options=[discord.SelectOption(label=f"{offset + i}. {task_label(ui.heading(task))}"[:100], value=task["id"],
+                description=f"{ui.STATUS_LABELS.get(task.get('status'), task.get('status', ''))} · 1H {task.get('one_h_report_slot') or '—'} · {task.get('finish_period') or '—'}"[:100]) for i, task in enumerate(chunk, 1)]))
+        content = f"**{title}** · {offset + 1}–{offset + len(chunk)} / {len(task_list)}\nZgjidh kartën nga dropdown për status, pika dhe editim."
         pages.append((content, view))
     return pages
 
@@ -117,6 +114,8 @@ class PrimeFlowBot(discord.Client):
         intents.message_content = settings.DISCORD_MESSAGE_CONTENT_ENABLED
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.tree = app_commands.CommandTree(self)
+        self.task_details = {}
+        self.task_cards = {}
         self.http_bridge = httpx.AsyncClient(base_url=settings.PRIMEFLOW_API_BASE_URL.rstrip("/") + "/api/discord",
             timeout=90, headers={"X-Primeflow-Discord-Secret": settings.DISCORD_BRIDGE_SECRET})
 
@@ -238,8 +237,8 @@ class PrimeFlowBot(discord.Client):
             try:
                 await self.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
                 data = await self.bridge("/bot/tasks", actor(interaction.user.id, interaction.guild_id, interaction.channel_id))
-                for text, view in task_pages(data["tasks"], "Detyrat e tua për sot"):
-                    await interaction.followup.send(text, view=view or discord.utils.MISSING)
+                for page, (text, view) in enumerate(task_pages(data["tasks"], "Detyrat e tua për sot")):
+                    await interaction.followup.send(text, embeds=ui.overview_embeds(data["tasks"], page), view=view or discord.utils.MISSING)
             except Exception as exc:
                 await interaction.followup.send(self.error_message(exc, read_only=True), ephemeral=True)
 
@@ -262,14 +261,67 @@ class PrimeFlowBot(discord.Client):
         if result.get("applied"):
             text += "\nU zbatuan: " + "; ".join(result["applied"])
         task = result.get("task")
-        if task:
-            text += f"\nStatusi: {task['status']} · Progresi: {task['progress_percentage']}%"
+        if task and result.get("fingerprint"):
+            await self.show_task(interaction, result, notice=text, update=True)
+            return
         if result.get("url"):
             text += f"\n{result['url']}"
         for part in chunks(text):
             await interaction.followup.send(part)
-        if task and result.get("fingerprint"):
-            await interaction.followup.send("Veprimi tjetër për këtë detyrë:", view=task_view(task["id"], result["fingerprint"]))
+
+    def remember_task(self, interaction, detail):
+        key = (interaction.guild_id, interaction.channel_id, interaction.user.id, detail["task"]["id"])
+        self.task_details[key] = detail
+        if len(self.task_details) > 512:
+            oldest = next(iter(self.task_details))
+            del self.task_details[oldest]
+            self.task_cards.pop(oldest, None)
+
+    async def show_task(self, interaction, detail, *, notice="Zgjidh veprimin për këtë detyrë.", update=False):
+        self.remember_task(interaction, detail)
+        task = detail["task"]
+        embed = ui.card(task, detail=detail)
+        view = task_view(task["id"], detail["fingerprint"])
+        source = getattr(interaction, "message", None)
+        key = (interaction.guild_id, interaction.channel_id, interaction.user.id, task["id"])
+        if not (source and len(source.embeds) == 1 and source.embeds[0].url == ui.task_url(task["id"])):
+            source = self.task_cards.get(key)
+        if update and source:
+            try:
+                await source.edit(content=display_text(notice)[:1800], embed=embed, view=view)
+            except discord.NotFound:
+                self.task_cards.pop(key, None)
+                await self.show_task(interaction, detail, notice=notice)
+                return
+            self.task_cards[key] = source
+            await interaction.followup.send("U përditësua në PrimeFlow dhe në kartë.", ephemeral=True)
+        else:
+            self.task_cards[key] = await interaction.followup.send(display_text(notice)[:1800], embed=embed, view=view, wait=True)
+
+    async def run_direct(self, interaction, task_id, fingerprint, actions, instruction):
+        try:
+            await self.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+            result = await self.bridge("/bot/command", {**actor(interaction.user.id, interaction.guild_id, interaction.channel_id),
+                "request_id": str(interaction.id), "task_id": task_id, "instruction": instruction,
+                "expected_fingerprint": fingerprint, "direct_actions": actions})
+            await self.show_result(interaction, result)
+        except Exception as exc:
+            await interaction.followup.send(self.error_message(exc), ephemeral=True)
+
+    async def current_detail(self, interaction, task_id, fingerprint=None):
+        await self.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+        detail = await self.bridge("/bot/select", {**actor(interaction.user.id, interaction.guild_id, interaction.channel_id), "task_id": task_id})
+        if fingerprint and detail["fingerprint"] != fingerprint:
+            await self.show_task(interaction, detail, notice="Detyra ndryshoi. Zgjidh veprimin mbi këtë kartë të rifreskuar.", update=True)
+            return None
+        self.remember_task(interaction, detail)
+        return detail
+
+    async def show_people(self, interaction, task_id, fingerprint, page=0):
+        if not await self.current_detail(interaction, task_id, fingerprint):
+            return
+        result = await self.bridge("/bot/people", {**actor(interaction.user.id, interaction.guild_id, interaction.channel_id), "task_id": task_id})
+        await interaction.followup.send("Zgjidh personin e konfirmimit:", view=ui.people_view(result["people"], task_id, fingerprint, page))
 
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != discord.InteractionType.component:
@@ -279,7 +331,71 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
-            if custom_id.startswith("pf:action:"):
+            if custom_id.startswith("pf:quick:"):
+                _, _, task_id, fingerprint, action = custom_id.split(":")
+                if action == "comment" or action == "done":
+                    await interaction.response.send_modal(ui.CommentModal(self, task_id, fingerprint, complete=action == "done"))
+                elif action == "edit":
+                    key = (interaction.guild_id, interaction.channel_id, interaction.user.id, task_id)
+                    detail = self.task_details.get(key)
+                    if not detail or detail["fingerprint"] != fingerprint:
+                        await interaction.response.send_message("Kliko Rifresko detyrën dhe pastaj Edito.", ephemeral=True)
+                    else:
+                        await interaction.response.send_modal(ui.EditModal(self, detail))
+                else:
+                    await interaction.response.defer(thinking=True)
+                    if action in {"todo", "progress", "wfe"}:
+                        status = {"todo": "TODO", "progress": "IN_PROGRESS", "wfe": "WAITING_CLIENT"}[action]
+                        await self.run_direct(interaction, task_id, fingerprint, [ui.action("update_task", {"status": status})], "Ndrysho statusin në " + status)
+                    elif action == "confirm":
+                        await self.show_people(interaction, task_id, fingerprint)
+                    elif action in {"points", "schedule", "refresh"}:
+                        detail = await self.current_detail(interaction, task_id, None if action == "refresh" else fingerprint)
+                        if detail:
+                            if action == "refresh":
+                                await self.show_task(interaction, detail, update=True)
+                            elif action == "points":
+                                view = ui.points_view(detail)
+                                await interaction.followup.send("Zgjidh një ose disa pika për strike / heqje strike." if view.children else "Kjo detyrë nuk ka pika për shënim.", view=view if view.children else discord.utils.MISSING)
+                            else:
+                                await interaction.followup.send("Ndrysho slotin ose AM/PM. Slotet ndjekin datën efektive të PrimeFlow.", view=ui.schedule_view(task_id, fingerprint))
+            elif custom_id.startswith("pf:pointset:"):
+                _, _, task_id, fingerprint, field, done = custom_id.split(":")
+                if field not in {"t", "d"} or done not in {"0", "1"}:
+                    raise ValueError("Përzgjedhje e pavlefshme.")
+                await interaction.response.defer(thinking=True)
+                numbers = [int(number) for number in data["values"]]
+                await self.run_direct(interaction, task_id, fingerprint,
+                    [ui.action("set_points", {"field": "title" if field == "t" else "description", "numbers": numbers, "done": done == "1"})],
+                    ("Bëj strike" if done == "1" else "Hiq strike") + " pikat " + ", ".join(map(str, numbers)))
+            elif custom_id.startswith("pf:points:"):
+                _, _, task_id, fingerprint, page = custom_id.split(":")
+                await interaction.response.defer(thinking=True)
+                detail = await self.current_detail(interaction, task_id, fingerprint)
+                if detail:
+                    await interaction.followup.send("Zgjidh pikat:", view=ui.points_view(detail, max(0, int(page))))
+            elif custom_id.startswith("pf:schedule:"):
+                _, _, task_id, fingerprint = custom_id.split(":")
+                await interaction.response.defer(thinking=True)
+                kind, value = data["values"][0].split(":", 1)
+                if kind == "period":
+                    actions = [ui.action("update_task", {"finish_period": value or None})]
+                elif kind == "slot":
+                    from zoneinfo import ZoneInfo
+                    actions = [ui.action("slot", {"one_h_report_slot": value or None, "report_date": datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date().isoformat()})]
+                else:
+                    raise ValueError("Planifikim i pavlefshëm.")
+                await self.run_direct(interaction, task_id, fingerprint, actions, "Ndrysho planifikimin: " + (value or "hiq periudhën/slotin"))
+            elif custom_id.startswith("pf:confirm:"):
+                _, _, task_id, fingerprint = custom_id.split(":")
+                await interaction.response.defer(thinking=True)
+                await self.run_direct(interaction, task_id, fingerprint,
+                    [ui.action("update_task", {"confirmation_assignee_id": data["values"][0], "status": "WAITING_CONFIRMATION"})], "Dërgoje për konfirmim te personi i zgjedhur.")
+            elif custom_id.startswith("pf:people:"):
+                _, _, task_id, fingerprint, page = custom_id.split(":")
+                await interaction.response.defer(thinking=True)
+                await self.show_people(interaction, task_id, fingerprint, max(0, int(page)))
+            elif custom_id.startswith("pf:action:"):
                 index = int(data["values"][0])
                 if index < 0 or index >= len(ACTION_CHOICES):
                     raise ValueError("Veprim i panjohur.")
@@ -289,16 +405,7 @@ class PrimeFlowBot(discord.Client):
                 await interaction.response.defer(thinking=True)
                 await self.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
                 result = await self.bridge("/bot/select", {**actor(interaction.user.id, interaction.guild_id, interaction.channel_id), "task_id": data["values"][0]})
-                task = result["task"]
-                lines = [task["title"], f"Statusi: {task['status']} · Sloti: {task.get('one_h_report_slot') or '—'} · {task.get('finish_period') or '—'}"]
-                for label, field in (("Pikat e titullit", "title_points"), ("Pikat e përshkrimit", "description_points")):
-                    if result[field]:
-                        lines.append(label + ":")
-                        lines.extend(f"{p['number']}. {'✓' if p['done'] else '○'} {p['text']}" for p in result[field])
-                lines.append(result["url"])
-                for part in chunks("\n".join(lines)):
-                    await interaction.followup.send(part)
-                await interaction.followup.send("Zgjidh veprimin, përdor /pyet, ose shkruaj udhëzimin në këtë kanal.", view=task_view(task["id"], result["fingerprint"]))
+                await self.show_task(interaction, result)
         except Exception as exc:
             if interaction.response.is_done():
                 await interaction.followup.send(self.error_message(exc), ephemeral=True)
@@ -348,7 +455,7 @@ class PrimeFlowBot(discord.Client):
                             # send. The key survives worker/API restarts.
                             nonce = hashlib.sha256(f"{job['id']}:{page}".encode()).hexdigest()[:24]
                             message = await self.http.request(discord.http.Route("POST", "/channels/{channel_id}/messages", channel_id=channel.id),
-                                json={"content": text, "components": view.to_components() if view else [],
+                                json={"content": text, "embeds": [embed.to_dict() for embed in ui.overview_embeds(data["tasks"], page)], "components": view.to_components() if view else [],
                                     "allowed_mentions": {"parse": []}, "nonce": nonce, "enforce_nonce": True})
                             message_ids.append(str(message["id"]))
                         await self.bridge(f"/bot/reminders/{job['id']}/ack", {**identity, "message_ids": message_ids})
