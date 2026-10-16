@@ -108,7 +108,7 @@ def export_blocks(report: dict) -> list[dict]:
     text(f"Data: {report['report_date']}")
     for key in ("underload", "overload", "reorganization"):
         manual(key)
-    for key in ("postponed", "untouched", "same_day"):
+    for key in ("postponed", "postponed_today", "untouched", "same_day"):
         tasks(key)
     text(MEETING_TITLE, 2)
     for label, meetings in meeting_groups(report):

@@ -55,6 +55,8 @@ from app.api.routers.knowledge import router as knowledge_router
 
 
 api_router = APIRouter()
+from app.api.routers.discord_agents import router as discord_agents_router
+api_router.include_router(discord_agents_router, prefix="/discord/bot/agents", tags=["discord"])
 api_router.include_router(discord_assistant_router, prefix="/discord", tags=["discord"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(checklist_items_router, prefix="/checklist-items", tags=["checklist-items"])

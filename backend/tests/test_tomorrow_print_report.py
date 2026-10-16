@@ -507,6 +507,21 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert '<style>' not in report_html
 
 
+def test_html_table_exposes_all_owners_for_user_filtering() -> None:
+    report_html = _html_table([("1H 10:00", [
+        {"task_id": "shared", "title": "Shared task", "assignees": ["Era Fana", "Rina Aliu"]},
+    ], False)])
+    assert 'data-task-users="EF|RA"' in report_html
+    assert 'data-task-ga-personal="false"' in report_html
+
+
+def test_html_table_marks_ga_personal_tasks_for_summary_click_filtering() -> None:
+    report_html = _html_table([("P: GA", [
+        {"task_id": "personal-ga", "title": "EF/GA: Personal", "assignees": ["Era Fana"]},
+    ], True)])
+    assert 'data-task-ga-personal="true"' in report_html
+
+
 def test_html_table_marks_important_deadline_tasks_for_filtering() -> None:
     report_html = _html_table(
         [("1H 10:00", [

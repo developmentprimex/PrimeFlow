@@ -119,6 +119,8 @@ def controls(task_id: str, fingerprint: str, action_choices) -> discord.ui.View:
     view.add_item(discord.ui.Select(custom_id=f"pf:action:{task_id}:{fingerprint}", row=2,
         placeholder="AI dhe ndryshime të tjera…", options=[discord.SelectOption(label=text, value=str(i)) for i, (text, _) in enumerate(action_choices)]))
     view.add_item(discord.ui.Button(label="Rifresko detyrën", custom_id=f"pf:quick:{task_id}:{fingerprint}:refresh", row=3))
+    view.add_item(discord.ui.Button(label="Delegoja agjentit", custom_id=f"pf:agent:targets:{task_id}:{fingerprint}", row=3, style=discord.ButtonStyle.primary))
+    view.add_item(discord.ui.Button(label="Rezultatet AI", custom_id=f"pf:agent:history:{task_id}:0", row=3))
     return view
 
 

@@ -15,7 +15,7 @@ export type ManualAnswers = Partial<Record<ManualKey, string>>
 
 type AttendanceRow = { id: string; person: string; note?: string | null; from?: string; to?: string; start?: string; until?: string }
 type NoteRow = { id: string; author?: string; content: string; created_at: string }
-type TaskRow = { id: string; title: string; status: string; created_at: string; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
+type TaskRow = { id: string; title: string; status: string; created_at: string; start_date?: string | null; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
@@ -93,6 +93,9 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
   onAnswerChange: (key: ManualKey, value: string) => void
 }) {
   const cutoffTime = report.data.captured_until ? reportTime(report.data.captured_until) : "08:30"
+  const tasks = report.data.tasks || []
+  const todayTasks = tasks.filter((task) => task.start_date === report.report_date)
+  const otherTasks = tasks.filter((task) => task.start_date !== report.report_date)
   const manual = (key: ManualKey, title: string) => <Point id={`m1-${key}`} title={title}>
     <div className="space-y-2 p-5"><Label htmlFor={`m1-answer-${key}`} className="text-sm">Përgjigjja / komenti</Label>
       <Textarea id={`m1-answer-${key}`} value={answers[key] || ""} disabled={disabled} maxLength={10000} autoResize
@@ -105,7 +108,16 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
     <Point id="m1-delays" title="2. VONESA" count={(report.data.delays || []).length}><Attendance rows={report.data.delays || []} kind="delay" /></Point>
     {manual("plan_changes", "3. A KA NDRYSHIM TË PLANIT / PRIORITETEVE?")}
     <Point id="m1-notes" title="4. NOTES TË REJA?" count={(report.data.notes || []).length} description={`Të krijuara nga dje 16:30 deri sot ${cutoffTime}.`}><Created rows={report.data.notes || []} kind="note" /></Point>
-    <Point id="m1-tasks" title="5. DETYRA TË REJA TË KRIJUARA SOT?" count={(report.data.tasks || []).length} description={`Të krijuara sot nga 00:00 deri në ${cutoffTime}.`}><Created rows={report.data.tasks || []} kind="task" /></Point>
+    <Point id="m1-tasks" title="5. DETYRA TË REJA TË KRIJUARA SOT?" count={tasks.length} description={`Të krijuara sot nga 00:00 deri në ${cutoffTime}.`}>
+      {([
+        ["1. TË KRIJUARA SOT ME START DATE SOT", todayTasks],
+        ["2. TË KRIJUARA SOT ME START DATE NË DITË TJETËR", otherTasks],
+      ] as const).map(([title, rows]) => <div key={title}>
+        <div className="flex items-center gap-3 border-y bg-slate-50 px-5 py-3"><h4 className="text-sm font-semibold">{title}</h4><Badge variant="secondary">{rows.length}</Badge></div>
+        {rows === otherTasks && rows.some((task) => !task.start_date) ? <p className="px-5 pt-3 text-xs text-muted-foreground">Përfshihen edhe detyrat pa Start Date.</p> : null}
+        <Created rows={rows} kind="task" />
+      </div>)}
+    </Point>
     {manual("reorganization", "6. A DUHET RIORGANIZIM?")}
     {(["ga_progress", "delivery"] as const).map((key) => <Point key={key} id={`m1-${key}`}
       title={key === "ga_progress" ? "7. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA" : "8. SA PER DOREZIM M2?"}

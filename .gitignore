@@ -19,6 +19,7 @@ backend/.python-version
 backend/alembic/versions/*.pyc
 backend/uploads/reports/
 backend/.discord-worker-status.json*
+backend/.discord-agent-recovery/
 
 # Frontend
 frontend/.next/

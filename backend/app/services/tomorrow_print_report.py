@@ -29,7 +29,7 @@ from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL, report_timezone
 from app.services.personal_task_owner import personal_task_owner
-from app.services.one_h_ga_summary import build_ga_summary, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
+from app.services.one_h_ga_summary import build_ga_summary, ga_task_categories, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.tomorrow_closing_sections import (
     ClosingSection,
@@ -1523,6 +1523,8 @@ def _html_table(
                             f' data-task-starts-today="{starts_today}"'
                             f' data-task-marker-by-ga="{marker_by_ga}"'
                             f' data-task-marker-comment="{html.escape(marker_comment, quote=True)}"'
+                            f' data-task-users="{html.escape("|".join(_assignees(item)), quote=True)}"'
+                            f' data-task-ga-personal="{"true" if "personal" in ga_task_categories(item, personal) else "false"}"'
                             if task_id else ""
                         )
                         comment_display = "block" if marker_comment else "none"

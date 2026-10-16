@@ -223,3 +223,4 @@ __all__ = [
 # Knowledge PX: keep prompt-request tasks open until the prompt is tested.
 from app.services import knowledge_task_guard as _knowledge_task_guard  # noqa: E402,F401
 from app.models.discord_assistant import DiscordLink, DiscordLinkCode, DiscordReminder, DiscordAction
+from app.models.discord_agent_run import DiscordAgentRun

@@ -56,6 +56,19 @@ test("M3 contains three editable manual answers without the removed GA section",
   assert.match(html, /brenda intervalit Start–Due/)
 })
 
+test("postponements separate morning and afternoon audit windows regardless of task period", () => {
+  const html = render({ data: { postponed_today: [
+    { ...row, task_id: "morning", title: "Morning change", am_pm: "PM", postponement_period: "AM", postponement_kind: "due" },
+    { ...row, task_id: "afternoon", title: "Afternoon change", am_pm: "AM", postponement_period: "PM", postponement_kind: "due" },
+  ] } })
+  const morning = html.slice(html.indexOf("AM — PARA PAUZËS"), html.indexOf("PM — PAS PAUZËS"))
+  const afternoon = html.slice(html.indexOf("PM — PAS PAUZËS"))
+  assert.match(morning, /Morning change/)
+  assert.doesNotMatch(morning, /Afternoon change/)
+  assert.match(afternoon, /Afternoon change/)
+  assert.doesNotMatch(afternoon, /Morning change/)
+})
+
 test("legacy GA rows and answers stay out of the report and the GA filter is removed", () => {
   const html = render({ data: { ga_postponed: [{ ...row, title: "Old GA-only task" }] } }, { ga_reorganization: "GA saved answer" })
   assert.doesNotMatch(html, /GA saved answer|Old GA-only task|ga-points-title/)
