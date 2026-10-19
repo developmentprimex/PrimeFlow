@@ -4039,6 +4039,41 @@ async def update_task_user_comment(
     return _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
 
 
+class SharedCommentsRequest(BaseModel):
+    task_ids: list[uuid.UUID] = Field(default_factory=list, max_length=2000)
+
+
+class SharedCommentOut(BaseModel):
+    task_id: uuid.UUID
+    comment: str | None
+    user_id: uuid.UUID
+    updated_at: datetime | None
+
+
+@router.post("/shared-comments", response_model=list[SharedCommentOut])
+async def shared_task_comments(
+    payload: SharedCommentsRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[SharedCommentOut]:
+    """Latest comment per task, whoever wrote it (Admin Tasks shows one shared cell).
+
+    A cleared comment counts as the latest one, so clearing the cell hides older comments.
+    """
+    if not payload.task_ids:
+        return []
+    rows = (
+        await db.execute(
+            select(TaskUserComment.task_id, TaskUserComment.comment, TaskUserComment.user_id, TaskUserComment.updated_at)
+            .where(TaskUserComment.task_id.in_(payload.task_ids))
+            .order_by(TaskUserComment.task_id, TaskUserComment.updated_at.desc().nulls_last())
+            .distinct(TaskUserComment.task_id)
+        )
+    ).all()
+    return [SharedCommentOut(task_id=task_id, comment=comment, user_id=user_id, updated_at=updated_at)
+            for task_id, comment, user_id, updated_at in rows]
+
+
 @router.post("/{task_id}/remove-from-day", response_model=None)
 async def remove_task_from_day(
     task_id: uuid.UUID,
