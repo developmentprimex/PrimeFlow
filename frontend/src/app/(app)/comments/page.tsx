@@ -75,7 +75,7 @@ function CommentsInbox() {
   return (
     <div className="w-full space-y-4">
       <div className="flex items-start justify-between gap-3">
-        <div><h1 className="flex items-center gap-2 text-xl font-bold"><MessageCircle className="text-blue-600" />Simbolet dhe komentet</h1><p className="mt-1 text-sm text-muted-foreground">{scope === "all" ? "Simbolet dhe komentet e të gjithë përdoruesve, pavarësisht departamentit." : "Simbolet dhe komentet që të përkasin, pavarësisht datës së detyrës."} Leximin e konfirmojnë vetëm personat përgjegjës të detyrës.</p></div>
+        <div><h1 className="flex items-center gap-2 text-xl font-bold"><MessageCircle className="text-blue-600" />Simbolet dhe komentet</h1><p className="mt-1 text-sm text-muted-foreground">{scope === "all" ? "Simbolet dhe komentet e të gjithë përdoruesve, pavarësisht departamentit." : "Simbolet dhe komentet që të përkasin, pavarësisht datës së detyrës."} Vetëm detyrat To do dhe In progress. Leximin e konfirmojnë vetëm personat përgjegjës të detyrës.</p></div>
         <Button variant="outline" disabled={comments.loading || allLoading} onClick={() => { void comments.refresh(); void loadAll() }}><RefreshCw className="size-4" />Ringarko</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">

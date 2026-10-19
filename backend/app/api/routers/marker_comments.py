@@ -17,6 +17,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_marker_comment_inbox import TaskMarkerCommentInbox as Inbox
 from app.models.user import User
 from app.services.task_marker import one_h_marker_label
+from app.services.task_marker_visibility import marker_alert_task
 
 router = APIRouter()
 
@@ -33,7 +34,7 @@ def task_membership(user_id):
     # Being its creator or having an old observer receipt does not qualify.
     related = aliased(Task)
     return exists().where(
-        related.is_active.is_(True), source_key(related) == Inbox.source_key,
+        marker_alert_task(related), source_key(related) == Inbox.source_key,
         or_(related.assigned_to == user_id, exists().where(
             TaskAssignee.task_id == related.id, TaskAssignee.user_id == user_id,
         )),
@@ -42,7 +43,7 @@ def task_membership(user_id):
 
 def visible_comments(user_id):
     return select(Inbox).join(Task, Task.id == Inbox.task_id).where(
-        Inbox.user_id == user_id, Task.is_active.is_(True),
+        Inbox.user_id == user_id, marker_alert_task(Task),
         task_membership(user_id), Inbox.marker == Task.one_h_marker,
         Inbox.comment == func.btrim(func.coalesce(Task.one_h_marker_comment, "")),
     )
@@ -58,7 +59,7 @@ async def recipient_progress(db, items):
         .select_from(Task).outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id)
         .join(User, or_(User.id == Task.assigned_to, User.id == TaskAssignee.user_id))
         .outerjoin(Inbox, and_(Inbox.source_key == key, Inbox.user_id == User.id))
-        .where(Task.is_active.is_(True), User.is_active.is_(True), key.in_(current))
+        .where(marker_alert_task(Task), User.is_active.is_(True), key.in_(current))
     )).all()
     recipients = {key: {} for key in current}
     for key, user_id, full_name, username, marker, comment, read_at in rows:
@@ -89,7 +90,7 @@ async def list_marker_comments(
     # Team browsing shows acknowledgement by current responsible recipients.
     mine = and_(Inbox.user_id == user.id, task_membership(user.id))
     stmt = visible_comments(user.id) if scope == "mine" else select(Inbox).join(Task, Task.id == Inbox.task_id).where(
-        Task.is_active.is_(True), Inbox.marker == Task.one_h_marker,
+        marker_alert_task(Task), Inbox.marker == Task.one_h_marker,
         Inbox.comment == func.btrim(func.coalesce(Task.one_h_marker_comment, "")),
     )
     stmt = stmt.add_columns(Task.title, User.full_name, Task.one_h_marker_by_ga, mine.label("is_mine"))
