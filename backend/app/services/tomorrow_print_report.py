@@ -1033,6 +1033,7 @@ def _task_rows(
         values = _dedupe(values)
         values.sort(
             key=lambda item: (
+                _task_period_label(item) == "PM" if bucket == "blocked" else False,
                 _task_status(item) == "DONE",
                 _is_appended_wfc(item) if bucket == "personal" else False,
                 common_view_item_sort_key(item),
@@ -1532,10 +1533,11 @@ def _html_table(
                             '<div data-task-marker-comment="true" '
                             f'title="{html.escape(marker_comment, quote=True)}" '
                             'style="clear:both;width:fit-content;max-width:min(100%,150px);box-sizing:border-box;'
-                            'margin:4px 0;padding:2px 6px;border:1px solid #BFDBFE;'
-                            'border-radius:4px;background:#EFF6FF;color:#1E3A8A;'
-                            'font-size:11px;font-weight:500;line-height:1.25;'
-                            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:{comment_display};">'
+                            'margin:2px 0;padding:2px 6px;border:1px solid #172554;'
+                            'border-radius:4px;background:#0055FF;color:#FFF;'
+                            'font-size:11px;font-weight:700;line-height:1.375;'
+                            'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;-webkit-print-color-adjust:exact;print-color-adjust:exact;'
+                            f'display:{comment_display};">'
                             f'<strong>COM:</strong> {html.escape(marker_comment)}</div>'
                         )
                         task_text_html = (

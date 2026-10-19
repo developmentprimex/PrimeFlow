@@ -589,33 +589,53 @@ export function PrintReportPage({
 
       const markerControl = document.createElement("span")
       markerControl.dataset.taskMarkerControlWrapper = "true"
-      markerControl.style.cssText = "position:relative;display:inline-block;float:right;margin:0 0 3px 4px;vertical-align:top"
+      markerControl.style.cssText = "position:relative;display:inline-flex;align-items:center;height:22px;float:right;margin:0 0 3px 4px;vertical-align:top"
 
       const select = document.createElement("select")
+      // Render the visible label independently of the native select's baseline.
+      // The select still handles focus, keyboard input, and the option menu.
+      const selectedSymbol = document.createElement("span")
+      selectedSymbol.setAttribute("aria-hidden", "true")
+      selectedSymbol.style.cssText = "position:absolute;left:3px;right:14px;top:0;bottom:2px;display:flex;align-items:center;justify-content:center;pointer-events:none;white-space:nowrap;font:900 16px/1 Arial,sans-serif"
       const resizeMarkerSelect = (marker: string, byGa: boolean) => {
         const label = taskMarkerOptions.find((option) => option.value === marker)?.label || "—"
         const visibleLength = label.length + (byGa && marker ? 2 : 0)
         select.style.width = visibleLength <= 1 ? "46px" : visibleLength <= 2 ? "52px" : "64px"
-        select.style.color = marker ? "#DC2626" : "#0F2A5F"
+        selectedSymbol.textContent = byGa && marker ? `(${label})` : label
+        selectedSymbol.style.color = marker ? "#DC2626" : "#0F2A5F"
       }
       select.dataset.taskMarkerControl = "true"
       select.setAttribute("aria-label", "Task marker")
       select.title = cell.dataset.taskMarkerComment || "Task marker"
       select.style.cssText = [
         "display:inline-block",
+        "box-sizing:border-box",
+        "appearance:none",
         "height:22px",
         "min-width:46px",
         "max-width:64px",
         "margin:0",
-        "padding:0 1px 0 3px",
+        "padding:0 14px 0 3px",
         "border:1px solid #93C5FD",
         "border-radius:999px",
         "background:#EFF6FF",
-        "color:#0F2A5F",
-        "font:900 16px/1 Arial,sans-serif",
+        "background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%230F2A5F' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")",
+        "background-repeat:no-repeat",
+        "background-position:right 3px center",
+        "background-size:10px 10px",
+        "color:transparent",
+        "font:900 16px/18px Arial,sans-serif",
         "text-align:center",
+        "text-align-last:center",
+        "vertical-align:middle",
         "cursor:pointer",
       ].join(";")
+      // Keep only the native control's interaction surface; the visible frame
+      // and symbol use flex alignment so Windows cannot shift the text down.
+      selectedSymbol.style.cssText = select.style.cssText + ";position:absolute;inset:0;width:100%;min-width:0;max-width:none;display:flex;align-items:center;justify-content:center;padding:0 14px 2px 3px;pointer-events:none;white-space:nowrap;font:900 16px/1 Arial,sans-serif"
+      select.style.opacity = "0"
+      select.addEventListener("focus", () => { markerControl.style.outline = "2px solid #2563EB"; markerControl.style.outlineOffset = "2px" })
+      select.addEventListener("blur", () => { markerControl.style.outline = ""; markerControl.style.outlineOffset = "" })
 
       const emptyOption = document.createElement("option")
       emptyOption.value = ""
@@ -650,7 +670,20 @@ export function PrintReportPage({
       const commentButton = document.createElement("button")
       commentButton.type = "button"
       commentButton.dataset.taskMarkerCommentControl = "true"
-      commentButton.textContent = "\u{1F4AC}"
+      const commentIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+      commentIcon.setAttribute("viewBox", "0 0 24 24")
+      commentIcon.setAttribute("width", "12")
+      commentIcon.setAttribute("height", "12")
+      commentIcon.setAttribute("fill", "none")
+      commentIcon.setAttribute("stroke", "currentColor")
+      commentIcon.setAttribute("stroke-width", "2.5")
+      commentIcon.setAttribute("stroke-linecap", "round")
+      commentIcon.setAttribute("stroke-linejoin", "round")
+      commentIcon.setAttribute("aria-hidden", "true")
+      const commentIconPath = document.createElementNS("http://www.w3.org/2000/svg", "path")
+      commentIconPath.setAttribute("d", "M7.9 20A9 9 0 1 0 4 16.1L2 22Z")
+      commentIcon.appendChild(commentIconPath)
+      commentButton.appendChild(commentIcon)
       commentButton.style.cssText = [
         "position:absolute",
         "right:-4px",
@@ -670,9 +703,22 @@ export function PrintReportPage({
         "box-shadow:0 1px 2px rgba(15,23,42,.16)",
       ].join(";")
       const updateCommentButton = (marker: string, comment: string) => {
+        const hasComment = Boolean(comment.trim())
         commentButton.style.display = marker ? "flex" : "none"
-        commentButton.title = comment || "Add symbol comment"
-        commentButton.setAttribute("aria-label", comment ? "View symbol comment" : "Add symbol comment")
+        commentButton.style.right = hasComment ? "-8px" : "-4px"
+        commentButton.style.top = hasComment ? "-8px" : "-5px"
+        commentButton.style.width = hasComment ? "24px" : "16px"
+        commentButton.style.height = hasComment ? "24px" : "16px"
+        commentButton.style.backgroundColor = hasComment ? "#0055FF" : "#FFF"
+        commentButton.style.borderColor = hasComment ? "#172554" : "#93C5FD"
+        commentButton.style.borderWidth = hasComment ? "2px" : "1px"
+        commentButton.style.color = hasComment ? "#FFF" : "#60A5FA"
+        commentButton.style.boxShadow = hasComment ? "0 0 0 2px #FFF, 0 3px 6px rgba(15,23,42,.3)" : "0 1px 2px rgba(15,23,42,.16)"
+        commentIcon.setAttribute("width", hasComment ? "16" : "12")
+        commentIcon.setAttribute("height", hasComment ? "16" : "12")
+        commentIcon.setAttribute("stroke-width", hasComment ? "3" : "2.5")
+        commentButton.title = hasComment ? comment : "Add symbol comment"
+        commentButton.setAttribute("aria-label", hasComment ? "View symbol comment" : "Add symbol comment")
       }
       updateCommentButton(select.value, cell.dataset.taskMarkerComment || "")
 
@@ -759,7 +805,7 @@ export function PrintReportPage({
         }
       })
 
-      markerControl.append(select, commentButton)
+      markerControl.append(select, selectedSymbol, commentButton)
       const periodBadge = cell.querySelector('[data-task-badge="finish-period"]')
       if (periodBadge) periodBadge.insertAdjacentElement("afterend", markerControl)
       else content.prepend(markerControl)
@@ -902,6 +948,13 @@ export function PrintReportPage({
       <iframe
         ref={previewFrameRef}
         onLoad={() => {
+          // Apply the compact layout to previously saved report HTML as well.
+          previewFrameRef.current?.contentDocument?.querySelectorAll<HTMLElement>('[data-task-marker-comment="true"]').forEach((comment) => {
+            comment.style.maxWidth = "min(100%, 150px)"
+            comment.style.whiteSpace = "nowrap"
+            comment.style.overflow = "hidden"
+            comment.style.textOverflow = "ellipsis"
+          })
           applyReportIntroVisibility()
           setupPreviewMarkerControls()
           setupPreviewFilters()
