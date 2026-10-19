@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
 import { useMarkerComments } from "@/components/marker-comments-context"
 import { reportTaskUsers, reportSummaryUser, reportUserOptions, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
+import { applyTaskStrikeBadges, taskHasStrikes, reportStrikeTotal, type OneHStrikeSummary } from "@/lib/one-h-strikes"
 
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type SettingsState = {
@@ -32,6 +33,7 @@ type Delivery = {
   last_error?: string | null
 }
 type Preview = {
+  one_h_strikes?: OneHStrikeSummary
   subject: string
   target_date: string
   html: string
@@ -202,6 +204,7 @@ export function PrintReportPage({
   const [reportIntroExpanded, setReportIntroExpanded] = React.useState(false)
   const [markerFilters, setMarkerFilters] = React.useState<Set<TaskMarkerSelection>>(() => new Set())
   const [dueDateFilter, setDueDateFilter] = React.useState<TaskDueDateFilter>("all")
+  const [strikesOnly, setStrikesOnly] = React.useState(false)
   const [userFilter, setUserFilter] = React.useState("")
   const [summaryOnly, setSummaryOnly] = React.useState(false)
   const [reportUsers, setReportUsers] = React.useState<string[]>([])
@@ -384,6 +387,40 @@ export function PrintReportPage({
   React.useEffect(() => { void loadSnapshot() }, [loadSnapshot])
 
   React.useEffect(() => {
+    if (!today || !preview || preview.is_frozen || selectedReportDate || !user?.id) return
+    let cancelled = false
+    let pending = false
+    const reportDate = preview.report_date
+    const refreshCounts = async () => {
+      if (pending || document.visibilityState !== "visible") return
+      pending = true
+      try {
+        const response = await apiFetch(`${API}/snapshot`, { cache: "no-store" })
+        if (!response.ok || cancelled) return
+        const latest = await response.json() as Preview
+        if (latest.is_frozen || latest.report_date !== reportDate) { await loadSnapshot(); return }
+        // Keep the generated layout, filters, and iframe scroll position.
+        setPreview((current) => current?.report_date === reportDate
+          ? { ...current, one_h_strikes: latest.one_h_strikes } : current)
+      } catch { /* Retry after a temporary network failure. */ }
+      finally { pending = false }
+    }
+    const timer = window.setInterval(() => { void refreshCounts() }, 30000)
+    const onVisibility = () => { void refreshCounts() }
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [API, apiFetch, today, preview?.snapshot_id, preview?.report_date, preview?.is_frozen, selectedReportDate, user?.id, loadSnapshot])
+
+  React.useEffect(() => {
+    const document = previewFrameRef.current?.contentDocument
+    if (today && document) applyTaskStrikeBadges(document, preview?.one_h_strikes)
+  }, [today, preview?.one_h_strikes])
+
+  React.useEffect(() => {
     if (!today || authLoading || !user?.id) return
     let cancelled = false
     const loadFrozenHistory = async () => {
@@ -510,7 +547,8 @@ export function PrintReportPage({
           dueDateFilter === "deadline" ? matchesDeadline : startsToday
         ))
         const matchesUser = !userFilter || reportTaskUsers(cell).includes(userFilter)
-        const matches = matchesMarker && matchesDueDate && matchesUser && (!summaryOnly || isReportSummaryTask(cell))
+        const matchesStrikes = !today || !strikesOnly || taskHasStrikes(preview?.one_h_strikes, cell.dataset.taskId || "")
+        const matches = matchesMarker && matchesDueDate && matchesUser && matchesStrikes && (!summaryOnly || isReportSummaryTask(cell))
         cell.style.display = matches ? "" : "none"
         cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
         if (dateCells[index]) dateCells[index].style.display = matches ? "" : "none"
@@ -521,7 +559,7 @@ export function PrintReportPage({
         if (content) content.style.visibility = ""
       })
     })
-    collapseEmptyReportTaskRows(document, Boolean(userFilter || summaryOnly || markerFilters.size || dueDateFilter !== "all"))
+    collapseEmptyReportTaskRows(document, Boolean(userFilter || summaryOnly || markerFilters.size || dueDateFilter !== "all" || (today && strikesOnly)))
     document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"] td').forEach((cell) => {
       cell.style.display = ""
       const active = summaryOnly && reportSummaryUser(cell) === userFilter
@@ -533,7 +571,7 @@ export function PrintReportPage({
     document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"]').forEach((summary) => {
       summary.style.display = ""
     })
-  }, [dueDateFilter, markerFilters, userFilter, summaryOnly, preview?.target_date])
+  }, [dueDateFilter, markerFilters, userFilter, summaryOnly, preview?.target_date, preview?.one_h_strikes, today, strikesOnly])
 
   const setupPreviewMarkerControls = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
@@ -917,6 +955,20 @@ export function PrintReportPage({
   if (!authLoading && !user) return <div className="rounded-lg border bg-white p-8">Sign in to access {reportName}.</div>
 
   const markerFilterControl = () => <MarkerFilterControl selected={markerFilters} onChange={setMarkerFilters} />
+  const strikeTotal = today ? reportStrikeTotal(preview?.one_h_strikes) : null
+  const strikeTotalControl = strikeTotal ? <span role="status" aria-label="Totali i strikes në intervalin e fundit të përfunduar"
+    title="Totali për të gjitha detyrat e raportit, pavarësisht filtrave. Çdo detyrë numërohet vetëm një herë."
+    style={{ display: "inline-flex", alignItems: "center", minHeight: 34, padding: "0 10px", border: "1px solid #93C5FD", borderRadius: 6,
+      background: "#EFF6FF", color: "#1E40AF", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
+    {strikeTotal.label}
+  </span> : null
+  const strikesFilterControl = today ? <button type="button" aria-pressed={strikesOnly}
+    aria-label="Vetëm detyrat me strikes > 0"
+    onClick={() => setStrikesOnly((selected) => !selected)}
+    style={{ minHeight: 34, padding: "0 12px", border: `1px solid ${strikesOnly ? "#2563EB" : "#CBD5E1"}`, borderRadius: 6,
+      background: strikesOnly ? "#DBEAFE" : "#F8FAFC", color: strikesOnly ? "#1E40AF" : "#0F172A", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
+    Vetëm me strikes &gt; 0
+  </button> : null
   const userFilterControl = <>
     <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-slate-50 px-3 text-sm font-medium"
       style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #CBD5E1", borderRadius: 6, background: "#F8FAFC", padding: "0 12px", fontSize: 14, color: "#0F172A" }}>
@@ -927,7 +979,7 @@ export function PrintReportPage({
         {reportUsers.map((initials) => <option key={initials} value={initials}>{initials}</option>)}
       </select>
     </label>
-    {summaryOnly ? <button type="button" onClick={() => { setSummaryOnly(false); setUserFilter(""); setMarkerFilters(new Set()); setDueDateFilter("all") }}
+    {summaryOnly ? <button type="button" onClick={() => { setSummaryOnly(false); setUserFilter(""); setMarkerFilters(new Set()); setDueDateFilter("all"); setStrikesOnly(false) }}
       style={{ border: "1px solid #93C5FD", borderRadius: 6, background: "#EFF6FF", padding: "0 10px", fontSize: 13, color: "#1D4ED8" }}>Show all tasks</button> : null}
   </>
 
@@ -992,6 +1044,8 @@ export function PrintReportPage({
           setupPreviewMarkerControls()
           syncPreviewCommentAttention()
           setupPreviewFilters()
+          const document = previewFrameRef.current?.contentDocument
+          if (today && document) applyTaskStrikeBadges(document, preview.one_h_strikes)
         }}
         title={`${reportName} generated email`}
         srcDoc={preview.html.replace('<div data-report-intro="true">', '<div data-report-intro="true" hidden>')}
@@ -1011,6 +1065,8 @@ export function PrintReportPage({
             {userFilterControl}
             {dueDateFilterControl}
             {markerFilterControl()}
+            {strikesFilterControl}
+            {strikeTotalControl}
           </div>
         </>,
         previewFilterContainer,
@@ -1023,7 +1079,7 @@ export function PrintReportPage({
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-center gap-2">
           {modeControl}
-          {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}</> : null}
+          {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}{strikesFilterControl}{strikeTotalControl}</> : null}
           <Button
             variant="outline"
             onClick={() => void generateReport()}
@@ -1046,7 +1102,7 @@ export function PrintReportPage({
           <p className="text-sm text-muted-foreground">{today ? "Today's Common View tasks and meetings, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}</> : null}
+          {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}{strikesFilterControl}{strikeTotalControl}</> : null}
           <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading || (today && (Boolean(preview?.is_frozen) || Boolean(selectedReportDate)))}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending || (today && Boolean(selectedReportDate))}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>

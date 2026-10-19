@@ -96,7 +96,7 @@ function taskTitle(value: string) {
 
 type TableKind = "postponed" | "untouched" | "same_day" | "ga_postponed"
 type Movement = "start_due" | "due" | "start"
-type Column = { key: keyof TaskRow | "nr" | "from" | "to" | "manual_comment"; label: string; width: number }
+type Column = { key: keyof TaskRow | "nr" | "from" | "to"; label: string; width: number }
 type TaskManualComments = {
   answers: ManualAnswers; disabled: boolean; onAnswerChange: (key: ManualKey, value: string) => void
 }
@@ -123,7 +123,6 @@ function columnsFor(kind: TableKind, movement?: Movement): Column[] {
   if (movement !== "due") {
     columns.push({ key: "reason", label: "ARSYEJA", width: 124 }, { key: "comment", label: "KOMENTI", width: 160 })
   }
-  if (kind === "untouched") columns.push({ key: "manual_comment", label: "KOMENT MANUAL", width: 220 })
   if (moved) columns.push({ key: "risk", label: "VLERËSIMI", width: 80 })
   if (kind === "ga_postponed") columns.push({ key: "category", label: "KUSHTI", width: 100 })
   return columns
@@ -145,11 +144,12 @@ function TaskGrid({ rows, kind, movement, manualComments }: { rows: TaskRow[]; k
   const columns = columnsFor(kind, movement)
   const cell = (row: TaskRow, column: Column, index: number) => {
     if (column.key === "nr") return index + 1
-    if (column.key === "manual_comment") {
+    if (column.key === "comment" && kind === "untouched" && manualComments) {
       const key: ManualKey = `untouched_comment:${row.task_id}`
-      return manualComments ? <Textarea aria-label={`Koment manual për ${taskTitle(row.title)}`} value={manualComments.answers[key] || ""}
-        disabled={manualComments.disabled} maxLength={10000} rows={2} className="min-h-20 bg-white text-black" placeholder="Shëno komentin."
-        onChange={(event) => manualComments.onAnswerChange(key, event.target.value)} /> : "—"
+      return <Textarea aria-label={`Komenti për ${taskTitle(row.title)}`}
+        value={manualComments.answers[key] ?? (row.comment && !["-", "—"].includes(row.comment) ? row.comment : "")}
+        disabled={manualComments.disabled} maxLength={10000} rows={1} autoResize className="min-h-9 bg-white text-black" placeholder="Shëno komentin."
+        onChange={(event) => manualComments.onAnswerChange(key, event.target.value)} />
     }
     if (column.key === "title") return <div className="w-full whitespace-normal break-words font-medium">{row.marker ? <strong className={`mr-1 text-sm font-black ${row.deadline_important || row.category?.includes("Deadline Important") ? "text-white" : "text-red-600"}`} data-task-symbol="true">{row.marker}</strong> : null}{taskTitle(row.title)}</div>
     if (column.key === "from" || column.key === "to") return dateRange(row, column.key === "to", movement)

@@ -24,6 +24,7 @@ from app.services.one_h_print_report_snapshot import (
     save_one_h_print_snapshot,
     serialize_one_h_print_snapshot,
 )
+from app.services.today_print_strikes import with_report_strikes
 from app.services.tomorrow_print_report import (
     REQUIRED_SHTYPI_RECIPIENTS,
     ensure_required_shtypi_recipient,
@@ -171,6 +172,7 @@ async def get_snapshot(
     if row is None:
         raise HTTPException(status_code=404, detail="Generated report not found")
     result = await serialize_one_h_print_snapshot(db, row)
+    result = await with_report_strikes(db, result, snapshot_date)
     if is_closed(snapshot_date):
         return await _frozen(db, snapshot_date)
     return {**result, **view_metadata(snapshot_date)}
@@ -201,9 +203,11 @@ async def generate_snapshot(
         report=report,
         user=user,
     )
+    result = await serialize_one_h_print_snapshot(db, row)
+    result = await with_report_strikes(db, result, snapshot_date)
     if is_closed(snapshot_date):
         return await _frozen(db, snapshot_date)
-    return {**await serialize_one_h_print_snapshot(db, row), **view_metadata(snapshot_date)}
+    return {**result, **view_metadata(snapshot_date)}
 
 
 @router.get("/print-preview")

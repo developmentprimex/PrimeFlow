@@ -96,7 +96,7 @@ def export_blocks(report: dict) -> list[dict]:
                     if column == "risk":
                         fill, color = (RED, RED_TEXT) if row.get("risk") == "RREZIK" else (GREEN, GREEN_TEXT)
                         bold = True
-                    cells.append({"text": _text(report_table_value(row, column, index, movement, report)),
+                    cells.append({"text": _text(report_table_value(row, column, index, movement, report, key)),
                                   "fill": fill, "color": color, "bold": bold,
                                   "marker": row.get("marker") if column == "title" else None,
                                   "eight_am": eight_am, "first": column_index == 0, "last": column_index == len(columns) - 1,

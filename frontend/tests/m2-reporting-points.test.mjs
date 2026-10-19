@@ -91,9 +91,9 @@ test("unfinished priority tasks appear second with due labels and priority styli
   assert.match(section, /background:#dc2626;color:white/)
   assert.match(section, /border-top:3px solid #dc2626/)
   assert.match(section, /ARSYEJA<\/th>/)
-  assert.match(section, /KOMENT MANUAL<\/th>/)
+  assert.doesNotMatch(section, /KOMENT MANUAL<\/th>/)
   assert.match(section, /Arsyeja nga My View/)
-  assert.match(section, /Komenti nga My View/)
+  assert.doesNotMatch(section, /Komenti nga My View/)
   assert.match(section, /<textarea[^>]*>Koment manual<\/textarea>/)
   assert.doesNotMatch(section, /<select|>STATUS<\/th>/)
 })
@@ -110,7 +110,26 @@ test("M2 unfinished comments survive draft reload and remain disabled in a read-
     report: { ...report, data: { unfinished_priority: [{ ...row, task_id: taskId, due_label: "SOT" }] } },
     answers, disabled: true, onAnswerChange: () => {},
   }))
-  assert.match(html, /<textarea[^>]*aria-label="Koment manual[^>]*disabled=""[^>]*>Manual i ruajtur<\/textarea>/)
+  assert.match(html, /<textarea[^>]*aria-label="Komenti p.r[^>]*disabled=""[^>]*>Manual i ruajtur<\/textarea>/)
+})
+
+test("M2 edits the existing comment column using My View text or an empty value", () => {
+  const tasks = [
+    { ...row, task_id: "11111111-1111-4111-8111-111111111111", comment: "Nga My View" },
+    { ...row, task_id: "22222222-2222-4222-8222-222222222222", comment: "-" },
+  ]
+  const render = (answers) => {
+    const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+      report: { ...report, data: { unfinished_priority: tasks } }, answers, disabled: false, onAnswerChange: () => {},
+    }))
+    return html.slice(html.indexOf('aria-labelledby="m2-unfinished-priority"'), html.indexOf('aria-labelledby="m2-postponed"'))
+  }
+  const html = render({})
+  assert.equal((html.match(/KOMENTI<\/th>/g) || []).length, 1)
+  assert.doesNotMatch(html, /KOMENT MANUAL<\/th>/)
+  assert.match(html, /<textarea[^>]*>Nga My View<\/textarea>/)
+  assert.match(html, /<textarea[^>]*><\/textarea>/)
+  assert.doesNotMatch(render({ [`unfinished_comment:${tasks[0].task_id}`]: "" }), /Nga My View/)
 })
 
 test("read-only reports keep all manual fields disabled", () => {

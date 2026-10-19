@@ -101,6 +101,11 @@ async def get_report(report_date: date, db: AsyncSession = Depends(get_db),
     ))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Raporti nuk eshte gjeneruar per kete date.")
+    if (report_date == datetime.now(report_timezone()).date()
+            and any(not item.get("task_id") for item in (row.data or {}).get("unfinished_priority", []))):
+        # Older snapshots omitted task IDs, which are needed to edit comments.
+        await refresh_report(db, row)
+        await db.commit()
     return await current_report_payload(db, row)
 
 

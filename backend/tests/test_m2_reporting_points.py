@@ -397,8 +397,8 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         titles = [block["text"] for block in blocks if block["kind"] == "text" and block["level"] == 2]
         assert titles == [*service.MANUAL_POINTS.values(), *service.AUTO_TITLES.values()]
         table = next(block for block in blocks if block["kind"] == "table")
-        assert [column[1] for column in table["columns"]] == ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TIPI", "TITULLI", "DUE DATE", "ARSYEJA", "KOMENTI", "KOMENT MANUAL"]
-        assert all(cell["fill"] == "#dc2626" and cell["eight_am"] for cell in table["rows"][1][:-1])
+        assert [column[1] for column in table["columns"]] == ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TIPI", "TITULLI", "DUE DATE", "ARSYEJA", "KOMENTI"]
+        assert all(cell["fill"] == "#dc2626" and cell["eight_am"] for cell in table["rows"][1])
         html = service.render_html(value)
         assert "08:00 EF: Test &lt;task&gt;" in html
         assert "DUE DATE: SOT" in service.render_plain_text(value)

@@ -88,10 +88,11 @@ def test_m2_enriches_each_task_by_id_and_keeps_priority_order():
     (m2, m2_api, M2ReportingPointsReport, "unfinished_priority", "unfinished_comment"),
     (m3, m3_api, M3ReportingPointsReport, "untouched", "untouched_comment"),
 ])
-def test_manual_comments_save_and_export_without_overwriting_my_view(service, api, model, section, prefix):
+@pytest.mark.parametrize("original_comment", ["Komenti nga My View", "-"])
+def test_report_comment_edits_save_and_export_in_the_existing_column(service, api, model, section, prefix, original_comment):
     task_id = str(uuid.uuid4())
     key = f"{prefix}:{task_id}"
-    data = {section: [{"task_id": task_id, "title": "Task", "status": "TODO", "reason": "Arsyeja nga My View", "comment": "Komenti nga My View"}]}
+    data = {section: [{"task_id": task_id, "title": "Task", "status": "TODO", "reason": "Arsyeja nga My View", "comment": original_comment}]}
     row = model(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data=data, status="DRAFT")
     payload = api.ManualAnswersPayload(manual_answers={key: "Manual <test>\nVazhdimi"})
     with patch.object(api, "_by_id", new=AsyncMock(return_value=row)), \
@@ -102,11 +103,18 @@ def test_manual_comments_save_and_export_without_overwriting_my_view(service, ap
     assert row.manual_answers[key] == "Manual <test>\nVazhdimi"
     assert row.data == data
     html = service.render_html(report)
-    assert "Manual &lt;test&gt;" in html and "Komenti nga My View" in html and "Arsyeja nga My View" in html
+    assert "Manual &lt;test&gt;" in html and "Arsyeja nga My View" in html
+    assert "Komenti nga My View" not in html
     assert "Manual <test>\nVazhdimi" in service.render_plain_text(report)
     blocks = service.export_blocks(report) if service is m2 else export_blocks(report)
     table = next(block for block in blocks if block["kind"] == "table")
     assert table["rows"][0][-1]["text"] == "Manual <test>\nVazhdimi"
+    assert [column[1] for column in table["columns"]].count("KOMENTI") == 1
+    assert "KOMENT MANUAL" not in [column[1] for column in table["columns"]]
+    # Clearing an edited report comment must not restore the My View text.
+    report["manual_answers"][key] = ""
+    blocks = service.export_blocks(report) if service is m2 else export_blocks(report)
+    assert next(block for block in blocks if block["kind"] == "table")["rows"][0][-1]["text"] == "-"
     invalid = api.ManualAnswersPayload(manual_answers={f"{prefix}:{uuid.uuid4()}": "Other task"})
     with patch.object(api, "_by_id", new=AsyncMock(return_value=row)), \
          patch.object(api, "locked_report", new=AsyncMock(return_value=row)), \
@@ -116,6 +124,25 @@ def test_manual_comments_save_and_export_without_overwriting_my_view(service, ap
     assert error.value.status_code == 422
     with pytest.raises(ValidationError):
         api.ManualAnswersPayload(manual_answers={f"{prefix}:invalid": "Invalid"})
+
+
+def test_today_m2_legacy_rows_are_refreshed_to_make_comment_cells_editable():
+    today = datetime.now(report_timezone()).date()
+    task_id = str(uuid.uuid4())
+    row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=today, data={"unfinished_priority": [{"title": "Legacy task"}]}, manual_answers={"reorganization": "Keep answer"})
+    db = AsyncMock()
+    db.execute.return_value = MagicMock(scalar_one_or_none=lambda: row)
+
+    async def refresh(db, report):
+        report.data = {"unfinished_priority": [{"task_id": task_id, "title": "Legacy task"}]}
+
+    with patch.object(m2_api, "refresh_report", new=AsyncMock(side_effect=refresh)) as regenerate, \
+         patch.object(m2_api, "current_report_payload", new=AsyncMock(side_effect=lambda db, report: m2.report_payload(report))):
+        payload = asyncio.run(m2_api.get_report(today, db, SimpleNamespace()))
+    assert payload["data"]["unfinished_priority"][0]["task_id"] == task_id
+    assert payload["manual_answers"]["reorganization"] == "Keep answer"
+    regenerate.assert_awaited_once_with(db, row)
+    db.commit.assert_awaited_once()
 
 
 @pytest.mark.parametrize("section", ["untouched", "unfinished_priority"])

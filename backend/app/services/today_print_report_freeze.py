@@ -22,6 +22,7 @@ from app.models.one_h_print_report_snapshot import OneHPrintReportSnapshot
 from app.services.one_h_print_report_snapshot import get_one_h_print_snapshot, serialize_one_h_print_snapshot
 from app.services.primeflow_report import previous_working_day, report_timezone
 from app.services.tomorrow_print_report import build_today_print_report, next_working_day
+from app.services.today_print_strikes import payload_task_ids, report_task_ids, task_strike_summary, with_report_strikes
 
 logger = logging.getLogger(__name__)
 FROZEN_KIND = "TODAY_FROZEN"
@@ -92,6 +93,7 @@ async def today_report(db: AsyncSession, day: date, *, include_attachment: bool 
     if day != local_now().date():
         raise ValueError("1H SHTYPI Today mund të gjenerohet vetëm për datën e sotme.")
     report = await build_today_print_report(day, include_attachment=include_attachment)
+    report = await with_report_strikes(db, report, day)
     # An in-flight request must not leak fresh data once the cutoff has passed.
     if is_closed(day):
         return await frozen_report(db, day, include_attachment=include_attachment)
@@ -131,6 +133,12 @@ async def _finish_frozen_report(db: AsyncSession, day: date) -> OneHPrintReportS
             ))
 
         report = await asyncio.to_thread(render)
+        if "one_h_strikes" in source["payload"]:
+            summary = source["payload"]["one_h_strikes"]
+            shown_ids = {str(task_id) for task_id in report_task_ids(report)}
+            report["one_h_strikes"] = {**summary, "tasks": {
+                task_id: counts for task_id, counts in summary.get("tasks", {}).items() if task_id in shown_ids
+            }}
         row.report_payload = {**pack_report(report), "is_frozen": True,
                               "frozen_at": stored["frozen_at"],
                               "source_captured_at": stored["source_captured_at"]}
@@ -168,6 +176,11 @@ async def capture_today_print_report(now: datetime | None = None) -> bool:
         # Friday's next-day meetings also come from the same frozen transaction.
         next_day = next_working_day(day)
         next_payload = await _source_payload(db, next_day) if next_day > date.fromisoformat(payload["week_end"]) else payload
+        # Capture strike evidence in the same pre-16:00 transaction. Rendering
+        # and historical reads must never query newer task or event state.
+        payload["one_h_strikes"] = await task_strike_summary(
+            db, day, payload_task_ids(payload), now=captured_at, completed_through=boundary,
+        )
 
         stored = {"target_date": day.isoformat(), "is_frozen": True,
                   "frozen_at": boundary.isoformat(), "source_captured_at": captured_at.isoformat(),

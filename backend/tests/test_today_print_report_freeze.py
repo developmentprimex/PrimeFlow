@@ -112,6 +112,7 @@ class FreezeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved.report_kind, freeze.FROZEN_KIND)
         self.assertEqual(saved.report_payload["source_captured_at"], clock(15, 59, 59).isoformat())
         self.assertTrue(saved.report_payload["frozen_attachments"])
+        self.assertEqual(saved.report_payload["one_h_strikes"]["captured_at"], clock(15, 59, 59).isoformat())
         self.assertEqual(db.commit.await_count, 2)
         self.assertNotIn("freeze_source", saved.report_payload)
 
@@ -134,6 +135,23 @@ class FreezeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(render.await_args.kwargs["payload"], {"items": {"before": []}})
         live_source.assert_not_awaited()
         self.assertNotIn("freeze_source", pending.report_payload)
+
+    async def test_frozen_total_only_includes_tasks_in_rendered_report(self):
+        shown_id, excluded_id = str(uuid.uuid4()), str(uuid.uuid4())
+        summary = {"active_slot": "16:00", "tasks": {shown_id: {"16:00": 3}, excluded_id: {"16:00": 7}}}
+        pending = row()
+        pending.report_payload = {
+            "frozen_at": clock().isoformat(), "source_captured_at": clock(15, 59, 59).isoformat(),
+            "freeze_source": {"payload": {"items": {}, "one_h_strikes": summary}, "next_day_payload": {}},
+        }
+        rendered = {**report(), "html": f'<td data-task-id="{shown_id}">Task</td><td data-task-id="{shown_id}">Repeated</td>'}
+        with patch.object(freeze, "get_one_h_print_snapshot", AsyncMock(return_value=pending)), \
+             patch.object(freeze, "build_today_print_report", AsyncMock(return_value=rendered)), \
+             patch.object(freeze, "task_strike_summary", AsyncMock()) as live_counts:
+            result = await freeze._finish_frozen_report(AsyncMock(), DAY)
+        self.assertEqual(result.report_payload["one_h_strikes"]["tasks"], {shown_id: {"16:00": 3}})
+        self.assertEqual(summary["tasks"][excluded_id]["16:00"], 7)
+        live_counts.assert_not_awaited()
 
     async def test_capture_skips_existing_archive_and_refuses_connection_delay_past_cutoff(self):
         db = AsyncMock()

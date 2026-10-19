@@ -87,12 +87,15 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
     <section className="space-y-3" aria-labelledby="m2-unfinished-priority"><h2 id="m2-unfinished-priority" className="text-lg font-bold">2. DET TE PAKRYERA, 08:00/DEADLINE/AM</h2>
       <div className="overflow-x-auto border">
         <table className="w-full min-w-[900px] border-collapse text-xs">
-          <thead className="bg-slate-100"><tr>{["NR", ...unfinishedColumns.map(([, title]) => title), "KOMENT MANUAL"].map((title) => <th key={title} className="border px-2 py-2 text-left">{title}</th>)}</tr></thead>
+          <thead className="bg-slate-100"><tr>{["NR", ...unfinishedColumns.map(([, title]) => title)].map((title) => <th key={title} className="border px-2 py-2 text-left">{title}</th>)}</tr></thead>
           <tbody>{unfinishedRows.map((row, index) => {
             const commentKey: ManualKey = `unfinished_comment:${row.task_id}`
-            const cells: React.ReactNode[] = [String(index + 1), ...unfinishedColumns.map(([field]) => String(row[field] || "—")),
-              row.task_id ? <Textarea key="manual" aria-label={`Koment manual për ${row.title}`} value={answers[commentKey] || ""} disabled={disabled} maxLength={10000}
-                className="min-h-20 min-w-[220px] bg-white text-black" placeholder="Shëno komentin." onChange={(event) => onAnswerChange(commentKey, event.target.value)} /> : "—"]
+            const cells: React.ReactNode[] = [String(index + 1), ...unfinishedColumns.map(([field]) =>
+              field === "comment" && row.task_id ? <Textarea key="comment" aria-label={`Komenti për ${row.title}`}
+                value={answers[commentKey] ?? (row.comment && !["-", "—"].includes(row.comment) ? row.comment : "")}
+                disabled={disabled} maxLength={10000} rows={1} autoResize
+                className="min-h-9 min-w-[180px] bg-white text-black" placeholder="Shëno komentin." onChange={(event) => onAnswerChange(commentKey, event.target.value)} />
+                : String(row[field] || "—"))]
             return <tr key={row.task_id || index} style={{ background: row.deadline_important ? "#dc2626" : row.status === "IN_PROGRESS" ? "#FFFF00" : "#FFC4ED", color: row.deadline_important ? "white" : "black" }}>
               {cells.map((value, columnIndex) => <td key={columnIndex} className={`border p-2 align-top ${columnIndex === 6 ? "min-w-[280px]" : columnIndex >= 8 ? "min-w-[160px] whitespace-pre-wrap break-words" : "w-px whitespace-nowrap"}`} style={row.eight_am ? {
                 borderTop: "3px solid #dc2626", borderBottom: "3px solid #dc2626",

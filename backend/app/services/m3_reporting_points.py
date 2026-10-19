@@ -466,8 +466,6 @@ def report_table_columns(key: str, movement: str = "") -> list[tuple[str, str, i
         columns += [("from", "NGA", date_width), ("to", "NE", date_width)]
     columns.append(("title", "TITULLI", 360))
     columns += [("reason", "ARSYEJA", 124), ("comment", "KOMENTI", 160)]
-    if key == "untouched":
-        columns.append(("manual_comment", "KOMENT MANUAL", 220))
     if key in {"postponed", "ga_postponed"}:
         columns.append(("risk", "VLERESIMI", 80))
         if key == "ga_postponed":
@@ -475,9 +473,15 @@ def report_table_columns(key: str, movement: str = "") -> list[tuple[str, str, i
     return columns
 
 
-def report_table_value(row: dict, column: str, index: int, kind: str, report: dict | None = None) -> Any:
-    if column == "manual_comment":
-        return (report or {}).get("manual_answers", {}).get(f"untouched_comment:{row.get('task_id')}") or "-"
+def effective_task_comment(row: dict, report: dict, prefix: str) -> str:
+    key = f"{prefix}:{row.get('task_id')}"
+    answers = report.get("manual_answers", {})
+    return (answers[key] if key in answers else row.get("comment")) or "-"
+
+
+def report_table_value(row: dict, column: str, index: int, kind: str, report: dict | None = None, section: str = "") -> Any:
+    if column == "comment" and section == "untouched":
+        return effective_task_comment(row, report or {}, "untouched_comment")
     def formatted(value):
         day = semantic_local_day(value)
         return day.strftime("%d.%m.%Y") if day else "-"
@@ -540,7 +544,7 @@ def render_html(report: dict) -> str:
                         style += f";width:{width}px"
                     if column == "risk":
                         style += ";font-weight:700;color:" + ("#7f1d1d" if row.get("risk") == "RREZIK" else "#14532d")
-                    value = _cell(report_table_value(row, column, index, kind, report))
+                    value = _cell(report_table_value(row, column, index, kind, report, key))
                     if column == "title":
                         if row.get("marker"):
                             value = (f"<strong data-task-symbol='true' style='display:inline-block;margin-right:4px;color:{'#ffffff' if row_color == '#ffffff' else '#DC2626'};font-size:1.18em;font-weight:900'>"
@@ -660,7 +664,7 @@ def render_plain_text(report: dict) -> str:
         for caption, kind, rows in task_table_groups(report["data"].get(key, []), key):
             if caption:
                 lines.append(caption)
-            lines.extend(" | ".join(f"{label}: {report_table_value(row, column, index, kind, report)}"
+            lines.extend(" | ".join(f"{label}: {report_table_value(row, column, index, kind, report, key)}"
                                     for column, label, _ in report_table_columns(key, kind))
                          for index, row in enumerate(rows, 1))
             if not rows:

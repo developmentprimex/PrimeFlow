@@ -161,8 +161,7 @@ def table_columns(key, movement=""):
         return [("nr", "NR", 28), ("assignees", "KUSH", 72), ("department", "DEP", 44),
                 ("am_pm", "AM/PM", 60), ("priority", "LLOJI", 120), ("task_type", "TIPI", 48),
                 ("title", "TITULLI", 450), ("due_label", "DUE DATE", 80),
-                ("reason", "ARSYEJA", 124), ("comment", "KOMENTI", 160),
-                ("unfinished_comment", "KOMENT MANUAL", 220)]
+                ("reason", "ARSYEJA", 124), ("comment", "KOMENTI", 180)]
     if key == "ga_progress":
         return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
                 ("project", "PRJK", 96), ("am_pm", "AM/PM", 60), ("task_type", "LLOJI", 48),
@@ -175,9 +174,9 @@ def table_columns(key, movement=""):
             ("marker", "SIMBOLI", 60), ("title", "TITULLI", 450), ("choice", "PO/JO", 50), ("answer", "PERGJIGJJA MANUALE", 300)]
 
 
-def table_value(report, row, column, index, movement):
-    if column == "unfinished_comment":
-        return report.get("manual_answers", {}).get(f"unfinished_comment:{row.get('task_id')}") or "-"
+def table_value(report, row, column, index, movement, section=""):
+    if column == "comment" and section == "unfinished_priority":
+        return m3.effective_task_comment(row, report, "unfinished_comment")
     if column == "manual_comment":
         return report.get("manual_answers", {}).get(f"postponed_comment:{row['task_id']}") or "-"
     if column == "choice":
@@ -221,9 +220,9 @@ def export_blocks(report):
                 fill, color, eight_am = m3.task_row_appearance(row)
                 cells = []
                 for column_index, (column, _, _) in enumerate(columns):
-                    value = str(table_value(report, row, column, index, movement))
+                    value = str(table_value(report, row, column, index, movement, key))
                     cell_fill, cell_color = fill, color
-                    if column in {"answer", "manual_comment", "unfinished_comment", "choice"}:
+                    if column in {"answer", "manual_comment", "choice"}:
                         cell_fill, cell_color = "#ffffff", "#000000"
                     if column == "choice" and value in {"PO", "JO"}:
                         cell_fill, cell_color = ("#16a34a" if value == "PO" else "#dc2626"), "#ffffff"

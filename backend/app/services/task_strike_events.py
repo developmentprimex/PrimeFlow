@@ -288,6 +288,20 @@ def _text_points(value: str | None, *, field_name: str) -> tuple[str, list[Strik
     return heading, points, current_done
 
 
+def count_struck_points_for_interval(
+    text: str | None, events: Iterable[TaskStrikeEvent], *,
+    interval_start: datetime, interval_end: datetime, field_name: str = "DESCRIPTION",
+) -> int:
+    """Count the blue points shown by the existing 1H interval renderer."""
+    if interval_end <= interval_start:
+        return 0
+    _, marked = render_text_for_interval(
+        text, events, interval_start=interval_start, interval_end=interval_end,
+        field_name=field_name,
+    )
+    return len(re.findall(r"\[\[done:blue\]\]", marked))
+
+
 def count_struck_points_for_day(
     text: str | None, events: Iterable[TaskStrikeEvent], *, day: date,
     field_name: str = "DESCRIPTION", allow_undated: bool = False,
