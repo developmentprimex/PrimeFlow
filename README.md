@@ -67,6 +67,13 @@ System task scheduling notes:
 
 ### 2) Frontend
 
+Private profile photo: only `42primex.eu@gmail.com` can upload, view or remove
+their photo from the account menu. Authenticated `/api/profile-photo` routes
+enforce this restriction, including for administrators. Photos are re-encoded
+without metadata and stored in `backend/private-data/profile-photos/`; preserve
+this directory across deploys and backups and do not expose it through the web
+server. No database migration is needed.
+
 ```powershell
 cd frontend
 copy .env.example .env.local

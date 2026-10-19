@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from app.api.routers.private_profile_photo import router as private_profile_photo_router
 from app.api.routers.discord_assistant import router as discord_assistant_router
 
 from app.api.routers.auth import router as auth_router
@@ -55,6 +56,7 @@ from app.api.routers.knowledge import router as knowledge_router
 
 
 api_router = APIRouter()
+api_router.include_router(private_profile_photo_router, prefix="/profile-photo", tags=["profile-photo"])
 from app.api.routers.discord_agents import router as discord_agents_router
 api_router.include_router(discord_agents_router, prefix="/discord/bot/agents", tags=["discord"])
 api_router.include_router(discord_assistant_router, prefix="/discord", tags=["discord"])
