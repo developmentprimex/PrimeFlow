@@ -77,7 +77,7 @@ Butonat kryesorë ndjekin statusin: To Do → **▶ Fillo / ✅ Mbylle**, Në pr
 **Hap PrimeFlow**. Menuja **Më shumë** ka Edito, Koment, Mbylle me koment,
 Slot/AM–PM, Konfirmim, statuset e tjera, udhëzimin AI, agjentin dhe Rifresko.
 **◀ ↩ Lista ▶** lëvizin mes detyrave të ditës. Pas mbylljes hapet vetë detyra
-tjetër; nëse mbyllja refuzohet (p.sh. kërkon koment), karta tregon arsyen.
+tjetër; nëse PrimeFlow e refuzon mbylljen, karta tregon arsyen.
 Pikat, Sloti dhe Konfirmimi hapen në të njëjtën kartë me **← Kthehu**.
 Kartat e postuara para këtij ndryshimi vazhdojnë të funksionojnë.
 
@@ -92,7 +92,10 @@ strike ruhet përmes `PATCH /ga-notes/{id}` ose `PATCH /plan-notes/{id}`, njëso
 strike manual. Këto rrugë sinkronizojnë detyrat e lidhura dhe historikun e strike-ve.
 Përshkrimet e veçanta dhe detyrat pa shënim ruajnë ndryshimet te detyra.
 Versioni përfshin tekstin e shënimit; menuja e pikave rifreskohet pas çdo ndryshimi.
-Mbyllja mund të shoqërohet me komentin e rezultatit dhe backend-i zbaton kushtet.
+Mbyllja (butoni, teksti "mbylle" ose "U krye" te raportimi) bën strike të gjitha pikat
+e hapura dhe, kur detyra nuk ka koment, shton komentin "Kryer". Për koment tjetër
+përdor **Më shumë → 📝 Mbylle me koment** ose shkruaje te mesazhi. Backend-i zbaton
+kushtet e tjera (p.sh. personi i konfirmimit).
 
 **Më shumë → 🤖 Udhëzim për AI**, mesazhet në kanal dhe `/pyet udhezimi:...` mbeten
 për kërkesa të lira. `/pyet` punon edhe pa Message Content Intent. Pyetjet sqaruese ruhen
@@ -102,7 +105,14 @@ zgjedhja e pikave vazhdon të përfshijë të gjitha pikat përmes faqeve.
 Për mesazhe të zakonshme në kanal, aktivizo **Message Content Intent** në Bot
 settings të Developer Portal dhe vendos `DISCORD_MESSAGE_CONTENT_ENABLED=true`.
 Rinis worker-in. Lejet e Discord-it për aplikacionet e mëdha mund të kërkojnë
-miratim për intent-in. Përdoruesit shkruajnë pasi kanë zgjedhur detyrën.
+miratim për intent-in.
+
+Përdoruesit mund të shkruajnë direkt, pa klikuar më parë. Detyra gjendet nga ajo që
+shohin: mesazhi i botit ku bëjnë Reply, përndryshe mesazhi i fundit i botit me detyra
+(lista, kujtesa e slotit ose karta), pastaj detyrat e tjera të ditës. "Këtë detyrë"
+është detyra e vetme e shfaqur; "detyra 2" ndjek numrat e listës; një fjalë nga titulli
+zgjedh detyrën. Kur nuk është e qartë, boti pyet dhe përgjigjja e shkurtër ("e dyta")
+e plotëson kërkesën. Rezultati shfaqet si karta e përditësuar e detyrës.
 
 Shembuj:
 
@@ -198,7 +208,10 @@ Nga e hëna në të premte, në `APP_TIMEZONE`:
 | 15:50 | Sloti 16:00 |
 | 16:05 | PM |
 
-Kujtesa e përmend personin (@) dhe liston detyrat e slotit. **📝 Fillo raportimin**
+Kujtesa e përmend personin (@) dhe liston detyrat e slotit. Te slotet 1H (jo AM/PM)
+shton "Takimi 1H fillon në …" dhe butonin **🎧 Kyçu në takimin 1H**, që hap kanalin zanor
+`DISCORD_1H_VOICE_CHANNEL_ID` (parazgjedhje: kanali 1H i serverit). Vetëm personat që kanë
+detyra në atë slot e marrin. **📝 Fillo raportimin**
 kalon detyrë pas detyre në të njëjtin mesazh me **✅ U krye / 🔵 Vazhdon / ⏸ WFE /
 ⏭ Kalo** dhe në fund lë përmbledhjen. **✅ Shëno të kryerat** mbyll disa detyra
 njëherësh. Validimet e PrimeFlow mbeten: nëse mbyllja kërkon koment ose konfirmim,

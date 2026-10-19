@@ -3,13 +3,16 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql as pg
 
-revision = "0150_discord_meeting_alerts"
-down_revision = "0149_discord_agent_runs"
+revision = "0151_discord_meeting_alerts"
+down_revision = "0150_marker_comment_inbox"
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
+    # The table may already exist if its SQL was run by hand in pgAdmin.
+    if sa.inspect(op.get_bind()).has_table("discord_meeting_alerts"):
+        return
     op.create_table("discord_meeting_alerts",
         sa.Column("id", pg.UUID(as_uuid=True), primary_key=True),
         sa.Column("link_id", pg.UUID(as_uuid=True), sa.ForeignKey("discord_links.id", ondelete="CASCADE"), nullable=False),

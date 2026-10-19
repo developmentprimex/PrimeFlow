@@ -287,6 +287,7 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
             payload.direct_actions = parsed_plan.actions
         owned = [task, {**task, "title": "Changed elsewhere"} if changed else task] + [task] * 20
         with patch.object(api, "identity", new_callable=AsyncMock, return_value=(self.link, user)), \
+             patch.object(api, "daily_tasks", new_callable=AsyncMock, return_value=[task]), \
              patch.object(api, "owned_task", new_callable=AsyncMock, side_effect=owned), \
              patch.object(tools, "user_api", side_effect=request), \
              patch.object(tools, "interpret", new_callable=AsyncMock, return_value=parsed_plan) as interpret:
@@ -366,7 +367,7 @@ class MigrationTests(unittest.TestCase):
                 revisions.add(values["revision"])
                 down = values.get("down_revision")
                 referenced.update(down if isinstance(down, tuple) else [down] if down else [])
-        self.assertEqual(revisions - referenced, {"0150_discord_meeting_alerts"})
+        self.assertEqual(revisions - referenced, {"0151_discord_meeting_alerts"})
         self.assertEqual(DiscordAction.__table__.c.id.type.length, 32)
         self.assertEqual(DiscordLink.__table__.c.channel_id.type.length, 32)
         self.assertIn("code_hash", DiscordLinkCode.__table__.c)

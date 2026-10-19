@@ -44,7 +44,7 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
         detail = {**detail_of(item), "title_points": [{"number": 1, "text": "1. STD OPEN AI API", "done": False}],
                   "description_points": [{"number": n, "text": f"{n}. " + "word " * 80, "done": False} for n in range(1, 12)]}
         embed = ui.card(item, detail=detail)
-        self.assertTrue(embed.description.startswith("⚪ To Do · Sloti 11:00 · Afati 19.10"))
+        self.assertTrue(embed.description.startswith("🟣 To Do · Sloti 11:00 · Afati 19.10"))
         self.assertNotIn("Pikat e titullit", embed.description)
         self.assertIn("11. ⬜ word", embed.description)
         self.assertNotIn("%", embed.description)
@@ -61,6 +61,25 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("19. ✅ ~~Point 19~~ · 🕘 14:20 16.10", embed.description)
         self.assertIn("20. ⬜ Point 20", embed.description)
         self.assertNotIn("pika të tjera", embed.description)
+
+    async def test_pink_todo_circle_is_uploaded_once_and_used_everywhere(self):
+        client = object.__new__(bot.PrimeFlowBot)
+        original = dict(ui.STATUS_ICONS)
+        try:
+            client.fetch_application_emojis = AsyncMock(return_value=[])
+            client.create_application_emoji = AsyncMock(return_value="<:pf_todo:42>")
+            await client.ensure_status_emojis()
+            image = client.create_application_emoji.call_args.kwargs["image"]
+            self.assertTrue(image.startswith(b"\x89PNG"))
+            self.assertIn("`1.` <:pf_todo:42> A", ui.list_view([task("A", "TODO")], "Sot")[0])
+            client.fetch_application_emojis = AsyncMock(return_value=[SimpleNamespace(name="pf_todo", __str__=None)])
+            client.create_application_emoji.reset_mock()
+            await client.ensure_status_emojis()
+            client.create_application_emoji.assert_not_called()
+            self.assertEqual(ui.status_text("DONE"), "🟢 E kryer")
+        finally:
+            ui.STATUS_ICONS.clear()
+            ui.STATUS_ICONS.update(original)
 
     def test_buttons_follow_status(self):
         def labels(status):
@@ -109,7 +128,7 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
         interaction = self.click()
         await client.quick(interaction, item["id"], "0" * 16, "progress")
         self.assertEqual(sent[0]["expected_fingerprint"], "1" * 16)
-        self.assertIn("🔵", interaction.edit_original_response.call_args.kwargs["embed"].description)
+        self.assertIn("🟡", interaction.edit_original_response.call_args.kwargs["embed"].description)
 
     def test_report_summary_uses_singular_forms(self):
         self.assertEqual(ui.report_summary("10:00", [1, 1, 0, 1]), "✓ **Sloti 10:00 u raportua** · 1 e kryer · 1 vazhdon · 1 e kaluar")
@@ -152,6 +171,18 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
         finally:
             bot.agent_client.handle_agent_interaction = original
         self.assertEqual(handler.call_args.args[2], f"pf:agent:targets:{item_id}:{'f' * 16}")
+
+    def test_slot_reminder_calls_people_into_the_1h_meeting(self):
+        url = bot.PrimeFlowBot.one_h_url("11:00", 1493866119700807722)
+        self.assertEqual(url, "https://discord.com/channels/1493866119700807722/1493866120338477119")
+        self.assertIsNone(bot.PrimeFlowBot.one_h_url("AM", 1))
+        content, view = ui.report_intro("11:00", [task("A")], str(uuid.uuid4()), "3", join_url=url)
+        self.assertIn("Takimi 1H fillon në 11:00", content)
+        button = next(item for item in view.children if getattr(item, "url", None))
+        self.assertEqual((button.label, button.url, button.row), ("🎧 Kyçu në takimin 1H", url, 0))
+        content, view = ui.report_intro("PM", [task("A")], str(uuid.uuid4()), "3")
+        self.assertNotIn("1H", content)
+        self.assertFalse(any(getattr(item, "url", None) for item in view.children))
 
     def test_report_controls_fit_discord_and_mention_user(self):
         rid = str(uuid.uuid4())

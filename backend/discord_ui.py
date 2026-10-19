@@ -20,9 +20,13 @@ POINTS_SHOWN = 25
 STRIKE_TIME = re.compile(r"\s+(\d{2}:\d{2}\s+\d{2}\.\d{2})\s*$")
 STATUS_LABELS = {"TODO": "To Do", "IN_PROGRESS": "Në progres", "WAITING_CLIENT": "WFE",
                  "WAITING_CONFIRMATION": "Në konfirmim", "DONE": "E kryer"}
-STATUS_ICONS = {"TODO": "⚪", "IN_PROGRESS": "🔵", "WAITING_CLIENT": "🟡", "WAITING_CONFIRMATION": "🟣", "DONE": "✅"}
-STATUS_COLORS = {"TODO": 0x64748B, "IN_PROGRESS": 0x3B82F6, "WAITING_CLIENT": 0xD4A017,
-                 "WAITING_CONFIRMATION": 0xA855F7, "DONE": 0x22C55E}
+# PrimeFlow's status colours: To Do pink, In progress yellow, Done green, WFE gold,
+# confirmation peach. Discord has no pink circle emoji: the bot uploads its own
+# (see pink_circle_png) and replaces the To Do placeholder once it is ready.
+TODO_PINK = 0xFFC4ED
+STATUS_ICONS = {"TODO": "🟣", "IN_PROGRESS": "🟡", "WAITING_CLIENT": "🟠", "WAITING_CONFIRMATION": "⚪", "DONE": "🟢"}
+STATUS_COLORS = {"TODO": TODO_PINK, "IN_PROGRESS": 0xFFFF00, "WAITING_CLIENT": 0xE2C15B,
+                 "WAITING_CONFIRMATION": 0xFFEDD5, "DONE": 0xC4FDC4}
 MARKER = re.compile(r"\[\[\s*/?\s*(?:added|done)(?::(?:blue|green|grey))?\s*\]\]", re.I)
 # The few buttons that fit the task's current status; everything else lives in "Më shumë".
 PRIMARY = {"TODO": [("▶ Fillo", "progress", discord.ButtonStyle.primary), ("✅ Mbylle", "done", discord.ButtonStyle.success)],
@@ -31,8 +35,8 @@ PRIMARY = {"TODO": [("▶ Fillo", "progress", discord.ButtonStyle.primary), ("�
            "WAITING_CONFIRMATION": [("▶ Në progres", "progress", discord.ButtonStyle.secondary)],
            "DONE": [("↺ Rihap", "todo", discord.ButtonStyle.secondary)]}
 MORE = [("📄 Teksti i plotë", "full"), ("✏️ Edito", "edit"), ("💬 Koment", "comment"), ("📝 Mbylle me koment", "done_comment"),
-        ("🕐 Slot / AM–PM", "schedule"), ("👤 Dërgo për konfirmim", "confirm"), ("⚪ To Do", "todo"),
-        ("🔵 Në progres", "progress"), ("🟡 WFE", "wfe"), ("🤖 Udhëzim për AI", "ai"), ("🧠 Delegoja agjentit", "agent"),
+        ("🕐 Slot / AM–PM", "schedule"), ("👤 Dërgo për konfirmim", "confirm"), ("To Do", "todo"),
+        ("Në progres", "progress"), ("WFE", "wfe"), ("🤖 Udhëzim për AI", "ai"), ("🧠 Delegoja agjentit", "agent"),
         ("📚 Rezultatet AI", "history"), ("🔄 Rifresko", "refresh")]
 STATUS_ACTIONS = {"todo": "TODO", "progress": "IN_PROGRESS", "wfe": "WAITING_CLIENT"}
 
@@ -66,8 +70,31 @@ def formatted(value: str | None) -> str:
     return readable(value)
 
 
+def icon(status: str | None) -> str:
+    return STATUS_ICONS.get(status) or STATUS_ICONS["TODO"]
+
+
+def pink_circle_png(size: int = 64) -> bytes:
+    """A smooth To Do pink circle as PNG, built without image libraries."""
+    import struct
+    import zlib
+    red, green, blue = TODO_PINK >> 16 & 255, TODO_PINK >> 8 & 255, TODO_PINK & 255
+    centre, radius = (size - 1) / 2, size / 2 - 1
+    raw = bytearray()
+    for y in range(size):
+        raw.append(0)
+        for x in range(size):
+            alpha = max(0.0, min(1.0, radius - ((x - centre) ** 2 + (y - centre) ** 2) ** 0.5 + 0.5))
+            raw += bytes((red, green, blue, round(alpha * 255)))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b""))
+
+
 def status_text(status: str | None) -> str:
-    return f"{STATUS_ICONS.get(status, '⚪')} {STATUS_LABELS.get(status, status or '—')}"
+    return f"{icon(status)} {STATUS_LABELS.get(status, status or '—')}"
 
 
 def summary(task: dict) -> str:
@@ -204,7 +231,8 @@ def controls(task_id: str, fingerprint: str, status: str | None = None) -> disco
     view.add_item(discord.ui.Button(label="Hap PrimeFlow", url=task_url(task_id), row=0))
     hidden = {action for _, action, _ in primary} | {action for action, value in STATUS_ACTIONS.items() if value == status}
     view.add_item(discord.ui.Select(custom_id=f"pf:more:{task_id}:{fingerprint}", row=1, placeholder="Më shumë…",
-        options=[discord.SelectOption(label=text, value=value) for text, value in MORE if value not in hidden]))
+        options=[discord.SelectOption(label=text, value=value, emoji=icon(STATUS_ACTIONS[value]) if value in STATUS_ACTIONS else None)
+                 for text, value in MORE if value not in hidden]))
     for text, direction in (("◀", "prev"), ("↩ Lista", "list"), ("▶", "next")):
         view.add_item(discord.ui.Button(label=text, custom_id=f"pf:nav:{task_id}:{direction}", row=2))
     return view
@@ -222,7 +250,7 @@ def list_view(task_list: list[dict], title: str, page: int = 0):
     page = min(max(page, 0), pages - 1)
     offset = page * LIST_PER_PAGE
     chunk = task_list[offset:offset + LIST_PER_PAGE]
-    lines = [f"`{offset + i}.` {STATUS_ICONS.get(task.get('status'), '⚪')} {discord.utils.escape_markdown(label(heading(task), 70))}"
+    lines = [f"`{offset + i}.` {icon(task.get('status'))} {discord.utils.escape_markdown(label(heading(task), 70))}"
              for i, task in enumerate(chunk, 1)]
     content = f"**{title}** · {len(task_list)}" + (f" · faqja {page + 1}/{pages}" if pages > 1 else "") + "\n" + "\n".join(lines)
     view = discord.ui.View(timeout=None)
@@ -238,15 +266,19 @@ def bucket_name(bucket: str) -> str:
     return f"Raportimi {bucket}" if bucket in {"AM", "PM"} else f"Sloti {bucket}"
 
 
-def report_intro(bucket: str, task_list: list[dict], reminder_id: str, user_id: str | None = None, notice: str | None = None):
-    lines = [f"`{i}.` {STATUS_ICONS.get(task.get('status'), '⚪')} {discord.utils.escape_markdown(label(heading(task), 70))}"
+def report_intro(bucket: str, task_list: list[dict], reminder_id: str, user_id: str | None = None, notice: str | None = None,
+                 join_url: str | None = None):
+    lines = [f"`{i}.` {icon(task.get('status'))} {discord.utils.escape_markdown(label(heading(task), 70))}"
              for i, task in enumerate(task_list[:25], 1)]
     content = ((f"<@{user_id}> " if user_id else "") + f"⏰ **{bucket_name(bucket)}** · {len(task_list)} detyra\n"
+               + (f"🎧 **Takimi 1H fillon në {bucket}.** Kyçu në kanalin 1H.\n" if join_url else "")
                + (notice + "\n" if notice else "") + "\n".join(lines))
     view = discord.ui.View(timeout=None)
     rid = uuid.UUID(str(reminder_id)).hex
     view.add_item(discord.ui.Button(label="📝 Fillo raportimin", style=discord.ButtonStyle.primary, row=0,
         custom_id=f"pf:rep:{rid}:-:0.0.0.0:go"))
+    if join_url:
+        view.add_item(discord.ui.Button(label="🎧 Kyçu në takimin 1H", url=join_url, row=0))
     view.add_item(discord.ui.Select(custom_id=f"pf:repdone:{rid}", row=1, placeholder="✅ Shëno të kryerat (një ose disa)…",
         min_values=1, max_values=min(len(task_list), 25), options=[discord.SelectOption(
             label=f"{i}. {label(heading(task), 90)}"[:100], value=task["id"]) for i, task in enumerate(task_list[:25], 1)]))
@@ -257,7 +289,7 @@ def report_step(bucket: str, task: dict, reminder_id: str, counts: list[int], po
     rid, tid = uuid.UUID(str(reminder_id)).hex, uuid.UUID(str(task["id"])).hex
     state = ".".join(map(str, counts))
     view = discord.ui.View(timeout=None)
-    for text, action, style in (("✅ U krye", "done", discord.ButtonStyle.success), ("🔵 Vazhdon", "cont", discord.ButtonStyle.primary),
+    for text, action, style in (("✅ U krye", "done", discord.ButtonStyle.success), ("🟡 Vazhdon", "cont", discord.ButtonStyle.primary),
                                 ("⏸ WFE", "wfe", discord.ButtonStyle.secondary), ("⏭ Kalo", "skip", discord.ButtonStyle.secondary)):
         view.add_item(discord.ui.Button(label=text, style=style, row=0, custom_id=f"pf:rep:{rid}:{tid}:{state}:{action}"))
     view.add_item(discord.ui.Button(label="📂 Hap detyrën", row=1, custom_id=f"pf:open:{task['id']}:new"))

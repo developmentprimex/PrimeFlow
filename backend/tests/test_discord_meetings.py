@@ -100,7 +100,7 @@ class MeetingMessageTests(unittest.IsolatedAsyncioTestCase):
     def test_migration_creates_every_model_column(self):
         from app.models.discord_assistant import DiscordMeetingAlert
         from pathlib import Path
-        source = (Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0150_discord_meeting_alerts.py").read_text(encoding="utf-8")
+        source = (Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0151_discord_meeting_alerts.py").read_text(encoding="utf-8")
         for column in DiscordMeetingAlert.__table__.c:
             self.assertIn(f'"{column.name}"', source)
         self.assertIn("uq_discord_meeting_alert", source)

@@ -66,6 +66,32 @@ def task_view(task_id: str, fingerprint: str = "", status: str | None = None) ->
     return ui.controls(task_id, fingerprint, status)
 
 
+def task_ids_in(message) -> list[str]:
+    """Task ids behind a bot message's buttons and menus, in the order shown."""
+    ids = []
+
+    def add(value):
+        try:
+            value = str(uuid.UUID(str(value)))
+        except ValueError:
+            return
+        if value not in ids:
+            ids.append(value)
+    for row in getattr(message, "components", None) or []:
+        for item in getattr(row, "children", None) or []:
+            custom_id = getattr(item, "custom_id", None) or ""
+            parts = custom_id.split(":")
+            if custom_id == "pf:task" or custom_id.startswith("pf:repdone:"):
+                for option in item.options:
+                    add(option.value)
+            elif custom_id.startswith("pf:rep:") and len(parts) > 3:
+                add(parts[3])
+            elif parts[:2] in (["pf", "open"], ["pf", "quick"], ["pf", "more"], ["pf", "nav"], ["pf", "back"],
+                               ["pf", "pointset"], ["pf", "points"], ["pf", "schedule"], ["pf", "confirm"]) and len(parts) > 2:
+                add(parts[2])
+    return ids
+
+
 def in_place(interaction) -> bool:
     """True when the click was acknowledged by editing its own message."""
     try:
@@ -190,7 +216,19 @@ class PrimeFlowBot(discord.Client):
             await channel.edit(overwrites=expected, reason="PrimeFlow personal channel privacy")
         return channel
 
+    async def ensure_status_emojis(self):
+        """Upload the pink To Do circle once as an application emoji and use it everywhere."""
+        try:
+            emoji = next((item for item in await self.fetch_application_emojis() if item.name == "pf_todo"), None)
+            if emoji is None:
+                emoji = await self.create_application_emoji(name="pf_todo", image=ui.pink_circle_png())
+            ui.STATUS_ICONS["TODO"] = str(emoji)
+        except (discord.HTTPException, discord.DiscordException) as exc:
+            # Cosmetic only: the purple fallback keeps everything working.
+            log.warning("Pink To Do emoji unavailable, using the fallback: %s", type(exc).__name__)
+
     async def setup_hook(self):
+        await self.ensure_status_emojis()
         guild = discord.Object(id=int(settings.DISCORD_GUILD_ID))
 
         @self.tree.command(name="lidh", description="Lidhe llogarinë personale PrimeFlow me kod njëpërdorimësh", guild=guild)
@@ -526,7 +564,8 @@ class PrimeFlowBot(discord.Client):
         notice = "\n".join([f"✅ U mbyllën {closed}"] + refused)
         remaining = (await self.bridge(f"/bot/reminders/{reminder_id}/tasks", identity))["tasks"]
         if remaining:
-            content, view = ui.report_intro(data["bucket"], remaining, reminder_id, notice=notice)
+            content, view = ui.report_intro(data["bucket"], remaining, reminder_id, notice=notice,
+                join_url=self.one_h_url(data["bucket"], interaction.guild_id))
             await interaction.edit_original_response(content=content, embed=None, view=view)
         else:
             await interaction.edit_original_response(content=notice + "\n" + ui.report_summary(data["bucket"], [closed, 0, 0, 0]), embed=None,
@@ -622,6 +661,22 @@ class PrimeFlowBot(discord.Client):
             else:
                 await interaction.response.send_message(self.error_message(exc), ephemeral=True)
 
+    async def context_task_ids(self, message) -> list[str]:
+        """Tasks the person is looking at: the bot message they replied to,
+        otherwise the latest bot list, card or reminder in the channel."""
+        try:
+            reference = getattr(message, "reference", None)
+            if reference and reference.message_id:
+                source = reference.resolved if isinstance(reference.resolved, discord.Message) else await message.channel.fetch_message(reference.message_id)
+                if source.author.id == self.user.id:
+                    return task_ids_in(source)
+            async for item in message.channel.history(limit=15, before=message):
+                if item.author.id == self.user.id and (ids := task_ids_in(item)):
+                    return ids
+        except discord.HTTPException:
+            log.warning("Could not read recent messages for task context")
+        return []
+
     async def on_message(self, message: discord.Message):
         if not settings.DISCORD_MESSAGE_CONTENT_ENABLED or message.author.bot or not message.guild or not message.content.strip():
             return
@@ -631,12 +686,16 @@ class PrimeFlowBot(discord.Client):
             channel = await self.private_channel(message.guild.id, message.channel.id, message.author.id)
             async with channel.typing():
                 result = await self.bridge("/bot/command", {**actor(message.author.id, message.guild.id, channel.id),
-                    "request_id": str(message.id), "instruction": message.content[:4000]})
+                    "request_id": str(message.id), "instruction": message.content[:4000],
+                    "context_task_ids": await self.context_task_ids(message)})
             text = result["message"]
             if result.get("applied"):
                 text += "\nU zbatuan: " + "; ".join(result["applied"])
-            if result.get("task"):
-                text += "\nStatusi: " + ui.status_text(result["task"]["status"])
+            if result.get("task") and result.get("fingerprint"):
+                # Show the result as the task card, so strikes and status are visible at once.
+                await channel.send((("✓ " if result.get("status") == "DONE" else "⚠ ") + text)[:1800], embed=ui.card(result["task"], detail=result),
+                    view=task_view(result["task"]["id"], result["fingerprint"], result["task"].get("status")))
+                return
             if result.get("url"):
                 text += "\n" + result["url"]
             for part in chunks(text):
@@ -674,7 +733,8 @@ class PrimeFlowBot(discord.Client):
                         if job.get("previous"):
                             await self.retire_reminder(channel, job["previous"])
                         if data["tasks"]:
-                            text, view = ui.report_intro(job["bucket"], data["tasks"], job["id"], job["discord_user_id"])
+                            text, view = ui.report_intro(job["bucket"], data["tasks"], job["id"], job["discord_user_id"],
+                                join_url=self.one_h_url(job["bucket"], job["guild_id"]))
                             # Discord deduplicates the same nonce on a retried
                             # send. The key survives worker/API restarts.
                             nonce = hashlib.sha256(f"{job['id']}:0".encode()).hexdigest()[:24]
@@ -688,6 +748,14 @@ class PrimeFlowBot(discord.Client):
             await asyncio.gather(*(deliver(job) for job in jobs))
         except Exception as exc:
             log.warning("Reminder polling failed: %s", type(exc).__name__)
+
+    @staticmethod
+    def one_h_url(bucket, guild_id) -> str | None:
+        """Slot reminders (not AM/PM) call the people with 1H tasks into the 1H meeting."""
+        channel_id = settings.DISCORD_1H_VOICE_CHANNEL_ID
+        if bucket in {"AM", "PM"} or not channel_id:
+            return None
+        return f"https://discord.com/channels/{guild_id}/{channel_id}"
 
     def voice_url(self, guild_id) -> str | None:
         """The configured meeting voice room, otherwise the server's first voice channel."""
