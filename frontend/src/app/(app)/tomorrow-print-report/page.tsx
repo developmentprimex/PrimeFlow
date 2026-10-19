@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
+import { useMarkerComments } from "@/components/marker-comments-context"
 import { reportTaskUsers, reportSummaryUser, reportUserOptions, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
 
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
@@ -191,6 +192,9 @@ export function PrintReportPage({
   const API = today ? "/today-print-report" : "/tomorrow-print-report"
   const reportName = today ? "1H SHTYPI SOT (Shiko simbolet)" : "1H SHTYPI NESER (Shiko simbolet)"
   const { apiFetch, user, loading: authLoading } = useAuth()
+  const markerComments = useMarkerComments()
+  const markerCommentsRef = React.useRef(markerComments)
+  React.useEffect(() => { markerCommentsRef.current = markerComments }, [markerComments])
   const [settings, setSettings] = React.useState<SettingsState | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState({ to: "", cc: "", bcc: "" })
   const [preview, setPreview] = React.useState<Preview | null>(null)
@@ -211,6 +215,32 @@ export function PrintReportPage({
   const [sending, setSending] = React.useState(false)
   const [generatingAction, setGeneratingAction] = React.useState<"generate" | null>(null)
   const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
+  const syncPreviewCommentAttention = React.useCallback(() => {
+    const frameDocument = previewFrameRef.current?.contentDocument
+    if (!frameDocument) return
+    frameDocument.querySelectorAll<HTMLElement>('[data-task-marker-comment="true"]').forEach((block) => {
+      const cell = block.closest<HTMLElement>("td[data-task-id]")
+      const taskId = cell?.dataset.taskId
+      const item = taskId ? markerComments?.byTask.get(taskId) : undefined
+      const unread = Boolean(item && !item.read_at && item.comment.trim() === block.title.trim())
+      block.querySelector('[data-marker-comment-new="true"]')?.remove()
+      if (unread) {
+        const label = frameDocument.createElement("strong")
+        label.dataset.markerCommentNew = "true"
+        label.textContent = "E RE · "
+        label.style.color = "#FEF08A"
+        block.prepend(label)
+      }
+      block.style.boxShadow = unread ? "0 0 0 2px #93C5FD" : "none"
+      block.style.cursor = "pointer"
+      block.setAttribute("role", "button")
+      block.tabIndex = 0
+      block.setAttribute("aria-label", `${unread ? "Koment i palexuar. " : ""}${block.title}`)
+      block.onclick = (event) => { event.preventDefault(); event.stopPropagation(); markerComments?.openTask(taskId, block.title) }
+      block.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); markerComments?.openTask(taskId, block.title) } }
+    })
+  }, [markerComments])
+  React.useEffect(() => { syncPreviewCommentAttention() }, [syncPreviewCommentAttention])
   const [previewFilterContainer, setPreviewFilterContainer] = React.useState<HTMLElement | null>(null)
   const markerModalCleanupRef = React.useRef<(() => void) | null>(null)
   const observedTodayDateRef = React.useRef("")
@@ -754,6 +784,7 @@ export function PrintReportPage({
           resizeMarkerSelect(nextValue, Boolean(updated.one_h_marker_by_ga))
           updateCommentButton(nextValue, updated.one_h_marker_comment || "")
           updateCommentBlock(updated.one_h_marker_comment || "")
+          window.dispatchEvent(new Event("primeflow:task-marker-updated"))
           taskMarkerOptions.forEach((option, index) => {
             const element = select.options[index + 1]
             if (element) {
@@ -779,6 +810,7 @@ export function PrintReportPage({
         const marker = cell.dataset.taskMarker || ""
         if (!marker || select.disabled) return
         const value = cell.dataset.taskMarkerComment || ""
+        markerCommentsRef.current?.markTaskRead(taskId, value)
         const nextComment = await openMarkerCommentModal(value)
         if (nextComment === null || nextComment.trim() === value.trim()) return
         select.disabled = true
@@ -796,6 +828,7 @@ export function PrintReportPage({
           select.title = savedComment || "Task marker"
           updateCommentButton(marker, savedComment)
           updateCommentBlock(savedComment)
+          window.dispatchEvent(new Event("primeflow:task-marker-updated"))
           toast.success("Symbol comment updated")
         } catch (error) {
           toast.error("Symbol comment update failed", { description: String(error) })
@@ -957,6 +990,7 @@ export function PrintReportPage({
           })
           applyReportIntroVisibility()
           setupPreviewMarkerControls()
+          syncPreviewCommentAttention()
           setupPreviewFilters()
         }}
         title={`${reportName} generated email`}

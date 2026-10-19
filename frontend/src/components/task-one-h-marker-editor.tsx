@@ -4,6 +4,7 @@ import * as React from "react"
 import { toast } from "sonner"
 import { MessageCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useMarkerComments } from "@/components/marker-comments-context"
 import { useAuth } from "@/lib/auth"
 import type { Task } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -32,6 +33,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   className?: string
 }) {
   const { apiFetch, user } = useAuth()
+  const comments = useMarkerComments()
   const [value, setValue] = React.useState<TaskMarker | typeof NONE>(marker || NONE)
   const [byGa, setByGa] = React.useState(Boolean(markerByGa))
   const [comment, setComment] = React.useState(markerComment || "")
@@ -39,6 +41,8 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   const [pendingMarker, setPendingMarker] = React.useState<TaskMarker | null>(null)
   const [commentOpen, setCommentOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const inboxItem = taskId ? comments?.byTask.get(taskId) : undefined
+  const appliedInboxRevision = React.useRef<string | null>(null)
   const hasComment = Boolean(comment.trim())
   const wrapperPositionClasses = ["order-last", "ml-auto", "shrink-0"]
     .filter((token) => className?.split(/\s+/).includes(token))
@@ -57,6 +61,14 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   React.useEffect(() => setValue(marker || NONE), [marker])
   React.useEffect(() => setByGa(Boolean(markerByGa)), [markerByGa])
   React.useEffect(() => { setComment(markerComment || ""); setDraftComment(markerComment || "") }, [markerComment])
+  React.useEffect(() => {
+    if (!inboxItem || saving || commentOpen || appliedInboxRevision.current === inboxItem.revision) return
+    appliedInboxRevision.current = inboxItem.revision
+    setValue(inboxItem.marker as TaskMarker)
+    setByGa(Boolean(inboxItem.marker_by_ga))
+    setComment(inboxItem.comment)
+    setDraftComment(inboxItem.comment)
+  }, [inboxItem, saving, commentOpen])
   React.useEffect(() => {
     if (!taskId || !marker || (markerByGa !== undefined && markerComment !== undefined)) return
     let active = true
@@ -137,7 +149,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
           )}
           title={hasComment ? comment : "Add symbol comment"}
           aria-label={hasComment ? "View symbol comment" : "Add symbol comment"}
-          onClick={() => { setPendingMarker(value); setDraftComment(comment); setCommentOpen(true) }}
+          onClick={() => { setPendingMarker(value); setDraftComment(comment); setCommentOpen(true); if (taskId && hasComment) comments?.markTaskRead(taskId, comment) }}
         >
           <MessageCircle className={hasComment ? "h-4 w-4" : "h-3 w-3"} strokeWidth={hasComment ? 3 : 2.5} aria-hidden="true" />
         </button>

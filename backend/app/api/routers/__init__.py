@@ -15,6 +15,7 @@ from app.api.routers.microsoft import router as microsoft_router
 from app.api.routers.meetings import router as meetings_router
 from app.api.routers.meeting_scheduler import router as meeting_scheduler_router
 from app.api.routers.notifications import router as notifications_router
+from app.api.routers.marker_comments import router as marker_comments_router
 from app.api.routers.planners import router as planners_router
 from app.api.routers.reports import router as reports_router
 from app.api.routers.project_members import router as project_members_router
@@ -73,6 +74,7 @@ api_router.include_router(microsoft_router, prefix="/microsoft", tags=["microsof
 api_router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
 api_router.include_router(meeting_scheduler_router, prefix="/meeting-scheduler", tags=["meeting-scheduler"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(marker_comments_router, prefix="/marker-comments", tags=["marker-comments"])
 api_router.include_router(planners_router, prefix="/planners", tags=["planners"])
 api_router.include_router(reports_router, prefix="/reports", tags=["reports"])
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])

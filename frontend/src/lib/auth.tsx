@@ -410,14 +410,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           notification_type?: string
           title?: string
           body?: string
-          data?: { open_url?: string }
+          data?: { open_url?: string; kind?: string }
         }
         if (msg.type === "notification") {
           const openUrl = msg.data?.open_url
           toast(msg.title || "Notification", {
             description: msg.body || undefined,
             action: openUrl ? {
-              label: "Open Meeting",
+              label: msg.data?.kind?.startsWith("task_marker") ? "Hap" : "Open Meeting",
               onClick: () => {
                 if (msg.notification_type === "reminder") stopActiveMeetingAlarm()
                 window.open(openUrl, "_blank", "noopener,noreferrer")
