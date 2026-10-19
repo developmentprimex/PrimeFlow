@@ -112,7 +112,8 @@ async def meeting_draft_reply(db: AsyncSession, link: DiscordLink, user: User, p
         await db.commit()
         return {"message": question, "status": "QUESTION"}
     participant_ids = list(dict.fromkeys(draft.participant_ids))
-    title = (draft.title or ("TAK INT" if draft.meeting_type == "internal" else "TAK EXT")).strip()[:200]
+    # Meeting titles in PrimeFlow are written in capitals.
+    title = (draft.title or ("TAK INT" if draft.meeting_type == "internal" else "TAK EXT")).strip().upper()[:200]
     url = draft.meeting_url if (draft.meeting_url or "").startswith("https://") else None
     body = {"title": title if len(title) >= 2 else "TAK INT", "meeting_type": draft.meeting_type, "starts_at": starts_at.isoformat(),
             "platform": (draft.platform or None) and draft.platform[:100], "meeting_url": url,

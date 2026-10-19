@@ -60,6 +60,11 @@ class MeetingDraftTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored.result["meeting"]["department_id"], str(DEPARTMENT))
         self.assertEqual(stored.result["meeting"]["participant_ids"], [ME, ENDI, RINESA])
 
+    async def test_title_is_always_in_capitals(self):
+        reply, _ = await self.reply("krijo tak int: takim intern test", draft(title="takim intern test"))
+        self.assertEqual(reply["meeting"]["title"], "TAKIM INTERN TEST")
+        self.assertEqual(self.added[0].result["meeting"]["title"], "TAKIM INTERN TEST")
+
     async def test_missing_time_is_asked_and_the_answer_continues_the_draft(self):
         reply, _ = await self.reply("krijo tak int me endi", draft(question="Në çfarë ore?", starts_at=None))
         self.assertEqual(reply, {"message": "Në çfarë ore?", "status": "QUESTION"})
