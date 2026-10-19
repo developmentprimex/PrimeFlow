@@ -8,7 +8,7 @@ const source = readFileSync(new URL("../src/lib/useVoiceAssistant.ts", import.me
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
 const flush = () => new Promise(resolve => setImmediate(resolve))
 
-function harness({ apiFetch = async () => new Response("sdp-answer"), getUserMedia } = {}) {
+function harness({ apiFetch = async () => new Response("sdp-answer"), getUserMedia, options } = {}) {
   const slots = [], cleanups = [], sent = [], requests = [], refreshes = []
   let cursor = 0, first = true, peer, stopped = false
   const track = { enabled: true, stop() { stopped = true } }
@@ -53,7 +53,7 @@ function harness({ apiFetch = async () => new Response("sdp-answer"), getUserMed
   })
   return {
     sent, requests, refreshes, track, stream,
-    render() { cursor = 0; const result = loadedModule.exports.useVoiceAssistant(); first = false; return result },
+    render() { cursor = 0; const result = loadedModule.exports.useVoiceAssistant(options); first = false; return result },
     open() { peer.dc.readyState = "open"; peer.dc.onopen() },
     emit(event) { peer.dc.onmessage({ data: JSON.stringify(event) }) },
     stopped: () => stopped,
@@ -61,6 +61,25 @@ function harness({ apiFetch = async () => new Response("sdp-answer"), getUserMed
     timerCount: () => timers.size,
   }
 }
+
+test("PX Notes starts listening without a spoken greeting and uses local editor tools silently", async () => {
+  let edited = false
+  const h = harness({ options: { mode: "px_notes", onToolCall: async name => {
+    assert.equal(name, "notes_edit")
+    edited = true
+    return { success: true, silent: true }
+  } } })
+  await h.render().start(); h.open()
+  assert.equal(JSON.parse(h.requests[0][1].body).mode, "px_notes")
+  assert.equal(h.sent.length, 0)
+  h.emit({ type: "response.done", response: { output: [{ type: "function_call", call_id: "edit", name: "notes_edit", arguments: "{}" }] } })
+  await flush()
+  assert.equal(edited, true)
+  assert.equal(h.requests.length, 1)
+  assert.equal(h.sent.at(-1).item.type, "function_call_output")
+  assert.equal(h.render().phase, "listening")
+  h.unmount()
+})
 
 test("connects through our authenticated backend, greets, mutes and releases the microphone", async () => {
   const h = harness()

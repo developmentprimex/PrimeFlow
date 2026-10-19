@@ -144,6 +144,16 @@ and `cd frontend; npm run test:voice`.
 API references: [WebRTC sessions](https://developers.openai.com/api/docs/guides/voice-webrtc?api=realtime)
 and [Realtime function tools](https://developers.openai.com/api/docs/guides/realtime-mcp).
 
+In **PX Notes**, **Mira · Start** is also available directly in New Note and
+Edit Note. This mode starts listening silently and edits the open draft:
+“shkruaje këtë Note…”, “rresht i ri”, “shto një pikë…”, “vendose pikën e tretë
+të parën”, “hap Note 3”, and “ruaje”. Notes are numbered using the current
+filtered row order. Point moves preserve completion marks and metadata footer
+lines. Dictation and formatting stay local until an explicit save command;
+switching Notes refuses to discard unsaved work. Existing-note voice saves use
+the version-checked task-bundle API, including PX JAV Notes. No new API key or
+database migration is required. Test both voice modes with `npm run test:voice`.
+
 ## MCP for ChatGPT / Codex
 
 Personal Discord assistant setup, supported task actions, reminder schedule and

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +20,7 @@ router = APIRouter()
 class SessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sdp: str = Field(min_length=10, max_length=100000)
+    mode: Literal["tasks", "px_notes"] = "tasks"
 
 
 @router.post("/session")
@@ -31,7 +33,7 @@ async def create_session(payload: SessionRequest, user=Depends(get_current_user)
                 "https://api.openai.com/v1/realtime/calls",
                 headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}",
                          "OpenAI-Safety-Identifier": hashlib.sha256(str(user.id).encode()).hexdigest()},
-                files={"sdp": (None, payload.sdp), "session": (None, json.dumps(voice.session_config(user)))},
+                files={"sdp": (None, payload.sdp), "session": (None, json.dumps(voice.session_config(user, mode=payload.mode)))},
             )
     except httpx.RequestError:
         raise HTTPException(502, "Nuk u lidhëm me shërbimin zanor. Provo përsëri.")
