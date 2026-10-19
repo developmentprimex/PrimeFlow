@@ -27,7 +27,7 @@ function load(relativePath, mockContextHook = false) {
   const localRequire = name => {
     if (name === "react") return { ...React, useContext: () => context, useState: initial => React.useState(Array.isArray(initial) ? teamItems : initial) }
     if (name === "next/navigation") return { usePathname: () => pathname, useSearchParams: () => new URLSearchParams(searchParams), useRouter: () => ({ replace: noop }) }
-    if (name === "next/link") return { __esModule: true, default: ({ children, href }) => React.createElement("a", { href }, children) }
+    if (name === "next/link") return { __esModule: true, default: ({ children, ...props }) => React.createElement("a", props, children) }
     if (name === "@/components/marker-comments-context") {
       if (mockContextHook) return { useMarkerComments: () => context }
       return load("../src/components/marker-comments-context.tsx")
@@ -56,6 +56,7 @@ function load(relativePath, mockContextHook = false) {
 const { TaskMarkerComment } = load("../src/components/task-marker-comment.tsx", true)
 const { MarkerCommentsPanel } = load("../src/components/marker-comments-context.tsx")
 const { default: CommentsPage } = load("../src/app/(app)/comments/page.tsx")
+const { TeamMarkerCommentsButton } = load("../src/components/team-marker-comments-button.tsx")
 function setContext(values = [item]) {
   context = {
     items: values, unread: values.filter(item => !item.read_at),
@@ -171,4 +172,20 @@ test("new symbols without comments show unread with recipient initials and full 
   assert.match(html, />E RE<\/span>/)
   assert.match(html, /title="Elsa Ferati"[^>]*>EF<\/span>/)
   assert.match(html, /title="Rinesa Ahmedi"[^>]*>RA<\/span>/)
+})
+
+test("PX Notes opens everyone's comments and its button reflects team unread state, not personal unread state", () => {
+  setContext([])
+  try {
+    teamItems = [{ ...item, is_mine: false, can_mark_read: false, recipient_count: 2, read_count: 1, all_read: false }]
+    let html = renderToStaticMarkup(React.createElement(TeamMarkerCommentsButton))
+    assert.match(html, /href="\/comments\?scope=all&amp;read=all"/)
+    assert.match(html, /bg-\[#0055FF\] text-white/)
+    assert.match(html, /Komentet e të gjithëve, 1 të palexuara/)
+    teamItems = [{ ...teamItems[0], all_read: true, read_count: 2 }]
+    html = renderToStaticMarkup(React.createElement(TeamMarkerCommentsButton))
+    assert.match(html, /border-blue-300 bg-white text-blue-700/)
+    assert.doesNotMatch(html, /bg-\[#0055FF\]/)
+    assert.match(html, /Komentet e të gjithëve, 0 të palexuara/)
+  } finally { teamItems = [] }
 })

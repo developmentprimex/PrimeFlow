@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
+import { TeamMarkerCommentsButton } from "@/components/team-marker-comments-button"
 import { KNOWLEDGE_CONFIG, knowledgeText } from "@/components/knowledge/knowledge-config"
 import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/prompt-link"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
@@ -3917,8 +3918,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle className="text-sm">Notes</CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
+            <TeamMarkerCommentsButton />
             <Button
               type="button"
               variant="outline"
@@ -3931,6 +3934,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
             >
               Legjenda <span className="text-base leading-none" aria-hidden="true">{showLegend ? "−" : "+"}</span>
             </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">

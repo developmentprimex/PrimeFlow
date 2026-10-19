@@ -8,6 +8,7 @@ const files = [
   'src/app/(app)/layout.tsx', 'src/app/(app)/tomorrow-print-report/page.tsx',
   'src/components/comment-task-edit-dialog.tsx', 'src/components/px-notes-workspace.tsx',
   'src/components/task-edit-dialog.tsx',
+  'src/components/team-marker-comments-button.tsx',
   'src/app/(app)/ga-ka-notes/page.tsx',
 ].map(file => path.join(root, file))
 const config = ts.readConfigFile(path.join(root, 'tsconfig.json'), ts.sys.readFile)
