@@ -137,7 +137,7 @@ export default function DiscordAssistantPage() {
 
           <section className="space-y-3 rounded-xl border bg-card p-6 text-sm">
             <h2 className="font-semibold">Si e përdor</h2>
-            <p>Zgjidh detyrën nga dropdown. Pastaj zgjidh veprimin ose përdor <code>/pyet</code> me udhëzimin tënd. Nëse biseda e lirë është aktivizuar, mund të shkruash direkt në kanal.</p>
+            <p>Shkruaj <code>/detyrat</code> dhe kliko numrin e detyrës. Karta hapet në të njëjtin mesazh: <strong>Mbylle</strong> të çon vetë te detyra tjetër, ◀ ▶ lëvizin mes detyrave dhe <strong>Më shumë</strong> ka veprimet e tjera. Në orën e slotit, kujtesa të lejon t’i raportosh detyrat me një klikim secilën. Për kërkesa të lira shkruaj direkt në kanal ose përdor <code>/pyet</code>.</p>
             <blockquote className="border-l-2 border-indigo-300 pl-3 text-muted-foreground">Te përshkrimi bëji strike pikat 1 dhe 3, lëre detyrën në progres dhe shto komentin: Presim materialet për pikën 2.</blockquote>
             <p>Asistenti mund të veprojë vetëm mbi detyrat e tua, me lejet që ke në PrimeFlow. Nëse mungon informacion, të pyet para ndryshimit.</p>
             <p className="text-muted-foreground">Kanalet janë private për anëtarët e tjerë. Pronari dhe administratorët e serverit Discord mund t’i shohin ato.</p>
