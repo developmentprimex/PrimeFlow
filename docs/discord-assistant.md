@@ -27,6 +27,7 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
    DISCORD_GUILD_ID=<server ID>
    DISCORD_CATEGORY_ID=<kategori ID, opsionale>
    DISCORD_AI_MODEL=gpt-5.4-mini
+   DISCORD_AGENT_MODEL=gpt-6-luna
    OPENAI_API_KEY=<çelësi OpenAI>
    PRIMEFLOW_API_BASE_URL=http://127.0.0.1:8000
    FRONTEND_URL=https://primeflow.primexeu.com
@@ -65,8 +66,8 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 
 ## Biseda dhe dropdown
 
-`/detyrat` dhe kujtesat shfaqin karta me ngjyrën e statusit, slotin/AM–PM,
-progresin dhe përmbledhjen e pikave, me nga 5 detyra për mesazh. Zgjedhja nga
+`/detyrat` dhe kujtesat shfaqin vetëm titujt e detyrave, deri në 10 për mesazh.
+Përshkrimi, pikat dhe statuset hapen vetëm pas zgjedhjes. Zgjedhja nga
 dropdown hap kartën e plotë me butona për To Do, Në progres, WFE, Mbylle,
 Konfirmim, Pikat/Strike, Edito, Koment, Slot/AM–PM dhe Rifresko.
 
@@ -76,6 +77,11 @@ Te Pikat mund të zgjidhen disa pika njëherësh për strike ose heqje strike;
 listat e gjata kanë faqe prej 25 pikash. Konfirmimi zgjedh personin nga përdoruesit
 aktivë. Edito hap titullin, përshkrimin, progresin, afatin dhe AM/PM; shënimet e
 strike-ve ruhen për tekstin e pandryshuar. Pas ruajtjes përditësohet karta aktive.
+Për detyrat me origjinë PX Notes/PX JAV, pikat merren nga shënimi burimor dhe
+strike ruhet përmes `PATCH /ga-notes/{id}` ose `PATCH /plan-notes/{id}`, njësoj si
+strike manual. Këto rrugë sinkronizojnë detyrat e lidhura dhe historikun e strike-ve.
+Përshkrimet e veçanta dhe detyrat pa shënim ruajnë ndryshimet te detyra.
+Versioni përfshin tekstin e shënimit; menuja e pikave rifreskohet pas çdo ndryshimi.
 Mbyllja mund të shoqërohet me komentin e rezultatit dhe backend-i zbaton kushtet.
 
 Dropdown-i "AI dhe ndryshime të tjera" dhe `/pyet udhezimi:...` mbeten për kërkesa
@@ -106,6 +112,67 @@ komentin personal, checklist items që janë të aksesueshme, slotin sipas datë
 markerët, heqjen nga dita, deaktivizimin dhe fshirjen. Veprimet që kërkojnë rol
 manager/admin refuzohen për staff, njësoj si në PrimeFlow. Nuk krijohen dokumente,
 nuk ekzekutohet kod dhe nuk thirren endpoint-e arbitrare nga modeli.
+
+## Delegimi te agjenti: hulumtim dhe përgatitje materialesh
+
+Në kartën e detyrës, **Delegoja agjentit** hap zgjedhjen e detyrës së plotë ose
+të një pike nga titulli/përshkrimi. Zgjidh **Hulumtim në internet** për rezultate
+me burime ose **Përgatit tekst / analizë** për draft nga konteksti i detyrës.
+Plotëso udhëzimin dhe rezultatin që pret. Formularët punojnë edhe pa Message
+Content Intent. Përzgjedhësit e pikave kanë faqe me deri 25 zgjedhje.
+
+Shembull: zgjidh pikën “Hulumto konkurrentët”, pastaj kërko “Krahaso 5 kompani
+në Gjermani, me shërbimet kryesore dhe linket e burimeve”. Për draft mund të
+kërkosh “Përgatit tekstin e ofertës nga kërkesat e përshkrimit; listo veçmas
+informacionin që ende mungon”.
+
+Punët ruhen në `discord_agent_runs` dhe shfaqin gjendjen aktuale: në radhë,
+duke punuar, gati për kontroll, dështoi ose anuluar. **Rezultatet AI** në kartë
+hap historikun, edhe pas rinisjes së botit. **Rifresko rezultatin** lexon gjendjen
+nga databaza. Rezultatet e gjata dhe lista e plotë e burimeve bashkëngjiten si
+skedar `.txt`; burimet shfaqen edhe si linke të klikueshme në Discord.
+
+**Prano rezultatin** ruan pranimin. **Prano dhe shëno pikën të kryer** përdor API-në
+ekzistuese të detyrës për strike dhe auditim. Nëse detyra/pika ndryshoi ndërkohë,
+shënimi refuzohet dhe rezultati mbetet për kontroll. Pranimi i punës së një
+detyre të plotë nuk e mbyll detyrën; përdor **Mbylle** me validimet normale.
+**Kërko ndryshime** krijon një punë të re me rezultatin paraardhës si kontekst.
+**Anulo** kërkon ndalimin; nëse OpenAI kishte përfunduar ndërkohë, ruhet rezultati
+real. Boti nuk pretendon anulim të një pune tashmë të përfunduar.
+
+Modeli i agjentit është `DISCORD_AGENT_MODEL=gpt-6-luna`, i pavarur nga modeli i
+interpretimit të komandave. Aplikacioni nuk vendos kufi monetar, limit ditor,
+kufi tokenësh ose numri kërkimesh. Vazhdon të zbatohet konfigurimi dhe aksesi i
+llogarisë OpenAI. Nuk ka kalim automatik në një model tjetër kur mungon aksesi.
+GitHub Actions pranon variable `DISCORD_AGENT_MODEL`; pa të përdor `gpt-6-luna`.
+
+Kërkohet migrimi `0149_discord_agent_runs`, API-ja, Celery worker, Celery beat
+dhe një worker Discord. Celery kontrollon punët çdo 30 sekonda dhe boti kontrollon
+rezultatet çdo 30 sekonda. Ekzekutimi përdor OpenAI Responses në background me
+`store=true`: konteksti/rezultati ruhen nga OpenAI sipas politikës së projektit,
+dhe rezultati ruhet gjithashtu në PostgreSQL. Dërgimi në Discord përdor tokenin
+e botit, jo interaction-in që mund të ketë skaduar.
+
+Revokimi i lidhjes ose heqja e caktimit ndalon aksesin/dorëzimin dhe kërkon
+anulimin e punëve aktive. Rinisja vazhdon leximin e OpenAI response ID ekzistues.
+Nëse nisja mbetet e paqartë pas timeout-it pa response ID të ruajtur, puna nuk
+përsëritet automatikisht: kontrollo aktivitetin e projektit OpenAI para se të
+nisësh një punë të re. Kjo shmang kërkesa të dyfishta me pagesë. ID-të që mbërrijnë
+vonë ruhen për anulim të riprovueshëm. Celery duhet të ketë akses shkrimi në
+`backend/.discord-agent-recovery/`; kjo dosje ruan vetëm ID rikuperimi dhe duhet
+të ruhet gjatë rinisjeve/deploy-it, që ndërprerjet e databazës të mos humbin ID-të.
+Dorëzimi përdor
+nonce dhe marker të qëndrueshëm në mesazhet e botit për rikuperimin pas ACK të
+humbur; nuk premtohet exactly-once në çdo gabim platforme.
+
+Versioni i parë hulumton dhe përgatit përmbajtje. Dërgimi real i email-eve,
+publikimi, blerjet, ekzekutimi i kodit dhe leximi i bashkëngjitjeve/dokumenteve
+private të kompanisë kërkojnë integrime të tjera. Konteksti përmban vetëm
+titullin, përshkrimin, objektivin dhe komentin e vetë përdoruesit.
+
+Për verifikim pa shpenzim OpenAI përdor testet e simuluara:
+`python -m unittest discover -s tests -p "test_discord*.py" -v` dhe
+`python -m unittest tests.test_migration_graph -v`, nga `backend`.
 
 ## Orari dhe përzgjedhja
 

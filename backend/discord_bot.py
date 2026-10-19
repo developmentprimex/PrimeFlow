@@ -17,6 +17,7 @@ from discord.ext import tasks
 
 from app.config import settings
 import discord_ui as ui
+import discord_agent_client as agent_client
 
 log = logging.getLogger("primeflow.discord")
 ACTION_CHOICES = [
@@ -71,10 +72,11 @@ def task_pages(task_list: list[dict], title: str):
     for offset in range(0, len(task_list), ui.TASKS_PER_PAGE):
         chunk = task_list[offset:offset + ui.TASKS_PER_PAGE]
         view = discord.ui.View(timeout=None)
-        view.add_item(discord.ui.Select(custom_id="pf:task", placeholder="Zgjidh detyrën për raportim",
+        view.add_item(discord.ui.Select(custom_id="pf:task", placeholder="Zgjidh detyrën",
             options=[discord.SelectOption(label=f"{offset + i}. {task_label(ui.heading(task))}"[:100], value=task["id"],
-                description=f"{ui.STATUS_LABELS.get(task.get('status'), task.get('status', ''))} · 1H {task.get('one_h_report_slot') or '—'} · {task.get('finish_period') or '—'}"[:100]) for i, task in enumerate(chunk, 1)]))
-        content = f"**{title}** · {offset + 1}–{offset + len(chunk)} / {len(task_list)}\nZgjidh kartën nga dropdown për status, pika dhe editim."
+                ) for i, task in enumerate(chunk, 1)]))
+        lines = [f"{offset + i}. {discord.utils.escape_markdown(ui.heading(task)[:100])[:120]}" for i, task in enumerate(chunk, 1)]
+        content = f"**{title}** · {offset + 1}–{offset + len(chunk)} / {len(task_list)}\n" + "\n".join(lines)
         pages.append((content, view))
     return pages
 
@@ -255,6 +257,7 @@ class PrimeFlowBot(discord.Client):
 
         await self.tree.sync(guild=guild)
         self.reminders.start()
+        self.agent_results.start()
 
     async def show_result(self, interaction, result):
         text = result["message"]
@@ -304,6 +307,12 @@ class PrimeFlowBot(discord.Client):
             result = await self.bridge("/bot/command", {**actor(interaction.user.id, interaction.guild_id, interaction.channel_id),
                 "request_id": str(interaction.id), "task_id": task_id, "instruction": instruction,
                 "expected_fingerprint": fingerprint, "direct_actions": actions})
+            if result.get("status") == "DONE" and result.get("task") and (getattr(interaction, "data", None) or {}).get("custom_id", "").startswith("pf:pointset:"):
+                picker = ui.points_view(result)
+                try:
+                    await interaction.message.edit(content="Zgjidh pikat për strike / heqje strike:", view=picker)
+                except discord.HTTPException:
+                    log.warning("Could not refresh the strike picker after a saved change")
             await self.show_result(interaction, result)
         except Exception as exc:
             await interaction.followup.send(self.error_message(exc), ephemeral=True)
@@ -331,6 +340,9 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
+            if custom_id.startswith("pf:agent:"):
+                await agent_client.handle_agent_interaction(self, interaction)
+                return
             if custom_id.startswith("pf:quick:"):
                 _, _, task_id, fingerprint, action = custom_id.split(":")
                 if action == "comment" or action == "done":
@@ -439,6 +451,17 @@ class PrimeFlowBot(discord.Client):
                 await channel.send(self.error_message(exc))
 
     @tasks.loop(seconds=30)
+    async def agent_results(self):
+        try:
+            await agent_client.deliver_agent_results(self)
+        except Exception as exc:
+            log.warning("Agent result polling failed: %s", type(exc).__name__)
+
+    @agent_results.before_loop
+    async def before_agent_results(self):
+        await self.wait_until_ready()
+
+    @tasks.loop(seconds=30)
     async def reminders(self):
         try:
             jobs = (await self.bridge("/bot/reminders/claim", {}))["jobs"]
@@ -472,6 +495,7 @@ class PrimeFlowBot(discord.Client):
     async def close(self):
         self.clear_ready_status()
         self.reminders.cancel()
+        self.agent_results.cancel()
         await self.http_bridge.aclose()
         await super().close()
 

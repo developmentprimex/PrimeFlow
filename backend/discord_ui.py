@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from html import unescape
 from difflib import SequenceMatcher
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -12,7 +13,7 @@ import discord
 
 from app.config import settings
 
-TASKS_PER_PAGE = 5
+TASKS_PER_PAGE = 10
 STATUS_LABELS = {"TODO": "To Do", "IN_PROGRESS": "Në progres", "WAITING_CLIENT": "WFE",
                  "WAITING_CONFIRMATION": "Në konfirmim", "DONE": "E kryer"}
 STATUS_COLORS = {"TODO": 0x64748B, "IN_PROGRESS": 0x3B82F6, "WAITING_CLIENT": 0xD4A017,
@@ -25,11 +26,18 @@ def plain(value: str | None) -> str:
 
 
 def label(value: str | None, limit=100) -> str:
-    return (re.sub(r"\s+", " ", plain(value)).strip() or "Detyrë")[:limit]
+    return (re.sub(r"\s+", " ", readable(value)).strip() or "Detyrë")[:limit]
+
+
+def readable(value: str | None) -> str:
+    """Render legacy rich text for Discord without modifying stored markup."""
+    value = re.sub(r"<\s*(?:br\s*/?|/p|/div|/li|/h[1-6])\s*>", "\n", value or "", flags=re.I)
+    value = re.sub(r"<[^>]*>", "", value)
+    return unescape(plain(value)).strip()
 
 
 def heading(task: dict) -> str:
-    return next((line.strip() for line in plain(task.get("title")).splitlines() if line.strip()), "Detyrë")[:230]
+    return next((line.strip() for line in readable(task.get("title")).splitlines() if line.strip()), "Detyrë")[:230]
 
 
 def task_url(task_id: str) -> str:
@@ -39,7 +47,7 @@ def task_url(task_id: str) -> str:
 def formatted(value: str | None) -> str:
     value = re.sub(r"\[\[\s*done(?::(?:blue|green|grey))?\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]",
                    lambda match: "~~" + discord.utils.escape_markdown(plain(match.group(1))) + "~~", value or "", flags=re.I | re.S)
-    return plain(value)
+    return readable(value)
 
 
 def card(task: dict, *, number: int | None = None, detail: dict | None = None) -> discord.Embed:
@@ -56,11 +64,15 @@ def card(task: dict, *, number: int | None = None, detail: dict | None = None) -
     if detail is not None:
         sections = []
         for name, key in (("Pikat e titullit", "title_points"), ("Pikat e përshkrimit", "description_points")):
+            if key == "title_points" and task.get("_px_note"):
+                name = "Pikat (PX Notes)"
             points = detail.get(key, [])
+            if key == "description_points" and readable(task.get("description")) == readable(task.get("title")):
+                continue
             if points:
                 lines = []
                 for point in points:
-                    text = re.sub(r"^\s*(?:\d+\.\s+|[•*-]\s+)", "", plain(point["text"]))
+                    text = re.sub(r"^\s*(?:\d+\.\s+|[•*-]\s+)", "", readable(point["text"]))
                     text = discord.utils.escape_markdown(text)
                     lines.append(f"{point['number']}. " + (f"✓ ~~{text}~~" if point["done"] else f"○ {text}"))
                 sections.append("**" + name + "**\n" + "\n".join(lines))
@@ -89,8 +101,8 @@ def card(task: dict, *, number: int | None = None, detail: dict | None = None) -
 
 
 def overview_embeds(task_list: list[dict], page: int) -> list[discord.Embed]:
-    start = page * TASKS_PER_PAGE
-    return [card(task, number=start + i) for i, task in enumerate(task_list[start:start + TASKS_PER_PAGE], 1)]
+    # Initial messages contain titles only; details open after selection.
+    return []
 
 
 def controls(task_id: str, fingerprint: str, action_choices) -> discord.ui.View:
@@ -107,6 +119,8 @@ def controls(task_id: str, fingerprint: str, action_choices) -> discord.ui.View:
     view.add_item(discord.ui.Select(custom_id=f"pf:action:{task_id}:{fingerprint}", row=2,
         placeholder="AI dhe ndryshime të tjera…", options=[discord.SelectOption(label=text, value=str(i)) for i, (text, _) in enumerate(action_choices)]))
     view.add_item(discord.ui.Button(label="Rifresko detyrën", custom_id=f"pf:quick:{task_id}:{fingerprint}:refresh", row=3))
+    view.add_item(discord.ui.Button(label="Delegoja agjentit", custom_id=f"pf:agent:targets:{task_id}:{fingerprint}", row=3, style=discord.ButtonStyle.primary))
+    view.add_item(discord.ui.Button(label="Rezultatet AI", custom_id=f"pf:agent:history:{task_id}:0", row=3))
     return view
 
 
@@ -116,6 +130,10 @@ def points_view(detail: dict, page=0):
     maximum = 1
     row = 0
     for field, key, name in (("t", "title_points", "titulli"), ("d", "description_points", "përshkrimi")):
+        if field == "t" and detail["task"].get("_px_note"):
+            name = "PX Notes"
+        if field == "d" and readable(detail["task"].get("description")) == readable(detail["task"].get("title")):
+            continue
         for done in (True, False):
             points = [point for point in detail.get(key, []) if point["done"] != done]
             maximum = max(maximum, math.ceil(len(points) / 25))

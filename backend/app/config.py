@@ -113,6 +113,7 @@ class Settings(BaseSettings):
     DISCORD_MESSAGE_CONTENT_ENABLED: bool = False
     DISCORD_AI_MODEL: str = "gpt-5.4-mini"
     DISCORD_AI_TIMEOUT_SECONDS: int = 45
+    DISCORD_AGENT_MODEL: str = "gpt-6-luna"
     SKILLS_AI_MODEL: str = "gpt-5.4-nano"
     SKILLS_AI_TIMEOUT_SECONDS: int = 20
     SPEECH_TRANSCRIBE_MODEL: str = "whisper-1"

@@ -10,7 +10,7 @@ import re
 KEYS = (
     "DISCORD_ASSISTANT_ENABLED", "DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID",
     "DISCORD_BRIDGE_SECRET", "DISCORD_CATEGORY_ID", "DISCORD_MESSAGE_CONTENT_ENABLED",
-    "DISCORD_AI_MODEL", "DISCORD_AI_TIMEOUT_SECONDS",
+    "DISCORD_AI_MODEL", "DISCORD_AI_TIMEOUT_SECONDS", "DISCORD_AGENT_MODEL",
 )
 REQUIRED = ("DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_BRIDGE_SECRET")
 
@@ -44,6 +44,7 @@ def build_config(env: dict | os._Environ) -> dict[str, str]:
     values["DISCORD_ASSISTANT_ENABLED"] = str(enabled).lower()
     values["DISCORD_MESSAGE_CONTENT_ENABLED"] = str(boolean(values["DISCORD_MESSAGE_CONTENT_ENABLED"] or "true", "DISCORD_MESSAGE_CONTENT_ENABLED")).lower()
     values["DISCORD_AI_MODEL"] = values["DISCORD_AI_MODEL"] or "gpt-5.4-mini"
+    values["DISCORD_AGENT_MODEL"] = values["DISCORD_AGENT_MODEL"] or "gpt-6-luna"
     timeout = values["DISCORD_AI_TIMEOUT_SECONDS"] or "45"
     if not timeout.isdigit() or not 1 <= int(timeout) <= 90:
         raise ValueError("DISCORD_AI_TIMEOUT_SECONDS must be between 1 and 90.")

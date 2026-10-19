@@ -23,7 +23,7 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
     async def test_dropdown_pages_are_valid_and_keep_every_task(self):
         tasks = [{"id": str(uuid.uuid4()), "title": "x" * 500, "status": "IN_PROGRESS"} for _ in range(63)]
         pages = bot.task_pages(tasks, "Raportimi")
-        self.assertEqual(len(pages), 13)
+        self.assertEqual(len(pages), 7)
         ids = []
         for text, view in pages:
             self.assertLessEqual(len(text), 2000)

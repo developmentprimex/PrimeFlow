@@ -92,7 +92,7 @@ async def owned_task(db: AsyncSession, user: User, task_id: uuid.UUID):
     result = await tools.user_api(user, "GET", f"/api/tasks/{task_id}")
     result["user_comment"] = (await db.execute(select(TaskUserComment.comment).where(
         TaskUserComment.task_id == task_id, TaskUserComment.user_id == user.id))).scalar_one_or_none()
-    return result
+    return await tools.with_source_note(user, result)
 
 
 async def daily_tasks(db: AsyncSession, user: User, bucket: str | None = None):
@@ -205,8 +205,8 @@ async def select_task(payload: Selection, db: AsyncSession = Depends(get_db)):
     link.selected_task_id, link.selected_at, link.pending_instruction = payload.task_id, datetime.now(timezone.utc), None
     link.selected_fingerprint = tools.fingerprint(task)
     await db.commit()
-    return {"task": task, "fingerprint": tools.fingerprint(task)[:16], "title_points": tools.text_points(task.get("title"), "title"),
-        "description_points": tools.text_points(task.get("description"), "description"),
+    return {"task": task, "fingerprint": tools.fingerprint(task)[:16], "title_points": tools.text_points(tools.point_text(task, "title"), "title"),
+        "description_points": tools.text_points(tools.point_text(task, "description"), "description"),
         "url": f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{payload.task_id}"}
 
 
@@ -279,6 +279,7 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             link.pending_instruction = None
             after = None if any(op["method"] == "DELETE" for op in operations) else await tools.user_api(user, "GET", f"/api/tasks/{task_id}")
             if after:
+                after = await tools.with_source_note(user, after)
                 after["user_comment"] = (await db.execute(select(TaskUserComment.comment).where(
                     TaskUserComment.task_id == task_id, TaskUserComment.user_id == user.id))).scalar_one_or_none()
                 link.selected_task_id = task_id
@@ -287,8 +288,8 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
                 link.selected_task_id, link.selected_fingerprint = None, None
             result = {"status": "DONE", "message": "; ".join(op["label"] for op in applied) or "Nuk u kërkua ndryshim.",
                 "task": after, "fingerprint": tools.fingerprint(after)[:16] if after else None,
-                "title_points": tools.text_points(after.get("title"), "title") if after else [],
-                "description_points": tools.text_points(after.get("description"), "description") if after else [],
+                "title_points": tools.text_points(tools.point_text(after, "title"), "title") if after else [],
+                "description_points": tools.text_points(tools.point_text(after, "description"), "description") if after else [],
                 "url": f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{task_id}"}
         action.result, action.status = {"reply": result, "before": before, "operations": applied}, result["status"]
         await db.commit()
