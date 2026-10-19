@@ -108,9 +108,13 @@ app password in `EMAIL_PASSWORD`.
 
 ## Voice task assistant (Mira)
 
-Every signed-in user can open **Mira** in the top bar and select **Fillo bisedën**.
+Every signed-in user can open **Mira** in the top bar and select **Start**.
 Mira speaks Albanian with the `marin` voice and supports natural interruptions,
 follow-up questions, live transcripts and typed commands during the voice call.
+The panel contains only chat, a Start/Stop button and Mute/Unmute. Responses default
+to one or two short sentences; lists give the total and up to three titles unless
+more detail is requested. Voice messages reserve their chat position before
+transcription completes, so delayed transcripts stay above their responses.
 Audio is processed by OpenAI; the standard API key stays on the backend.
 
 Set `OPENAI_API_KEY` in `backend/.env` (or the existing deployment secret) and
@@ -127,7 +131,7 @@ Examples:
 - “Bëje strike pikën e dytë te përshkrimi.” / “Tani rihape atë pikë.”
 
 Schedule queries use the signed-in user's assignments, application timezone,
-selected date and explicit daily 1H slot overrides. Task cards link to the task.
+selected date and explicit daily 1H slot overrides.
 Changes use the normal authenticated task/checklist/PX Notes APIs. Ambiguous
 matches prompt a question; stale versions are rejected, and partial changes are
 reported. Closing a task uses the existing completion steps (strike open text
