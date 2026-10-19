@@ -11,6 +11,7 @@ KEYS = (
     "DISCORD_ASSISTANT_ENABLED", "DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID",
     "DISCORD_BRIDGE_SECRET", "DISCORD_CATEGORY_ID", "DISCORD_MESSAGE_CONTENT_ENABLED",
     "DISCORD_AI_MODEL", "DISCORD_AI_TIMEOUT_SECONDS", "DISCORD_AGENT_MODEL",
+    "DISCORD_MEETING_VOICE_CHANNEL_ID",
 )
 REQUIRED = ("DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_BRIDGE_SECRET")
 
@@ -41,6 +42,8 @@ def build_config(env: dict | os._Environ) -> dict[str, str]:
             raise ValueError("DISCORD_BRIDGE_SECRET must contain at least 32 characters.")
     if values["DISCORD_CATEGORY_ID"] and not re.fullmatch(r"\d{17,20}", values["DISCORD_CATEGORY_ID"]):
         raise ValueError("DISCORD_CATEGORY_ID must be a numeric Discord category ID.")
+    if values["DISCORD_MEETING_VOICE_CHANNEL_ID"] and not re.fullmatch(r"\d{17,20}", values["DISCORD_MEETING_VOICE_CHANNEL_ID"]):
+        raise ValueError("DISCORD_MEETING_VOICE_CHANNEL_ID must be a numeric Discord voice channel ID.")
     values["DISCORD_ASSISTANT_ENABLED"] = str(enabled).lower()
     values["DISCORD_MESSAGE_CONTENT_ENABLED"] = str(boolean(values["DISCORD_MESSAGE_CONTENT_ENABLED"] or "true", "DISCORD_MESSAGE_CONTENT_ENABLED")).lower()
     values["DISCORD_AI_MODEL"] = values["DISCORD_AI_MODEL"] or "gpt-5.4-mini"

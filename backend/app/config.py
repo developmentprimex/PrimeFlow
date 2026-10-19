@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     DISCORD_BOT_TOKEN: str | None = None
     DISCORD_GUILD_ID: str | None = None
     DISCORD_CATEGORY_ID: str | None = None
+    DISCORD_MEETING_VOICE_CHANNEL_ID: str | None = None
     DISCORD_MESSAGE_CONTENT_ENABLED: bool = False
     DISCORD_AI_MODEL: str = "gpt-5.4-mini"
     DISCORD_AI_TIMEOUT_SECONDS: int = 45

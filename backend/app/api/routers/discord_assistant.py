@@ -16,12 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
-from app.models.discord_assistant import DiscordAction, DiscordLink, DiscordLinkCode, DiscordReminder
+from app.models.discord_assistant import DiscordAction, DiscordLink, DiscordLinkCode, DiscordMeetingAlert, DiscordReminder
+from app.models.meeting import MeetingParticipant
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
+from app.services import discord_meetings
 from app.services import discord_task_tools as tools
 
 router = APIRouter()
@@ -363,5 +365,57 @@ async def acknowledge(reminder_id: uuid.UUID, payload: Receipt, db: AsyncSession
         raise HTTPException(404, "Kujtesa nuk u gjet.")
     reminder.sent_at = datetime.now(timezone.utc)
     reminder.message_ids = payload.message_ids
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/bot/meetings/claim", dependencies=[Depends(require_bot)])
+async def claim_meeting_alerts(db: AsyncSession = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    links = {link.user_id: link for link in (await db.execute(select(DiscordLink).join(User, User.id == DiscordLink.user_id).where(
+        DiscordLink.enabled.is_(True), DiscordLink.channel_id.is_not(None),
+        DiscordLink.guild_id == settings.DISCORD_GUILD_ID, User.is_active.is_(True)))).scalars().all()}
+    due = await discord_meetings.due_alerts(db, now, list(links))
+    if not due:
+        return {"jobs": []}
+    # Everyone invited is listed by name, so each person sees who else is called.
+    rows = (await db.execute(select(MeetingParticipant.meeting_id, User.id, User.full_name)
+        .join(User, User.id == MeetingParticipant.user_id).where(
+            MeetingParticipant.meeting_id.in_({meeting.id for meeting, *_ in due}),
+            MeetingParticipant.assignment_source == "manual", User.is_active.is_(True)))).all()
+    names: dict[uuid.UUID, list[tuple[uuid.UUID, str]]] = {}
+    for meeting_id, user_id, full_name in rows:
+        names.setdefault(meeting_id, []).append((user_id, full_name))
+    jobs = []
+    for meeting, user_id, occurrence, kind in due:
+        link = links[user_id]
+        stmt = insert(DiscordMeetingAlert).values(id=uuid.uuid4(), link_id=link.id, meeting_id=meeting.id,
+            occurrence_starts_at=occurrence, kind=kind, lease_until=now + timedelta(minutes=2))
+        stmt = stmt.on_conflict_do_update(constraint="uq_discord_meeting_alert", set_={"lease_until": now + timedelta(minutes=2)},
+            where=(DiscordMeetingAlert.sent_at.is_(None) & (DiscordMeetingAlert.lease_until < now))).returning(DiscordMeetingAlert.id)
+        alert_id = (await db.execute(stmt)).scalar_one_or_none()
+        if alert_id:
+            jobs.append({"id": str(alert_id), "kind": kind, "discord_user_id": link.discord_user_id,
+                "guild_id": link.guild_id, "channel_id": link.channel_id,
+                "meeting": {"id": str(meeting.id), "title": meeting.title, "platform": meeting.platform,
+                    "url": meeting.meeting_url, "type": meeting.meeting_type, "starts_at": occurrence.isoformat(),
+                    "minutes_before": meeting.reminder_minutes_before,
+                    "others": [{"name": name, "discord_user_id": links[other].discord_user_id if other in links else None}
+                               for other, name in sorted(names.get(meeting.id, []), key=lambda item: item[1] or "") if other != user_id]}})
+    await db.commit()
+    return {"jobs": jobs}
+
+
+class MeetingReceipt(Actor):
+    message_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
+
+
+@router.post("/bot/meetings/{alert_id}/ack", dependencies=[Depends(require_bot)])
+async def acknowledge_meeting_alert(alert_id: uuid.UUID, payload: MeetingReceipt, db: AsyncSession = Depends(get_db)):
+    link, _ = await identity(db, payload)
+    alert = await db.get(DiscordMeetingAlert, alert_id, with_for_update=True)
+    if not alert or alert.link_id != link.id:
+        raise HTTPException(404, "Kujtesa e takimit nuk u gjet.")
+    alert.sent_at, alert.message_id = datetime.now(timezone.utc), payload.message_id
     await db.commit()
     return {"ok": True}

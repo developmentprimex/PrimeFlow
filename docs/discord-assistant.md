@@ -218,6 +218,27 @@ dritareje. Regjistri unik `link/day/bucket`, lease-i dhe nonce-t Discord shmangi
 ridërgimin në retry-t e zakonshme. Nuk premtohet delivery exactly-once për
 ndërprerje të gjata ose gabime të platformës.
 
+## Kujtesat e takimeve
+
+Pjesëmarrësit e zgjedhur te **Participants & reminder** në PrimeFlow marrin kujtesën
+edhe në kanalin e tyre personal në Discord, me përmendje (@) që Discord-i të bjerë
+si njoftim në telefon/desktop. Vlen koha e kujtesës së takimit (p.sh. 15 minuta
+para), si dhe anulimet dhe përsëritjet, njësoj si njoftimet në shfletues.
+
+- **Takim i jashtëm:** "🔔 Takim pas N min", me butonin **🔗 Hap takimin** kur
+  takimi ka link.
+- **Takim i brendshëm:** kujtesa para takimit dhe, kur fillon, "🔴 Takimi po fillon
+  tani" për secilin pjesëmarrës, me **🎧 Hyr në kanalin zanor**. Kanali zanor është
+  `DISCORD_MEETING_VOICE_CHANNEL_ID` (GitHub Actions variable, opsionale); pa të
+  përdoret kanali i parë zanor i serverit.
+- Kujtesa liston edhe pjesëmarrësit e tjerë. Personat pa llogari Discord të lidhur
+  marrin vetëm njoftimin në PrimeFlow.
+
+Discord nuk lejon që një bot të nisë thirrje telefonike/zanore; "thirrja" është
+përmendja me njoftim dhe butoni për t'u futur në kanalin zanor. Kërkohet migrimi
+`0150_discord_meeting_alerts`. Pa të, kujtesat e takimeve nuk dërgohen, por
+kujtesat e detyrave vazhdojnë normalisht.
+
 ## Identiteti, lejet dhe historiku
 
 API-ja kontrollon serverin, Discord user ID dhe channel ID bashkë. Detyra duhet

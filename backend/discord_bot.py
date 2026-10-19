@@ -250,6 +250,7 @@ class PrimeFlowBot(discord.Client):
 
         await self.tree.sync(guild=guild)
         self.reminders.start()
+        self.meeting_alerts.start()
         self.agent_results.start()
 
     async def show_result(self, interaction, result):
@@ -688,6 +689,38 @@ class PrimeFlowBot(discord.Client):
         except Exception as exc:
             log.warning("Reminder polling failed: %s", type(exc).__name__)
 
+    def voice_url(self, guild_id) -> str | None:
+        """The configured meeting voice room, otherwise the server's first voice channel."""
+        guild = self.get_guild(int(guild_id))
+        channel_id = settings.DISCORD_MEETING_VOICE_CHANNEL_ID
+        if not channel_id and guild and guild.voice_channels:
+            channel_id = guild.voice_channels[0].id
+        return f"https://discord.com/channels/{guild_id}/{channel_id}" if channel_id else None
+
+    @tasks.loop(seconds=30)
+    async def meeting_alerts(self):
+        try:
+            jobs = (await self.bridge("/bot/meetings/claim", {}))["jobs"]
+            for job in jobs:
+                try:
+                    channel = await self.private_channel(job["guild_id"], job["channel_id"], job["discord_user_id"])
+                    content, embed, view = ui.meeting_alert(job, self.voice_url(job["guild_id"]))
+                    nonce = hashlib.sha256(f"meeting:{job['id']}".encode()).hexdigest()[:24]
+                    # The mention is what makes Discord ring the phone/desktop.
+                    message = await self.http.request(discord.http.Route("POST", "/channels/{channel_id}/messages", channel_id=channel.id),
+                        json={"content": content, "embeds": [embed.to_dict()], "components": view.to_components(),
+                            "allowed_mentions": {"parse": [], "users": [job["discord_user_id"]]}, "nonce": nonce, "enforce_nonce": True})
+                    identity = {key: job[key] for key in ("discord_user_id", "guild_id", "channel_id")}
+                    await self.bridge(f"/bot/meetings/{job['id']}/ack", {**identity, "message_id": str(message["id"])})
+                except Exception as exc:
+                    log.warning("Meeting alert %s failed: %s", job["id"], type(exc).__name__)
+        except Exception as exc:
+            log.warning("Meeting alert polling failed: %s", type(exc).__name__)
+
+    @meeting_alerts.before_loop
+    async def before_meeting_alerts(self):
+        await self.wait_until_ready()
+
     async def retire_reminder(self, channel, previous):
         """An unanswered earlier report stops offering buttons once the next one arrives."""
         for message_id in previous.get("message_ids") or []:
@@ -706,6 +739,7 @@ class PrimeFlowBot(discord.Client):
     async def close(self):
         self.clear_ready_status()
         self.reminders.cancel()
+        self.meeting_alerts.cancel()
         self.agent_results.cancel()
         await self.http_bridge.aclose()
         await super().close()

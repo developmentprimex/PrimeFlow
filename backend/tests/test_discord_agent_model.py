@@ -44,7 +44,7 @@ class AgentModelTests(unittest.TestCase):
         from io import StringIO
         from unittest.mock import patch
         scripts = migration_scripts()
-        self.assertEqual(scripts.get_heads(), ["0149_discord_agent_runs"])
+        self.assertIn("0149_discord_agent_runs", {script.revision for script in scripts.walk_revisions()})
         migration = scripts.get_revision("0149_discord_agent_runs").module
         output = StringIO()
         operations = Operations(MigrationContext.configure(dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output}))

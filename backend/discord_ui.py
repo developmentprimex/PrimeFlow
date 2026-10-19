@@ -433,3 +433,30 @@ class EditModal(discord.ui.Modal):
                 [action("update_task", changes)], "Edito fushat e plotësuara në formular.")
         except (ValueError, TypeError):
             await interaction.followup.send("Kontrollo fushat: periudha AM/PM dhe afati YYYY-MM-DD HH:MM.", ephemeral=True)
+
+
+def meeting_alert(job: dict, voice_url: str | None = None):
+    """Meeting reminder that pings the person; internal meetings link the voice room."""
+    meeting = job["meeting"]
+    starts = datetime.fromisoformat(meeting["starts_at"]).astimezone(ZoneInfo(settings.APP_TIMEZONE))
+    internal = meeting.get("type") == "internal"
+    if job["kind"] == "start":
+        headline = "🔴 **Takimi po fillon tani**"
+    else:
+        headline = f"🔔 **Takim pas {meeting.get('minutes_before') or 0} min**"
+    content = f"<@{job['discord_user_id']}> {headline} · {discord.utils.escape_markdown(label(meeting['title'], 150))}"
+    embed = discord.Embed(title=label(meeting["title"], 250), color=0xEF4444 if job["kind"] == "start" else 0xF59E0B)
+    details = [f"🕘 {starts.strftime('%H:%M')} · " + ("Takim i brendshëm" if internal else "Takim i jashtëm")]
+    if meeting.get("platform"):
+        details.append("📍 " + label(meeting["platform"], 100))
+    others = meeting.get("others") or []
+    if others:
+        details.append("👥 Me: " + ", ".join(label(person["name"], 40) for person in others[:15]) + (" …" if len(others) > 15 else ""))
+    embed.description = "\n".join(details)
+    view = discord.ui.View(timeout=None)
+    url = (meeting.get("url") or "").strip()
+    if url.startswith(("https://", "http://")):
+        view.add_item(discord.ui.Button(label="🔗 Hap takimin", url=url[:512]))
+    if internal and voice_url:
+        view.add_item(discord.ui.Button(label="🎧 Hyr në kanalin zanor", url=voice_url))
+    return content[:2000], embed, view

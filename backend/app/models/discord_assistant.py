@@ -59,3 +59,18 @@ class DiscordAction(Base):
     status: Mapped[str] = mapped_column(String(24), default="PROCESSING")
     result: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscordMeetingAlert(Base):
+    """One Discord meeting alert per person, occurrence and kind (before / start)."""
+    __tablename__ = "discord_meeting_alerts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    link_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("discord_links.id", ondelete="CASCADE"))
+    meeting_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), index=True)
+    occurrence_starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    kind: Mapped[str] = mapped_column(String(8))
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    message_id: Mapped[str | None] = mapped_column(String(32))
+    __table_args__ = (UniqueConstraint("link_id", "meeting_id", "occurrence_starts_at", "kind", name="uq_discord_meeting_alert"),)
