@@ -40,6 +40,7 @@ from app.services.daily_realization_baseline import ensure_daily_baselines_for_d
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
 from app.services.task_marker import active_one_h_marker, current_effective_marker_date, marker_is_by_ga, normalize_marker_comment, note_bundle_marker_update, sync_note_task_marker
+from app.services.marker_comments import record_initial_marker_comments
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.task_daily_progress import sync_task_daily_finish_period, upsert_explicit_task_daily_status
 from app.services.ga_note_task_instances import (
@@ -790,6 +791,7 @@ async def update_ga_note_task_bundle(
 
     created_notifications = []
     if reconcile_result is not None:
+        await record_initial_marker_comments(db, reconcile_result.created_tasks, actor_email=user.email)
         for created_task in reconcile_result.created_tasks:
             if created_task.assigned_to is None:
                 continue

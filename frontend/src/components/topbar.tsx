@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Briefcase, CheckCheck, PanelLeftOpen, Trash2 } from "lucide-react"
+import { Briefcase, CheckCheck, MessageCircle, PanelLeftOpen, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { AccountMenu } from "@/components/account-menu"
@@ -12,6 +12,7 @@ import { useAuth } from "@/lib/auth"
 import { API_HTTP_URL } from "@/lib/config"
 import type { Notification, User } from "@/lib/types"
 import { useSidebar } from "./sidebar-context"
+import { useMarkerComments } from "./marker-comments-context"
 
 type RequestTrace = {
   method: string
@@ -42,6 +43,8 @@ function departmentRoute(department: { name: string; code?: string | null }) {
 
 export function Topbar() {
   const { user, apiFetch } = useAuth()
+  const markerComments = useMarkerComments()
+  const unreadComments = markerComments?.unread.length || 0
   const { isOpen, toggle } = useSidebar()
   const [sheetOpen, setSheetOpen] = React.useState(false)
   const [notifications, setNotifications] = React.useState<Notification[]>([])
@@ -261,6 +264,13 @@ export function Topbar() {
             </Link>
           </Button>
         ) : null}
+        <Button asChild variant="outline" className={unreadComments ? "border-blue-700 bg-[#0055FF] text-white hover:bg-blue-700 hover:text-white" : "border-blue-300 text-blue-700"}>
+          <Link href="/comments" aria-label={`Simbole dhe komente, ${unreadComments} të palexuara`} title="Simbolet dhe komentet">
+            <MessageCircle className="h-4 w-4" />
+            <span className="hidden sm:inline">Komente</span>
+            {unreadComments > 0 && <span className="rounded-full bg-white px-1.5 py-0.5 text-xs font-bold text-blue-700" aria-live="polite">{unreadComments}</span>}
+          </Link>
+        </Button>
         <Sheet open={sheetOpen} onOpenChange={(open) => void handleNotificationsOpenChange(open)}>
           <SheetTrigger asChild>
             <Button variant="outline">
@@ -307,7 +317,7 @@ export function Topbar() {
                         <div className="mt-1 text-xs text-muted-foreground">
                           {n.read_at ? "Read" : "Unread"}
                         </div>
-                        {n.type === "reminder" && typeof n.data?.open_url === "string" ? (
+                        {(n.type === "reminder" || n.data?.kind === "task_marker_comment" || n.data?.kind === "task_marker") && typeof n.data?.open_url === "string" ? (
                           <Button
                             type="button"
                             variant="outline"
@@ -315,7 +325,7 @@ export function Topbar() {
                             className="mt-2"
                             onClick={() => window.open(n.data?.open_url as string, "_blank", "noopener,noreferrer")}
                           >
-                            Open Meeting
+                            {n.data?.kind === "task_marker_comment" ? "Lexo komentin" : n.data?.kind === "task_marker" ? n.data?.comment_id ? "Lexo simbolin" : "Hap detyrën" : "Open Meeting"}
                           </Button>
                         ) : null}
                       </div>

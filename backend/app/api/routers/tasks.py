@@ -58,6 +58,7 @@ from app.services.task_daily_progress import (
 )
 from app.services.task_date_window import task_date_window_filter
 from app.services.task_marker import active_one_h_marker, current_effective_marker_date, marker_is_by_ga, normalize_marker_comment, sync_task_marker
+from app.services.marker_comments import record_initial_marker_comments
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
@@ -1882,6 +1883,13 @@ async def create_task(
             detail="Cannot set both ga_note_origin_id and plan_note_origin_id",
         )
 
+    if payload.ga_note_origin_id is None and payload.plan_note_origin_id is None:
+        from app.services.task_marker_comment_title import update_comment_in_title
+
+        payload.title = update_comment_in_title(
+            payload.title, None, normalize_marker_comment(payload.one_h_marker, payload.one_h_marker_comment),
+        )
+
     department_id = payload.department_id
     dependency_task_id = payload.dependency_task_id
     is_fast = is_fast_task_fields(
@@ -2299,6 +2307,7 @@ async def create_task(
                     },
                 )
 
+            await record_initial_marker_comments(db, created_tasks, actor_email=user.email)
             await db.commit()
 
             for n in created_notifications:
@@ -2429,6 +2438,7 @@ async def create_task(
                             },
                         )
 
+                    await record_initial_marker_comments(db, created_tasks, actor_email=user.email)
                     await db.commit()
 
                     for n in created_notifications:
@@ -2538,6 +2548,7 @@ async def create_task(
                 },
             )
 
+        await record_initial_marker_comments(db, created_tasks, actor_email=user.email)
         await db.commit()
 
         for n in created_notifications:
@@ -2643,6 +2654,7 @@ async def create_task(
                 },
             )
 
+        await record_initial_marker_comments(db, created_tasks, actor_email=user.email)
         await db.commit()
 
         for n in created_notifications:
@@ -2814,6 +2826,7 @@ async def create_task(
                 )
             )
 
+    await record_initial_marker_comments(db, [task], actor_email=user.email)
     await db.commit()
 
     for n in created_notifications:

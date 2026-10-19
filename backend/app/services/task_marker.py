@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ga_note import GaNote
@@ -88,6 +88,8 @@ async def sync_note_task_marker(
     marker_date = current_effective_marker_date()
     marker_by_ga = bool(marker and marker_is_by_ga(actor_email))
     marker_comment = normalize_marker_comment(marker, marker_comment)
+    previous_comment = note.one_h_marker_comment
+    changed = (note.one_h_marker, note.one_h_marker_comment) != (marker, marker_comment)
     note.one_h_marker = marker
     note.one_h_marker_date = marker_date
     note.one_h_marker_by_ga = marker_by_ga
@@ -99,6 +101,13 @@ async def sync_note_task_marker(
             one_h_marker_comment=marker_comment,
         )
     )
+    if changed:
+        from app.services.marker_comments import record_marker_change
+        tasks = (await db.execute(select(Task).where(origin == note.id, Task.is_active.is_(True)))).scalars().all()
+        from app.services.task_marker_comment_title import sync_comment_title
+
+        await sync_comment_title(db, tasks, previous_comment, marker_comment, source_note=note)
+        await record_marker_change(db, list(tasks), marker=marker, comment=marker_comment, actor_email=actor_email)
 
 
 async def sync_task_marker(
@@ -108,6 +117,8 @@ async def sync_task_marker(
     marker_date = current_effective_marker_date()
     marker_by_ga = bool(marker and marker_is_by_ga(actor_email))
     marker_comment = normalize_marker_comment(marker, marker_comment)
+    previous_comment = task.one_h_marker_comment
+    changed = (task.one_h_marker, task.one_h_marker_comment) != (marker, marker_comment)
     task.one_h_marker = marker
     task.one_h_marker_date = marker_date
     task.one_h_marker_by_ga = marker_by_ga
@@ -132,6 +143,15 @@ async def sync_task_marker(
                 one_h_marker_comment=marker_comment,
             )
         )
+    if changed:
+        from app.services.marker_comments import record_marker_change
+        tasks = (await db.execute(select(Task).where(
+            or_(Task.id == task.id, *related), Task.is_active.is_(True),
+        ))).scalars().all()
+        from app.services.task_marker_comment_title import sync_comment_title
+
+        await sync_comment_title(db, tasks, previous_comment, marker_comment)
+        await record_marker_change(db, list(tasks), marker=marker, comment=marker_comment, actor_email=actor_email)
 
 
 def note_bundle_marker_update(note, payload, tasks) -> tuple[bool, str | None]:

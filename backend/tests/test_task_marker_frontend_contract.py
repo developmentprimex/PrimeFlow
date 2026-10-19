@@ -40,7 +40,7 @@ def test_department_task_marker_dropdowns_align_to_the_end_of_title_cells():
 
 def test_symbol_filters_include_all_marked_tasks_in_1h_and_px_notes():
     one_h = (ROOT / "frontend/src/app/(app)/tomorrow-print-report/page.tsx").read_text(encoding="utf-8")
-    px_notes = (ROOT / "frontend/src/app/(app)/ga-ka-notes/page.tsx").read_text(encoding="utf-8")
+    px_notes = (ROOT / "frontend/src/components/px-notes-workspace.tsx").read_text(encoding="utf-8")
     for source in (one_h, px_notes):
         assert 'value="with"' in source
         assert "All with symbols" in source
@@ -51,7 +51,7 @@ def test_m2_m3_symbols_are_available_in_shared_editors_and_legends():
     paths = (
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/app/(app)/common/page.tsx",
-        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/components/px-notes-workspace.tsx",
         "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
         "backend/app/services/primeflow_report.py",
         "backend/app/services/tomorrow_print_report.py",
@@ -64,7 +64,7 @@ def test_m2_m3_symbols_are_available_in_shared_editors_and_legends():
     legend_paths = (
         "frontend/src/components/task-one-h-marker-legend.tsx",
         "frontend/src/app/(app)/common/page.tsx",
-        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/components/px-notes-workspace.tsx",
         "backend/app/services/primeflow_report.py",
         "backend/app/services/tomorrow_print_report.py",
     )
@@ -77,7 +77,7 @@ def test_monitor_close_and_symbol_comments_are_available_everywhere():
     paths = (
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/app/(app)/common/page.tsx",
-        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/components/px-notes-workspace.tsx",
         "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
         "backend/app/services/tomorrow_print_report.py",
     )
@@ -96,7 +96,7 @@ def test_client_urgent_symbol_is_available_in_editors_legends_and_reports():
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/components/task-one-h-marker-legend.tsx",
         "frontend/src/app/(app)/common/page.tsx",
-        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/components/px-notes-workspace.tsx",
         "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
         "backend/app/services/primeflow_report.py",
         "backend/app/services/tomorrow_print_report.py",
@@ -112,7 +112,7 @@ def test_f_bz1n1_and_ga_symbols_are_available_everywhere():
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/components/task-one-h-marker-legend.tsx",
         "frontend/src/app/(app)/common/page.tsx",
-        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/components/px-notes-workspace.tsx",
         "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
         "backend/app/services/primeflow_report.py",
         "backend/app/services/tomorrow_print_report.py",
@@ -130,7 +130,7 @@ def test_marker_dropdowns_and_legends_use_the_requested_order():
     dropdown_paths = (
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/app/(app)/common/page.tsx",
-        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/components/px-notes-workspace.tsx",
         "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
     )
     for relative_path in dropdown_paths:
@@ -207,7 +207,7 @@ def test_common_view_personal_owner_priority_is_genti_then_ka_then_ga():
 def test_symbol_views_refresh_when_the_user_returns_to_them():
     paths = (
         "frontend/src/app/(app)/common/page.tsx",
-        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/components/px-notes-workspace.tsx",
         "frontend/src/app/(app)/departments/development/department-kanban.tsx",
         "frontend/src/app/(app)/departments/graphic-design/department-kanban.tsx",
         "frontend/src/app/(app)/departments/project-content-manager/department-kanban.tsx",

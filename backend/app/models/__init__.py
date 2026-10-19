@@ -87,6 +87,7 @@ from app.models.system_task_occurrence_override import SystemTaskOccurrenceOverr
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
+from app.models.task_marker_comment_inbox import TaskMarkerCommentInbox
 from app.models.task_assignee import TaskAssignee
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
@@ -112,6 +113,7 @@ from app.models.weekly_planning_audit import (
 )
 
 __all__ = [
+    "TaskMarkerCommentInbox",
     "ReportingPointsSettings",
     "AttendanceLog",
     "AuditLog",

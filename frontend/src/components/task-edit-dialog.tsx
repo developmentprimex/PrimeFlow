@@ -119,12 +119,14 @@ export function TaskEditDialog({
   onOpenChange,
   onUpdated,
   showDescriptionField = false,
+  embedded = false,
 }: {
   task: Task | null
   open: boolean
   onOpenChange: (open: boolean) => void
   onUpdated: (task: Task) => void | Promise<void>
   showDescriptionField?: boolean
+  embedded?: boolean
 }) {
   const { apiFetch } = useAuth()
   const isNoteOriginTask = Boolean(task?.ga_note_origin_id || task?.plan_note_origin_id)
@@ -325,9 +327,8 @@ export function TaskEditDialog({
 
   if (!task) return null
 
-  return (
-    <Dialog open={open} onOpenChange={(nextOpen) => (!saving ? onOpenChange(nextOpen) : undefined)}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl lg:max-w-4xl">
+  const content = (
+    <>
         <DialogHeader className="shrink-0">
           <DialogTitle>Edit task</DialogTitle>
           <DialogDescription>
@@ -530,7 +531,12 @@ export function TaskEditDialog({
             {saving ? "Saving..." : "Save changes"}
           </Button>
         </DialogFooter>
-      </DialogContent>
+    </>
+  )
+
+  return embedded ? content : (
+    <Dialog open={open} onOpenChange={(nextOpen) => (!saving ? onOpenChange(nextOpen) : undefined)}>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl lg:max-w-4xl">{content}</DialogContent>
     </Dialog>
   )
 }

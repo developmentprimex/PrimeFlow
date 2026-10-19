@@ -39,5 +39,17 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with SessionLocal() as session:
         yield session
+        # Marker notifications are queued during a write and delivered only after
+        # the successful endpoint has committed it. Inbox/read state is separate.
+        pending = session.info.pop("pending_marker_notifications", [])
+        if pending:
+            import logging
+            from app.services.notifications import publish_notification
+
+            for notification in pending:
+                try:
+                    await publish_notification(user_id=notification.user_id, notification=notification)
+                except Exception:
+                    logging.getLogger(__name__).exception("Could not publish marker notification %s", notification.id)
 
 
