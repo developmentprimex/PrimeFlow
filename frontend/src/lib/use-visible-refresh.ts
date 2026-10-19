@@ -21,6 +21,8 @@ export function useVisibleRefresh(refresh: () => void | Promise<void>, enabled =
       finally { running = false }
     }
     window.addEventListener("focus", run)
+    const taskChanged = () => { lastRefresh = 0; void run() }
+    window.addEventListener("primex:tasks-changed", taskChanged)
     document.addEventListener("visibilitychange", run)
     const timer = window.setInterval(run, intervalMs)
     let rolloverTimer: number
@@ -37,6 +39,7 @@ export function useVisibleRefresh(refresh: () => void | Promise<void>, enabled =
     scheduleRollover()
     return () => {
       window.removeEventListener("focus", run)
+      window.removeEventListener("primex:tasks-changed", taskChanged)
       document.removeEventListener("visibilitychange", run)
       window.clearInterval(timer)
       window.clearTimeout(rolloverTimer)

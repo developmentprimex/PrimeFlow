@@ -34,6 +34,7 @@ from app.api.routers.exports import router as exports_router
 from app.api.routers.external_platform_links import router as external_platform_links_router
 from app.api.routers.file_access import router as file_access_router
 from app.api.routers.speech import router as speech_router
+from app.api.routers.voice_assistant import router as voice_assistant_router
 from app.api.routers.public import router as public_router
 from app.api.routers.question_library import router as question_library_router
 from app.api.routers.report_delivery_runs import router as report_delivery_runs_router
@@ -93,6 +94,7 @@ api_router.include_router(exports_router, prefix="/exports", tags=["exports"])
 api_router.include_router(external_platform_links_router, prefix="/external-platform-links", tags=["external-platform-links"])
 api_router.include_router(file_access_router, prefix="/file-access", tags=["file-access"])
 api_router.include_router(speech_router, prefix="/speech", tags=["speech"])
+api_router.include_router(voice_assistant_router, prefix="/voice-assistant", tags=["voice-assistant"])
 api_router.include_router(public_router, prefix="/public", tags=["public"])
 api_router.include_router(question_library_router, prefix="/question-library", tags=["question-library"])
 api_router.include_router(report_delivery_runs_router, prefix="/admin/report-delivery-runs", tags=["admin"])
