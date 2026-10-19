@@ -106,6 +106,44 @@ Scheduled email failures do not prevent the API from starting. Manual report
 email still requires `EMAIL_USER=130primex.eu@gmail.com` and that account's Gmail
 app password in `EMAIL_PASSWORD`.
 
+## Voice task assistant (Mira)
+
+Every signed-in user can open **Mira** in the top bar and select **Start**.
+Mira speaks Albanian with the `marin` voice and supports natural interruptions,
+follow-up questions, live transcripts and typed commands during the voice call.
+The panel contains only chat, a Start/Stop button and Mute/Unmute. Responses default
+to one or two short sentences; lists give the total and up to three titles unless
+more detail is requested. Voice messages reserve their chat position before
+transcription completes, so delayed transcripts stay above their responses.
+Audio is processed by OpenAI; the standard API key stays on the backend.
+
+Set `OPENAI_API_KEY` in `backend/.env` (or the existing deployment secret) and
+restart the API. Optional settings: `VOICE_ASSISTANT_MODEL=gpt-realtime-2.1` and
+`VOICE_ASSISTANT_VOICE=marin`. The OpenAI account must have access to the configured
+Realtime model and available credit. Microphone access requires HTTPS or localhost.
+No new package or database migration is required.
+
+Examples:
+
+- “Çfarë detyra kam në 1H të orës 10?”
+- “Çfarë më ka mbetur për sot?” / “Po nesër paradite?”
+- “Ma mbyll detyrën Raporti javor.”
+- “Bëje strike pikën e dytë te përshkrimi.” / “Tani rihape atë pikë.”
+
+Schedule queries use the signed-in user's assignments, application timezone,
+selected date and explicit daily 1H slot overrides.
+Changes use the normal authenticated task/checklist/PX Notes APIs. Ambiguous
+matches prompt a question; stale versions are rejected, and partial changes are
+reported. Closing a task uses the existing completion steps (strike open text
+points and add “Kryer” if a comment is missing). Mira does not expose deletion.
+Closing the panel, ending a call or signing out releases the microphone. Calls
+also end after ten minutes; start a new call to continue.
+
+Verification: `cd backend; python -m unittest tests.test_voice_assistant tests.test_discord_assistant`
+and `cd frontend; npm run test:voice`.
+API references: [WebRTC sessions](https://developers.openai.com/api/docs/guides/voice-webrtc?api=realtime)
+and [Realtime function tools](https://developers.openai.com/api/docs/guides/realtime-mcp).
+
 ## MCP for ChatGPT / Codex
 
 Personal Discord assistant setup, supported task actions, reminder schedule and

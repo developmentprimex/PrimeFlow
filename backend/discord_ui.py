@@ -492,3 +492,31 @@ def meeting_alert(job: dict, voice_url: str | None = None):
     if internal and voice_url:
         view.add_item(discord.ui.Button(label="🎧 Hyr në kanalin zanor", url=voice_url))
     return content[:2000], embed, view
+
+
+def meeting_draft_view(draft_id: str, *, conflict: bool = False) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    if conflict:
+        view.add_item(discord.ui.Button(label="Krijo gjithsesi", style=discord.ButtonStyle.danger, custom_id=f"pf:mtg:{draft_id}:force"))
+    else:
+        view.add_item(discord.ui.Button(label="✅ Krijo takimin", style=discord.ButtonStyle.success, custom_id=f"pf:mtg:{draft_id}:ok"))
+    view.add_item(discord.ui.Button(label="✖ Anulo", custom_id=f"pf:mtg:{draft_id}:no"))
+    return view
+
+
+def meeting_draft_card(meeting: dict) -> discord.Embed:
+    """Preview of a meeting created from chat, shown before anything is saved."""
+    internal = meeting.get("meeting_type") == "internal"
+    starts = datetime.fromisoformat(meeting["starts_at"]).astimezone(ZoneInfo(settings.APP_TIMEZONE))
+    days = ["E hënë", "E martë", "E mërkurë", "E enjte", "E premte", "E shtunë", "E diel"]
+    embed = discord.Embed(title=label(meeting["title"], 250), color=0x3B82F6 if internal else 0xF59E0B)
+    lines = [("🏢 TAK INT · takim i brendshëm" if internal else "🤝 TAK EXT · takim i jashtëm"),
+             f"🗓 {days[starts.weekday()]}, {starts.strftime('%d.%m.%Y')} · 🕘 {starts.strftime('%H:%M')}",
+             "👥 " + ", ".join(label(name, 40) for name in meeting.get("participants") or [])]
+    if meeting.get("platform"):
+        lines.append("📍 " + label(meeting["platform"], 100))
+    if meeting.get("meeting_url"):
+        lines.append("🔗 " + meeting["meeting_url"][:300])
+    embed.description = "\n".join(lines)
+    embed.set_footer(text="Pjesëmarrësit marrin kujtesën 15 min para, edhe në Discord.")
+    return embed

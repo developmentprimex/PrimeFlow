@@ -2201,6 +2201,8 @@ export default function AdminTasksPage() {
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
   const [allTasksReportCommentEdits, setAllTasksReportCommentEdits] = React.useState<Record<string, string>>({})
   const [savingAllTasksReportComments, setSavingAllTasksReportComments] = React.useState<Record<string, boolean>>({})
+  // ALL TASKS shows one shared comment per task: the latest one, whoever wrote it.
+  const [sharedTaskComments, setSharedTaskComments] = React.useState<Record<string, string | null>>({})
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [showAllTasksReport, setShowAllTasksReport] = React.useState(false)
   const [exportingAllTasks, setExportingAllTasks] = React.useState(false)
@@ -3524,6 +3526,38 @@ export default function AdminTasksPage() {
     })
   }, [allTasksDateFrom, allTasksDateTo, allTasksTableRows, todayIso])
 
+  const allTasksCommentIds = React.useMemo(
+    () => Array.from(new Set(filteredAllTasksRows.map((row) => row.taskId).filter(Boolean))).sort().join(","),
+    [filteredAllTasksRows]
+  )
+
+  React.useEffect(() => {
+    if (!allTasksCommentIds) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiFetch("/tasks/shared-comments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task_ids: allTasksCommentIds.split(",") }),
+        })
+        if (!res.ok || cancelled) return
+        const rows = (await res.json()) as Array<{ task_id: string; comment: string | null }>
+        if (cancelled) return
+        setSharedTaskComments((prev) => {
+          const next = { ...prev }
+          for (const row of rows) next[row.task_id] = row.comment
+          return next
+        })
+      } catch (error) {
+        console.error("Failed to load shared comments", error)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, allTasksCommentIds])
+
   const dailyUserReportRows = React.useMemo(() => {
     const rows: Array<{
       typeLabel: string
@@ -4056,6 +4090,7 @@ export default function AdminTasksPage() {
         return false
       }
       updateTaskCommentState(taskId, payloadComment)
+      setSharedTaskComments((prev) => ({ ...prev, [taskId]: payloadComment }))
       setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
       return true
     } catch (error) {
@@ -7042,7 +7077,8 @@ export default function AdminTasksPage() {
               const actionKey = `task:${row.taskId || "na"}`
               const isUpdating = Boolean(taskStatusUpdating[actionKey])
               const commentKey = `all-task:${row.taskId}`
-              const previousValue = row.comment ?? ""
+              const previousValue =
+                (row.taskId && row.taskId in sharedTaskComments ? sharedTaskComments[row.taskId] : row.comment) ?? ""
               const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
               const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
               const isConfirmAction = Boolean(row.needsGaneConfirmation && statusValue === "WAITING_CONFIRMATION")

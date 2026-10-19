@@ -247,6 +247,14 @@ para), si dhe anulimet dhe përsëritjet, njësoj si njoftimet në shfletues.
 - Kujtesa liston edhe pjesëmarrësit e tjerë. Personat pa llogari Discord të lidhur
   marrin vetëm njoftimin në PrimeFlow.
 
+**Krijimi nga chat-i:** p.sh. "krijo tak int për nesër ora 15 me unë, endi, rinesa, gane".
+Boti kupton llojin (TAK INT / TAK EXT), datën dhe orën, pjesëmarrësit (emri, mbiemri ose
+username; "unë" = vetë personi), titullin, platformën dhe linkun kur jepen. Kur mungon ora,
+lloji ose një emër nuk është unik, pyet; përgjigjja e shkurtër vazhdon draftin. Para ruajtjes
+shfaqet karta me **✅ Krijo takimin / ✖ Anulo**. Takimi krijohet përmes `POST /api/meetings`
+me lejet e personit, në departamentin e tij. Nëse orari përputhet me 1H, boti i tregon
+përplasjet dhe ofron **Krijo gjithsesi**. Kujtesa standarde (15 min) vlen menjëherë.
+
 Discord nuk lejon që një bot të nisë thirrje telefonike/zanore; "thirrja" është
 përmendja me njoftim dhe butoni për t'u futur në kanalin zanor. Kërkohet migrimi
 `0150_discord_meeting_alerts`. Pa të, kujtesat e takimeve nuk dërgohen, por
