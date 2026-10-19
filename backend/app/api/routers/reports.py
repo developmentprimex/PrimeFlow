@@ -56,6 +56,8 @@ from app.services.daily_rlz_compliance import (
     editable_until, is_editable_day,
 )
 from app.services.audit import add_audit_log
+from app.services.daily_realization_explanation import requires_daily_explanation
+from app.services.daily_realization_events import semantic_local_day
 
 
 router = APIRouter()
@@ -450,7 +452,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=False,
                     late_days=None,
-                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id)),
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id), task=t),
                 )
             )
             continue
@@ -471,7 +473,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=False,
                     late_days=None,
-                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id)),
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id), task=t),
                 )
             )
         elif planned_end < day:
@@ -493,7 +495,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=True,
                     late_days=late_days,
-                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id)),
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id), task=t),
                 )
             )
 
@@ -680,13 +682,13 @@ async def daily_report(
 
 def _daily_rlz_state_out(
     row: TaskDailyRlzState | None, day: date, fallback_comment: str | None = None,
-    *, system_task: Task | None = None,
+    *, system_task: Task | None = None, task: Task | None = None,
 ) -> DailyRlzTaskStateOut:
-    explanation_required = bool(
-        system_task is not None
-        and not system_task.completed_at
-        and system_task.status == TaskStatus.TODO
-    )
+    task = task if task is not None else system_task
+    explanation_required = bool(task is not None and requires_daily_explanation(
+        status="DONE" if task.completed_at else str(getattr(task.status, "value", task.status)),
+        selected_day=day, deadline=semantic_local_day(task.due_date),
+    ).requires_explanation)
     return DailyRlzTaskStateOut(
         reason_code=row.reason_code if row else None,
         reason_label=REASON_LABELS.get(row.reason_code) if row else None,
@@ -752,7 +754,7 @@ async def upsert_daily_rlz_state(
     await db.refresh(row)
     return _daily_rlz_state_out(
         row, payload.day,
-        system_task=task if task.system_template_origin_id or task.system_task_slot_id else None,
+        task=task,
     )
 
 
@@ -799,7 +801,7 @@ async def correct_daily_rlz_state(
     await db.refresh(row)
     return _daily_rlz_state_out(
         row, payload.day,
-        system_task=task if task.system_template_origin_id or task.system_task_slot_id else None,
+        task=task,
     )
 
 

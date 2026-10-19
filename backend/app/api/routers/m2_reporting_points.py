@@ -21,7 +21,7 @@ from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
 from app.services.m2_reporting_points import (
     MANUAL_POINTS, get_settings, locked_report, refresh_report, render_html,
-    render_plain_text, report_payload, send_report, report_attachments,
+    render_plain_text, report_payload, current_report_payload, send_report, report_attachments,
 )
 
 router = APIRouter()
@@ -53,7 +53,7 @@ class ManualAnswersPayload(BaseModel):
             if key in MANUAL_POINTS:
                 continue
             prefix, _, task_id = key.partition(":")
-            if prefix not in {"delivery", "delivery_choice", "postponed_comment"}:
+            if prefix not in {"delivery", "delivery_choice", "postponed_comment", "unfinished_comment"}:
                 raise ValueError("Pike manuale e panjohur.")
             try:
                 if str(uuid.UUID(task_id)) != task_id:
@@ -101,7 +101,7 @@ async def get_report(report_date: date, db: AsyncSession = Depends(get_db),
     ))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Raporti nuk eshte gjeneruar per kete date.")
-    return report_payload(row)
+    return await current_report_payload(db, row)
 
 
 @router.post("/generate")
@@ -117,7 +117,7 @@ async def generate(report_date: date, db: AsyncSession = Depends(get_db),
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m2_reporting_points", entity_id=row.id,
                   action="GENERATE", after={"report_date": report_date.isoformat()})
     await db.commit()
-    return report_payload(row)
+    return await current_report_payload(db, row)
 
 
 @router.put("/{report_id}/answers")
@@ -131,6 +131,8 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
                   for prefix in ("delivery", "delivery_choice")}
     valid_keys.update(f"postponed_comment:{item['task_id']}" for section in ("postponed", "postponed_am")
                       for item in (row.data or {}).get(section, []))
+    valid_keys.update(f"unfinished_comment:{item['task_id']}"
+                      for item in (row.data or {}).get("unfinished_priority", []) if item.get("task_id"))
     if any(key not in MANUAL_POINTS and key not in valid_keys and key not in before for key in payload.manual_answers):
         raise HTTPException(422, "Detyra nuk gjendet ne kete raport.")
     row.manual_answers = {**before, **payload.manual_answers}
@@ -139,13 +141,13 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m2_reporting_points", entity_id=row.id,
                   action="SAVE_ANSWERS", before=before, after=row.manual_answers)
     await db.commit()
-    return report_payload(row)
+    return await current_report_payload(db, row)
 
 
 @router.get("/{report_id}/preview")
 async def preview(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                   _: User = Depends(get_current_user)) -> dict:
-    report = report_payload(await _by_id(db, report_id))
+    report = await current_report_payload(db, await _by_id(db, report_id))
     return {"html": render_html(report), "plain_text": render_plain_text(report)}
 
 
@@ -171,13 +173,13 @@ async def send(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(502, "Dergimi deshtoi. Kontrollo konfigurimin e email-it ose provo perseri.") from exc
-    return report_payload(row)
+    return await current_report_payload(db, row)
 
 
 @router.get("/{report_id}/download/{format}")
 async def download(report_id: uuid.UUID, format: Literal["docx", "png", "txt", "html"],
                    db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    report = report_payload(await _by_id(db, report_id))
+    report = await current_report_payload(db, await _by_id(db, report_id))
     filename = f"pikat_m2_{report['report_date']}.{format}"
     if format in {"docx", "png"}:
         attachments = await asyncio.to_thread(report_attachments, report)

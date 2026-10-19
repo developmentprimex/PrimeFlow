@@ -46,11 +46,22 @@ class ManualAnswersPayload(BaseModel):
     @field_validator("manual_answers")
     @classmethod
     def validate_answers(cls, value: dict[str, str]) -> dict[str, str]:
-        if any(key not in MANUAL_POINTS and not is_meeting_comment_key(key) for key in value):
+        if any(key not in MANUAL_POINTS and not is_meeting_comment_key(key)
+               and not is_task_comment_key(key) for key in value):
             raise ValueError("Pike manuale e panjohur.")
         if any(len(answer) > 10000 for answer in value.values()):
             raise ValueError("Pergjigjja nuk mund te kete mbi 10000 karaktere.")
         return value
+
+
+def is_task_comment_key(key: str) -> bool:
+    prefix, _, task_id = key.partition(":")
+    if prefix != "untouched_comment":
+        return False
+    try:
+        return str(uuid.UUID(task_id)) == task_id
+    except ValueError:
+        return False
 
 
 async def _by_id(db: AsyncSession, report_id: uuid.UUID) -> M3ReportingPointsReport:
@@ -115,6 +126,11 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     row = await locked_report(db, existing.report_date)
     await db.refresh(row)
     before = dict(row.manual_answers or {})
+    valid_comments = {f"untouched_comment:{item['task_id']}"
+                      for item in (row.data or {}).get("untouched", []) if item.get("task_id")}
+    if any(is_task_comment_key(key) and key not in valid_comments and key not in before
+           for key in payload.manual_answers):
+        raise HTTPException(422, "Detyra nuk gjendet ne kete raport.")
     row.manual_answers = {**before, **payload.manual_answers}
     row.status, row.last_error = "DRAFT", None
     row.updated_by = user.id

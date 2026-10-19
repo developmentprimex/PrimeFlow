@@ -373,16 +373,19 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unfinished_priority_reuses_after_break_rows_and_preserves_existing_sections(self):
         rows = [
-            ["1", "ER", "GD", "AM", "TODO", "DUE SOT", "PRJK", "ER: Detyre", "SOT"],
-            ["2", "EF", "DEV", "AM/PM", "IN_PROGRESS", "DEADLINE / 08:00", "1H", "08:00 EF: Test <task>", "SOT"],
+            ["1", "ER", "GD", "AM", "TODO", "DUE SOT", "PRJK", "ER: Detyre", "SOT", str(uuid.uuid4())],
+            ["2", "EF", "DEV", "AM/PM", "IN_PROGRESS", "DEADLINE / 08:00", "1H", "08:00 EF: Test <task>", "SOT", str(uuid.uuid4())],
         ]
         db = AsyncMock()
         db.execute.return_value = MagicMock()
         db.execute.return_value.all.return_value = []
-        with patch.object(service.m3, "build_task_data", new=AsyncMock(return_value={"postponed": [], "delivery": []})), \
+        async def enriched_sections(db, day, *, section_selector):
+            return section_selector([], [], day)
+
+        with patch.object(service.m3, "build_task_data", new=AsyncMock(side_effect=enriched_sections)), \
              patch.object(service, "build_unfinished_priority_task_rows", new=AsyncMock(return_value=rows)) as shared_rows:
             data = await service.build_task_data(db, DAY)
-        shared_rows.assert_awaited_once_with(db, DAY)
+        shared_rows.assert_awaited_once_with(db, DAY, include_task_id=True)
         assert data["delivery"] == data["postponed"] == []
         assert [row["title"] for row in data["unfinished_priority"]] == [row[7] for row in rows]
         assert data["unfinished_priority"][0]["deadline_important"] is False
@@ -394,8 +397,8 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         titles = [block["text"] for block in blocks if block["kind"] == "text" and block["level"] == 2]
         assert titles == [*service.MANUAL_POINTS.values(), *service.AUTO_TITLES.values()]
         table = next(block for block in blocks if block["kind"] == "table")
-        assert [column[1] for column in table["columns"]] == ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TIPI", "TITULLI", "DUE DATE"]
-        assert all(cell["fill"] == "#dc2626" and cell["eight_am"] for cell in table["rows"][1])
+        assert [column[1] for column in table["columns"]] == ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TIPI", "TITULLI", "DUE DATE", "ARSYEJA", "KOMENTI", "KOMENT MANUAL"]
+        assert all(cell["fill"] == "#dc2626" and cell["eight_am"] for cell in table["rows"][1][:-1])
         html = service.render_html(value)
         assert "08:00 EF: Test &lt;task&gt;" in html
         assert "DUE DATE: SOT" in service.render_plain_text(value)

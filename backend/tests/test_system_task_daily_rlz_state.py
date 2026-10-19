@@ -48,12 +48,12 @@ def test_todo_system_task_daily_reason_and_comment_can_be_saved():
 
 
 @pytest.mark.parametrize("status", list(TaskStatus))
-def test_only_todo_system_tasks_require_explanation_even_without_rlz_membership(status):
+def test_open_system_tasks_require_explanation_even_without_rlz_membership(status):
     task = Task(status=status, system_template_origin_id=uuid.uuid4())
     system = _daily_rlz_state_out(None, DAY, system_task=task)
     regular = _daily_rlz_state_out(None, DAY)
 
-    expected = status == TaskStatus.TODO
+    expected = status in {TaskStatus.TODO, TaskStatus.IN_PROGRESS}
     assert system.requires_explanation == expected
     assert system.reason_required == system.comment_required == expected
     assert system.reason_missing == system.comment_missing == expected

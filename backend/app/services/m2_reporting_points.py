@@ -89,15 +89,21 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
         personal_titles.update((await db.execute(select(model.id, model.content).join(
             Task, origin == model.id,
         ).where(Task.is_active.is_(True), Task.is_personal.is_(True)))).all())
-    data = await m3.build_task_data(db, day, section_selector=lambda tasks, events, report_day:
-        select_task_sections(tasks, events, report_day, personal_titles=personal_titles))
-    rows = await build_unfinished_priority_task_rows(db, day)
-    data["unfinished_priority"] = [
-        {"assignees": row[1], "department": row[2], "am_pm": row[3], "status": row[4],
+    rows = await build_unfinished_priority_task_rows(db, day, include_task_id=True)
+    unfinished = [
+        {"task_id": row[9], "assignees": row[1], "department": row[2], "am_pm": row[3], "status": row[4],
          "priority": row[5], "task_type": row[6], "title": row[7], "due_label": row[8],
          "deadline_important": "DEADLINE" in row[5], "eight_am": "08:00" in row[5]}
         for row in rows
     ]
+    def sections(tasks, events, report_day):
+        return {**select_task_sections(tasks, events, report_day, personal_titles=personal_titles),
+                "unfinished_priority": unfinished}
+
+    order = {row["task_id"]: index for index, row in enumerate(unfinished)}
+    data = await m3.build_task_data(db, day, section_selector=sections)
+    # Keep the shared morning table's priority order after common enrichment.
+    data["unfinished_priority"].sort(key=lambda row: order[row["task_id"]])
     return data
 
 
@@ -142,6 +148,10 @@ def report_payload(row: M2ReportingPointsReport) -> dict:
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
 
 
+async def current_report_payload(db: AsyncSession, row: M2ReportingPointsReport) -> dict:
+    return await m3.with_current_task_explanations(db, report_payload(row), "unfinished_priority")
+
+
 def table_groups(report, key):
     return m3.task_table_groups(report.get("data", {}).get(key, []), "ga_postponed" if key in {"postponed", "postponed_am"} else key)
 
@@ -150,7 +160,9 @@ def table_columns(key, movement=""):
     if key == "unfinished_priority":
         return [("nr", "NR", 28), ("assignees", "KUSH", 72), ("department", "DEP", 44),
                 ("am_pm", "AM/PM", 60), ("priority", "LLOJI", 120), ("task_type", "TIPI", 48),
-                ("title", "TITULLI", 450), ("due_label", "DUE DATE", 80)]
+                ("title", "TITULLI", 450), ("due_label", "DUE DATE", 80),
+                ("reason", "ARSYEJA", 124), ("comment", "KOMENTI", 160),
+                ("unfinished_comment", "KOMENT MANUAL", 220)]
     if key == "ga_progress":
         return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
                 ("project", "PRJK", 96), ("am_pm", "AM/PM", 60), ("task_type", "LLOJI", 48),
@@ -164,6 +176,8 @@ def table_columns(key, movement=""):
 
 
 def table_value(report, row, column, index, movement):
+    if column == "unfinished_comment":
+        return report.get("manual_answers", {}).get(f"unfinished_comment:{row.get('task_id')}") or "-"
     if column == "manual_comment":
         return report.get("manual_answers", {}).get(f"postponed_comment:{row['task_id']}") or "-"
     if column == "choice":
@@ -209,7 +223,7 @@ def export_blocks(report):
                 for column_index, (column, _, _) in enumerate(columns):
                     value = str(table_value(report, row, column, index, movement))
                     cell_fill, cell_color = fill, color
-                    if column in {"answer", "manual_comment", "choice"}:
+                    if column in {"answer", "manual_comment", "unfinished_comment", "choice"}:
                         cell_fill, cell_color = "#ffffff", "#000000"
                     if column == "choice" and value in {"PO", "JO"}:
                         cell_fill, cell_color = ("#16a34a" if value == "PO" else "#dc2626"), "#ffffff"

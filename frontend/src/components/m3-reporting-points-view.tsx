@@ -11,7 +11,7 @@ export const MANUAL_POINTS = {
   reorganization: "3. RIORGANIZIM NESER?",
 } as const
 
-export type ManualKey = keyof typeof MANUAL_POINTS | `meeting_plan:${string}`
+export type ManualKey = keyof typeof MANUAL_POINTS | `meeting_plan:${string}` | `untouched_comment:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 export type TaskRow = {
   task_id: string
@@ -96,7 +96,10 @@ function taskTitle(value: string) {
 
 type TableKind = "postponed" | "untouched" | "same_day" | "ga_postponed"
 type Movement = "start_due" | "due" | "start"
-type Column = { key: keyof TaskRow | "nr" | "from" | "to"; label: string; width: number }
+type Column = { key: keyof TaskRow | "nr" | "from" | "to" | "manual_comment"; label: string; width: number }
+type TaskManualComments = {
+  answers: ManualAnswers; disabled: boolean; onAnswerChange: (key: ManualKey, value: string) => void
+}
 
 function postponementKind(row: TaskRow): Movement {
   if (row.postponement_kind) return row.postponement_kind
@@ -120,6 +123,7 @@ function columnsFor(kind: TableKind, movement?: Movement): Column[] {
   if (movement !== "due") {
     columns.push({ key: "reason", label: "ARSYEJA", width: 124 }, { key: "comment", label: "KOMENTI", width: 160 })
   }
+  if (kind === "untouched") columns.push({ key: "manual_comment", label: "KOMENT MANUAL", width: 220 })
   if (moved) columns.push({ key: "risk", label: "VLERËSIMI", width: 80 })
   if (kind === "ga_postponed") columns.push({ key: "category", label: "KUSHTI", width: 100 })
   return columns
@@ -135,12 +139,18 @@ function dateRange(row: TaskRow, to: boolean, movement?: Movement) {
   return movement === "start" ? start : due
 }
 
-function TaskGrid({ rows, kind, movement }: { rows: TaskRow[]; kind: TableKind; movement?: Movement }) {
+function TaskGrid({ rows, kind, movement, manualComments }: { rows: TaskRow[]; kind: TableKind; movement?: Movement; manualComments?: TaskManualComments }) {
   const orderedRows = kind === "same_day" ? rows.filter((row) => row.status !== "DONE") : rows
   if (!orderedRows.length) return <p className="px-5 py-6 text-sm text-muted-foreground">Asnjë detyrë për këtë pikë.</p>
   const columns = columnsFor(kind, movement)
   const cell = (row: TaskRow, column: Column, index: number) => {
     if (column.key === "nr") return index + 1
+    if (column.key === "manual_comment") {
+      const key: ManualKey = `untouched_comment:${row.task_id}`
+      return manualComments ? <Textarea aria-label={`Koment manual për ${taskTitle(row.title)}`} value={manualComments.answers[key] || ""}
+        disabled={manualComments.disabled} maxLength={10000} rows={2} className="min-h-20 bg-white text-black" placeholder="Shëno komentin."
+        onChange={(event) => manualComments.onAnswerChange(key, event.target.value)} /> : "—"
+    }
     if (column.key === "title") return <div className="w-full whitespace-normal break-words font-medium">{row.marker ? <strong className={`mr-1 text-sm font-black ${row.deadline_important || row.category?.includes("Deadline Important") ? "text-white" : "text-red-600"}`} data-task-symbol="true">{row.marker}</strong> : null}{taskTitle(row.title)}</div>
     if (column.key === "from" || column.key === "to") return dateRange(row, column.key === "to", movement)
     if (column.key.endsWith("_date")) return reportDate(row[column.key as "created_date" | "start_date" | "due_date"])
@@ -163,7 +173,7 @@ function TaskGrid({ rows, kind, movement }: { rows: TaskRow[]; kind: TableKind; 
   </div>
 }
 
-export function ReportingTaskTable({ rows, kind, splitPeriods = true }: { rows: TaskRow[]; kind: TableKind; splitPeriods?: boolean }) {
+export function ReportingTaskTable({ rows, kind, splitPeriods = true, manualComments }: { rows: TaskRow[]; kind: TableKind; splitPeriods?: boolean; manualComments?: TaskManualComments }) {
   if (kind === "postponed" && splitPeriods) {
     const periods = ["AM", "PM", ...(rows.some((row) => !row.postponement_period) ? ["-"] : [])]
     return <div>{periods.map((period) => <div key={period}>
@@ -173,7 +183,7 @@ export function ReportingTaskTable({ rows, kind, splitPeriods = true }: { rows: 
   }
   if (kind === "untouched") return <div>{[
     { label: "DET FT DHE PRJK PA PROGRES", system: false }, { label: "DETYRAT E SISTEMIT PA PROGRES", system: true },
-  ].map(({ label, system }) => <div key={label}><h4 className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-950">{label}:</h4><TaskGrid rows={rows.filter((row) => !!(row.is_system_task || row.task_type === "SYS") === system)} kind={kind} /></div>)}</div>
+  ].map(({ label, system }) => <div key={label}><h4 className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-950">{label}:</h4><TaskGrid rows={rows.filter((row) => !!(row.is_system_task || row.task_type === "SYS") === system)} kind={kind} manualComments={manualComments} /></div>)}</div>
   if (kind !== "postponed" && kind !== "ga_postponed") return <TaskGrid rows={rows} kind={kind} />
   const groups: { label: string; movement: Movement }[] = [
     { label: "SHTYER START DHE DUE DATE", movement: "start_due" }, { label: "SHTYER DUE DATE", movement: "due" },
@@ -185,10 +195,10 @@ export function ReportingTaskTable({ rows, kind, splitPeriods = true }: { rows: 
   </div>)}</div>
 }
 
-function Point({ title, note, rows, kind, splitPeriods = false }: { title: string; note: React.ReactNode; rows: TaskRow[]; kind: Parameters<typeof ReportingTaskTable>[0]["kind"]; splitPeriods?: boolean }) {
+function Point({ title, note, rows, kind, splitPeriods = false, manualComments }: { title: string; note: React.ReactNode; rows: TaskRow[]; kind: Parameters<typeof ReportingTaskTable>[0]["kind"]; splitPeriods?: boolean; manualComments?: TaskManualComments }) {
   return <section className="overflow-hidden rounded-xl border bg-card">
     <div className="border-b px-5 py-4"><div className="flex items-center gap-3"><h3 className="font-semibold">{title}</h3><Badge variant="secondary">{rows.length}</Badge></div><p className={kind === "postponed" ? "mt-2 text-sm font-bold leading-6 text-slate-950" : "mt-1 text-xs text-muted-foreground"}>{note}</p></div>
-    <ReportingTaskTable rows={rows} kind={kind} splitPeriods={splitPeriods} />
+    <ReportingTaskTable rows={rows} kind={kind} splitPeriods={splitPeriods} manualComments={manualComments} />
   </section>
 }
 
@@ -251,7 +261,7 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
       </div>
       <Point title="1. DET QË JANË SHTY NGA KJO JAVË NË JAVËN TJETËR / BRENDA JAVËS" note={<>Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></>} rows={data.postponed || []} kind="postponed" />
       <Point title="DET QË JANË SHTYER SOT AM DHE PM" note="Detyrat që para shtyrjes ishin të planifikuara për ditën e raportit (brenda intervalit Start–Due). Shtyrjet ndahen sipas orës së ndryshimit: para 12:00 dhe nga 12:00." rows={data.postponed_today || []} kind="postponed" splitPeriods />
-      <Point title="2. PSE PA PREK TËRË DITËN?" note="Detyrat TODO ku data e raportit është brenda intervalit Start–Due, pavarësisht progresit të mëparshëm." rows={data.untouched || []} kind="untouched" />
+      <Point title="2. PSE PA PREK TËRË DITËN?" note="Detyrat TODO ku data e raportit është brenda intervalit Start–Due, pavarësisht progresit të mëparshëm." rows={data.untouched || []} kind="untouched" manualComments={{ answers, disabled, onAnswerChange }} />
       <Point title="3. SOT PËR SOT/DEADLINE - PROGRESI?" note="Vetëm detyrat që nuk janë DONE dhe kanë Creation Date, Start Date dhe Due Date në datën e këtij raporti." rows={(data.same_day || []).filter((row) => row.status !== "DONE")} kind="same_day" />
       <UnheldMeetings rows={data.unheld_meetings || []} reportDay={report.report_date} answers={answers} disabled={meetingCommentsDisabled} onAnswerChange={onAnswerChange} />
       <section className="rounded-xl border bg-card p-5" aria-labelledby="m3-realization-title">

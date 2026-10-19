@@ -46,6 +46,24 @@ function render(overrides = {}, answers = {}, disabled = false) {
   }))
 }
 
+test("point two keeps My View evidence and manual comments per task including SYS", () => {
+  const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"]
+  const answers = { [`untouched_comment:${ids[0]}`]: "Manual FT", [`untouched_comment:${ids[1]}`]: "Manual SYS" }
+  const data = { untouched: ids.map((task_id, index) => ({ ...row, task_id, task_type: index ? "SYS" : "FT", reason: "My View reason", comment: "My View comment" })) }
+  const html = render({ data }, answers)
+  assert.equal((html.match(/KOMENT MANUAL<\/th>/g) || []).length, 2)
+  assert.equal((html.match(/My View reason/g) || []).length, 2)
+  assert.equal((html.match(/My View comment/g) || []).length, 2)
+  assert.match(html, /<textarea[^>]*>Manual FT<\/textarea>/)
+  assert.match(html, /<textarea[^>]*>Manual SYS<\/textarea>/)
+  assert.match(render({ data }, answers, true), /<textarea[^>]*aria-label="Koment manual[^>]*disabled=""/)
+  const { readManualDraft, writeManualDraft } = load("@/lib/m3-reporting-points-draft")
+  const values = new Map()
+  const storage = { getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) }
+  writeManualDraft(storage, "user", "2026-10-05", answers)
+  assert.deepEqual(JSON.parse(JSON.stringify(readManualDraft(storage, "user", "2026-10-05"))), answers)
+})
+
 test("M3 contains three editable manual answers without the removed GA section", () => {
   const html = render({}, { underload: "Përgjigje e ruajtur", ga_reorganization: "Riorganizo ekipin" })
   assert.match(html, /PIKAT PËR RAPORTIM M3/)

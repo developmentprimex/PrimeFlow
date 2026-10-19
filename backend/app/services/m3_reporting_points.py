@@ -251,11 +251,7 @@ async def build_task_data(db: AsyncSession, day: date, *, section_selector=selec
             evidence = states[task_id]
             # My View writes day-scoped reasons/comments to TaskDailyRlzState.
             # Do not replace absent daily evidence with the date-change audit reason.
-            prefix = lambda item: f"{_initials(users.get(item.user_id))}: " if len(evidence) > 1 else ""
-            row["comment"] = "\n".join(prefix(item) + item.comment.strip()
-                                        for item in evidence if item.comment and item.comment.strip()) or "-"
-            row["reason"] = "\n".join(prefix(item) + REASON_LABELS.get(item.reason_code, item.reason_code)
-                                       for item in evidence if item.reason_code) or "-"
+            row.update(daily_explanation_values(evidence, users))
             daily = progress.get(task_id)
             row["completed_today"] = daily.completed_delta if daily else 0
             row["completed_value"] = daily.completed_value if daily else None
@@ -376,8 +372,43 @@ def report_payload(row: M3ReportingPointsReport) -> dict:
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
 
 
+def daily_explanation_values(evidence, users: dict) -> dict:
+    def prefix(item):
+        return f"{_initials(users.get(item.user_id))}: " if len(evidence) > 1 else ""
+    return {
+        "comment": "\n".join(prefix(item) + item.comment.strip()
+                              for item in evidence if item.comment and item.comment.strip()) or "-",
+        "reason": "\n".join(prefix(item) + REASON_LABELS.get(item.reason_code, item.reason_code)
+                             for item in evidence if item.reason_code) or "-",
+    }
+
+
+async def with_current_task_explanations(db: AsyncSession, payload: dict, section: str) -> dict:
+    # Today's My View edits appear on the next report refresh. Historical reports
+    # keep their saved evidence, and manual report comments remain independent.
+    if payload["report_date"] != datetime.now(report_timezone()).date().isoformat():
+        return payload
+    rows = payload["data"].get(section, [])
+    task_ids = {uuid.UUID(row["task_id"]) for row in rows if row.get("task_id")}
+    if not task_ids:
+        return payload
+    states = defaultdict(list)
+    for state in (await db.execute(select(TaskDailyRlzState).where(
+        TaskDailyRlzState.day_date == date.fromisoformat(payload["report_date"]),
+        TaskDailyRlzState.task_id.in_(task_ids),
+    ).order_by(TaskDailyRlzState.user_id))).scalars().all():
+        states[state.task_id].append(state)
+    user_ids = {state.user_id for items in states.values() for state in items}
+    users = {user.id: user.full_name or user.username or user.email
+             for user in (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()} if user_ids else {}
+    updated = [{**row, **daily_explanation_values(states[uuid.UUID(row["task_id"])], users)}
+               if row.get("task_id") else row for row in rows]
+    return {**payload, "data": {**payload["data"], section: updated}}
+
+
 async def current_report_payload(db: AsyncSession, row: M3ReportingPointsReport) -> dict:
     payload = report_payload(row)
+    payload = await with_current_task_explanations(db, payload, "untouched")
     payload["data"] = await add_saved_meeting_appearance(db, payload["data"])
     return payload
 
@@ -435,6 +466,8 @@ def report_table_columns(key: str, movement: str = "") -> list[tuple[str, str, i
         columns += [("from", "NGA", date_width), ("to", "NE", date_width)]
     columns.append(("title", "TITULLI", 360))
     columns += [("reason", "ARSYEJA", 124), ("comment", "KOMENTI", 160)]
+    if key == "untouched":
+        columns.append(("manual_comment", "KOMENT MANUAL", 220))
     if key in {"postponed", "ga_postponed"}:
         columns.append(("risk", "VLERESIMI", 80))
         if key == "ga_postponed":
@@ -442,7 +475,9 @@ def report_table_columns(key: str, movement: str = "") -> list[tuple[str, str, i
     return columns
 
 
-def report_table_value(row: dict, column: str, index: int, kind: str) -> Any:
+def report_table_value(row: dict, column: str, index: int, kind: str, report: dict | None = None) -> Any:
+    if column == "manual_comment":
+        return (report or {}).get("manual_answers", {}).get(f"untouched_comment:{row.get('task_id')}") or "-"
     def formatted(value):
         day = semantic_local_day(value)
         return day.strftime("%d.%m.%Y") if day else "-"
@@ -505,7 +540,7 @@ def render_html(report: dict) -> str:
                         style += f";width:{width}px"
                     if column == "risk":
                         style += ";font-weight:700;color:" + ("#7f1d1d" if row.get("risk") == "RREZIK" else "#14532d")
-                    value = _cell(report_table_value(row, column, index, kind))
+                    value = _cell(report_table_value(row, column, index, kind, report))
                     if column == "title":
                         if row.get("marker"):
                             value = (f"<strong data-task-symbol='true' style='display:inline-block;margin-right:4px;color:{'#ffffff' if row_color == '#ffffff' else '#DC2626'};font-size:1.18em;font-weight:900'>"
@@ -625,7 +660,7 @@ def render_plain_text(report: dict) -> str:
         for caption, kind, rows in task_table_groups(report["data"].get(key, []), key):
             if caption:
                 lines.append(caption)
-            lines.extend(" | ".join(f"{label}: {report_table_value(row, column, index, kind)}"
+            lines.extend(" | ".join(f"{label}: {report_table_value(row, column, index, kind, report)}"
                                     for column, label, _ in report_table_columns(key, kind))
                          for index, row in enumerate(rows, 1))
             if not rows:

@@ -218,6 +218,7 @@ def _unfinished_priority_task_rows(
     cutoff: datetime,
     timezone: ZoneInfo,
     department_codes: dict[Any, str] | None = None,
+    *, include_task_id: bool = False,
 ) -> list[list[str]]:
     """AM/AM-PM TODO or in-progress work whose due date is the report day."""
     selected: list[tuple[Task, datetime | None, str, str]] = []
@@ -280,7 +281,7 @@ def _unfinished_priority_task_rows(
             _m3_task_type_label(task),
             _display_title(task.title),
             "SOT",
-        ]
+        ] + ([str(task.id)] if include_task_id else [])
         for index, (task, due_at, task_type, status) in enumerate(selected, start=1)
     ]
 
@@ -412,7 +413,9 @@ def _waiting_client_task_rows(
     ]
 
 
-async def build_unfinished_priority_task_rows(db: AsyncSession, report_day: date) -> list[list[str]]:
+async def build_unfinished_priority_task_rows(
+    db: AsyncSession, report_day: date, *, include_task_id: bool = False,
+) -> list[list[str]]:
     """Load unfinished morning work at the configured M2 send cutoff."""
     tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
@@ -431,6 +434,7 @@ async def build_unfinished_priority_task_rows(db: AsyncSession, report_day: date
         cutoff,
         cutoff_timezone,
         department_codes,
+        include_task_id=include_task_id,
     )
 
 

@@ -77,10 +77,10 @@ test("M2 presents five points with a final per-task manual answer", () => {
 })
 
 test("unfinished priority tasks appear second with due labels and priority styling", () => {
-  const priority = { assignees: "ER", department: "GD", am_pm: "AM", status: "IN_PROGRESS", priority: "DEADLINE / 08:00",
+  const priority = { task_id: "11111111-1111-4111-8111-111111111111", reason: "Arsyeja nga My View", comment: "Komenti nga My View", assignees: "ER", department: "GD", am_pm: "AM", status: "IN_PROGRESS", priority: "DEADLINE / 08:00",
     task_type: "PRJK", title: "08:00 Detyre <test>", due_label: "SOT", deadline_important: true, eight_am: true }
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
-    report: { ...report, data: { ...report.data, unfinished_priority: [priority] } }, answers: {}, disabled: false, onAnswerChange: () => {},
+    report: { ...report, data: { ...report.data, unfinished_priority: [priority] } }, answers: { [`unfinished_comment:${priority.task_id}`]: "Koment manual" }, disabled: false, onAnswerChange: () => {},
   }))
   const section = html.slice(html.indexOf('aria-labelledby="m2-unfinished-priority"'), html.indexOf('aria-labelledby="m2-postponed"'))
   assert.ok(html.indexOf('id="m2-reorganization"') < html.indexOf('id="m2-unfinished-priority"'))
@@ -90,7 +90,27 @@ test("unfinished priority tasks appear second with due labels and priority styli
   assert.match(section, />SOT<\/td>/)
   assert.match(section, /background:#dc2626;color:white/)
   assert.match(section, /border-top:3px solid #dc2626/)
-  assert.doesNotMatch(section, /<textarea|<select|>STATUS<\/th>/)
+  assert.match(section, /ARSYEJA<\/th>/)
+  assert.match(section, /KOMENT MANUAL<\/th>/)
+  assert.match(section, /Arsyeja nga My View/)
+  assert.match(section, /Komenti nga My View/)
+  assert.match(section, /<textarea[^>]*>Koment manual<\/textarea>/)
+  assert.doesNotMatch(section, /<select|>STATUS<\/th>/)
+})
+
+test("M2 unfinished comments survive draft reload and remain disabled in a read-only view", () => {
+  const taskId = "11111111-1111-4111-8111-111111111111"
+  const key = `unfinished_comment:${taskId}`
+  const values = new Map()
+  const storage = { getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) }
+  writeManualDraft(storage, "user", "2026-10-05", { [key]: "Manual i ruajtur" })
+  const answers = readManualDraft(storage, "user", "2026-10-05")
+  assert.equal(answers[key], "Manual i ruajtur")
+  const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+    report: { ...report, data: { unfinished_priority: [{ ...row, task_id: taskId, due_label: "SOT" }] } },
+    answers, disabled: true, onAnswerChange: () => {},
+  }))
+  assert.match(html, /<textarea[^>]*aria-label="Koment manual[^>]*disabled=""[^>]*>Manual i ruajtur<\/textarea>/)
 })
 
 test("read-only reports keep all manual fields disabled", () => {
