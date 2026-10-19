@@ -232,7 +232,7 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             {"message": "Kjo komandë është në përpunim ose kërkon kontroll në PrimeFlow; nuk do të përsëritet.", "status": old.status})
     task_id = payload.task_id or link.selected_task_id
     if not task_id:
-        return {"message": "Zgjidh detyrën nga dropdown fillimisht.", "status": "QUESTION"}
+        return {"message": "Hap detyrën fillimisht me /detyrat.", "status": "QUESTION"}
     action = DiscordAction(id=payload.request_id, link_id=link.id, task_id=task_id, instruction=payload.instruction)
     db.add(action)
     # Durable reservation BEFORE calling an API that may commit. An interrupted
@@ -247,7 +247,7 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
         if not expected and link.selected_task_id == task_id:
             expected = (link.selected_fingerprint or "")[:16]
         if expected and tools.fingerprint(before)[:16] != expected:
-            raise ValueError("Detyra ndryshoi pasi u shfaq në Discord. Zgjidhe përsëri nga dropdown për të parë pikat aktuale.")
+            raise ValueError("Detyra ishte ndryshuar në PrimeFlow ndërkohë. Karta u rifreskua; zgjidh përsëri.")
         history = link.pending_instruction if link.selected_task_id == task_id else None
         try:
             checklists = await tools.user_api(user, "GET", "/api/checklists", params={"task_id": str(task_id)})

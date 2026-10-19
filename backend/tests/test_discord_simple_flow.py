@@ -58,7 +58,7 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
             {"number": n, "text": f"{n}. Point {n}" + (" 14:20 16.10" if n % 2 else ""), "done": bool(n % 2)} for n in range(1, 21)]}
         embed = ui.card(item, detail=detail)
         self.assertIn("☑ 10/20 pika", embed.description.splitlines()[0])
-        self.assertIn("19. ✅ ~~Point 19~~ `14:20 16.10`", embed.description)
+        self.assertIn("19. ✅ ~~Point 19~~ · 🕘 14:20 16.10", embed.description)
         self.assertIn("20. ⬜ Point 20", embed.description)
         self.assertNotIn("pika të tjera", embed.description)
 
@@ -94,6 +94,26 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("U mbyll: First", kwargs["content"])
         self.assertEqual(kwargs["embed"].title, "Second")
         interaction.followup.send.assert_not_called()
+
+    async def test_out_of_date_card_still_changes_status_with_fresh_version(self):
+        item = task("A", "TODO")
+        client = self.client()
+        sent = []
+
+        async def bridge(path, payload):
+            if path == "/bot/select":
+                return {**detail_of(item), "fingerprint": "1" * 16}
+            sent.append(payload)
+            return {"status": "DONE", "message": "ok", "task": {**item, "status": "IN_PROGRESS"}, "fingerprint": "2" * 16}
+        client.bridge = bridge
+        interaction = self.click()
+        await client.quick(interaction, item["id"], "0" * 16, "progress")
+        self.assertEqual(sent[0]["expected_fingerprint"], "1" * 16)
+        self.assertIn("🔵", interaction.edit_original_response.call_args.kwargs["embed"].description)
+
+    def test_report_summary_uses_singular_forms(self):
+        self.assertEqual(ui.report_summary("10:00", [1, 1, 0, 1]), "✓ **Sloti 10:00 u raportua** · 1 e kryer · 1 vazhdon · 1 e kaluar")
+        self.assertIn("2 vazhdojnë", ui.report_summary("10:00", [0, 2, 0, 0]))
 
     async def test_refused_close_stays_on_card_with_hint(self):
         item = task("Needs comment")

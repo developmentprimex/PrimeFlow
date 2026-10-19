@@ -114,7 +114,9 @@ def point_line(point: dict, limit: int | None = None) -> str:
     if limit and len(text) > limit:
         text = text[:limit - 1] + "…"
     text = discord.utils.escape_markdown(text)
-    return f"{point['number']}. " + (f"✅ ~~{text}~~" + (f" `{stamp}`" if stamp else "") if point["done"] else f"⬜ {text}")
+    # Non-breaking spaces keep the strike time on one line.
+    stamp = " · 🕘 " + stamp.replace(" ", " ") if stamp else ""
+    return f"{point['number']}. " + (f"✅ ~~{text}~~{stamp}" if point["done"] else f"⬜ {text}")
 
 
 def points_count(task: dict, detail: dict) -> str:
@@ -264,8 +266,9 @@ def report_step(bucket: str, task: dict, reminder_id: str, counts: list[int], po
 
 def report_summary(bucket: str, counts: list[int]) -> str:
     done, cont, wfe, skipped = counts
-    parts = [f"{done} të kryera" if done else None, f"{cont} vazhdojnë" if cont else None,
-             f"{wfe} WFE" if wfe else None, f"{skipped} të kaluara" if skipped else None]
+    parts = [(f"{done} e kryer" if done == 1 else f"{done} të kryera") if done else None,
+             (f"{cont} vazhdon" if cont == 1 else f"{cont} vazhdojnë") if cont else None,
+             f"{wfe} WFE" if wfe else None, (f"{skipped} e kaluar" if skipped == 1 else f"{skipped} të kaluara") if skipped else None]
     return f"✓ **{bucket_name(bucket)} u raportua**" + (" · " + " · ".join(filter(None, parts)) if any(counts) else "")
 
 

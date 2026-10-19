@@ -346,6 +346,11 @@ class PrimeFlowBot(discord.Client):
                     await interaction.message.edit(content="Zgjidh pikat për strike / heqje strike:", view=picker)
                 except discord.HTTPException:
                     log.warning("Could not refresh the strike picker after a saved change")
+            if in_place(interaction) and not result.get("task"):
+                # Keep the user on the card: show why nothing changed there.
+                detail = await self.select(interaction, task_id)
+                await self.show_task(interaction, detail, notice="⚠ " + result["message"][:900])
+                return
             await self.show_result(interaction, result)
         except Exception as exc:
             await interaction.followup.send(self.error_message(exc), ephemeral=True)
@@ -365,14 +370,14 @@ class PrimeFlowBot(discord.Client):
     async def current_detail(self, interaction, task_id, fingerprint=None):
         detail = await self.select(interaction, task_id)
         if fingerprint and detail["fingerprint"] != fingerprint:
-            await self.show_task(interaction, detail, notice="Detyra ndryshoi. Zgjidh veprimin mbi këtë kartë të rifreskuar.", update=True)
+            await self.show_task(interaction, detail, notice="🔄 Detyra ishte ndryshuar në PrimeFlow. Ky është versioni i fundit; provo përsëri.", update=True)
             return None
         self.remember_task(interaction, detail)
         return detail
 
     async def show_people(self, interaction, task_id, fingerprint, page=0):
-        if not await self.current_detail(interaction, task_id, fingerprint):
-            return
+        # The picker carries the fresh version, so an older card never blocks it.
+        fingerprint = (await self.current_detail(interaction, task_id))["fingerprint"]
         result = await self.bridge("/bot/people", {**actor(interaction.user.id, interaction.guild_id, interaction.channel_id), "task_id": task_id})
         view = ui.people_view(result["people"], task_id, fingerprint, page)
         if in_place(interaction):
@@ -415,6 +420,10 @@ class PrimeFlowBot(discord.Client):
                 f"pf:agent:targets:{task_id}:{fingerprint}" if action == "agent" else f"pf:agent:history:{task_id}:0")
         else:
             await self.ack(interaction)
+            if action in ui.STATUS_ACTIONS or action == "done":
+                # A status change does not depend on the text shown, so a card
+                # that is a little out of date must not refuse it.
+                fingerprint = (await self.current_detail(interaction, task_id))["fingerprint"]
             if action in ui.STATUS_ACTIONS:
                 status = ui.STATUS_ACTIONS[action]
                 await self.run_direct(interaction, task_id, fingerprint, [ui.action("update_task", {"status": status})], "Ndrysho statusin në " + status)
@@ -423,9 +432,7 @@ class PrimeFlowBot(discord.Client):
             elif action == "confirm":
                 await self.show_people(interaction, task_id, fingerprint)
             elif action in {"points", "schedule", "refresh", "full"}:
-                detail = await self.current_detail(interaction, task_id, None if action in {"refresh", "full"} else fingerprint)
-                if not detail:
-                    return
+                detail = await self.current_detail(interaction, task_id)
                 if action == "refresh":
                     await self.show_task(interaction, detail, update=True)
                 elif action == "full":
@@ -436,15 +443,16 @@ class PrimeFlowBot(discord.Client):
                     if len(view.children) == 1:
                         await interaction.followup.send("Kjo detyrë nuk ka pika për shënim.", ephemeral=True)
                     elif in_place(interaction):
-                        await interaction.edit_original_response(content="Zgjidh një ose disa pika për strike / heqje strike:", view=view)
+                        await interaction.edit_original_response(content="Zgjidh një ose disa pika për strike / heqje strike:",
+                            embed=ui.card(detail["task"], detail=detail), view=view)
                     else:
                         await interaction.followup.send("Zgjidh një ose disa pika për strike / heqje strike.", view=view)
                 else:
                     text = "Ndrysho slotin ose AM/PM. Slotet ndjekin datën efektive të PrimeFlow."
                     if in_place(interaction):
-                        await interaction.edit_original_response(content=text, view=ui.schedule_view(task_id, fingerprint))
+                        await interaction.edit_original_response(content=text, view=ui.schedule_view(task_id, detail["fingerprint"]))
                     else:
-                        await interaction.followup.send(text, view=ui.schedule_view(task_id, fingerprint))
+                        await interaction.followup.send(text, view=ui.schedule_view(task_id, detail["fingerprint"]))
             else:
                 raise ValueError("Veprim i panjohur.")
 
@@ -573,13 +581,12 @@ class PrimeFlowBot(discord.Client):
             elif custom_id.startswith("pf:points:"):
                 _, _, task_id, fingerprint, page = custom_id.split(":")
                 await self.ack(interaction)
-                detail = await self.current_detail(interaction, task_id, fingerprint)
-                if detail:
-                    view = ui.points_view(detail, max(0, int(page)))
-                    if in_place(interaction):
-                        await interaction.edit_original_response(view=view)
-                    else:
-                        await interaction.followup.send("Zgjidh pikat:", view=view)
+                detail = await self.current_detail(interaction, task_id)
+                view = ui.points_view(detail, max(0, int(page)))
+                if in_place(interaction):
+                    await interaction.edit_original_response(embed=ui.card(detail["task"], detail=detail), view=view)
+                else:
+                    await interaction.followup.send("Zgjidh pikat:", view=view)
             elif custom_id.startswith("pf:schedule:"):
                 _, _, task_id, fingerprint = custom_id.split(":")
                 await self.ack(interaction)
