@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import re
 import uuid
+from typing import Annotated
 from datetime import date, datetime, timedelta, timezone
 
 try:
@@ -1445,6 +1446,9 @@ async def _clear_plan_note_conversion_if_no_active_tasks(
 
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     department_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
     status: TaskStatus | None = None,
@@ -1578,7 +1582,13 @@ async def list_tasks(
             )
         )
 
-    tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
+    if q and q.strip():
+        search = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        stmt = stmt.where(or_(Task.title.ilike(search, escape="\\"), Task.description.ilike(search, escape="\\")))
+    stmt = stmt.order_by(Task.created_at).offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    tasks = (await db.execute(stmt)).scalars().all()
     task_ids = [t.id for t in tasks]
     assignee_map, comment_map, alignment_map = await _task_list_metadata(db, task_ids, user.id)
     question_status_overrides = await _question_task_status_overrides(db, tasks, user.id)

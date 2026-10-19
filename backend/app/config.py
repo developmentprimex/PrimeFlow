@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     GA_NOTES_MAX_FILE_MB: int = 25
 
     OPENAI_API_KEY: str | None = None
+    VOICE_ASSISTANT_MODEL: str = "gpt-realtime-2.1"
+    VOICE_ASSISTANT_VOICE: str = "marin"
     # Opt-in Discord worker; never starts or sends messages from the API process.
     DISCORD_ASSISTANT_ENABLED: bool = False
     DISCORD_BRIDGE_SECRET: str | None = None

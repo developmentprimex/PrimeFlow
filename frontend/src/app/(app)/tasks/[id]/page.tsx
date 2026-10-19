@@ -150,6 +150,12 @@ export default function TaskDetailsPage() {
     void load()
   }, [load])
 
+  React.useEffect(() => {
+    const changed = () => { void load() }
+    window.addEventListener("primex:tasks-changed", changed)
+    return () => window.removeEventListener("primex:tasks-changed", changed)
+  }, [load])
+
   const [saving, setSaving] = React.useState(false)
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
