@@ -30,7 +30,7 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
         tasks = [self.task("Title\n1. PRIVATE DETAIL") for _ in range(12)]
         tasks[0]["description"] = "LONG DESCRIPTION"
         text, view = ui.list_view(tasks, "Sot")
-        self.assertIn("`1.` 🔵 Title", text)
+        self.assertIn("`1.` 🟡 Title", text)
         self.assertNotIn("PRIVATE DETAIL", text)
         self.assertNotIn("LONG DESCRIPTION", text)
         self.assertEqual(len(view.children), 12)

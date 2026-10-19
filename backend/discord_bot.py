@@ -216,7 +216,19 @@ class PrimeFlowBot(discord.Client):
             await channel.edit(overwrites=expected, reason="PrimeFlow personal channel privacy")
         return channel
 
+    async def ensure_status_emojis(self):
+        """Upload the pink To Do circle once as an application emoji and use it everywhere."""
+        try:
+            emoji = next((item for item in await self.fetch_application_emojis() if item.name == "pf_todo"), None)
+            if emoji is None:
+                emoji = await self.create_application_emoji(name="pf_todo", image=ui.pink_circle_png())
+            ui.STATUS_ICONS["TODO"] = str(emoji)
+        except (discord.HTTPException, discord.DiscordException) as exc:
+            # Cosmetic only: the purple fallback keeps everything working.
+            log.warning("Pink To Do emoji unavailable, using the fallback: %s", type(exc).__name__)
+
     async def setup_hook(self):
+        await self.ensure_status_emojis()
         guild = discord.Object(id=int(settings.DISCORD_GUILD_ID))
 
         @self.tree.command(name="lidh", description="Lidhe llogarinë personale PrimeFlow me kod njëpërdorimësh", guild=guild)

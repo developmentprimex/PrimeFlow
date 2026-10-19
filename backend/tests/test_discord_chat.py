@@ -60,11 +60,62 @@ class ChooseTaskTests(unittest.IsolatedAsyncioTestCase):
         _, chooser = await self.choose("B", today, answer=tools.TaskChoice(ref=2, question=None))
         self.assertIn("mbylle", chooser.call_args.args[2])
 
+    async def test_short_answer_sees_the_bots_question_about_the_selected_task(self):
+        asked, other = task("REMPP KUCHEN"), task("ZHV")
+        self.link.selected_task_id = uuid.UUID(asked["id"])
+        self.link.pending_instruction = "mbylle detyren per rempp\nPyetja: Kush e konfirmon?"
+        _, chooser = await self.choose("Elsa", [other, asked], context=[other])
+        candidates, history = chooser.call_args.args[1], chooser.call_args.args[2]
+        self.assertIn("Kush e konfirmon?", history)
+        self.assertEqual([item["title"] for item in candidates if item["selected"]], ["REMPP KUCHEN"])
+
     async def test_unknown_ref_from_ai_becomes_a_question(self):
         with patch.object(tools, "_structured", AsyncMock(return_value=tools.TaskChoice(ref=9, question=None))):
             choice = await tools.choose_task("x", [{"ref": 1}, {"ref": 2}])
         self.assertIsNone(choice.ref)
         self.assertTrue(choice.question)
+
+
+def done_plan(*extra):
+    import json
+    return tools.TaskPlan(question=None, actions=[tools.ToolAction(tool=name, arguments_json=json.dumps(args))
+                                                  for name, args in (*extra, ("update_task", {"status": "DONE"}))])
+
+
+class ClosingTests(unittest.TestCase):
+    def operations(self, task, plan):
+        from datetime import datetime, timezone
+        return tools.compile_actions(tools.with_closing_steps(plan, task), task, [], [], "mbylle", datetime(2026, 10, 19, 9, tzinfo=timezone.utc))
+
+    def test_close_strikes_every_open_point_and_comments_kryer(self):
+        item = {"id": str(uuid.uuid4()), "title": "REMPP KUCHEN", "description": "1. [[done]]A[[/done]]\n2. B\n3. C", "user_comment": None}
+        operations = self.operations(item, done_plan())
+        self.assertEqual([op["path"].rsplit("/", 1)[-1] for op in operations], ["comment", item["id"]])
+        self.assertEqual(operations[0]["body"]["comment"], "Kryer")
+        body = operations[1]["body"]
+        self.assertEqual(body["status"], "DONE")
+        self.assertEqual([point["done"] for point in tools.text_points(body["description"], "description")], [True, True, True])
+        self.assertNotIn("title", body)  # A one-line title is the task name, never struck.
+
+    def test_existing_or_given_comment_is_not_replaced(self):
+        item = {"id": str(uuid.uuid4()), "title": "T", "description": "", "user_comment": "U dërgua te klienti"}
+        self.assertFalse(any(op["path"].endswith("/comment") for op in self.operations(item, done_plan())))
+        item["user_comment"] = None
+        operations = self.operations(item, done_plan(("comment", {"comment": "Rezultati"})))
+        self.assertEqual([op["body"]["comment"] for op in operations if op["path"].endswith("/comment")], ["Rezultati"])
+
+    def test_px_note_points_are_struck_before_the_task_is_closed(self):
+        content = "Heading\n1. A\n2. B"
+        item = {"id": str(uuid.uuid4()), "title": content, "description": content, "user_comment": "ok",
+                "_px_note": {"collection": "ga-notes", "id": str(uuid.uuid4()), "content": content}}
+        operations = self.operations(item, done_plan())
+        self.assertEqual([op["label"] for op in operations], ["Strike u ruajt në PX Notes", "Detyra dhe pikat u përditësuan"])
+        self.assertEqual([p["done"] for p in tools.text_points(operations[0]["body"]["content"], "title")], [True, True])
+
+    def test_other_status_changes_are_untouched(self):
+        import json
+        plan = tools.TaskPlan(question=None, actions=[tools.ToolAction(tool="update_task", arguments_json=json.dumps({"status": "TODO"}))])
+        self.assertIs(tools.with_closing_steps(plan, {"title": "T", "description": "1. A"}), plan)
 
 
 @unittest.skipUnless(AVAILABLE, "Install requirements-discord.txt")

@@ -77,7 +77,7 @@ Butonat kryesorë ndjekin statusin: To Do → **▶ Fillo / ✅ Mbylle**, Në pr
 **Hap PrimeFlow**. Menuja **Më shumë** ka Edito, Koment, Mbylle me koment,
 Slot/AM–PM, Konfirmim, statuset e tjera, udhëzimin AI, agjentin dhe Rifresko.
 **◀ ↩ Lista ▶** lëvizin mes detyrave të ditës. Pas mbylljes hapet vetë detyra
-tjetër; nëse mbyllja refuzohet (p.sh. kërkon koment), karta tregon arsyen.
+tjetër; nëse PrimeFlow e refuzon mbylljen, karta tregon arsyen.
 Pikat, Sloti dhe Konfirmimi hapen në të njëjtën kartë me **← Kthehu**.
 Kartat e postuara para këtij ndryshimi vazhdojnë të funksionojnë.
 
@@ -92,7 +92,10 @@ strike ruhet përmes `PATCH /ga-notes/{id}` ose `PATCH /plan-notes/{id}`, njëso
 strike manual. Këto rrugë sinkronizojnë detyrat e lidhura dhe historikun e strike-ve.
 Përshkrimet e veçanta dhe detyrat pa shënim ruajnë ndryshimet te detyra.
 Versioni përfshin tekstin e shënimit; menuja e pikave rifreskohet pas çdo ndryshimi.
-Mbyllja mund të shoqërohet me komentin e rezultatit dhe backend-i zbaton kushtet.
+Mbyllja (butoni, teksti "mbylle" ose "U krye" te raportimi) bën strike të gjitha pikat
+e hapura dhe, kur detyra nuk ka koment, shton komentin "Kryer". Për koment tjetër
+përdor **Më shumë → 📝 Mbylle me koment** ose shkruaje te mesazhi. Backend-i zbaton
+kushtet e tjera (p.sh. personi i konfirmimit).
 
 **Më shumë → 🤖 Udhëzim për AI**, mesazhet në kanal dhe `/pyet udhezimi:...` mbeten
 për kërkesa të lira. `/pyet` punon edhe pa Message Content Intent. Pyetjet sqaruese ruhen

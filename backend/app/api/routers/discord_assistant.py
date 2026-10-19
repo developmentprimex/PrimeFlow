@@ -76,7 +76,9 @@ class StaleTask(ValueError):
 
 async def choose_task(db: AsyncSession, link: DiscordLink, user: User, payload: Command):
     """Pick the task a chat message is about from what the person sees and today's work."""
-    today = await daily_tasks(db, user)
+    # Closed tasks stay reachable so "rihape REMPP" works right after closing it.
+    today = await daily_tasks(db, user, include_done=True)
+    today.sort(key=lambda task: task.get("status") == "DONE")
     by_id = {str(task["id"]): task for task in today}
     shown = []
     for task_id in payload.context_task_ids or []:
@@ -89,11 +91,18 @@ async def choose_task(db: AsyncSession, link: DiscordLink, user: User, payload: 
         shown.append(task)
     shown_ids = {str(task["id"]) for task in shown}
     candidates = shown + [task for task in today if str(task["id"]) not in shown_ids]
+    if link.pending_instruction and link.selected_task_id and str(link.selected_task_id) not in {str(task["id"]) for task in candidates}:
+        try:
+            candidates.append(await owned_task(db, user, link.selected_task_id))  # The task the open question is about.
+        except HTTPException:
+            pass
     if not candidates:
         return None, None
     if len(candidates) == 1:
         return uuid.UUID(str(candidates[0]["id"])), None
-    pending = link.pending_instruction if (link.pending_instruction or "").startswith(CHOICE_MARK) else None
+    # The bot's open question travels with the message, so a short answer
+    # ("kryer", "po", a name) goes to the task the question was about.
+    pending = link.pending_instruction or None
     choice = await tools.choose_task(payload.instruction, [{
         "ref": ref, "shown_number": ref if ref <= len(shown) else None,
         "title": next((line.strip() for line in tools.plain_text(task.get("title")).splitlines() if line.strip()), "")[:200],
@@ -136,12 +145,12 @@ async def owned_task(db: AsyncSession, user: User, task_id: uuid.UUID):
     return await tools.with_source_note(user, result)
 
 
-async def daily_tasks(db: AsyncSession, user: User, bucket: str | None = None):
+async def daily_tasks(db: AsyncSession, user: User, bucket: str | None = None, *, include_done: bool = False):
     now = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
     start = datetime.combine(now.date(), time.min, now.tzinfo)
     end = start + timedelta(days=1) - timedelta(microseconds=1)
     tasks = await tools.user_api(user, "GET", "/api/tasks", params={"assigned_to": str(user.id),
-        "window_from": start.isoformat(), "window_to": end.isoformat(), "include_done": "false", "include_inactive": "false"})
+        "window_from": start.isoformat(), "window_to": end.isoformat(), "include_done": str(include_done).lower(), "include_inactive": "false"})
     # Always read today's explicit overrides. At 16:05 the slot editing endpoint
     # targets tomorrow, but the PM reminder still reports today's work.
     overrides = dict((await db.execute(select(TaskOneHReportSlot.task_id, TaskOneHReportSlot.one_h_report_slot)
@@ -314,6 +323,7 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
         # validation/audit/idempotency path, without asking AI to reinterpret it.
         plan = (tools.TaskPlan(question=None, actions=payload.direct_actions) if payload.direct_actions is not None
                 else await tools.interpret(payload.instruction, before, checklists, users, history))
+        plan = tools.with_closing_steps(plan, before)
         if plan.question:
             link.selected_task_id, link.selected_at = task_id, datetime.now(timezone.utc)
             link.pending_instruction = ((history + "\n") if history else "") + payload.instruction + "\nPyetja: " + plan.question

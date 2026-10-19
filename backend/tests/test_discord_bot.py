@@ -158,7 +158,7 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
     async def test_multiline_task_labels_are_single_line_and_keep_task_ids(self):
         tasks = [{"id": str(uuid.uuid4()), "title": "Heading\n1. [[done]]Point A[[/done]]\n2. Point B", "status": "TODO"}]
         text, view = bot.ui.list_view(tasks, "Today")
-        self.assertIn("`1.` ⚪ Heading\n", text)
+        self.assertIn("`1.` 🟣 Heading\n", text)
         self.assertNotIn("Point A", text)
         self.assertEqual(view.children[0].custom_id, f"pf:open:{tasks[0]['id']}")
 
