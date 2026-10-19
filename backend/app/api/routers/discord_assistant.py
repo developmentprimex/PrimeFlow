@@ -70,6 +70,64 @@ class Command(Actor):
 CHOICE_MARK = "[zgjedhja e detyrës]"
 
 
+MEETING_MARK = "[takim i ri]"
+
+
+async def meeting_draft_reply(db: AsyncSession, link: DiscordLink, user: User, payload: Command):
+    """Chat "krijo tak int ..." becomes a meeting draft the person confirms with one click.
+    Returns None when the message is not about creating a meeting."""
+    people = [{"id": str(person["id"]), "full_name": person.get("full_name"), "username": person.get("username"),
+               "department_id": person.get("department_id")}
+              for person in await tools.user_api(user, "GET", "/api/users") if person.get("is_active", True)]
+    by_id = {person["id"]: person for person in people}
+    pending = link.pending_instruction[len(MEETING_MARK):] if (link.pending_instruction or "").startswith(MEETING_MARK) else None
+    draft = await tools.draft_meeting(payload.instruction, [{key: person[key] for key in ("id", "full_name", "username")} for person in people],
+                                      {"id": str(user.id), "full_name": user.full_name}, pending)
+    if not draft.is_meeting_request:
+        if pending:
+            link.pending_instruction = None  # The person moved on to something else.
+        return None
+    question = draft.question
+    starts_at = None
+    if not question:
+        try:
+            starts_at = datetime.fromisoformat(draft.starts_at or "")
+            if starts_at.tzinfo is None:
+                starts_at = starts_at.replace(tzinfo=ZoneInfo(settings.APP_TIMEZONE))
+        except ValueError:
+            question = "Në cilën datë dhe orë është takimi?"
+        else:
+            if starts_at < datetime.now(timezone.utc) - timedelta(minutes=5):
+                question = "Kjo kohë ka kaluar. Në cilën datë dhe orë është takimi?"
+        if not draft.meeting_type:
+            question = question or "A është takim i brendshëm (TAK INT) apo i jashtëm (TAK EXT)?"
+        if not draft.participant_ids or any(item not in by_id for item in draft.participant_ids):
+            question = question or "Kush janë pjesëmarrësit? Shkruaj emrat siç janë në PrimeFlow."
+    department_id = user.department_id or next((by_id[item]["department_id"] for item in draft.participant_ids
+                                               if item in by_id and by_id[item]["department_id"]), None)
+    if not question and not department_id:
+        question = "Në cilin departament hyn ky takim?"
+    if question:
+        link.pending_instruction = MEETING_MARK + ((pending or "") + "\n" + payload.instruction + "\nPyetja: " + question)[-7000:]
+        await db.commit()
+        return {"message": question, "status": "QUESTION"}
+    participant_ids = list(dict.fromkeys(draft.participant_ids))
+    title = (draft.title or ("TAK INT" if draft.meeting_type == "internal" else "TAK EXT")).strip()[:200]
+    url = draft.meeting_url if (draft.meeting_url or "").startswith("https://") else None
+    body = {"title": title if len(title) >= 2 else "TAK INT", "meeting_type": draft.meeting_type, "starts_at": starts_at.isoformat(),
+            "platform": (draft.platform or None) and draft.platform[:100], "meeting_url": url,
+            "department_id": str(department_id), "participant_ids": participant_ids}
+    reply = {"status": "MEETING_DRAFT", "draft_id": payload.request_id,
+             "message": "Kontrollo takimin dhe kliko ✅ Krijo takimin.",
+             "meeting": {**{key: body[key] for key in ("title", "meeting_type", "starts_at", "platform", "meeting_url")},
+                         "participants": [by_id[item]["full_name"] for item in participant_ids]}}
+    db.add(DiscordAction(id=payload.request_id, link_id=link.id, task_id=None, instruction=payload.instruction,
+                         status="MEETING_DRAFT", result={"reply": reply, "meeting": body}))
+    link.pending_instruction = None
+    await db.commit()
+    return reply
+
+
 class StaleTask(ValueError):
     """The task changed after the person last saw it in Discord."""
 
@@ -281,6 +339,10 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
         return (old.result.get("reply", old.result) if old.result else
             {"message": "Kjo komandë është në përpunim ose kërkon kontroll në PrimeFlow; nuk do të përsëritet.", "status": old.status})
     task_id = payload.task_id
+    if not task_id and (tools.MEETING_HINT.search(payload.instruction) or (link.pending_instruction or "").startswith(MEETING_MARK)):
+        reply = await meeting_draft_reply(db, link, user, payload)
+        if reply is not None:
+            return reply
     if not task_id:
         task_id, question = await choose_task(db, link, user, payload)
         if question:
@@ -487,3 +549,65 @@ async def acknowledge_meeting_alert(alert_id: uuid.UUID, payload: MeetingReceipt
     alert.sent_at, alert.message_id = datetime.now(timezone.utc), payload.message_id
     await db.commit()
     return {"ok": True}
+
+
+class MeetingDecision(Actor):
+    force: bool = False
+
+
+async def meeting_draft(db: AsyncSession, payload: Actor, draft_id: str):
+    if not draft_id.isdigit() or len(draft_id) > 32:
+        raise HTTPException(404, "Drafti i takimit nuk u gjet.")
+    link, user = await identity(db, payload, lock=True)
+    action = await db.get(DiscordAction, draft_id, populate_existing=True)
+    if not action or action.link_id != link.id or not (action.result or {}).get("meeting"):
+        raise HTTPException(404, "Drafti i takimit nuk u gjet.")
+    return user, action
+
+
+@router.post("/bot/meeting-drafts/{draft_id}/confirm", dependencies=[Depends(require_bot)])
+async def confirm_meeting_draft(draft_id: str, payload: MeetingDecision, db: AsyncSession = Depends(get_db)):
+    user, action = await meeting_draft(db, payload, draft_id)
+    if action.status == "DONE":
+        return action.result["created_reply"]
+    if action.status == "CANCELLED":
+        return {"status": "CANCELLED", "message": "Ky draft është anuluar."}
+    if action.status != "MEETING_DRAFT" and not (action.status == "MEETING_CONFLICT" and payload.force):
+        return {"status": "ERROR", "message": "Ky takim është në krijim ose kërkon kontroll në PrimeFlow para se të provosh përsëri."}
+    body = {**action.result["meeting"], "allow_one_h_conflict": payload.force}
+    # Reserved before the write, so a lost reply never creates the meeting twice.
+    action.status = "PROCESSING"
+    await db.commit()
+    try:
+        created = await tools.user_api(user, "POST", "/api/meetings", body=body)
+    except HTTPException as exc:
+        detail = exc.detail
+        if exc.status_code == 409 and isinstance(detail, dict) and detail.get("code") == "one_h_conflict":
+            action.status = "MEETING_CONFLICT"
+            reply = {"status": "CONFLICT", "message": "Ky orar përputhet me 1H.", "conflicts": [
+                {"title": item.get("title"), "starts_at": item.get("starts_at"), "ends_at": item.get("ends_at")}
+                for item in detail.get("conflicts", [])][:10]}
+        else:
+            action.status = "MEETING_DRAFT"  # Refused before anything was created; safe to retry.
+            message = detail.get("message", detail) if isinstance(detail, dict) else detail
+            reply = {"status": "ERROR", "message": str(message)[:1000]}
+        await db.commit()
+        return reply
+    reply = {"status": "DONE", "message": "Takimi u krijua në PrimeFlow.", "meeting_id": str(created["id"]),
+             "url": f"{settings.FRONTEND_URL.rstrip('/')}/common?meeting={created['id']}"}
+    action.status = "DONE"
+    action.result = {**action.result, "created_reply": reply}
+    await db.commit()
+    return reply
+
+
+@router.post("/bot/meeting-drafts/{draft_id}/cancel", dependencies=[Depends(require_bot)])
+async def cancel_meeting_draft(draft_id: str, payload: Actor, db: AsyncSession = Depends(get_db)):
+    _, action = await meeting_draft(db, payload, draft_id)
+    if action.status == "DONE":
+        return action.result["created_reply"]
+    if action.status == "PROCESSING":
+        return {"status": "ERROR", "message": "Takimi po krijohet; kontrollo PrimeFlow."}
+    action.status = "CANCELLED"
+    await db.commit()
+    return {"status": "CANCELLED", "message": "Drafti u anulua. Nuk u krijua asnjë takim."}

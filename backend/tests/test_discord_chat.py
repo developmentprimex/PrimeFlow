@@ -97,6 +97,17 @@ class ClosingTests(unittest.TestCase):
         self.assertEqual([point["done"] for point in tools.text_points(body["description"], "description")], [True, True, True])
         self.assertNotIn("title", body)  # A one-line title is the task name, never struck.
 
+    def test_title_heading_is_never_struck_only_the_steps_below_it(self):
+        title = "KI-AUFTRAGSBEARBEITUNG: PRIMEX & REMPP KUCHEN\nME KUZHINA:\nCLAIMS,\nORDER PROCESSING"
+        item = {"id": str(uuid.uuid4()), "title": title, "description": title, "user_comment": "ok"}
+        body = self.operations(item, done_plan())[0]["body"]
+        self.assertEqual([p["done"] for p in tools.text_points(body["title"], "title")], [False, True, True, True])
+        self.assertTrue(body["title"].startswith("KI-AUFTRAGSBEARBEITUNG: PRIMEX & REMPP KUCHEN\n"))
+        numbered = {"id": str(uuid.uuid4()), "title": "Heading\n1. A\n2. B", "description": "", "user_comment": "ok"}
+        body = self.operations(numbered, done_plan())[0]["body"]
+        self.assertTrue(body["title"].startswith("Heading\n"))
+        self.assertEqual([p["done"] for p in tools.text_points(body["title"], "title")], [True, True])
+
     def test_existing_or_given_comment_is_not_replaced(self):
         item = {"id": str(uuid.uuid4()), "title": "T", "description": "", "user_comment": "U dërgua te klienti"}
         self.assertFalse(any(op["path"].endswith("/comment") for op in self.operations(item, done_plan())))

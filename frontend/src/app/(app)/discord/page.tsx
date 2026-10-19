@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Copy, ExternalLink, MessageSquare, Unplug } from "lucide-react"
+import { AlarmClock, Bot, CalendarPlus, CheckCircle2, Copy, ExternalLink, ListChecks, MessageCircle, MessageSquare, ShieldCheck, Unplug } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,88 @@ type Connection = {
   timezone: string
   schedule: { bucket: string; at: string }[]
 }
+
+const FEATURES = [
+  {
+    icon: ListChecks,
+    title: "Detyrat e ditës",
+    points: [
+      "/detyrat shfaq detyrat e sotme me numra; kliko numrin për ta hapur.",
+      "Karta hapet në të njëjtin mesazh: statusi, sloti, afati dhe të gjitha pikat, edhe ato të bëra strike.",
+      "◀ ▶ lëvizin mes detyrave, ↩ Lista kthehet te lista.",
+      "Më shumë: edito, koment, slot/AM–PM, konfirmim, To Do/WFE, teksti i plotë.",
+    ],
+  },
+  {
+    icon: CheckCircle2,
+    title: "Mbyllja me një klik",
+    points: [
+      "Mbylle bën strike të gjitha pikat poshtë titullit dhe e mbyll detyrën.",
+      "Nëse detyra nuk ka koment, shtohet vetë komenti “Kryer”.",
+      "Pas mbylljes hapet vetë detyra tjetër.",
+      "Për koment tjetër: Më shumë → Mbylle me koment.",
+    ],
+  },
+  {
+    icon: MessageCircle,
+    title: "Shkruaj lirshëm",
+    points: [
+      "Shkruaj si në bisedë: mbylle, bëji strike pikat, ktheje në To Do, shto koment.",
+      "“Këtë detyrë” = detyra në ekran; “detyra 2” = numri në listë; ose përmend titullin.",
+      "Rezultati shfaqet si karta e përditësuar e detyrës.",
+      "Kur nuk është e qartë, boti pyet dhe ti përgjigjesh shkurt.",
+    ],
+  },
+  {
+    icon: AlarmClock,
+    title: "Raportimi i sloteve 1H",
+    points: [
+      "10 min para çdo sloti merr kujtesë vetëm për detyrat e atij sloti.",
+      "Fillo raportimin: ✅ U krye / 🟡 Vazhdon / ⏸ WFE / ⏭ Kalo, një klik për detyrë.",
+      "Shëno të kryerat mbyll disa detyra njëherësh.",
+      "Butoni 🎧 Kyçu në takimin 1H të fut direkt në kanalin zanor 1H.",
+    ],
+  },
+  {
+    icon: CalendarPlus,
+    title: "Takimet",
+    points: [
+      "Kujtesë në Discord para takimeve ku je pjesëmarrës, me linkun e takimit.",
+      "Te TAK INT, kur fillon takimi, boti të thërret me 🎧 Hyr në kanalin zanor.",
+      "Krijo takim nga chat-i: “krijo tak int për nesër ora 15 me unë, endi, rinesa”.",
+      "Para ruajtjes kontrollon kartën dhe kliko ✅ Krijo takimin.",
+    ],
+  },
+  {
+    icon: Bot,
+    title: "Agjenti AI",
+    points: [
+      "Më shumë → Delegoja agjentit: hulumtim në internet ose draft teksti për një detyrë ose pikë.",
+      "Rezultatet AI ruajnë historikun; prano rezultatin ose kërko ndryshime.",
+      "Prano dhe shëno pikën të kryer e bën strike pikën përkatëse.",
+    ],
+  },
+]
+
+const EXAMPLES = [
+  "mbylle këtë detyrë",
+  "detyra 2, bëji strike pikën 2 dhe 4",
+  "hiq strike nga pika 3",
+  "bëje WFE dhe shto komentin: presim përgjigjen e klientit",
+  "ktheje REMPP në to do",
+  "ndrysho slotin në 14:20",
+  "dërgoje për konfirmim te Elsa",
+  "krijo tak int për nesër ora 15 me unë, endi, rinesa, gane",
+  "krijo tak ext të enjten 10:30 me klientin Bali, linku https://teams…",
+]
+
+const STATUS_LEGEND = [
+  { label: "To Do", color: "#FFC4ED" },
+  { label: "Në progres", color: "#FFFF00" },
+  { label: "WFE", color: "#E2C15B" },
+  { label: "Në konfirmim", color: "#FFEDD5" },
+  { label: "E kryer", color: "#C4FDC4" },
+]
 
 export default function DiscordAssistantPage() {
   const { apiFetch } = useAuth()
@@ -91,7 +173,7 @@ export default function DiscordAssistantPage() {
         <div className="rounded-xl bg-indigo-50 p-3 text-indigo-600"><MessageSquare className="size-6" /></div>
         <div>
           <h1 className="text-2xl font-semibold">Asistenti në Discord</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Raporto për detyrat e tua dhe përditëso PrimeFlow nga kanali yt privat.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Menaxho detyrat, raportimin 1H dhe takimet nga kanali yt privat në Discord.</p>
         </div>
       </div>
 
@@ -135,11 +217,52 @@ export default function DiscordAssistantPage() {
             </table>
           </section>
 
+          <section className="space-y-4">
+            <div>
+              <h2 className="font-semibold">Çfarë mund të bësh me asistentin</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Përdor butonat ose shkruaj lirshëm në kanalin tënd. Të dyja ndryshojnë PrimeFlow me të njëjtat rregulla dhe leje.</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {FEATURES.map(feature => (
+                <div key={feature.title} className="space-y-2 rounded-xl border bg-card p-5 text-sm">
+                  <div className="flex items-center gap-2 font-semibold"><feature.icon className="size-4 text-indigo-600" />{feature.title}</div>
+                  <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                    {feature.points.map(point => <li key={point}>{point}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section className="space-y-3 rounded-xl border bg-card p-6 text-sm">
-            <h2 className="font-semibold">Si e përdor</h2>
-            <p>Shkruaj <code>/detyrat</code> dhe kliko numrin e detyrës. Karta hapet në të njëjtin mesazh: <strong>Mbylle</strong> të çon vetë te detyra tjetër, ◀ ▶ lëvizin mes detyrave dhe <strong>Më shumë</strong> ka veprimet e tjera. Në orën e slotit, kujtesa të lejon t’i raportosh detyrat me një klikim secilën. Për kërkesa të lira shkruaj direkt në kanal ose përdor <code>/pyet</code>.</p>
-            <blockquote className="border-l-2 border-indigo-300 pl-3 text-muted-foreground">Te përshkrimi bëji strike pikat 1 dhe 3, lëre detyrën në progres dhe shto komentin: Presim materialet për pikën 2.</blockquote>
-            <p>Asistenti mund të veprojë vetëm mbi detyrat e tua, me lejet që ke në PrimeFlow. Nëse mungon informacion, të pyet para ndryshimit.</p>
+            <h2 className="font-semibold">Shembuj për t’i shkruar në kanal</h2>
+            <p className="text-muted-foreground">Asistenti e gjen detyrën nga mesazhi i fundit i botit (lista, kujtesa ose karta). Mund të bësh edhe <strong>Reply</strong> te mesazhi i detyrës. Kliko një shembull për ta kopjuar.</p>
+            <div className="flex flex-wrap gap-2">
+              {EXAMPLES.map(example => (
+                <button key={example} type="button" className="rounded-full border bg-muted/50 px-3 py-1.5 text-left hover:bg-muted"
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(example); toast.success("U kopjua.") }
+                    catch { toast.error("Kopjoje manualisht.") }
+                  }}>{example}</button>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-3 rounded-xl border bg-card p-6 text-sm">
+            <h2 className="font-semibold">Ngjyrat e statusit</h2>
+            <div className="flex flex-wrap gap-4">
+              {STATUS_LEGEND.map(status => (
+                <span key={status.label} className="flex items-center gap-2">
+                  <span className="size-3.5 rounded-full border border-black/10" style={{ backgroundColor: status.color }} />{status.label}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-2 rounded-xl border bg-card p-6 text-sm">
+            <h2 className="flex items-center gap-2 font-semibold"><ShieldCheck className="size-4 text-indigo-600" />Siguria dhe kufijtë</h2>
+            <p>Asistenti vepron vetëm mbi detyrat e tua, me lejet që ke në PrimeFlow. Kur kërkesa nuk është e qartë, të pyet para çdo ndryshimi. Çdo ndryshim regjistrohet në historik si në PrimeFlow.</p>
+            <p>Fotot dhe skedarët në chat nuk lexohen. Takimet me përsëritje dhe TAK EXT me TAK INT të lidhur krijohen ende në PrimeFlow.</p>
             <p className="text-muted-foreground">Kanalet janë private për anëtarët e tjerë. Pronari dhe administratorët e serverit Discord mund t’i shohin ato.</p>
           </section>
         </>

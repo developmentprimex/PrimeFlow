@@ -10,6 +10,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import discord
 import httpx
@@ -571,6 +572,33 @@ class PrimeFlowBot(discord.Client):
             await interaction.edit_original_response(content=notice + "\n" + ui.report_summary(data["bucket"], [closed, 0, 0, 0]), embed=None,
                 view=discord.ui.View(timeout=None).add_item(discord.ui.Button(label="📋 Detyrat e mia", custom_id="pf:list:0")))
 
+    async def decide_meeting(self, interaction, draft_id, decision):
+        """Create or cancel a meeting drafted from chat; the card turns into the outcome."""
+        if decision not in {"ok", "force", "no"}:
+            raise ValueError("Veprim i panjohur.")
+        await self.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+        identity = actor(interaction.user.id, interaction.guild_id, interaction.channel_id)
+        if decision == "no":
+            result = await self.bridge(f"/bot/meeting-drafts/{draft_id}/cancel", identity)
+        else:
+            result = await self.bridge(f"/bot/meeting-drafts/{draft_id}/confirm", {**identity, "force": decision == "force"})
+        if result["status"] == "DONE":
+            view = discord.ui.View(timeout=None)
+            view.add_item(discord.ui.Button(label="Hap në PrimeFlow", url=result["url"]))
+            await interaction.edit_original_response(content="✅ " + result["message"], view=view)
+        elif result["status"] == "CANCELLED":
+            await interaction.edit_original_response(content="✖ " + result["message"], view=None)
+        elif result["status"] == "CONFLICT":
+            zone = ZoneInfo(settings.APP_TIMEZONE)
+            lines = [f"• {ui.label(item.get('title'), 80)} · "
+                     f"{datetime.fromisoformat(item['starts_at']).astimezone(zone).strftime('%H:%M')}–"
+                     f"{datetime.fromisoformat(item['ends_at']).astimezone(zone).strftime('%H:%M')}"
+                     for item in result.get("conflicts") or [] if item.get("starts_at") and item.get("ends_at")]
+            await interaction.edit_original_response(content="⚠ " + result["message"] + "\n" + "\n".join(lines),
+                view=ui.meeting_draft_view(draft_id, conflict=True))
+        else:
+            await interaction.followup.send("⚠ " + result["message"], ephemeral=True)
+
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != discord.InteractionType.component:
             return
@@ -606,6 +634,10 @@ class PrimeFlowBot(discord.Client):
                 _, _, reminder_hex, task_hex, state, action = custom_id.split(":")
                 await self.ack(interaction)
                 await self.report(interaction, reminder_hex, task_hex, state, action)
+            elif custom_id.startswith("pf:mtg:"):
+                _, _, draft_id, decision = custom_id.split(":")
+                await self.ack(interaction)
+                await self.decide_meeting(interaction, draft_id, decision)
             elif custom_id.startswith("pf:repdone:"):
                 await self.ack(interaction)
                 await self.report_done(interaction, custom_id.split(":")[2], data["values"])
@@ -688,6 +720,10 @@ class PrimeFlowBot(discord.Client):
                 result = await self.bridge("/bot/command", {**actor(message.author.id, message.guild.id, channel.id),
                     "request_id": str(message.id), "instruction": message.content[:4000],
                     "context_task_ids": await self.context_task_ids(message)})
+            if result.get("status") == "MEETING_DRAFT":
+                await channel.send(result["message"], embed=ui.meeting_draft_card(result["meeting"]),
+                    view=ui.meeting_draft_view(result["draft_id"]))
+                return
             text = result["message"]
             if result.get("applied"):
                 text += "\nU zbatuan: " + "; ".join(result["applied"])
