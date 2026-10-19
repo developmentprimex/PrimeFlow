@@ -2,6 +2,8 @@
 
 import * as React from "react"
 import { toast } from "sonner"
+import { MessageCircle } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 import type { Task } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -37,6 +39,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   const [pendingMarker, setPendingMarker] = React.useState<TaskMarker | null>(null)
   const [commentOpen, setCommentOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const hasComment = Boolean(comment.trim())
   const wrapperPositionClasses = ["order-last", "ml-auto", "shrink-0"]
     .filter((token) => className?.split(/\s+/).includes(token))
     .join(" ")
@@ -115,15 +118,30 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   return (
     <div className={`relative inline-flex items-center ${wrapperPositionClasses}`} onClick={(event) => event.stopPropagation()}>
       <Select value={value} onValueChange={chooseMarker} disabled={!taskId || saving}>
-        <SelectTrigger className={`h-7 min-w-[64px] max-w-[82px] border-blue-300 bg-blue-50 px-2 text-base font-black [text-shadow:0_0_0_currentColor] ${className || ""}`} style={{ color: value === NONE ? "#0F2A5F" : "#DC2626", ...compactCommonViewStyle }} aria-label="Task symbol" title={comment || "Edit task symbol"}>
-          <SelectValue placeholder="—" />
+        <SelectTrigger className={`h-7 min-w-[64px] max-w-[82px] border-blue-300 bg-blue-50 px-2 py-0 text-base font-black leading-none [text-shadow:0_0_0_currentColor] ${className || ""}`} style={{ color: value === NONE ? "#0F2A5F" : "#DC2626", ...compactCommonViewStyle }} aria-label="Task symbol" title={comment || "Edit task symbol"}>
+          <SelectValue placeholder="—" className="relative -top-px leading-none" />
         </SelectTrigger>
         <SelectContent className="font-black text-[#0F2A5F]">
           <SelectItem value={NONE}>—</SelectItem>
           {OPTIONS.map((option) => <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{byGa && value === option.value ? `(${option.label})` : option.label}</SelectItem>)}
         </SelectContent>
       </Select>
-      {value !== NONE ? <button type="button" className="absolute -right-1 -top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-blue-300 bg-white p-0 text-[9px] shadow-sm" title={comment || "Add symbol comment"} aria-label={comment ? "View symbol comment" : "Add symbol comment"} onClick={() => { setPendingMarker(value); setDraftComment(comment); setCommentOpen(true) }}>💬</button> : null}
+      {value !== NONE ? (
+        <button
+          type="button"
+          className={cn(
+            "absolute z-10 flex items-center justify-center rounded-full p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700",
+            hasComment
+              ? "-right-2 -top-2 h-6 w-6 border-2 border-blue-950 bg-[#0055FF] text-white shadow-md ring-2 ring-white hover:bg-blue-700"
+              : "-right-1 -top-1 h-4 w-4 border border-blue-300 bg-white text-blue-400 shadow-sm hover:bg-blue-50"
+          )}
+          title={hasComment ? comment : "Add symbol comment"}
+          aria-label={hasComment ? "View symbol comment" : "Add symbol comment"}
+          onClick={() => { setPendingMarker(value); setDraftComment(comment); setCommentOpen(true) }}
+        >
+          <MessageCircle className={hasComment ? "h-4 w-4" : "h-3 w-3"} strokeWidth={hasComment ? 3 : 2.5} aria-hidden="true" />
+        </button>
+      ) : null}
       <Dialog open={commentOpen} onOpenChange={setCommentOpen}>
         <DialogContent onClick={(event) => event.stopPropagation()}>
           <DialogHeader><DialogTitle>Symbol comment</DialogTitle><DialogDescription>Add an optional comment. It appears above the task title wherever the task is shown.</DialogDescription></DialogHeader>

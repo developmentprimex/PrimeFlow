@@ -1433,6 +1433,10 @@ const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
 const getCommonTaskPeriodLabel = (finishPeriod?: string | null) =>
   getFinishPeriodIndicatorLabel(finishPeriod) || "AM/PM"
 
+const getCommonTaskPeriodSortRank = (finishPeriod?: string | null) => {
+  return getCommonTaskPeriodLabel(finishPeriod) === "PM" ? 1 : 0
+}
+
 const isOneTimeMeeting = (recurrenceType?: string | null) => {
   const normalized = (recurrenceType || "").trim().toLowerCase()
   return !normalized || normalized === "none"
@@ -2131,15 +2135,21 @@ export default function CommonViewPage() {
       dueDate?: string | null
       oneHReportSlot?: string | null
       isSystemTask?: boolean
+      finishPeriod?: string | null
     }>(
       items: T[],
-      multiDate: boolean
+      multiDate: boolean,
+      periodFirst = false
     ) => {
       const sorted = [...items]
       sorted.sort((a, b) => {
         if (multiDate) {
           const dateCmp = a.date.localeCompare(b.date)
           if (dateCmp) return dateCmp
+        }
+        if (periodFirst) {
+          const periodCmp = getCommonTaskPeriodSortRank(a.finishPeriod) - getCommonTaskPeriodSortRank(b.finishPeriod)
+          if (periodCmp) return periodCmp
         }
         return compareTaskOrder(a, b)
       })
@@ -2220,7 +2230,14 @@ export default function CommonViewPage() {
       isDeadlineImportant?: boolean
       createdAt?: string | null
       isSystemTask?: boolean
-    }>(items: T[]) => [...items].sort(compareReportPrintOrder),
+      finishPeriod?: string | null
+    }>(items: T[], periodFirst = false) => [...items].sort((a, b) => {
+      if (periodFirst) {
+        const periodCmp = getCommonTaskPeriodSortRank(a.finishPeriod) - getCommonTaskPeriodSortRank(b.finishPeriod)
+        if (periodCmp) return periodCmp
+      }
+      return compareReportPrintOrder(a, b)
+    }),
     [compareReportPrintOrder]
   )
   const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
@@ -5439,7 +5456,7 @@ export default function CommonViewPage() {
 
       const sortedTaskRows = taskRows.map((row) => ({
         ...row,
-        items: mergePrintTaskEntries(row.id, sortTasksForReportPrint(row.items)),
+        items: mergePrintTaskEntries(row.id, sortTasksForReportPrint(row.items, row.id === "blocked")),
       }))
       const meetingRows = ([
         { id: "external" as const, label: "TAK EXT", items: payload.items.external as unknown as Array<Record<string, unknown>> },
@@ -5555,7 +5572,7 @@ export default function CommonViewPage() {
   .print-task-cell { position:relative; padding-top:8px; padding-bottom:27px; }
   .print-task-cell.has-start-today { padding-bottom:41px; }
   .print-task-title { font-size:17px; line-height:1.25; }
-  .print-marker-comment { display:block; width:fit-content; max-width:min(100%,150px); box-sizing:border-box; margin:4px 0; padding:2px 6px; border:1px solid #bfdbfe; border-radius:4px; background:#eff6ff; color:#1e3a8a; font-size:11px; font-weight:500; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .print-marker-comment { display:block; width:fit-content; max-width:min(100%,150px); box-sizing:border-box; margin:2px 0; padding:2px 6px; border:1px solid #172554; border-radius:4px; background:#0055ff; color:#fff; font-size:11px; font-weight:700; line-height:1.375; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   .print-meeting-cell { padding-top:8px; font-size:13px; line-height:1.3; }
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-start { display:inline-flex; flex-direction:column; align-items:flex-start; gap:2px; }
@@ -5816,7 +5833,8 @@ export default function CommonViewPage() {
           filtered.blocked.filter(
             (x) => x.date === iso && !isWaitingClientTask(x) && !isRoutedWaitingConfirmation(x)
           ),
-          false
+          false,
+          true
         ),
         oneH: sortTasksByOrder(
           filtered.oneH.filter(
@@ -8202,7 +8220,8 @@ export default function CommonViewPage() {
       filtered.blocked.filter(
         (entry) => !isWaitingClientTask(entry) && !isRoutedWaitingConfirmation(entry)
       ),
-      isMultiDate
+      isMultiDate,
+      true
     )
     const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
       title: x.title,
@@ -8836,7 +8855,7 @@ export default function CommonViewPage() {
           ),
           false
         ),
-        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
+        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso && !isWaitingClientTask(x)), false, true),
         oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
@@ -9122,7 +9141,7 @@ export default function CommonViewPage() {
       .flatMap((row, rowIndex) => {
         const items = mergePrintTaskEntries(
           row.id,
-          sortTasksForReportPrint(row.items.filter((item) => !item.placeholder))
+          sortTasksForReportPrint(row.items.filter((item) => !item.placeholder), row.id === "blocked")
         )
         const rowCount = Math.max(1, Math.ceil(items.length / 6))
         return Array.from({ length: rowCount }, (_, chunkIndex) => {
