@@ -810,8 +810,13 @@ export function PrintReportPage({
     if (!container) {
       container = document.createElement("div")
       container.dataset.taskFilterToolbar = "true"
-      container.style.cssText = "display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin:12px 0 8px;font-family:Arial,sans-serif"
+      container.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;margin:8px 0 6px;font-family:Arial,sans-serif"
       taskTable.before(container)
+    }
+    const summary = document.querySelector<HTMLElement>('[data-ga-task-summary="true"]')
+    if (summary) {
+      summary.style.margin = "0 auto 0 0"
+      container.prepend(summary)
     }
     setPreviewFilterContainer(container)
   }
@@ -906,7 +911,21 @@ export function PrintReportPage({
         className={`w-full rounded border bg-white ${embedded ? "h-[620px]" : "h-dvh min-h-dvh"}`}
       />
       {previewFilterContainer ? createPortal(
-        <>{dueDateFilterControl}{markerFilterControl()}</>,
+        <>
+          <style>{`
+            [data-report-filters-group] > label,
+            [data-report-filters-group] > details { font-size:13px !important; }
+            [data-report-filters-group] > label { padding:0 10px !important;gap:6px !important; }
+            [data-report-filters-group] > label > select { height:30px !important;font-size:13px !important; }
+            [data-report-filters-group] > details > summary { height:30px !important;min-width:140px !important;padding:0 10px !important;gap:6px !important; }
+            [data-report-filters-group] > button { min-height:32px;padding:0 10px !important;white-space:nowrap; }
+          `}</style>
+          <div data-report-filters-group="true" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+            {userFilterControl}
+            {dueDateFilterControl}
+            {markerFilterControl()}
+          </div>
+        </>,
         previewFilterContainer,
       ) : null}
     </div>

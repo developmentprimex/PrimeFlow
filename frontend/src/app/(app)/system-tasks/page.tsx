@@ -592,6 +592,7 @@ export function SystemTasksView({
     FINISH_PERIOD_NONE_VALUE
   )
   const [internalNotes, setInternalNotes] = React.useState<Record<string, string>>({})
+  const createDetailsRef = React.useRef<HTMLDetailsElement>(null)
   const [daysOfWeek, setDaysOfWeek] = React.useState<string[]>([])
   const [dayOfMonth, setDayOfMonth] = React.useState("")
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
@@ -1165,6 +1166,20 @@ export function SystemTasksView({
 
   const submit = async () => {
     if (!departmentId) return
+    const missingDetail = INTERNAL_NOTE_FIELDS.find(
+      (field) => !internalNotes[field.key]?.trim()
+    )
+    if (missingDetail) {
+      toast.error(`${missingDetail.label} is required.`)
+      const details = createDetailsRef.current
+      if (details) {
+        details.open = true
+        details.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+          `[name="${missingDetail.key}"]`
+        )?.focus()
+      }
+      return
+    }
     // Check if assignees are from different departments - if so, use ALL scope
     const assigneeDepartments = new Set<string>()
     for (const id of assigneeIds) {
@@ -3074,16 +3089,19 @@ export function SystemTasksView({
                         </div>
                       </div>
                     )}
-                    <details className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                    <details ref={createDetailsRef} open className="rounded-lg border border-border/60 bg-muted/20 p-3">
                       <summary className="cursor-pointer text-sm font-medium text-slate-700">
-                        More details
+                        More details (required)
                       </summary>
                       <div className="mt-3 space-y-4">
                         <div className="grid gap-3 md:grid-cols-2">
                           {INTERNAL_NOTE_FIELDS.map((field) => (
                             <div key={field.key} className="space-y-1">
-                              <Label className="text-sm">{field.label}</Label>
+                              <Label htmlFor={`create-note-${field.key}`} className="text-sm">{field.label} *</Label>
                               <Input
+                                id={`create-note-${field.key}`}
+                                name={field.key}
+                                required
                                 value={internalNotes[field.key] || ""}
                                 onChange={(event) =>
                                   setInternalNoteValue(field.key, event.target.value, setInternalNotes)
@@ -3095,10 +3113,12 @@ export function SystemTasksView({
                           ))}
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-sm text-muted-foreground">
+                          <Label htmlFor="create-note-QA" className="text-sm text-muted-foreground">
                             <span className="uppercase">Question/Answer</span> (optional)
                           </Label>
                           <Textarea
+                            id="create-note-QA"
+                            name="QA"
                             value={internalNotes.QA || ""}
                             onChange={(event) => setInternalNoteValue("QA", event.target.value, setInternalNotes)}
                             placeholder="Type any questions/answers..."
