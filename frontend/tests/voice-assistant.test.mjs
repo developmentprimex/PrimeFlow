@@ -101,11 +101,11 @@ test("deduplicates function calls, returns results to the model and refreshes ch
   assert.equal(output.item.call_id, "call-1")
   assert.equal(JSON.parse(output.item.output).success, true)
   assert.deepEqual(h.refreshes, ["primex:tasks-changed"])
-  assert.equal(h.render().messages[0].text, "U ruajt")
+  assert.equal(h.render().messages.length, 0) // Tool details stay out of the chat.
   h.unmount()
 })
 
-test("keeps transcripts and schedule cards available for follow-up commands", async () => {
+test("keeps transcripts and returns schedule results to the model for follow-up commands", async () => {
   const h = harness({ apiFetch: async path => path.endsWith("/session") ? new Response("sdp-answer") : Response.json({ tasks: [{ id: "task-1", title: "Raporti", status: "TODO", one_h_report_slot: "10:00" }] }) })
   await h.render().start(); h.open()
   h.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-1", transcript: "Çfarë kam në 1H të orës 10?" })
@@ -114,9 +114,80 @@ test("keeps transcripts and schedule cards available for follow-up commands", as
   h.emit({ type: "response.output_audio_transcript.delta", item_id: "answer", delta: "Ke një " })
   h.emit({ type: "response.output_audio_transcript.delta", item_id: "answer", delta: "detyrë." })
   assert.equal(h.render().messages[1].text, "Ke një detyrë.")
-  assert.equal(h.render().tasks[0].one_h_report_slot, "10:00")
+  const output = h.sent.find(event => event.item?.type === "function_call_output")
+  assert.equal(JSON.parse(output.item.output).tasks[0].one_h_report_slot, "10:00")
   assert.equal(h.render().sendText("Mbylle atë"), true)
   assert.equal(h.sent.at(-2).item.content[0].text, "Mbylle atë")
+  h.unmount()
+})
+
+test("reserves the spoken user's bubble before an answer even when transcription is late", async () => {
+  const h = harness()
+  await h.render().start(); h.open()
+  h.emit({ type: "input_audio_buffer.speech_started", item_id: "user-1" })
+  assert.equal(h.render().messages[0].pending, true)
+  h.emit({ type: "response.output_audio_transcript.delta", item_id: "answer-1", delta: "Ke dy detyra." })
+  h.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-1", transcript: "Çfarë detyra kam?" })
+  assert.deepEqual(Array.from(h.render().messages, message => message.id), ["user-1", "answer-1"])
+  assert.equal(h.render().messages[0].text, "Çfarë detyra kam?")
+  assert.equal(h.render().messages[0].pending, false)
+  h.unmount()
+})
+
+test("out-of-order transcriptions across multiple turns keep each answer after its question", async () => {
+  const h = harness()
+  await h.render().start(); h.open()
+  for (const turn of [1, 2]) {
+    h.emit({ type: "input_audio_buffer.speech_started", item_id: `user-${turn}` })
+    h.emit({ type: "input_audio_buffer.committed", item_id: `user-${turn}`, previous_item_id: turn === 1 ? null : "answer-1" })
+    h.emit({ type: "conversation.item.added", previous_item_id: `user-${turn}`, item: { id: `answer-${turn}`, type: "message", role: "assistant", content: [] } })
+    h.emit({ type: "response.output_audio_transcript.delta", item_id: `answer-${turn}`, delta: `Answer ${turn}` })
+  }
+  h.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-2", transcript: "Question 2" })
+  h.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-1", transcript: "Question 1" })
+  assert.deepEqual(Array.from(h.render().messages, message => message.text), ["Question 1", "Answer 1", "Question 2", "Answer 2"])
+  h.unmount()
+})
+
+test("conversation predecessors repair ordering through invisible tool items if speech events were missed", async () => {
+  const h = harness()
+  await h.render().start(); h.open()
+  h.emit({ type: "response.output_audio_transcript.delta", item_id: "answer", delta: "U mbyll." })
+  h.emit({ type: "conversation.item.added", previous_item_id: "tool-result", item: { id: "answer", type: "message", role: "assistant", content: [] } })
+  h.emit({ type: "conversation.item.added", previous_item_id: "tool-call", item: { id: "tool-result", type: "function_call_output" } })
+  h.emit({ type: "conversation.item.added", previous_item_id: "user", item: { id: "tool-call", type: "function_call" } })
+  h.emit({ type: "conversation.item.created", previous_item_id: null, item: { id: "user", type: "message", role: "user", content: [] } })
+  h.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "user", transcript: "Mbylle detyrën" })
+  assert.deepEqual(Array.from(h.render().messages, message => message.id), ["user", "answer"])
+  assert.equal(h.render().messages[1].text, "U mbyll.")
+  h.unmount()
+})
+
+test("typed messages use the same item ID as their server echo and appear only once", async () => {
+  const h = harness()
+  await h.render().start(); h.open()
+  h.render().sendText("Mbylle detyrën")
+  const item = h.sent.find(event => event.item?.role === "user").item
+  assert.equal(h.render().messages[0].id, item.id)
+  h.emit({ type: "response.output_audio_transcript.delta", item_id: "answer", delta: "U mbyll." })
+  h.emit({ type: "conversation.item.added", previous_item_id: null, item })
+  h.emit({ type: "conversation.item.created", previous_item_id: null, item })
+  assert.deepEqual(Array.from(h.render().messages, message => message.text), ["Mbylle detyrën", "U mbyll."])
+  h.unmount()
+})
+
+test("failed transcription fills the reserved bubble and delayed metadata cannot erase text", async () => {
+  const h = harness()
+  await h.render().start(); h.open()
+  h.emit({ type: "input_audio_buffer.speech_started", item_id: "user" })
+  h.emit({ type: "response.output_audio_transcript.delta", item_id: "answer", delta: "Nuk të kuptova." })
+  h.emit({ type: "conversation.item.input_audio_transcription.failed", item_id: "user" })
+  h.emit({ type: "conversation.item.created", item: { id: "user", type: "message", role: "user", content: [] } })
+  const messages = h.render().messages
+  assert.equal(messages[0].role, "user")
+  assert.equal(messages[0].pending, false)
+  assert.equal(messages[0].text, "Transkripti nuk u përfundua.")
+  assert.equal(messages[1].text, "Nuk të kuptova.")
   h.unmount()
 })
 

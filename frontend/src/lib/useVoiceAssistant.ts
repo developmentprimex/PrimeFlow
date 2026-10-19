@@ -3,30 +3,41 @@
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
 
-export type VoiceMessage = { id: string; role: "user" | "assistant" | "activity"; text: string }
-export type VoiceTask = { id: string; title: string; status: string; one_h_report_slot?: string | null }
+export type VoiceMessage = { id: string; role: "user" | "assistant"; text: string; pending: boolean }
 type Phase = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "working"
 type ToolCall = { type: string; call_id: string; name: string; arguments: string }
 type RealtimeEvent = {
-  type: string; item_id?: string; delta?: string; transcript?: string; text?: string;
+  type: string; item_id?: string; previous_item_id?: string | null; delta?: string; transcript?: string; text?: string;
+  item?: { id: string; type: string; role?: "user" | "assistant"; content?: { text?: string; transcript?: string }[] };
   error?: { message?: string; code?: string };
   response?: { status?: string; output?: ToolCall[]; status_details?: { error?: { message?: string } } };
 }
 
 const allowedTools = new Set(["search_tasks", "list_my_schedule", "get_task", "set_task_status", "set_task_points", "set_checklist_item"])
-const labels: Record<string, string> = {
-  search_tasks: "Po kërkoj detyrat…", list_my_schedule: "Po shoh planifikimin tënd…", get_task: "Po lexoj detyrën…",
-  set_task_status: "Po ndryshoj statusin…", set_task_points: "Po përditësoj pikat…", set_checklist_item: "Po përditësoj checklistën…",
+// Transcription is asynchronous. Follow conversation predecessors, including
+// invisible function items, instead of ordering bubbles by transcript arrival.
+function orderMessages(messages: VoiceMessage[], predecessors: Map<string, string | null>) {
+  const byId = new Map(messages.map(message => [message.id, message]))
+  const visited = new Set<string>()
+  const ordered: VoiceMessage[] = []
+  const visit = (id: string) => {
+    if (visited.has(id)) return
+    visited.add(id)
+    const parent = predecessors.get(id)
+    if (parent) visit(parent)
+    const entry = byId.get(id)
+    if (entry) ordered.push(entry)
+  }
+  messages.forEach(message => visit(message.id))
+  return ordered
 }
 
 export function useVoiceAssistant() {
   const { apiFetch } = useAuth()
   const [phase, setPhase] = React.useState<Phase>("idle")
   const [messages, setMessages] = React.useState<VoiceMessage[]>([])
-  const [tasks, setTasks] = React.useState<VoiceTask[]>([])
   const [error, setError] = React.useState("")
   const [muted, setMuted] = React.useState(false)
-  const [activity, setActivity] = React.useState("")
   const [audioBlocked, setAudioBlocked] = React.useState(false)
   const audioRef = React.useRef<HTMLAudioElement>(null)
   const connection = React.useRef<RTCPeerConnection | null>(null)
@@ -36,12 +47,15 @@ export function useVoiceAssistant() {
   const timeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const deadline = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const request = React.useRef<AbortController | null>(null)
+  const predecessors = React.useRef(new Map<string, string | null>())
 
-  const message = React.useCallback((id: string, role: VoiceMessage["role"], text: string, append = false) => {
+  const message = React.useCallback((id: string, role: VoiceMessage["role"], text?: string, append = false) => {
     setMessages(previous => {
       const existing = previous.find(m => m.id === id)
-      if (existing) return previous.map(m => m.id === id ? { ...m, text: append ? m.text + text : text } : m)
-      return [...previous.slice(-149), { id, role, text }]
+      const next = existing
+        ? previous.map(m => m.id === id && text !== undefined ? { ...m, text: append ? m.text + text : text, pending: false } : m)
+        : [...previous.slice(-149), { id, role, text: text || "", pending: text === undefined }]
+      return orderMessages(next, predecessors.current)
     })
   }, [])
 
@@ -67,7 +81,6 @@ export function useVoiceAssistant() {
     setPhase("idle")
     setMuted(false)
     setAudioBlocked(false)
-    setActivity("")
   }, [release])
 
   React.useEffect(() => () => release(), [release])
@@ -79,7 +92,7 @@ export function useVoiceAssistant() {
     const active = () => generation.current === current
     setError("")
     setMessages([])
-    setTasks([])
+    predecessors.current.clear()
     setMuted(false)
     setPhase("connecting")
     if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === "undefined") {
@@ -103,7 +116,7 @@ export function useVoiceAssistant() {
         if (!active() || !audioRef.current) return
         audioRef.current.srcObject = new MediaStream([event.track])
         void audioRef.current.play().catch(() => {
-          if (active()) { setAudioBlocked(true); setError("Shtyp Play për të dëgjuar Mirën.") }
+          if (active()) { setAudioBlocked(true); setError("Shtyp Start përsëri për të aktivizuar zërin.") }
         })
       }
       pc.onconnectionstatechange = () => {
@@ -128,7 +141,6 @@ export function useVoiceAssistant() {
         for (const call of calls) {
           if (!active()) return
           setPhase("working")
-          setActivity(labels[call.name] || "Po punoj…")
           let output: Record<string, unknown>
           try {
             if (!allowedTools.has(call.name)) throw new Error("Veprimi nuk mbështetet.")
@@ -145,15 +157,9 @@ export function useVoiceAssistant() {
           // refresh its result; never start another tool from an ended session.
           if (output.changed) window.dispatchEvent(new Event("primex:tasks-changed"))
           if (!active()) return
-          const found = Array.isArray(output.tasks) ? output.tasks : output.task ? [output.task] : null
-          if (found) setTasks(found.filter((t): t is VoiceTask => !!t && typeof t === "object" && typeof t.id === "string" && typeof t.title === "string"))
-          if (output.changed) {
-            const applied = Array.isArray(output.applied) ? output.applied.join(" · ") : "Ndryshimi u ruajt"
-            message(`tool-${call.call_id}`, "activity", applied + (output.success === false ? " · Veprimi u përfundua pjesërisht." : ""))
-          }
           send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) } })
         }
-        if (active()) { setActivity(""); setPhase("thinking"); respond() }
+        if (active()) { setPhase("thinking"); respond() }
       }
       dc.onopen = () => {
         if (!active()) return
@@ -161,7 +167,7 @@ export function useVoiceAssistant() {
         setPhase("listening")
         respond()
         deadline.current = setTimeout(() => {
-          if (active()) { stop(); message(crypto.randomUUID(), "activity", "Biseda u mbyll pas 10 minutash. Mund të nisësh një bisedë të re.") }
+          if (active()) { stop(); setError("Biseda u mbyll pas 10 minutash. Shtyp Start për të vazhduar.") }
         }, 10 * 60 * 1000)
       }
       dc.onclose = () => {
@@ -171,10 +177,26 @@ export function useVoiceAssistant() {
         if (!active()) return
         let event: RealtimeEvent
         try { event = JSON.parse(data) } catch { return }
+        if (["conversation.item.added", "conversation.item.created"].includes(event.type) && event.item) {
+          if (event.previous_item_id !== undefined) predecessors.current.set(event.item.id, event.previous_item_id)
+          if (event.item.type === "message" && event.item.role) {
+            const text = event.item.content?.map(content => content.text || content.transcript || "").join("")
+            message(event.item.id, event.item.role, text || undefined)
+          } else {
+            setMessages(previous => orderMessages(previous, predecessors.current))
+          }
+        }
+        if (["input_audio_buffer.speech_started", "input_audio_buffer.committed"].includes(event.type) && event.item_id) {
+          if (event.previous_item_id !== undefined) predecessors.current.set(event.item_id, event.previous_item_id)
+          message(event.item_id, "user")
+        }
         if (event.type === "input_audio_buffer.speech_started") setPhase("listening")
         if (event.type === "input_audio_buffer.speech_stopped") setPhase("thinking")
-        if (event.type === "conversation.item.input_audio_transcription.completed" && event.transcript) {
-          message(event.item_id || crypto.randomUUID(), "user", event.transcript)
+        if (event.type === "conversation.item.input_audio_transcription.completed" && event.item_id) {
+          message(event.item_id, "user", event.transcript || "Audio pa tekst të kuptueshëm.")
+        }
+        if (event.type === "conversation.item.input_audio_transcription.failed" && event.item_id) {
+          message(event.item_id, "user", "Transkripti nuk u përfundua.")
         }
         if (["response.output_audio_transcript.delta", "response.output_text.delta"].includes(event.type) && event.delta) {
           message(event.item_id || "assistant", "assistant", event.delta, true)
@@ -226,10 +248,11 @@ export function useVoiceAssistant() {
   const sendText = React.useCallback((text: string) => {
     const dc = channel.current
     if (!text.trim() || dc?.readyState !== "open") return false
+    const id = `msg_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`
+    message(id, "user", text.trim())
     dc.send(JSON.stringify({ type: "response.cancel" }))
-    dc.send(JSON.stringify({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: text.trim() }] } }))
+    dc.send(JSON.stringify({ type: "conversation.item.create", item: { id, type: "message", role: "user", content: [{ type: "input_text", text: text.trim() }] } }))
     dc.send(JSON.stringify({ type: "response.create" }))
-    message(crypto.randomUUID(), "user", text.trim())
     setPhase("thinking")
     return true
   }, [message])
@@ -242,5 +265,13 @@ export function useVoiceAssistant() {
     setMuted(next)
   }, [])
 
-  return { phase, messages, tasks, error, muted, activity, audioBlocked, audioRef, start, stop, sendText, toggleMute }
+  const resumeAudio = React.useCallback(async () => {
+    try {
+      await audioRef.current?.play()
+      setAudioBlocked(false)
+      setError("")
+    } catch { setError("Zëri është bllokuar nga shfletuesi. Lejo audion dhe shtyp Start.") }
+  }, [])
+
+  return { phase, messages, error, muted, audioBlocked, audioRef, start, stop, sendText, toggleMute, resumeAudio }
 }
