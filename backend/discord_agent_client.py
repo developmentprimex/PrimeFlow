@@ -14,9 +14,10 @@ import discord_agent_ui as ui
 log = logging.getLogger(__name__)
 
 
-async def handle_agent_interaction(bot, interaction):
+async def handle_agent_interaction(bot, interaction, custom_id=None):
     data = interaction.data or {}
-    custom_id = data.get("custom_id", "")
+    # The card's "Më shumë" menu routes here with the equivalent button id.
+    custom_id = custom_id or data.get("custom_id", "")
     if not custom_id.startswith("pf:agent:"):
         return False
     parts = custom_id.split(":")

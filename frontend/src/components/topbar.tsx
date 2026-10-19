@@ -5,9 +5,8 @@ import Link from "next/link"
 import { Briefcase, CheckCheck, PanelLeftOpen, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { AccountMenu } from "@/components/account-menu"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { useAuth } from "@/lib/auth"
 import { API_HTTP_URL } from "@/lib/config"
@@ -42,7 +41,7 @@ function departmentRoute(department: { name: string; code?: string | null }) {
 }
 
 export function Topbar() {
-  const { user, apiFetch, logout } = useAuth()
+  const { user, apiFetch } = useAuth()
   const { isOpen, toggle } = useSidebar()
   const [sheetOpen, setSheetOpen] = React.useState(false)
   const [notifications, setNotifications] = React.useState<Notification[]>([])
@@ -210,18 +209,19 @@ export function Topbar() {
   }, [loadUnreadCount])
 
   React.useEffect(() => {
-    if (!user.department_id) return
+    const departmentId = user?.department_id
+    if (!departmentId) return
     let cancelled = false
     const loadDepartmentRoute = async () => {
       const response = await apiFetch("/departments")
       if (!response.ok || cancelled) return
       const departments = (await response.json()) as Array<{ id: string; name: string; code?: string | null }>
-      const department = departments.find((item) => item.id === user.department_id)
+      const department = departments.find((item) => item.id === departmentId)
       if (!cancelled && department) setDepartmentViewHref(`${departmentRoute(department)}?view=mine&daily=full`)
     }
     void loadDepartmentRoute()
     return () => { cancelled = true }
-  }, [apiFetch, user.department_id])
+  }, [apiFetch, user?.department_id])
 
   React.useEffect(() => {
     const handleNotification = () => {
@@ -341,18 +341,7 @@ export function Topbar() {
           </SheetContent>
         </Sheet>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-10 w-10 rounded-full p-0">
-              <Avatar className="h-8 w-8">
-                <AvatarFallback>{initials(user)}</AvatarFallback>
-              </Avatar>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => void logout()}>Sign out</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <AccountMenu initials={initials(user)} />
       </div>
     </header>
   )

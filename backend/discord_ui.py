@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import uuid
 from html import unescape
 from difflib import SequenceMatcher
 from datetime import datetime
@@ -13,12 +14,27 @@ import discord
 
 from app.config import settings
 
-TASKS_PER_PAGE = 10
+LIST_PER_PAGE = 20
+POINTS_SHOWN = 25
+# PrimeFlow appends the strike time as `HH:MM DD.MM` to a completed point.
+STRIKE_TIME = re.compile(r"\s+(\d{2}:\d{2}\s+\d{2}\.\d{2})\s*$")
 STATUS_LABELS = {"TODO": "To Do", "IN_PROGRESS": "Në progres", "WAITING_CLIENT": "WFE",
                  "WAITING_CONFIRMATION": "Në konfirmim", "DONE": "E kryer"}
+STATUS_ICONS = {"TODO": "⚪", "IN_PROGRESS": "🔵", "WAITING_CLIENT": "🟡", "WAITING_CONFIRMATION": "🟣", "DONE": "✅"}
 STATUS_COLORS = {"TODO": 0x64748B, "IN_PROGRESS": 0x3B82F6, "WAITING_CLIENT": 0xD4A017,
                  "WAITING_CONFIRMATION": 0xA855F7, "DONE": 0x22C55E}
 MARKER = re.compile(r"\[\[\s*/?\s*(?:added|done)(?::(?:blue|green|grey))?\s*\]\]", re.I)
+# The few buttons that fit the task's current status; everything else lives in "Më shumë".
+PRIMARY = {"TODO": [("▶ Fillo", "progress", discord.ButtonStyle.primary), ("✅ Mbylle", "done", discord.ButtonStyle.success)],
+           "IN_PROGRESS": [("✅ Mbylle", "done", discord.ButtonStyle.success), ("⏸ WFE", "wfe", discord.ButtonStyle.secondary)],
+           "WAITING_CLIENT": [("▶ Vazhdo", "progress", discord.ButtonStyle.primary), ("✅ Mbylle", "done", discord.ButtonStyle.success)],
+           "WAITING_CONFIRMATION": [("▶ Në progres", "progress", discord.ButtonStyle.secondary)],
+           "DONE": [("↺ Rihap", "todo", discord.ButtonStyle.secondary)]}
+MORE = [("📄 Teksti i plotë", "full"), ("✏️ Edito", "edit"), ("💬 Koment", "comment"), ("📝 Mbylle me koment", "done_comment"),
+        ("🕐 Slot / AM–PM", "schedule"), ("👤 Dërgo për konfirmim", "confirm"), ("⚪ To Do", "todo"),
+        ("🔵 Në progres", "progress"), ("🟡 WFE", "wfe"), ("🤖 Udhëzim për AI", "ai"), ("🧠 Delegoja agjentit", "agent"),
+        ("📚 Rezultatet AI", "history"), ("🔄 Rifresko", "refresh")]
+STATUS_ACTIONS = {"todo": "TODO", "progress": "IN_PROGRESS", "wfe": "WAITING_CLIENT"}
 
 
 def plain(value: str | None) -> str:
@@ -50,44 +66,117 @@ def formatted(value: str | None) -> str:
     return readable(value)
 
 
+def status_text(status: str | None) -> str:
+    return f"{STATUS_ICONS.get(status, '⚪')} {STATUS_LABELS.get(status, status or '—')}"
+
+
+def summary(task: dict) -> str:
+    """One line instead of separate Status / Planning / Due fields."""
+    parts = [status_text(task.get("status"))]
+    if task.get("one_h_report_slot"):
+        parts.append("Sloti " + task["one_h_report_slot"])
+    if task.get("finish_period"):
+        parts.append(task["finish_period"])
+    if task.get("due_date"):
+        try:
+            due = datetime.fromisoformat(task["due_date"].replace("Z", "+00:00")).astimezone(ZoneInfo(settings.APP_TIMEZONE))
+            parts.append("Afati " + due.strftime("%d.%m %H:%M"))
+        except ValueError:
+            pass
+    return " · ".join(parts)
+
+
+def point_sections(task: dict, detail: dict) -> list[tuple[str, list[dict]]]:
+    sections = []
+    for name, key in (("Pikat e titullit", "title_points"), ("Pikat e përshkrimit", "description_points")):
+        if key == "title_points" and task.get("_px_note"):
+            name = "Pikat (PX Notes)"
+        points = detail.get(key, [])
+        if key == "description_points" and readable(task.get("description")) == readable(task.get("title")):
+            continue
+        if key == "title_points" and len(points) == 1 and label(strip_number(points[0]["text"]), 230) == heading(task):
+            continue  # The only "point" is the title itself.
+        if points:
+            sections.append((name, points))
+    return sections
+
+
+def strip_number(text: str) -> str:
+    return re.sub(r"^\s*(?:\d+\.\s+|[•*-]\s+)", "", readable(text))
+
+
+def point_line(point: dict, limit: int | None = None) -> str:
+    text = re.sub(r"\s+", " ", strip_number(point["text"])) if limit else strip_number(point["text"])
+    match = STRIKE_TIME.search(text)
+    stamp = match.group(1) if match and point["done"] else ""
+    if stamp:
+        text = text[:match.start()]
+    if limit and len(text) > limit:
+        text = text[:limit - 1] + "…"
+    text = discord.utils.escape_markdown(text)
+    return f"{point['number']}. " + (f"✅ ~~{text}~~" + (f" `{stamp}`" if stamp else "") if point["done"] else f"⬜ {text}")
+
+
+def points_count(task: dict, detail: dict) -> str:
+    points = [point for _, items in point_sections(task, detail) for point in items]
+    return f"☑ {sum(point['done'] for point in points)}/{len(points)} pika" if points else ""
+
+
+def full_text(task: dict, detail: dict) -> str:
+    """Complete task text, shown privately on request instead of in every card."""
+    sections = []
+    for name, points in point_sections(task, detail):
+        lines = [point_line(point) for point in points]
+        sections.append("**" + name + "**\n" + "\n".join(lines))
+    if not sections and task.get("description"):
+        sections.append(formatted(task["description"]))
+    if task.get("user_comment"):
+        sections.append("**Komenti yt**\n" + formatted(task["user_comment"]))
+    return "**" + heading(task) + "**\n\n" + ("\n\n".join(sections) or "Kjo detyrë nuk ka përshkrim.")
+
+
+def badges(task: dict) -> str:
+    names = [name for key, name in (("is_bllok", "BLL"), ("is_r1", "R1"), ("is_personal", "Personal"), ("is_1h_report", "1H")) if task.get(key)]
+    if task.get("priority") == "HIGH":
+        names.append("Prioritet i lartë")
+    return " · ".join(names)
+
+
 def card(task: dict, *, number: int | None = None, detail: dict | None = None) -> discord.Embed:
-    title = heading(task)
-    embed = discord.Embed(title=(f"{number}. " if number is not None else "") + title,
+    embed = discord.Embed(title=((f"{number}. " if number is not None else "") + heading(task))[:256],
         url=task_url(task["id"]), color=STATUS_COLORS.get(task.get("status"), 0x64748B))
-    embed.add_field(name="Statusi", value=STATUS_LABELS.get(task.get("status"), task.get("status") or "—"), inline=True)
-    plan = " · ".join(filter(None, ["1H " + task["one_h_report_slot"] if task.get("one_h_report_slot") else None, task.get("finish_period")])) or "Pa slot / AM–PM"
-    embed.add_field(name="Planifikimi", value=plan, inline=True)
-    embed.add_field(name="Progresi", value=f"{task.get('progress_percentage') or 0}%", inline=True)
-    badges = [name for key, name in (("is_bllok", "BLL"), ("is_r1", "R1"), ("is_personal", "Personal"), ("is_1h_report", "1H")) if task.get(key)]
-    badges.append("Prioritet i lartë" if task.get("priority") == "HIGH" else "Prioritet normal")
-    embed.set_footer(text=" · ".join(badges))
+    lines = [summary(task)]
+    shortened = False
+    if detail is not None and points_count(task, detail):
+        lines[0] += " · " + points_count(task, detail)
     if detail is not None:
-        sections = []
-        for name, key in (("Pikat e titullit", "title_points"), ("Pikat e përshkrimit", "description_points")):
-            if key == "title_points" and task.get("_px_note"):
-                name = "Pikat (PX Notes)"
-            points = detail.get(key, [])
-            if key == "description_points" and readable(task.get("description")) == readable(task.get("title")):
-                continue
-            if points:
-                lines = []
-                for point in points:
-                    text = re.sub(r"^\s*(?:\d+\.\s+|[•*-]\s+)", "", readable(point["text"]))
-                    text = discord.utils.escape_markdown(text)
-                    lines.append(f"{point['number']}. " + (f"✓ ~~{text}~~" if point["done"] else f"○ {text}"))
-                sections.append("**" + name + "**\n" + "\n".join(lines))
+        sections = point_sections(task, detail)
+        shown = 0
+        for name, points in sections:
+            if len(sections) > 1:
+                lines.append(f"\n**{name}**")
+            elif not shown:
+                lines.append("")
+            for point in points:
+                if shown >= POINTS_SHOWN:
+                    shortened = True
+                    break
+                shortened = shortened or len(strip_number(point["text"])) > 160
+                lines.append(point_line(point, 160))
+                shown += 1
+        remaining = sum(len(points) for _, points in sections) - shown
+        if remaining > 0:
+            lines.append(f"… +{remaining} pika të tjera te **☑ Pikat**")
         if not sections and task.get("description"):
-            sections.append(formatted(task["description"]))
+            text = formatted(task["description"])
+            short = "\n".join(text.splitlines()[:6])[:600]
+            shortened = shortened or short != text
+            lines += ["", short + ("…" if short != text else "")]
         if task.get("user_comment"):
-            sections.append("**Komenti yt**\n" + formatted(task["user_comment"]))
-        body = "\n\n".join(sections)
-        embed.description = body[:3700] + ("\n… Teksti i plotë: hap PrimeFlow. Pikat mund të zgjidhen te **Pikat**." if len(body) > 3700 else "")
-        if task.get("due_date"):
-            try:
-                due = datetime.fromisoformat(task["due_date"].replace("Z", "+00:00")).astimezone(ZoneInfo(settings.APP_TIMEZONE))
-                embed.add_field(name="Afati", value=due.strftime("%d.%m.%Y · %H:%M"), inline=True)
-            except ValueError:
-                pass
+            comment = formatted(task["user_comment"])
+            lines += ["", "💬 " + comment[:200] + ("…" if len(comment) > 200 else "")]
+        if shortened:
+            lines.append("\n_Teksti i plotë: **Më shumë → 📄 Teksti i plotë**_")
     else:
         preview = formatted(task.get("title"))
         if "\n" not in preview and task.get("description"):
@@ -96,32 +185,88 @@ def card(task: dict, *, number: int | None = None, detail: dict | None = None) -
             preview = preview.split("\n", 1)[1]
         elif plain(preview).strip() == heading(task):
             preview = ""
-        embed.description = preview[:520] + ("\n… Zgjidhe për detajet dhe editimin." if len(preview) > 520 else "")
+        if preview:
+            lines += ["", preview[:400] + ("…" if len(preview) > 400 else "")]
+    embed.description = "\n".join(lines)[:4000]
+    if badges(task):
+        embed.set_footer(text=badges(task))
     return embed
 
 
-def overview_embeds(task_list: list[dict], page: int) -> list[discord.Embed]:
-    # Initial messages contain titles only; details open after selection.
-    return []
-
-
-def controls(task_id: str, fingerprint: str, action_choices) -> discord.ui.View:
+def controls(task_id: str, fingerprint: str, status: str | None = None) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
-    first = [("To Do", "todo", discord.ButtonStyle.secondary), ("Në progres", "progress", discord.ButtonStyle.primary),
-             ("WFE", "wfe", discord.ButtonStyle.secondary), ("Mbylle", "done", discord.ButtonStyle.success),
-             ("Konfirmim", "confirm", discord.ButtonStyle.secondary)]
-    second = [("Pikat / Strike", "points"), ("Edito", "edit"), ("Koment", "comment"), ("Slot / AM–PM", "schedule")]
-    for text, action, style in first:
+    primary = PRIMARY.get(status, PRIMARY["IN_PROGRESS"])
+    for text, action, style in primary:
         view.add_item(discord.ui.Button(label=text, custom_id=f"pf:quick:{task_id}:{fingerprint}:{action}", style=style, row=0))
-    for text, action in second:
-        view.add_item(discord.ui.Button(label=text, custom_id=f"pf:quick:{task_id}:{fingerprint}:{action}", row=1))
-    view.add_item(discord.ui.Button(label="Hap PrimeFlow", url=task_url(task_id), row=1))
-    view.add_item(discord.ui.Select(custom_id=f"pf:action:{task_id}:{fingerprint}", row=2,
-        placeholder="AI dhe ndryshime të tjera…", options=[discord.SelectOption(label=text, value=str(i)) for i, (text, _) in enumerate(action_choices)]))
-    view.add_item(discord.ui.Button(label="Rifresko detyrën", custom_id=f"pf:quick:{task_id}:{fingerprint}:refresh", row=3))
-    view.add_item(discord.ui.Button(label="Delegoja agjentit", custom_id=f"pf:agent:targets:{task_id}:{fingerprint}", row=3, style=discord.ButtonStyle.primary))
-    view.add_item(discord.ui.Button(label="Rezultatet AI", custom_id=f"pf:agent:history:{task_id}:0", row=3))
+    view.add_item(discord.ui.Button(label="☑ Pikat", custom_id=f"pf:quick:{task_id}:{fingerprint}:points", row=0))
+    view.add_item(discord.ui.Button(label="Hap PrimeFlow", url=task_url(task_id), row=0))
+    hidden = {action for _, action, _ in primary} | {action for action, value in STATUS_ACTIONS.items() if value == status}
+    view.add_item(discord.ui.Select(custom_id=f"pf:more:{task_id}:{fingerprint}", row=1, placeholder="Më shumë…",
+        options=[discord.SelectOption(label=text, value=value) for text, value in MORE if value not in hidden]))
+    for text, direction in (("◀", "prev"), ("↩ Lista", "list"), ("▶", "next")):
+        view.add_item(discord.ui.Button(label=text, custom_id=f"pf:nav:{task_id}:{direction}", row=2))
     return view
+
+
+def back_button(task_id: str, row: int) -> discord.ui.Button:
+    return discord.ui.Button(label="← Kthehu", custom_id=f"pf:back:{task_id}", row=row)
+
+
+def list_view(task_list: list[dict], title: str, page: int = 0):
+    """Numbered titles with one button per task: one click opens the card."""
+    if not task_list:
+        return f"**{title}**\nNuk ke detyra të hapura. 🎉", None
+    pages = math.ceil(len(task_list) / LIST_PER_PAGE)
+    page = min(max(page, 0), pages - 1)
+    offset = page * LIST_PER_PAGE
+    chunk = task_list[offset:offset + LIST_PER_PAGE]
+    lines = [f"`{offset + i}.` {STATUS_ICONS.get(task.get('status'), '⚪')} {discord.utils.escape_markdown(label(heading(task), 70))}"
+             for i, task in enumerate(chunk, 1)]
+    content = f"**{title}** · {len(task_list)}" + (f" · faqja {page + 1}/{pages}" if pages > 1 else "") + "\n" + "\n".join(lines)
+    view = discord.ui.View(timeout=None)
+    for i, task in enumerate(chunk):
+        view.add_item(discord.ui.Button(label=str(offset + i + 1), custom_id=f"pf:open:{task['id']}", row=i // 5))
+    if pages > 1:
+        view.add_item(discord.ui.Button(label="◀", row=4, disabled=page == 0, custom_id=f"pf:list:{max(0, page - 1)}"))
+        view.add_item(discord.ui.Button(label="▶", row=4, disabled=page + 1 >= pages, custom_id=f"pf:list:{page + 1}"))
+    return content + "\nKliko numrin për ta hapur.", view
+
+
+def bucket_name(bucket: str) -> str:
+    return f"Raportimi {bucket}" if bucket in {"AM", "PM"} else f"Sloti {bucket}"
+
+
+def report_intro(bucket: str, task_list: list[dict], reminder_id: str, user_id: str | None = None, notice: str | None = None):
+    lines = [f"`{i}.` {STATUS_ICONS.get(task.get('status'), '⚪')} {discord.utils.escape_markdown(label(heading(task), 70))}"
+             for i, task in enumerate(task_list[:25], 1)]
+    content = ((f"<@{user_id}> " if user_id else "") + f"⏰ **{bucket_name(bucket)}** · {len(task_list)} detyra\n"
+               + (notice + "\n" if notice else "") + "\n".join(lines))
+    view = discord.ui.View(timeout=None)
+    rid = uuid.UUID(str(reminder_id)).hex
+    view.add_item(discord.ui.Button(label="📝 Fillo raportimin", style=discord.ButtonStyle.primary, row=0,
+        custom_id=f"pf:rep:{rid}:-:0.0.0.0:go"))
+    view.add_item(discord.ui.Select(custom_id=f"pf:repdone:{rid}", row=1, placeholder="✅ Shëno të kryerat (një ose disa)…",
+        min_values=1, max_values=min(len(task_list), 25), options=[discord.SelectOption(
+            label=f"{i}. {label(heading(task), 90)}"[:100], value=task["id"]) for i, task in enumerate(task_list[:25], 1)]))
+    return content[:2000], view
+
+
+def report_step(bucket: str, task: dict, reminder_id: str, counts: list[int], position: int, total: int):
+    rid, tid = uuid.UUID(str(reminder_id)).hex, uuid.UUID(str(task["id"])).hex
+    state = ".".join(map(str, counts))
+    view = discord.ui.View(timeout=None)
+    for text, action, style in (("✅ U krye", "done", discord.ButtonStyle.success), ("🔵 Vazhdon", "cont", discord.ButtonStyle.primary),
+                                ("⏸ WFE", "wfe", discord.ButtonStyle.secondary), ("⏭ Kalo", "skip", discord.ButtonStyle.secondary)):
+        view.add_item(discord.ui.Button(label=text, style=style, row=0, custom_id=f"pf:rep:{rid}:{tid}:{state}:{action}"))
+    view.add_item(discord.ui.Button(label="📂 Hap detyrën", row=1, custom_id=f"pf:open:{task['id']}:new"))
+    return f"⏰ **{bucket_name(bucket)}** · {position}/{total}", card(task), view
+
+
+def report_summary(bucket: str, counts: list[int]) -> str:
+    done, cont, wfe, skipped = counts
+    parts = [f"{done} të kryera" if done else None, f"{cont} vazhdojnë" if cont else None,
+             f"{wfe} WFE" if wfe else None, f"{skipped} të kaluara" if skipped else None]
+    return f"✓ **{bucket_name(bucket)} u raportua**" + (" · " + " · ".join(filter(None, parts)) if any(counts) else "")
 
 
 def points_view(detail: dict, page=0):
@@ -148,6 +293,7 @@ def points_view(detail: dict, page=0):
     if maximum > 1:
         for text, target, disabled in (("←", page - 1, page <= 0), (f"{page + 1}/{maximum}", page, True), ("→", page + 1, page + 1 >= maximum)):
             view.add_item(discord.ui.Button(label=text, row=4, disabled=disabled, custom_id=f"pf:points:{task_id}:{fingerprint}:{max(0, target)}"))
+    view.add_item(back_button(task_id, 4))
     return view
 
 
@@ -157,6 +303,7 @@ def schedule_view(task_id: str, fingerprint: str):
     options += [discord.SelectOption(label="Hiq AM/PM", value="period:"), discord.SelectOption(label="Hiq slotin", value="slot:")]
     view = discord.ui.View(timeout=None)
     view.add_item(discord.ui.Select(custom_id=f"pf:schedule:{task_id}:{fingerprint}", placeholder="Zgjidh slotin ose periudhën", options=options))
+    view.add_item(back_button(task_id, 1))
     return view
 
 
@@ -169,6 +316,7 @@ def people_view(people: list[dict], task_id: str, fingerprint: str, page=0):
     if len(people) > 25:
         for text, target, disabled in (("←", page - 1, page == 0), ("→", page + 1, (page + 1) * 25 >= len(people))):
             view.add_item(discord.ui.Button(label=text, row=1, disabled=disabled, custom_id=f"pf:people:{task_id}:{fingerprint}:{max(0, target)}"))
+    view.add_item(back_button(task_id, 1))
     return view
 
 
@@ -215,7 +363,7 @@ class CommentModal(discord.ui.Modal):
         self.add_item(self.comment)
 
     async def on_submit(self, interaction):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer()
         actions = []
         if str(self.comment).strip():
             actions.append(action("comment", {"comment": str(self.comment).strip()}))
@@ -236,7 +384,6 @@ class EditModal(discord.ui.Modal):
         if due:
             due = datetime.fromisoformat(due.replace("Z", "+00:00")).astimezone(ZoneInfo(settings.APP_TIMEZONE)).strftime("%Y-%m-%d %H:%M")
         values = [("title", "Titulli", task.get("title"), 4000), ("description", "Përshkrimi", task.get("description"), 4000),
-                  ("progress_percentage", "Progresi 0–100", str(task.get("progress_percentage") or 0), 3),
                   ("due_date", "Afati: YYYY-MM-DD HH:MM", due, 32), ("finish_period", "Periudha: AM ose PM", task.get("finish_period"), 2)]
         for key, name, value, limit in values:
             # Editor markup stays in the payload unless the user explicitly
@@ -251,7 +398,7 @@ class EditModal(discord.ui.Modal):
             self.add_item(self.inputs[key])
 
     async def on_submit(self, interaction):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer()
         try:
             changes = {}
             for key, field in self.inputs.items():
@@ -259,11 +406,7 @@ class EditModal(discord.ui.Modal):
                 original = self.original[key].strip()
                 if value == original or (len(original) > field.max_length and not value):
                     continue
-                if key == "progress_percentage":
-                    value = int(value)
-                    if not 0 <= value <= 100:
-                        raise ValueError("Progresi duhet të jetë nga 0 deri në 100.")
-                elif key == "finish_period":
+                if key == "finish_period":
                     value = value.upper() or None
                     if value not in {None, "AM", "PM"}:
                         raise ValueError("Periudha duhet të jetë AM ose PM.")
@@ -286,4 +429,4 @@ class EditModal(discord.ui.Modal):
             await self.bot.run_direct(interaction, self.detail["task"]["id"], self.detail["fingerprint"],
                 [action("update_task", changes)], "Edito fushat e plotësuara në formular.")
         except (ValueError, TypeError):
-            await interaction.followup.send("Kontrollo fushat: progresi 0–100, periudha AM/PM dhe afati YYYY-MM-DD HH:MM.", ephemeral=True)
+            await interaction.followup.send("Kontrollo fushat: periudha AM/PM dhe afati YYYY-MM-DD HH:MM.", ephemeral=True)

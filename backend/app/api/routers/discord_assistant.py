@@ -331,8 +331,13 @@ async def claim_reminders(db: AsyncSession = Depends(get_db)):
                 where=(DiscordReminder.sent_at.is_(None) & (DiscordReminder.lease_until < now))).returning(DiscordReminder.id)
             reminder_id = (await db.execute(stmt)).scalar_one_or_none()
             if reminder_id:
+                # The bot retires the previous report's buttons when it was left unanswered.
+                previous = (await db.execute(select(DiscordReminder.bucket, DiscordReminder.message_ids).where(
+                    DiscordReminder.link_id == link.id, DiscordReminder.day == now.date(), DiscordReminder.id != reminder_id,
+                    DiscordReminder.sent_at.is_not(None)).order_by(DiscordReminder.sent_at.desc()).limit(1))).first()
                 jobs.append({"id": str(reminder_id), "bucket": bucket, "discord_user_id": link.discord_user_id,
-                    "guild_id": link.guild_id, "channel_id": link.channel_id})
+                    "guild_id": link.guild_id, "channel_id": link.channel_id,
+                    "previous": {"bucket": previous.bucket, "message_ids": previous.message_ids or []} if previous else None})
     await db.commit()
     return {"jobs": jobs}
 
@@ -342,7 +347,7 @@ async def reminder_tasks(reminder_id: uuid.UUID, payload: Actor, db: AsyncSessio
     link, user = await identity(db, payload)
     reminder = await db.get(DiscordReminder, reminder_id)
     if not reminder or reminder.link_id != link.id or reminder.day != datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date():
-        raise HTTPException(404, "Kujtesa nuk u gjet.")
+        raise HTTPException(404, "Ky raportim ka skaduar. Përdor /detyrat.")
     return {"tasks": await daily_tasks(db, user, reminder.bucket), "bucket": reminder.bucket}
 
 

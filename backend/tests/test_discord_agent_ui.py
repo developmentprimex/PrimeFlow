@@ -148,6 +148,6 @@ class AgentUiTests(unittest.IsolatedAsyncioTestCase):
     async def test_task_card_exposes_agent_controls(self):
         self.ui()
         import discord_ui
-        ids = [item.custom_id for item in discord_ui.controls(TASK["id"], "a"*16, [("AI", "")]).children]
-        self.assertTrue(any(value and value.startswith("pf:agent:targets:") for value in ids))
-        self.assertTrue(any(value and value.startswith("pf:agent:history:") for value in ids))
+        menu = next(item for item in discord_ui.controls(TASK["id"], "a"*16, "IN_PROGRESS").children if isinstance(item, discord.ui.Select))
+        self.assertTrue(menu.custom_id.startswith("pf:more:"))
+        self.assertTrue({"agent", "history"} <= {option.value for option in menu.options})

@@ -19,24 +19,21 @@ if AVAILABLE:
 class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
     def task(self, text="Task\n1. [[done]][[added]]Point A[[/added]][[/done]]\n2. Point B"):
         return {"id": str(uuid.uuid4()), "title": text, "status": "IN_PROGRESS", "finish_period": "AM",
-                "one_h_report_slot": "11:50", "progress_percentage": 40, "priority": "HIGH"}
+                "one_h_report_slot": "11:50", "priority": "HIGH"}
 
     def detail(self, count=3):
         return {"task": self.task(), "fingerprint": "a" * 16,
                 "title_points": [{"number": i + 1, "text": f"{i + 1}. [[added]]Point {i + 1}[[/added]]", "done": i % 3 == 0} for i in range(count)],
                 "description_points": []}
 
-    def test_initial_list_has_only_titles_and_no_detail_embeds(self):
+    def test_initial_list_has_only_titles(self):
         tasks = [self.task("Title\n1. PRIVATE DETAIL") for _ in range(12)]
         tasks[0]["description"] = "LONG DESCRIPTION"
-        pages = bot.task_pages(tasks, "Sot")
-        self.assertEqual(len(pages), 2)
-        self.assertEqual(ui.overview_embeds(tasks, 0), [])
-        text, view = pages[0]
-        self.assertIn("1. Title", text)
+        text, view = ui.list_view(tasks, "Sot")
+        self.assertIn("`1.` 🔵 Title", text)
         self.assertNotIn("PRIVATE DETAIL", text)
         self.assertNotIn("LONG DESCRIPTION", text)
-        self.assertTrue(all(option.description is None for option in view.children[0].options))
+        self.assertEqual(len(view.children), 12)
 
     def test_detail_hides_html_and_duplicate_note_description(self):
         detail = self.detail()
@@ -52,8 +49,8 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
     def test_detail_shows_completed_points_without_editor_markers(self):
         detail = self.detail()
         embed = ui.card(detail["task"], detail=detail)
-        self.assertIn("✓ ~~", embed.description)
-        self.assertIn("○ ", embed.description)
+        self.assertIn("✅ ~~", embed.description)
+        self.assertIn("⬜ ", embed.description)
         self.assertNotIn("[[", embed.description)
         self.assertLessEqual(len(embed), 6000)
 
@@ -72,7 +69,9 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
 
     def test_controls_persist_and_custom_ids_fit_discord(self):
         detail = self.detail()
-        view = ui.controls(detail["task"]["id"], detail["fingerprint"], [("AI", "")])
+        for status in ("TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE", None):
+            self.assertLessEqual(len(ui.controls(detail["task"]["id"], detail["fingerprint"], status).children), 25)
+        view = ui.controls(detail["task"]["id"], detail["fingerprint"], "IN_PROGRESS")
         self.assertTrue(view.is_persistent())
         self.assertTrue(all(len(item.custom_id) <= 100 for item in view.children if item.custom_id))
         for row in range(5):
@@ -92,11 +91,11 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
     async def test_metadata_edit_does_not_erase_title_strikes(self):
         client = SimpleNamespace(run_direct=AsyncMock())
         modal = ui.EditModal(client, self.detail())
-        modal.inputs["progress_percentage"]._value = "75"
+        modal.inputs["finish_period"]._value = "pm"
         interaction = SimpleNamespace(response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
         await modal.on_submit(interaction)
         actions = client.run_direct.call_args.args[3]
-        self.assertEqual(json.loads(actions[0]["arguments_json"]), {"progress_percentage": 75})
+        self.assertEqual(json.loads(actions[0]["arguments_json"]), {"finish_period": "PM"})
 
     async def test_completion_comment_is_submitted_with_done_without_ai(self):
         client = SimpleNamespace(run_direct=AsyncMock())
@@ -143,7 +142,8 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
             data={"custom_id": "pf:pointset:previous"}, message=SimpleNamespace(edit=AsyncMock()))
         await client.run_direct(interaction, result["task"]["id"], "b" * 16, [], "Strike")
         view = interaction.message.edit.call_args.kwargs["view"]
-        self.assertTrue(all(result["fingerprint"] in item.custom_id for item in view.children))
+        selects = [item for item in view.children if isinstance(item, discord.ui.Select)]
+        self.assertTrue(selects and all(result["fingerprint"] in item.custom_id for item in selects))
         client.show_result.assert_awaited_once_with(interaction, result)
 
 

@@ -18,6 +18,7 @@ backend/.venv
 backend/.python-version
 backend/alembic/versions/*.pyc
 backend/uploads/reports/
+backend/private-data/
 backend/.discord-worker-status.json*
 backend/.discord-agent-recovery/
 

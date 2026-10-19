@@ -20,22 +20,22 @@ if AVAILABLE:
 
 @unittest.skipUnless(AVAILABLE, "Install requirements-discord.txt to test the Discord worker")
 class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
-    async def test_dropdown_pages_are_valid_and_keep_every_task(self):
+    async def test_list_pages_have_one_button_per_task_and_keep_every_task(self):
         tasks = [{"id": str(uuid.uuid4()), "title": "x" * 500, "status": "IN_PROGRESS"} for _ in range(63)]
-        pages = bot.task_pages(tasks, "Raportimi")
-        self.assertEqual(len(pages), 7)
         ids = []
-        for text, view in pages:
+        for page in range(4):
+            text, view = bot.ui.list_view(tasks, "Sot", page)
             self.assertLessEqual(len(text), 2000)
             self.assertNotIn("IN_PROGRESS", text)
-            select = view.children[0]
-            self.assertLessEqual(len(select.options), 25)
-            self.assertTrue(all(len(option.label) <= 100 for option in select.options))
-            ids.extend(option.value for option in select.options)
+            buttons = [item for item in view.children if item.custom_id.startswith("pf:open:")]
+            self.assertLessEqual(len(buttons), 20)
+            self.assertTrue(all(item.row < 4 for item in buttons))
+            ids.extend(item.custom_id.split(":")[2] for item in buttons)
+            self.assertTrue(all(len(item.custom_id) <= 100 for item in view.children))
         self.assertEqual(ids, [task["id"] for task in tasks])
 
     async def test_action_menu_persistent_and_modal_defaults(self):
-        view = bot.task_view(str(uuid.uuid4()))
+        view = bot.task_view(str(uuid.uuid4()), "a" * 16, "TODO")
         self.assertTrue(view.is_persistent())
         menu = next(item for item in view.children if isinstance(item, discord.ui.Select))
         self.assertLessEqual(len(menu.options), 25)
@@ -43,9 +43,9 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(modal.instruction.default, "Bëje WFE.")
 
     async def test_empty_bucket_and_long_multiline_content(self):
-        pages = bot.task_pages([], "PM")
-        self.assertIsNone(pages[0][1])
-        self.assertIn("Nuk ke", pages[0][0])
+        text, view = bot.ui.list_view([], "PM")
+        self.assertIsNone(view)
+        self.assertIn("Nuk ke", text)
         text = ("Pikë e gjatë\n" * 500) + "x" * 4000
         self.assertTrue(all(len(part) <= 1800 for part in bot.chunks(text)))
 
@@ -157,9 +157,10 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_multiline_task_labels_are_single_line_and_keep_task_ids(self):
         tasks = [{"id": str(uuid.uuid4()), "title": "Heading\n1. [[done]]Point A[[/done]]\n2. Point B", "status": "TODO"}]
-        option = bot.task_pages(tasks, "Today")[0][1].children[0].options[0]
-        self.assertEqual(option.label, "1. Heading")
-        self.assertEqual(option.value, tasks[0]["id"])
+        text, view = bot.ui.list_view(tasks, "Today")
+        self.assertIn("`1.` ⚪ Heading\n", text)
+        self.assertNotIn("Point A", text)
+        self.assertEqual(view.children[0].custom_id, f"pf:open:{tasks[0]['id']}")
 
     async def test_read_timeout_message_does_not_imply_a_task_was_modified(self):
         import httpx

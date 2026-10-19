@@ -64,18 +64,28 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 7. Hape `/discord`, gjenero kodin, pastaj përdor `/lidh` në Discord. Rifresko
    faqen për ta parë lidhjen dhe për ta hapur kanalin personal.
 
-## Biseda dhe dropdown
+## Navigimi: një mesazh, pak klikime
 
-`/detyrat` dhe kujtesat shfaqin vetëm titujt e detyrave, deri në 10 për mesazh.
-Përshkrimi, pikat dhe statuset hapen vetëm pas zgjedhjes. Zgjedhja nga
-dropdown hap kartën e plotë me butona për To Do, Në progres, WFE, Mbylle,
-Konfirmim, Pikat/Strike, Edito, Koment, Slot/AM–PM dhe Rifresko.
+`/detyrat` shfaq titujt e numëruar dhe një buton për secilin numër (20 për faqe).
+Klikimi e kthen të njëjtin mesazh në kartën e detyrës; kanali nuk mbushet me
+mesazhe të reja. Karta tregon statusin, slotin, afatin dhe sa pika janë kryer në një rresht,
+pastaj të gjitha pikat: ✅ ~~të bëra strike~~ (me orën e strike-it) dhe ⬜ të hapura. Teksti i plotë hapet privatisht te
+**Më shumë → 📄 Teksti i plotë**.
+
+Butonat kryesorë ndjekin statusin: To Do → **▶ Fillo / ✅ Mbylle**, Në progres →
+**✅ Mbylle / ⏸ WFE**, WFE → **▶ Vazhdo / ✅ Mbylle**; gjithmonë **☑ Pikat** dhe
+**Hap PrimeFlow**. Menuja **Më shumë** ka Edito, Koment, Mbylle me koment,
+Slot/AM–PM, Konfirmim, statuset e tjera, udhëzimin AI, agjentin dhe Rifresko.
+**◀ ↩ Lista ▶** lëvizin mes detyrave të ditës. Pas mbylljes hapet vetë detyra
+tjetër; nëse mbyllja refuzohet (p.sh. kërkon koment), karta tregon arsyen.
+Pikat, Sloti dhe Konfirmimi hapen në të njëjtën kartë me **← Kthehu**.
+Kartat e postuara para këtij ndryshimi vazhdojnë të funksionojnë.
 
 Statuset, formularët dhe zgjedhja e pikave nuk kërkojnë interpretim AI: ndryshimi
 i saktë kalon në të njëjtat kontrolle të API-së, versionit të detyrës dhe auditimit.
-Te Pikat mund të zgjidhen disa pika njëherësh për strike ose heqje strike;
+Te ☑ Pikat mund të zgjidhen disa pika njëherësh për strike ose heqje strike;
 listat e gjata kanë faqe prej 25 pikash. Konfirmimi zgjedh personin nga përdoruesit
-aktivë. Edito hap titullin, përshkrimin, progresin, afatin dhe AM/PM; shënimet e
+aktivë. Edito hap titullin, përshkrimin, afatin dhe AM/PM; shënimet e
 strike-ve ruhen për tekstin e pandryshuar. Pas ruajtjes përditësohet karta aktive.
 Për detyrat me origjinë PX Notes/PX JAV, pikat merren nga shënimi burimor dhe
 strike ruhet përmes `PATCH /ga-notes/{id}` ose `PATCH /plan-notes/{id}`, njësoj si
@@ -84,8 +94,8 @@ Përshkrimet e veçanta dhe detyrat pa shënim ruajnë ndryshimet te detyra.
 Versioni përfshin tekstin e shënimit; menuja e pikave rifreskohet pas çdo ndryshimi.
 Mbyllja mund të shoqërohet me komentin e rezultatit dhe backend-i zbaton kushtet.
 
-Dropdown-i "AI dhe ndryshime të tjera" dhe `/pyet udhezimi:...` mbeten për kërkesa
-të lira. `/pyet` punon edhe pa Message Content Intent. Pyetjet sqaruese ruhen
+**Më shumë → 🤖 Udhëzim për AI**, mesazhet në kanal dhe `/pyet udhezimi:...` mbeten
+për kërkesa të lira. `/pyet` punon edhe pa Message Content Intent. Pyetjet sqaruese ruhen
 për detyrën aktive. Tekstet shumë të gjata kanë link për hapje në PrimeFlow;
 zgjedhja e pikave vazhdon të përfshijë të gjitha pikat përmes faqeve.
 
@@ -187,6 +197,15 @@ Nga e hëna në të premte, në `APP_TIMEZONE`:
 | 14:10 | Sloti 14:20 |
 | 15:50 | Sloti 16:00 |
 | 16:05 | PM |
+
+Kujtesa e përmend personin (@) dhe liston detyrat e slotit. **📝 Fillo raportimin**
+kalon detyrë pas detyre në të njëjtin mesazh me **✅ U krye / 🔵 Vazhdon / ⏸ WFE /
+⏭ Kalo** dhe në fund lë përmbledhjen. **✅ Shëno të kryerat** mbyll disa detyra
+njëherësh. Validimet e PrimeFlow mbeten: nëse mbyllja kërkon koment ose konfirmim,
+boti e thotë privatisht dhe **📂 Hap detyrën** hap kartën e plotë. Kur personi
+nuk ka detyra për slotin, nuk dërgohet asnjë mesazh. Kur vjen kujtesa tjetër,
+një raportim i mëparshëm i papërfunduar kthehet në "pa raportuar", pa butona.
+Butonat e raportimit punojnë vetëm brenda ditës së kujtesës.
 
 Përzgjedhja përdor dritaren ditore të API-së `/api/tasks`, assignee-n aktual dhe
 vetëm detyrat aktive e të hapura. Sloti specifik i datës ka përparësi ndaj slotit
