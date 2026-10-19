@@ -14,6 +14,11 @@ type RealtimeEvent = {
 }
 
 const allowedTools = new Set(["search_tasks", "list_my_schedule", "get_task", "set_task_status", "set_task_points", "set_checklist_item"])
+const notesTools = new Set(["notes_get_context", "notes_edit", "notes_select", "notes_new", "notes_save"])
+type VoiceOptions = {
+  mode?: "tasks" | "px_notes"
+  onToolCall?: (name: string, arguments_: Record<string, unknown>) => Promise<Record<string, unknown>>
+}
 // Transcription is asynchronous. Follow conversation predecessors, including
 // invisible function items, instead of ordering bubbles by transcript arrival.
 function orderMessages(messages: VoiceMessage[], predecessors: Map<string, string | null>) {
@@ -32,7 +37,7 @@ function orderMessages(messages: VoiceMessage[], predecessors: Map<string, strin
   return ordered
 }
 
-export function useVoiceAssistant() {
+export function useVoiceAssistant(options: VoiceOptions = {}) {
   const { apiFetch } = useAuth()
   const [phase, setPhase] = React.useState<Phase>("idle")
   const [messages, setMessages] = React.useState<VoiceMessage[]>([])
@@ -48,6 +53,8 @@ export function useVoiceAssistant() {
   const deadline = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const request = React.useRef<AbortController | null>(null)
   const predecessors = React.useRef(new Map<string, string | null>())
+  const optionsRef = React.useRef(options)
+  React.useEffect(() => { optionsRef.current = options }, [options])
 
   const message = React.useCallback((id: string, role: VoiceMessage["role"], text?: string, append = false) => {
     setMessages(previous => {
@@ -90,6 +97,7 @@ export function useVoiceAssistant() {
     release()
     const current = generation.current
     const active = () => generation.current === current
+    const mode = optionsRef.current.mode || "tasks"
     setError("")
     setMessages([])
     predecessors.current.clear()
@@ -138,34 +146,44 @@ export function useVoiceAssistant() {
         else { pendingResponse = false; responseActive = true; send({ type: "response.create" }) }
       }
       const runTools = async (calls: ToolCall[]) => {
+        let silent = mode === "px_notes"
         for (const call of calls) {
           if (!active()) return
           setPhase("working")
           let output: Record<string, unknown>
           try {
-            if (!allowedTools.has(call.name)) throw new Error("Veprimi nuk mbështetet.")
             const args = JSON.parse(call.arguments)
-            const result = await apiFetch(`/voice-assistant/tools/${call.name}`, {
-              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(args),
-            })
-            const body = await result.json().catch(() => ({}))
-            output = result.ok ? body : { success: false, error: typeof body.detail === "string" ? body.detail : "Veprimi u refuzua. Lexo gjendjen para riprovimit." }
+            if (mode === "px_notes") {
+              if (!notesTools.has(call.name) || !optionsRef.current.onToolCall) throw new Error("Veprimi nuk mbështetet.")
+              output = await optionsRef.current.onToolCall(call.name, args)
+            } else {
+              if (!allowedTools.has(call.name)) throw new Error("Veprimi nuk mbështetet.")
+              const result = await apiFetch(`/voice-assistant/tools/${call.name}`, {
+                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(args),
+              })
+              const body = await result.json().catch(() => ({}))
+              output = result.ok ? body : { success: false, error: typeof body.detail === "string" ? body.detail : "Veprimi u refuzua. Lexo gjendjen para riprovimit." }
+            }
           } catch {
             output = { success: false, error: "Rezultati i veprimit nuk u konfirmua. Lexo gjendjen përpara se të riprovosh." }
           }
           // A started write may finish after the microphone is stopped. Always
           // refresh its result; never start another tool from an ended session.
           if (output.changed) window.dispatchEvent(new Event("primex:tasks-changed"))
+          if (output.silent !== true) silent = false
           if (!active()) return
           send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) } })
         }
-        if (active()) { setPhase("thinking"); respond() }
+        if (active()) {
+          setPhase(silent ? "listening" : "thinking")
+          if (!silent) respond()
+        }
       }
       dc.onopen = () => {
         if (!active()) return
         if (timeout.current) clearTimeout(timeout.current)
         setPhase("listening")
-        respond()
+        if (mode !== "px_notes") respond()
         deadline.current = setTimeout(() => {
           if (active()) { stop(); setError("Biseda u mbyll pas 10 minutash. Shtyp Start për të vazhduar.") }
         }, 10 * 60 * 1000)
@@ -228,7 +246,7 @@ export function useVoiceAssistant() {
       if (!active()) return
       const result = await apiFetch("/voice-assistant/session", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sdp: offer.sdp }), signal: controller.signal,
+        body: JSON.stringify({ sdp: offer.sdp, mode }), signal: controller.signal,
       })
       if (!active()) return
       if (!result.ok) {

@@ -2,6 +2,7 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { useBrowserTabTitle } from "@/components/browser-tab-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { TaskOneHMarkerLegend } from "@/components/task-one-h-marker-legend"
@@ -1336,6 +1337,7 @@ export default function DepartmentKanban() {
   const [loading, setLoading] = React.useState(true)
   const [loadingExtras, setLoadingExtras] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
+  useBrowserTabTitle(viewMode === "mine" ? "My View · Development" : "Development")
   React.useEffect(() => {
     if (searchParams.get("view") !== "mine") return
     const timer = window.setTimeout(() => setViewMode("mine"), 0)

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { flushSync } from "react-dom"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -33,6 +34,9 @@ import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmat
 import { inferSkillCategory, SKILL_CATEGORIES } from "@/lib/skills"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
+import { useVoiceAssistant } from "@/lib/useVoiceAssistant"
+import { createNotesVoiceController, reconcileSavedNoteDraft, type NotesVoiceAdapter, type NotesVoiceState } from "@/lib/px-notes-voice"
+import { PxNotesMiraControls } from "@/components/px-notes-mira-controls"
 import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCategory, SkillCategoryInference, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 function isKnowledgeNote(note: GaNote | null | undefined) {
@@ -1340,8 +1344,16 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       textarea.setSelectionRange(0, 0)
     }
   }, [content, defaultNoteContent])
+  const editNoteVersionRef = React.useRef<string | null>(null)
   const editContentLatestRef = React.useRef("")
   const editDictationSelectionRef = React.useRef({ start: 0, end: 0 })
+  const bindEditTextarea = React.useCallback((textarea: HTMLTextAreaElement | null) => {
+    editTextareaRef.current = textarea
+    if (textarea) {
+      const cursor = editDictationSelectionRef.current
+      textarea.setSelectionRange(cursor.start, cursor.end)
+    }
+  }, [])
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
@@ -1488,6 +1500,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   }, [isCloudRecording, isVoiceListening, stopCloud, stopVoice, voiceMode])
 
   const handleVoiceToggle = () => {
+    stopMira()
     if (voiceMode === "browser") {
       toggleVoice()
       return
@@ -1500,6 +1513,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   }
 
   const handleEditVoiceToggle = () => {
+    stopMira()
     const textarea = editTextareaRef.current
     if (textarea) {
       editDictationSelectionRef.current = {
@@ -2125,7 +2139,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       }
       const created = (await res.json()) as GaNote
       setNotes((prev) => [created, ...prev])
-      setContent(defaultNoteContent)
+      flushSync(() => setContent((latest) => latest === content ? defaultNoteContent : latest))
+      if (contentTextareaRef.current?.value === defaultNoteContent) {
+        contentTextareaRef.current.setSelectionRange(0, 0)
+      }
       setNoteOneHMarker(ONE_H_MARKER_NONE)
       setNoteOneHMarkerComment("")
       if (selectedFiles.length > 0) {
@@ -2138,6 +2155,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           toast.error("Note saved, attachments failed")
         }
       }
+      return created
     } finally {
       setPosting(false)
     }
@@ -2184,6 +2202,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       const normalizedText = capitalizeNoteFirstLetter(parsedContent.text)
       const doneRanges = adjustTextRangesForTextChange(parsedContent.text, normalizedText, parsedContent.doneRanges)
       const addedRanges = adjustTextRangesForTextChange(parsedContent.text, normalizedText, parsedContent.addedRanges)
+      editNoteVersionRef.current = note.updated_at || null
       setEditNoteId(note.id)
       editContentLatestRef.current = normalizedText
       editDictationSelectionRef.current = {
@@ -2436,7 +2455,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     }
   }
 
-  const saveEditNote = async () => {
+  const saveEditNote = async (keepOpen = false) => {
     if (!editNoteId) return
     const trimmed = editContent.trim()
     if (!trimmed) {
@@ -2457,6 +2476,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         return
       }
     }
+    const submittedDraft = { text: editContent, doneRanges: editDoneRanges, addedRanges: editAddedRanges, cursor: { start: 0, end: 0 } }
     setSavingEdit(true)
     try {
       const editContentWithProgress = synchronizeNumberedListProgress({
@@ -2477,7 +2497,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         return
       }
       const noteBasePath = currentNote?.source === "PX_JAV" ? "plan-notes" : "ga-notes"
-      const endpoint = taskInfo?.taskId
+      const endpoint = taskInfo?.taskId || keepOpen
         ? `/${noteBasePath}/${editNoteId}/task-bundle`
         : `/${noteBasePath}/${editNoteId}`
       const body: Record<string, unknown> = { content: serializedContent }
@@ -2518,6 +2538,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         body.expected_updated_at = currentNote?.updated_at || null
       }
 
+      if (keepOpen) {
+        if (!editNoteVersionRef.current) throw new Error("Reopen the note before saving with Mira.")
+        body.expected_updated_at = editNoteVersionRef.current
+      }
       const res = await apiFetch(endpoint, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2534,13 +2558,27 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         }
 
         toast.success("Note updated")
-        onEditorSaved?.()
-        setEditNoteId(null)
-        setEditDoneRanges([])
-        setEditAddedRanges([])
-        setEditTaskProjectId("NONE")
-        setEditTaskAssigneeIds([])
-        setEditTaskAssigneeStates({})
+        if (!keepOpen) {
+          onEditorSaved?.()
+          setEditNoteId(null)
+          setEditDoneRanges([])
+          setEditAddedRanges([])
+          setEditTaskProjectId("NONE")
+          setEditTaskAssigneeIds([])
+          setEditTaskAssigneeStates({})
+        } else {
+          const fresh = parseMarkedNoteContentWithProgress(updated.content)
+          const current = voiceAdapter.current?.read()
+          if (current?.target === `${currentNote?.source || "GA_KA"}:${editNoteId}`) {
+            editNoteVersionRef.current = updated.updated_at || null
+            const reconciled = reconcileSavedNoteDraft(submittedDraft, current.draft, { ...fresh, cursor: current.draft.cursor })
+            setEditContent(reconciled.text)
+            editContentLatestRef.current = reconciled.text
+            setEditDoneRanges(reconciled.doneRanges)
+            setEditAddedRanges(reconciled.addedRanges)
+          }
+        }
+        return updated
       } else {
         let errorMessage = "Failed to update note"
         if (res) {
@@ -3242,6 +3280,98 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     [notesRenderLimit, visibleNotes]
   )
 
+  const voiceAdapter = React.useRef<NotesVoiceAdapter | null>(null)
+  const [runNotesTool] = React.useState(() => createNotesVoiceController({
+    read: () => voiceAdapter.current!.read(),
+    write: draft => voiceAdapter.current!.write(draft),
+    select: note => voiceAdapter.current!.select(note),
+    newNote: () => voiceAdapter.current!.newNote(),
+    save: () => voiceAdapter.current!.save(),
+  }))
+  const { phase: miraPhase, muted: miraMuted, error: miraError, audioBlocked: miraAudioBlocked,
+    audioRef: miraAudio, start: startMira, stop: stopMira, toggleMute: muteMira, resumeAudio: resumeMira } = useVoiceAssistant({ mode: "px_notes", onToolCall: runNotesTool })
+
+  // Realtime callbacks read the committed editor state, never the state from
+  // when the microphone was first opened. Local edits stay in the same UI.
+  React.useLayoutEffect(() => {
+    const waitForTarget = async (target: string) => {
+      for (let frame = 0; frame < 20; frame++) {
+        await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
+        const state = voiceAdapter.current!.read()
+        if (state.target === target && !state.busy) return
+      }
+      throw new Error("Editori nuk u hap. Provo përsëri.")
+    }
+    voiceAdapter.current = {
+      read: (): NotesVoiceState => {
+        const note = notes.find(item => item.id === editNoteId)
+        const editing = Boolean(editNoteId)
+        const textarea = editing ? editTextareaRef.current : contentTextareaRef.current
+        const text = editing ? editContent : content
+        const parsed = note ? parseMarkedNoteContentWithProgress(note.content) : null
+        const currentText = editing ? serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges) : content
+        const originalText = parsed ? serializeMarkedNoteContent(parsed.text, parsed.doneRanges, parsed.addedRanges) : defaultNoteContent
+        const taskInfo = editNoteId ? noteTaskInfo.get(editNoteId) : null
+        const metadataChanged = editing && (
+          editDescription.trim() !== (taskInfo?.description || "").trim()
+          || editTaskProjectId !== (taskInfo?.taskProjectId ?? note?.project_id ?? "NONE")
+          || !sameStringSet(editTaskAssigneeIds, taskInfo?.assignees.map(assignee => assignee.id) || [])
+          || editNoteOneHMarker !== (note?.one_h_marker ?? ONE_H_MARKER_NONE)
+          || editNoteOneHMarkerComment !== (note?.one_h_marker_comment || "")
+          || editTaskAssigneeIds.some(id => !sameGaAssigneeTaskState(editTaskAssigneeStates[id] ?? createEmptyGaAssigneeTaskState(), taskInfo?.assigneeStates[id] ?? createEmptyGaAssigneeTaskState()))
+        )
+        return {
+          target: editing ? `${note?.source || "GA_KA"}:${editNoteId}` : "new",
+          draft: { text, doneRanges: editing ? editDoneRanges : [], addedRanges: editing ? editAddedRanges : [],
+            cursor: { start: textarea?.selectionStart ?? text.length, end: textarea?.selectionEnd ?? text.length } },
+          notes: renderedNotes.map(item => ({ id: item.id, source: item.source || "GA_KA", content: item.content, closed: item.status === "CLOSED" })),
+          dirty: currentText.trim() !== originalText.trim() || Boolean(metadataChanged),
+          busy: posting || savingEdit || loadingEditNote,
+        }
+      },
+      write: async draft => {
+        flushSync(() => {
+          if (editNoteId) {
+            setEditContent(draft.text)
+            editContentLatestRef.current = draft.text
+            setEditDoneRanges(draft.doneRanges)
+            setEditAddedRanges(draft.addedRanges)
+            editDictationSelectionRef.current = draft.cursor
+          } else setContent(draft.text)
+        })
+        const textarea = editNoteId ? editTextareaRef.current : contentTextareaRef.current
+        textarea?.setSelectionRange(draft.cursor.start, draft.cursor.end)
+      },
+      select: async selected => {
+        if (editorNote && selected.id !== editorNote.id) throw new Error("Hap këtë Note nga lista PX Notes.")
+        const note = notes.find(item => item.id === selected.id && (item.source || "GA_KA") === selected.source)
+        if (!note || !await openEditNote(note)) throw new Error("Note-i nuk u hap.")
+        await waitForTarget(`${selected.source}:${selected.id}`)
+      },
+      newNote: async () => {
+        if (editorNote) throw new Error("Hap PX Notes për një Note të ri.")
+        if (content.trim() && content.trim() !== defaultNoteContent.trim()) throw new Error("Ruaje fillimisht draftin e ri.")
+        flushSync(() => { setEditNoteId(null) })
+        contentTextareaRef.current?.setSelectionRange(0, 0)
+        await waitForTarget("new")
+      },
+      save: async () => {
+        const saved = editNoteId ? await saveEditNote(true) : await createNote()
+        return saved || null
+      },
+    }
+  })
+
+  const startNotesMira = () => {
+    if (isVoiceListening) stopVoice()
+    if (isCloudRecording) stopCloud()
+    if (isEditVoiceListening) stopEditVoice()
+    if (isEditCloudRecording) stopEditCloud()
+    void startMira()
+  }
+  const miraControls = <PxNotesMiraControls phase={miraPhase} muted={miraMuted} error={miraError} audioBlocked={miraAudioBlocked}
+    onStart={startNotesMira} onStop={stopMira} onMute={muteMira} onResume={() => void resumeMira()} />
+
   const attachmentDialogItems = React.useMemo(() => {
     if (!attachmentsDialogNoteId) return []
     const note = visibleNotes.find((item) => item.id === attachmentsDialogNoteId)
@@ -3305,6 +3435,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           <DialogHeader className="shrink-0">
             <DialogTitle>Edit Note</DialogTitle>
           </DialogHeader>
+          {miraControls}
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3365,7 +3496,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 </div>
               </div>
               <Textarea
-                ref={editTextareaRef}
+                ref={bindEditTextarea}
                 value={editContent}
                 onChange={(event) => {
                   handleEditContentChange(normalizeNoteTextareaInput(event.currentTarget))
@@ -3705,6 +3836,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           </div>
             <div className="flex shrink-0 justify-end gap-2 border-t bg-background pt-3">
               <Button variant="outline" onClick={() => {
+                stopMira()
                 setEditNoteId(null)
                 setEditDoneRanges([])
                 setEditAddedRanges([])
@@ -3725,6 +3857,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
 
   const editDialog = <Dialog open={Boolean(editNoteId)} onOpenChange={(open) => {
     if (!open) {
+      stopMira()
       setEditNoteId(null)
       setEditDoneRanges([])
       setEditAddedRanges([])
@@ -3738,13 +3871,14 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   // The same editor and save path are used both here and from the comments inbox.
   if (editorNote) {
     const content = editNoteId ? editDialogContent : <><DialogHeader className="shrink-0"><DialogTitle>Edit Note</DialogTitle></DialogHeader><p role="status">Duke ngarkuar detyrën…</p></>
-    return embeddedEditor ? content : <Dialog open onOpenChange={(open) => { if (!open) onEditorClose?.() }}>
+    return <><audio ref={miraAudio} autoPlay className="hidden" />{embeddedEditor ? content : <Dialog open onOpenChange={(open) => { if (!open) onEditorClose?.() }}>
       <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-3xl">{content}</DialogContent>
-    </Dialog>
+    </Dialog>}</>
   }
 
   return (
     <div className="space-y-6">
+      <audio ref={miraAudio} autoPlay className="hidden" />
       <div className={`rounded-2xl border bg-gradient-to-r from-amber-50 via-indigo-50 to-cyan-50 p-6 shadow-sm${quickMode ? " hidden" : ""}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -3819,6 +3953,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
+          {miraControls}
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyNewNoteBold}>

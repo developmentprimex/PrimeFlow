@@ -67,9 +67,9 @@ TOOL_MODELS = {
 }
 
 
-def session_config(user) -> dict:
+def session_config(user, mode: str = "tasks") -> dict:
     name = user.full_name or user.username
-    return {
+    config = {
         "type": "realtime",
         "model": settings.VOICE_ASSISTANT_MODEL,
         "instructions": f"""Je Mira, asistentja zanore e PrimeFlow. Po bisedon me {json.dumps(name)}.
@@ -110,6 +110,11 @@ Mos lexo UUID/versione me zë. Nuk mund të fshish detyra ose të kryesh punën 
                    "parameters": model.model_json_schema()} for name, (model, description) in TOOL_MODELS.items()],
         "tool_choice": "auto",
     }
+    if mode == "px_notes":
+        from app.services import voice_notes
+        config["instructions"] = voice_notes.INSTRUCTIONS
+        config["tools"] = voice_notes.tools()
+    return config
 
 
 async def read_task(user, task_id: str) -> tuple[dict, list]:

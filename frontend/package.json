@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:speech": "node --test tests/speech.test.mjs",
-    "test:voice": "node --test tests/voice-assistant.test.mjs"
+    "test:voice": "node --test tests/voice-assistant.test.mjs tests/px-notes-voice.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -13,6 +13,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_marker_comment_inbox import TaskMarkerCommentInbox
 from app.models.user import User
 from app.services.notifications import add_notification
+from app.services.task_marker_visibility import marker_alert_enabled
 
 
 def marker_comment_source_key(task: Task) -> str:
@@ -55,15 +56,19 @@ async def record_marker_change(
     assignments = (await db.execute(select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids)))).all()
     recipients: dict[uuid.UUID, Task] = {}
     by_id = {task.id: task for task in tasks}
+    def choose_recipient(user_id, task):
+        previous_task = recipients.get(user_id)
+        if previous_task is None or marker_alert_enabled(task) or not marker_alert_enabled(previous_task):
+            recipients[user_id] = task
     # Prefer a person's own task copy for navigation and subsequent access checks.
     for task in tasks:
         if task.created_by:
             recipients.setdefault(task.created_by, task)
     for task_id, user_id in assignments:
-        recipients[user_id] = by_id[task_id]
+        choose_recipient(user_id, by_id[task_id])
     for task in tasks:
         if task.assigned_to:
-            recipients[task.assigned_to] = task
+            choose_recipient(task.assigned_to, task)
     active_ids = set((await db.execute(select(User.id).where(User.id.in_(recipients), User.is_active.is_(True)))).scalars())
     source_key = marker_comment_source_key(tasks[0])
     existing = {item.user_id: item for item in (await db.execute(
@@ -102,7 +107,7 @@ async def record_marker_change(
                     "task_id", "task_ids", "author_id", "revision", "marker", "comment", "updated_at", "read_at",
                 )},
             ).returning(TaskMarkerCommentInbox).execution_options(populate_existing=True))).scalar_one().id
-        if actor and user_id == actor.id:
+        if not marker_alert_enabled(task) or (actor and user_id == actor.id):
             continue
         symbol = one_h_marker_label(marker)
         notification = add_notification(

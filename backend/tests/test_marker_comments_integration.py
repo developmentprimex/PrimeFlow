@@ -18,9 +18,9 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.api.routers.marker_comments import ReadComment, list_marker_comments, read_marker_comment
-from app.api.routers.notifications import delete_all_notifications_post, mark_all_read
+from app.api.routers.notifications import delete_all_notifications_post, list_notifications, mark_all_read, unread_notification_count
 from app.config import settings
-from app.models.enums import UserRole
+from app.models.enums import NotificationType, UserRole
 from app.models.notification import Notification
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
@@ -314,6 +314,63 @@ async def _exercise_inbox():
                         await db.flush()
                         assert note.content == original
                         assert all(copy.title == original for copy in copies)
+                    # Only To do/In progress contribute personal/team inboxes,
+                    # delivery, and notification counters. Other alert types stay.
+                    baseline_notifications = (await unread_notification_count(db, outsider))["count"]
+                    baseline_queue = len(db.info["pending_marker_notifications"])
+                    status_tasks = []
+                    for status in ("TODO", "IN_PROGRESS", "DONE", "WAITING_CLIENT", "WAITING_CONFIRMATION"):
+                        status_task = Task(id=uuid.uuid4(), title=f"Status filter {status}", assigned_to=outsider.id,
+                                           created_by=actor.id, status=status, is_active=True, one_h_marker="QUESTION")
+                        db.add(status_task)
+                        await db.flush()
+                        await record_initial_marker_comments(db, [status_task], actor_email=actor.email)
+                        status_tasks.append(status_task)
+                    db.add(Notification(id=uuid.uuid4(), user_id=outsider.id, type=NotificationType.assignment,
+                                        title="Unrelated assignment", data={"task_id": str(status_tasks[2].id)}))
+                    await db.flush()
+                    assert len(db.info["pending_marker_notifications"]) == baseline_queue + 2
+                    personal = (await list_marker_comments(db, outsider))["items"]
+                    assert {item["task_id"] for item in personal} == {str(task.id) for task in status_tasks[:2]}
+                    team = (await list_marker_comments(db, actor, scope="all"))["items"]
+                    excluded = {str(task.id) for task in status_tasks[2:]}
+                    assert not excluded.intersection(item["task_id"] for item in team)
+                    assert (await unread_notification_count(db, outsider))["count"] == baseline_notifications + 3
+
+                    todo_item = next(item for item in personal if item["task_id"] == str(status_tasks[0].id))
+                    status_tasks[0].status = "DONE"
+                    await db.flush()
+                    assert len((await list_marker_comments(db, outsider))["items"]) == 1
+                    assert (await unread_notification_count(db, outsider))["count"] == baseline_notifications + 2
+                    notification_rows = await list_notifications(False, db, outsider)
+                    assert not any(row.data and row.data.get("kind") in ("task_marker", "task_marker_comment")
+                                   and row.data.get("task_id") == str(status_tasks[0].id) for row in notification_rows)
+                    assert any(row.title == "Unrelated assignment" for row in notification_rows)
+                    with pytest.raises(HTTPException) as finished:
+                        await read_marker_comment(uuid.UUID(todo_item["id"]), ReadComment(revision=uuid.UUID(todo_item["revision"])), db, outsider)
+                    assert finished.value.status_code == 404
+                    status_tasks[0].status = "IN_PROGRESS"
+                    await db.flush()
+                    restored = next(item for item in (await list_marker_comments(db, outsider))["items"] if item["id"] == todo_item["id"])
+                    assert restored["revision"] == todo_item["revision"] and restored["read_at"] is None
+
+                    # A completed person's copy does not keep shared tasks unread
+                    # or expose that copy in their personal list.
+                    active_copy, done_copy = [Task(id=uuid.uuid4(), title="Mixed status shared task", assigned_to=person.id,
+                                                   created_by=actor.id, fast_task_group_id=group_id, status=status,
+                                                   is_active=True, one_h_marker="M3")
+                                             for group_id in [uuid.uuid4()]
+                                             for person, status in ((outsider, "TODO"), (second, "DONE"))]
+                    db.add_all([active_copy, done_copy])
+                    await db.flush()
+                    await record_initial_marker_comments(db, [active_copy, done_copy], actor_email=actor.email)
+                    mixed = next(item for item in (await list_marker_comments(db, actor, scope="all"))["items"] if item["task_id"] == str(active_copy.id))
+                    assert mixed["recipient_count"] == 1 and mixed["recipients"][0]["user_id"] == str(outsider.id)
+                    assert not any(item["source_key"] == mixed["source_key"] for item in (await list_marker_comments(db, second))["items"])
+                    done_copy.status = "IN_PROGRESS"
+                    await db.flush()
+                    mixed = next(item for item in (await list_marker_comments(db, actor, scope="all"))["items"] if item["source_key"] == mixed["source_key"])
+                    assert mixed["recipient_count"] == 2
             finally:
                 await transaction.rollback()
     finally:

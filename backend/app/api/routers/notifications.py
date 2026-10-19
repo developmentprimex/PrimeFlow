@@ -4,16 +4,26 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import String, cast, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.notification import Notification
 from app.schemas.notification import NotificationOut
+from app.models.task import Task
+from app.services.task_marker_visibility import marker_alert_task
 
 
 router = APIRouter()
+
+
+def visible_marker_notifications():
+    kind = Notification.data["kind"].astext
+    return or_(
+        func.coalesce(kind, "").not_in(("task_marker", "task_marker_comment")),
+        exists().where(cast(Task.id, String) == Notification.data["task_id"].astext, marker_alert_task(Task)),
+    )
 
 
 def _to_out(n: Notification) -> NotificationOut:
@@ -38,7 +48,7 @@ async def unread_notification_count(
         await db.execute(
             select(func.count())
             .select_from(Notification)
-            .where(Notification.user_id == user.id, Notification.read_at.is_(None))
+            .where(Notification.user_id == user.id, Notification.read_at.is_(None), visible_marker_notifications())
         )
     ).scalar_one()
     return {"count": int(count or 0)}
@@ -50,7 +60,7 @@ async def list_notifications(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[NotificationOut]:
-    stmt = select(Notification).where(Notification.user_id == user.id)
+    stmt = select(Notification).where(Notification.user_id == user.id, visible_marker_notifications())
     if unread_only:
         stmt = stmt.where(Notification.read_at.is_(None))
     notifications = (await db.execute(stmt.order_by(Notification.created_at.desc()))).scalars().all()

@@ -10,6 +10,7 @@ import { SidebarProvider } from "@/components/sidebar-context"
 import { WaitingConfirmationGaProvider } from "@/components/waiting-confirmation-ga-context"
 import { MarkerCommentsPanel, MarkerCommentsProvider } from "@/components/marker-comments-context"
 import { useAuth } from "@/lib/auth"
+import { BrowserTabTitleProvider } from "@/components/browser-tab-title"
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -25,6 +26,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null
 
   return (
+    <BrowserTabTitleProvider>
     <SidebarProvider>
       <WaitingConfirmationGaProvider>
         <MarkerCommentsProvider key={user.id}>
@@ -39,6 +41,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </MarkerCommentsProvider>
       </WaitingConfirmationGaProvider>
     </SidebarProvider>
+    </BrowserTabTitleProvider>
   )
 }
 

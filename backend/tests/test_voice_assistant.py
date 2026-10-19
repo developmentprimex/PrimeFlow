@@ -137,6 +137,19 @@ class VoiceRouteTests(unittest.IsolatedAsyncioTestCase):
                 await api.create_session(api.SessionRequest(sdp="v=0\nsdp-offer"), USER)
         self.assertNotIn("secret-test-key", error.exception.detail)
 
+    async def test_notes_session_exposes_only_editor_tools_and_preserves_the_default_task_mode(self):
+        import json
+        mocked = AsyncMock()
+        mocked.__aenter__.return_value.post.return_value = httpx.Response(201, text="v=0\nsdp-answer")
+        with patch.object(api.settings, "OPENAI_API_KEY", "secret-test-key"), patch.object(api.httpx, "AsyncClient", return_value=mocked):
+            await api.create_session(api.SessionRequest(sdp="v=0\nsdp-offer", mode="px_notes"), USER)
+        config = json.loads(mocked.__aenter__.return_value.post.call_args.kwargs["files"]["session"][1])
+        names = {tool["name"] for tool in config["tools"]}
+        self.assertIn("notes_edit", names)
+        self.assertIn("notes_save", names)
+        self.assertNotIn("set_task_status", names)
+        self.assertIn("set_task_status", {tool["name"] for tool in voice.session_config(USER)["tools"]})
+
 
 if __name__ == "__main__":
     unittest.main()
