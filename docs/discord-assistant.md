@@ -102,7 +102,14 @@ zgjedhja e pikave vazhdon të përfshijë të gjitha pikat përmes faqeve.
 Për mesazhe të zakonshme në kanal, aktivizo **Message Content Intent** në Bot
 settings të Developer Portal dhe vendos `DISCORD_MESSAGE_CONTENT_ENABLED=true`.
 Rinis worker-in. Lejet e Discord-it për aplikacionet e mëdha mund të kërkojnë
-miratim për intent-in. Përdoruesit shkruajnë pasi kanë zgjedhur detyrën.
+miratim për intent-in.
+
+Përdoruesit mund të shkruajnë direkt, pa klikuar më parë. Detyra gjendet nga ajo që
+shohin: mesazhi i botit ku bëjnë Reply, përndryshe mesazhi i fundit i botit me detyra
+(lista, kujtesa e slotit ose karta), pastaj detyrat e tjera të ditës. "Këtë detyrë"
+është detyra e vetme e shfaqur; "detyra 2" ndjek numrat e listës; një fjalë nga titulli
+zgjedh detyrën. Kur nuk është e qartë, boti pyet dhe përgjigjja e shkurtër ("e dyta")
+e plotëson kërkesën. Rezultati shfaqet si karta e përditësuar e detyrës.
 
 Shembuj:
 

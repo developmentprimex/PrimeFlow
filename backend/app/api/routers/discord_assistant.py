@@ -63,6 +63,45 @@ class Command(Actor):
     instruction: str = Field(min_length=1, max_length=4000)
     expected_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
     direct_actions: list[tools.ToolAction] | None = Field(default=None, min_length=1, max_length=20)
+    # Tasks on screen in Discord (replied-to or latest bot message), in the order shown.
+    context_task_ids: list[uuid.UUID] | None = Field(default=None, max_length=25)
+
+
+CHOICE_MARK = "[zgjedhja e detyrës]"
+
+
+class StaleTask(ValueError):
+    """The task changed after the person last saw it in Discord."""
+
+
+async def choose_task(db: AsyncSession, link: DiscordLink, user: User, payload: Command):
+    """Pick the task a chat message is about from what the person sees and today's work."""
+    today = await daily_tasks(db, user)
+    by_id = {str(task["id"]): task for task in today}
+    shown = []
+    for task_id in payload.context_task_ids or []:
+        task = by_id.get(str(task_id))
+        if task is None:
+            try:
+                task = await owned_task(db, user, task_id)
+            except HTTPException:
+                continue  # No longer theirs or no longer active.
+        shown.append(task)
+    shown_ids = {str(task["id"]) for task in shown}
+    candidates = shown + [task for task in today if str(task["id"]) not in shown_ids]
+    if not candidates:
+        return None, None
+    if len(candidates) == 1:
+        return uuid.UUID(str(candidates[0]["id"])), None
+    pending = link.pending_instruction if (link.pending_instruction or "").startswith(CHOICE_MARK) else None
+    choice = await tools.choose_task(payload.instruction, [{
+        "ref": ref, "shown_number": ref if ref <= len(shown) else None,
+        "title": next((line.strip() for line in tools.plain_text(task.get("title")).splitlines() if line.strip()), "")[:200],
+        "status": task.get("status"), "selected": str(task["id"]) == str(link.selected_task_id)}
+        for ref, task in enumerate(candidates, 1)], pending)
+    if choice.question or choice.ref is None:
+        return None, choice.question or "Për cilën detyrë e ke fjalën?"
+    return uuid.UUID(str(candidates[choice.ref - 1]["id"])), None
 
 
 async def identity(db: AsyncSession, actor: Actor, *, lock: bool = False):
@@ -232,9 +271,21 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             raise HTTPException(409, "Komandë e përsëritur me identitet tjetër.")
         return (old.result.get("reply", old.result) if old.result else
             {"message": "Kjo komandë është në përpunim ose kërkon kontroll në PrimeFlow; nuk do të përsëritet.", "status": old.status})
-    task_id = payload.task_id or link.selected_task_id
+    task_id = payload.task_id
     if not task_id:
-        return {"message": "Hap detyrën fillimisht me /detyrat.", "status": "QUESTION"}
+        task_id, question = await choose_task(db, link, user, payload)
+        if question:
+            # Keep the request, so a short answer ("e dyta") completes it.
+            previous = link.pending_instruction[len(CHOICE_MARK):] if (link.pending_instruction or "").startswith(CHOICE_MARK) else ""
+            link.pending_instruction = CHOICE_MARK + (previous + "\n" + payload.instruction + "\nPyetja: " + question)[-7000:]
+            await db.commit()
+            return {"message": question, "status": "QUESTION"}
+        if not task_id:
+            return {"message": "Nuk ke detyra të hapura sot. Përdor /detyrat.", "status": "QUESTION"}
+        if (link.pending_instruction or "").startswith(CHOICE_MARK):
+            link.selected_task_id = task_id  # The kept request now belongs to this task.
+        elif link.selected_task_id != task_id:
+            link.pending_instruction = None
     action = DiscordAction(id=payload.request_id, link_id=link.id, task_id=task_id, instruction=payload.instruction)
     db.add(action)
     # Durable reservation BEFORE calling an API that may commit. An interrupted
@@ -249,7 +300,7 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
         if not expected and link.selected_task_id == task_id:
             expected = (link.selected_fingerprint or "")[:16]
         if expected and tools.fingerprint(before)[:16] != expected:
-            raise ValueError("Detyra ishte ndryshuar në PrimeFlow ndërkohë. Karta u rifreskua; zgjidh përsëri.")
+            raise StaleTask("Detyra ishte ndryshuar në PrimeFlow ndërkohë. Ja versioni i fundit; shkruaje kërkesën përsëri.")
         history = link.pending_instruction if link.selected_task_id == task_id else None
         try:
             checklists = await tools.user_api(user, "GET", "/api/checklists", params={"task_id": str(task_id)})
@@ -312,6 +363,13 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             link.selected_task_id = task_id
             link.pending_instruction = (payload.instruction + "\nSqarimi i kërkuar nga PrimeFlow: " + message)[-8000:]
         result = {"status": "PARTIAL" if applied else "QUESTION" if recoverable else "ERROR", "message": message, "applied": [op["label"] for op in applied]}
+        if isinstance(exc, StaleTask) and before:
+            # Show the current card so the person sees the numbers that apply now.
+            link.selected_task_id, link.selected_fingerprint = task_id, tools.fingerprint(before)
+            result.update({"task": before, "fingerprint": tools.fingerprint(before)[:16],
+                "url": f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{task_id}",
+                "title_points": tools.text_points(tools.point_text(before, "title"), "title"),
+                "description_points": tools.text_points(tools.point_text(before, "description"), "description")})
         action.result, action.status = {"reply": result, "before": before, "operations": applied}, result["status"]
         await db.commit()
         return result

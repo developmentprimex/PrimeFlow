@@ -287,6 +287,7 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
             payload.direct_actions = parsed_plan.actions
         owned = [task, {**task, "title": "Changed elsewhere"} if changed else task] + [task] * 20
         with patch.object(api, "identity", new_callable=AsyncMock, return_value=(self.link, user)), \
+             patch.object(api, "daily_tasks", new_callable=AsyncMock, return_value=[task]), \
              patch.object(api, "owned_task", new_callable=AsyncMock, side_effect=owned), \
              patch.object(tools, "user_api", side_effect=request), \
              patch.object(tools, "interpret", new_callable=AsyncMock, return_value=parsed_plan) as interpret:
