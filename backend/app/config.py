@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     DISCORD_GUILD_ID: str | None = None
     DISCORD_CATEGORY_ID: str | None = None
     DISCORD_MEETING_VOICE_CHANNEL_ID: str | None = None
+    # Voice channel of the 1H slot meetings; slot reminders link to it.
+    DISCORD_1H_VOICE_CHANNEL_ID: str | None = "1493866120338477119"
     DISCORD_MESSAGE_CONTENT_ENABLED: bool = False
     DISCORD_AI_MODEL: str = "gpt-5.4-mini"
     DISCORD_AI_TIMEOUT_SECONDS: int = 45

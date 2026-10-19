@@ -238,15 +238,19 @@ def bucket_name(bucket: str) -> str:
     return f"Raportimi {bucket}" if bucket in {"AM", "PM"} else f"Sloti {bucket}"
 
 
-def report_intro(bucket: str, task_list: list[dict], reminder_id: str, user_id: str | None = None, notice: str | None = None):
+def report_intro(bucket: str, task_list: list[dict], reminder_id: str, user_id: str | None = None, notice: str | None = None,
+                 join_url: str | None = None):
     lines = [f"`{i}.` {STATUS_ICONS.get(task.get('status'), '⚪')} {discord.utils.escape_markdown(label(heading(task), 70))}"
              for i, task in enumerate(task_list[:25], 1)]
     content = ((f"<@{user_id}> " if user_id else "") + f"⏰ **{bucket_name(bucket)}** · {len(task_list)} detyra\n"
+               + (f"🎧 **Takimi 1H fillon në {bucket}.** Kyçu në kanalin 1H.\n" if join_url else "")
                + (notice + "\n" if notice else "") + "\n".join(lines))
     view = discord.ui.View(timeout=None)
     rid = uuid.UUID(str(reminder_id)).hex
     view.add_item(discord.ui.Button(label="📝 Fillo raportimin", style=discord.ButtonStyle.primary, row=0,
         custom_id=f"pf:rep:{rid}:-:0.0.0.0:go"))
+    if join_url:
+        view.add_item(discord.ui.Button(label="🎧 Kyçu në takimin 1H", url=join_url, row=0))
     view.add_item(discord.ui.Select(custom_id=f"pf:repdone:{rid}", row=1, placeholder="✅ Shëno të kryerat (një ose disa)…",
         min_values=1, max_values=min(len(task_list), 25), options=[discord.SelectOption(
             label=f"{i}. {label(heading(task), 90)}"[:100], value=task["id"]) for i, task in enumerate(task_list[:25], 1)]))

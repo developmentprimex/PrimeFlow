@@ -526,7 +526,8 @@ class PrimeFlowBot(discord.Client):
         notice = "\n".join([f"✅ U mbyllën {closed}"] + refused)
         remaining = (await self.bridge(f"/bot/reminders/{reminder_id}/tasks", identity))["tasks"]
         if remaining:
-            content, view = ui.report_intro(data["bucket"], remaining, reminder_id, notice=notice)
+            content, view = ui.report_intro(data["bucket"], remaining, reminder_id, notice=notice,
+                join_url=self.one_h_url(data["bucket"], interaction.guild_id))
             await interaction.edit_original_response(content=content, embed=None, view=view)
         else:
             await interaction.edit_original_response(content=notice + "\n" + ui.report_summary(data["bucket"], [closed, 0, 0, 0]), embed=None,
@@ -674,7 +675,8 @@ class PrimeFlowBot(discord.Client):
                         if job.get("previous"):
                             await self.retire_reminder(channel, job["previous"])
                         if data["tasks"]:
-                            text, view = ui.report_intro(job["bucket"], data["tasks"], job["id"], job["discord_user_id"])
+                            text, view = ui.report_intro(job["bucket"], data["tasks"], job["id"], job["discord_user_id"],
+                                join_url=self.one_h_url(job["bucket"], job["guild_id"]))
                             # Discord deduplicates the same nonce on a retried
                             # send. The key survives worker/API restarts.
                             nonce = hashlib.sha256(f"{job['id']}:0".encode()).hexdigest()[:24]
@@ -688,6 +690,14 @@ class PrimeFlowBot(discord.Client):
             await asyncio.gather(*(deliver(job) for job in jobs))
         except Exception as exc:
             log.warning("Reminder polling failed: %s", type(exc).__name__)
+
+    @staticmethod
+    def one_h_url(bucket, guild_id) -> str | None:
+        """Slot reminders (not AM/PM) call the people with 1H tasks into the 1H meeting."""
+        channel_id = settings.DISCORD_1H_VOICE_CHANNEL_ID
+        if bucket in {"AM", "PM"} or not channel_id:
+            return None
+        return f"https://discord.com/channels/{guild_id}/{channel_id}"
 
     def voice_url(self, guild_id) -> str | None:
         """The configured meeting voice room, otherwise the server's first voice channel."""

@@ -153,6 +153,18 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
             bot.agent_client.handle_agent_interaction = original
         self.assertEqual(handler.call_args.args[2], f"pf:agent:targets:{item_id}:{'f' * 16}")
 
+    def test_slot_reminder_calls_people_into_the_1h_meeting(self):
+        url = bot.PrimeFlowBot.one_h_url("11:00", 1493866119700807722)
+        self.assertEqual(url, "https://discord.com/channels/1493866119700807722/1493866120338477119")
+        self.assertIsNone(bot.PrimeFlowBot.one_h_url("AM", 1))
+        content, view = ui.report_intro("11:00", [task("A")], str(uuid.uuid4()), "3", join_url=url)
+        self.assertIn("Takimi 1H fillon në 11:00", content)
+        button = next(item for item in view.children if getattr(item, "url", None))
+        self.assertEqual((button.label, button.url, button.row), ("🎧 Kyçu në takimin 1H", url, 0))
+        content, view = ui.report_intro("PM", [task("A")], str(uuid.uuid4()), "3")
+        self.assertNotIn("1H", content)
+        self.assertFalse(any(getattr(item, "url", None) for item in view.children))
+
     def test_report_controls_fit_discord_and_mention_user(self):
         rid = str(uuid.uuid4())
         items = [task(f"T{n}") for n in range(30)]

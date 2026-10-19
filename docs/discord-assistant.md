@@ -198,7 +198,10 @@ Nga e hëna në të premte, në `APP_TIMEZONE`:
 | 15:50 | Sloti 16:00 |
 | 16:05 | PM |
 
-Kujtesa e përmend personin (@) dhe liston detyrat e slotit. **📝 Fillo raportimin**
+Kujtesa e përmend personin (@) dhe liston detyrat e slotit. Te slotet 1H (jo AM/PM)
+shton "Takimi 1H fillon në …" dhe butonin **🎧 Kyçu në takimin 1H**, që hap kanalin zanor
+`DISCORD_1H_VOICE_CHANNEL_ID` (parazgjedhje: kanali 1H i serverit). Vetëm personat që kanë
+detyra në atë slot e marrin. **📝 Fillo raportimin**
 kalon detyrë pas detyre në të njëjtin mesazh me **✅ U krye / 🔵 Vazhdon / ⏸ WFE /
 ⏭ Kalo** dhe në fund lë përmbledhjen. **✅ Shëno të kryerat** mbyll disa detyra
 njëherësh. Validimet e PrimeFlow mbeten: nëse mbyllja kërkon koment ose konfirmim,
