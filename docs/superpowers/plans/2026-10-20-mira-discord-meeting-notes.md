@@ -65,12 +65,12 @@
 - All routes require existing `require_bot`. Worker mutations require matching unexpired capture token and instance. Start/save/stop additionally use authenticated linked-user authorization; manager stop checks current voice ID asserted by the trusted bot.
 - Route contracts under the prefix above: `POST /start` (VoiceStart), `POST /{id}/detail` (VoiceActor), `POST /{id}/authorize-stop` (VoiceActor; authorizes before the bot disconnects), `POST /{id}/listening`, `POST /{id}/heartbeat`, `POST /{id}/interrupt` (worker token/instance), `POST /{id}/finish` (worker token/instance plus segment_count/partial after an authorized stop), `POST /{id}/save` (VoiceActor). Stale or mismatched workers cannot advance a session. Persist stop authorization against the session/instance so a capture token alone cannot impersonate a human stop request.
 
-- [ ] Write `test_discord_voice_model.py` assertions for unique sequence, active-guild index and migration chain; write API tests for start replay, wrong guild/link/channel, second active session, organizer/manager stop, unrelated staff denial, and revoked account.
-- [ ] Write `test_ga_note_creation.py`: ordinary POST and meeting save enforce the same department/project rules; `save_twice_returns_same_note` asserts one insert under concurrent transactions; losing the reply cannot create another Note. Use a disposable PostgreSQL test database for locking/index tests and mocks only for pure authorization cases.
-- [ ] Run from `backend`: `python -m unittest tests.test_discord_voice_model tests.test_discord_voice_api tests.test_ga_note_creation -v`; verify the new behavior fails before implementation.
-- [ ] Implement persistence, schemas, state transitions and shared Note creation. Save holds the session row lock, rechecks organizer/destination access, inserts Note and sets saved_note_id in one transaction. Empty drafts cannot be saved. Do not call an HTTP route that commits separately.
-- [ ] Run the tests green, plus `python -m unittest tests.test_discord_assistant tests.test_discord_agent_api -v`; confirm ordinary Note output remains unchanged.
-- [ ] Commit: `feat: persist and authorize Discord meeting note sessions`.
+- [x] Write `test_discord_voice_model.py` assertions for unique sequence, active-guild index and migration chain; write API tests for start replay, wrong guild/link/channel, second active session, organizer/manager stop, unrelated staff denial, and revoked account.
+- [x] Write `test_ga_note_creation.py`: ordinary POST and meeting save enforce the same department/project rules; `save_twice_returns_same_note` asserts one insert under concurrent transactions; losing the reply cannot create another Note. Use a disposable PostgreSQL test database for locking/index tests and mocks only for pure authorization cases.
+- [x] Run from `backend`: `python -m unittest tests.test_discord_voice_model tests.test_discord_voice_api tests.test_ga_note_creation -v`; verify the new behavior fails before implementation.
+- [x] Implement persistence, schemas, state transitions and shared Note creation. Save holds the session row lock, rechecks organizer/destination access, inserts Note and sets saved_note_id in one transaction. Empty drafts cannot be saved. Do not call an HTTP route that commits separately.
+- [x] Run the tests green, plus `python -m unittest tests.test_discord_assistant tests.test_discord_agent_api -v`; confirm ordinary Note output remains unchanged.
+- [x] Commit: `feat: persist and authorize Discord meeting note sessions`.
 
 ## Task 2: Silent Node Receive Transport with Bounded Buffers
 
@@ -83,12 +83,12 @@
 - Maximum unacknowledged segments: 8. Maximum total buffered PCM: 16 MiB. If either limit prevents safe capture, emit interruption and stop, rather than silently dropping speech. A final `stopped` carries last sequence and partial flag.
 - Use `@discordjs/voice@0.19.2` and its DAVE implementation; pin a compatible decoder after package metadata/native Windows checks and lock all resolved dependencies. Child env excludes API key, bot token, database credentials and bridge secret; voice credentials arrive only through the adapter pipe.
 
-- [ ] Write tests that assert `selfMute === true`, `selfDeaf === false`, DAVE enabled, and that the transport never creates a player or sends media. Simulate interleaved speaker Opus packets and assert distinct speaker segments/monotonic sequence.
-- [ ] Add tests for malformed/oversize IPC, credit exhaustion, stop with pending data, disconnect, DAVE/decode failure, silence, and repeated stop. WAV header size and PCM byte counts must match.
-- [ ] Run `node --test backend/discord-voice/tests/*.test.mjs` and observe red tests.
-- [ ] Implement pure protocol/audio functions and worker with injected adapter/clock dependencies for tests. Only receive APIs are allowed. `ready` is emitted after voice connection Ready, not after spawn. Emit a safe error if speaking is observed for 10 seconds without decodable audio.
-- [ ] Install locked dependencies in this isolated package; run `npm ci` and dependency/import preflight on Windows. Re-run Node tests green. Do not connect to a real Discord server during unit tests.
-- [ ] Commit: `feat: receive Discord meeting audio silently`.
+- [x] Write tests that assert `selfMute === true`, `selfDeaf === false`, DAVE enabled, and that the transport never creates a player or sends media. Simulate interleaved speaker Opus packets and assert distinct speaker segments/monotonic sequence.
+- [x] Add tests for malformed/oversize IPC, credit exhaustion, stop with pending data, disconnect, DAVE/decode failure, silence, and repeated stop. WAV header size and PCM byte counts must match.
+- [x] Run `node --test backend/discord-voice/tests/*.test.mjs` and observe red tests.
+- [x] Implement pure protocol/audio functions and worker with injected adapter/clock dependencies for tests. Only receive APIs are allowed. `ready` is emitted after voice connection Ready, not after spawn. Emit a safe error if speaking is observed for 10 seconds without decodable audio.
+- [x] Install locked dependencies in this isolated package; run `npm ci` and dependency/import preflight on Windows. Re-run Node tests green. Do not connect to a real Discord server during unit tests.
+- [x] Commit: `feat: receive Discord meeting audio silently`.
 
 ## Task 3: Python Child Process and Existing Gateway Adapter
 
@@ -101,12 +101,12 @@
 - Only Op 4 outbound Gateway payloads for the exact active guild/channel (or channel_id=null for leave) are accepted; mute/deaf must retain silent-listening values. Pass raw VOICE_STATE_UPDATE/VOICE_SERVER_UPDATE only to the active adapter. Transport credentials must never reach logs.
 - Child supervision uses `asyncio.create_subprocess_exec`, an absolute package path and configured Node binary; no shell invocation. Reader has the same 3 MB line limit. Child exit/Gateway disconnect interrupts the session, destroys voice transport and fails pending requests. Shutdown is bounded and reaps the child.
 
-- [ ] Write tests using a fake child process: startup success/timeout, invalid Op/guild/channel rejection, stderr redaction, only matching events forwarded, oversized JSON, unexpected exit, disconnect and close twice.
-- [ ] Add a race test: stop requested while the first chunk callback is blocked; assert the leave/stop command is sent before the callback finishes, no new capture starts, and final acknowledgement waits separately for queued work.
-- [ ] Run `python -m unittest tests.test_discord_voice_client -v` red.
-- [ ] Implement adapter using Task 2 IPC. Separate Gateway handling from HTTP uploads so slow transcription cannot block voice keepalives or stop. Enable only the minimal raw event hook required by discord.py; do not log raw Gateway frames.
-- [ ] Run green and existing bot tests. Verify shutdown with feature off creates no child process.
-- [ ] Commit: `feat: bridge Mira voice capture through the existing Discord bot`.
+- [x] Write tests using a fake child process: startup success/timeout, invalid Op/guild/channel rejection, stderr redaction, only matching events forwarded, oversized JSON, unexpected exit, disconnect and close twice.
+- [x] Add a race test: stop requested while the first chunk callback is blocked; assert the leave/stop command is sent before the callback finishes, no new capture starts, and final acknowledgement waits separately for queued work.
+- [x] Run `python -m unittest tests.test_discord_voice_client -v` red.
+- [x] Implement adapter using Task 2 IPC. Separate Gateway handling from HTTP uploads so slow transcription cannot block voice keepalives or stop. Enable only the minimal raw event hook required by discord.py; do not log raw Gateway frames.
+- [x] Run green and existing bot tests. Verify shutdown with feature off creates no child process.
+- [x] Commit: `feat: bridge Mira voice capture through the existing Discord bot`.
 
 ## Task 4: Transcription, Durable Finalization and Recovery
 
@@ -122,12 +122,12 @@
 - Summary inputs batch at 24,000 characters without splitting a segment; reduce batches recursively if necessary. Preserve speaker/timing references in intermediate summaries. Never silently slice the transcript to context length.
 - Worker heartbeat every 10 seconds, stale capture after 60 seconds. Expired captures become INTERRUPTED and release the active-guild slot. Finalization can resume from persisted transcripts. Persist generation leases/progress and safe provider errors; do not persist raw audio.
 
-- [ ] Write provider tests for Albanian prompt/model, silence, malformed WAV, redacted errors, no tools, overlapping speakers, absent owner/deadline and long transcript reduction preserving last-batch decisions.
-- [ ] Write job/API tests for duplicate chunks, byte conflicts, out-of-order concurrent chunks, finish waiting for an outstanding receipt, expired lease/fenced result, crashed worker, interrupted partial output and empty transcript refusing Note creation.
-- [ ] Run `python -m unittest tests.test_discord_voice_openai tests.test_discord_voice_jobs tests.test_discord_voice_api -v` red.
-- [ ] Implement provider and job contracts with Tasks 1 and 3 interfaces. Reuse existing Albanian model config and normal text model config; do not alter agent-task model choices or switch providers silently. Use stable source identifiers in summaries, not guessed attribution.
-- [ ] Run tests green plus existing speech/agent job regressions. Confirm request cancellation does not leave raw audio on disk and logs contain neither keys nor meeting text.
-- [ ] Commit: `feat: transcribe and summarize Mira staff meetings durably`.
+- [x] Write provider tests for Albanian prompt/model, silence, malformed WAV, redacted errors, no tools, overlapping speakers, absent owner/deadline and long transcript reduction preserving last-batch decisions.
+- [x] Write job/API tests for duplicate chunks, byte conflicts, out-of-order concurrent chunks, finish waiting for an outstanding receipt, expired lease/fenced result, crashed worker, interrupted partial output and empty transcript refusing Note creation.
+- [x] Run `python -m unittest tests.test_discord_voice_openai tests.test_discord_voice_jobs tests.test_discord_voice_api -v` red.
+- [x] Implement provider and job contracts with Tasks 1 and 3 interfaces. Reuse existing Albanian model config and normal text model config; do not alter agent-task model choices or switch providers silently. Use stable source identifiers in summaries, not guessed attribution.
+- [x] Run tests green plus existing speech/agent job regressions. Confirm request cancellation does not leave raw audio on disk and logs contain neither keys nor meeting text.
+- [x] Commit: `feat: transcribe and summarize Mira staff meetings durably`.
 
 ## Task 5: Commands, Private Review and PX Notes Save Controls
 
@@ -142,13 +142,13 @@
 - Result delivery uses claim/ack leases and persisted message IDs, stable Discord nonces with replay protection, following the existing reminder/result delivery pattern. Recheck private-channel overwrites and organizer link before every send or file upload.
 - Delivery routes: `POST /delivery/claim` returns eligible session, organizer, private-channel ID and lease token; `POST /{id}/delivery/ack` takes that token and sent message IDs. Detail/view access remains user-authorized; worker delivery still checks the active organizer link and privacy before reading/sending the draft.
 
-- [ ] Write tests for missing voice channel, Stage channel, permission denial, failed public notice preventing capture, handshake failure, notice-before-capture ordering and no spoken output.
-- [ ] Test organizer/manager stop, outsider rejection, stale persistent buttons after restart, long private result, newly public personal channel, account unlink/deactivation, duplicate stop/save clicks and final note link.
-- [ ] Test `/takimi mbaro` while transcription is blocked: bot leaves immediately, shows processing, and later delivers the result without a live interaction token. Add capture-disabled command registration regression.
-- [ ] Run `python -m unittest tests.test_discord_voice_bot tests.test_discord_bot -v` red.
-- [ ] Implement commands/coordinator/UI using previous task interfaces. Reserve STARTING, verify notice and audio preflight, then enter LISTENING only on child readiness. Failed notice/connect cleans the reservation. Stop validates the actor before sending leave; queues drain/finalize after leave. Do not register a second Gateway client.
-- [ ] Run tests green plus `python -m unittest discover -s tests -p 'test_discord*.py'`; inspect every failure and separate pre-existing environment blockers from regressions.
-- [ ] Commit: `feat: add silent meeting commands and reviewed PX Notes delivery`.
+- [x] Write tests for missing voice channel, Stage channel, permission denial, failed public notice preventing capture, handshake failure, notice-before-capture ordering and no spoken output.
+- [x] Test organizer/manager stop, outsider rejection, stale persistent buttons after restart, long private result, newly public personal channel, account unlink/deactivation, duplicate stop/save clicks and final note link.
+- [x] Test `/takimi mbaro` while transcription is blocked: bot leaves immediately, shows processing, and later delivers the result without a live interaction token. Add capture-disabled command registration regression.
+- [x] Run `python -m unittest tests.test_discord_voice_bot tests.test_discord_bot -v` red.
+- [x] Implement commands/coordinator/UI using previous task interfaces. Reserve STARTING, verify notice and audio preflight, then enter LISTENING only on child readiness. Failed notice/connect cleans the reservation. Stop validates the actor before sending leave; queues drain/finalize after leave. Do not register a second Gateway client.
+- [x] Run tests green plus `python -m unittest discover -s tests -p 'test_discord*.py'`; inspect every failure and separate pre-existing environment blockers from regressions.
+- [x] Commit: `feat: add silent meeting commands and reviewed PX Notes delivery`.
 
 ## Task 6: Deployment, Full Verification and Live Acceptance
 
@@ -156,13 +156,13 @@
 
 **Interfaces:** `DISCORD_MEETING_NOTES_ENABLED` defaults false; `DISCORD_VOICE_NODE_BINARY` defaults `node`. Existing bot token and API key remain server-only. Enabled deployment runs isolated `npm ci`, Node/version/DAVE/decoder preflight and both Python/Node regression tests before starting the bot. Disabled deployment does not require voice dependencies. No dependency install or test logs print environment values.
 
-- [ ] Write deploy tests asserting feature-off behavior, enabled Node/import checks, locked install path, missing dependency/unsupported runtime failures and secret-free configuration. Run them red.
-- [ ] Implement configuration and preflight. The bot reports capture availability separately from ordinary bot readiness. Mark expired prior captures interrupted; normal task commands remain available while voice capture is off.
-- [ ] Run `python -m unittest discover -s tests -p 'test_discord*.py'`, `python -m unittest tests.test_speech_transcribe tests.test_ga_note_creation`, `node --test backend/discord-voice/tests/*.test.mjs`, full backend suite, and `git diff --check`. Record commands, actual results/skips/blockers; mocked PostgreSQL tests do not count as locking verification.
-- [ ] Review the completed change, especially IPC bounds, fencing after restart, permissions, partial summaries, Note atomicity and absence of outbound audio. Fix review findings and rerun relevant regressions.
+- [x] Write deploy tests asserting feature-off behavior, enabled Node/import checks, locked install path, missing dependency/unsupported runtime failures and secret-free configuration. Run them red.
+- [x] Implement configuration and preflight. The bot reports capture availability separately from ordinary bot readiness. Mark expired prior captures interrupted; normal task commands remain available while voice capture is off.
+- [x] Run `python -m unittest discover -s tests -p 'test_discord*.py'`, `python -m unittest tests.test_speech_transcribe tests.test_ga_note_creation`, `node --test backend/discord-voice/tests/*.test.mjs`, full backend suite, and `git diff --check`. Record commands, actual results/skips/blockers; mocked PostgreSQL tests do not count as locking verification.
+- [x] Review the completed change, especially IPC bounds, fencing after restart, permissions, partial summaries, Note atomicity and absence of outbound audio. Fix review findings and rerun relevant regressions.
 - [ ] Perform live acceptance only in a deliberately started test meeting with staff: two speakers in Albanian, overlap, join/leave/rejoin, stop, review, save twice. Verify audio reception survives DAVE transitions, bot never speaks, result attribution/decisions are accurate, only one Note exists and no private content is posted to shared chat.
-- [ ] Record live result or explicitly mark it pending. Do not join/record a real meeting automatically to complete this checkbox. Keep feature disabled until deployment preflight and live acceptance are deliberately exercised.
-- [ ] Update user docs with permissions (`View Channel`, `Connect`, `Send Messages` for the meeting notice), private command flow, recovery and known partial-result behavior. Document Node package requirements and how to verify readiness without recording.
+- [x] Record live result or explicitly mark it pending. Do not join/record a real meeting automatically to complete this checkbox. Keep feature disabled until deployment preflight and live acceptance are deliberately exercised.
+- [x] Update user docs with permissions (`View Channel`, `Connect`, `Send Messages` for the meeting notice), private command flow, recovery and known partial-result behavior. Document Node package requirements and how to verify readiness without recording.
 - [ ] Commit final verified code/docs; integrate remote changes safely and push when the authorized implementation is complete. Report commit, usage, verification and any remaining live acceptance requirement accurately.
 
 ## Plan Self-Review
@@ -173,4 +173,4 @@
 - Commands and independent pieces can be developed/tested without recording a production meeting.
 - The recommended execution method is native: implement these six dependent tasks in the current session and request one independent review of the whole change before completion.
 
-Status: plan prepared and self-reviewed; awaiting user review and execution-method selection. No product code or dependencies have been changed for this feature.
+Status: design and native execution approved; implementation and local verification complete. Live Discord acceptance remains pending as recorded in the validation report.

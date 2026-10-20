@@ -1,6 +1,6 @@
 # Mira: shënime të takimeve në Discord
 
-Status: dizajni u miratua nga përdoruesi më 2026-10-20; në përgatitje plani i implementimit.
+Status: dizajni dhe plani u miratuan; kodi dhe verifikimi lokal përfunduan. Mbetet prova reale e takimit në Discord.
 
 ## Qëllimi i konfirmuar
 
