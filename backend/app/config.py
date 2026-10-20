@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     MEETING_RECORDINGS_FFPROBE: str = "ffprobe"
     RECORDING_ANALYSIS_ENABLED: bool = True
     RECORDING_ANALYSIS_MODEL: str = "gpt-6-luna"
+    RECORDING_TRANSCRIBE_MODEL: str = "gpt-transcribe"
+    # Sends the chosen language code to the transcription API; disable if a model rejects it.
+    RECORDING_TRANSCRIBE_LANGUAGE_HINT: bool = True
+    # Product and client terms added to transcription prompts, next to staff and department names.
+    RECORDING_TRANSCRIPTION_VOCABULARY: str = "PrimeFlow, PrimEx, PX, Mendex, MX, GA, PX Notes, Mira"
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"

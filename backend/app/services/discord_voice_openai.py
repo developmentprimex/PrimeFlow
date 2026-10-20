@@ -64,10 +64,10 @@ def albanian_date(moment):
     return text[0].upper()+text[1:]
 
 
-async def request(path, **kwargs):
+async def request(path, *, timeout=60, **kwargs):
     if not settings.OPENAI_API_KEY: raise ValueError('openai_not_configured')
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             result=await client.post('https://api.openai.com/v1/'+path,
                 headers={'Authorization':'Bearer '+settings.OPENAI_API_KEY}, **kwargs)
             result.raise_for_status()

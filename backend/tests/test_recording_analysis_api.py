@@ -94,24 +94,35 @@ class AnalysisApiTests(unittest.TestCase):
     def test_durable_failure_retry_summary_and_atomic_task_confirmation(self):
         sid = self.saved()
         self.assertEqual(self.start(sid).status_code, 202)
-        notes = {'summary': 'Raporti', 'decisions': [], 'actions': [{'title': 'Dërgo raportin', 'description': 'Dërgo raportin e takimit.',
-            'evidence': 'Do ta dërgoj raportin @other nesër.', 'assignee_text': None, 'deadline_text': None}]}
+        from datetime import date
+        notes = {'summary': 'Përmbledhja e takimit', 'decisions': ['Raporti dërgohet nesër'], 'actions': [{'title': 'Dërgo raportin',
+            'description': 'Dërgo raportin e takimit.', 'evidence': 'Do ta dërgoj raportin @other nesër.', 'assignee_text': 'Owner',
+            'deadline_text': 'nesër', 'due_date': date(2026, 10, 21)}]}
+        async def expire_backoff():
+            from app.models.recording_analysis import RecordingAnalysis
+            async with self.session() as db:
+                job = await db.get(RecordingAnalysis, uuid.UUID(sid))
+                job.lease_until = None
+                await db.commit()
         with patch('app.services.recording_analysis_provider.transcribe', new=AsyncMock(return_value='Do ta dërgoj raportin @other nesër.')) as transcribe:
-            with patch('app.services.recording_analysis_provider.extract_notes', new=AsyncMock(side_effect=ValueError('provider_failed'))):
+            self.tick()
+            with patch('app.services.recording_analysis_provider.analyze_meeting', new=AsyncMock(side_effect=ValueError('meeting_provider_failed'))):
                 self.tick()
             data = self.get(sid).json()
-            self.assertEqual(data['analysis']['status'], 'FAILED')
+            self.assertEqual(data['analysis']['status'], 'SUMMARIZING', 'Transient failures retry automatically')
+            self.assertIn('automatikisht', data['analysis']['error_message'])
             self.assertEqual(data['segments'][0]['text'], 'Do ta dërgoj raportin @other nesër.')
-            self.assertEqual(self.start(sid).status_code, 202)
-            with patch('app.services.recording_analysis_provider.extract_notes', new=AsyncMock(return_value=notes)):
+            self.assertEqual(self.tick(), 0, 'Backoff delays the automatic retry')
+            asyncio.run(expire_backoff())
+            with patch('app.services.recording_analysis_provider.analyze_meeting', new=AsyncMock(return_value=notes)):
                 self.tick()
             self.assertEqual(transcribe.await_count, 1, 'Persisted transcript must survive worker restart/retry')
-        with patch('app.services.discord_voice_openai.summarize_meeting', new=AsyncMock(return_value='Përmbledhja e takimit')):
-            self.tick()
         data = self.get(sid).json()
         self.assertEqual(data['analysis']['status'], 'READY', data)
         self.assertEqual(len(data['actions']), 1)
+        self.assertEqual(data['analysis']['decisions'], ['Raporti dërgohet nesër'])
         action = data['actions'][0]
+        self.assertEqual(action['suggested_due_date'], '2026-10-21')
         self.assertIsNone(action['created_task_id'])
         self.assertEqual(self.start(sid).status_code, 202)
         self.assertEqual(self.tick(), 0)
@@ -141,7 +152,7 @@ class AnalysisApiTests(unittest.TestCase):
         with TestClient(self.app) as restarted:
             reloaded = restarted.get(f'/api/meeting-recordings/{sid}/analysis', headers=self.auth()).json()
         self.assertEqual(reloaded['actions'][0]['created_task_id'], first.json()['task_id'])
-        self.assertEqual(reloaded['analysis']['summary'], 'Përmbledhja e takimit')
+        self.assertTrue(reloaded['analysis']['summary'].endswith('Përmbledhja e takimit'))
 
     def test_worker_claim_fencing_and_expired_lease_recovery(self):
         from datetime import datetime, timedelta, timezone

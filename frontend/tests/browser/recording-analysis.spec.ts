@@ -6,7 +6,7 @@ const department = "33333333-3333-4333-8333-333333333333"
 const actionId = "44444444-4444-4444-8444-444444444444"
 const taskId = "55555555-5555-4555-8555-555555555555"
 const user = { id: owner, full_name: "Test owner", email: "owner@example.com", role: "STAFF", is_active: true, department_id: department }
-const action = { id: actionId, segment_index: 0, title: "Dërgo raportin", description: "Përgatit raportin.", evidence: "Do ta dërgoj raportin.", assignee_text: null, deadline_text: null, created_task_id: null, confirmed_at: null }
+const action = { id: actionId, segment_index: 0, title: "Dërgo raportin", description: "Përgatit raportin.", evidence: "Do ta dërgoj raportin.", assignee_text: null, deadline_text: null, suggested_assignee_id: null, suggested_due_date: null, created_task_id: null, confirmed_at: null }
 
 async function shell(page: Page, configured = true) {
   let state: Record<string, unknown> = { configured, can_manage: true, analysis: null, actions: [], segments: [] }
@@ -44,7 +44,7 @@ async function shell(page: Page, configured = true) {
   await page.route(`http://127.0.0.1:3101/api/meeting-recordings/${id}/stream`, route => route.fulfill({ status: 204 }))
   await page.goto(`/meeting-recordings/${id}`)
   await expect(page.getByText("Transkripti, përmbledhja dhe detyrat", { exact: true })).toBeVisible()
-  return { writes, ready: () => { state = { ...state, analysis: { status: "READY", language: "sq", total_segments: 1, segments_done: 1, summary: "U diskutua raporti i takimit.", error_message: null }, actions: [action], segments: [{ index: 0, start_seconds: 0, duration_seconds: 28, text: action.evidence, decisions: [] }] } } }
+  return { writes, ready: () => { state = { ...state, analysis: { status: "READY", language: "sq", total_segments: 1, segments_done: 1, summary: "U diskutua raporti i takimit.", error_message: null, decisions: [] }, actions: [action], segments: [{ index: 0, start_seconds: 0, duration_seconds: 28, text: action.evidence }] } } }
 }
 
 test("configuration and consent guard processing; proposals require review and persist after reload", async ({ page }) => {

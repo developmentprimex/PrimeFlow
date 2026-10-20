@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 
-type Action = { id: string; segment_index: number; title: string; description: string; evidence: string; assignee_text: string | null; deadline_text: string | null; created_task_id: string | null; confirmed_at: string | null }
-type Segment = { index: number; start_seconds: number; duration_seconds: number; text: string; decisions: string[] }
-type Analysis = { configured: boolean; can_manage: boolean; analysis: null | { status: string; language: string; total_segments: number; segments_done: number; summary: string | null; error_message: string | null }; segments: Segment[]; actions: Action[] }
+type Action = { id: string; segment_index: number; title: string; description: string; evidence: string; assignee_text: string | null; deadline_text: string | null; suggested_assignee_id: string | null; suggested_due_date: string | null; created_task_id: string | null; confirmed_at: string | null }
+type Segment = { index: number; start_seconds: number; duration_seconds: number; text: string }
+type Analysis = { configured: boolean; can_manage: boolean; analysis: null | { status: string; language: string; total_segments: number; segments_done: number; summary: string | null; error_message: string | null; decisions: string[] }; segments: Segment[]; actions: Action[] }
 type Person = { id: string; full_name: string; department_id: string | null }
 type Department = { id: string; name: string }
 const STATUS: Record<string, string> = { QUEUED: "Në pritje të përpunimit", TRANSCRIBING: "Duke transkriptuar", SUMMARIZING: "Duke përgatitur përmbledhjen dhe propozimet", READY: "Përpunimi përfundoi", FAILED: "Përpunimi dështoi" }
@@ -23,9 +23,11 @@ function ActionReview({ action, recordingId, people, departments, canManage, onC
   const { apiFetch, user } = useAuth()
   const [title, setTitle] = React.useState(action.title)
   const [description, setDescription] = React.useState(action.description)
-  const [department, setDepartment] = React.useState(user?.department_id || "")
-  const [assignee, setAssignee] = React.useState("")
-  const [due, setDue] = React.useState("")
+  const suggested = people.find(p => p.id === action.suggested_assignee_id)
+  const [department, setDepartment] = React.useState(suggested?.department_id || user?.department_id || "")
+  const [assignee, setAssignee] = React.useState(suggested?.id || "")
+  // AI deadlines are dates only; default the time to the end of the working day.
+  const [due, setDue] = React.useState(action.suggested_due_date ? `${action.suggested_due_date}T17:00` : "")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState("")
   const [createdId, setCreatedId] = React.useState<string | null>(action.created_task_id)
@@ -43,9 +45,9 @@ function ActionReview({ action, recordingId, people, departments, canManage, onC
     finally { setBusy(false) }
   }
   return <div className="space-y-3 rounded-md border p-4">
-    <p className="text-sm text-muted-foreground">Segmenti {action.segment_index + 1} · Propozim AI — kontrolloje para krijimit</p>
+    <p className="text-sm text-muted-foreground">Rreth {recordingTime(action.segment_index * 300)} · Propozim AI — kontrolloje para krijimit</p>
     <blockquote className="border-l-2 pl-3 text-sm">{action.evidence}</blockquote>
-    {(action.assignee_text || action.deadline_text) && <p className="text-sm">Në bisedë: {action.assignee_text && `përgjegjësi: ${action.assignee_text}`} {action.deadline_text && `· afati: ${action.deadline_text}`}. Zgjidhi dhe konfirmoji më poshtë.</p>}
+    {(action.assignee_text || action.deadline_text) && <p className="text-sm">Në bisedë: {action.assignee_text && `përgjegjësi: ${action.assignee_text}`} {action.deadline_text && `· afati: ${action.deadline_text}`}. {action.suggested_assignee_id || action.suggested_due_date ? "Janë plotësuar më poshtë; kontrolloji." : "Zgjidhi dhe konfirmoji më poshtë."}</p>}
     {createdId ? <p className="text-sm text-green-700"><Link className="underline" href={`/tasks/${createdId}`}>Hap detyrën e krijuar</Link></p>
       : action.confirmed_at ? <p className="text-sm">Detyra e konfirmuar është fshirë nga Tasks.</p>
       : canManage ? <fieldset disabled={busy} className="space-y-3">
@@ -118,7 +120,8 @@ export function RecordingAnalysisPanel({ recordingId }: { recordingId: string })
         <Button disabled={!data.configured || !consent || busy} onClick={() => void start()}>{busy ? "Duke nisur…" : data.analysis ? "Riprovo përpunimin" : "Transkripto dhe përmblidh"}</Button>
       </div>}
       {data.analysis?.summary && <section className="space-y-2"><h3 className="font-semibold">Përmbledhja</h3><p className="whitespace-pre-wrap text-sm">{data.analysis.summary}</p></section>}
-      {data.actions.length > 0 && <section className="space-y-3"><h3 className="font-semibold">Detyrat e propozuara ({data.actions.length})</h3>{data.actions.map(action => <ActionReview key={action.id} action={action} recordingId={recordingId} people={people} departments={departments} canManage={data.can_manage} onCreated={load} />)}</section>}
+      {(data.analysis?.decisions?.length ?? 0) > 0 && <section className="space-y-2"><h3 className="font-semibold">Vendimet</h3><ul className="list-disc space-y-1 pl-5 text-sm">{data.analysis!.decisions.map((d, i) => <li key={i}>{d}</li>)}</ul></section>}
+      {data.actions.length > 0 && <section className="space-y-3"><h3 className="font-semibold">Detyrat e propozuara ({data.actions.length})</h3>{data.actions.map(action => <ActionReview key={`${action.id}-${people.length > 0}`} action={action} recordingId={recordingId} people={people} departments={departments} canManage={data.can_manage} onCreated={load} />)}</section>}
       {data.analysis?.status === "READY" && !data.actions.length && <p className="text-sm">Nuk u gjetën veprime të konfirmuara për t’u kthyer në detyra.</p>}
       {data.segments.length > 0 && <details className="rounded-md border p-4"><summary className="cursor-pointer font-semibold">Transkripti ({data.segments.length} pjesë)</summary><div className="mt-3 max-h-[32rem] space-y-4 overflow-auto">{data.segments.map(s => <div key={s.index}><p className="text-xs text-muted-foreground">{recordingTime(s.start_seconds)} – {recordingTime(s.start_seconds + s.duration_seconds)}</p><p className="whitespace-pre-wrap text-sm">{s.text || "Nuk u dallua të folur në këtë pjesë."}</p></div>)}</div></details>}
     </>}
