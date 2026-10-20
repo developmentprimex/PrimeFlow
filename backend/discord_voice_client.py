@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 MAX_LINE = 3_000_000
@@ -15,7 +16,10 @@ INTERRUPTION_REASONS = frozenset({'voice_error','voice_disconnected','voice_move
 # Audio the worker lost while it kept listening; the notes are marked partial.
 GAP_REASONS = frozenset({'decode_invalid_packet','decode_bad_argument','decode_frame_too_large','decode_error',
     'decoder_error','receive_error','no_decoded_audio','voice_error','voice_reconnecting'})
-# Consecutive segments that may fail transcription before capture is declared broken.
+# Capture is declared broken only when transcription has failed for this long with
+# no success in between (a rate limit burst can fail many segments in seconds),
+# and at least this many segments failed.
+UPLOAD_FAILURE_SECONDS = 60
 UPLOAD_FAILURE_LIMIT = 3
 # Matches MAX_PENDING in discord-voice/audio.mjs.
 MAX_PENDING_UPLOADS = 48
@@ -32,6 +36,8 @@ class VoiceCaptureClient:
         self.failed = False
         self.last_sequence = 0
         self.upload_failures = 0
+        self.failing_since = None
+        self.clock = time.monotonic
         self.session_id = self.instance_id = self.guild_id = self.channel_id = None
         self.ready = self.stopped = None
 
@@ -123,14 +129,16 @@ class VoiceCaptureClient:
     async def _upload(self, message):
         try:
             async with self.upload_limit: await self.on_segment(message)
-            self.upload_failures=0
+            self.upload_failures=0;self.failing_since=None
         except Exception as exc:
             response=getattr(exc,'response',None)
             log.warning('MIRA_DIAGNOSTIC session=%s stage=upload error_type=%s http_status=%s',
                 self.session_id,type(exc).__name__,getattr(response,'status_code',None))
-            # One lost segment leaves a gap in the notes; only a run of failures stops listening.
+            # A lost segment leaves a gap in the notes; only a long run of failures stops listening.
             self.upload_failures+=1
-            if self.upload_failures>=UPLOAD_FAILURE_LIMIT:
+            if self.failing_since is None:self.failing_since=self.clock()
+            if (self.upload_failures>=UPLOAD_FAILURE_LIMIT
+                    and self.clock()-self.failing_since>=UPLOAD_FAILURE_SECONDS):
                 await self._fail('transcription_failed');return
         try:await self.send({'type':'credit','sequence':message['sequence']})
         except (ValueError,OSError,ConnectionError):

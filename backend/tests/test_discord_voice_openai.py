@@ -23,6 +23,38 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreaterEqual(w.getnframes(),4800)
             self.assertEqual(w.readframes(960),pcm)
 
+    def openai(self,*responses):
+        """Route provider HTTP calls to canned responses; returns the list of seen requests."""
+        import httpx
+        seen=[];queue=list(responses);real=httpx.AsyncClient
+        def handler(request):
+            seen.append(request);status,headers,body=queue.pop(0)
+            return httpx.Response(status,headers=headers,json=body)
+        transport=httpx.MockTransport(handler)
+        return seen,patch.object(provider.httpx,'AsyncClient',lambda **kw:real(transport=transport,**kw))
+
+    async def test_rate_limited_transcription_waits_and_retries_the_same_segment(self):
+        seen,client=self.openai((429,{'retry-after':'3'},{'error':{}}),(503,{},{'error':{}}),(200,{},{'text':'Po.'}))
+        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
+            self.assertEqual(await provider.transcribe_segment(wav()),'Po.')
+        self.assertEqual(len(seen),3)
+        self.assertEqual([c.args[0] for c in sleep.await_args_list],[3.0,4])
+
+    async def test_rejected_transcription_is_not_retried_and_keeps_the_http_status(self):
+        seen,client=self.openai((400,{},{'error':{}}))
+        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()):
+            with self.assertRaises(provider.ProviderError) as caught:await provider.transcribe_segment(wav())
+        self.assertEqual(len(seen),1);self.assertEqual(caught.exception.status,400)
+        # Other callers match on this message, so it must not change.
+        self.assertEqual(str(caught.exception),'meeting_provider_failed');self.assertIsInstance(caught.exception,ValueError)
+
+    async def test_persistent_rate_limit_gives_up_within_the_bot_upload_timeout(self):
+        seen,client=self.openai(*[(429,{'retry-after':'120'},{'error':{}})]*5)
+        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
+            with self.assertRaises(provider.ProviderError) as caught:await provider.transcribe_segment(wav())
+        self.assertEqual(caught.exception.status,429);self.assertEqual(len(seen),3)
+        self.assertLessEqual(sum(c.args[0] for c in sleep.await_args_list)+3*provider.TRANSCRIBE_TIMEOUT,90)
+
     async def test_silence_is_empty_and_invalid_wav_never_calls_provider(self):
         with patch.object(provider,'request',AsyncMock()) as call:
             self.assertEqual(await provider.transcribe_segment(wav(bytes(1920))), '')

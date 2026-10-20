@@ -30,10 +30,28 @@ class VoiceClientTests(unittest.IsolatedAsyncioTestCase):
         c.on_interruption.assert_not_awaited();self.assertFalse(c.failed)
         self.assertEqual([x.args[0] for x in c.send.await_args_list],[{'type':'credit','sequence':0},{'type':'credit','sequence':1}])
 
-    async def test_repeated_segment_failures_still_interrupt_instead_of_pretending_to_listen(self):
+    async def test_a_burst_of_failed_segments_keeps_listening(self):
+        # e.g. an OpenAI rate limit for ~half a minute while many people talk
         c=self.client();c.send=AsyncMock();c.on_segment.side_effect=ValueError('transcription_failed')
+        clock=[100.0];c.clock=lambda:clock[0]
         with self.assertLogs('primeflow.discord.voice',level='WARNING'):
-            for sequence in range(3):await c._upload({'sequence':sequence})
+            for sequence in range(10):clock[0]+=5;await c._upload({'sequence':sequence})
+            await asyncio.sleep(0)
+        c.on_interruption.assert_not_awaited();self.assertFalse(c.failed)
+
+    async def test_a_success_resets_the_failure_window(self):
+        c=self.client();c.send=AsyncMock();clock=[100.0];c.clock=lambda:clock[0]
+        c.on_segment.side_effect=[ValueError('x'),ValueError('x'),None,ValueError('x'),ValueError('x'),ValueError('x')]
+        with self.assertLogs('primeflow.discord.voice',level='WARNING'):
+            for sequence,step in enumerate((0,30,20,20,30,15)):clock[0]+=step;await c._upload({'sequence':sequence})
+            await asyncio.sleep(0)
+        c.on_interruption.assert_not_awaited()
+
+    async def test_transcription_failing_for_a_minute_still_interrupts_instead_of_pretending_to_listen(self):
+        c=self.client();c.send=AsyncMock();c.on_segment.side_effect=ValueError('transcription_failed')
+        clock=[100.0];c.clock=lambda:clock[0]
+        with self.assertLogs('primeflow.discord.voice',level='WARNING'):
+            for sequence in range(4):await c._upload({'sequence':sequence});clock[0]+=21
             await asyncio.sleep(0)
         c.on_interruption.assert_awaited_once_with('transcription_failed')
 

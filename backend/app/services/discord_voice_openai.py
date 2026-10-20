@@ -1,4 +1,5 @@
 """Text-only meeting transcription/notes. Audio never goes into durable storage."""
+import asyncio
 import hashlib
 import io
 import json
@@ -64,6 +65,19 @@ def albanian_date(moment):
     return text[0].upper()+text[1:]
 
 
+class ProviderError(ValueError):
+    """meeting_provider_failed, carrying OpenAI's HTTP status (None when no answer arrived).
+
+    Callers match on the message, so it stays 'meeting_provider_failed'."""
+    def __init__(self, status=None, retry_after=None):
+        super().__init__('meeting_provider_failed')
+        self.status, self.retry_after = status, retry_after
+
+    @property
+    def transient(self):
+        return self.status is None or self.status in (408, 409, 429) or self.status >= 500
+
+
 async def request(path, *, timeout=60, **kwargs):
     if not settings.OPENAI_API_KEY: raise ValueError('openai_not_configured')
     try:
@@ -72,8 +86,30 @@ async def request(path, *, timeout=60, **kwargs):
                 headers={'Authorization':'Bearer '+settings.OPENAI_API_KEY}, **kwargs)
             result.raise_for_status()
             return result.json()
+    except httpx.HTTPStatusError as exc:
+        try:retry_after=float(exc.response.headers.get('retry-after',''))
+        except ValueError:retry_after=None
+        raise ProviderError(exc.response.status_code, retry_after) from None
     except (httpx.HTTPError, ValueError):
-        raise ValueError('meeting_provider_failed') from None
+        raise ProviderError() from None
+
+
+# The bot waits 90 s for a segment receipt, so all attempts and waits must fit
+# inside it: 3 x 20 s plus at most 2 x 10 s of waiting.
+TRANSCRIBE_TIMEOUT = 20
+TRANSCRIBE_ATTEMPTS = 3
+TRANSCRIBE_MAX_WAIT = 10
+
+
+async def transcribe_with_retries(**kwargs):
+    for attempt in range(1, TRANSCRIBE_ATTEMPTS+1):
+        try:
+            return await request('audio/transcriptions', timeout=TRANSCRIBE_TIMEOUT, **kwargs)
+        except ProviderError as exc:
+            if not exc.transient or attempt == TRANSCRIBE_ATTEMPTS:
+                raise
+            # Honour OpenAI's Retry-After (rate limits), otherwise back off 2 s, 4 s.
+            await asyncio.sleep(min(exc.retry_after or 2*attempt, TRANSCRIBE_MAX_WAIT))
 
 
 def validate_wav(data):
@@ -102,7 +138,7 @@ async def transcribe_segment(wav):
             audio.setnchannels(2);audio.setsampwidth(2);audio.setframerate(48000)
             audio.writeframes(pcm+bytes(19200-len(pcm)))
         wav=padded.getvalue()
-    body=await request('audio/transcriptions',data={'model':settings.DISCORD_MEETING_TRANSCRIBE_MODEL,
+    body=await transcribe_with_retries(data={'model':settings.DISCORD_MEETING_TRANSCRIBE_MODEL,
         'prompt':ALBANIAN_TRANSCRIPTION_PROMPT},files={'file':('meeting.wav',wav,'audio/wav')})
     result=body.get('text')
     if not isinstance(result,str) or len(result)>16000:raise ValueError('invalid_transcript')

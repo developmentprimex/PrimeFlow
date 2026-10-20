@@ -34,6 +34,24 @@ class VoiceJobTests(PostgresMeetingTests):
             self.assertEqual([s['sequence'] for s in summary.call_args.args[1]],[0,1])
             async with self.sessions() as db:self.assertEqual((await db.get(Meeting,sid)).status,'READY')
 
+    async def test_failed_segment_records_the_openai_status_for_diagnostics(self):
+        from app.models.discord_voice_meeting import DiscordVoiceSegment as Segment
+        from app.services.discord_voice_openai import ProviderError
+        sid,instance=uuid.uuid4(),uuid.uuid4();token='x'*40
+        async with self.sessions() as db:
+            db.add(Meeting(id=sid,user_id=self.uid,link_id=self.lid,department_id=self.did,guild_id='123',
+                voice_channel_id='55',private_channel_id='44',request_id='997',instance_id=instance,
+                capture_token_hash=service.token_hash(token),title='Staff',status='LISTENING'))
+            await db.commit()
+        meta=SegmentMeta(capture_token=token,instance_id=instance,sequence=0,speaker_id='12',speaker_name='Ana',start_ms=0,end_ms=1000)
+        with patch('app.services.discord_voice_openai.transcribe_segment',AsyncMock(side_effect=ProviderError(429))):
+            async with self.sessions() as db:receipt=await service.receive_segment(db,sid,meta,wav())
+        self.assertEqual(receipt['status'],'ERROR')
+        async with self.sessions() as db:
+            from sqlalchemy import select
+            segment=(await db.execute(select(Segment).where(Segment.session_id==sid))).scalar_one()
+            self.assertEqual(segment.error,'transcription_failed:429')
+
     async def test_scheduled_1h_meeting_is_saved_to_px_notes_without_a_discord_delivery(self):
         from app.models.discord_voice_meeting import DiscordVoiceSegment as Segment
         from app.models.ga_note import GaNote
