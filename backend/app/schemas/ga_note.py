@@ -40,6 +40,7 @@ class GaNoteOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     attachments: list[GaNoteAttachmentOut] = []
+    from_mira: bool = False
 
 
 class GaNotePublicOut(BaseModel):

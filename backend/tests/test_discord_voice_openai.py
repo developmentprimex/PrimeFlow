@@ -52,7 +52,10 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         system=call.call_args.kwargs['json']['input'][0]['content']
         for heading in ('Përmbledhja:','Kapitujt & Temat:','Detyrat e Takimit:','Pyetjet Kryesore:','Shënime:'):
             self.assertIn(heading,system)
-        self.assertIn('Nuk u identifikuan detyra.',system);self.assertIn('E pazgjidhur',system)
+        self.assertIn('E pazgjidhur',system)
+        # Short meetings get short notes: empty sections are dropped, nothing is repeated.
+        self.assertIn('hiq të tjerat fare',system);self.assertIn('mos e përsërit',system)
+        self.assertNotIn('Nuk u identifikuan detyra.',system)
         self.assertIn('[segmenti 0, Emri i folësit, 00:02–00:07]',system)
         self.assertTrue(result.startswith('E premte, 26 qershor 2026\nStaff\n\nPërmbledhja:'))
 

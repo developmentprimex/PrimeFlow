@@ -4710,7 +4710,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                 : aggregatedStatus === "WAITING_CONFIRMATION"
                                   ? "bg-amber-50"
                                   : "bg-slate-100"
-                        : "bg-sky-200"
+                        : note.from_mira
+                          ? "bg-violet-100"
+                          : "bg-sky-200"
 
                     // Only show department if:
                     // 1. Note has a project (always show projects)
@@ -4730,6 +4732,14 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                           <div className="flex flex-col gap-1">
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0 flex flex-wrap items-center gap-1">
+                                {note.from_mira ? (
+                                  <img
+                                    src="/mira-avatar.png"
+                                    alt="Mira"
+                                    title="Shënim nga Mira (takim në Discord)"
+                                    className="h-7 w-7 shrink-0 rounded-full border-2 border-violet-300"
+                                  />
+                                ) : null}
                                 {showMobileDeptBadge || assignees.length > 0 ? (
                                   <span className="sm:hidden inline-flex items-center gap-1 mr-1">
                                     {showMobileDeptBadge ? (

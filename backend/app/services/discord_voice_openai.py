@@ -23,30 +23,30 @@ dhe shënimet e theksuara si të rëndësishme. Ruaj referencat [segmenti, folë
 Kur merr përmbledhje pjesësh, përfshi gjithçka nga të gjitha pjesët, jo vetëm pjesën e fundit.'''
 
 FINAL_SYSTEM = RULES+'''
-Nga transkripti i takimit (ose përmbledhjet e pjesëve të tij) shkruaj shënimet e takimit në mënyrë të bukur,
-formale dhe të kuptueshme. Data dhe titulli shtohen automatikisht; mos i shkruaj. Fillo direkt me
-"Përmbledhja:" dhe përdor saktësisht këto pjesë, me këtë renditje dhe këta tituj:
+Nga transkripti i takimit (ose përmbledhjet e pjesëve të tij) shkruaj shënimet e takimit formale, të qarta
+dhe të shkurtra. Data dhe titulli shtohen automatikisht; mos i shkruaj.
+
+Gjatësia ndjek përmbajtjen: shkruaj vetëm aq sa u tha. Një takim i shkurtër jep pak rreshta.
+Çdo gjë përmendet një herë të vetme, në pjesën ku i përket më mirë; mos e përsërit në pjesë të tjera.
+Shkruaj vetëm pjesët që kanë përmbajtje dhe hiq të tjerat fare, pa shkruar "nuk ka" ose "nuk u identifikua".
+Mos shkruaj komente për transkriptin, cilësinë e audios apo pjesët që mungojnë.
+
+Pjesët, me këtë renditje dhe këta tituj:
 
 Përmbledhja:
-Një përmbledhje e qartë e takimit: çfarë u diskutua, qëllimi kryesor i takimit, vendimet e rëndësishme
-dhe rezultati i përgjithshëm. Bazohu vetëm në transkript.
+Një ose dy fjali: për çfarë ishte takimi dhe si përfundoi. Gjithmonë e pranishme.
 
 Kapitujt & Temat:
-Ndaje takimin në kapituj logjikë. Çdo kapitull ka një titull dhe një shpjegim të shkurtër të temës së
-diskutuar. Nxirr në pah pikat kryesore dhe organizoje diskutimin në pjesë të lexueshme.
+Vetëm kur u diskutuan të paktën dy tema të ndryshme: titull i shkurtër dhe një fjali për secilën.
 
 Detyrat e Takimit:
-Të gjitha detyrat, ndjekjet, përgjegjësitë, afatet ose hapat e ardhshëm që u përmendën. Çdo detyrë
-përmban përgjegjësin nëse përmendet, detyrën dhe afatin nëse përmendet.
-Nëse nuk ka detyra, shkruaj "Nuk u identifikuan detyra."
+Detyrat, ndjekjet ose hapat e ardhshëm që u përmendën: përgjegjësi nëse përmendet, detyra, afati nëse përmendet.
 
 Pyetjet Kryesore:
-Pyetjet e rëndësishme që u ngritën, me përgjigje ose pa. Nëse pyetja mori përgjigje, shto një përgjigje
-të shkurtër sipas transkriptit. Nëse jo, shëno "E pazgjidhur".
+Pyetjet e rëndësishme, me përgjigjen e shkurtër nëse u dha, përndryshe "E pazgjidhur".
 
 Shënime:
-Shënime, kujtesa, vendime, vëzhgime ose detaje specifike që u përmendën si të rëndësishme. Mos e përsërit
-gjithë transkriptin; ruaj vetëm atë që dikush do të donte ta mbante mend.
+Vetëm vendime, kujtesa ose detaje që u theksuan si të rëndësishme dhe nuk janë përmendur më lart.
 
 Shkruaj çdo titull pjese me shkronja të trasha, p.sh. **Përmbledhja:**. Përdor lista "-" ose "1.";
 pa tabela dhe pa tituj Markdown me #.
