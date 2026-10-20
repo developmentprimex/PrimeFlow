@@ -1,5 +1,54 @@
 # Asistenti personal PrimeFlow në Discord
 
+## Mira në takimet zanore: vetëm dëgjim
+
+Mira mund të hyjë me identitetin e botit ekzistues në një voice channel të
+zakonshëm dhe të marrë shënime pa folur. Aktivizo GitHub Actions variable
+`DISCORD_MEETING_NOTES_ENABLED=true` dhe bëj deploy; si parazgjedhje është
+`false`. Përdoren token-i i botit dhe `OPENAI_API_KEY` ekzistues. Nuk duhet bot i
+dytë. Variabla opsionale `DISCORD_VOICE_NODE_BINARY` zgjedh executable-n e Node;
+parazgjedhja është `node`. Kërkohet Node >=22.12.
+
+1. Lidhe llogarinë me `/lidh`, pastaj hyr në voice channel-in e stafit.
+2. Në kanalin tënd personal përdor `/takimi fillo`. Titulli është opsional.
+   Departamenti merret nga llogaria; admin/manager mund të japë UUID-në e një
+   departamenti tjetër me parametrin opsional `departamenti`.
+3. Mira poston njoftim në chat-in e voice channel-it përpara se të dëgjojë.
+   Kërkon `View Channel`, `Connect` dhe `Send Messages` në atë kanal. Nuk
+   kërkon lejen `Speak` dhe nuk transmeton audio. Në mungesë të njoftimit ose
+   lidhjes së audios, takimi nuk nis si “Po dëgjoj”.
+4. Përdor `/takimi mbaro` ose **Përfundo takimin** në kanalin personal.
+   Organizuesi mund ta ndalë; admin/manager tjetër duhet të jetë në të njëjtin
+   voice channel dhe të përdorë kanalin e vet personal. Komandat përfundohen
+   edhe kur përgatitja e shënimeve vazhdon në sfond.
+5. Shënimet vijnë në kanalin personal: përmbledhje, vendime, veprime me
+   përgjegjës/afat kur janë përmendur dhe paqartësi. Për shënime të gjata
+   dërgohet skedar UTF-8. Përdor **Shiko shënimet**, pastaj **Ruaj në PX Notes**.
+   Dy klikime nuk krijojnë dy Notes. **Hap PX Notes** hap listën për redaktim.
+
+Mbahet një takim në një kohë për server. Pas ndalimit, Mira del nga voice
+channel menjëherë; radha lokale e transkriptimit përfundon përpara se të nisë
+një takim i ri. Shënimet e ruajtura kanë lejet normale të PX Notes. Teksti i
+takimit nuk zbatohet si komandë për detyra. Përmbledhja nuk postohet në kanalin
+e përbashkët. Audioja nuk arkivohet; ruhen segmentet e transkriptuara dhe drafti.
+
+Në shkëputje ose gabim të audios njoftohet organizuesi. Shënimet e pjesshme
+etiketohen qartë. Pas një rinisjeje nuk rifillon dëgjimi automatikisht; sesioni
+i vjetër shënohet i ndërprerë dhe teksti i marrë mund të përmblidhet. Celery
+worker/beat përpunojnë sesionet çdo 30 sekonda; boti dërgon rezultatet private.
+Në dështim të përmbledhjes, transkripti mbetet në DB për rikuperim teknik.
+
+Deploy-i përdor migrimin `0152_discord_voice_meetings`, instalimin e kyçur në
+`backend/discord-voice` dhe `python scripts/check_discord_voice.py --install`.
+Ky kontroll verifikon DAVE/Opus dhe testet lokale pa hyrë në Discord. Mund të
+ekzekutosh `python scripts/check_discord_voice.py` vetëm për kontroll importesh.
+Node child nuk trashëgon çelësat, token-in e botit apo kredencialet e databazës.
+
+Para përdorimit të rregullt, bëni një takim prove të nisur qëllimisht me dy
+folës në shqip: flisni njëkohësisht, njëri të dalë e të rikthehet, ndaleni,
+kontrolloni shënimet dhe klikoni ruajtjen dy herë. Kjo verifikon marrjen reale
+të audios dhe ndryshimet DAVE; testet me mock nuk e zëvendësojnë këtë provë.
+
 Secili përdorues lidh llogarinë e vet në faqen `/discord` të PrimeFlow. Kodi
 njëpërdorimësh vlen 10 minuta dhe përdoret me `/lidh kodi:...` në serverin e ekipit.
 Fjalëkalimet dhe tokenët PrimeFlow nuk vendosen në Discord. Një llogari Discord

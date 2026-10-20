@@ -108,6 +108,8 @@ class Settings(BaseSettings):
     VOICE_ASSISTANT_VOICE: str = "marin"
     # Opt-in Discord worker; never starts or sends messages from the API process.
     DISCORD_ASSISTANT_ENABLED: bool = False
+    DISCORD_MEETING_NOTES_ENABLED: bool = False
+    DISCORD_VOICE_NODE_BINARY: str = "node"
     DISCORD_BRIDGE_SECRET: str | None = None
     DISCORD_BOT_TOKEN: str | None = None
     DISCORD_GUILD_ID: str | None = None
