@@ -70,7 +70,7 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
             try:
                 await instance.setup_hook()
                 commands = instance.tree.get_commands(guild=discord.Object(id=123))
-                self.assertEqual({command.name for command in commands}, {"lidh", "detyrat", "pyet"})
+                self.assertEqual({command.name for command in commands}, {"lidh", "detyrat", "pyet", "push"})
                 self.assertEqual(str(instance.http_bridge.base_url), "http://primeflow.test/api/discord/")
                 request = instance.http_bridge.build_request("POST", "/bot/tasks", json={})
                 self.assertEqual(str(request.url), "http://primeflow.test/api/discord/bot/tasks")

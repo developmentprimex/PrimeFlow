@@ -35,9 +35,10 @@ def meeting(kind="internal", minutes=15):
     return Meeting(id=uuid.uuid4(), title="Sync", meeting_type=kind, reminder_minutes_before=minutes, starts_at=START, recurrence_type="none")
 
 
-def due(item, current, canceled=()):
+def due(item, current, canceled=(), statuses=()):
     user = uuid.uuid4()
-    db = SimpleNamespace(execute=AsyncMock(side_effect=[Result([(item, user)]), Result(list(canceled))]))
+    rows = [(meeting_id, day, "canceled") for meeting_id, day in canceled] + list(statuses)
+    db = SimpleNamespace(execute=AsyncMock(side_effect=[Result([(item, user)]), Result(rows)]))
     with patch.object(discord_meetings.settings, "APP_TIMEZONE", "UTC"):
         return [kind for *_, kind in asyncio.run(discord_meetings.due_alerts(db, current, [user]))]
 
@@ -59,6 +60,27 @@ class DueAlertTests(unittest.TestCase):
         self.assertEqual(due(item, START - timedelta(minutes=5), canceled=[(item.id, START.date())]), [])
 
 
+    def test_participants_are_asked_after_the_meeting_whether_it_was_held(self):
+        item = meeting("external")
+        self.assertEqual(due(item, START + timedelta(minutes=29)), [])
+        self.assertEqual(due(item, START + timedelta(minutes=31)), ["after"])
+        self.assertEqual(due(item, START + timedelta(hours=3)), [])
+
+    def test_after_question_waits_for_the_planned_end(self):
+        item = meeting("internal")
+        item.ends_at = START + timedelta(minutes=90)
+        self.assertEqual(due(item, START + timedelta(minutes=60)), [])
+        self.assertEqual(due(item, START + timedelta(minutes=91)), ["after"])
+
+    def test_no_after_question_once_marked_in_common_view(self):
+        item = meeting("external")
+        for status in ("held", "canceled"):
+            self.assertEqual(due(item, START + timedelta(minutes=40), statuses=[(item.id, START.date(), status)]), [])
+
+    def test_no_after_question_for_another_day(self):
+        self.assertEqual(due(meeting("external"), START + timedelta(days=1, minutes=40)), [])
+
+
 @unittest.skipUnless(AVAILABLE, "Install requirements-discord.txt")
 class MeetingMessageTests(unittest.IsolatedAsyncioTestCase):
     def job(self, kind="before", meeting_type="internal", url="https://zoom.us/j/1"):
@@ -71,6 +93,21 @@ class MeetingMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(content.startswith("<@3> 🔴 **Takimi po fillon tani**"))
         self.assertIn("Anisa Ternava", embed.description)
         self.assertEqual([item.label for item in view.children], ["🔗 Hap takimin", "🎧 Hyr në kanalin zanor"])
+
+    def test_after_question_offers_held_or_canceled(self):
+        job = self.job("after")
+        content, _, view = ui.meeting_alert(job, "https://discord.com/channels/1/9")
+        self.assertIn("A u mbajt takimi?", content)
+        self.assertEqual([(item.label, item.custom_id) for item in view.children],
+                         [("✅ Mbajtur", f"pf:mheld:{job['id']}:held"), ("✖ Anuluar", f"pf:mheld:{job['id']}:canceled")])
+        self.assertIn("Anuluar", ui.meeting_held_text("Sync", "canceled", "Laurent Hoxha"))
+
+    def test_push_notice_is_polite_and_mentions_the_person(self):
+        text = ui.push_notice("3", "Laurent Hoxha", 5, "Rregullime te raportet")
+        self.assertTrue(text.startswith("<@3> "))
+        self.assertIn("5 minuta", text)
+        self.assertIn("Rregullime te raportet", text)
+        self.assertIn("PrimeFlow u përditësua", ui.push_done("3"))
 
     def test_external_reminder_has_no_voice_room_and_ignores_non_web_links(self):
         content, _, view = ui.meeting_alert(self.job(meeting_type="external", url="Office 2"), "https://discord.com/channels/1/9")

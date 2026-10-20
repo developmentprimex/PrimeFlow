@@ -474,10 +474,13 @@ def meeting_alert(job: dict, voice_url: str | None = None):
     internal = meeting.get("type") == "internal"
     if job["kind"] == "start":
         headline = "🔴 **Takimi po fillon tani**"
+    elif job["kind"] == "after":
+        headline = "❓ **A u mbajt takimi?**"
     else:
         headline = f"🔔 **Takim pas {meeting.get('minutes_before') or 0} min**"
     content = f"<@{job['discord_user_id']}> {headline} · {discord.utils.escape_markdown(label(meeting['title'], 150))}"
-    embed = discord.Embed(title=label(meeting["title"], 250), color=0xEF4444 if job["kind"] == "start" else 0xF59E0B)
+    embed = discord.Embed(title=label(meeting["title"], 250),
+                          color={"start": 0xEF4444, "after": 0x3B82F6}.get(job["kind"], 0xF59E0B))
     details = [f"🕘 {starts.strftime('%H:%M')} · " + ("Takim i brendshëm" if internal else "Takim i jashtëm")]
     if meeting.get("platform"):
         details.append("📍 " + label(meeting["platform"], 100))
@@ -486,12 +489,39 @@ def meeting_alert(job: dict, voice_url: str | None = None):
         details.append("👥 Me: " + ", ".join(label(person["name"], 40) for person in others[:15]) + (" …" if len(others) > 15 else ""))
     embed.description = "\n".join(details)
     view = discord.ui.View(timeout=None)
+    if job["kind"] == "after":
+        # Same choice as the Mbajtur / Anuluar column in Common View.
+        view.add_item(discord.ui.Button(label="✅ Mbajtur", style=discord.ButtonStyle.success, custom_id=f"pf:mheld:{job['id']}:held"))
+        view.add_item(discord.ui.Button(label="✖ Anuluar", style=discord.ButtonStyle.danger, custom_id=f"pf:mheld:{job['id']}:canceled"))
+        return content[:2000], embed, view
     url = (meeting.get("url") or "").strip()
     if url.startswith(("https://", "http://")):
         view.add_item(discord.ui.Button(label="🔗 Hap takimin", url=url[:512]))
     if internal and voice_url:
         view.add_item(discord.ui.Button(label="🎧 Hyr në kanalin zanor", url=voice_url))
     return content[:2000], embed, view
+
+
+def meeting_held_text(title: str, status: str, by: str) -> str:
+    """The question after a meeting once someone answered it (for every participant)."""
+    outcome = "✅ **Mbajtur**" if status == "held" else "✖ **Anuluar**"
+    return f"{outcome} · {discord.utils.escape_markdown(label(title, 150))} · shënoi {discord.utils.escape_markdown(label(by, 60))}"
+
+
+def push_notice(discord_user_id: str, by: str, minutes: int, note: str | None = None) -> str:
+    """Polite heads-up that PrimeFlow is being deployed."""
+    text = (f"<@{discord_user_id}> 🛠️ **PrimeFlow po përditësohet**\n"
+            f"{discord.utils.escape_markdown(label(by, 60))} po publikon një version të ri. Për rreth **{minutes} minuta** "
+            "PrimeFlow mund të mos hapet, dhe ndryshimet që bëni gjatë kësaj kohe mund të mos ruhen.\n"
+            "🙏 Ju lutemi ruani punën që keni hapur tani dhe prisni njoftimin ✅ para se të vazhdoni.")
+    if note:
+        text += "\n📝 " + discord.utils.escape_markdown(label(note, 300))
+    return text + "\nFaleminderit për durimin!"
+
+
+def push_done(discord_user_id: str) -> str:
+    return (f"<@{discord_user_id}> ✅ **PrimeFlow u përditësua.** Mund të vazhdoni punën normalisht.\n"
+            "Nëse keni ruajtur diçka gjatë përditësimit, rifreskoni faqen dhe kontrolloni që është ruajtur.")
 
 
 def meeting_draft_view(draft_id: str, *, conflict: bool = False) -> discord.ui.View:

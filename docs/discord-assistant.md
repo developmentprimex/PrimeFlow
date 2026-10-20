@@ -244,6 +244,11 @@ para), si dhe anulimet dhe përsëritjet, njësoj si njoftimet në shfletues.
   tani" për secilin pjesëmarrës, me **🎧 Hyr në kanalin zanor**. Kanali zanor është
   `DISCORD_MEETING_VOICE_CHANNEL_ID` (GitHub Actions variable, opsionale); pa të
   përdoret kanali i parë zanor i serverit.
+- **Pas takimit:** kur mbaron takimi (sipas orës së përfundimit; pa të, 30 min pas fillimit)
+  secili pjesëmarrës merr "❓ A u mbajt takimi?" me **✅ Mbajtur / ✖ Anuluar**. Zgjedhja ruhet
+  njësoj si kolona Mbajtur/Anuluar te Common View, dhe pyetja te pjesëmarrësit e tjerë
+  përditësohet me përgjigjen dhe emrin e personit që e shënoi. Nëse statusi është vendosur
+  tashmë në Common View, pyetja nuk dërgohet. Pyetja dërgohet brenda 2 orëve pas përfundimit.
 - Kujtesa liston edhe pjesëmarrësit e tjerë. Personat pa llogari Discord të lidhur
   marrin vetëm njoftimin në PrimeFlow.
 
@@ -259,6 +264,15 @@ Discord nuk lejon që një bot të nisë thirrje telefonike/zanore; "thirrja" ë
 përmendja me njoftim dhe butoni për t'u futur në kanalin zanor. Kërkohet migrimi
 `0150_discord_meeting_alerts`. Pa të, kujtesat e takimeve nuk dërgohen, por
 kujtesat e detyrave vazhdojnë normalisht.
+
+## Njoftimi për push: `/push`
+
+Kushdo me llogari të lidhur shkruan `/push` (opsionale `minuta`, parazgjedhje 5, dhe `shenim`)
+para se të publikojë PrimeFlow. Të gjithë të tjerët marrin në kanalin personal, me përmendje,
+një njoftim se PrimeFlow po përditësohet dhe se ndryshimet gjatë asaj kohe mund të mos ruhen.
+Kur deploy-i e rinis botin me version të ri (`APP_BUILD_SHA` ndryshon) brenda 45 minutave,
+të gjithë marrin automatikisht "✅ PrimeFlow u përditësua". Brenda 10 minutave një `/push`
+i dytë nuk ridërgon njoftimin; tregon kush e ka njoftuar. Njoftimet ruhen te `discord_actions`.
 
 ## Identiteti, lejet dhe historiku
 
