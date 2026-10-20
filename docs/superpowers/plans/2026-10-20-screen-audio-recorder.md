@@ -46,4 +46,4 @@ Files: `frontend/src/lib/recording-*`, `frontend/src/components/meeting-recordin
 
 - [x] Run backend regression tests, frontend unit/browser tests, lint, typecheck and production build; fix feature regressions.
 - [x] Document storage/migration/permissions/proxy/encoding/backup/recovery/platform limits and verified scenarios, plus exact changed files.
-- [ ] Commit Phase A, prepare Phase B in a separate commit, review branch, push and create reviewable PR without merging/deploying.
+- [x] Commit Phase A, prepare Phase B in a separate commit, review branch, push and create reviewable PR without merging/deploying: [draft PR #183](https://github.com/elsaferati/Primex-TaskManager/pull/183).
