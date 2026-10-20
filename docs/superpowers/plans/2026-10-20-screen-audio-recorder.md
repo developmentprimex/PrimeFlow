@@ -30,20 +30,20 @@
 
 Files: `backend/app/models/meeting_recording.py`, `backend/app/schemas/meeting_recording.py`, `backend/app/services/meeting_recording_storage.py`, `backend/app/api/routers/meeting_recordings.py`, migration `0153_meeting_recordings`, configuration and router/model registration. The revision follows the Discord voice-meeting migration introduced on main during implementation.
 
-- [ ] Write and run failing storage/API tests for traversal, streaming size limits, sequential/idempotent receipts, missing chunks, authorization and range playback.
-- [ ] Implement local storage, two new tables, owner writes and scoped reads, audit, validated remux/finalization and restart-safe retries.
-- [ ] Apply/rollback/reapply migration in isolated PostgreSQL test database and run backend tests.
+- [x] Write and run failing storage/API tests for traversal, streaming size limits, sequential/idempotent receipts, missing chunks, authorization and range playback.
+- [x] Implement local storage, two new tables, owner writes and scoped reads, audit, validated remux/finalization and restart-safe retries.
+- [x] Apply/rollback/reapply migration in isolated PostgreSQL test database and run backend tests.
 
 ### Task 2: Browser capture and library
 
 Files: `frontend/src/lib/recording-*`, `frontend/src/components/meeting-recordings/*`, authenticated recording pages, same-origin media routes, sidebar and meeting detail link.
 
-- [ ] Write and run controller/queue tests covering denied permissions, missing system audio, native stop, pause/resume, backpressure, retries and cleanup.
-- [ ] Implement capture controller, bounded IndexedDB outbox, explicit recovery, Albanian recorder/library/detail and private streaming proxy.
-- [ ] Verify actual Chromium MediaRecorder output end to end; separate synthetic audio verification from unverified Teams/OS capture claims.
+- [x] Write and run controller/queue tests covering denied permissions, missing system audio, native stop, pause/resume, backpressure, retries and cleanup.
+- [x] Implement capture controller, bounded IndexedDB outbox, explicit recovery, Albanian recorder/library/detail and private streaming proxy.
+- [x] Verify actual Chromium MediaRecorder output end to end; separate synthetic audio verification from unverified Teams/OS capture claims.
 
 ### Task 3: Release verification and documentation
 
-- [ ] Run backend regression tests, frontend unit/browser tests, lint, typecheck and production build; fix feature regressions.
-- [ ] Document storage/migration/permissions/proxy/encoding/backup/recovery/platform limits and verified scenarios, plus exact changed files.
+- [x] Run backend regression tests, frontend unit/browser tests, lint, typecheck and production build; fix feature regressions.
+- [x] Document storage/migration/permissions/proxy/encoding/backup/recovery/platform limits and verified scenarios, plus exact changed files.
 - [ ] Commit Phase A, prepare Phase B in a separate commit, review branch, push and create reviewable PR without merging/deploying.

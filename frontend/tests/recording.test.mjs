@@ -8,9 +8,9 @@ import { webcrypto } from "node:crypto"
 function load(name, globals = {}) {
   const source = readFileSync(new URL(`../src/lib/${name}.ts`, import.meta.url), "utf8")
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
-  const module = { exports: {} }
-  vm.runInNewContext(outputText, { module, exports: module.exports, Response, Blob, AbortSignal, crypto: webcrypto, setTimeout, performance, ...globals })
-  return module.exports
+  const loaded = { exports: {} }
+  vm.runInNewContext(outputText, { module: loaded, exports: loaded.exports, Response, Blob, AbortSignal, crypto: webcrypto, setTimeout, performance, ...globals })
+  return loaded.exports
 }
 
 function captureHarness({ system = true, micDenied = false, displayDenied = false, delayedMic } = {}) {
@@ -125,6 +125,16 @@ test("pause/resume and independent microphone/system toggles", async () => {
   h.capture.toggle("microphone"); assert.equal(h.mic.enabled, false); assert.equal(h.sys.enabled, true)
   h.capture.toggle("system"); assert.equal(h.sys.enabled, false)
   h.capture.resume(); assert.equal(h.capture.state, "recording")
+  await h.capture.stop()
+})
+test("overlapping prepare/start attempts cannot replace an active recorder", async () => {
+  const h = captureHarness()
+  await Promise.all([h.capture.prepare("", "browser"), h.capture.prepare("", "browser")])
+  await h.capture.start()
+  const original = h.Recorder.last
+  await assert.rejects(h.capture.start())
+  await h.capture.prepare("", "browser")
+  assert.equal(h.Recorder.last, original)
   await h.capture.stop()
 })
 

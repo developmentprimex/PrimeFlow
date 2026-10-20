@@ -243,7 +243,7 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
   }
   const value: RecorderContextValue = { ...view, prepare, start, cancel, retry, discard,
     stop: () => { void runtime.current?.capture.stop() }, pause: () => runtime.current?.capture.pause(),
-    resume: () => { if (!view.error && !view.saving && (!view.manifest || view.manifest.bytes - view.manifest.uploadedBytes < PAUSE_PENDING_BYTES)) { runtime.current?.capture.resume(); setView(v => ({ ...v, backpressure: false })) } },
+    resume: () => { if (!view.error && !view.saving && runtime.current && runtime.current.stagingBytes < 16 * 1024 * 1024 && (!view.manifest || view.manifest.bytes - view.manifest.uploadedBytes < PAUSE_PENDING_BYTES)) { runtime.current.capture.resume(); setView(v => ({ ...v, backpressure: false })) } },
     toggle: input => runtime.current?.capture.toggle(input),
   }
   const active = ["recording", "paused", "stopping", "prepared", "selecting"].includes(view.state) || view.saving

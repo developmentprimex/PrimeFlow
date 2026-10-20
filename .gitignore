@@ -28,6 +28,7 @@ tmp/recorder-fixture.json
 tmp/recorder-browser-storage/
 tmp/recorder-baseline/
 tmp/recorder-baseline.zip
+tmp/recorder-full-lint.json
 backend/private-data/
 backend/.discord-worker-status.json*
 backend/.discord-agent-recovery/
