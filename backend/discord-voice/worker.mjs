@@ -109,8 +109,8 @@ export function createReceiver({sessionId,instanceId,guildId,channelId,userId,em
 }
 
 async function main(){
-  const voice=await import('@discordjs/voice');const {default:Opus}=await import('opusscript');await import('@snazzah/davey');
-  const makeDecoder=()=>new Opus(48000,2,Opus.Application.AUDIO);
+  const voice=await import('@discordjs/voice');const {createOpusDecoder}=await import('./opus.mjs');await import('@snazzah/davey');
+  const makeDecoder=createOpusDecoder;
   const probe=makeDecoder();probe.delete();
   if(process.argv.includes('--check')){process.stdout.write('{"voice_ready":true}\n');return;}
   let receiver,session,instance,carry='';

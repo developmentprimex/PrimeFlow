@@ -1,6 +1,6 @@
 import {test,mock} from 'node:test';import assert from 'node:assert/strict';import {EventEmitter} from 'node:events';
 import {createReceiver} from '../worker.mjs';
-import Opus from 'opusscript';
+import {createOpusDecoder} from '../opus.mjs';
 
 function fixture(makeDecoder=()=>({decode:x=>x,delete(){}}),{entersState=async()=>{}}={}){
  const events=[];let options,adapter;const speaking=new EventEmitter();const conn=new EventEmitter();
@@ -106,7 +106,7 @@ test('persistent invalid audio still fails instead of pretending to listen',asyn
 });
 
 test('real Opus decoder recovers after a malformed packet between valid frames',async()=>{
- const f=fixture(()=>new Opus(48000,2,Opus.Application.AUDIO));await f.r.ready;
+ const f=fixture(createOpusDecoder);await f.r.ready;
  try{
   f.conn.receiver.speaking.emit('start','10');const s=f.streams.get('10');
   s.emit('data',Buffer.from([0xf8,0xff,0xfe]));
