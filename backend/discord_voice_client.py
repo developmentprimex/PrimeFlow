@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 
 MAX_LINE = 3_000_000
 VOICE_DIR = Path(__file__).resolve().parent / 'discord-voice'
+log = logging.getLogger('primeflow.discord.voice')
+INTERRUPTION_REASONS = frozenset({'voice_error','voice_disconnected','voice_moved','no_decoded_audio',
+    'decoder_error','decode_error','receive_error','connect_timeout','audio_backpressure','worker_command_failed'})
 
 
 class VoiceCaptureClient:
@@ -95,19 +99,28 @@ class VoiceCaptureClient:
             if len(self.uploads)>=8: await self._fail('audio_backpressure');return
             task=asyncio.create_task(self._upload(message));self.uploads.add(task);task.add_done_callback(self.uploads.discard)
         elif kind=='interrupted':
-            await self._fail('audio_interrupted')
+            reason=message.get('reason')
+            if reason not in INTERRUPTION_REASONS:reason='audio_interrupted'
+            close_code=message.get('close_code')
+            log.warning('MIRA_DIAGNOSTIC session=%s reason=%s close_code=%s',self.session_id,reason,
+                close_code if type(close_code) is int else None)
+            await self._fail(reason)
         else: raise ValueError('ipc_type')
 
     async def _upload(self, message):
         try:
             async with self.upload_limit: await self.on_segment(message)
             await self.send({'type':'credit','sequence':message['sequence']})
-        except Exception:
+        except Exception as exc:
+            response=getattr(exc,'response',None)
+            log.warning('MIRA_DIAGNOSTIC session=%s stage=upload error_type=%s http_status=%s',
+                self.session_id,type(exc).__name__,getattr(response,'status_code',None))
             await self._fail('transcription_failed')
 
     async def _fail(self, reason):
         if self.failed: return
         self.failed=True
+        log.warning('MIRA_DIAGNOSTIC session=%s reason=%s',self.session_id,reason)
         if self.ready and not self.ready.done(): self.ready.set_exception(ValueError(reason))
         # Callback must be independent of the reader, otherwise stop waits on itself.
         task=asyncio.create_task(self.on_interruption(reason))

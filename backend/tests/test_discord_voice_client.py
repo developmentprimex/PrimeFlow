@@ -4,6 +4,16 @@ from unittest.mock import AsyncMock
 from discord_voice_client import VoiceCaptureClient
 
 class VoiceClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_interruption_preserves_safe_reason_and_numeric_close_code(self):
+        c=self.client()
+        with self.assertLogs('primeflow.discord.voice',level='WARNING') as logs:
+            await c.handle({'type':'interrupted','session_id':'s','instance_id':'i',
+                'reason':'voice_disconnected','close_code':4014,'error':'never log raw tokens'})
+            await asyncio.sleep(0)
+        c.on_interruption.assert_awaited_once_with('voice_disconnected')
+        self.assertIn('4014',' '.join(logs.output))
+        self.assertNotIn('never log',' '.join(logs.output))
+
     def client(self):
         c=VoiceCaptureClient(AsyncMock(),AsyncMock(),AsyncMock())
         c.session_id='s';c.instance_id='i';c.guild_id='1';c.channel_id='2'

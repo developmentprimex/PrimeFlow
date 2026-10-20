@@ -17,9 +17,9 @@ export function createReceiver({sessionId,instanceId,guildId,channelId,userId,em
     for(const decoder of decoders.values())decoder.delete?.();decoders.clear();
     connection.destroy();out({type:'stopped',last_sequence:buffer.sequence,partial});
   }
-  function fail(reason){if(closed)return;partial=true;out({type:'interrupted',reason});stop();}
+  function fail(reason,details={}){if(closed)return;partial=true;out({type:'interrupted',reason,...details});stop();}
   connection.on('error',()=>fail('voice_error'));
-  connection.on('stateChange',(_old,state)=>{if(!closed&&['disconnected','destroyed'].includes(state.status))fail('voice_disconnected');});
+  connection.on('stateChange',(_old,state)=>{if(!closed&&['disconnected','destroyed'].includes(state.status))fail('voice_disconnected',{close_code:state.closeCode});});
   connection.receiver.speaking.on('start',id=>{
     if(closed||streams.has(id))return;
     let decoded=false;
@@ -64,7 +64,7 @@ async function main(){
   }
   process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>{
     try{carry+=chunk;let end;while((end=carry.indexOf('\n'))>=0){const line=carry.slice(0,end);carry=carry.slice(end+1);command(decodeMessage(line));}if(Buffer.byteLength(carry)>MAX_LINE)throw Error('ipc_size');}
-    catch{receiver?.destroy();process.exitCode=1;process.stdin.destroy();}
+    catch{if(session)emit({type:'interrupted',reason:'worker_command_failed',session_id:session,instance_id:instance});receiver?.destroy();process.exitCode=1;process.stdin.destroy();}
   });
   process.stdin.on('end',()=>receiver?.destroy());
   process.on('SIGTERM',()=>{receiver?.destroy();process.exit(0);});
