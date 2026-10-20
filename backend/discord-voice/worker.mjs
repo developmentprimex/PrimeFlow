@@ -52,7 +52,7 @@ export function createReceiver({sessionId,instanceId,guildId,channelId,userId,em
   connection.receiver.speaking.on('start',id=>{
     if(closed||streams.has(id))return;
     let decoded=false,badPackets=0,released=false,decoder;
-    const stream=connection.receiver.subscribe(id,{end:{behavior:voice.EndBehaviorType.AfterSilence,duration:700}});
+    const stream=connection.receiver.subscribe(id,{end:{behavior:voice.EndBehaviorType.AfterSilence,duration:1200}});
     streams.set(id,stream);
     const watchdog=setTimeout(()=>{timers.delete(watchdog);if(!decoded)drop('no_decoded_audio');},10000);timers.add(watchdog);
     function release(){

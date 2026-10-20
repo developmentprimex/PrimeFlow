@@ -1,15 +1,18 @@
 import {createRequire} from 'node:module';
 
-// opusscript's JS wrapper indexes its 16-bit heap view with byte pointers, so
-// decoded PCM is written to twice the allocated address, and it caches heap
-// views that detach when the WASM heap grows. Both corrupt or break decoding
-// once many speakers have decoders. This wrapper calls the same native Opus
-// handler with correct byte pointers and reads the live heap on every call.
-// Its WASM build also corrupts memory on packets longer than 60 ms; Discord
-// sends 20 ms frames, so such a packet is undecryptable garbage and is rejected.
+// opusscript's native decoder writes each byte of the 16-bit PCM into its own
+// 16-bit slot, so its output is twice the PCM size. The JS wrapper allocates
+// only the PCM size and passes twice the allocated address, so every decode
+// writes outside its buffer; it also caches heap views that detach when the
+// WASM heap grows. Both corrupt or break decoding once many speakers have
+// decoders. This wrapper calls the same native handler into a buffer big
+// enough for the doubled output, reads the live heap on every call, and
+// rejects packets longer than 60 ms (Discord sends 20 ms frames, so such a
+// packet is undecryptable garbage).
 const require=createRequire(import.meta.url);
-const CHANNELS=2,MAX_PACKET=1276*3,MAX_SAMPLES=5760; // 120 ms at 48 kHz, the Opus maximum
-const MAX_DECODED_SAMPLES=2880; // 60 ms
+const CHANNELS=2,MAX_PACKET=1276*3;
+const MAX_DECODED_SAMPLES=2880; // 60 ms at 48 kHz
+const OUTPUT_SLOTS=MAX_DECODED_SAMPLES*CHANNELS*2; // one 16-bit slot per PCM byte
 
 // Samples per frame at 48 kHz from the TOC config (RFC 6716, section 3.1).
 function frameSamples(config){
@@ -33,7 +36,7 @@ function open(){
   const module=native;
   try{
     const handler=new module.OpusScriptHandler(48000,CHANNELS,2049);
-    return {module,handler,input:module._malloc(MAX_PACKET),output:module._malloc(MAX_SAMPLES*CHANNELS*2)};
+    return {module,handler,input:module._malloc(MAX_PACKET),output:module._malloc(OUTPUT_SLOTS*2)};
   }catch(error){
     // A WASM trap means this heap is damaged; later speakers get a fresh instance.
     if(error instanceof WebAssembly.RuntimeError&&native===module)native=undefined;
@@ -59,7 +62,10 @@ export function createOpusDecoder(){
         throw Error('Decode error: Internal error');
       }
       if(decoded<0)throw Error('Decode error: '+(ERRORS[decoded]??'Internal error'));
-      return Buffer.from(module.HEAPU8.slice(output,output+decoded*CHANNELS*2));
+      const slots=module.HEAPU16.subarray(output>>1,(output>>1)+decoded*CHANNELS*2);
+      const pcm=Buffer.allocUnsafe(slots.length);
+      for(let i=0;i<slots.length;i++)pcm[i]=slots[i];
+      return pcm;
     },
     delete(){
       if(freed)return;freed=true;

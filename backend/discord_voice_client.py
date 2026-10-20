@@ -17,6 +17,8 @@ GAP_REASONS = frozenset({'decode_invalid_packet','decode_bad_argument','decode_f
     'decoder_error','receive_error','no_decoded_audio','voice_error','voice_reconnecting'})
 # Consecutive segments that may fail transcription before capture is declared broken.
 UPLOAD_FAILURE_LIMIT = 3
+# Matches MAX_PENDING in discord-voice/audio.mjs.
+MAX_PENDING_UPLOADS = 48
 
 
 class VoiceCaptureClient:
@@ -25,7 +27,7 @@ class VoiceCaptureClient:
         self.process = None
         self.reader = None
         self.uploads = set()
-        self.upload_limit = asyncio.Semaphore(2)
+        self.upload_limit = asyncio.Semaphore(4)
         self.closing = False
         self.failed = False
         self.last_sequence = 0
@@ -102,7 +104,7 @@ class VoiceCaptureClient:
         elif kind=='segment':
             if type(message.get('sequence')) is not int or message['sequence']!=self.last_sequence:raise ValueError('ipc_sequence')
             self.last_sequence+=1
-            if len(self.uploads)>=8: await self._fail('audio_backpressure');return
+            if len(self.uploads)>=MAX_PENDING_UPLOADS: await self._fail('audio_backpressure');return
             task=asyncio.create_task(self._upload(message));self.uploads.add(task);task.add_done_callback(self.uploads.discard)
         elif kind=='audio_gap':
             reason=message.get('reason')

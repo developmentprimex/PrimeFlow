@@ -6,6 +6,29 @@ const require=createRequire(import.meta.url);
 
 const SILENCE=Buffer.from([0xf8,0xff,0xfe]);
 
+function tonePackets(count){
+ const Opus=require('opusscript');
+ const pcm=Buffer.alloc(960*4);
+ for(let i=0;i<960;i++){const v=Math.round(Math.sin(2*Math.PI*440*i/48000)*12000);pcm.writeInt16LE(v,i*4);pcm.writeInt16LE(v,i*4+2);}
+ const encoder=new Opus(48000,2,Opus.Application.AUDIO);
+ try{return Array.from({length:count},()=>encoder.encode(pcm,960));}finally{encoder.delete();}
+}
+
+test('real speech-like audio decodes to the same PCM as the reference decoder, not silence',()=>{
+ const Opus=require('opusscript');
+ const packets=tonePackets(20);
+ const reference=new Opus(48000,2,Opus.Application.AUDIO),d=createOpusDecoder();
+ try{
+  for(const packet of packets){
+   const expected=reference.decode(packet),actual=d.decode(packet);
+   assert.deepEqual(actual,expected);
+  }
+  const last=d.decode(packets[0]);let peak=0;
+  for(let i=0;i<last.length;i+=2)peak=Math.max(peak,Math.abs(last.readInt16LE(i)));
+  assert.ok(peak>8000,`decoded peak ${peak} is too quiet for a 12000 amplitude tone`);
+ }finally{reference.delete();d.delete();}
+});
+
 test('a 20 ms Opus frame decodes to 960 stereo 16-bit samples',()=>{
  const d=createOpusDecoder();
  try{assert.equal(d.decode(SILENCE).length,960*2*2);}finally{d.delete();}
