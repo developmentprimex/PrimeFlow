@@ -33,6 +33,13 @@ OpenAI during development.
   import, stop failure wedge and wall-span issues were fixed. The reviewer
   independently reran the 13 lifecycle and 9 Node tests and found no remaining
   immediately related Critical/Important issues.
+- Activation verification also exercises the installed discord.py Gateway
+  dispatch: `debug_log_receive` emits `socket_raw_receive`, not the obsolete
+  `socket_response` event. The bot now consumes that real hook, parses only
+  voice dispatches and ignores other/invalid packets. The regression failed
+  before the hook correction and passed afterward. The enabled suite then ran
+  201 tests successfully (eight PostgreSQL tests skipped after the disposable
+  database was stopped; their earlier real-database run passed).
 
 ## Broader existing test state
 

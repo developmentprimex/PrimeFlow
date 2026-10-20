@@ -889,9 +889,19 @@ class PrimeFlowBot(discord.Client):
     async def before_reminders(self):
         await self.wait_until_ready()
 
-    async def on_socket_response(self, payload):
-        if settings.DISCORD_MEETING_NOTES_ENABLED:
-            await self.meeting_capture.gateway(payload)
+    async def on_socket_raw_receive(self, payload):
+        # discord.py 2.x emits this hook after decompressing the Gateway JSON.
+        # The old socket_response event is not emitted by supported versions.
+        if not settings.DISCORD_MEETING_NOTES_ENABLED:
+            return
+        try:
+            event = json.loads(payload)
+        except (TypeError, ValueError):
+            return
+        if (isinstance(event, dict) and event.get("op") == 0
+                and event.get("t") in ("VOICE_STATE_UPDATE", "VOICE_SERVER_UPDATE")
+                and isinstance(event.get("d"), dict)):
+            await self.meeting_capture.gateway(event)
 
     async def on_disconnect(self):
         if settings.DISCORD_MEETING_NOTES_ENABLED:
