@@ -1,6 +1,6 @@
 # Mira: shënime të takimeve në Discord
 
-Status: dizajn për shqyrtim; implementimi nuk ka filluar.
+Status: dizajni u miratua nga përdoruesi më 2026-10-20; në përgatitje plani i implementimit.
 
 ## Qëllimi i konfirmuar
 
