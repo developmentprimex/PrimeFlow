@@ -13,6 +13,7 @@ from app.api.routers.internal_meeting_sessions import router as internal_meeting
 from app.api.routers.internal_notes import router as internal_notes_router
 from app.api.routers.microsoft import router as microsoft_router
 from app.api.routers.meetings import router as meetings_router
+from app.api.routers.meeting_recordings import router as meeting_recordings_router
 from app.api.routers.meeting_scheduler import router as meeting_scheduler_router
 from app.api.routers.notifications import router as notifications_router
 from app.api.routers.marker_comments import router as marker_comments_router
@@ -73,6 +74,7 @@ api_router.include_router(internal_meeting_sessions_router, prefix="/internal-me
 api_router.include_router(internal_notes_router, prefix="/internal-notes", tags=["internal-notes"])
 api_router.include_router(microsoft_router, prefix="/microsoft", tags=["microsoft"])
 api_router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
+api_router.include_router(meeting_recordings_router, prefix="/meeting-recordings", tags=["meeting-recordings"])
 api_router.include_router(meeting_scheduler_router, prefix="/meeting-scheduler", tags=["meeting-scheduler"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(marker_comments_router, prefix="/marker-comments", tags=["marker-comments"])

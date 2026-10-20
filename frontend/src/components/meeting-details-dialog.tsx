@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 
 import { toast } from "sonner"
 import { playMeetingReminderSound, unlockMeetingReminderAudio } from "@/lib/meeting-reminder-audio"
@@ -127,6 +128,7 @@ export function MeetingDetailsDialog({
           <div>
             <div id="meeting-details-title" style={{ fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>Meeting Details</div>
             <div style={{ marginTop: "8px", fontSize: "16px", fontWeight: 700 }}>{meeting.title}</div>
+            <Link className="text-sm underline" href={`/meeting-recordings?meeting_id=${meeting.id}&title=${encodeURIComponent(meeting.title)}`} onClick={onClose}>Regjistro këtë takim</Link>
             <div className="external-meeting-meta" style={{ marginTop: "5px" }}>
               <span>{formatWhen(meeting)}</span>
               <span>{meeting.platform || "Platform TBD"}</span>

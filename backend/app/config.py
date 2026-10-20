@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_RECYCLE: int = 1800
+    MEETING_RECORDINGS_ROOT: str = "uploads/meeting-recordings"
+    MEETING_RECORDINGS_MAX_CHUNK_BYTES: int = 32 * 1024 * 1024
+    MEETING_RECORDINGS_MAX_SESSION_BYTES: int = 20 * 1024 * 1024 * 1024
+    MEETING_RECORDINGS_MAX_DURATION_SECONDS: int = 12 * 60 * 60
+    MEETING_RECORDINGS_MAX_OPEN_SESSIONS: int = 3
+    MEETING_RECORDINGS_FFMPEG: str = "ffmpeg"
+    MEETING_RECORDINGS_FFPROBE: str = "ffprobe"
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"

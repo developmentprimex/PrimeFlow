@@ -18,6 +18,16 @@ backend/.venv
 backend/.python-version
 backend/alembic/versions/*.pyc
 backend/uploads/reports/
+backend/uploads/meeting-recordings/
+tmp/recorder-pg/
+tmp/recorder-tools/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.next-recorder-test/
+tmp/recorder-fixture.json
+tmp/recorder-browser-storage/
+tmp/recorder-baseline/
+tmp/recorder-baseline.zip
 backend/private-data/
 backend/.discord-worker-status.json*
 backend/.discord-agent-recovery/

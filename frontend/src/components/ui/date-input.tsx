@@ -33,10 +33,10 @@ function parseDdMmToIso(value: string) {
   return isValidIsoDate(iso) ? iso : null
 }
 
-function isWithinBounds(value: string, min?: string, max?: string) {
+function isWithinBounds(value: string, min?: string | number, max?: string | number) {
   if (!isValidIsoDate(value)) return false
-  if (min && isValidIsoDate(min) && value < min) return false
-  if (max && isValidIsoDate(max) && value > max) return false
+  if (typeof min === "string" && min && isValidIsoDate(min) && value < min) return false
+  if (typeof max === "string" && max && isValidIsoDate(max) && value > max) return false
   return true
 }
 
