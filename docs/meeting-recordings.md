@@ -192,7 +192,7 @@ All paths below have `/api/meeting-recordings` as their base:
 | GET/HEAD | `/{id}/stream` | Authorized media, single byte ranges |
 | GET | `/{id}/download` | Authorized attachment, server-controlled filename |
 
-Migration `0152_meeting_recordings` follows `0151_discord_meeting_alerts` and
+Migration `0153_meeting_recordings` follows `0152_discord_voice_meetings` and
 creates `meeting_recordings` and `meeting_recording_chunks`. Existing meeting IDs,
 participants, recurrence and calendar rows are not rewritten. After backing up the
 target DB and obtaining deployment approval, run from `backend/`:

@@ -370,6 +370,7 @@ class MigrationTests(unittest.TestCase):
         # Later features may extend the graph; Discord's revision must remain
         # present and there must still be exactly one unambiguous migration head.
         self.assertIn("0151_discord_meeting_alerts", revisions)
+        self.assertIn("0152_discord_voice_meetings", revisions)
         self.assertEqual(len(revisions - referenced), 1)
         self.assertEqual(DiscordAction.__table__.c.id.type.length, 32)
         self.assertEqual(DiscordLink.__table__.c.channel_id.type.length, 32)

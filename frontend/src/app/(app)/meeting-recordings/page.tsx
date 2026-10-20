@@ -12,7 +12,7 @@ import { RECORDING_STATUS, recordingSize, recordingTime, type MeetingRecording }
 
 export default function MeetingRecordingsPage() {
   const { apiFetch, user } = useAuth()
-  const { savedId, saving, manifest } = useRecorder()
+  const { savedId, saving, manifest, discard } = useRecorder()
   const [rows, setRows] = React.useState<MeetingRecording[]>([])
   const [error, setError] = React.useState("")
   const [offset, setOffset] = React.useState(0)
@@ -39,7 +39,8 @@ export default function MeetingRecordingsPage() {
             <td className="space-y-2 p-2"><Link className="underline" href={`/meeting-recordings/${row.id}`}>{row.status === "READY" ? "Luaj / shkarko" : "Detajet"}</Link>
               {row.created_by === user?.id && row.id !== manifest?.id && !["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="ghost" disabled={saving} onClick={async () => {
                 if (!window.confirm("Braktis këtë sesion të papërfunduar? Mos e përdorni për një regjistrim aktiv në një pajisje tjetër.")) return
-                try { await recordingJson(await apiFetch(`/meeting-recordings/${row.id}/fail`, { method: "POST" })); await load() } catch (e) { setError(String(e)) }
+                await discard(row.id)
+                await load()
               }}>Braktis</Button>}
             </td>
           </tr>)}</tbody>

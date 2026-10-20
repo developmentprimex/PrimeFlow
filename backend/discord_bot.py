@@ -20,6 +20,7 @@ from discord.ext import tasks
 from app.config import settings
 import discord_ui as ui
 import discord_agent_client as agent_client
+import discord_voice_meetings as voice_meetings
 
 log = logging.getLogger("primeflow.discord")
 ACTION_CHOICES = [
@@ -134,7 +135,8 @@ class PrimeFlowBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = settings.DISCORD_MESSAGE_CONTENT_ENABLED
-        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
+        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none(), enable_debug_events=settings.DISCORD_MEETING_NOTES_ENABLED)
+        self.meeting_capture = voice_meetings.MeetingCaptureCoordinator(self)
         self.tree = app_commands.CommandTree(self)
         self.task_details = {}
         self.task_cards = {}
@@ -174,6 +176,29 @@ class PrimeFlowBot(discord.Client):
 
     async def on_ready(self):
         self.publish_ready_status()
+        await self.announce_push_done()
+
+    async def announce_push_done(self):
+        """After /push the deploy restarts the bot with the new build; tell everyone it is over."""
+        try:
+            targets = (await self.bridge("/bot/push/complete", {"build": os.getenv("APP_BUILD_SHA", "unknown")}))["targets"]
+        except Exception as exc:
+            log.warning("Push completion check failed: %s", type(exc).__name__)
+            return
+        await self.broadcast(targets, ui.push_done)
+
+    async def broadcast(self, targets, render) -> int:
+        """Ping each person in their private channel; returns how many were reached."""
+        sent = 0
+        for target in targets:
+            try:
+                channel = await self.private_channel(settings.DISCORD_GUILD_ID, target["channel_id"], target["discord_user_id"])
+                await channel.send(render(target["discord_user_id"]),
+                    allowed_mentions=discord.AllowedMentions(users=[discord.Object(int(target["discord_user_id"]))]))
+                sent += 1
+            except Exception as exc:
+                log.warning("Broadcast to %s failed: %s", target["channel_id"], type(exc).__name__)
+        return sent
 
     async def on_resumed(self):
         self.publish_ready_status()
@@ -287,7 +312,26 @@ class PrimeFlowBot(discord.Client):
             except Exception as exc:
                 await interaction.followup.send(self.error_message(exc), ephemeral=True)
 
+        @self.tree.command(name="push", description="Njofto të gjithë që PrimeFlow po përditësohet", guild=guild)
+        @app_commands.describe(minuta="Sa minuta zgjat përafërsisht (parazgjedhje 5)", shenim="Shënim opsional për ekipin")
+        async def push(interaction: discord.Interaction, minuta: app_commands.Range[int, 1, 60] = 5, shenim: str | None = None):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                result = await self.bridge("/bot/push", {"discord_user_id": str(interaction.user.id), "guild_id": str(interaction.guild_id),
+                    "request_id": str(interaction.id), "build": os.getenv("APP_BUILD_SHA", "unknown")})
+                if result["status"] != "SENT":
+                    await interaction.followup.send("ℹ " + result["message"], ephemeral=True)
+                    return
+                sent = await self.broadcast(result["targets"], lambda user_id: ui.push_notice(user_id, result["by"], minuta, shenim))
+                await interaction.followup.send(f"📢 Njoftimi u dërgua te {sent} persona. Kur PrimeFlow të rinisë me versionin e ri, "
+                    "të gjithë marrin automatikisht njoftimin ✅.", ephemeral=True)
+            except Exception as exc:
+                await interaction.followup.send(self.error_message(exc), ephemeral=True)
+
+        voice_meetings.register_meeting_commands(self, guild)
         await self.tree.sync(guild=guild)
+        if settings.DISCORD_MEETING_NOTES_ENABLED:
+            self.voice_meeting_results.start()
         self.reminders.start()
         self.meeting_alerts.start()
         self.agent_results.start()
@@ -599,6 +643,22 @@ class PrimeFlowBot(discord.Client):
         else:
             await interaction.followup.send("⚠ " + result["message"], ephemeral=True)
 
+    async def meeting_held(self, interaction, alert_id, status):
+        """Mbajtur / Anuluar: saved once, and every participant's question shows the answer."""
+        await self.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+        result = await self.bridge(f"/bot/meetings/{alert_id}/status",
+                                   {**actor(interaction.user.id, interaction.guild_id, interaction.channel_id), "status": status})
+        embeds = interaction.message.embeds if interaction.message else []
+        title = embeds[0].title if embeds and embeds[0].title else "Takimi"
+        text = ui.meeting_held_text(title, result["status"], result["by"])
+        await interaction.edit_original_response(content=text, view=None)
+        for other in result.get("others") or []:
+            try:
+                channel = self.get_channel(int(other["channel_id"])) or await self.fetch_channel(int(other["channel_id"]))
+                await channel.get_partial_message(int(other["message_id"])).edit(content=text, view=None)
+            except (discord.HTTPException, ValueError):
+                log.warning("Could not update meeting question %s", other["message_id"])
+
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != discord.InteractionType.component:
             return
@@ -607,7 +667,9 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
-            if custom_id.startswith("pf:agent:"):
+            if custom_id.startswith("pf:vm:"):
+                await voice_meetings.handle_meeting_interaction(self, interaction)
+            elif custom_id.startswith("pf:agent:"):
                 await agent_client.handle_agent_interaction(self, interaction)
             elif custom_id.startswith("pf:quick:"):
                 _, _, task_id, fingerprint, action = custom_id.split(":")
@@ -638,6 +700,10 @@ class PrimeFlowBot(discord.Client):
                 _, _, draft_id, decision = custom_id.split(":")
                 await self.ack(interaction)
                 await self.decide_meeting(interaction, draft_id, decision)
+            elif custom_id.startswith("pf:mheld:"):
+                _, _, alert_id, status = custom_id.split(":")
+                await self.ack(interaction)
+                await self.meeting_held(interaction, alert_id, status)
             elif custom_id.startswith("pf:repdone:"):
                 await self.ack(interaction)
                 await self.report_done(interaction, custom_id.split(":")[2], data["values"])
@@ -840,7 +906,38 @@ class PrimeFlowBot(discord.Client):
     async def before_reminders(self):
         await self.wait_until_ready()
 
+    async def on_socket_raw_receive(self, payload):
+        # discord.py 2.x emits this hook after decompressing the Gateway JSON.
+        # The old socket_response event is not emitted by supported versions.
+        if not settings.DISCORD_MEETING_NOTES_ENABLED:
+            return
+        try:
+            event = json.loads(payload)
+        except (TypeError, ValueError):
+            return
+        if (isinstance(event, dict) and event.get("op") == 0
+                and event.get("t") in ("VOICE_STATE_UPDATE", "VOICE_SERVER_UPDATE")
+                and isinstance(event.get("d"), dict)):
+            await self.meeting_capture.gateway(event)
+
+    async def on_disconnect(self):
+        if settings.DISCORD_MEETING_NOTES_ENABLED:
+            await self.meeting_capture.interrupt("gateway_disconnected")
+
+    @tasks.loop(seconds=15)
+    async def voice_meeting_results(self):
+        try:
+            await voice_meetings.deliver_meeting_results(self)
+        except Exception:
+            log.warning("Mira meeting result delivery unavailable")
+
+    @voice_meeting_results.before_loop
+    async def before_voice_meeting_results(self):
+        await self.wait_until_ready()
+
     async def close(self):
+        self.voice_meeting_results.cancel()
+        await self.meeting_capture.close()
         self.clear_ready_status()
         self.reminders.cancel()
         self.meeting_alerts.cancel()

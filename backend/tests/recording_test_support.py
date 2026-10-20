@@ -45,10 +45,10 @@ def prepare_database():
     config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
     # Model prerequisites are isolated fixtures; execute the actual new migration
     # through Alembic, including downgrade and re-upgrade.
-    command.stamp(config, "0151_discord_meeting_alerts")
-    command.upgrade(config, "0152_meeting_recordings")
-    command.downgrade(config, "0151_discord_meeting_alerts")
-    command.upgrade(config, "0152_meeting_recordings")
+    command.stamp(config, "0152_discord_voice_meetings")
+    command.upgrade(config, "0153_meeting_recordings")
+    command.downgrade(config, "0152_discord_voice_meetings")
+    command.upgrade(config, "0153_meeting_recordings")
     with Session(engine) as db:
         department = Department(name="Recorder test", code="REC")
         db.add(department); db.flush()

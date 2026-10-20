@@ -227,3 +227,4 @@ from app.services import knowledge_task_guard as _knowledge_task_guard  # noqa: 
 from app.models.discord_assistant import DiscordLink, DiscordLinkCode, DiscordReminder, DiscordAction, DiscordMeetingAlert
 from app.models.discord_agent_run import DiscordAgentRun
 from app.models.meeting_recording import MeetingRecording, MeetingRecordingChunk
+from app.models.discord_voice_meeting import DiscordVoiceMeeting, DiscordVoiceSegment

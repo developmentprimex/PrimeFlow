@@ -28,7 +28,7 @@
 
 ### Task 1: Persistence and upload protocol
 
-Files: `backend/app/models/meeting_recording.py`, `backend/app/schemas/meeting_recording.py`, `backend/app/services/meeting_recording_storage.py`, `backend/app/api/routers/meeting_recordings.py`, migration `0152_meeting_recordings`, configuration and router/model registration.
+Files: `backend/app/models/meeting_recording.py`, `backend/app/schemas/meeting_recording.py`, `backend/app/services/meeting_recording_storage.py`, `backend/app/api/routers/meeting_recordings.py`, migration `0153_meeting_recordings`, configuration and router/model registration. The revision follows the Discord voice-meeting migration introduced on main during implementation.
 
 - [ ] Write and run failing storage/API tests for traversal, streaming size limits, sequential/idempotent receipts, missing chunks, authorization and range playback.
 - [ ] Implement local storage, two new tables, owner writes and scoped reads, audit, validated remux/finalization and restart-safe retries.

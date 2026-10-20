@@ -58,7 +58,9 @@ from app.api.routers.skills import router as skills_router
 from app.api.routers.knowledge import router as knowledge_router
 
 
+from app.api.routers.discord_voice_meetings import router as discord_voice_meetings_router
 api_router = APIRouter()
+api_router.include_router(discord_voice_meetings_router, prefix="/discord/bot/voice-meetings", tags=["discord"])
 api_router.include_router(private_profile_photo_router, prefix="/profile-photo", tags=["profile-photo"])
 from app.api.routers.discord_agents import router as discord_agents_router
 api_router.include_router(discord_agents_router, prefix="/discord/bot/agents", tags=["discord"])

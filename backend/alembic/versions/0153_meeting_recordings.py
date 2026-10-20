@@ -3,8 +3,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
-revision = "0152_meeting_recordings"
-down_revision = "0151_discord_meeting_alerts"
+revision = "0153_meeting_recordings"
+down_revision = "0152_discord_voice_meetings"
 branch_labels = None
 depends_on = None
 

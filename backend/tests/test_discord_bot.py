@@ -62,7 +62,7 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
                     await instance.private_channel(123, 10, 20)
 
     async def test_command_registration_and_bridge_url_without_login(self):
-        with patch.object(bot.settings, "DISCORD_GUILD_ID", "123"), patch.object(bot.settings, "DISCORD_BRIDGE_SECRET", "x" * 32), \
+        with patch.object(bot.settings, "DISCORD_GUILD_ID", "123"), patch.object(bot.settings, "DISCORD_MEETING_NOTES_ENABLED", False), patch.object(bot.settings, "DISCORD_BRIDGE_SECRET", "x" * 32), \
              patch.object(bot.settings, "PRIMEFLOW_API_BASE_URL", "http://primeflow.test"), \
              patch.object(bot.app_commands.CommandTree, "sync", new_callable=AsyncMock), \
              patch.object(bot.tasks.Loop, "start"):
@@ -70,7 +70,7 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
             try:
                 await instance.setup_hook()
                 commands = instance.tree.get_commands(guild=discord.Object(id=123))
-                self.assertEqual({command.name for command in commands}, {"lidh", "detyrat", "pyet"})
+                self.assertEqual({command.name for command in commands}, {"lidh", "detyrat", "pyet", "push"})
                 self.assertEqual(str(instance.http_bridge.base_url), "http://primeflow.test/api/discord/")
                 request = instance.http_bridge.build_request("POST", "/bot/tasks", json={})
                 self.assertEqual(str(request.url), "http://primeflow.test/api/discord/bot/tasks")

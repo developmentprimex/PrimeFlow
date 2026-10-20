@@ -552,6 +552,89 @@ async def acknowledge_meeting_alert(alert_id: uuid.UUID, payload: MeetingReceipt
     return {"ok": True}
 
 
+class MeetingHeld(Actor):
+    status: str = Field(pattern=r"^(held|canceled)$")
+
+
+@router.post("/bot/meetings/{alert_id}/status", dependencies=[Depends(require_bot)])
+async def mark_meeting_held(alert_id: uuid.UUID, payload: MeetingHeld, db: AsyncSession = Depends(get_db)):
+    """Mbajtur / Anuluar from Discord saves the same occurrence status as Common View."""
+    link, user = await identity(db, payload)
+    alert = await db.get(DiscordMeetingAlert, alert_id)
+    if not alert or alert.link_id != link.id or alert.kind != "after":
+        raise HTTPException(404, "Pyetja për takimin nuk u gjet.")
+    day = alert.occurrence_starts_at.astimezone(ZoneInfo(settings.APP_TIMEZONE)).date()
+    await tools.user_api(user, "PATCH", f"/api/meetings/{alert.meeting_id}/occurrence-status",
+                         body={"occurrence_date": day.isoformat(), "status": payload.status})
+    # The other participants' questions are answered too; the bot updates them.
+    others = (await db.execute(select(DiscordLink.channel_id, DiscordMeetingAlert.message_id)
+        .join(DiscordLink, DiscordLink.id == DiscordMeetingAlert.link_id).where(
+            DiscordMeetingAlert.meeting_id == alert.meeting_id, DiscordMeetingAlert.kind == "after",
+            DiscordMeetingAlert.occurrence_starts_at == alert.occurrence_starts_at, DiscordMeetingAlert.id != alert.id,
+            DiscordMeetingAlert.message_id.is_not(None), DiscordLink.channel_id.is_not(None)))).all()
+    return {"status": payload.status, "by": user.full_name or user.username,
+            "others": [{"channel_id": channel_id, "message_id": message_id} for channel_id, message_id in others]}
+
+
+PUSH_COMPLETION_WINDOW = timedelta(minutes=45)
+
+
+class PushNotice(BaseModel):
+    discord_user_id: str = Field(pattern=r"^\d{1,32}$")
+    guild_id: str = Field(pattern=r"^\d{1,32}$")
+    request_id: str = Field(pattern=r"^\d{1,32}$")
+    build: str = Field(default="unknown", max_length=64)
+
+
+async def push_targets(db: AsyncSession) -> list[dict]:
+    links = (await db.execute(select(DiscordLink).join(User, User.id == DiscordLink.user_id).where(
+        DiscordLink.enabled.is_(True), DiscordLink.channel_id.is_not(None),
+        DiscordLink.guild_id == settings.DISCORD_GUILD_ID, User.is_active.is_(True)))).scalars().all()
+    return [{"discord_user_id": link.discord_user_id, "channel_id": link.channel_id} for link in links]
+
+
+@router.post("/bot/push", dependencies=[Depends(require_bot)])
+async def announce_push(payload: PushNotice, db: AsyncSession = Depends(get_db)):
+    """/push: anyone linked warns everyone that PrimeFlow is being deployed."""
+    if payload.guild_id != settings.DISCORD_GUILD_ID:
+        raise HTTPException(403, "Serveri Discord nuk përputhet.")
+    link = (await db.execute(select(DiscordLink).where(DiscordLink.discord_user_id == payload.discord_user_id,
+        DiscordLink.guild_id == payload.guild_id, DiscordLink.enabled.is_(True)))).scalar_one_or_none()
+    user = link and await db.get(User, link.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(403, "Lidhe llogarinë PrimeFlow me /lidh para se të përdorësh /push.")
+    # Every /push is announced; only a retried delivery of the same command is not.
+    if await db.get(DiscordAction, payload.request_id):
+        return {"status": "RECENT", "message": "Ky njoftim është dërguar tashmë."}
+    targets = [target for target in await push_targets(db) if target["discord_user_id"] != payload.discord_user_id]
+    db.add(DiscordAction(id=payload.request_id, link_id=link.id, task_id=None, instruction="/push", status="PUSH",
+                         result={"build": payload.build}))
+    await db.commit()
+    return {"status": "SENT", "by": user.full_name or user.username, "targets": targets}
+
+
+class PushCompletion(BaseModel):
+    build: str = Field(max_length=64)
+
+
+@router.post("/bot/push/complete", dependencies=[Depends(require_bot)])
+async def complete_push(payload: PushCompletion, db: AsyncSession = Depends(get_db)):
+    """The bot restarts with the new build after a deploy: tell everyone PrimeFlow is back."""
+    if payload.build == "unknown":
+        return {"targets": []}
+    now = datetime.now(timezone.utc)
+    pending = (await db.execute(select(DiscordAction).where(DiscordAction.status == "PUSH",
+        DiscordAction.created_at > now - PUSH_COMPLETION_WINDOW).with_for_update())).scalars().all()
+    pending = [action for action in pending if (action.result or {}).get("build") != payload.build]
+    if not pending:
+        return {"targets": []}
+    for action in pending:
+        action.status = "PUSH_DONE"
+        action.result = {**(action.result or {}), "completed_build": payload.build}
+    await db.commit()
+    return {"targets": await push_targets(db)}
+
+
 class MeetingDecision(Actor):
     force: bool = False
 

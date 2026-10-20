@@ -28,6 +28,7 @@ celery_app.conf.result_serializer = "json"
 celery_app.conf.accept_content = ["json"]
 
 celery_app.conf.beat_schedule = {
+    "process-discord-voice-meetings": {"task": "app.celery_tasks.process_discord_voice_meetings", "schedule": 30.0},
     "process-discord-agent-runs": {
         "task": "app.celery_tasks.process_discord_agent_runs",
         "schedule": 30.0,

@@ -30,6 +30,9 @@ export function RecorderPanel() {
     void navigator.mediaDevices?.enumerateDevices().then(all => setDevices(all.filter(d => d.kind === "audioinput"))).catch(() => {})
   }, [])
   React.useEffect(() => {
+    if (recorder.state === "prepared") void navigator.mediaDevices.enumerateDevices().then(all => setDevices(all.filter(d => d.kind === "audioinput"))).catch(() => {})
+  }, [recorder.state])
+  React.useEffect(() => {
     let active = true
     void apiFetch("/meetings?include_all_departments=true").then(async response => {
       if (!response.ok) return

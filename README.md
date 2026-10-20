@@ -159,6 +159,13 @@ database migration is required. Test both voice modes with `npm run test:voice`.
 Personal Discord assistant setup, supported task actions, reminder schedule and
 deployment instructions: [Discord assistant](docs/discord-assistant.md).
 
+Mira can also take staff meeting notes silently in a Discord voice channel.
+Opt in with `DISCORD_MEETING_NOTES_ENABLED=true`, then use `/takimi fillo` and
+`/takimi mbaro` from the linked personal channel. Review the private result and
+choose **Ruaj në PX Notes**. It uses the existing bot and OpenAI key, never
+speaks, and does not create tasks from spoken instructions. See the Discord
+guide for Node/DAVE preflight, permissions and the required live meeting test.
+
 This repo includes an MCP server that lets an MCP-capable client call Primeflow through the existing FastAPI API. Local MCP clients can use stdio. ChatGPT Apps/connectors need the server deployed as a reachable HTTPS remote MCP endpoint.
 
 Install backend dependencies, start the API, then set a Primeflow access token.

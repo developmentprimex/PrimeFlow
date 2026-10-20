@@ -204,7 +204,16 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     }
     r.finishing = true
     setView(v => ({ ...v, saving: true, error: null }))
+    let releaseRecoveryLock: (() => void) | undefined
     try {
+      await new Promise<void>((resolve, reject) => {
+        void navigator.locks.request("primeflow-screen-recorder", { ifAvailable: true }, async lock => {
+          if (!lock) { reject(new Error("Një skedë tjetër po regjistron ose rikuperon. Ndaloje atje përpara rikuperimit.")); return }
+          const held = new Promise<void>(release => { releaseRecoveryLock = release })
+          resolve()
+          await held
+        }).catch(reject)
+      })
       const m = await r.outbox.get(target)
       if (!m.stopped) {
         if (!partial) throw new Error("Regjistrimi u ndërpre. Konfirmoni rikuperimin e pjesës së disponueshme.")
@@ -215,18 +224,21 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
       if (r.id === target) r.id = undefined
       setView(v => ({ ...v, savedId: target, error: null }))
     } catch (error) { setView(v => ({ ...v, error: error instanceof Error ? error.message : String(error) })) }
-    finally { r.finishing = false; setView(v => ({ ...v, saving: false })); await refresh() }
+    finally { releaseRecoveryLock?.(); r.finishing = false; setView(v => ({ ...v, saving: false })); await refresh() }
   }
   const discard = async (id: string) => {
     const r = runtime.current
     if (!r || r.finishing || r.starting || ["recording", "paused", "stopping"].includes(r.capture.state)) return
     try {
-      const response = await api.current(`/meeting-recordings/${id}/fail`, { method: "POST" })
-      if (!response.ok) throw new Error("Serveri nuk konfirmoi mbylljen e sesionit.")
-      await r.outbox.remove(id)
-      if (r.id === id) r.id = undefined
-      setView(v => ({ ...v, error: null }))
-      await refresh()
+      await navigator.locks.request("primeflow-screen-recorder", { ifAvailable: true }, async lock => {
+        if (!lock) throw new Error("Një skedë tjetër ka një regjistrim aktiv.")
+        const response = await api.current(`/meeting-recordings/${id}/fail`, { method: "POST" })
+        if (!response.ok) throw new Error("Serveri nuk konfirmoi mbylljen e sesionit.")
+        await r.outbox.remove(id)
+        if (r.id === id) r.id = undefined
+        setView(v => ({ ...v, error: null }))
+        await refresh()
+      })
     } catch (error) { setView(v => ({ ...v, error: String(error) })) }
   }
   const value: RecorderContextValue = { ...view, prepare, start, cancel, retry, discard,
