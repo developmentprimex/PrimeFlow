@@ -60,3 +60,12 @@ class DiscordVoiceSegment(Base):
     lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (UniqueConstraint('session_id', 'sequence', name='uq_voice_segment_sequence'),)
+
+
+from sqlalchemy import exists  # noqa: E402
+from sqlalchemy.orm import column_property  # noqa: E402
+from app.models.ga_note import GaNote  # noqa: E402
+
+# A PX Note saved from a Mira meeting; loaded with every GaNote query so all
+# notes endpoints can mark it without a stored column.
+GaNote.from_mira = column_property(exists().where(DiscordVoiceMeeting.saved_note_id == GaNote.id))

@@ -12,6 +12,13 @@ VOICE_DIR = Path(__file__).resolve().parent / 'discord-voice'
 log = logging.getLogger('primeflow.discord.voice')
 INTERRUPTION_REASONS = frozenset({'voice_error','voice_disconnected','voice_moved','no_decoded_audio',
     'decoder_error','decode_error','receive_error','connect_timeout','audio_backpressure','worker_command_failed'})
+# Audio the worker lost while it kept listening; the notes are marked partial.
+GAP_REASONS = frozenset({'decode_invalid_packet','decode_bad_argument','decode_frame_too_large','decode_error',
+    'decoder_error','receive_error','no_decoded_audio','voice_error','voice_reconnecting'})
+# Consecutive segments that may fail transcription before capture is declared broken.
+UPLOAD_FAILURE_LIMIT = 3
+# Matches MAX_PENDING in discord-voice/audio.mjs.
+MAX_PENDING_UPLOADS = 48
 
 
 class VoiceCaptureClient:
@@ -20,10 +27,11 @@ class VoiceCaptureClient:
         self.process = None
         self.reader = None
         self.uploads = set()
-        self.upload_limit = asyncio.Semaphore(2)
+        self.upload_limit = asyncio.Semaphore(4)
         self.closing = False
         self.failed = False
         self.last_sequence = 0
+        self.upload_failures = 0
         self.session_id = self.instance_id = self.guild_id = self.channel_id = None
         self.ready = self.stopped = None
 
@@ -96,8 +104,13 @@ class VoiceCaptureClient:
         elif kind=='segment':
             if type(message.get('sequence')) is not int or message['sequence']!=self.last_sequence:raise ValueError('ipc_sequence')
             self.last_sequence+=1
-            if len(self.uploads)>=8: await self._fail('audio_backpressure');return
+            if len(self.uploads)>=MAX_PENDING_UPLOADS: await self._fail('audio_backpressure');return
             task=asyncio.create_task(self._upload(message));self.uploads.add(task);task.add_done_callback(self.uploads.discard)
+        elif kind=='audio_gap':
+            reason=message.get('reason')
+            if reason not in GAP_REASONS:
+                raise ValueError('ipc_gap_reason')
+            log.warning('MIRA_DIAGNOSTIC session=%s audio_gap=%s',self.session_id,reason)
         elif kind=='interrupted':
             reason=message.get('reason')
             if reason not in INTERRUPTION_REASONS:reason='audio_interrupted'
@@ -110,12 +123,18 @@ class VoiceCaptureClient:
     async def _upload(self, message):
         try:
             async with self.upload_limit: await self.on_segment(message)
-            await self.send({'type':'credit','sequence':message['sequence']})
+            self.upload_failures=0
         except Exception as exc:
             response=getattr(exc,'response',None)
             log.warning('MIRA_DIAGNOSTIC session=%s stage=upload error_type=%s http_status=%s',
                 self.session_id,type(exc).__name__,getattr(response,'status_code',None))
-            await self._fail('transcription_failed')
+            # One lost segment leaves a gap in the notes; only a run of failures stops listening.
+            self.upload_failures+=1
+            if self.upload_failures>=UPLOAD_FAILURE_LIMIT:
+                await self._fail('transcription_failed');return
+        try:await self.send({'type':'credit','sequence':message['sequence']})
+        except (ValueError,OSError,ConnectionError):
+            if not self.closing:await self._fail('voice_process_unavailable')
 
     async def _fail(self, reason):
         if self.failed: return

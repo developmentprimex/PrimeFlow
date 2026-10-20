@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {encodeWav, SegmentBuffer} from '../audio.mjs';
+import {encodeWav, SegmentBuffer, MAX_PENDING} from '../audio.mjs';
 import {decodeMessage} from '../protocol.mjs';
 
 test('WAV describes the exact stereo PCM and rejects oversized buffers',()=>{
@@ -15,11 +15,16 @@ test('overlapping speakers retain IDs and global sequence; stop flushes once',()
   assert.deepEqual(chunks.map(x=>[x.sequence,x.speaker_id]),[[0,'13'],[1,'12']]);
   assert.equal(b.sequence,2);assert.equal(chunks[0].start_ms,110);
 });
+test('a busy meeting can queue many short segments while transcription catches up',()=>{
+  const b=new SegmentBuffer(()=>{});
+  for(let i=0;i<40;i++){b.push(String(10+i%8),Buffer.alloc(1920),i*10);b.flush(String(10+i%8));}
+  assert.equal(b.sequence,40);
+});
 test('credit exhaustion interrupts rather than silently dropping speech',()=>{
   const b=new SegmentBuffer(()=>{});
-  for(let i=0;i<8;i++){b.push('12',Buffer.alloc(1920),i*10);b.flush('12');}
-  assert.throws(()=>{b.push('12',Buffer.alloc(1920),100);b.flush('12');},/backpressure/);
-  b.credit(0);b.flush('12');assert.equal(b.sequence,9);
+  for(let i=0;i<MAX_PENDING;i++){b.push('12',Buffer.alloc(1920),i*10);b.flush('12');}
+  assert.throws(()=>{b.push('12',Buffer.alloc(1920),1000);b.flush('12');},/backpressure/);
+  b.credit(0);b.flush('12');assert.equal(b.sequence,MAX_PENDING+1);
 });
 test('malformed, oversized, and unknown IPC messages are rejected',()=>{
   for(const value of ['[]','null','{"type":"eval"}','x'.repeat(3000001)])assert.throws(()=>decodeMessage(value));

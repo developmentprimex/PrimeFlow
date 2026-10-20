@@ -37,7 +37,7 @@ async def process_voice_meetings():
                 row.status='FAILED';row.error='Nuk u dëgjua të folur i kuptueshëm.';row.partial=partial
                 await db.commit();stats['failed']+=1;continue
             lease=uuid.uuid4();row.lease_token=lease;row.lease_until=now()+timedelta(seconds=180)
-            title,cache=row.title,row.summary_progress or {}
+            title,cache,meeting_date=row.title,row.summary_progress or {},row.started_at or row.created_at
             await db.commit()
         async def checkpoint(progress):
             async with SessionLocal() as db:
@@ -46,7 +46,8 @@ async def process_voice_meetings():
                 current.summary_progress=dict(progress);current.lease_until=now()+timedelta(seconds=180)
                 await db.commit()
         try:
-            draft=await provider.summarize_meeting(title,parts,partial=partial,cache=cache,checkpoint=checkpoint)
+            draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
+                cache=cache,checkpoint=checkpoint)
             error=None
         except ValueError:
             draft=None;error='Përmbledhja dështoi. Transkripti i marrë mbetet i ruajtur.'
