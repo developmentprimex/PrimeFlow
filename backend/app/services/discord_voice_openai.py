@@ -45,6 +45,15 @@ def validate_wav(data):
 async def transcribe_segment(wav):
     pcm=validate_wav(wav)
     if not any(pcm): return ''
+    # Discord may end a speaker stream after a single 20 ms packet. The
+    # transcription API rejects audio shorter than 100 ms. Preserve all
+    # captured samples and append silence only for the provider request.
+    if len(pcm)<19200:
+        padded=io.BytesIO()
+        with wave.open(padded,'wb') as audio:
+            audio.setnchannels(2);audio.setsampwidth(2);audio.setframerate(48000)
+            audio.writeframes(pcm+bytes(19200-len(pcm)))
+        wav=padded.getvalue()
     body=await request('audio/transcriptions',data={'model':settings.DISCORD_MEETING_TRANSCRIBE_MODEL,
         'prompt':ALBANIAN_TRANSCRIPTION_PROMPT},files={'file':('meeting.wav',wav,'audio/wav')})
     result=body.get('text')

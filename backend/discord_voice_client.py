@@ -98,6 +98,11 @@ class VoiceCaptureClient:
             self.last_sequence+=1
             if len(self.uploads)>=8: await self._fail('audio_backpressure');return
             task=asyncio.create_task(self._upload(message));self.uploads.add(task);task.add_done_callback(self.uploads.discard)
+        elif kind=='audio_gap':
+            reason=message.get('reason')
+            if reason not in ('decode_invalid_packet','decode_bad_argument','decode_frame_too_large'):
+                raise ValueError('ipc_gap_reason')
+            log.warning('MIRA_DIAGNOSTIC session=%s audio_gap=%s',self.session_id,reason)
         elif kind=='interrupted':
             reason=message.get('reason')
             if reason not in INTERRUPTION_REASONS:reason='audio_interrupted'

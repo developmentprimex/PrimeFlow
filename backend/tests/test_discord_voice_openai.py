@@ -14,6 +14,15 @@ def wav(pcm=b'\x20\x10\x20\x10'*480):
     return f.getvalue()
 
 class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_short_speech_tail_is_padded_to_provider_minimum_without_changing_samples(self):
+        pcm=b'\x20\x10\x20\x10'*960
+        with patch.object(provider,'request',AsyncMock(return_value={'text':'Po.'})) as call:
+            self.assertEqual(await provider.transcribe_segment(wav(pcm)),'Po.')
+        audio=call.call_args.kwargs['files']['file'][1]
+        with wave.open(io.BytesIO(audio),'rb') as w:
+            self.assertGreaterEqual(w.getnframes(),4800)
+            self.assertEqual(w.readframes(960),pcm)
+
     async def test_silence_is_empty_and_invalid_wav_never_calls_provider(self):
         with patch.object(provider,'request',AsyncMock()) as call:
             self.assertEqual(await provider.transcribe_segment(wav(bytes(1920))), '')

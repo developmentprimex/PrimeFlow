@@ -4,6 +4,14 @@ from unittest.mock import AsyncMock
 from discord_voice_client import VoiceCaptureClient
 
 class VoiceClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reported_packet_gap_is_diagnostic_and_does_not_interrupt_capture(self):
+        c=self.client()
+        with self.assertLogs('primeflow.discord.voice',level='WARNING') as logs:
+            await c.handle({'type':'audio_gap','session_id':'s','instance_id':'i','reason':'decode_invalid_packet'})
+        c.on_interruption.assert_not_awaited()
+        self.assertFalse(c.failed)
+        self.assertIn('decode_invalid_packet',' '.join(logs.output))
+
     async def test_worker_interruption_preserves_safe_reason_and_numeric_close_code(self):
         c=self.client()
         with self.assertLogs('primeflow.discord.voice',level='WARNING') as logs:

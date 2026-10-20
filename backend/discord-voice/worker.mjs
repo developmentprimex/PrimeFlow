@@ -22,13 +22,33 @@ export function createReceiver({sessionId,instanceId,guildId,channelId,userId,em
   connection.on('stateChange',(_old,state)=>{if(!closed&&['disconnected','destroyed'].includes(state.status))fail('voice_disconnected',{close_code:state.closeCode});});
   connection.receiver.speaking.on('start',id=>{
     if(closed||streams.has(id))return;
-    let decoded=false;
+    let decoded=false,badPackets=0;
     const watchdog=setTimeout(()=>{timers.delete(watchdog);if(!decoded)fail('no_decoded_audio');},10000);timers.add(watchdog);
     const stream=connection.receiver.subscribe(id,{end:{behavior:voice.EndBehaviorType.AfterSilence,duration:700}});
     streams.set(id,stream);
     let decoder;
     try{decoder=makeDecoder();decoders.set(id,decoder);}catch{fail('decoder_error');return;}
-    stream.on('data',packet=>{if(closed)return;try{const pcm=decoder.decode(packet);if(pcm.length){decoded=true;buffer.push(id,pcm,now()-began);}}catch{fail('decode_error');}});
+    stream.on('data',packet=>{
+      if(closed)return;
+      let pcm;
+      try{pcm=decoder.decode(packet);}
+      catch(error){
+        const reason=new Map([
+          ['Decode error: Invalid packet','decode_invalid_packet'],
+          ['Decode error: Bad argument','decode_bad_argument'],
+          ['Decode error: Buffer too small','decode_frame_too_large']
+        ]).get(error?.message);
+        if(!reason){fail('decode_error');return;}
+        // A transient malformed packet must not disconnect every participant.
+        // Report any loss, and keep a finite recovery budget per speaker.
+        partial=true;badPackets++;
+        if(badPackets===1)out({type:'audio_gap',reason});
+        if(badPackets>=100)fail('decode_error');
+        return;
+      }
+      badPackets=0;
+      if(pcm.length){decoded=true;try{buffer.push(id,pcm,now()-began);}catch{fail('audio_backpressure');}}
+    });
     stream.once('end',()=>{streams.delete(id);clearTimeout(watchdog);timers.delete(watchdog);try{buffer.flush(id);}catch{fail('audio_backpressure');}decoder.delete?.();decoders.delete(id);});
     stream.once('error',()=>fail('receive_error'));
   });
