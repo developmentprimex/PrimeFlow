@@ -45,7 +45,7 @@ def validate_wav(data):
 async def transcribe_segment(wav):
     pcm=validate_wav(wav)
     if not any(pcm): return ''
-    body=await request('audio/transcriptions',data={'model':settings.SPEECH_ALBANIAN_TRANSCRIBE_MODEL,
+    body=await request('audio/transcriptions',data={'model':settings.DISCORD_MEETING_TRANSCRIBE_MODEL,
         'prompt':ALBANIAN_TRANSCRIPTION_PROMPT},files={'file':('meeting.wav',wav,'audio/wav')})
     result=body.get('text')
     if not isinstance(result,str) or len(result)>16000:raise ValueError('invalid_transcript')

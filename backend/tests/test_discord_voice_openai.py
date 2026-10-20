@@ -23,7 +23,7 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_albanian_model_prompt_and_transcript(self):
         with patch.object(provider,'request',AsyncMock(return_value={'text':'Kontrollo raportin.'})) as call:
             self.assertEqual(await provider.transcribe_segment(wav()),'Kontrollo raportin.')
-            data=call.call_args.kwargs['data'];self.assertEqual(data['model'],settings.SPEECH_ALBANIAN_TRANSCRIBE_MODEL)
+            data=call.call_args.kwargs['data'];self.assertEqual(data['model'],'gpt-transcribe')
             self.assertIn('shqip',data['prompt']);self.assertNotIn('language',data)
 
     async def test_summary_is_text_only_and_retains_speaker_references(self):

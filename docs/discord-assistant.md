@@ -1,5 +1,9 @@
 # Asistenti personal PrimeFlow në Discord
 
+Shënimet e takimeve përdorin `DISCORD_MEETING_TRANSCRIBE_MODEL=gpt-transcribe`
+për audion. Përmbledhjet përdorin `DISCORD_AI_MODEL`; në server është vendosur
+`gpt-6-luna`.
+
 ## Mira në takimet zanore: vetëm dëgjim
 
 Mira mund të hyjë me identitetin e botit ekzistues në një voice channel të
