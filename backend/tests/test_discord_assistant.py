@@ -367,7 +367,11 @@ class MigrationTests(unittest.TestCase):
                 revisions.add(values["revision"])
                 down = values.get("down_revision")
                 referenced.update(down if isinstance(down, tuple) else [down] if down else [])
-        self.assertEqual(revisions - referenced, {"0153_meeting_recordings"})
+        # Later features may extend the graph; Discord's revision must remain
+        # present and there must still be exactly one unambiguous migration head.
+        self.assertIn("0151_discord_meeting_alerts", revisions)
+        self.assertIn("0152_discord_voice_meetings", revisions)
+        self.assertEqual(len(revisions - referenced), 1)
         self.assertEqual(DiscordAction.__table__.c.id.type.length, 32)
         self.assertEqual(DiscordLink.__table__.c.channel_id.type.length, 32)
         self.assertIn("code_hash", DiscordLinkCode.__table__.c)

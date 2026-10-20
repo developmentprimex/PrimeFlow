@@ -23,6 +23,20 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_RECYCLE: int = 1800
+    MEETING_RECORDINGS_ROOT: str = "uploads/meeting-recordings"
+    MEETING_RECORDINGS_MAX_CHUNK_BYTES: int = 32 * 1024 * 1024
+    MEETING_RECORDINGS_MAX_SESSION_BYTES: int = 20 * 1024 * 1024 * 1024
+    MEETING_RECORDINGS_MAX_DURATION_SECONDS: int = 12 * 60 * 60
+    MEETING_RECORDINGS_MAX_OPEN_SESSIONS: int = 3
+    MEETING_RECORDINGS_FFMPEG: str = "ffmpeg"
+    MEETING_RECORDINGS_FFPROBE: str = "ffprobe"
+    RECORDING_ANALYSIS_ENABLED: bool = True
+    RECORDING_ANALYSIS_MODEL: str = "gpt-6-luna"
+    RECORDING_TRANSCRIBE_MODEL: str = "gpt-transcribe"
+    # Sends the chosen language code to the transcription API; disable if a model rejects it.
+    RECORDING_TRANSCRIBE_LANGUAGE_HINT: bool = True
+    # Product and client terms added to transcription prompts, next to staff and department names.
+    RECORDING_TRANSCRIPTION_VOCABULARY: str = "PrimeFlow, PrimEx, PX, Mendex, MX, GA, PX Notes, Mira"
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"

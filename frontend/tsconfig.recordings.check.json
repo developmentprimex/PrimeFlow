@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["next-env.d.ts", "src/lib/recording-*.ts", "src/components/meeting-recordings/**/*.tsx", "src/app/(app)/meeting-recordings/**/*.tsx", "src/app/api/meeting-recordings/**/*.ts"],
+  "exclude": ["node_modules"]
+}

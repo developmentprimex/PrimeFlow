@@ -1884,6 +1884,18 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
+    return await create_task_in_session(payload, db, user)
+
+
+async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *, before_commit=None) -> TaskOut:
+    """Existing creation flow; an internal hook can attach provenance atomically.
+
+    The hook is not an API parameter. Callers using it must supply a single,
+    ordinary task without note origins, dependencies or multiple assignees.
+    """
+    if before_commit is not None and (payload.ga_note_origin_id or payload.plan_note_origin_id
+            or payload.dependency_task_id or len(payload.assignees or []) > 1):
+        raise ValueError("Provenance hook requires a single ordinary task")
     # ensures_manager_or_admin(user) - Removed to allow all department members to create tasks
     payload.title = _normalize_email_task_title(payload.title)
     _validate_eight_am_one_h_slot(payload.title, payload.one_h_report_slot)
@@ -2837,6 +2849,8 @@ async def create_task(
             )
 
     await record_initial_marker_comments(db, [task], actor_email=user.email)
+    if before_commit is not None:
+        before_commit(task)
     await db.commit()
 
     for n in created_notifications:

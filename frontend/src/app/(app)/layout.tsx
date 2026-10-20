@@ -11,6 +11,7 @@ import { WaitingConfirmationGaProvider } from "@/components/waiting-confirmation
 import { MarkerCommentsPanel, MarkerCommentsProvider } from "@/components/marker-comments-context"
 import { useAuth } from "@/lib/auth"
 import { BrowserTabTitleProvider } from "@/components/browser-tab-title"
+import { RecorderProvider } from "@/components/meeting-recordings/recorder-provider"
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -26,6 +27,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null
 
   return (
+    <RecorderProvider key={user.id}>
     <BrowserTabTitleProvider>
     <SidebarProvider>
       <WaitingConfirmationGaProvider>
@@ -42,6 +44,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </WaitingConfirmationGaProvider>
     </SidebarProvider>
     </BrowserTabTitleProvider>
+    </RecorderProvider>
   )
 }
 

@@ -6,6 +6,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { 
   LayoutDashboard, 
+  Video,
   Globe, 
   Code2, 
   FileText, 
@@ -73,6 +74,7 @@ type NavGroup = {
 }
 
 const primaryItems: NavItem[] = [
+  { href: "/meeting-recordings", label: "Regjistrimet", icon: Video },
   { 
     href: "/dashboard", 
     label: "Dashboard", 

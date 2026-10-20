@@ -30,7 +30,9 @@
     ".next/dev/types/**/*.ts",
     ".next-deploy/types/**/*.ts",
     ".next-deploy/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    ".next-recorder-test/types/**/*.ts",
+    ".next-recorder-test/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }
