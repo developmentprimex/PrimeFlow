@@ -36,7 +36,10 @@ export function createReceiver({sessionId,instanceId,guildId,channelId,userId,em
   return {ready,stop,destroy:stop,credit:sequence=>buffer.credit(sequence),gateway:event=>{
     if(closed||event?.d?.guild_id!==guildId)return;
     if(event.t==='VOICE_SERVER_UPDATE')adapter.onVoiceServerUpdate(event.d);
-    if(event.t==='VOICE_STATE_UPDATE'&&event.d.user_id===userId)adapter.onVoiceStateUpdate(event.d);
+    if(event.t==='VOICE_STATE_UPDATE'&&event.d.user_id===userId){
+      if(event.d.channel_id!==channelId){fail('voice_moved');return;}
+      adapter.onVoiceStateUpdate(event.d);
+    }
   }};
 }
 

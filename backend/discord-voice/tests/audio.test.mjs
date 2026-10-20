@@ -25,3 +25,15 @@ test('malformed, oversized, and unknown IPC messages are rejected',()=>{
   for(const value of ['[]','null','{"type":"eval"}','x'.repeat(3000001)])assert.throws(()=>decodeMessage(value));
   assert.equal(decodeMessage('{"type":"shutdown"}').type,'shutdown');
 });
+test('60ms Opus frames split exactly at the ten second WAV limit',()=>{
+ const chunks=[];const b=new SegmentBuffer(x=>chunks.push(x));
+ for(let i=0;i<167;i++)b.push('12',Buffer.alloc(11520),i*60);
+ b.stop();assert.equal(chunks.length,2);
+ for(const c of chunks)assert.ok(Buffer.from(c.audio_base64,'base64').length<=1920044);
+});
+test('packet gaps cannot make a chunk exceed the backend wall-time limit',()=>{
+ const chunks=[];const b=new SegmentBuffer(x=>chunks.push(x));
+ for(let i=0;i<500;i++)b.push('12',Buffer.alloc(3840),i*25);
+ b.stop();assert.equal(chunks.length,2);
+ for(const c of chunks)assert.ok(c.end_ms-c.start_ms<=10000);
+});

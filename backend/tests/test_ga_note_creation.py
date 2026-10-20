@@ -27,3 +27,10 @@ class NoteCreationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(note.created_by, user.id)
         self.assertEqual(note.department_id, user.department_id)
         db.commit.assert_not_called()
+
+    async def test_normal_project_note_keeps_project_and_department(self):
+        user=SimpleNamespace(id=uuid.uuid4(),role=UserRole.STAFF,department_id=uuid.uuid4(),email='test@example.test')
+        project=SimpleNamespace(id=uuid.uuid4(),department_id=user.department_id)
+        db=SimpleNamespace(add=Mock(),execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=project))))
+        note=await build_ga_note(db,user,GaNoteCreate(content='Project note',project_id=project.id))
+        self.assertEqual(note.project_id,project.id);self.assertEqual(note.department_id,user.department_id)

@@ -19,6 +19,7 @@ class VoiceCaptureClient:
         self.upload_limit = asyncio.Semaphore(2)
         self.closing = False
         self.failed = False
+        self.last_sequence = 0
         self.session_id = self.instance_id = self.guild_id = self.channel_id = None
         self.ready = self.stopped = None
 
@@ -34,6 +35,9 @@ class VoiceCaptureClient:
         self.process = await asyncio.create_subprocess_exec(node, str(VOICE_DIR / 'worker.mjs'),
             cwd=str(VOICE_DIR), env=self.child_env(), stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=MAX_LINE+1)
+        if self.closing:
+            self.process.kill();await self.process.wait()
+            raise ValueError('capture_cancelled')
         self.reader = asyncio.create_task(self._read())
         await self.send({'type':'start', 'guild_id':self.guild_id, 'channel_id':self.channel_id, 'user_id':str(bot_user_id)})
         await asyncio.wait_for(asyncio.shield(self.ready), 20)
@@ -71,7 +75,9 @@ class VoiceCaptureClient:
         if message.get('session_id')!=self.session_id or message.get('instance_id')!=self.instance_id:
             raise ValueError('ipc_session')
         if kind=='gateway_send':
-            payload=message.get('payload',{});data=payload.get('d',{})
+            payload=message.get('payload')
+            if not isinstance(payload,dict) or not isinstance(payload.get('d'),dict):raise ValueError('gateway_shape')
+            data=payload['d']
             if payload.get('op')!=4 or set(payload)!={'op','d'} or set(data)-{'guild_id','channel_id','self_mute','self_deaf'}:
                 raise ValueError('gateway_operation')
             if data.get('guild_id')!=self.guild_id or data.get('channel_id') not in (None,self.channel_id) or data.get('self_mute') is not True or data.get('self_deaf') is not False:
@@ -84,6 +90,8 @@ class VoiceCaptureClient:
             if type(count) is not int or count<0: raise ValueError('ipc_sequence')
             if self.stopped and not self.stopped.done(): self.stopped.set_result(message)
         elif kind=='segment':
+            if type(message.get('sequence')) is not int or message['sequence']!=self.last_sequence:raise ValueError('ipc_sequence')
+            self.last_sequence+=1
             if len(self.uploads)>=8: await self._fail('audio_backpressure');return
             task=asyncio.create_task(self._upload(message));self.uploads.add(task);task.add_done_callback(self.uploads.discard)
         elif kind=='interrupted':
@@ -122,6 +130,9 @@ class VoiceCaptureClient:
             try: await asyncio.wait_for(self.process.wait(),3)
             except asyncio.TimeoutError:
                 self.process.kill();await self.process.wait()
+        if self.guild_id:
+            try:await asyncio.wait_for(self.send_gateway({'op':4,'d':{'guild_id':self.guild_id,'channel_id':None,'self_mute':True,'self_deaf':False}}),3)
+            except Exception:pass
         if self.reader:
             self.reader.cancel();await asyncio.gather(self.reader,return_exceptions=True)
         for task in list(self.uploads):task.cancel()

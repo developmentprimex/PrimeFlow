@@ -6,12 +6,14 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import select, text, or_
 from app.api.routers import discord_assistant as bridge
 from app.api.access import ensure_department_access
 from app.config import settings
 from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting, DiscordVoiceSegment as Segment
 from app.models.enums import UserRole
+from app.models.discord_assistant import DiscordLink
+from app.models.user import User
 from app.schemas.ga_note import GaNoteCreate
 from app.services.ga_note_creation import build_ga_note
 
@@ -26,6 +28,7 @@ def token_hash(token):
 
 def view(row):
     return dict(id=str(row.id), status=row.status, title=row.title, partial=bool(row.partial),
+        created_at=row.created_at.isoformat() if row.created_at else None,
         organizer_user_id=str(row.user_id), voice_channel_id=row.voice_channel_id,
         private_channel_id=row.private_channel_id, error=row.error, draft_text=row.draft_text,
         saved_note_id=str(row.saved_note_id) if row.saved_note_id else None,
@@ -184,3 +187,27 @@ async def receive_segment(db, session_id, payload, audio):
     if error:row.partial=True
     await db.commit()
     return {'sequence':segment.sequence,'status':segment.status}
+
+
+async def claim_deliveries(db):
+    rows=(await db.execute(select(Meeting,DiscordLink).join(DiscordLink,DiscordLink.id==Meeting.link_id)
+        .join(User,User.id==Meeting.user_id).where(Meeting.status.in_(['READY','FAILED']),
+            Meeting.delivered_at.is_(None),or_(Meeting.delivery_until.is_(None),Meeting.delivery_until<now()),
+            DiscordLink.enabled.is_(True),User.is_active.is_(True),DiscordLink.channel_id==Meeting.private_channel_id,
+            Meeting.guild_id==settings.DISCORD_GUILD_ID)
+        .order_by(Meeting.created_at).with_for_update(of=Meeting,skip_locked=True).limit(10))).all()
+    jobs=[]
+    for row,link in rows:
+        row.delivery_token=uuid.uuid4();row.delivery_until=now()+timedelta(minutes=5)
+        jobs.append(dict(id=str(row.id),guild_id=row.guild_id,channel_id=row.private_channel_id,
+            discord_user_id=link.discord_user_id,delivery_token=str(row.delivery_token)))
+    await db.commit()
+    return {'jobs':jobs}
+
+
+async def ack_delivery(db,session_id,payload):
+    row=await locked(db,session_id)
+    if row.delivery_token!=payload.delivery_token:raise HTTPException(409,'Njoftimi ka ndryshuar.')
+    row.message_ids=payload.message_ids;row.delivered_at=now();row.delivery_until=None
+    await db.commit()
+    return {'success':True}

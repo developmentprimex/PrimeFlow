@@ -38,3 +38,24 @@ class VoiceClientTests(unittest.IsolatedAsyncioTestCase):
         c=self.client()
         with self.assertRaises(ValueError):await c.handle({'type':'segment','session_id':'s','instance_id':'other'})
         c.on_segment.assert_not_awaited()
+
+    async def test_malformed_gateway_payload_is_rejected_as_protocol_error(self):
+        c=self.client()
+        for payload in [None,[],{'op':4,'d':None}]:
+            with self.assertRaises(ValueError):await c.handle({'type':'gateway_send','session_id':'s','instance_id':'i','payload':payload})
+
+    async def test_close_leaves_guild_even_if_child_has_already_died(self):
+        c=self.client();await c.close()
+        c.send_gateway.assert_awaited_once_with({'op':4,'d':{'guild_id':'1','channel_id':None,'self_mute':True,'self_deaf':False}})
+
+    async def test_close_during_process_spawn_cannot_start_late_capture(self):
+        from unittest.mock import Mock, patch
+        entered=asyncio.Event();release=asyncio.Event()
+        process=Mock(returncode=None);process.wait=AsyncMock();process.stdin=Mock()
+        async def spawn(*args,**kwargs):entered.set();await release.wait();return process
+        c=self.client()
+        with patch('asyncio.create_subprocess_exec',spawn):
+            start=asyncio.create_task(c.start(session_id='s',instance_id='i',guild_id='1',channel_id='2',bot_user_id='3'))
+            await entered.wait();await c.close();release.set()
+            with self.assertRaises(ValueError):await start
+            process.kill.assert_called_once();process.stdin.write.assert_not_called()

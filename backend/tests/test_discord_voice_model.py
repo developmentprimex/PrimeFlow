@@ -74,3 +74,21 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(a['saved_note_id'], b['saved_note_id'])
             async with self.sessions() as db:
                 self.assertEqual((await db.execute(select(func.count()).select_from(GaNote))).scalar_one(), 1)
+
+    async def test_frozen_migration_creates_matching_columns_in_postgresql(self):
+        import importlib.util
+        from pathlib import Path
+        from alembic.operations import Operations
+        from alembic.migration import MigrationContext
+        from sqlalchemy import inspect
+        path=Path(__file__).resolve().parents[1]/'alembic/versions/0152_discord_voice_meetings.py'
+        spec=importlib.util.spec_from_file_location('voice_migration',path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        async with self.engine.begin() as conn:
+            await conn.run_sync(lambda c: Segment.__table__.drop(c))
+            await conn.run_sync(lambda c: Meeting.__table__.drop(c))
+            await conn.execute(text(f'SET LOCAL search_path TO {self.schema},public'))
+            def upgrade(c):
+                with patch.object(module,'op',Operations(MigrationContext.configure(c))):module.upgrade()
+                self.assertEqual({x['name'] for x in inspect(c).get_columns(Meeting.__tablename__,schema=self.schema)},set(Meeting.__table__.c.keys()))
+                self.assertTrue(any(x['name']=='uq_discord_voice_active_guild' and x['unique'] for x in inspect(c).get_indexes(Meeting.__tablename__,schema=self.schema)))
+            await conn.run_sync(upgrade)

@@ -1,4 +1,5 @@
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access
 from app.models.enums import GaNoteType, GaNoteStatus, UserRole

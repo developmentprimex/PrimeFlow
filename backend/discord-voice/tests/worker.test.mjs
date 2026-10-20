@@ -18,3 +18,7 @@ test('adapter forwards only matching voice events; unexpected disconnect interru
  f.r.gateway({t:'VOICE_SERVER_UPDATE',d:{guild_id:'1',endpoint:'voice'}});assert.equal(f.events.length,2);
  f.conn.emit('stateChange',{}, {status:'disconnected'});assert.equal(f.events.find(x=>x.type==='interrupted').reason,'voice_disconnected');
 });
+test('moving the bot to an unannounced voice channel immediately stops capture',async()=>{
+ const f=fixture();await f.r.ready;f.r.gateway({t:'VOICE_STATE_UPDATE',d:{guild_id:'1',user_id:'3',channel_id:'99'}});
+ assert.equal(f.events.find(x=>x.type==='interrupted')?.reason,'voice_moved');
+});

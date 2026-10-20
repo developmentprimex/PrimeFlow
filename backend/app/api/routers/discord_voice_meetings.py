@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.api.routers.discord_assistant import require_bot
-from app.schemas.discord_voice_meeting import VoiceActor, VoiceStart, Worker, Finish, Interrupt, SegmentMeta
+from app.schemas.discord_voice_meeting import VoiceActor, VoiceStart, Worker, Finish, Interrupt, SegmentMeta, DeliveryAck
 from app.services import discord_voice_meetings as service
 
 router = APIRouter(dependencies=[Depends(require_bot)])
@@ -61,3 +61,11 @@ async def segment(session_id: uuid.UUID, capture_token: str = Form(...), instanc
     finally:await file.close()
     try:return await service.receive_segment(db,session_id,payload,bytes(data))
     except ValueError:raise HTTPException(422,'Audioja nuk është WAV i vlefshëm.') from None
+
+@router.post('/delivery/claim')
+async def claim(db: AsyncSession = Depends(get_db)):
+    return await service.claim_deliveries(db)
+
+@router.post('/{session_id}/delivery/ack')
+async def ack(session_id: uuid.UUID, payload: DeliveryAck, db: AsyncSession = Depends(get_db)):
+    return await service.ack_delivery(db,session_id,payload)

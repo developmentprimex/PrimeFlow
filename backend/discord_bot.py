@@ -20,6 +20,7 @@ from discord.ext import tasks
 from app.config import settings
 import discord_ui as ui
 import discord_agent_client as agent_client
+import discord_voice_meetings as voice_meetings
 
 log = logging.getLogger("primeflow.discord")
 ACTION_CHOICES = [
@@ -134,7 +135,8 @@ class PrimeFlowBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = settings.DISCORD_MESSAGE_CONTENT_ENABLED
-        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
+        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none(), enable_debug_events=settings.DISCORD_MEETING_NOTES_ENABLED)
+        self.meeting_capture = voice_meetings.MeetingCaptureCoordinator(self)
         self.tree = app_commands.CommandTree(self)
         self.task_details = {}
         self.task_cards = {}
@@ -287,7 +289,10 @@ class PrimeFlowBot(discord.Client):
             except Exception as exc:
                 await interaction.followup.send(self.error_message(exc), ephemeral=True)
 
+        voice_meetings.register_meeting_commands(self, guild)
         await self.tree.sync(guild=guild)
+        if settings.DISCORD_MEETING_NOTES_ENABLED:
+            self.voice_meeting_results.start()
         self.reminders.start()
         self.meeting_alerts.start()
         self.agent_results.start()
@@ -607,7 +612,9 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
-            if custom_id.startswith("pf:agent:"):
+            if custom_id.startswith("pf:vm:"):
+                await voice_meetings.handle_meeting_interaction(self, interaction)
+            elif custom_id.startswith("pf:agent:"):
                 await agent_client.handle_agent_interaction(self, interaction)
             elif custom_id.startswith("pf:quick:"):
                 _, _, task_id, fingerprint, action = custom_id.split(":")
@@ -840,7 +847,28 @@ class PrimeFlowBot(discord.Client):
     async def before_reminders(self):
         await self.wait_until_ready()
 
+    async def on_socket_response(self, payload):
+        if settings.DISCORD_MEETING_NOTES_ENABLED:
+            await self.meeting_capture.gateway(payload)
+
+    async def on_disconnect(self):
+        if settings.DISCORD_MEETING_NOTES_ENABLED:
+            await self.meeting_capture.interrupt("gateway_disconnected")
+
+    @tasks.loop(seconds=15)
+    async def voice_meeting_results(self):
+        try:
+            await voice_meetings.deliver_meeting_results(self)
+        except Exception:
+            log.warning("Mira meeting result delivery unavailable")
+
+    @voice_meeting_results.before_loop
+    async def before_voice_meeting_results(self):
+        await self.wait_until_ready()
+
     async def close(self):
+        self.voice_meeting_results.cancel()
+        await self.meeting_capture.close()
         self.clear_ready_status()
         self.reminders.cancel()
         self.meeting_alerts.cancel()
