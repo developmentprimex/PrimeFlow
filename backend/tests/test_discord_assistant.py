@@ -367,7 +367,7 @@ class MigrationTests(unittest.TestCase):
                 revisions.add(values["revision"])
                 down = values.get("down_revision")
                 referenced.update(down if isinstance(down, tuple) else [down] if down else [])
-        self.assertEqual(revisions - referenced, {"0151_discord_meeting_alerts"})
+        self.assertEqual(revisions - referenced, {"0152_discord_voice_meetings"})
         self.assertEqual(DiscordAction.__table__.c.id.type.length, 32)
         self.assertEqual(DiscordLink.__table__.c.channel_id.type.length, 32)
         self.assertIn("code_hash", DiscordLinkCode.__table__.c)
