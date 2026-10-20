@@ -35,6 +35,12 @@ use the separate speech settings above. Luna supports the existing Responses
 API and Structured Outputs contract:
 [OpenAI GPT-6 Luna model documentation](https://developers.openai.com/api/docs/models/gpt-6-luna).
 
+Luna follow-up verification on 2026-10-20: the configured local key successfully
+completed real Responses API calls for schema-validated proposals and the
+existing meeting summarizer using `gpt-6-luna`. The input was invented Albanian
+test text; no saved recording audio or transcripts were read or sent. The five
+recording provider tests and four existing Discord provider tests also passed.
+
 Production uses existing Celery workers and beat: the new
 `app.celery_tasks.process_recording_analyses` task is scheduled every five
 seconds. Restart the API, workers and beat on approved deployment after the
