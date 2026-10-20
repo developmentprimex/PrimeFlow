@@ -312,6 +312,23 @@ class PrimeFlowBot(discord.Client):
             except Exception as exc:
                 await interaction.followup.send(self.error_message(exc), ephemeral=True)
 
+        @self.tree.command(name="push", description="Njofto të gjithë që PrimeFlow po përditësohet", guild=guild)
+        @app_commands.describe(minuta="Sa minuta zgjat përafërsisht (parazgjedhje 5)", shenim="Shënim opsional për ekipin")
+        async def push(interaction: discord.Interaction, minuta: app_commands.Range[int, 1, 60] = 5, shenim: str | None = None):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                result = await self.bridge("/bot/push", {"discord_user_id": str(interaction.user.id), "guild_id": str(interaction.guild_id),
+                    "request_id": str(interaction.id), "build": os.getenv("APP_BUILD_SHA", "unknown")})
+                if result["status"] != "SENT":
+                    await interaction.followup.send("ℹ " + result["message"], ephemeral=True)
+                    return
+                sent = await self.broadcast(result["targets"], lambda user_id: ui.push_notice(user_id, result["by"], minuta, shenim))
+                await interaction.followup.send(f"📢 Njoftimi u dërgua te {sent} persona. Kur PrimeFlow të rinisë me versionin e ri, "
+                    "të gjithë marrin automatikisht njoftimin ✅.", ephemeral=True)
+            except Exception as exc:
+                await interaction.followup.send(self.error_message(exc), ephemeral=True)
+
+        voice_meetings.register_meeting_commands(self, guild)
         await self.tree.sync(guild=guild)
         if settings.DISCORD_MEETING_NOTES_ENABLED:
             self.voice_meeting_results.start()
