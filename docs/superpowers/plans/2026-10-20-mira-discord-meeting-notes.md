@@ -163,7 +163,7 @@
 - [ ] Perform live acceptance only in a deliberately started test meeting with staff: two speakers in Albanian, overlap, join/leave/rejoin, stop, review, save twice. Verify audio reception survives DAVE transitions, bot never speaks, result attribution/decisions are accurate, only one Note exists and no private content is posted to shared chat.
 - [x] Record live result or explicitly mark it pending. Do not join/record a real meeting automatically to complete this checkbox. Keep feature disabled until deployment preflight and live acceptance are deliberately exercised.
 - [x] Update user docs with permissions (`View Channel`, `Connect`, `Send Messages` for the meeting notice), private command flow, recovery and known partial-result behavior. Document Node package requirements and how to verify readiness without recording.
-- [ ] Commit final verified code/docs; integrate remote changes safely and push when the authorized implementation is complete. Report commit, usage, verification and any remaining live acceptance requirement accurately.
+- [x] Commit final verified code/docs; integrate remote changes safely and push when the authorized implementation is complete. Report commit, usage, verification and any remaining live acceptance requirement accurately.
 
 ## Plan Self-Review
 

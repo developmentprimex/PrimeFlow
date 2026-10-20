@@ -10,6 +10,9 @@ OpenAI during development.
 - `python -m unittest discover -s tests -p 'test_discord*.py'`: **199 passed**.
   `VOICE_TEST_DATABASE_URL` pointed only at a disposable PostgreSQL 17 instance
   on localhost:55439. These tests cover the existing bot and the new feature.
+  The same **199 tests also passed with `DISCORD_MEETING_NOTES_ENABLED=true`**;
+  the legacy command-registration fixture explicitly tests the feature-off
+  command set, while the new fixture verifies the enabled `/takimi` group.
 - `python -m unittest tests.test_ga_note_creation tests.test_speech_transcribe tests.test_migration_graph`:
   **17 passed**. Project-bound ordinary Note creation is covered as well as
   meeting Note creation.
