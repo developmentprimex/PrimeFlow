@@ -167,3 +167,9 @@ def send_px_jav_weekly_report(self) -> str | None:
 def process_discord_voice_meetings():
     from app.jobs.discord_voice_meetings import process_voice_meetings
     return _run_async(process_voice_meetings())
+
+
+@celery_app.task(name="app.celery_tasks.process_recording_analyses")
+def process_recording_analyses():
+    from app.jobs.recording_analysis import process_recording_analyses as process
+    return _run_async(process())

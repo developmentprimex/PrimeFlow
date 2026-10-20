@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     MEETING_RECORDINGS_MAX_OPEN_SESSIONS: int = 3
     MEETING_RECORDINGS_FFMPEG: str = "ffmpeg"
     MEETING_RECORDINGS_FFPROBE: str = "ffprobe"
+    RECORDING_ANALYSIS_ENABLED: bool = True
+    RECORDING_ANALYSIS_MODEL: str = "gpt-5.4-mini"
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"

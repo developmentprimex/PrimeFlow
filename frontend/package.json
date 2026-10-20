@@ -5,6 +5,7 @@
   "scripts": {
     "test:recordings": "node --test tests/recording.test.mjs",
     "test:recordings:browser": "playwright test --config playwright.recordings.config.ts",
+    "test:recordings:analysis": "playwright test --config playwright.analysis.config.ts",
     "typecheck:recordings": "tsc -p tsconfig.recordings.check.json",
     "dev": "next dev --port 3000",
     "build": "next build",

@@ -52,10 +52,10 @@ async def transcribe_segment(wav):
     return result.strip()
 
 
-async def summarize_meeting(title, segments, *, partial, cache=None, checkpoint=None):
+async def summarize_meeting(title, segments, *, partial, cache=None, checkpoint=None, model=None):
     cache=dict(cache or {})
     async def summarize(parts):
-        payload={'model':settings.DISCORD_AI_MODEL,'store':False,'input':[
+        payload={'model':model or settings.DISCORD_AI_MODEL,'store':False,'input':[
             {'role':'system','content':SYSTEM},
             {'role':'user','content':json.dumps({'title':title,'partial':partial,'segments':parts},ensure_ascii=False)}]}
         key=hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()

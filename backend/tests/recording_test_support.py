@@ -20,7 +20,7 @@ def configure_test_environment():
     return url
 
 
-def prepare_database():
+def prepare_database(*, full_schema=False):
     configure_test_environment()
     # Imports occur only AFTER enforcing and installing the isolated URL.
     from app import models  # noqa: F401
@@ -35,12 +35,17 @@ def prepare_database():
     with engine.begin() as connection:
         connection.execute(sa.text("DROP SCHEMA public CASCADE"))
         connection.execute(sa.text("CREATE SCHEMA public"))
-        Department.__table__.create(connection)
-        User.__table__.create(connection)
-        connection.execute(sa.text("CREATE TABLE projects (id UUID PRIMARY KEY)"))
-        Meeting.__table__.create(connection)
-        MeetingParticipant.__table__.create(connection)
-        AuditLog.__table__.create(connection)
+        if full_schema:
+            from app.db import Base
+            exclude = {'meeting_recordings', 'meeting_recording_chunks', 'recording_analyses', 'recording_transcripts', 'recording_actions'}
+            Base.metadata.create_all(connection, tables=[t for t in Base.metadata.sorted_tables if t.name not in exclude])
+        else:
+            Department.__table__.create(connection)
+            User.__table__.create(connection)
+            connection.execute(sa.text("CREATE TABLE projects (id UUID PRIMARY KEY)"))
+            Meeting.__table__.create(connection)
+            MeetingParticipant.__table__.create(connection)
+            AuditLog.__table__.create(connection)
     config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
     config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
     # Model prerequisites are isolated fixtures; execute the actual new migration
@@ -49,12 +54,16 @@ def prepare_database():
     command.upgrade(config, "0153_meeting_recordings")
     command.downgrade(config, "0152_discord_voice_meetings")
     command.upgrade(config, "0153_meeting_recordings")
+    if full_schema:
+        command.upgrade(config, '0154_recording_analysis')
+        command.downgrade(config, '0153_meeting_recordings')
+        command.upgrade(config, '0154_recording_analysis')
     with Session(engine) as db:
         department = Department(name="Recorder test", code="REC")
         db.add(department); db.flush()
         people = {}
         for key, role in [("owner", UserRole.STAFF), ("other", UserRole.STAFF), ("participant", UserRole.STAFF), ("manager", UserRole.MANAGER)]:
-            person = User(id=uuid.uuid4(), email=f"{key}@recorder.invalid", full_name=key, role=role, password_hash="unused", department_id=department.id, is_active=True)
+            person = User(id=uuid.uuid4(), email=f"{key}@example.com", username=key, full_name=key, role=role, password_hash="unused", department_id=department.id, is_active=True)
             db.add(person)
             people[key] = person
         db.flush()

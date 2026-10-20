@@ -6,6 +6,7 @@ import { useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth"
+import { RecordingAnalysisPanel } from "@/components/meeting-recordings/analysis-panel"
 import { recordingJson } from "@/lib/recording-outbox"
 import { RECORDING_STATUS, recordingSize, recordingTime, type MeetingRecording } from "@/lib/recording-types"
 
@@ -48,5 +49,6 @@ export default function RecordingDetailPage() {
       </>}
       {row.status !== "READY" && <p className="text-sm">{row.error_message || "Ngarkimi dhe verifikimi nuk kanë përfunduar. Hapni faqen e regjistrimeve për rikuperim."}</p>}
     </CardContent></Card>}
+    {row?.status === "READY" && <RecordingAnalysisPanel key={id} recordingId={id} />}
   </div>
 }

@@ -10,7 +10,7 @@ from recording_test_support import configure_test_environment, prepare_database
 configure_test_environment()
 fixture_path = Path(__file__).resolve().parents[2] / "tmp/recorder-fixture.json"
 if "--prepare" in sys.argv:
-    fixture_path.write_text(json.dumps(prepare_database()), encoding="utf-8")
+    fixture_path.write_text(json.dumps(prepare_database(full_schema=True)), encoding="utf-8")
     print("Isolated recorder browser fixture prepared")
     raise SystemExit(0)
 
@@ -20,6 +20,7 @@ from sqlalchemy import select
 import uvicorn
 from app.api.deps import get_current_user
 from app.api.routers.meeting_recordings import router
+from app.api.routers.recording_analysis import router as analysis_router
 from app.db import get_db
 from app.models.meeting import Meeting, MeetingParticipant
 
@@ -28,6 +29,7 @@ if not fixture_path.is_file():
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["http://127.0.0.1:3100"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(router, prefix="/api/meeting-recordings")
+app.include_router(analysis_router, prefix="/api/meeting-recordings")
 
 
 @app.get("/api/auth/me")
