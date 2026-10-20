@@ -13,8 +13,13 @@ const markup = { exports: {} }
 const markupSource = readFileSync(new URL("../src/lib/note-markup.tsx", import.meta.url), "utf8")
 vm.runInNewContext(ts.transpileModule(markupSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: markup, exports: markup.exports, require })
 const loaded = { exports: {} }
+const reasons = { exports: {} }
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../src/lib/daily-rlz-ui.ts", import.meta.url), "utf8"), {
+  compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS },
+}).outputText, { module: reasons, exports: reasons.exports })
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } })
 vm.runInNewContext(outputText, { module: loaded, exports: loaded.exports, require: name => name === "@/lib/note-markup" ? markup.exports :
+  name === "@/lib/daily-rlz-ui" ? reasons.exports :
   name === "@/components/ui/button" ? { Button: props => React.createElement("button", props) } :
   name === "@/components/ui/textarea" ? { Textarea: props => React.createElement("textarea", props) } : require(name) })
 const { weeklyPostponements, RealizationWeeklyPostponements } = loaded.exports
@@ -42,4 +47,12 @@ test("approved tasks show the decision and no approval action", () => {
   assert.ok(html.includes("Aprovuar"))
   assert.ok(html.includes("Manager"))
   assert.ok(!html.includes("<button"))
+})
+test("the original postponement reason and comment remain separate from the manager decision", () => {
+  const result = report([[{ ...task, timeline: [{ ...task.timeline[0], metadata: { reason: "WAITING_CLIENT", comment: "Original user explanation" } }],
+    manager_decision: { comment: "Manager decision comment" } }]])
+  const html = renderToStaticMarkup(React.createElement(RealizationWeeklyPostponements, { result, canEdit: false, busy: false }))
+  assert.match(html, /Original user explanation/)
+  assert.match(html, /Manager decision comment/)
+  assert.match(html, /Arsyeja e shtyrjes/)
 })

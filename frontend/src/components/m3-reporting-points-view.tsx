@@ -120,9 +120,7 @@ function columnsFor(kind: TableKind, movement?: Movement): Column[] {
     columns.push({ key: "from", label: "NGA", width }, { key: "to", label: "NE", width })
   }
   columns.push({ key: "title", label: "TITULLI", width: 360 })
-  if (movement !== "due") {
-    columns.push({ key: "reason", label: "ARSYEJA", width: 124 }, { key: "comment", label: "KOMENTI", width: 160 })
-  }
+  columns.push({ key: "reason", label: "ARSYEJA", width: 124 }, { key: "comment", label: "KOMENTI", width: 160 })
   if (moved) columns.push({ key: "risk", label: "VLERËSIMI", width: 80 })
   if (kind === "ga_postponed") columns.push({ key: "category", label: "KUSHTI", width: 100 })
   return columns

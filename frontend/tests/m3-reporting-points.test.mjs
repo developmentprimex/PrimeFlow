@@ -40,6 +40,22 @@ const report = {
   realization_captured_at: null, status: "DRAFT",
 }
 
+test("due date postponements display their saved reason and comment", () => {
+  const html = render({ data: { postponed: [{ ...row, postponement_kind: "due", reason: "Saved postponement reason", comment: "Saved postponement comment" }] } })
+  assert.match(html, /Saved postponement reason/)
+  assert.match(html, /Saved postponement comment/)
+})
+
+test("M1 plan changes show the explanation captured by each postponement", () => {
+  const { M1ReportingPointsView } = load("@/components/m1-reporting-points-view")
+  const html = renderToStaticMarkup(React.createElement(M1ReportingPointsView, {
+    report: { ...report, data: { postponed: [{ ...row, postponement_kind: "start", postponement_period: "AM", reason: "M1 saved reason", comment: "M1 saved comment" }] } },
+    answers: {}, disabled: false, onAnswerChange: () => {},
+  }))
+  assert.match(html, /M1 saved reason/)
+  assert.match(html, /M1 saved comment/)
+})
+
 function render(overrides = {}, answers = {}, disabled = false) {
   return renderToStaticMarkup(React.createElement(M3ReportingPointsView, {
     report: { ...report, ...overrides }, answers, disabled, onAnswerChange: () => {},

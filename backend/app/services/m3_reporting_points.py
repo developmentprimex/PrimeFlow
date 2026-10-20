@@ -20,7 +20,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.user import User
-from app.services.daily_realization_events import semantic_local_day
+from app.services.daily_realization_events import semantic_local_day, postponement_explanation_from_events
 from app.services.daily_realization_live import build_live_daily_realization
 from app.services.daily_realization_metrics import combine_daily_metrics
 from app.services.daily_rlz_compliance import REASON_LABELS
@@ -178,6 +178,7 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, post
                "postponement_period": postponement_period,
                "change_reason": next((str((event.after or {}).get("reason") or "") for event in reversed(task_events)
                                       if (event.after or {}).get("reason")), "")}
+        row.update(postponement_explanation_from_events(task_events))
         # The audit day determines membership, regardless of the original planning week.
         sections["postponed"].append(dict(row))
         if task.is_deadline_important or originally_same_day:
@@ -251,7 +252,8 @@ async def build_task_data(db: AsyncSession, day: date, *, section_selector=selec
             evidence = states[task_id]
             # My View writes day-scoped reasons/comments to TaskDailyRlzState.
             # Do not replace absent daily evidence with the date-change audit reason.
-            row.update(daily_explanation_values(evidence, users))
+            if not row.get("postponement_explanation"):
+                row.update(daily_explanation_values(evidence, users))
             daily = progress.get(task_id)
             row["completed_today"] = daily.completed_delta if daily else 0
             row["completed_value"] = daily.completed_value if daily else None

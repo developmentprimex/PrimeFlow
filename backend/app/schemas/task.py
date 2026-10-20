@@ -140,6 +140,8 @@ class TaskRemoveFromDayRequest(BaseModel):
 
 
 class TaskUpdate(BaseModel):
+    postponement_reason_code: str | None = Field(default=None, max_length=40, exclude=True)
+    postponement_comment: str | None = Field(default=None, max_length=10000, exclude=True)
     title: str | None = Field(default=None, min_length=2)
     description: str | None = Field(default=None)
     internal_notes: str | None = None

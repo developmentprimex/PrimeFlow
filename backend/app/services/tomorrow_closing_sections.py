@@ -242,18 +242,18 @@ async def build_tomorrow_closing_sections(
         result: list[ClosingTableRow] = []
         for index, task in enumerate(ordered(values), 1):
             date_from, date_to = ranges.get(task.id, ("-", "-"))
-            result.append(
-                _task_row(
-                    task,
-                    [
-                        str(index),
-                        *common_values_with_project(task),
-                        _m3_task_type_label(task),
-                        _stack_start_due(date_from),
-                        _stack_start_due(date_to),
-                    ],
-                )
+            row = _task_row(
+                task,
+                [
+                    str(index),
+                    *common_values_with_project(task),
+                    _m3_task_type_label(task),
+                    _stack_start_due(date_from),
+                    _stack_start_due(date_to),
+                ],
             )
+            row.values.extend(getattr(task, "_report_postponement_explanation", ("-", "-")))
+            result.append(row)
         return result
 
     note_rows = [ClosingTableRow(values=row) for row in await _blue_note_rows(db)]
@@ -291,14 +291,14 @@ async def build_tomorrow_closing_sections(
                 ClosingTable(
                     label="SHTYER START DHE DUE DATE",
                     columns=[
-                        "NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI"
+                        "NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI", "ARSYEJA", "KOMENT"
                     ],
                     rows=postponed_rows(postponed_both, postponed_both_ranges),
                 ),
                 ClosingTable(
-                    label="SHTYER DUE DATE",
+                    label="SHTYER START OSE DUE DATE",
                     columns=[
-                        "NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI"
+                        "NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI", "ARSYEJA", "KOMENT"
                     ],
                     rows=postponed_rows(postponed, postponed_ranges),
                 ),

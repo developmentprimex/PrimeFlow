@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { TaskOneHMarkerFromLabel } from "@/components/task-one-h-marker"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
-import { reportDate, reportTime } from "@/components/m3-reporting-points-view"
+import { reportDate, reportTime, ReportingTaskTable } from "@/components/m3-reporting-points-view"
 import type { TaskRow as GaTaskRow } from "@/components/m3-reporting-points-view"
 
 export { reportDate, reportTime }
@@ -19,7 +19,7 @@ type TaskRow = { id: string; title: string; status: string; created_at: string; 
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
-  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[] }
+  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[]; postponed?: GaTaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -101,6 +101,7 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
       <Textarea id={`m1-answer-${key}`} value={answers[key] || ""} disabled={disabled} maxLength={10000} autoResize
         className="min-h-24 bg-white" placeholder="Shëno përgjigjen dhe komentin." onChange={(event) => onAnswerChange(key, event.target.value)} />
     </div>
+    {key === "plan_changes" && !!report.data.postponed?.length ? <ReportingTaskTable rows={report.data.postponed} kind="postponed" /> : null}
   </Point>
   return <div className="space-y-5">
     <div><h2 className="text-xl font-bold">PIKAT PËR RAPORTIM M1</h2><p className="mt-1 text-sm text-muted-foreground">Gjendja për {reportDate(report.report_date)} deri në {cutoffTime}.</p></div>
