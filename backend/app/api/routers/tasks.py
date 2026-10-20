@@ -64,6 +64,7 @@ from app.services.task_classification import is_fast_task as is_fast_task_model,
 from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
+from app.services.task_postponement import require_postponement_explanation, save_postponement_daily_explanation
 from app.services.project_classification import (
     is_mst_or_tt_project as _is_mst_or_tt_project,
     is_mst_project,
@@ -2889,6 +2890,39 @@ async def update_task(
 
     ensure_task_editor(user, task)
 
+    postponement = require_postponement_explanation(
+        task=task,
+        updates={field: getattr(payload, field) for field in ("start_date", "due_date") if _payload_has_field(payload, field)},
+        reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
+    )
+
+    prepared_date_departments = None
+    if any(_payload_has_field(payload, field) for field in ("start_date", "due_date")):
+        # Baselines must precede task row locks, as in the other mutation routes.
+        # Then reload locked dates so a concurrent edit cannot bypass the rule.
+        owner_ids = set((await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id))).scalars().all())
+        owner_ids.update(payload.assignees or [])
+        owner_ids.update(value for value in (task.assigned_to, payload.assigned_to) if value)
+        department_ids = {task.department_id, payload.department_id}
+        if owner_ids:
+            department_ids.update((await db.execute(select(User.department_id).where(User.id.in_(owner_ids)))).scalars().all())
+        await ensure_daily_baselines_for_departments(
+            db=db, department_ids=department_ids, day=_realization_today(), actor=user,
+        )
+        prepared_date_departments = department_ids
+        group_id = select(Task.fast_task_group_id).where(Task.id == task_id).correlate(None).scalar_subquery()
+        locked = (await db.execute(select(Task).where(or_(Task.id == task_id, Task.fast_task_group_id == group_id))
+            .order_by(Task.id).with_for_update().execution_options(populate_existing=True))).scalars().all()
+        task = next((item for item in locked if item.id == task_id), None)
+        if task is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        ensure_task_editor(user, task)
+        postponement = require_postponement_explanation(
+            task=task,
+            updates={field: getattr(payload, field) for field in ("start_date", "due_date") if _payload_has_field(payload, field)},
+            reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
+        )
+
     question_status_requested = payload.status if task.question_origin_id is not None else None
     question_status_override: TaskStatus | None = None
     if question_status_requested is not None and not is_assigned_to_task:
@@ -2975,12 +3009,15 @@ async def update_task(
         affected_departments.update((await db.execute(
             select(User.department_id).where(User.id.in_(affected_user_ids))
         )).scalars().all())
-    await ensure_daily_baselines_for_departments(
-        db=db,
-        department_ids=affected_departments,
-        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
-        actor=user,
-    )
+    if prepared_date_departments is None:
+        await ensure_daily_baselines_for_departments(
+            db=db,
+            department_ids=affected_departments,
+            day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
+            actor=user,
+        )
+    elif not affected_departments.issubset(prepared_date_departments):
+        raise HTTPException(status_code=409, detail="Përgjegjësi i detyrës ndryshoi. Rifresko dhe provo përsëri.")
 
     # Snapshot completion values before update for MST/TT daily progress logging.
     old_total, old_completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
@@ -3046,6 +3083,7 @@ async def update_task(
     fast_group_desired_assignee_ids: list[uuid.UUID] | None = None
     fast_group_semantic_tasks: list[Task] = []
     fast_group_semantic_before: dict[uuid.UUID, dict] = {}
+    fast_group_postponements: dict[uuid.UUID, dict] = {}
     if is_fast_group_task and task.fast_task_group_id is not None:
         fast_group_semantic_tasks = (
             await db.execute(
@@ -3059,6 +3097,12 @@ async def update_task(
             group_task.id: task_semantic_state(group_task)
             for group_task in fast_group_semantic_tasks
         }
+        for group_task in fast_group_semantic_tasks:
+            fast_group_postponements[group_task.id] = require_postponement_explanation(
+                task=group_task,
+                updates={field: getattr(payload, field) for field in ("start_date", "due_date") if _payload_has_field(payload, field)},
+                reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
+            )
 
     if payload.title is not None:
         task.title = payload.title
@@ -3777,6 +3821,10 @@ async def update_task(
         db=db, task_id=task.id, actor_user_id=user.id,
         before=before, after=after,
         old_assignee_ids=old_assignee_ids, new_assignee_ids=new_assignee_ids,
+        **postponement,
+    )
+    await save_postponement_daily_explanation(
+        db, task_id=task.id, user_ids=old_assignee_ids | new_assignee_ids or {user.id}, explanation=postponement,
     )
     for group_task in fast_group_semantic_tasks:
         if group_task.id == task.id:
@@ -3793,6 +3841,12 @@ async def update_task(
             before=before_group, after=after_group,
             old_assignee_ids=[old_group_owner] if old_group_owner else [],
             new_assignee_ids=[new_group_owner] if new_group_owner else [],
+            **fast_group_postponements.get(group_task.id, {}),
+        )
+        await save_postponement_daily_explanation(
+            db, task_id=group_task.id,
+            user_ids={owner for owner in (old_group_owner, new_group_owner) if owner},
+            explanation=fast_group_postponements.get(group_task.id, {}),
         )
 
     add_audit_log(

@@ -168,7 +168,7 @@ def table_columns(key, movement=""):
                 ("marker", "SIMBOLI", 60), ("title", "TITULLI", 450)]
     if key in {"postponed", "postponed_am"}:
         return [(field, label, 60 if field == "am_pm" else width) for field, label, width in m3.report_table_columns("ga_postponed", movement)
-                if field not in {"reason", "comment", "category"}] + [("manual_comment", "KOMENT MANUAL", 220)]
+                if field != "category"] + [("manual_comment", "KOMENT MANUAL", 220)]
     return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
             ("project", "PRJK", 96), ("am_pm", "AM/PM", 60), ("task_type", "LLOJI", 48),
             ("marker", "SIMBOLI", 60), ("title", "TITULLI", 450), ("choice", "PO/JO", 50), ("answer", "PERGJIGJJA MANUALE", 300)]

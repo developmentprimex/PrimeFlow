@@ -2,6 +2,8 @@
 
 import * as React from "react"
 import { toast } from "sonner"
+import { useTaskPostponement } from "@/components/task-postponement-dialog"
+import { withPostponementExplanation } from "@/lib/task-postponement"
 
 import { API_HTTP_URL, API_HTTP_FALLBACK_URL, API_WS_URL } from "@/lib/config"
 import { clearDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
@@ -251,6 +253,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const tokenRef = React.useRef<string | null>(null)
 
   const userId = user?.id ?? null
+  const { requestExplanation, postponementDialog } = useTaskPostponement(userId)
 
   React.useEffect(() => {
     tokenRef.current = token
@@ -533,10 +536,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (currentToken) headers.set("Authorization", `Bearer ${currentToken}`)
 
       const isReadRequest = (init.method || "GET").toUpperCase() === "GET"
-      const doFetch = async (overrideToken?: string | null, overrideUrl?: string) => {
+      const doFetch = async (requestInit: RequestInit, overrideToken?: string | null, overrideUrl?: string) => {
         const h = new Headers(headers)
         if (overrideToken) h.set("Authorization", `Bearer ${overrideToken}`)
-        const fetchOnce = () => fetch(overrideUrl || url, { ...init, headers: h, credentials: "include" })
+        const fetchOnce = () => fetch(overrideUrl || url, { ...requestInit, headers: h, credentials: "include" })
         // Writes are never repeated: a lost response does not prove the server
         // did not apply the change.
         if (!isReadRequest) return fetchOnce()
@@ -555,10 +558,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      const executeRequest = async (): Promise<Response> => {
+      const executeRequest = async (requestInit: RequestInit = init): Promise<Response> => {
         let res: Response
         try {
-          res = await doFetch()
+          res = await doFetch(requestInit)
         } catch (err) {
           const errName = (err as { name?: string } | null)?.name
           const aborted = init.signal?.aborted || errName === "AbortError"
@@ -568,7 +571,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (!path.startsWith("http") && API_HTTP_FALLBACK_URL !== API_HTTP_URL) {
             try {
-              res = await doFetch(undefined, makeUrl(API_HTTP_FALLBACK_URL))
+              res = await doFetch(requestInit, undefined, makeUrl(API_HTTP_FALLBACK_URL))
             } catch (fallbackErr) {
               const fallbackErrName = (fallbackErr as { name?: string } | null)?.name
               const fallbackAborted = init.signal?.aborted || fallbackErrName === "AbortError"
@@ -607,7 +610,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setStoredToken(refreshed)
         setToken(refreshed)
 
-        const retryRes = await doFetch(refreshed)
+        const retryRes = await doFetch(requestInit, refreshed)
         if (retryRes.status === 401) {
           clearSessionCaches()
           setStoredToken(null)
@@ -625,7 +628,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearSessionCaches()
       }
       const canShareRequest = method === "GET" && init.body == null && init.signal == null
-      if (!canShareRequest) return executeRequest()
+      if (!canShareRequest) return withPostponementExplanation(path, init, executeRequest, requestExplanation)
 
       const requestKey = createRequestKey(url, headers, init)
       const prefetched = prefetchedResponseCache.get(requestKey)
@@ -661,7 +664,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    []
+    [requestExplanation]
   )
 
   const prefetchApiFetch = React.useCallback(
@@ -723,6 +726,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={value}>
       {children}
+      {postponementDialog}
       {activeMeetingAlarm ? (
         <div
           role="alert"

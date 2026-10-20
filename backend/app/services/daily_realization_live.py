@@ -220,7 +220,8 @@ def timeline_from_events(*, day: date, baseline_task: dict | None, events: list[
             "actor_user_id": str(event.actor_user_id) if event.actor_user_id else None,
             "old_value": old.get("value", old.get("assignee_ids")),
             "new_value": new.get("value", new.get("assignee_ids")),
-            "metadata": {"reason": new.get("reason") or old.get("reason")},
+            "metadata": {"reason": new.get("reason_code") or new.get("reason") or old.get("reason"),
+                         **({"comment": new["comment"]} if new.get("comment") else {})},
         })
     return rows
 

@@ -52,6 +52,16 @@ const answerKey = `delivery:${taskId}`
 const row = { task_id: taskId, title: "Detyra <script>", assignees: "EF", department: "DEV", project: "P", status: "TODO", progress: 0, am_pm: "AM", task_type: "1H", marker: "M2/3" }
 const report = { id: "report", report_date: "2026-10-06", manual_answers: {}, data: { delivery: [row] }, status: "DRAFT" }
 
+test("postponements display their source explanation alongside the manual report comment", () => {
+  const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+    report: { ...report, data: { postponed: [{ ...row, postponement_kind: "due", reason: "Source reason", comment: "Source comment" }] } },
+    answers: { [`postponed_comment:${taskId}`]: "Manager comment" }, disabled: false, onAnswerChange: () => {},
+  }))
+  assert.match(html, /Source reason/)
+  assert.match(html, /Source comment/)
+  assert.match(html, /Manager comment/)
+})
+
 test("M2 presents five points with a final per-task manual answer", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: { reorganization: "Riorganizo", [answerKey]: "Dorezuar", [`delivery_choice:${taskId}`]: "PO" }, disabled: false, onAnswerChange: () => {},

@@ -273,7 +273,8 @@ async def backfill_saved_task_planning(db: AsyncSession, row: M1ReportingPointsR
 
 def select_ga_tasks(tasks, events, day: date, *, personal_titles: dict | None = None) -> dict:
     sections = m2.select_task_sections(tasks, events, day, personal_titles=personal_titles)
-    return {key: sections[key] for key in ("ga_progress", "delivery")}
+    return {**{key: sections[key] for key in ("ga_progress", "delivery")},
+            "postponed": m3.select_task_sections(tasks, events, day)["postponed_today"]}
 
 
 async def build_ga_task_data(db: AsyncSession, day: date, cutoff: datetime) -> dict:
@@ -428,6 +429,19 @@ def export_blocks(report: dict) -> list[dict]:
         blocks.append({"kind": "text", "text": title, "level": 2})
         if key in MANUAL_POINTS:
             blocks.append({"kind": "text", "text": report.get("manual_answers", {}).get(key) or "Pa përgjigje", "level": 0})
+            if key == "plan_changes":
+                for caption, movement, group in m3.task_table_groups(report.get("data", {}).get("postponed", []), "postponed_today"):
+                    if not group:
+                        continue
+                    blocks.append({"kind": "text", "text": caption, "level": 3})
+                    columns = m3.report_table_columns("postponed", movement)
+                    rows = []
+                    for index, row in enumerate(group, 1):
+                        fill, color, _ = m3.task_row_appearance(row)
+                        rows.append([{"text": str(m3.report_table_value(row, column, index, movement)),
+                                      "fill": fill, "color": color, "bold": column == "title", "divider": False}
+                                     for column, _, _ in columns])
+                    blocks.append({"kind": "table", "columns": columns, "rows": rows})
         elif key == "tasks":
             tasks = report.get("data", {}).get("tasks") or []
             day = date.fromisoformat(report["report_date"])

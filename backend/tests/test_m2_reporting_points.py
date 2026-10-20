@@ -278,7 +278,8 @@ def test_complete_exports_have_matching_colors_and_complete_content():
     assert len(tables) == 4
     for table in tables[:3]:
         headers = [column[0] for column in table["columns"]]
-        assert not {"status", "reason", "comment", "category"}.intersection(headers)
+        assert not {"status", "category"}.intersection(headers)
+        assert {"reason", "comment"}.issubset(headers)
         assert headers[-1] == "manual_comment"
         row = dict(zip(headers, table["rows"][0]))
         assert row["manual_comment"]["fill"] == "#ffffff"

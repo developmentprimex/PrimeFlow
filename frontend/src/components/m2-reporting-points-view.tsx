@@ -50,7 +50,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
   const renderTable = (rows: TaskRow[], delivery: boolean) => <div className="overflow-x-auto border">
     <table className="w-full min-w-[1150px] border-collapse text-xs">
       <thead className="bg-slate-100"><tr>
-        {["NR", ...common.map(([, title]) => title), ...(delivery ? ["SIMBOLI", "TITULLI", "PO/JO", "PËRGJIGJJA MANUALE"] : ["NGA", "NË", "TITULLI / SIMBOLI", "VLERËSIMI", "KOMENT MANUAL"])].map((title, columnIndex) => <th key={title} className={`border py-2 text-left ${delivery && (columnIndex === 6 || columnIndex === 8) ? "px-1" : "px-2"}${(delivery ? columnIndex < 7 || columnIndex === 8 : columnIndex < 8) ? " w-px whitespace-nowrap" : ""}`}>{title}</th>)}
+        {["NR", ...common.map(([, title]) => title), ...(delivery ? ["SIMBOLI", "TITULLI", "PO/JO", "PËRGJIGJJA MANUALE"] : ["NGA", "NË", "TITULLI / SIMBOLI", "ARSYEJA", "KOMENTI", "VLERËSIMI", "KOMENT MANUAL"])].map((title, columnIndex) => <th key={title} className={`border py-2 text-left ${delivery && (columnIndex === 6 || columnIndex === 8) ? "px-1" : "px-2"}${(delivery ? columnIndex < 7 || columnIndex === 8 : columnIndex < 8) ? " w-px whitespace-nowrap" : ""}`}>{title}</th>)}
       </tr></thead>
       <tbody>{rows.map((row, index) => {
         const key: ManualKey = `delivery:${row.task_id}`
@@ -70,7 +70,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
           </td><td className="min-w-[240px] border p-2 align-top">
             <Textarea aria-label={`Përgjigjja manuale për ${row.title}`} value={answers[key] || ""} disabled={disabled} maxLength={10000}
               className="min-h-20 bg-white text-black" placeholder="A është dorëzuar? Shëno përgjigjjen." onChange={(event) => onAnswerChange(key, event.target.value)} />
-          </td></> : <><td className="border p-2 align-top font-bold" style={{ background: row.risk === "RREZIK" ? "#fee2e2" : "#dcfce7", color: row.risk === "RREZIK" ? "#7f1d1d" : "#14532d" }}>{row.risk}</td><td className="min-w-[240px] border p-2 align-top">
+          </td></> : <><td className="min-w-[150px] whitespace-pre-wrap border p-2 align-top">{row.reason || "—"}</td><td className="min-w-[220px] whitespace-pre-wrap border p-2 align-top">{row.comment || "—"}</td><td className="border p-2 align-top font-bold" style={{ background: row.risk === "RREZIK" ? "#fee2e2" : "#dcfce7", color: row.risk === "RREZIK" ? "#7f1d1d" : "#14532d" }}>{row.risk}</td><td className="min-w-[240px] border p-2 align-top">
             <Textarea aria-label={`Koment manual për ${row.title}`} value={answers[commentKey] || ""} disabled={disabled} maxLength={10000}
               className="min-h-20 bg-white text-black" placeholder="Shëno komentin." onChange={(event) => onAnswerChange(commentKey, event.target.value)} />
           </td></>}

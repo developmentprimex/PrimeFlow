@@ -24,6 +24,7 @@ from app.models.system_task_template_alignment_user import SystemTaskTemplateAli
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_rlz_state import TaskDailyRlzState
+from app.services.daily_realization_events import postponement_explanation_from_events
 from app.models.user import User
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.daily_report_logic import business_days_between, planned_range_for_daily_report
@@ -296,19 +297,16 @@ def _is_postponed_for_m3_day(task: Task, events: list[AuditLog], report_day: dat
 def _postponement_events_for_m3_task(
     task: Task, events: list[AuditLog], report_day: date
 ) -> list[AuditLog]:
-    return [
-        event for event in events
-        if event.action in {"task.due_date_changed", "task.start_date_changed"}
-        and _audit_local_date((event.before or {}).get("value")) == report_day
-        and (
-            changed_date := _audit_local_date((event.after or {}).get("value"))
-        ) is not None
-        and changed_date > report_day
-        and (
-            _local_date(task.due_date if event.action == "task.due_date_changed" else task.start_date)
-            == changed_date
-        )
-    ]
+    matching = []
+    for field in ("due_date", "start_date"):
+        changes = [event for event in events if event.action == f"task.{field}_changed"]
+        if not changes:
+            continue
+        original = _audit_local_date((changes[0].before or {}).get("value"))
+        current = _audit_local_date((changes[-1].after or {}).get("value"))
+        if original == report_day and current and current > report_day and _local_date(getattr(task, field, None)) == current:
+            matching.extend(changes)
+    return matching
 
 
 def _daily_baseline_task_ids(snapshots: list[DailyPlannerSnapshot]) -> set[uuid.UUID]:
@@ -371,13 +369,15 @@ async def _postponed_tasks_for_m3_day(
         )
         if not matching_events:
             continue
+        explanation = postponement_explanation_from_events(matching_events)
+        task._report_postponement_explanation = (explanation.get("reason", "-"), explanation.get("comment", "-"))
         due_events = [e for e in matching_events if e.action == "task.due_date_changed"]
         start_events = [e for e in matching_events if e.action == "task.start_date_changed"]
         if due_events and start_events:
             postponed_both.append(task)
-            start_before = _audit_local_date((start_events[-1].before or {}).get("value"))
+            start_before = _audit_local_date((start_events[0].before or {}).get("value"))
             start_after = _audit_local_date((start_events[-1].after or {}).get("value"))
-            due_before = _audit_local_date((due_events[-1].before or {}).get("value"))
+            due_before = _audit_local_date((due_events[0].before or {}).get("value"))
             due_after = _audit_local_date((due_events[-1].after or {}).get("value"))
             both_date_ranges[task.id] = (
                 # ``|`` is the column delimiter used by the ASCII table
@@ -391,11 +391,20 @@ async def _postponed_tasks_for_m3_day(
         elif due_events:
             postponed.append(task)
             matching_event = due_events[-1]
-            before_date = _audit_local_date((matching_event.before or {}).get("value"))
+            before_date = _audit_local_date((due_events[0].before or {}).get("value"))
             after_date = _audit_local_date((matching_event.after or {}).get("value"))
             date_ranges[task.id] = (
                 before_date.strftime("%d.%m.%Y") if before_date else report_day.strftime("%d.%m.%Y"),
                 after_date.strftime("%d.%m.%Y") if after_date else "-",
+            )
+        elif start_events:
+            postponed.append(task)
+            matching_event = start_events[-1]
+            before_date = _audit_local_date((start_events[0].before or {}).get("value"))
+            after_date = _audit_local_date((matching_event.after or {}).get("value"))
+            date_ranges[task.id] = (
+                f"START: {before_date:%d.%m.%Y}" if before_date else "-",
+                f"START: {after_date:%d.%m.%Y}" if after_date else "-",
             )
     return postponed, date_ranges, postponed_both, both_date_ranges
 
@@ -1289,6 +1298,8 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     postponed_today, postponed_date_ranges, postponed_both_today, postponed_both_date_ranges = await _postponed_tasks_for_m3_day(
         db, report_day, tasks
     )
+    postponed_explanations = {task.id: getattr(task, "_report_postponement_explanation", ("-", "-"))
+                             for task in [*postponed_today, *postponed_both_today]}
     product_delta_today = _product_delta_tasks_for_m3_day(report_tasks, report_day)
 
     tomorrow_tasks = [task for task in tasks if _task_covers_report_day(task, tomorrow) and _is_open(task)]
@@ -1486,11 +1497,12 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_am_pm=True,
                 department_codes=department_codes,
                 date_range_by_task=postponed_both_date_ranges,
+                daily_rlz_by_task=postponed_explanations,
                 project_titles_by_id=project_titles_by_id,
                 include_priority_tone=True,
                 **table_kwargs,
             )
-            + ["", "SHTYER DUE DATE:"]
+            + ["", "SHTYER START OSE DUE DATE:"]
             + _m3_status_table(
                 "",
                 postponed_today,
@@ -1501,6 +1513,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_am_pm=True,
                 department_codes=department_codes,
                 date_range_by_task=postponed_date_ranges,
+                daily_rlz_by_task=postponed_explanations,
                 project_titles_by_id=project_titles_by_id,
                 include_priority_tone=True,
                 **table_kwargs,

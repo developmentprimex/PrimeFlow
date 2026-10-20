@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 from datetime import date, datetime, timedelta, timezone, time as dt_time
 from collections import defaultdict
 
@@ -10,7 +11,7 @@ except ImportError:  # pragma: no cover
     ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete, insert, or_, select, text, cast, Date as SQLDate, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
@@ -65,6 +66,7 @@ from app.services.meeting_system_tasks import (
 )
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events
+from app.services.task_postponement import require_postponement_explanation, save_postponement_daily_explanation
 
 
 router = APIRouter()
@@ -1240,6 +1242,8 @@ class SystemTaskOccurrenceDateOverrideIn(BaseModel):
     template_id: uuid.UUID
     source_occurrence_date: date
     target_occurrence_date: date
+    postponement_reason_code: str | None = Field(default=None, max_length=40)
+    postponement_comment: str | None = Field(default=None, max_length=10000)
 
 
 def _can_override_system_occurrence_date(user: User, template: SystemTaskTemplate) -> bool:
@@ -1279,6 +1283,7 @@ async def override_system_task_occurrence_date(
             .where(Task.assigned_to == user.id)
             .where(task_local_date == payload.source_occurrence_date)
             .order_by(Task.created_at.desc())
+            .limit(1)
         )
     ).scalars().first()
     if task is None and user.role in (UserRole.ADMIN, UserRole.MANAGER):
@@ -1288,6 +1293,7 @@ async def override_system_task_occurrence_date(
                 .where(Task.system_template_origin_id == tmpl.id)
                 .where(task_local_date == payload.source_occurrence_date)
                 .order_by(Task.created_at.desc())
+                .limit(1)
             )
         ).scalars().first()
 
@@ -1299,13 +1305,29 @@ async def override_system_task_occurrence_date(
     old_due_date = task.due_date or task.origin_run_at or task.start_date
     if old_due_date is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task does not have a date to move")
+    day_shift = (payload.target_occurrence_date - payload.source_occurrence_date).days
+    new_due_date = old_due_date + timedelta(days=day_shift)
+    postponement = require_postponement_explanation(
+        task=SimpleNamespace(id=task.id, title=task.title, start_date=task.start_date, due_date=old_due_date),
+        updates={"due_date": new_due_date}, reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
+    )
     await ensure_daily_baselines_for_departments(
         db=db, department_ids={task.department_id},
         day=payload.source_occurrence_date, actor=user,
     )
-    status_before = _enum_value(task.status)
-    day_shift = (payload.target_occurrence_date - payload.source_occurrence_date).days
+    # Match the baseline-before-task-lock order of the other mutation routes.
+    await db.refresh(task, with_for_update=True)
+    if task.status == TaskStatus.DONE:
+        raise HTTPException(status_code=400, detail="Done system tasks cannot be edited")
+    old_due_date = task.due_date or task.origin_run_at or task.start_date
+    if old_due_date is None:
+        raise HTTPException(status_code=400, detail="Task does not have a date to move")
     new_due_date = old_due_date + timedelta(days=day_shift)
+    postponement = require_postponement_explanation(
+        task=SimpleNamespace(id=task.id, title=task.title, start_date=task.start_date, due_date=old_due_date),
+        updates={"due_date": new_due_date}, reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
+    )
+    status_before = _enum_value(task.status)
     if task.due_date is not None and new_due_date != task.due_date and task.original_due_date is None:
         task.original_due_date = task.due_date
     task.due_date = new_due_date
@@ -1318,6 +1340,10 @@ async def override_system_task_occurrence_date(
         after={"due_date": new_due_date.isoformat(), "status": _enum_value(task.status)},
         old_assignee_ids={task.assigned_to} if task.assigned_to else set(),
         new_assignee_ids={task.assigned_to} if task.assigned_to else set(),
+        **postponement,
+    )
+    await save_postponement_daily_explanation(
+        db, task_id=task.id, user_ids={task.assigned_to or user.id}, explanation=postponement,
     )
 
     await db.commit()

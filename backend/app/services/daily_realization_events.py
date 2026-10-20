@@ -60,16 +60,34 @@ def task_semantic_state(task) -> dict[str, Any]:
     }
 
 
+def postponement_explanation_from_events(events) -> dict:
+    """Read the last explained forward date move, leaving legacy daily input intact."""
+    explained = [event for event in events if (event.after or {}).get("reason") and (event.after or {}).get("comment")]
+    for event in sorted(explained, key=lambda item: (item.created_at, str(item.id)), reverse=True):
+        if event.action not in {"task.start_date_changed", "task.due_date_changed"}:
+            continue
+        before, after = event.before or {}, event.after or {}
+        old, new = semantic_local_day(before.get("value")), semantic_local_day(after.get("value"))
+        if old and new and new > old and after.get("reason") and after.get("comment"):
+            return {"reason": after["reason"], "comment": after["comment"], "postponement_explanation": True}
+    return {}
+
+
 def record_task_semantic_events(
     *, db, task_id: uuid.UUID, actor_user_id: uuid.UUID | None,
     before: dict[str, Any], after: dict[str, Any],
     old_assignee_ids: Iterable[uuid.UUID] = (), new_assignee_ids: Iterable[uuid.UUID] = (),
     reason: str | None = None,
+    reason_code: str | None = None, comment: str | None = None,
 ) -> list:
     """Append one AuditLog row per meaningful change in the caller's transaction."""
     events = []
     local_day = datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
     metadata = {"day": local_day.isoformat(), "reason": reason}
+    if reason_code is not None:
+        metadata["reason_code"] = reason_code
+    if comment is not None:
+        metadata["comment"] = comment
     for field, action in SEMANTIC_FIELDS.items():
         old, new = before.get(field), after.get(field)
         if old == new:
