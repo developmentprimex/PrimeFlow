@@ -1,9 +1,9 @@
 import uuid
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.api.routers.discord_assistant import require_bot
-from app.schemas.discord_voice_meeting import VoiceActor, VoiceStart, Worker, Finish, Interrupt
+from app.schemas.discord_voice_meeting import VoiceActor, VoiceStart, Worker, Finish, Interrupt, SegmentMeta
 from app.services import discord_voice_meetings as service
 
 router = APIRouter(dependencies=[Depends(require_bot)])
@@ -40,3 +40,24 @@ async def finish(session_id: uuid.UUID, payload: Finish, db: AsyncSession = Depe
 @router.post('/{session_id}/save')
 async def save(session_id: uuid.UUID, payload: VoiceActor, db: AsyncSession = Depends(get_db)):
     return await service.save_notes(db, payload, session_id)
+
+@router.post('/{session_id}/segments')
+async def segment(session_id: uuid.UUID, capture_token: str = Form(...), instance_id: uuid.UUID = Form(...),
+    sequence: int = Form(...), speaker_id: str = Form(...), speaker_name: str = Form(...),
+    start_ms: int = Form(...), end_ms: int = Form(...), file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    from pydantic import ValidationError
+    try:
+        payload=SegmentMeta(capture_token=capture_token,instance_id=instance_id,sequence=sequence,
+            speaker_id=speaker_id,speaker_name=speaker_name,start_ms=start_ms,end_ms=end_ms)
+    except ValidationError:
+        raise HTTPException(422,'Të dhënat e segmentit nuk janë të vlefshme.') from None
+    await service.worker_row(db,session_id,payload)
+    await db.rollback()
+    data=bytearray()
+    try:
+        while chunk:=await file.read(65536):
+            data.extend(chunk)
+            if len(data)>2_000_000:raise HTTPException(413,'Segmenti është shumë i madh.')
+    finally:await file.close()
+    try:return await service.receive_segment(db,session_id,payload,bytes(data))
+    except ValueError:raise HTTPException(422,'Audioja nuk është WAV i vlefshëm.') from None

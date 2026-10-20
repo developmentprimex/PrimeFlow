@@ -25,6 +25,13 @@ class Finish(Worker):
     segment_count: int = Field(ge=0)
     partial: bool = False
 
+class SegmentMeta(Worker):
+    sequence: int = Field(ge=0)
+    speaker_id: str = Field(pattern=r'^\d{1,32}$')
+    speaker_name: str = Field(min_length=1, max_length=100)
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+
 class Interrupt(Worker):
     reason: str = Field(max_length=60, pattern=r'^[a-z_]+$')
 

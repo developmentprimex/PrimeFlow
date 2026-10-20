@@ -161,3 +161,9 @@ def send_px_jav_weekly_report(self) -> str | None:
         )
     return str(run.id)
 
+
+
+@celery_app.task(name="app.celery_tasks.process_discord_voice_meetings")
+def process_discord_voice_meetings():
+    from app.jobs.discord_voice_meetings import process_voice_meetings
+    return _run_async(process_voice_meetings())

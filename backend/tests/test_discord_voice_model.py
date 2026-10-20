@@ -10,7 +10,7 @@ from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.db import Base
 from app import models
-from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting
+from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting, DiscordVoiceSegment as Segment
 from app.models.ga_note import GaNote
 from app.models.department import Department
 from app.models.user import User
@@ -24,7 +24,7 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.schema = 'mira_test_' + uuid.uuid4().hex
         self.engine = create_async_engine(os.environ['VOICE_TEST_DATABASE_URL'], execution_options={'schema_translate_map':{None:self.schema}})
-        tables = {Meeting.__table__, GaNote.__table__, DiscordLink.__table__}
+        tables = {Segment.__table__, Meeting.__table__, GaNote.__table__, DiscordLink.__table__}
         while True:
             expanded = tables | {fk.column.table for t in tables for fk in t.foreign_keys}
             if expanded == tables: break

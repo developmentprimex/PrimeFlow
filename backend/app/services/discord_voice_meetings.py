@@ -142,3 +142,45 @@ async def save_notes(db, actor, session_id):
     row.saved_note_id, row.saved_at, row.status = note.id, now(), 'SAVED'
     await db.commit()
     return view(row)
+
+
+async def receive_segment(db, session_id, payload, audio):
+    from app.services import discord_voice_openai as provider
+    provider.validate_wav(audio)
+    if payload.end_ms < payload.start_ms or payload.end_ms-payload.start_ms>11000:
+        raise HTTPException(422, 'Koha e segmentit nuk është e vlefshme.')
+    digest=hashlib.sha256(audio).hexdigest()
+    row=await worker_row(db, session_id, payload)
+    if row.status not in ('STARTING','LISTENING','INTERRUPTED','FINALIZING'):
+        raise HTTPException(409, 'Audioja është mbyllur.')
+    if row.expected_segments is not None and payload.sequence>=row.expected_segments:
+        raise HTTPException(409, 'Segmenti është jashtë takimit.')
+    segment=(await db.execute(select(Segment).where(Segment.session_id==session_id,
+        Segment.sequence==payload.sequence).with_for_update())).scalar_one_or_none()
+    if segment:
+        if (segment.content_hash,segment.speaker_id,segment.start_ms,segment.end_ms)!=(digest,payload.speaker_id,payload.start_ms,payload.end_ms):
+            raise HTTPException(409, 'Segmenti i përsëritur nuk përputhet.')
+        if segment.status in ('DONE','ERROR'):
+            return {'sequence':segment.sequence,'status':segment.status}
+        if segment.lease_until and segment.lease_until>now():
+            raise HTTPException(409, 'Segmenti po përpunohet.')
+    else:
+        segment=Segment(id=uuid.uuid4(),session_id=session_id,sequence=payload.sequence,
+            speaker_id=payload.speaker_id,speaker_name=payload.speaker_name,start_ms=payload.start_ms,
+            end_ms=payload.end_ms,content_hash=digest,status='PROCESSING')
+        db.add(segment)
+    lease=uuid.uuid4();segment.lease_token=lease;segment.lease_until=now()+timedelta(seconds=120)
+    await db.commit()
+    try:
+        transcript=await provider.transcribe_segment(audio);error=None
+    except ValueError:
+        transcript=None;error='transcription_failed'
+    # Reacquire in a consistent order; never hold a DB lock over remote IO.
+    row=await locked(db,session_id)
+    segment=(await db.execute(select(Segment).where(Segment.id==segment.id).with_for_update()
+        .execution_options(populate_existing=True))).scalar_one()
+    if segment.lease_token!=lease:raise HTTPException(409,'Përpunimi i segmentit ka ndryshuar.')
+    segment.transcript,segment.error,segment.status=transcript,error,'ERROR' if error else 'DONE'
+    if error:row.partial=True
+    await db.commit()
+    return {'sequence':segment.sequence,'status':segment.status}
