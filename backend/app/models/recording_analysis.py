@@ -1,7 +1,7 @@
 """Durable AI progress; never changes the source recording's READY status."""
 import uuid
-from datetime import datetime
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from datetime import date, datetime
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
@@ -18,6 +18,8 @@ class RecordingAnalysis(Base):
     segments_done: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str | None] = mapped_column(Text)
     summary_progress: Mapped[dict | None] = mapped_column(JSONB)
+    decisions: Mapped[list | None] = mapped_column(JSONB)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
     error_message: Mapped[str | None] = mapped_column(String(500))
     lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -47,6 +49,8 @@ class RecordingAction(Base):
     evidence: Mapped[str] = mapped_column(Text)
     assignee_text: Mapped[str | None] = mapped_column(String(200))
     deadline_text: Mapped[str | None] = mapped_column(String(200))
+    suggested_assignee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
+    suggested_due_date: Mapped[date | None] = mapped_column(Date)
     created_task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('tasks.id', ondelete='SET NULL'))
     confirmed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('users.id'))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

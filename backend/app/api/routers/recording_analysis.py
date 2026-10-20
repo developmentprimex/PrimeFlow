@@ -46,10 +46,13 @@ async def get_analysis(recording_id: uuid.UUID, db: AsyncSession = Depends(get_d
         audit(db, user, row, 'recording_analysis_viewed')
         await db.commit()
     return {'configured': available(), 'can_manage': row.created_by == user.id,
-        'analysis': {key: getattr(job, key) for key in ('status', 'language', 'total_segments', 'segments_done', 'summary', 'error_message', 'updated_at')} if job else None,
+        'analysis': {**{key: getattr(job, key) for key in ('status', 'language', 'total_segments', 'segments_done', 'summary', 'error_message', 'updated_at')},
+            # Analyses from before meeting-level notes kept decisions per segment.
+            'decisions': job.decisions if job.decisions is not None else [d for s in segments for d in (s.notes or {}).get('decisions', [])]} if job else None,
         'segments': [{'index': s.index, 'start_seconds': s.start_seconds, 'duration_seconds': s.duration_seconds,
-                      'text': s.text, 'decisions': (s.notes or {}).get('decisions', [])} for s in segments],
-        'actions': [{key: getattr(a, key) for key in ('id', 'segment_index', 'title', 'description', 'evidence', 'assignee_text', 'deadline_text', 'created_task_id', 'confirmed_at')} for a in actions]}
+                      'text': s.text} for s in segments],
+        'actions': [{key: getattr(a, key) for key in ('id', 'segment_index', 'title', 'description', 'evidence', 'assignee_text', 'deadline_text',
+            'suggested_assignee_id', 'suggested_due_date', 'created_task_id', 'confirmed_at')} for a in actions]}
 
 
 @router.post('/{recording_id}/analysis', status_code=202)
@@ -67,7 +70,7 @@ async def start_analysis(recording_id: uuid.UUID, payload: AnalysisStart, db: As
             raise HTTPException(409, 'Riprovo me gjuhën fillestare që të ruhen pjesët e përpunuara.')
         if job.lease_until and job.lease_until > datetime.now(timezone.utc):
             raise HTTPException(409, 'Përpunimi është ende aktiv.')
-        job.status, job.error_message, job.lease_token, job.lease_until = 'QUEUED', None, None, None
+        job.status, job.error_message, job.lease_token, job.lease_until, job.attempts = 'QUEUED', None, None, None, 0
     else:
         from app.services.recording_analysis_provider import segment_plan
         job = Analysis(recording_id=row.id, requested_by=user.id, language=payload.language,
@@ -106,7 +109,8 @@ async def confirm_task(recording_id: uuid.UUID, action_id: uuid.UUID, payload: T
         proposal.created_task_id, proposal.confirmed_by = task.id, user.id
         proposal.confirmed_at = datetime.now(timezone.utc)
         audit(db, user, row, 'recording_task_confirmed', action_id=str(proposal.id), task_id=str(task.id))
+    from app.services.recording_analysis_provider import SEGMENT_SECONDS, clock
     description = (payload.description + '\n\nBurimi: regjistrimi ' + str(row.id)
-        + ', segmenti ' + str(proposal.segment_index + 1))
+        + ', rreth ' + clock(proposal.segment_index * SEGMENT_SECONDS))
     result = await create_task_in_session(TaskCreate(**payload.model_dump(exclude={'description'}), description=description), db, user, before_commit=attach)
     return {'task_id': result.id, 'duplicate': False}

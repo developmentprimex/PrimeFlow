@@ -1,5 +1,9 @@
 # Asistenti personal PrimeFlow në Discord
 
+Shënimet e takimeve përdorin `DISCORD_MEETING_TRANSCRIBE_MODEL=gpt-transcribe`
+për audion. Përmbledhjet përdorin `DISCORD_AI_MODEL`; në server është vendosur
+`gpt-6-luna`.
+
 ## Mira në takimet zanore: vetëm dëgjim
 
 Mira mund të hyjë me identitetin e botit ekzistues në një voice channel të
@@ -32,8 +36,12 @@ një takim i ri. Shënimet e ruajtura kanë lejet normale të PX Notes. Teksti i
 takimit nuk zbatohet si komandë për detyra. Përmbledhja nuk postohet në kanalin
 e përbashkët. Audioja nuk arkivohet; ruhen segmentet e transkriptuara dhe drafti.
 
-Në shkëputje ose gabim të audios njoftohet organizuesi. Shënimet e pjesshme
-etiketohen qartë. Pas një rinisjeje nuk rifillon dëgjimi automatikisht; sesioni
+Shkëputjet e shkurtra të Discord-it, paketat e audios që nuk dekodohen nga një
+folës dhe një segment i vetëm që dështon në transkriptim nuk e ndalin takimin:
+Mira rilidhet ose rinis vetëm atë folës; takimi shënohet i pjesshëm në PrimeFlow, pa etiketë në tekstin e shënimeve.
+Organizuesi njoftohet dhe dëgjimi ndalet vetëm kur rilidhja dështon (rreth 25 s),
+kur askush nuk dekodohet për 30 s, ose kur 3 segmente rresht apo 3 heartbeat-e
+rresht dështojnë. Pas një rinisjeje nuk rifillon dëgjimi automatikisht; sesioni
 i vjetër shënohet i ndërprerë dhe teksti i marrë mund të përmblidhet. Celery
 worker/beat përpunojnë sesionet çdo 30 sekonda; boti dërgon rezultatet private.
 Në dështim të përmbledhjes, transkripti mbetet në DB për rikuperim teknik.

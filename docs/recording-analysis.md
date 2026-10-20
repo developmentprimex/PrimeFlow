@@ -198,3 +198,24 @@ frontend/src/app/(app)/meeting-recordings/[id]/page.tsx
 frontend/src/components/meeting-recordings/analysis-panel.tsx
 frontend/tests/browser/recording-analysis.spec.ts
 ```
+
+## Quality changes (2026-10-20)
+
+- Transcription uses `RECORDING_TRANSCRIBE_MODEL` (default `gpt-transcribe`) for every
+  language, sends the language code (`RECORDING_TRANSCRIBE_LANGUAGE_HINT`), and adds a
+  vocabulary of active staff (meeting participants first), departments and
+  `RECORDING_TRANSCRIPTION_VOCABULARY` plus the end of the previous segment to the prompt.
+- Segments start 2 s early so boundary words are heard whole; audio is filtered
+  (`highpass`, `lowpass`, `dynaudnorm`). Segments with less than 1 s of audible speech are
+  not sent, and known noise hallucinations ("Faleminderit që shikuat", subtitle credits) are removed.
+- Summary, decisions and task proposals come from one analysis of the whole meeting
+  (reduced in parts for long meetings, checkpointed in `summary_progress`) with the
+  meeting date and participants, in the GA notes structure. Tasks are no longer
+  extracted per 5-minute segment.
+- A proposal whose evidence cannot be found in the transcript (ignoring punctuation and
+  diacritics) is dropped instead of failing the analysis; near-duplicates are merged.
+- Spoken assignees are matched to a single active user and relative deadlines are
+  resolved to a date; both prefill the review form.
+- Provider calls retry in-process, and transient job failures back off and retry up to
+  three times before `FAILED`. Migration `0155_recording_analysis_quality` adds the
+  columns for decisions, attempts and suggestions.

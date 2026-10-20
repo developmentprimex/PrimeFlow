@@ -55,9 +55,9 @@ def prepare_database(*, full_schema=False):
     command.downgrade(config, "0152_discord_voice_meetings")
     command.upgrade(config, "0153_meeting_recordings")
     if full_schema:
-        command.upgrade(config, '0154_recording_analysis')
+        command.upgrade(config, '0155_recording_analysis_quality')
         command.downgrade(config, '0153_meeting_recordings')
-        command.upgrade(config, '0154_recording_analysis')
+        command.upgrade(config, '0155_recording_analysis_quality')
     with Session(engine) as db:
         department = Department(name="Recorder test", code="REC")
         db.add(department); db.flush()

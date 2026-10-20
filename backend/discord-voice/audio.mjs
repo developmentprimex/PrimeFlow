@@ -1,4 +1,6 @@
 const MAX_PCM=48000*4*10;
+// Segments awaiting transcription; meetings with many open mics queue many short ones.
+export const MAX_PENDING=48;
 export function encodeWav(pcm) {
   if (!Buffer.isBuffer(pcm)||pcm.length%4||pcm.length+44>2000000) throw Error('audio_size');
   const h=Buffer.alloc(44);h.write('RIFF');h.writeUInt32LE(pcm.length+36,4);h.write('WAVEfmt ',8);
@@ -27,7 +29,7 @@ export class SegmentBuffer {
   }
   flush(id){
     const s=this.speakers.get(id);if(!s?.size)return;
-    if(this.pending.size>=8)throw Error('audio_backpressure');
+    if(this.pending.size>=MAX_PENDING)throw Error('audio_backpressure');
     const sequence=this.sequence++,wav=encodeWav(Buffer.concat(s.parts));
     this.pending.add(sequence);this.bytes-=s.size;this.speakers.delete(id);
     this.emit({type:'segment',sequence,speaker_id:id,start_ms:Math.floor(s.start),end_ms:Math.ceil(s.end),audio_base64:wav.toString('base64')});
