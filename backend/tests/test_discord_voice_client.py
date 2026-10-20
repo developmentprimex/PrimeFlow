@@ -12,6 +12,31 @@ class VoiceClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(c.failed)
         self.assertIn('decode_invalid_packet',' '.join(logs.output))
 
+    async def test_recoverable_worker_gaps_are_diagnostic_and_do_not_interrupt_capture(self):
+        c=self.client()
+        for reason in ('voice_reconnecting','voice_error','receive_error','no_decoded_audio','decode_error','decoder_error'):
+            with self.assertLogs('primeflow.discord.voice',level='WARNING'):
+                await c.handle({'type':'audio_gap','session_id':'s','instance_id':'i','reason':reason})
+        c.on_interruption.assert_not_awaited()
+        self.assertFalse(c.failed)
+
+    async def test_one_failed_segment_is_credited_and_capture_keeps_listening(self):
+        c=self.client();c.send=AsyncMock()
+        c.on_segment.side_effect=[ValueError('transcription_failed'),None]
+        with self.assertLogs('primeflow.discord.voice',level='WARNING'):
+            await c._upload({'sequence':0})
+        await c._upload({'sequence':1})
+        await asyncio.sleep(0)
+        c.on_interruption.assert_not_awaited();self.assertFalse(c.failed)
+        self.assertEqual([x.args[0] for x in c.send.await_args_list],[{'type':'credit','sequence':0},{'type':'credit','sequence':1}])
+
+    async def test_repeated_segment_failures_still_interrupt_instead_of_pretending_to_listen(self):
+        c=self.client();c.send=AsyncMock();c.on_segment.side_effect=ValueError('transcription_failed')
+        with self.assertLogs('primeflow.discord.voice',level='WARNING'):
+            for sequence in range(3):await c._upload({'sequence':sequence})
+            await asyncio.sleep(0)
+        c.on_interruption.assert_awaited_once_with('transcription_failed')
+
     async def test_worker_interruption_preserves_safe_reason_and_numeric_close_code(self):
         c=self.client()
         with self.assertLogs('primeflow.discord.voice',level='WARNING') as logs:

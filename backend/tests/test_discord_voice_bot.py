@@ -78,6 +78,27 @@ class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0);self.assertEqual(sequence,['leave','drain']);block.set()
         await c.finalization
 
+    async def test_one_failed_heartbeat_does_not_interrupt_the_meeting(self):
+        bot,c,i=self.fixture()
+        active={'id':'s','capture':None,'worker':{},'actor':{},'partial':False,'heartbeat':None,'finishing':False}
+        c.active=active;calls=0
+        async def bridge(path,payload):
+            nonlocal calls;calls+=1
+            if calls==1:raise ValueError('temporary')
+            c.active=None
+        bot.bridge.side_effect=bridge
+        with patch('discord_voice_meetings.asyncio.sleep',AsyncMock()),patch.object(c,'interrupt',AsyncMock()) as interrupt:
+            await c.heartbeat(active)
+        interrupt.assert_not_awaited();self.assertEqual(calls,2)
+
+    async def test_heartbeat_that_keeps_failing_interrupts(self):
+        bot,c,i=self.fixture()
+        active={'id':'s','capture':None,'worker':{},'actor':{},'partial':False,'heartbeat':None,'finishing':False}
+        c.active=active;bot.bridge.side_effect=ValueError('down')
+        with patch('discord_voice_meetings.asyncio.sleep',AsyncMock()),patch.object(c,'interrupt',AsyncMock()) as interrupt:
+            await c.heartbeat(active)
+        interrupt.assert_awaited_once_with('heartbeat_failed');self.assertEqual(bot.bridge.await_count,3)
+
     def test_ui_has_only_text_controls_and_stable_ids(self):
         for state in ['LISTENING','READY','SAVED']:
             view=meeting_view({'id':'11111111-1111-4111-8111-111111111111','status':state,'note_url':'https://example.test/ga-ka-notes'})

@@ -73,12 +73,19 @@ class MeetingCaptureCoordinator:
                 raise
 
     async def heartbeat(self,active):
+        # The API expires a session after 60 s without a heartbeat; three missed
+        # 10 s beats in a row still fit inside that window.
+        failures=0
         try:
             while self.active is active:
                 await asyncio.sleep(10)
-                await self.bot.bridge(PREFIX+f"/{active['id']}/heartbeat",active['worker'])
+                try:
+                    await self.bot.bridge(PREFIX+f"/{active['id']}/heartbeat",active['worker']);failures=0
+                except asyncio.CancelledError:raise
+                except Exception:
+                    failures+=1
+                    if failures>=3:await self.interrupt('heartbeat_failed');return
         except asyncio.CancelledError:pass
-        except Exception:await self.interrupt('heartbeat_failed')
 
     async def upload(self,active,message):
         import httpx
@@ -96,6 +103,9 @@ class MeetingCaptureCoordinator:
                 response=await self.bot.http_bridge.post(PREFIX+f"/{active['id']}/segments",data=fields,
                     files={'file':('meeting.wav',audio,'audio/wav')})
                 response.raise_for_status();receipt=response.json()
+                if receipt.get('status')=='ERROR':
+                    # The API stored this segment as failed; a retry returns the same answer.
+                    active['partial']=True;raise RuntimeError('transcription_failed')
                 if receipt.get('status')!='DONE':raise ValueError('transcription_failed')
                 return
             except (httpx.HTTPError,ValueError):
