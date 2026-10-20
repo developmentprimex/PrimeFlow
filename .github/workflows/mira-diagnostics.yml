@@ -1,0 +1,45 @@
+name: Mira Audio Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: primeflow-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: self-hosted
+    timeout-minutes: 3
+    steps:
+      - name: Read audio status without meeting content
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location (Join-Path $env:GITHUB_WORKSPACE 'backend')
+          @'
+          import asyncio, json
+          from sqlalchemy import text
+          from app.db import engine
+          async def main():
+              async with engine.connect() as c:
+                  await c.execute(text('SET TRANSACTION READ ONLY'))
+                  meetings = (await c.execute(text('SELECT id, status, partial, error, created_at, started_at, stopped_at, heartbeat_at FROM discord_voice_meetings ORDER BY created_at DESC LIMIT 5'))).mappings().all()
+                  for row in meetings:
+                      print('MIRA_SESSION', json.dumps(dict(row), default=str))
+                      segments = (await c.execute(text('SELECT sequence, status, error, start_ms, end_ms FROM discord_voice_segments WHERE session_id=:id ORDER BY sequence'), {'id': row['id']})).mappings().all()
+                      print('MIRA_SEGMENTS', json.dumps([dict(s) for s in segments], default=str))
+              await engine.dispose()
+          asyncio.run(main())
+          '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
+          if ($LASTEXITCODE -ne 0) { throw 'Audio status query failed.' }
+          Get-ChildItem 'C:\pm2-system\logs\primeflow-discord*' -File -ErrorAction SilentlyContinue | ForEach-Object {
+            Get-Content -LiteralPath $_.FullName -Tail 2000 | Where-Object {
+              $_ -match 'HTTP Request: POST .*voice-meetings/' -or
+              $_ -match 'Discord operation failed:' -or
+              $_ -match 'MIRA_DIAGNOSTIC'
+            } | Select-Object -Last 45
+          }
