@@ -43,6 +43,39 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
             payload=call.call_args.kwargs['json'];self.assertNotIn('tools',payload);self.assertFalse(payload['store'])
             self.assertIn('Ana',payload['input'][1]['content']);self.assertIn('Mos shpik',payload['input'][0]['content'])
 
+    async def test_final_notes_follow_the_ga_meeting_structure_with_albanian_date(self):
+        from datetime import datetime, timezone
+        response={'output':[{'type':'message','content':[{'type':'output_text','text':'Përmbledhja:\nU rishikua plani.'}]}]}
+        with patch.object(provider,'request',AsyncMock(return_value=response)) as call:
+            result=await provider.summarize_meeting('Staff',[{'sequence':0,'speaker_name':'Ana','transcript':'Ana dërgon raportin të premten.'}],
+                partial=False,meeting_date=datetime(2026,6,26,8,0,tzinfo=timezone.utc))
+        system=call.call_args.kwargs['json']['input'][0]['content']
+        for heading in ('Përmbledhja:','Kapitujt & Temat:','Detyrat e Takimit:','Pyetjet Kryesore:','Shënime:'):
+            self.assertIn(heading,system)
+        self.assertIn('Nuk u identifikuan detyra.',system);self.assertIn('E pazgjidhur',system)
+        self.assertIn('[segmenti 0, Emri i folësit, 00:02–00:07]',system)
+        self.assertTrue(result.startswith('E premte, 26 qershor 2026\nStaff\n\nPërmbledhja:'))
+
+    async def test_default_title_with_channel_and_time_is_kept_without_a_second_date(self):
+        from datetime import datetime, timezone
+        response={'output':[{'type':'message','content':[{'type':'output_text','text':'**Përmbledhja:** Takimi nis.'}]}]}
+        title='1H 820/10/11/1150/1420/16 · 20.10.2026 10:32'
+        with patch.object(provider,'request',AsyncMock(return_value=response)):
+            result=await provider.summarize_meeting(title,[{'sequence':0,'transcript':'Përshëndetje.'}],
+                partial=False,meeting_date=datetime(2026,10,20,8,32,tzinfo=timezone.utc))
+        self.assertTrue(result.startswith(title+'\n\n**Përmbledhja:**'))
+
+    async def test_partial_batches_keep_tasks_and_questions_and_only_the_last_pass_uses_the_template(self):
+        systems=[]
+        async def respond(path,**kwargs):
+            systems.append(kwargs['json']['input'][0]['content'])
+            return {'output':[{'type':'message','content':[{'type':'output_text','text':'Pjesë [0].'}]}]}
+        with patch.object(provider,'request',respond):
+            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*12000} for i in range(3)],partial=False)
+        self.assertGreater(len(systems),1)
+        self.assertTrue(all('Detyrat e Takimit:' not in s and 'pyetjet' in s for s in systems[:-1]))
+        self.assertIn('Detyrat e Takimit:',systems[-1])
+
     async def test_long_transcript_reduces_all_batches_including_last(self):
         seen=[]
         async def respond(path,**kwargs):
