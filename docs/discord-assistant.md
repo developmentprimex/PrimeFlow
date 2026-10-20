@@ -320,8 +320,8 @@ Kushdo me llogari të lidhur shkruan `/push` (opsionale `minuta`, parazgjedhje 5
 para se të publikojë PrimeFlow. Të gjithë të tjerët marrin në kanalin personal, me përmendje,
 një njoftim se PrimeFlow po përditësohet dhe se ndryshimet gjatë asaj kohe mund të mos ruhen.
 Kur deploy-i e rinis botin me version të ri (`APP_BUILD_SHA` ndryshon) brenda 45 minutave,
-të gjithë marrin automatikisht "✅ PrimeFlow u përditësua". Brenda 10 minutave një `/push`
-i dytë nuk ridërgon njoftimin; tregon kush e ka njoftuar. Njoftimet ruhen te `discord_actions`.
+të gjithë marrin automatikisht "✅ PrimeFlow u përditësua" (një herë, edhe pas disa `/push`).
+Çdo `/push` dërgon njoftimin, pa kufi kohe. Njoftimet ruhen te `discord_actions`.
 
 ## Identiteti, lejet dhe historiku
 

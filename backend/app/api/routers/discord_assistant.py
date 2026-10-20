@@ -576,7 +576,6 @@ async def mark_meeting_held(alert_id: uuid.UUID, payload: MeetingHeld, db: Async
             "others": [{"channel_id": channel_id, "message_id": message_id} for channel_id, message_id in others]}
 
 
-PUSH_COOLDOWN = timedelta(minutes=10)
 PUSH_COMPLETION_WINDOW = timedelta(minutes=45)
 
 
@@ -604,16 +603,9 @@ async def announce_push(payload: PushNotice, db: AsyncSession = Depends(get_db))
     user = link and await db.get(User, link.user_id)
     if not user or not user.is_active:
         raise HTTPException(403, "Lidhe llogarinë PrimeFlow me /lidh para se të përdorësh /push.")
-    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('discord_push'))"))
+    # Every /push is announced; only a retried delivery of the same command is not.
     if await db.get(DiscordAction, payload.request_id):
         return {"status": "RECENT", "message": "Ky njoftim është dërguar tashmë."}
-    now = datetime.now(timezone.utc)
-    recent = (await db.execute(select(DiscordAction, User.full_name).join(DiscordLink, DiscordLink.id == DiscordAction.link_id)
-        .join(User, User.id == DiscordLink.user_id).where(DiscordAction.status == "PUSH", DiscordAction.created_at > now - PUSH_COOLDOWN)
-        .order_by(DiscordAction.created_at.desc()).limit(1))).first()
-    if recent:
-        at = recent[0].created_at.astimezone(ZoneInfo(settings.APP_TIMEZONE)).strftime("%H:%M")
-        return {"status": "RECENT", "message": f"{recent[1]} e ka njoftuar ekipin për push në {at}. Nuk u dërgua njoftim i dyfishtë."}
     targets = [target for target in await push_targets(db) if target["discord_user_id"] != payload.discord_user_id]
     db.add(DiscordAction(id=payload.request_id, link_id=link.id, task_id=None, instruction="/push", status="PUSH",
                          result={"build": payload.build}))
