@@ -19,7 +19,7 @@ Set these in the backend environment, never in frontend environment variables:
 ```
 OPENAI_API_KEY=<configure privately>
 RECORDING_ANALYSIS_ENABLED=true
-RECORDING_ANALYSIS_MODEL=gpt-5.4-mini
+RECORDING_ANALYSIS_MODEL=gpt-6-luna
 SPEECH_ALBANIAN_TRANSCRIBE_MODEL=gpt-4o-transcribe
 SPEECH_TRANSCRIBE_MODEL=whisper-1
 ```
@@ -28,6 +28,12 @@ FFmpeg is required as already configured for the recorder. The worker must
 have read permission on the same `MEETING_RECORDINGS_ROOT` as the API and
 write permission to its OS temporary directory. Keep the root persistent.
 No new Python/npm dependency is required.
+
+Summary generation and task proposals use `gpt-6-luna` by default. The model
+can be overridden with `RECORDING_ANALYSIS_MODEL`; transcription continues to
+use the separate speech settings above. Luna supports the existing Responses
+API and Structured Outputs contract:
+[OpenAI GPT-6 Luna model documentation](https://developers.openai.com/api/docs/models/gpt-6-luna).
 
 Production uses existing Celery workers and beat: the new
 `app.celery_tasks.process_recording_analyses` task is scheduled every five
