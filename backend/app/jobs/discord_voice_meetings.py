@@ -46,7 +46,7 @@ async def process_voice_meetings():
                 current.summary_progress=dict(progress);current.lease_until=now()+timedelta(seconds=180)
                 await db.commit()
         try:
-            draft=await provider.summarize_meeting(title,parts,partial=partial,meeting_date=meeting_date,
+            draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
                 cache=cache,checkpoint=checkpoint)
             error=None
         except ValueError:

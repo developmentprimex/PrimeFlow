@@ -109,12 +109,12 @@ async def transcribe_segment(wav):
     return result.strip()
 
 
-async def summarize_meeting(title, segments, *, partial, meeting_date=None, cache=None, checkpoint=None):
+async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, checkpoint=None):
     cache=dict(cache or {})
     async def summarize(parts,final=False):
         payload={'model':settings.DISCORD_AI_MODEL,'store':False,'input':[
             {'role':'system','content':FINAL_SYSTEM if final else PART_SYSTEM},
-            {'role':'user','content':json.dumps({'title':title,'partial':partial,'segments':parts},ensure_ascii=False)}]}
+            {'role':'user','content':json.dumps({'title':title,'segments':parts},ensure_ascii=False)}]}
         key=hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
         if key in cache:return cache[key]
         response=await request('responses',json=payload)
@@ -140,4 +140,4 @@ async def summarize_meeting(title, segments, *, partial, meeting_date=None, cach
     # The default title already ends with "· dd.mm.yyyy HH:MM"; add the date only when it is missing.
     dated=not meeting_date or re.search(r'\d{2}\.\d{2}\.\d{4}',title)
     heading=('' if dated else albanian_date(meeting_date)+'\n')+title
-    return ('SHËNIME TË PJESSHME — disa pjesë të audios mungojnë.\n\n' if partial else '')+heading+'\n\n'+result
+    return heading+'\n\n'+result

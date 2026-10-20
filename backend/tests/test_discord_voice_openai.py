@@ -38,8 +38,9 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_summary_is_text_only_and_retains_speaker_references(self):
         response={'output':[{'type':'message','content':[{'type':'output_text','text':'Vendimet\nKontrollo.'}]}]}
         with patch.object(provider,'request',AsyncMock(return_value=response)) as call:
-            result=await provider.summarize_meeting('Staff',[{'sequence':0,'speaker_id':'12','speaker_name':'Ana','start_ms':0,'end_ms':1000,'transcript':'Kontrollo.'}],partial=True)
-            self.assertIn('PJESSHME',result)
+            result=await provider.summarize_meeting('Staff',[{'sequence':0,'speaker_id':'12','speaker_name':'Ana','start_ms':0,'end_ms':1000,'transcript':'Kontrollo.'}])
+            # Notes carry no partial-audio banner, and the model is not told to write one.
+            self.assertNotIn('PJESSHME',result);self.assertNotIn('partial',call.call_args.kwargs['json']['input'][1]['content'])
             payload=call.call_args.kwargs['json'];self.assertNotIn('tools',payload);self.assertFalse(payload['store'])
             self.assertIn('Ana',payload['input'][1]['content']);self.assertIn('Mos shpik',payload['input'][0]['content'])
 
@@ -48,7 +49,7 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         response={'output':[{'type':'message','content':[{'type':'output_text','text':'Përmbledhja:\nU rishikua plani.'}]}]}
         with patch.object(provider,'request',AsyncMock(return_value=response)) as call:
             result=await provider.summarize_meeting('Staff',[{'sequence':0,'speaker_name':'Ana','transcript':'Ana dërgon raportin të premten.'}],
-                partial=False,meeting_date=datetime(2026,6,26,8,0,tzinfo=timezone.utc))
+                meeting_date=datetime(2026,6,26,8,0,tzinfo=timezone.utc))
         system=call.call_args.kwargs['json']['input'][0]['content']
         for heading in ('Përmbledhja:','Kapitujt & Temat:','Detyrat e Takimit:','Pyetjet Kryesore:','Shënime:'):
             self.assertIn(heading,system)
@@ -65,7 +66,7 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         title='1H 820/10/11/1150/1420/16 · 20.10.2026 10:32'
         with patch.object(provider,'request',AsyncMock(return_value=response)):
             result=await provider.summarize_meeting(title,[{'sequence':0,'transcript':'Përshëndetje.'}],
-                partial=False,meeting_date=datetime(2026,10,20,8,32,tzinfo=timezone.utc))
+                meeting_date=datetime(2026,10,20,8,32,tzinfo=timezone.utc))
         self.assertTrue(result.startswith(title+'\n\n**Përmbledhja:**'))
 
     async def test_partial_batches_keep_tasks_and_questions_and_only_the_last_pass_uses_the_template(self):
@@ -74,7 +75,7 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
             systems.append(kwargs['json']['input'][0]['content'])
             return {'output':[{'type':'message','content':[{'type':'output_text','text':'Pjesë [0].'}]}]}
         with patch.object(provider,'request',respond):
-            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*12000} for i in range(3)],partial=False)
+            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*12000} for i in range(3)])
         self.assertGreater(len(systems),1)
         self.assertTrue(all('Detyrat e Takimit:' not in s and 'pyetjet' in s for s in systems[:-1]))
         self.assertIn('Detyrat e Takimit:',systems[-1])
@@ -85,5 +86,5 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
             seen.append(kwargs['json']['input'][1]['content'])
             return {'output':[{'type':'message','content':[{'type':'output_text','text':'Përmbledhje me burime [0,1,2].'}]}]}
         with patch.object(provider,'request',respond):
-            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':('x'*12000 if i<2 else 'LAST_DECISION')} for i in range(3)],partial=False)
+            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':('x'*12000 if i<2 else 'LAST_DECISION')} for i in range(3)])
         self.assertGreater(len(seen),1);self.assertTrue(any('LAST_DECISION' in item for item in seen))

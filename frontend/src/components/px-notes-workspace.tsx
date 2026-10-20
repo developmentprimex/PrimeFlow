@@ -4737,7 +4737,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                     src="/mira-avatar.png"
                                     alt="Mira"
                                     title="Shënim nga Mira (takim në Discord)"
-                                    className="h-7 w-7 shrink-0 rounded-full border-2 border-violet-300"
+                                    className="h-10 w-10 shrink-0 rounded-full border-2 border-violet-300"
                                   />
                                 ) : null}
                                 {showMobileDeptBadge || assignees.length > 0 ? (
