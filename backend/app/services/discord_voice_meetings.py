@@ -139,12 +139,21 @@ async def save_notes(db, actor, session_id):
         raise HTTPException(409, 'Note-i i ruajtur është hequr; nuk krijohet përsëri.')
     if row.status != 'READY' or not (row.draft_text or '').strip():
         raise HTTPException(409, 'Shënimet nuk janë gati.')
+    await store_note(db, row, user)
+    await db.commit()
+    return view(row)
+
+
+def is_scheduled(row):
+    """Mira started this 1H meeting on her own schedule (no Discord interaction)."""
+    return row.request_id.startswith('auto1h-')
+
+
+async def store_note(db, row, user):
     note = await build_ga_note(db, user, GaNoteCreate(content=row.draft_text, department_id=row.department_id,
         created_by=user.id))
     await db.flush()
     row.saved_note_id, row.saved_at, row.status = note.id, now(), 'SAVED'
-    await db.commit()
-    return view(row)
 
 
 async def receive_segment(db, session_id, payload, audio):

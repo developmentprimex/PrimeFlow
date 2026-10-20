@@ -4,6 +4,8 @@ from datetime import timedelta
 from sqlalchemy import select, update, or_
 from app.db import SessionLocal
 from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting, DiscordVoiceSegment as Segment
+from app.models.user import User
+from app.services import discord_voice_meetings as service
 from app.services.discord_voice_meetings import now
 from app.services import discord_voice_openai as provider
 
@@ -35,6 +37,8 @@ async def process_voice_meetings():
                 for s in segments if s.status=='DONE' and s.transcript]
             if not parts:
                 row.status='FAILED';row.error='Nuk u dëgjua të folur i kuptueshëm.';row.partial=partial
+                # A scheduled 1H slot nobody spoke in is not worth a Discord message.
+                if service.is_scheduled(row):row.delivered_at=now()
                 await db.commit();stats['failed']+=1;continue
             lease=uuid.uuid4();row.lease_token=lease;row.lease_until=now()+timedelta(seconds=180)
             title,cache,meeting_date=row.title,row.summary_progress or {},row.started_at or row.created_at
@@ -56,5 +60,15 @@ async def process_voice_meetings():
             if current.lease_token!=lease or current.status not in ('FINALIZING','INTERRUPTED'):continue
             current.status='FAILED' if error else 'READY';current.error=error
             current.draft_text=draft;current.partial=partial;current.lease_until=None
+            if service.is_scheduled(current):
+                # Scheduled 1H meetings go straight to PX Notes, in the same commit so
+                # Discord delivery never sees them READY. If saving fails, the savepoint
+                # rolls back and the notes are delivered in Discord as usual.
+                try:
+                    async with db.begin_nested():
+                        if not error:await service.store_note(db,current,await db.get(User,current.user_id))
+                        current.delivered_at=now()
+                except Exception:
+                    pass
             await db.commit();stats['failed' if error else 'ready']+=1
     return stats

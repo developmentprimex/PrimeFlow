@@ -47,6 +47,17 @@ class VoiceClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('4014',' '.join(logs.output))
         self.assertNotIn('never log',' '.join(logs.output))
 
+    def test_scheduled_1h_request_ids_are_accepted_and_nothing_else(self):
+        import uuid
+        from pydantic import ValidationError
+        from app.schemas.discord_voice_meeting import VoiceStart
+        base=dict(discord_user_id='77',guild_id='123',channel_id='44',voice_channel_id='55',
+            instance_id=uuid.uuid4(),capture_token='x'*40,title='1H')
+        self.assertEqual(VoiceStart(**base,request_id='auto1h-202610190958').request_id,'auto1h-202610190958')
+        self.assertEqual(VoiceStart(**base,request_id='1430000000000000000').request_id,'1430000000000000000')
+        for bad in ('auto1h-2026','auto-202610190958','x1'):
+            with self.assertRaises(ValidationError):VoiceStart(**base,request_id=bad)
+
     def client(self):
         c=VoiceCaptureClient(AsyncMock(),AsyncMock(),AsyncMock())
         c.session_id='s';c.instance_id='i';c.guild_id='1';c.channel_id='2'

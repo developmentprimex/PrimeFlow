@@ -1,9 +1,10 @@
 """Silent staff meetings controlled by the existing Discord bot."""
 import asyncio
 import base64
+import logging
 import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import suppress
 import discord
 from discord import app_commands
@@ -13,6 +14,21 @@ from discord_voice_client import VoiceCaptureClient, VOICE_DIR
 from discord_voice_ui import meeting_view, result_message, send_durable
 
 PREFIX='/bot/voice-meetings'
+log=logging.getLogger('primeflow.discord.voice')
+# Mira leaves this long after the last person left (a quick rejoin keeps her),
+# or when nobody arrived this long after she joined.
+EMPTY_AFTER_LAST_LEFT=30
+EMPTY_BEFORE_ANYONE_CAME=600
+
+
+def auto_join_slot(now,times):
+    """The weekday 1H join time whose 2-minute window contains now, else None."""
+    if now.weekday()>=5:return None
+    for item in filter(None,(part.strip() for part in (times or '').split(','))):
+        hour,minute=map(int,item.split(':'))
+        slot=now.replace(hour=hour,minute=minute,second=0,microsecond=0)
+        if slot<=now<slot+timedelta(minutes=2):return slot
+    return None
 
 
 def identity(interaction):
@@ -24,6 +40,7 @@ def identity(interaction):
 class MeetingCaptureCoordinator:
     def __init__(self,bot):
         self.bot=bot;self.active=None;self.lock=asyncio.Lock();self.finalization=None;self.background=set()
+        self.scheduled=set()  # 1H slots already attempted by this process
 
     async def preflight(self):
         process=await asyncio.create_subprocess_exec(settings.DISCORD_VOICE_NODE_BINARY,str(VOICE_DIR/'worker.mjs'),'--check',
@@ -34,21 +51,27 @@ class MeetingCaptureCoordinator:
         if process.returncode or b'"voice_ready":true' not in output:raise ValueError('Shërbimi i audios nuk është gati.')
 
     async def start(self,interaction,title,department_id):
+        channel=getattr(getattr(interaction.user,'voice',None),'channel',None)
+        if not isinstance(channel,discord.VoiceChannel):raise ValueError('Hyr në një voice channel të zakonshëm.')
+        await self.bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
+        await self.begin(actor=identity(interaction),guild=interaction.guild,voice=channel,
+            request_id=str(interaction.id),title=title,department_id=department_id,notify=interaction.followup.send)
+
+    async def begin(self,*,actor,guild,voice,request_id,title,department_id,notify):
+        channel=voice
         async with self.lock:
             if self.active:raise ValueError('Një takim po dëgjohet tashmë.')
-            channel=getattr(getattr(interaction.user,'voice',None),'channel',None)
-            if not isinstance(channel,discord.VoiceChannel):raise ValueError('Hyr në një voice channel të zakonshëm.')
-            await self.bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
-            permissions=channel.permissions_for(interaction.guild.me)
+            permissions=channel.permissions_for(guild.me)
             if not all((permissions.view_channel,permissions.connect,permissions.send_messages)):
                 raise ValueError('Mira ka nevojë për View Channel, Connect dhe Send Messages.')
             await self.preflight()
             worker={'capture_token':secrets.token_urlsafe(32),'instance_id':str(uuid.uuid4())}
-            row=await self.bot.bridge(PREFIX+'/start',{**identity(interaction),**worker,
-                'request_id':str(interaction.id),'title':(title or f'{channel.name} · {datetime.now().strftime("%d.%m.%Y %H:%M")}')[:200],
+            row=await self.bot.bridge(PREFIX+'/start',{**actor,**worker,
+                'request_id':request_id,'title':(title or f'{channel.name} · {datetime.now().strftime("%d.%m.%Y %H:%M")}')[:200],
                 'department_id':department_id})
-            active={'id':row['id'],'worker':worker,'actor':identity(interaction),'capture':None,
-                'partial':False,'heartbeat':None,'finishing':False,'voice_channel':channel}
+            active={'id':row['id'],'worker':worker,'actor':actor,'capture':None,
+                'partial':False,'heartbeat':None,'finishing':False,'voice_channel':channel,
+                'listening':False,'seen_people':False,'empty_since':None}
             self.active=active
             try:
                 # A visible notice is a prerequisite, never a best-effort afterthought.
@@ -58,12 +81,12 @@ class MeetingCaptureCoordinator:
                 async def upload(message):await self.upload(active,message)
                 async def interrupted(reason):await self.interrupt(reason)
                 capture=VoiceCaptureClient(self.bot.ws.send_as_json,upload,interrupted);active['capture']=capture
-                await capture.start(session_id=row['id'],instance_id=worker['instance_id'],guild_id=interaction.guild_id,
+                await capture.start(session_id=row['id'],instance_id=worker['instance_id'],guild_id=actor['guild_id'],
                     channel_id=channel.id,bot_user_id=self.bot.user.id,node=settings.DISCORD_VOICE_NODE_BINARY)
                 if active['finishing'] or self.active is not active:raise ValueError('Nisja e takimit u anulua.')
                 await self.bot.bridge(PREFIX+f"/{row['id']}/listening",worker)
-                row['status']='LISTENING'
-                await interaction.followup.send('Mira po dëgjon në heshtje.',view=meeting_view(row))
+                row['status']='LISTENING';active['listening']=True
+                await notify('Mira po dëgjon në heshtje.',view=meeting_view(row))
             except Exception:
                 if active['capture']:
                     with suppress(Exception):await active['capture'].close()
@@ -119,6 +142,11 @@ class MeetingCaptureCoordinator:
         await self.bot.bridge(PREFIX+f"/{active['id']}/authorize-stop",identity(interaction))
         if active['finishing']:
             await interaction.followup.send('Shënimet po përgatiten.');return
+        await self.end(active)
+        await interaction.followup.send('Dëgjimi u ndal. Po përgatis shënimet.')
+
+    async def end(self,active):
+        """Leave the voice channel and finalize; the caller has authorized the stop."""
         active['finishing']=True
         try:
             end=await active['capture'].stop() if active['capture'] else {'last_sequence':0,'partial':False}
@@ -129,7 +157,49 @@ class MeetingCaptureCoordinator:
             end={'last_sequence':getattr(active['capture'],'last_sequence',0),'partial':True}
         self.finalization=asyncio.create_task(self.finalize(active,end))
         self.background.add(self.finalization);self.finalization.add_done_callback(self.background.discard)
-        await interaction.followup.send('Dëgjimi u ndal. Po përgatis shënimet.')
+
+    async def auto_stop(self,reason):
+        active=self.active
+        if not active or active['finishing']:return
+        # The organizer's own identity authorizes the stop, as if they ran /takimi mbaro.
+        await self.bot.bridge(PREFIX+f"/{active['id']}/authorize-stop",active['actor'])
+        await self.end(active)
+        log.info('Mira left the meeting session=%s reason=%s',active['id'],reason)
+
+    async def tick(self,now):
+        """Scheduler step: watch who is in the meeting, then join the next 1H slot."""
+        await self.check_presence(now)
+        owner=settings.DISCORD_1H_AUTO_OWNER_DISCORD_ID
+        slot=auto_join_slot(now,settings.DISCORD_1H_AUTO_JOIN_TIMES)
+        if not owner or slot is None or slot in self.scheduled or self.active:return
+        self.scheduled.add(slot)
+        try:await self.auto_start(slot,owner)
+        except Exception as exc:log.warning('Mira could not join the 1H slot %s: %s',slot.strftime('%H:%M'),exc)
+
+    async def auto_start(self,slot,owner):
+        guild=self.bot.get_guild(int(settings.DISCORD_GUILD_ID))
+        if not guild:raise ValueError('guild_unavailable')
+        voice=guild.get_channel(int(settings.DISCORD_1H_VOICE_CHANNEL_ID or 0))
+        if not isinstance(voice,discord.VoiceChannel):
+            voice=next((c for c in guild.voice_channels if c.name.upper().startswith('1H')),None)
+        if voice is None:raise ValueError('1h_voice_channel_missing')
+        private=next((c for c in guild.text_channels if c.topic==f'PrimeFlow personal workspace: {owner}'),None)
+        if private is None:raise ValueError('organizer_private_channel_missing')
+        actor=dict(discord_user_id=str(owner),guild_id=str(guild.id),channel_id=str(private.id),voice_channel_id=str(voice.id))
+        await self.begin(actor=actor,guild=guild,voice=voice,request_id=f"auto1h-{slot.strftime('%Y%m%d%H%M')}",
+            title=None,department_id=None,notify=private.send)
+
+    async def check_presence(self,now):
+        active=self.active
+        if not active or active['finishing'] or not active.get('listening'):return
+        if any(not member.bot for member in active['voice_channel'].members):
+            active['seen_people']=True;active['empty_since']=None;return
+        if active['empty_since'] is None:active['empty_since']=now
+        empty=now-active['empty_since']
+        if active['seen_people'] and empty>timedelta(seconds=EMPTY_AFTER_LAST_LEFT):
+            await self.auto_stop('everyone_left')
+        elif not active['seen_people'] and empty>=timedelta(seconds=EMPTY_BEFORE_ANYONE_CAME):
+            await self.auto_stop('nobody_came')
 
     async def finalize(self,active,end):
         try:

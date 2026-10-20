@@ -34,6 +34,28 @@ class VoiceJobTests(PostgresMeetingTests):
             self.assertEqual([s['sequence'] for s in summary.call_args.args[1]],[0,1])
             async with self.sessions() as db:self.assertEqual((await db.get(Meeting,sid)).status,'READY')
 
+    async def test_scheduled_1h_meeting_is_saved_to_px_notes_without_a_discord_delivery(self):
+        from app.models.discord_voice_meeting import DiscordVoiceSegment as Segment
+        from app.models.ga_note import GaNote
+        sid=uuid.uuid4()
+        async with self.sessions() as db:
+            db.add(Meeting(id=sid,user_id=self.uid,link_id=self.lid,department_id=self.did,guild_id='123',
+                voice_channel_id='55',private_channel_id='44',request_id='auto1h-202610200958',instance_id=uuid.uuid4(),
+                capture_token_hash=service.token_hash('x'*40),title='1H',status='FINALIZING',stop_authorized=True,
+                expected_segments=1,stopped_at=service.now()-timedelta(seconds=120)))
+            db.add(Segment(id=uuid.uuid4(),session_id=sid,sequence=0,speaker_id='12',speaker_name='Ana',start_ms=0,
+                end_ms=1000,content_hash='h',status='DONE',transcript='Ana dërgon raportin.'))
+            await db.commit()
+        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='**Përmbledhja:** Raporti.')):
+            await jobs.process_voice_meetings()
+        async with self.sessions() as db:
+            row=await db.get(Meeting,sid)
+            self.assertEqual(row.status,'SAVED');self.assertIsNotNone(row.delivered_at)
+            note=await db.get(GaNote,row.saved_note_id)
+            self.assertEqual(note.content,'**Përmbledhja:** Raporti.');self.assertEqual(note.created_by,self.uid)
+        async with self.sessions() as db:
+            self.assertEqual((await service.claim_deliveries(db))['jobs'],[])
+
     async def test_stale_capture_recovers_as_partial_without_starting_audio(self):
         sid=uuid.uuid4()
         async with self.sessions() as db:

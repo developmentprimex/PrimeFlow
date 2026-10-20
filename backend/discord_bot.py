@@ -332,6 +332,7 @@ class PrimeFlowBot(discord.Client):
         await self.tree.sync(guild=guild)
         if settings.DISCORD_MEETING_NOTES_ENABLED:
             self.voice_meeting_results.start()
+            self.voice_meeting_schedule.start()
         self.reminders.start()
         self.meeting_alerts.start()
         self.agent_results.start()
@@ -935,7 +936,20 @@ class PrimeFlowBot(discord.Client):
     async def before_voice_meeting_results(self):
         await self.wait_until_ready()
 
+    @tasks.loop(seconds=10)
+    async def voice_meeting_schedule(self):
+        # Mira joins the 1H channel before each slot and leaves once everyone has gone.
+        try:
+            await self.meeting_capture.tick(datetime.now(ZoneInfo(settings.APP_TIMEZONE)))
+        except Exception as exc:
+            log.warning("Mira meeting schedule failed: %s", type(exc).__name__)
+
+    @voice_meeting_schedule.before_loop
+    async def before_voice_meeting_schedule(self):
+        await self.wait_until_ready()
+
     async def close(self):
+        self.voice_meeting_schedule.cancel()
         self.voice_meeting_results.cancel()
         await self.meeting_capture.close()
         self.clear_ready_status()

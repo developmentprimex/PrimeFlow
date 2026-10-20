@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     DISCORD_MEETING_VOICE_CHANNEL_ID: str | None = None
     # Voice channel of the 1H slot meetings; slot reminders link to it.
     DISCORD_1H_VOICE_CHANNEL_ID: str | None = "1493866120338477119"
+    # Mira joins the 1H channel on weekdays at these local times (2 minutes before
+    # each slot) and saves the notes to PX Notes as this organizer. Empty disables it.
+    DISCORD_1H_AUTO_JOIN_TIMES: str = "09:58,10:58,11:48,14:18,15:58"
+    DISCORD_1H_AUTO_OWNER_DISCORD_ID: str | None = "1425896175839608933"
     DISCORD_MESSAGE_CONTENT_ENABLED: bool = False
     DISCORD_AI_MODEL: str = "gpt-5.4-mini"
     DISCORD_MEETING_TRANSCRIBE_MODEL: str = "gpt-transcribe"

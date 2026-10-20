@@ -30,6 +30,12 @@ parazgjedhja është `node`. Kërkohet Node >=22.12.
    dërgohet skedar UTF-8. Përdor **Shiko shënimet**, pastaj **Ruaj në PX Notes**.
    Dy klikime nuk krijojnë dy Notes. **Hap PX Notes** hap listën për redaktim.
 
+Takimet 1H: nga e hëna në të premte Mira hyn vetë në kanalin 1H 2 minuta para
+çdo sloti (`DISCORD_1H_AUTO_JOIN_TIMES`, parazgjedhje 09:58, 10:58, 11:48, 14:18,
+15:58), në emër të `DISCORD_1H_AUTO_OWNER_DISCORD_ID`. Del me `/takimi mbaro`,
+30 sekonda pasi del personi i fundit, ose pas 10 minutash nëse s'vjen askush.
+Shënimet e këtyre takimeve ruhen direkt në PX Notes dhe nuk dërgohen në Discord.
+
 Mbahet një takim në një kohë për server. Pas ndalimit, Mira del nga voice
 channel menjëherë; radha lokale e transkriptimit përfundon përpara se të nisë
 një takim i ri. Shënimet e ruajtura kanë lejet normale të PX Notes. Teksti i
