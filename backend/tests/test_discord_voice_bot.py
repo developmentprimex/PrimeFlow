@@ -9,6 +9,38 @@ from discord_voice_meetings import MeetingCaptureCoordinator
 from discord_voice_ui import meeting_view
 
 class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_installed_discord_websocket_dispatches_voice_data_to_capture(self):
+        import json
+        import discord.gateway
+        import discord_bot
+        import asyncio
+        client=object.__new__(discord_bot.PrimeFlowBot)
+        client.meeting_capture=SimpleNamespace(gateway=AsyncMock())
+        websocket=object.__new__(discord.gateway.DiscordWebSocket)
+        pending=[]
+        def dispatch(event,data):
+            handler=getattr(client,'on_'+event,None)
+            if handler:pending.append(asyncio.create_task(handler(data)))
+        websocket._dispatch=dispatch
+        packet={'op':0,'t':'VOICE_SERVER_UPDATE','d':{'guild_id':'123','endpoint':'voice.example.test','token':'test-only'}}
+        with patch('discord_bot.settings.DISCORD_MEETING_NOTES_ENABLED',True):
+            # The real library emits socket_raw_receive from its enabled debug hook.
+            websocket.debug_log_receive(json.dumps(packet))
+            await asyncio.gather(*pending)
+        client.meeting_capture.gateway.assert_awaited_once_with(packet)
+
+    async def test_gateway_hook_ignores_non_voice_invalid_and_disabled_events(self):
+        import json
+        import discord_bot
+        client=object.__new__(discord_bot.PrimeFlowBot)
+        client.meeting_capture=SimpleNamespace(gateway=AsyncMock())
+        with patch('discord_bot.settings.DISCORD_MEETING_NOTES_ENABLED',True):
+            for payload in ['not json','[]',json.dumps({'op':0,'t':'MESSAGE_CREATE','d':{}}),json.dumps({'op':0,'t':'VOICE_STATE_UPDATE','d':[]})]:
+                await client.on_socket_raw_receive(payload)
+        with patch('discord_bot.settings.DISCORD_MEETING_NOTES_ENABLED',False):
+            await client.on_socket_raw_receive(json.dumps({'op':0,'t':'VOICE_STATE_UPDATE','d':{}}))
+        client.meeting_capture.gateway.assert_not_awaited()
+
     def fixture(self):
         bot=SimpleNamespace(bridge=AsyncMock(),private_channel=AsyncMock(),user=SimpleNamespace(id=3),
             ws=SimpleNamespace(send_as_json=AsyncMock()),get_guild=Mock(),get_channel=Mock())

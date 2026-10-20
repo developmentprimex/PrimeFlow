@@ -20,6 +20,7 @@ class VoiceDeployTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(settings,'DISCORD_MEETING_NOTES_ENABLED',True),patch.object(settings,'DISCORD_GUILD_ID','123'),patch.object(settings,'DISCORD_BRIDGE_SECRET','x'*32),patch.object(discord_bot.app_commands.CommandTree,'sync',AsyncMock()),patch.object(discord_bot.tasks.Loop,'start'):
             bot=discord_bot.PrimeFlowBot()
             try:
+                self.assertTrue(bot._enable_debug_events)
                 await bot.setup_hook()
                 group=bot.tree.get_command('takimi',guild=discord.Object(id=123))
                 self.assertEqual({c.name for c in group.commands},{'fillo','mbaro'})
