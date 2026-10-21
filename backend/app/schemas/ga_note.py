@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field
+from app.schemas.task_postponement import TaskPostponementExplanations
 
 
 class GaNoteAttachmentOut(BaseModel):
@@ -106,7 +107,7 @@ class GaNoteTaskAssigneeStateUpdate(BaseModel):
     is_personal: bool = False
 
 
-class GaNoteTaskBundleUpdate(BaseModel):
+class GaNoteTaskBundleUpdate(TaskPostponementExplanations):
     """Atomic update for a GA note and its independent assignee copies."""
 
     content: str | None = None

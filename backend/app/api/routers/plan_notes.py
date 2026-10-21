@@ -34,6 +34,7 @@ from app.schemas.plan_note import (
 from app.services.audit import add_audit_log
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
+from app.services.task_postponement import check_note_postponement_explanations, save_postponement_daily_explanation
 from app.services.ga_note_task_instances import (
     GaNoteAssigneeExecutionState,
     apply_ga_note_assignee_execution_states,
@@ -479,13 +480,18 @@ async def update_plan_note_task_bundle(
     await _ensure_note_access(note, user, db)
 
     existing_tasks = (
-        await db.execute(select(Task).where(Task.plan_note_origin_id == note.id).with_for_update())
+        await db.execute(select(Task).where(Task.plan_note_origin_id == note.id).order_by(Task.id))
     ).scalars().all()
-    try:
-        marker_changed, shared_marker = note_bundle_marker_update(note, payload, existing_tasks)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
+    date_updates = {
+        item.assignee_id: {"start_date": item.start_date, "due_date": item.due_date}
+        for item in payload.assignee_states or []
+        if payload.assignee_ids is None or item.assignee_id in payload.assignee_ids
+    }
+    await check_note_postponement_explanations(
+        db,
+        tasks=existing_tasks, updates_by_assignee=date_updates,
+        explanations=payload.postponement_explanations,
+    )
     affected_department_ids = {task.department_id for task in existing_tasks if task.department_id}
     if note.department_id:
         affected_department_ids.add(note.department_id)
@@ -499,6 +505,20 @@ async def update_plan_note_task_bundle(
         db, department_ids=affected_department_ids, actor=user,
         day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
     )
+
+    existing_tasks = (await db.execute(select(Task).where(Task.plan_note_origin_id == note.id)
+        .order_by(Task.id).with_for_update().execution_options(populate_existing=True))).scalars().all()
+    if any(task.department_id and task.department_id not in affected_department_ids for task in existing_tasks):
+        raise HTTPException(status_code=409, detail="Përgjegjësi ndryshoi. Rifresko dhe provo përsëri.")
+    postponements = await check_note_postponement_explanations(
+        db,
+        tasks=existing_tasks, updates_by_assignee=date_updates, explanations=payload.postponement_explanations,
+    )
+    try:
+        marker_changed, shared_marker = note_bundle_marker_update(note, payload, existing_tasks)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
 
     if (
         payload.expected_updated_at is not None
@@ -727,6 +747,11 @@ async def update_plan_note_task_bundle(
             before=before_state, after=after_state,
             old_assignee_ids=[old_owner] if old_owner else [],
             new_assignee_ids=[new_owner] if new_owner else [],
+            **postponements.get(task.id, {}),
+        )
+        await save_postponement_daily_explanation(
+            db, task_id=task.id, user_ids={owner for owner in (old_owner, new_owner) if owner},
+            explanation=postponements.get(task.id, {}),
         )
 
     add_audit_log(
@@ -826,6 +851,27 @@ async def update_plan_note_task_deadline(
             is_deadline_important=linked_tasks[0].is_deadline_important,
         )
 
+    updates = {"due_date": new_due_date} if update_due else {}
+    await check_note_postponement_explanations(
+        db,
+        tasks=linked_tasks, updates_by_assignee={task.assigned_to: updates for task in linked_tasks},
+        explanations=payload.postponement_explanations,
+    )
+    await ensure_daily_baselines_for_departments(
+        db, department_ids={task.department_id for task in linked_tasks}, actor=user,
+        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
+    )
+    linked_tasks = (await db.execute(select(Task).where(
+        Task.plan_note_origin_id == note_id, Task.is_active.is_(True),
+    ).order_by(Task.id).with_for_update().execution_options(populate_existing=True))).scalars().all()
+    if not linked_tasks:
+        raise HTTPException(status_code=404, detail="No active tasks found for this plan note")
+    postponements = await check_note_postponement_explanations(
+        db,
+        tasks=linked_tasks, updates_by_assignee={task.assigned_to: updates for task in linked_tasks},
+        explanations=payload.postponement_explanations,
+    )
+
     updated_count = 0
     for task in linked_tasks:
         before = {
@@ -856,6 +902,15 @@ async def update_plan_note_task_deadline(
                 "due_date": task.due_date.isoformat() if task.due_date else None,
                 "is_deadline_important": task.is_deadline_important,
             }
+            record_task_semantic_events(
+                db=db, task_id=task.id, actor_user_id=user.id, before=before, after=after,
+                old_assignee_ids=[task.assigned_to] if task.assigned_to else [],
+                new_assignee_ids=[task.assigned_to] if task.assigned_to else [],
+                **postponements.get(task.id, {}),
+            )
+            await save_postponement_daily_explanation(
+                db, task_id=task.id, user_ids={task.assigned_to or user.id}, explanation=postponements.get(task.id, {}),
+            )
             add_audit_log(
                 db=db,
                 actor_user_id=user.id,
