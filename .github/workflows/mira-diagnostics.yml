@@ -56,11 +56,11 @@ jobs:
           asyncio.run(main())
           '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
           Write-Output '--- Mira Host lines from the Discord bot logs'
-          Get-ChildItem 'C:\pm2-system\logs\primeflow-discord*' -File -ErrorAction SilentlyContinue | ForEach-Object {
+          Get-ChildItem 'C:\pm2-system\logs\primeflow-discord*' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 3 | ForEach-Object {
             Write-Output ('FILE ' + $_.Name + ' ' + $_.LastWriteTime)
-            Get-Content -LiteralPath $_.FullName -Tail 4000 | Where-Object {
-              $_ -match 'Mira host|MIRA_HOST|mira-host'
-            } | Select-Object -Last 40
+            Get-Content -LiteralPath $_.FullName -Tail 20000 | Where-Object {
+              ($_ -match 'Mira host|MIRA_HOST|mira-host|mira_host|Traceback|Error|error|failed|Exception') -and ($_ -notmatch 'mira-host/tick')
+            } | Select-Object -Last 60
           }
           Write-Output '--- mira-host requests and errors from the API logs'
           Get-ChildItem 'C:\pm2-system\logs\primex-backend*' -File -ErrorAction SilentlyContinue | ForEach-Object {
