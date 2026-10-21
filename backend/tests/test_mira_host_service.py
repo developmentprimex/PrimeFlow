@@ -226,3 +226,22 @@ class TurnNotesTests(unittest.TestCase):
                       for m, s, t in ((0, 'Mira', 'Rinesa?'), (1, 'Rinesa', '299 kompani'), (3, 'Endi', 'skema'))]
         lines = host.lines_during(transcript, '2026-10-21T14:20:30+02:00', '2026-10-21T14:22:00+02:00')
         self.assertEqual([l['speaker'] for l in lines], ['Rinesa'])
+
+
+class JoinRetryTests(unittest.TestCase):
+    def setUp(self):
+        self.row = MiraHostSettings(updated_at=datetime(2026, 10, 21, 16, 1, tzinfo=TZ))
+
+    def meeting(self, error, attempts=1, ended=datetime(2026, 10, 21, 15, 58, 39, tzinfo=TZ), status='ABORTED'):
+        return Mira1HMeeting(status=status, error=error, join_attempts=attempts, ended_at=ended)
+
+    def test_a_failed_voice_connection_is_retried_a_few_times(self):
+        self.assertTrue(host.can_retry(self.meeting('interrupted:connect_timeout'), self.row))
+        self.assertTrue(host.can_retry(self.meeting('realtime:OpenAI refuzoi'), self.row))
+        self.assertFalse(host.can_retry(self.meeting('interrupted:connect_timeout', attempts=3), self.row))
+
+    def test_restarting_after_mira_ndalo_rejoins_but_a_held_meeting_never_repeats(self):
+        self.assertTrue(host.can_retry(self.meeting('stopped_by_command'), self.row))
+        self.assertFalse(host.can_retry(self.meeting('stopped_by_command', ended=datetime(2026, 10, 21, 16, 5, tzinfo=TZ)), self.row))
+        self.assertFalse(host.can_retry(self.meeting(None, status='DONE'), self.row))
+        self.assertFalse(host.can_retry(self.meeting('stale'), self.row))

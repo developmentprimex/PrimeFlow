@@ -142,11 +142,12 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
     });
     connection.on('error',()=>emit({type:'log',event:'voice_error'}));
     connection.receiver.speaking.on('start',listen);
-    voice.entersState(connection,voice.VoiceConnectionStatus.Ready,20000).then(()=>{
+    // Discord's voice handshake (with DAVE encryption) can take longer than 20 s in a busy channel.
+    voice.entersState(connection,voice.VoiceConnectionStatus.Ready,45000).then(()=>{
       if(closed)return;
       inputClock=now();nextFrameAt=now();sendInput();sendOutput();
       emit({type:'ready',user_id:gateway.userId});
-    }).catch(()=>fail('connect_timeout'));
+    }).catch(()=>fail('connect_timeout',{voice_status:connection.state?.status??null,guild_seen:joined}));
   }
 
   function start(m){

@@ -389,7 +389,7 @@ async def tick(db: AsyncSession, at: datetime | None = None) -> dict:
         if due_join:
             meeting = (await db.execute(select(Mira1HMeeting).where(Mira1HMeeting.meeting_date == day,
                 Mira1HMeeting.slot == slot))).scalar_one_or_none()
-            if meeting is None:
+            if meeting is None or can_retry(meeting, row):
                 jobs.append({"kind": "join", "slot": slot, "starts_at": start.isoformat()})
     await db.commit()
     return {"enabled": True, "jobs": jobs}
@@ -405,6 +405,21 @@ async def meeting_for(db: AsyncSession, meeting_id: uuid.UUID, *, lock: bool = F
     return meeting
 
 
+# A failed connection is retried in the slot's join window, at most this many times.
+MAX_JOIN_ATTEMPTS = 3
+RETRYABLE_PREFIXES = ("interrupted:", "realtime:", "error:")
+
+
+def can_retry(meeting: Mira1HMeeting, row: MiraHostSettings) -> bool:
+    """A meeting that never really happened may be joined again: after a failed connection, or when
+    hosting was started again after /mira ndalo."""
+    if meeting.status != "ABORTED" or (meeting.join_attempts or 0) >= MAX_JOIN_ATTEMPTS:
+        return False
+    error = meeting.error or ""
+    restarted = error == "stopped_by_command" and row.updated_at and meeting.ended_at and row.updated_at > meeting.ended_at
+    return error.startswith(RETRYABLE_PREFIXES) or bool(restarted)
+
+
 async def start_meeting(db: AsyncSession, slot: str, at: datetime | None = None) -> Mira1HMeeting:
     if slot not in SLOTS:
         raise HTTPException(422, "Slot i panjohur.")
@@ -414,8 +429,11 @@ async def start_meeting(db: AsyncSession, slot: str, at: datetime | None = None)
         started_at=at, host_transcript=[]).on_conflict_do_nothing(constraint="uq_mira_1h_meeting_slot"))
     meeting = (await db.execute(select(Mira1HMeeting).where(Mira1HMeeting.meeting_date == day,
         Mira1HMeeting.slot == slot).with_for_update())).scalar_one()
-    if meeting.status in {"DONE", "ABORTED"}:
+    if meeting.status == "DONE" or (meeting.status == "ABORTED" and not can_retry(meeting, await get_settings(db))):
         raise HTTPException(409, "Ky 1H është mbajtur tashmë.")
+    if meeting.status == "ABORTED":
+        meeting.started_at, meeting.ended_at, meeting.error, meeting.summary_status = at, None, None, None
+    meeting.join_attempts = (meeting.join_attempts or 0) + 1
     meeting.status, meeting.started_at = "GA_PHASE", meeting.started_at or at
     # The silent recorder joins the same channel at the same time; its transcript belongs to this 1H.
     meeting.voice_meeting_id = meeting.voice_meeting_id or await recorder_session(db, day, slot)

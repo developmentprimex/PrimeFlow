@@ -175,7 +175,7 @@ class MiraHost:
             session["process"] = process
             await process.start(guild_id=str(guild.id), channel_id=str(voice.id), token=settings.MIRA_HOST_BOT_TOKEN,
                                 client_secret=started["client_secret"], model=started["model"])
-            await asyncio.wait_for(session["ready"].wait(), 40)
+            await asyncio.wait_for(session["ready"].wait(), 70)
             await self.say(session, f"SISTEMI: Je në kanalin e 1H {slot}. Faza GA: përshëndet shkurt dhe pyet 'Notes të reja?'.")
             starts_at = datetime.fromisoformat(started["starts_at"])
             deadline = datetime.now(tz()) + timedelta(minutes=MAX_MEETING_MINUTES)
@@ -280,7 +280,8 @@ class MiraHost:
             if not session["closed"].is_set():
                 if kind == "interrupted":
                     session["reason"] = f"interrupted:{message.get('reason')}"[:100]
-                    log.warning("MIRA_HOST interrupted reason=%s close_code=%s", message.get("reason"), message.get("close_code"))
+                    log.warning("MIRA_HOST interrupted reason=%s close_code=%s voice_status=%s", message.get("reason"),
+                                message.get("close_code"), message.get("voice_status"))
                 session["ready"].set()
                 session["closed"].set()
         elif kind == "log":

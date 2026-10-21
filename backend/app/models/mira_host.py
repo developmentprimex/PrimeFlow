@@ -39,6 +39,7 @@ class Mira1HMeeting(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     summary_status: Mapped[str | None] = mapped_column(String(20))
     error: Mapped[str | None] = mapped_column(String(300))
+    join_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (UniqueConstraint('meeting_date', 'slot', name='uq_mira_1h_meeting_slot'),)
 
