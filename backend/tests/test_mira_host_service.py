@@ -187,3 +187,42 @@ class KnowledgeTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SpokenTitleTests(unittest.TestCase):
+    def test_owners_and_leading_numbers_are_not_read_aloud(self):
+        self.assertEqual(host.spoken_title('RA/OH: 13 EVENTE ASISTENT'), 'EVENTE ASISTENT')
+        self.assertEqual(host.spoken_title('EH: 39/10 WKF VS API'), 'WKF VS API')
+        self.assertEqual(host.spoken_title('OH: 08:00 OH: FRG: EM: SB', ['OH']), 'FRG: EM: SB')
+        self.assertEqual(host.spoken_title('EH: EH: CODEX ACC', ['EH']), 'CODEX ACC')
+        self.assertEqual(host.spoken_title('EP/ESH/DV: 5 PIM- IDENTIFIKIMI'), 'PIM- IDENTIFIKIMI')
+        self.assertEqual(host.spoken_title('LH: SRV DE DEAKTIVIZIM'), 'SRV DE DEAKTIVIZIM')
+        self.assertEqual(host.spoken_title('2026'), '2026')
+
+
+class SharedTaskTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_task_shared_by_two_people_is_reported_once(self):
+        first, second = str(uuid.uuid4()), str(uuid.uuid4())
+        done_at = datetime(2026, 10, 21, 10, 30, tzinfo=TZ).isoformat()
+        data = host.SlotData(payload([
+            item('EF', '10:00', 'ASISTENTI PER TAK', rank=0, status='DONE', task_id=first, completed_at=done_at),
+            item('RA', '10:00', 'ASISTENTI PER TAK', rank=1, status='DONE', task_id=second, completed_at=done_at),
+        ]), DAY)
+        strikes = [SimpleNamespace(task_id=uuid.UUID(t), point_key=f'k{t}', action='STRUCK', point_text='Sekuenca vetem kur duhet',
+                                   occurred_at=datetime(2026, 10, 21, 9, tzinfo=timezone.utc)) for t in (first, second)]
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=strikes))))))
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
+        with patch.object(host, 'mentioned', AsyncMock(return_value=set())):
+            progress = await host.new_progress(db, meeting, data)
+        self.assertEqual(len(progress['done']), 1)
+        self.assertEqual(progress['done'][0]['owners'], ['EF', 'RA'])
+        self.assertEqual(len(progress['strikes']), 1)
+        self.assertEqual([p['text'] for p in progress['strikes'][0]['points']], ['Sekuenca vetem kur duhet'])
+
+
+class TurnNotesTests(unittest.TestCase):
+    def test_only_the_lines_spoken_during_a_turn_belong_to_it(self):
+        transcript = [{'at': f'2026-10-21T14:2{m}:00+02:00', 'speaker': s, 'text': t}
+                      for m, s, t in ((0, 'Mira', 'Rinesa?'), (1, 'Rinesa', '299 kompani'), (3, 'Endi', 'skema'))]
+        lines = host.lines_during(transcript, '2026-10-21T14:20:30+02:00', '2026-10-21T14:22:00+02:00')
+        self.assertEqual([l['speaker'] for l in lines], ['Rinesa'])

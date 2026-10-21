@@ -34,7 +34,7 @@ def tz():
 
 def task_lines(tasks: list[dict]) -> str:
     def line(t):
-        parts = [t["title"], t["status"], t["period"]]
+        parts = [t.get("spoken") or t["title"], t["status"], t["period"]]
         if t.get("symbol"):
             parts.append("simboli " + t["symbol"])
         if t.get("deadline"):
@@ -53,8 +53,8 @@ def turn_brief(current: dict) -> dict:
         "detyrat_e_slotit": task_lines(brief["current"]),
         "slot_paraprak": brief.get("previous_slot"),
         "nga_sloti_paraprak_ne_proces_ose_pa_progres": task_lines(brief["previous_open"]),
-        "progres_i_ri": {"done": [d["title"] for d in progress.get("done", [])],
-                          "strikes": [{"detyra": s["title"], "pikat": [p["text"] for p in s["points"]]}
+        "progres_i_ri": {"done": [d.get("spoken") or d["title"] for d in progress.get("done", [])],
+                          "strikes": [{"detyra": s.get("spoken") or s["title"], "pikat": [p["text"] for p in s["points"]]}
                                       for s in progress.get("strikes", [])]},
     }
 

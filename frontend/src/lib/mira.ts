@@ -54,7 +54,16 @@ export type MeetingDetail = MeetingRow & {
   } | null
 }
 
-export type MiraNote = { id: string; title: string; content: string; status: string; created_at: string | null; url: string }
+export type MiraNote = {
+  id: string
+  kind: "1H" | "PX_NOTE"
+  title: string
+  content: string
+  status: string
+  created_at: string | null
+  url: string
+  meeting_id: string | null
+}
 
 export type KnowledgeCategory = "STRUKTURA" | "RREGULLORE" | "DEFINIME" | "PROCESE" | "TJETER"
 

@@ -12,7 +12,7 @@ import {
 const ACCENT = "#2f5d8a"
 
 // Mira's notes use **bold** section titles and "-" lists; nothing else is rendered as markup.
-function Summary({ text }: { text: string }) {
+export function Summary({ text }: { text: string }) {
   return (
     <div className="max-w-[70ch] space-y-1.5 text-sm leading-relaxed">
       {text.split("\n").map((line, index) => (
