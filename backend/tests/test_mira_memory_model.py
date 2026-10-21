@@ -88,3 +88,13 @@ class MemoryDeployTests(unittest.TestCase):
             configure_discord.build_config({'MIRA_MEMORY_ENABLED': 'sometimes'})
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/deploy.yml').read_text()
         self.assertIn('MIRA_MEMORY_ENABLED: ${{ vars.MIRA_MEMORY_ENABLED }}', workflow)
+
+    def test_memory_job_is_scheduled_and_diagnosed(self):
+        from app.celery_app import celery_app
+        from app import celery_tasks
+        entry = celery_app.conf.beat_schedule['process-mira-memory']
+        self.assertEqual((entry['task'], entry['schedule']), ('app.celery_tasks.process_mira_memory', 30.0))
+        self.assertTrue(callable(celery_tasks.process_mira_memory))
+        workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/mira-diagnostics.yml').read_text()
+        self.assertIn('memory_status', workflow)
+        self.assertIn('celery-worker', workflow)

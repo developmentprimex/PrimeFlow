@@ -30,6 +30,7 @@ celery_app.conf.accept_content = ["json"]
 celery_app.conf.beat_schedule = {
     "process-recording-analyses": {"task": "app.celery_tasks.process_recording_analyses", "schedule": 5.0},
     "process-discord-voice-meetings": {"task": "app.celery_tasks.process_discord_voice_meetings", "schedule": 30.0},
+    "process-mira-memory": {"task": "app.celery_tasks.process_mira_memory", "schedule": 30.0},
     "process-discord-agent-runs": {
         "task": "app.celery_tasks.process_discord_agent_runs",
         "schedule": 30.0,
