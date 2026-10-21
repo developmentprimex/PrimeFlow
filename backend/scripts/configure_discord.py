@@ -12,6 +12,7 @@ KEYS = (
     "DISCORD_BRIDGE_SECRET", "DISCORD_CATEGORY_ID", "DISCORD_MESSAGE_CONTENT_ENABLED",
     "DISCORD_AI_MODEL", "DISCORD_AI_TIMEOUT_SECONDS", "DISCORD_AGENT_MODEL",
     "DISCORD_MEETING_VOICE_CHANNEL_ID", "DISCORD_MEETING_NOTES_ENABLED", "DISCORD_VOICE_NODE_BINARY",
+    "MIRA_MEMORY_ENABLED",
 )
 REQUIRED = ("DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_BRIDGE_SECRET")
 
@@ -49,6 +50,7 @@ def build_config(env: dict | os._Environ) -> dict[str, str]:
         raise ValueError("Meeting notes require the Discord assistant to be enabled.")
     values["DISCORD_MEETING_NOTES_ENABLED"] = str(voice_enabled).lower()
     values["DISCORD_VOICE_NODE_BINARY"] = values["DISCORD_VOICE_NODE_BINARY"] or "node"
+    values["MIRA_MEMORY_ENABLED"] = str(boolean(values["MIRA_MEMORY_ENABLED"] or "false", "MIRA_MEMORY_ENABLED")).lower()
     values["DISCORD_ASSISTANT_ENABLED"] = str(enabled).lower()
     values["DISCORD_MESSAGE_CONTENT_ENABLED"] = str(boolean(values["DISCORD_MESSAGE_CONTENT_ENABLED"] or "true", "DISCORD_MESSAGE_CONTENT_ENABLED")).lower()
     values["DISCORD_AI_MODEL"] = values["DISCORD_AI_MODEL"] or "gpt-5.4-mini"

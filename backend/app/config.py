@@ -138,6 +138,13 @@ class Settings(BaseSettings):
     DISCORD_MESSAGE_CONTENT_ENABLED: bool = False
     DISCORD_AI_MODEL: str = "gpt-5.4-mini"
     DISCORD_MEETING_TRANSCRIBE_MODEL: str = "gpt-transcribe"
+    # Mira's living memory register of meetings; off keeps notes exactly as before.
+    MIRA_MEMORY_ENABLED: bool = False
+    MIRA_MEMORY_QUIET_DAYS: int = 30
+    MIRA_MEMORY_RECENT_CLOSED_DAYS: int = 14
+    MIRA_MEMORY_MAX_ATTEMPTS: int = 5
+    MIRA_MEMORY_WAIT_MINUTES: int = 15
+    MIRA_MEMORY_CONTEXT_CHARS: int = 40000
     DISCORD_AI_TIMEOUT_SECONDS: int = 45
     DISCORD_AGENT_MODEL: str = "gpt-6-luna"
     SKILLS_AI_MODEL: str = "gpt-5.4-nano"

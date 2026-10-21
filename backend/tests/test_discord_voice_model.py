@@ -91,6 +91,8 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
             await conn.execute(text(f'SET LOCAL search_path TO {self.schema},public'))
             def upgrade(c):
                 with patch.object(module,'op',Operations(MigrationContext.configure(c))):module.upgrade()
-                self.assertEqual({x['name'] for x in inspect(c).get_columns(Meeting.__tablename__,schema=self.schema)},set(Meeting.__table__.c.keys()))
+                # 0156_mira_memory adds the memory columns after this frozen migration.
+                later={'memory_status','memory_attempts','memory_error','memory_lease_until'}
+                self.assertEqual({x['name'] for x in inspect(c).get_columns(Meeting.__tablename__,schema=self.schema)},set(Meeting.__table__.c.keys())-later)
                 self.assertTrue(any(x['name']=='uq_discord_voice_active_guild' and x['unique'] for x in inspect(c).get_indexes(Meeting.__tablename__,schema=self.schema)))
             await conn.run_sync(upgrade)
