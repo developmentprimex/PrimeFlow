@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import wave
 import unittest
@@ -120,3 +121,63 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(provider,'request',respond):
             await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':('x'*12000 if i<2 else 'LAST_DECISION')} for i in range(3)])
         self.assertGreater(len(seen),1);self.assertTrue(any('LAST_DECISION' in item for item in seen))
+
+
+MEMORY={'items':[{'id':'a1','title':'Oferta Albaniaplast','description':'Arta e përgatit.','kind':'TASK','status':'OPEN',
+    'people':['Arta'],'human_edited':False,'quiet':False,'version':1,
+    'mentions':[{'date':'20.10 14:18','meeting':'1H','text':'Arta: deri të enjten.'}]}],'wrong_titles':['Printeri i ri'],'omitted':0}
+
+def text_response(text):
+    return {'output':[{'type':'message','content':[{'type':'output_text','text':text}]}]}
+
+class MemoryProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_summary_payload_unchanged_without_memory(self):
+        with patch.object(provider,'request',AsyncMock(return_value=text_response('**Përmbledhja:** x'))) as call:
+            await provider.summarize_meeting('Staff',[{'sequence':0,'transcript':'Po.'}])
+        payload=call.call_args.kwargs['json']
+        self.assertEqual(payload['input'][0]['content'],provider.FINAL_SYSTEM)
+        self.assertEqual(set(json.loads(payload['input'][1]['content'])),{'title','segments'})
+
+    async def test_summary_final_call_receives_memory_and_rules(self):
+        calls=[]
+        async def respond(path,**kwargs):
+            calls.append(kwargs['json']);return text_response('Pjesë [0].')
+        with patch.object(provider,'request',respond):
+            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*12000} for i in range(3)],memory=MEMORY)
+        final,parts=calls[-1],calls[:-1]
+        self.assertTrue(final['input'][0]['content'].endswith(provider.MEMORY_NOTES_RULES))
+        sent=json.loads(final['input'][1]['content'])['kujtesa']
+        self.assertEqual(sent['items'][0]['title'],'Oferta Albaniaplast');self.assertNotIn('wrong_titles',sent);self.assertNotIn('omitted',sent)
+        self.assertTrue(parts and all('kujtesa' not in json.loads(p['input'][1]['content']) for p in parts))
+
+    async def test_extract_memory_uses_strict_schema_and_returns_operations(self):
+        operations=[{'action':'mention','item_id':'a1','title':None,'description':None,'kind':None,'people':['Arta'],
+            'said':'Arta pret çmimet.','segments':[0]}]
+        with patch.object(provider,'request',AsyncMock(return_value=text_response(json.dumps({'operations':operations})))) as call:
+            result=await provider.extract_memory_operations('1H',[{'sequence':0,'speaker_name':'Arta','transcript':'Pres çmimet.'}],
+                meeting_date=None,memory=MEMORY)
+        self.assertEqual(result,operations)
+        payload=call.call_args.kwargs['json']
+        self.assertEqual(payload['text']['format']['type'],'json_schema');self.assertIs(payload['text']['format']['strict'],True)
+        self.assertIs(payload['store'],False);self.assertEqual(payload['model'],settings.DISCORD_AI_MODEL)
+        self.assertNotIn('tools',payload)
+        self.assertIn('Mos shpik',payload['input'][0]['content'])
+        content=json.loads(payload['input'][1]['content'])
+        self.assertEqual(content['kujtesa']['wrong_titles'],['Printeri i ri'])
+
+    async def test_extract_memory_long_transcript_uses_part_step(self):
+        calls=[]
+        async def respond(path,**kwargs):
+            calls.append(kwargs['json'])
+            return text_response(json.dumps({'operations':[]}) if 'text' in kwargs['json'] else 'Detaje [0, Ana].')
+        with patch.object(provider,'request',respond):
+            result=await provider.extract_memory_operations('1H',[{'sequence':i,'transcript':'x'*12000} for i in range(3)],
+                meeting_date=None,memory=MEMORY)
+        self.assertEqual(result,[])
+        self.assertGreaterEqual(len([c for c in calls if 'text' not in c]),2)
+        self.assertEqual(len([c for c in calls if 'text' in c]),1);self.assertIn('text',calls[-1])
+
+    async def test_extract_memory_invalid_json_raises(self):
+        with patch.object(provider,'request',AsyncMock(return_value=text_response('jo json'))):
+            with self.assertRaisesRegex(ValueError,'invalid_memory_response'):
+                await provider.extract_memory_operations('1H',[{'sequence':0,'transcript':'Po.'}],meeting_date=None,memory=MEMORY)
