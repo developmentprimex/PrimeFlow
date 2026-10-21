@@ -68,6 +68,28 @@ njëpërdorimësh vlen 10 minuta dhe përdoret me `/lidh kodi:...` në serverin 
 Fjalëkalimet dhe tokenët PrimeFlow nuk vendosen në Discord. Një llogari Discord
 lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 
+## Kujtesa e Mira-s
+
+Pas çdo takimi Mira përditëson një regjistër të vetëm të gjallë me atë që u tha:
+detyrat dhe premtimet, temat e hapura, vendimet dhe informacionet që mund të duhen
+më vonë. Regjistri nxirret nga transkripti i plotë, jo nga shënimet. Kur shkruan
+shënimet e takimit të radhës, Mira e lexon regjistrin dhe e lidh takimin me të
+kaluarën vetëm kur është qartë e njëjta çështje, p.sh. "(1H, 21.10 09:58)".
+
+- Aktivizimi: GitHub Actions variable `MIRA_MEMORY_ENABLED=true`, pastaj deploy.
+  Si parazgjedhje është `false`, dhe shënimet punojnë saktësisht si më parë.
+- Hyjnë të gjitha takimet, edhe ato të `/takimi fillo` që nuk u ruajtën në PX Notes.
+  Takimet para aktivizimit nuk përfshihen; regjistri nis bosh.
+- Faqja **Kujtesa e Mira-s** (`/mira-kujtesa`) e tregon regjistrin për të gjithë
+  stafin. Çdokush mund ta korrigjojë një pikë, ta mbyllë, ta rihapë ose ta shënojë si
+  të gabuar. Korrigjimi i një personi ka përparësi; asgjë nuk fshihet nga historiku.
+- Shënimet nuk e presin kurrë kujtesën. Një përditësim që dështon provohet deri në 5
+  herë; pastaj takimi shfaqet në fund të faqes si "nuk u përfshi" dhe një admin ose
+  menaxher mund ta provojë sërish.
+- `gh workflow run mira-diagnostics.yml --ref main` tregon `memory_status` për
+  takimet e fundit dhe rreshtat `MIRA_DIAGNOSTIC memory` nga Celery worker, pa
+  përmbajtje takimesh.
+
 ## Aktivizimi fillestar
 
 1. Krijo serverin e ekipit në Discord dhe një aplikacion/bot në

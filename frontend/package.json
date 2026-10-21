@@ -12,7 +12,9 @@
     "start": "next start",
     "lint": "eslint",
     "test:speech": "node --test tests/speech.test.mjs",
-    "test:voice": "node --test tests/voice-assistant.test.mjs tests/px-notes-voice.test.mjs"
+    "test:voice": "node --test tests/voice-assistant.test.mjs tests/px-notes-voice.test.mjs",
+    "test:mira": "node --test tests/mira-memory.test.mjs",
+    "test:mira:browser": "playwright test --config playwright.mira.config.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
