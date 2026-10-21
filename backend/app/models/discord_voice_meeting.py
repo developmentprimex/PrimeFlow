@@ -40,6 +40,11 @@ class DiscordVoiceMeeting(Base):
     delivery_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     message_ids: Mapped[list | None] = mapped_column(JSONB)
+    # Mira's memory register: PENDING/RUNNING/APPLIED/FAILED/SKIPPED, separate from the notes.
+    memory_status: Mapped[str | None] = mapped_column(String(20))
+    memory_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    memory_error: Mapped[str | None] = mapped_column(String(100))
+    memory_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (Index('uq_discord_voice_active_guild', 'guild_id', unique=True,
         postgresql_where=text("status IN ('STARTING','LISTENING')")),)
 

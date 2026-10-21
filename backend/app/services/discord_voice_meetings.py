@@ -185,8 +185,10 @@ async def receive_segment(db, session_id, payload, audio):
     await db.commit()
     try:
         transcript=await provider.transcribe_segment(audio);error=None
-    except ValueError:
-        transcript=None;error='transcription_failed'
+    except ValueError as exc:
+        # Keep OpenAI's HTTP status (e.g. transcription_failed:429) for Mira diagnostics.
+        status=getattr(exc,'status',None)
+        transcript=None;error='transcription_failed'+(f':{status}' if status else '')
     # Reacquire in a consistent order; never hold a DB lock over remote IO.
     row=await locked(db,session_id)
     segment=(await db.execute(select(Segment).where(Segment.id==segment.id).with_for_update()

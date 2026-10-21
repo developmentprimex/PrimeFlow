@@ -24,7 +24,9 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.schema = 'mira_test_' + uuid.uuid4().hex
         self.engine = create_async_engine(os.environ['VOICE_TEST_DATABASE_URL'], execution_options={'schema_translate_map':{None:self.schema}})
-        tables = {Segment.__table__, Meeting.__table__, GaNote.__table__, DiscordLink.__table__}
+        from app.models.ga_note_attachment import GaNoteAttachment
+        # GaNote always loads its attachments, which no foreign key from these tables reaches.
+        tables = {Segment.__table__, Meeting.__table__, GaNote.__table__, DiscordLink.__table__, GaNoteAttachment.__table__}
         while True:
             expanded = tables | {fk.column.table for t in tables for fk in t.foreign_keys}
             if expanded == tables: break
@@ -89,6 +91,8 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
             await conn.execute(text(f'SET LOCAL search_path TO {self.schema},public'))
             def upgrade(c):
                 with patch.object(module,'op',Operations(MigrationContext.configure(c))):module.upgrade()
-                self.assertEqual({x['name'] for x in inspect(c).get_columns(Meeting.__tablename__,schema=self.schema)},set(Meeting.__table__.c.keys()))
+                # 0156_mira_memory adds the memory columns after this frozen migration.
+                later={'memory_status','memory_attempts','memory_error','memory_lease_until'}
+                self.assertEqual({x['name'] for x in inspect(c).get_columns(Meeting.__tablename__,schema=self.schema)},set(Meeting.__table__.c.keys())-later)
                 self.assertTrue(any(x['name']=='uq_discord_voice_active_guild' and x['unique'] for x in inspect(c).get_indexes(Meeting.__tablename__,schema=self.schema)))
             await conn.run_sync(upgrade)

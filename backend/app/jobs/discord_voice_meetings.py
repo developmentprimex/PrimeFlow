@@ -1,4 +1,5 @@
 """Lease-fenced finalization of persisted text; no audio and no Discord login."""
+import logging
 import uuid
 from datetime import timedelta
 from sqlalchemy import select, update, or_
@@ -8,6 +9,10 @@ from app.models.user import User
 from app.services import discord_voice_meetings as service
 from app.services.discord_voice_meetings import now
 from app.services import discord_voice_openai as provider
+from app.services import mira_memory
+from app.config import settings
+
+log=logging.getLogger(__name__)
 
 
 async def process_voice_meetings():
@@ -37,11 +42,19 @@ async def process_voice_meetings():
                 for s in segments if s.status=='DONE' and s.transcript]
             if not parts:
                 row.status='FAILED';row.error='Nuk u dëgjua të folur i kuptueshëm.';row.partial=partial
+                row.memory_status='SKIPPED'
                 # A scheduled 1H slot nobody spoke in is not worth a Discord message.
                 if service.is_scheduled(row):row.delivered_at=now()
                 await db.commit();stats['failed']+=1;continue
             lease=uuid.uuid4();row.lease_token=lease;row.lease_until=now()+timedelta(seconds=180)
             title,cache,meeting_date=row.title,row.summary_progress or {},row.started_at or row.created_at
+            memory=None
+            if settings.MIRA_MEMORY_ENABLED:
+                # Notes never wait on memory: without a snapshot they are written as before.
+                try:
+                    async with db.begin_nested():memory=await mira_memory.snapshot(db)
+                except Exception as exc:
+                    log.warning('MIRA_DIAGNOSTIC memory meeting=%s stage=snapshot error=%s',sid,type(exc).__name__)
             await db.commit()
         async def checkpoint(progress):
             async with SessionLocal() as db:
@@ -51,7 +64,7 @@ async def process_voice_meetings():
                 await db.commit()
         try:
             draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
-                cache=cache,checkpoint=checkpoint)
+                cache=cache,checkpoint=checkpoint,memory=memory)
             error=None
         except ValueError:
             draft=None;error='Përmbledhja dështoi. Transkripti i marrë mbetet i ruajtur.'
@@ -60,6 +73,7 @@ async def process_voice_meetings():
             if current.lease_token!=lease or current.status not in ('FINALIZING','INTERRUPTED'):continue
             current.status='FAILED' if error else 'READY';current.error=error
             current.draft_text=draft;current.partial=partial;current.lease_until=None
+            current.memory_status='PENDING' if settings.MIRA_MEMORY_ENABLED else 'SKIPPED'
             if service.is_scheduled(current):
                 # Scheduled 1H meetings go straight to PX Notes, in the same commit so
                 # Discord delivery never sees them READY. If saving fails, the savepoint

@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import wave
 import unittest
@@ -22,6 +23,38 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         with wave.open(io.BytesIO(audio),'rb') as w:
             self.assertGreaterEqual(w.getnframes(),4800)
             self.assertEqual(w.readframes(960),pcm)
+
+    def openai(self,*responses):
+        """Route provider HTTP calls to canned responses; returns the list of seen requests."""
+        import httpx
+        seen=[];queue=list(responses);real=httpx.AsyncClient
+        def handler(request):
+            seen.append(request);status,headers,body=queue.pop(0)
+            return httpx.Response(status,headers=headers,json=body)
+        transport=httpx.MockTransport(handler)
+        return seen,patch.object(provider.httpx,'AsyncClient',lambda **kw:real(transport=transport,**kw))
+
+    async def test_rate_limited_transcription_waits_and_retries_the_same_segment(self):
+        seen,client=self.openai((429,{'retry-after':'3'},{'error':{}}),(503,{},{'error':{}}),(200,{},{'text':'Po.'}))
+        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
+            self.assertEqual(await provider.transcribe_segment(wav()),'Po.')
+        self.assertEqual(len(seen),3)
+        self.assertEqual([c.args[0] for c in sleep.await_args_list],[3.0,4])
+
+    async def test_rejected_transcription_is_not_retried_and_keeps_the_http_status(self):
+        seen,client=self.openai((400,{},{'error':{}}))
+        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()):
+            with self.assertRaises(provider.ProviderError) as caught:await provider.transcribe_segment(wav())
+        self.assertEqual(len(seen),1);self.assertEqual(caught.exception.status,400)
+        # Other callers match on this message, so it must not change.
+        self.assertEqual(str(caught.exception),'meeting_provider_failed');self.assertIsInstance(caught.exception,ValueError)
+
+    async def test_persistent_rate_limit_gives_up_within_the_bot_upload_timeout(self):
+        seen,client=self.openai(*[(429,{'retry-after':'120'},{'error':{}})]*5)
+        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
+            with self.assertRaises(provider.ProviderError) as caught:await provider.transcribe_segment(wav())
+        self.assertEqual(caught.exception.status,429);self.assertEqual(len(seen),3)
+        self.assertLessEqual(sum(c.args[0] for c in sleep.await_args_list)+3*provider.TRANSCRIBE_TIMEOUT,90)
 
     async def test_silence_is_empty_and_invalid_wav_never_calls_provider(self):
         with patch.object(provider,'request',AsyncMock()) as call:
@@ -88,3 +121,63 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(provider,'request',respond):
             await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':('x'*12000 if i<2 else 'LAST_DECISION')} for i in range(3)])
         self.assertGreater(len(seen),1);self.assertTrue(any('LAST_DECISION' in item for item in seen))
+
+
+MEMORY={'items':[{'id':'a1','title':'Oferta Albaniaplast','description':'Arta e përgatit.','kind':'TASK','status':'OPEN',
+    'people':['Arta'],'human_edited':False,'quiet':False,'version':1,
+    'mentions':[{'date':'20.10 14:18','meeting':'1H','text':'Arta: deri të enjten.'}]}],'wrong_titles':['Printeri i ri'],'omitted':0}
+
+def text_response(text):
+    return {'output':[{'type':'message','content':[{'type':'output_text','text':text}]}]}
+
+class MemoryProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_summary_payload_unchanged_without_memory(self):
+        with patch.object(provider,'request',AsyncMock(return_value=text_response('**Përmbledhja:** x'))) as call:
+            await provider.summarize_meeting('Staff',[{'sequence':0,'transcript':'Po.'}])
+        payload=call.call_args.kwargs['json']
+        self.assertEqual(payload['input'][0]['content'],provider.FINAL_SYSTEM)
+        self.assertEqual(set(json.loads(payload['input'][1]['content'])),{'title','segments'})
+
+    async def test_summary_final_call_receives_memory_and_rules(self):
+        calls=[]
+        async def respond(path,**kwargs):
+            calls.append(kwargs['json']);return text_response('Pjesë [0].')
+        with patch.object(provider,'request',respond):
+            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*12000} for i in range(3)],memory=MEMORY)
+        final,parts=calls[-1],calls[:-1]
+        self.assertTrue(final['input'][0]['content'].endswith(provider.MEMORY_NOTES_RULES))
+        sent=json.loads(final['input'][1]['content'])['kujtesa']
+        self.assertEqual(sent['items'][0]['title'],'Oferta Albaniaplast');self.assertNotIn('wrong_titles',sent);self.assertNotIn('omitted',sent)
+        self.assertTrue(parts and all('kujtesa' not in json.loads(p['input'][1]['content']) for p in parts))
+
+    async def test_extract_memory_uses_strict_schema_and_returns_operations(self):
+        operations=[{'action':'mention','item_id':'a1','title':None,'description':None,'kind':None,'people':['Arta'],
+            'said':'Arta pret çmimet.','segments':[0]}]
+        with patch.object(provider,'request',AsyncMock(return_value=text_response(json.dumps({'operations':operations})))) as call:
+            result=await provider.extract_memory_operations('1H',[{'sequence':0,'speaker_name':'Arta','transcript':'Pres çmimet.'}],
+                meeting_date=None,memory=MEMORY)
+        self.assertEqual(result,operations)
+        payload=call.call_args.kwargs['json']
+        self.assertEqual(payload['text']['format']['type'],'json_schema');self.assertIs(payload['text']['format']['strict'],True)
+        self.assertIs(payload['store'],False);self.assertEqual(payload['model'],settings.DISCORD_AI_MODEL)
+        self.assertNotIn('tools',payload)
+        self.assertIn('Mos shpik',payload['input'][0]['content'])
+        content=json.loads(payload['input'][1]['content'])
+        self.assertEqual(content['kujtesa']['wrong_titles'],['Printeri i ri'])
+
+    async def test_extract_memory_long_transcript_uses_part_step(self):
+        calls=[]
+        async def respond(path,**kwargs):
+            calls.append(kwargs['json'])
+            return text_response(json.dumps({'operations':[]}) if 'text' in kwargs['json'] else 'Detaje [0, Ana].')
+        with patch.object(provider,'request',respond):
+            result=await provider.extract_memory_operations('1H',[{'sequence':i,'transcript':'x'*12000} for i in range(3)],
+                meeting_date=None,memory=MEMORY)
+        self.assertEqual(result,[])
+        self.assertGreaterEqual(len([c for c in calls if 'text' not in c]),2)
+        self.assertEqual(len([c for c in calls if 'text' in c]),1);self.assertIn('text',calls[-1])
+
+    async def test_extract_memory_invalid_json_raises(self):
+        with patch.object(provider,'request',AsyncMock(return_value=text_response('jo json'))):
+            with self.assertRaisesRegex(ValueError,'invalid_memory_response'):
+                await provider.extract_memory_operations('1H',[{'sequence':0,'transcript':'Po.'}],meeting_date=None,memory=MEMORY)
