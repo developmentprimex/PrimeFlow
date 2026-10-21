@@ -131,3 +131,10 @@ test('transcripts carry the loudest speaker of the utterance',()=>{
   host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'u1',transcript:' Po, e kreva. '});
   assert.deepEqual(events.at(-1),{type:'transcript',role:'staff',speaker_id:null,text:'Po, e kreva.'});
 });
+
+test('Mira stays deaf while she waits in the channel and starts listening with her first instruction',()=>{
+  const {host}=fakes();
+  assert.equal(host._listening,false);
+  host.say('SISTEMI: Faza GA');
+  assert.equal(host._listening,true);
+});

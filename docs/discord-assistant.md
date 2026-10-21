@@ -104,7 +104,8 @@ Mesazhet me shkrim i dërgon boti ekzistues PrimeFlow në kanalet private të `/
 | Kur | Çka ndodh |
 |---|---|
 | 5 min para (11:00, 11:50, 14:20, 16:00; jo 10:00) | Secili me detyra 1H në atë slot merr protokollin, detyrat e slotit dhe detyrat në proces / pa progres nga sloti paraprak |
-| 2 min para | Thirren në 1H Diellza, Gane dhe Elza; Olsa, nëse Elza mungon sot ose s'është kyçur në fillim të slotit. Mira hyn në kanal |
+| 6 min para | Mira Host hyn në kanal dhe pret në heshtje (nuk dëgjon dhe nuk flet). Nëse lidhja dështon, provon sërish deri në 3 herë |
+| 2 min para | Thirren në 1H Diellza, Gane dhe Elza; Olsa, nëse Elza mungon sot ose s'është kyçur në fillim të slotit. Mira fillon të flasë |
 | Deri në orën e slotit | Faza GA: "Notes të reja?" (për secilin note: personi, data, AM/PM, deadline, simboli; pas "po" krijohet detyra 1H). Pastaj "A ka Done?", vetëm Done dhe Strike të reja, pa përsëritur çka u përmend në 1H-të e mëparshme të sotme |
 | Ora e slotit | Stafi një nga një sipas renditjes së Common View. Mira thërret të radhës pak para se të mbarojë personi aktual, që askush të mos presë. Regjistrohet kur ka filluar dhe kur ka mbaruar secili |
 | Fundi | Transkripti dhe përmbledhja ruhen te faqja **Mira → Takimet 1H** |

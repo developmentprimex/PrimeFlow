@@ -154,6 +154,8 @@ class Settings(BaseSettings):
     MIRA_HOST_BOT_TOKEN: str | None = None
     MIRA_HOST_PRE_BRIEF_MINUTES: int = 5
     MIRA_HOST_GA_CALL_MINUTES: int = 2
+    # Mira joins this early (silent), so a failed connection is retried before she must talk.
+    MIRA_HOST_CONNECT_MINUTES: int = 6
     MIRA_HOST_VOICE: str = "marin"
     MIRA_HOST_SPEED: float = 1.15
     DISCORD_AI_TIMEOUT_SECONDS: int = 45

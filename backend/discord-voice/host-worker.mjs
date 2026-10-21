@@ -24,6 +24,9 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   gatewayFactory=createGateway,now=()=>performance.now(),setTimer=setTimeout,clearTimer=clearTimeout}){
   let gateway,connection,realtime,adapter,guildId,channelId,closed=false,joined=false;
   let responseActive=false,currentResponse=null,inputTimer,outputTimer,inputClock=0,nextFrameAt=0,silenceLeft=0;
+  // Mira joins early and silent: until the first instruction nobody's voice reaches Realtime,
+  // so she cannot answer people who are already chatting in the channel.
+  let listening=false;
   const mixer=new Mixer(),pendingCalls=new Set(),queuedSays=[],cancelled=new Set(),speakerOf=new Map();
   const streams=new Map();
   let encoder,playback;
@@ -97,7 +100,8 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
     if(due>=INPUT_CHUNK_MS*24){
       // After a stall (e.g. a long GC) send at most one second; Realtime needs fresh audio, not a backlog.
       const count=Math.min(due,24000);inputClock=now();
-      rt({type:'input_audio_buffer.append',audio:int16ToBase64(mixer.pull(count))});
+      const audio=mixer.pull(count);
+      if(listening)rt({type:'input_audio_buffer.append',audio:int16ToBase64(audio)});
     }
     inputTimer=setTimer(sendInput,INPUT_CHUNK_MS/2);
   }
@@ -180,6 +184,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   return {
     start,stop,
     say(text,{respond=true}={}){
+      listening=true;
       if(respond){queuedSays.push(text);maybeContinue();}
       else rt({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text}]}});
     },
@@ -189,7 +194,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
       if(!pendingCalls.size&&!responseActive){rt({type:'response.create'});responseActive=true;}
     },
     // Exposed for tests.
-    _onRealtime:onRealtime,get _playback(){return playback;},
+    _onRealtime:onRealtime,get _playback(){return playback;},get _listening(){return listening;},
   };
 }
 

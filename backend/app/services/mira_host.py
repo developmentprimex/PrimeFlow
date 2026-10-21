@@ -361,7 +361,8 @@ async def tick(db: AsyncSession, at: datetime | None = None) -> dict:
         due_brief = slot not in NO_PRE_BRIEF and brief_at <= at < brief_at + timedelta(minutes=2)
         due_call = call_at <= at < start
         due_fallback = start <= at < start + timedelta(minutes=2)
-        due_join = call_at <= at < start + timedelta(minutes=10)
+        # Mira connects early and silently; she starts talking at call_at, when the GA team is called.
+        due_join = start - timedelta(minutes=settings.MIRA_HOST_CONNECT_MINUTES) <= at < start + timedelta(minutes=10)
         if not (due_brief or due_call or due_fallback or due_join):
             continue
         data = data or SlotData(await common_payload(db, day), day)
@@ -390,7 +391,8 @@ async def tick(db: AsyncSession, at: datetime | None = None) -> dict:
             meeting = (await db.execute(select(Mira1HMeeting).where(Mira1HMeeting.meeting_date == day,
                 Mira1HMeeting.slot == slot))).scalar_one_or_none()
             if meeting is None or can_retry(meeting, row):
-                jobs.append({"kind": "join", "slot": slot, "starts_at": start.isoformat()})
+                jobs.append({"kind": "join", "slot": slot, "starts_at": start.isoformat(),
+                             "talk_at": max(call_at, at).isoformat()})
     await db.commit()
     return {"enabled": True, "jobs": jobs}
 

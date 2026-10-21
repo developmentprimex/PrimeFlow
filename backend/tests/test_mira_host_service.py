@@ -101,8 +101,14 @@ class TickTests(unittest.IsolatedAsyncioTestCase):
         return [(j['kind'], j['slot']) for j in result['jobs']]
 
     async def test_no_pre_brief_for_10_but_for_11(self):
-        self.assertEqual(await self.kinds(9, 55), [])
-        self.assertEqual(await self.kinds(10, 55), [('brief', '11:00')])
+        self.assertNotIn(('brief', '10:00'), await self.kinds(9, 55))
+        self.assertIn(('brief', '11:00'), await self.kinds(10, 55))
+
+    async def test_mira_connects_six_minutes_early_and_talks_two_minutes_before(self):
+        self.assertEqual(await self.kinds(9, 53), [])
+        result = await host.tick(self.db, datetime(2026, 10, 21, 9, 54, 10, tzinfo=TZ))
+        join = next(j for j in result['jobs'] if j['kind'] == 'join')
+        self.assertEqual(datetime.fromisoformat(join['talk_at']).strftime('%H:%M'), '09:58')
 
     async def test_ga_is_called_two_minutes_before_and_mira_joins(self):
         kinds = await self.kinds(9, 58)
