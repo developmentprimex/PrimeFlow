@@ -169,6 +169,8 @@ jobs:
           echo RECORDING_TIMING_ENABLED=true >> backend\.env
           echo RECORDING_TIMING_PYTHON=D:/PrimeFlow-alignment-pilot/venv/Scripts/python.exe >> backend\.env
           echo RECORDING_TIMING_MODEL_CACHE=D:/PrimeFlow-alignment-pilot/model-cache >> backend\.env
+          echo MEETING_RECORDINGS_FFMPEG=D:/PrimeFlow-alignment-pilot/bin/ffmpeg.exe >> backend\.env
+          echo MEETING_RECORDINGS_FFPROBE=D:/PrimeFlow-alignment-pilot/bin/ffprobe.exe >> backend\.env
           echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend\.env
           echo REDIS_ENABLED=true >> backend\.env
           echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend\.env
