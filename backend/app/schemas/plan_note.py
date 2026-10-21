@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+from app.schemas.task_postponement import TaskPostponementExplanations
 
 from app.models.enums import (
     GaNotePriority,
@@ -113,7 +114,7 @@ class PlanNoteUpdate(BaseModel):
     planning_brief: PxJavPlanningBrief | None = None
 
 
-class PlanNoteTaskDeadlineUpdate(BaseModel):
+class PlanNoteTaskDeadlineUpdate(TaskPostponementExplanations):
     due_date: datetime | None = None
     is_deadline_important: bool | None = None
     clear: bool = False
@@ -137,7 +138,7 @@ class PlanNoteTaskAssigneeStateUpdate(BaseModel):
     is_personal: bool = False
 
 
-class PlanNoteTaskBundleUpdate(BaseModel):
+class PlanNoteTaskBundleUpdate(TaskPostponementExplanations):
     content: str | None = None
     description: str | None = None
     project_id: uuid.UUID | None = None

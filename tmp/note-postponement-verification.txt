@@ -1,0 +1,25 @@
+Notes postponement explanation follow-up, verified 2026-10-20
+
+PX Notes and PX JAV task-bundle date changes now require both a reason and
+comment for each postponed assignee task. Each dialog identifies the task,
+assignee, and changed dates. All explanations are collected before a single
+atomic resubmission; canceling any dialog prevents that resubmission.
+
+Backend validation runs before note/task mutations and again against locked
+task rows after baseline creation. Audit events retain reason code, displayed
+reason, and comment, and the corresponding assignee's daily state is updated.
+The existing report consumers use these task date events. The legacy PX JAV
+task-deadline path has the same guard and now emits semantic date events.
+
+Verification:
+- Expanded backend selection including M1/M2/M3: 360 passed, 28 subtests passed.
+  Log: note-postponement-backend.log.
+- Final Notes/task regression selection: 173 passed, 12 subtests passed.
+  Log: note-postponement-final-backend.log.
+- Full frontend Node tests: 217 passed. Log: note-postponement-frontend.log.
+- Browser tests against the actual editors with mocked HTTP responses:
+  all 6 passed (Start, Due, both dates, cancellation, PX Notes, PX JAV).
+- tsc -p tsconfig.postponements.check.json --pretty false: exit 0.
+- git diff --check: passed.
+
+No commit, push, deployment, or database migration was performed in this follow-up.

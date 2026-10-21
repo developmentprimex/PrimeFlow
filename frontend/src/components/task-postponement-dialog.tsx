@@ -28,6 +28,7 @@ export function TaskPostponementForm({ details, onFinish }: {
         if (ready) onFinish({ postponement_reason_code: reason, postponement_comment: comment.trim() })
       }}>
         <p className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-sm font-medium">{details.task_title}</p>
+        {details.assignee_name ? <p className="text-sm"><strong>Përgjegjësi:</strong> {details.assignee_name}</p> : null}
         <ul className="text-sm text-muted-foreground">{details.changes.map((change) => <li key={change.field}>
           {change.field === "start_date" ? "Start Date" : "Due Date"}: {date(change.from)} → {date(change.to)}
         </li>)}</ul>

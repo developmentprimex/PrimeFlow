@@ -61,3 +61,34 @@ test("system occurrence moves use the same guard and aborting while explaining p
   assert.equal(requests, 1)
   assert.equal(response.ok, false)
 })
+
+for (const path of ["/ga-notes/note/task-bundle", "/plan-notes/note/task-bundle", "/plan-notes/note/task-deadline"]) {
+  test(`${path} collects every task explanation before one atomic retry`, async () => {
+    const requests = [], prompted = []
+    const body = { content: "Keep draft", assignee_states: [{ assignee_id: "a", due_date: "2026-10-21" }] }
+    const response = await withPostponementExplanation(path, { method: "PATCH", body: JSON.stringify(body) }, async request => {
+      requests.push(JSON.parse(request.body))
+      return requests.length === 1 ? Response.json({ detail: { ...detail, postponements: [
+        { ...detail, task_id: "task-a", assignee_id: "a" }, { ...detail, task_id: "task-b", assignee_id: "b" },
+      ] } }, { status: 409 }) : Response.json({ saved: true })
+    }, async info => { prompted.push(info.task_id); return { postponement_reason_code: "OTHER", postponement_comment: `Why ${info.task_id}` } })
+    assert.equal(response.ok, true)
+    assert.deepEqual(prompted, ["task-a", "task-b"])
+    assert.equal(requests.length, 2)
+    assert.deepEqual(requests[1], { ...body, postponement_explanations: {
+      "task-a": { postponement_reason_code: "OTHER", postponement_comment: "Why task-a" },
+      "task-b": { postponement_reason_code: "OTHER", postponement_comment: "Why task-b" },
+    } })
+  })
+}
+
+test("canceling a later note task explanation never partially submits the bundle", async () => {
+  let requests = 0, prompts = 0
+  const response = await withPostponementExplanation("/ga-notes/note/task-bundle", init, async () => {
+    requests++
+    return Response.json({ detail: { ...detail, postponements: [{ ...detail, task_id: "a" }, { ...detail, task_id: "b" }] } }, { status: 409 })
+  }, async () => ++prompts === 1 ? { postponement_reason_code: "OTHER", postponement_comment: "First reason" } : null)
+  assert.equal(response.ok, false)
+  assert.equal(requests, 1)
+  assert.equal(prompts, 2)
+})
