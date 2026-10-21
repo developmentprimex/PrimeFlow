@@ -36,6 +36,37 @@ jobs:
           asyncio.run(main())
           '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
           if ($LASTEXITCODE -ne 0) { throw 'Audio status query failed.' }
+          @'
+          import asyncio, json
+          from sqlalchemy import text
+          from app.db import engine
+          async def main():
+              for sql in ('SELECT version_num FROM alembic_version',
+                          'SELECT id, enabled_until, ga_participants FROM mira_host_settings',
+                          'SELECT id, meeting_date, slot, status, started_at, ended_at, error FROM mira_1h_meetings ORDER BY created_at DESC LIMIT 5',
+                          'SELECT key, kind, slot, sent_at FROM mira_1h_events ORDER BY created_at DESC LIMIT 20'):
+                  async with engine.connect() as c:
+                      await c.execute(text('SET TRANSACTION READ ONLY'))
+                      try:
+                          rows = (await c.execute(text(sql))).mappings().all()
+                          print('MIRA_HOST_DB', sql[:45], json.dumps([dict(r) for r in rows], default=str))
+                      except Exception as exc:
+                          print('MIRA_HOST_DB_ERROR', sql[:45], type(exc).__name__, str(exc)[:300])
+              await engine.dispose()
+          asyncio.run(main())
+          '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
+          Write-Output '--- Mira Host lines from the Discord bot logs'
+          Get-ChildItem 'C:\pm2-system\logs\primeflow-discord*' -File -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Output ('FILE ' + $_.Name + ' ' + $_.LastWriteTime)
+            Get-Content -LiteralPath $_.FullName -Tail 4000 | Where-Object {
+              $_ -match 'Mira host|MIRA_HOST|mira-host'
+            } | Select-Object -Last 40
+          }
+          Write-Output '--- mira-host requests and errors from the API logs'
+          Get-ChildItem 'C:\pm2-system\logs\primex-backend*' -File -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Output ('FILE ' + $_.Name + ' ' + $_.LastWriteTime)
+            Get-Content -LiteralPath $_.FullName -Tail 6000 | Select-String -Pattern 'mira-host|mira_host' -Context 0,25 | Select-Object -Last 6 | ForEach-Object { $_.ToString() }
+          }
           Get-ChildItem 'C:\pm2-system\logs\primeflow-discord*' -File -ErrorAction SilentlyContinue | ForEach-Object {
             Get-Content -LiteralPath $_.FullName -Tail 2000 | Where-Object {
               $_ -match 'HTTP Request: POST .*voice-meetings/' -or
