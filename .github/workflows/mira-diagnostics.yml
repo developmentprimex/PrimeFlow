@@ -55,6 +55,31 @@ jobs:
               await engine.dispose()
           asyncio.run(main())
           '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
+          Write-Output '--- OpenAI answer to the Mira Host session settings'
+          @'
+          import httpx, json
+          from app.config import settings
+          from app.services import mira_host as h
+          session = {
+              "type": "realtime", "model": settings.VOICE_ASSISTANT_MODEL, "instructions": "Test.",
+              "audio": {
+                  "input": {
+                      "format": {"type": "audio/pcm", "rate": 24000},
+                      "transcription": {"model": "gpt-4o-transcribe", "language": "sq", "prompt": "Takim 1H."},
+                      "turn_detection": {"type": "semantic_vad", "eagerness": "high", "create_response": True, "interrupt_response": True},
+                      "noise_reduction": {"type": "near_field"},
+                  },
+                  "output": {"format": {"type": "audio/pcm", "rate": 24000}, "voice": settings.MIRA_HOST_VOICE, "speed": settings.MIRA_HOST_SPEED},
+              },
+              "tools": h.tool_definitions(), "tool_choice": "auto",
+          }
+          r = httpx.post("https://api.openai.com/v1/realtime/client_secrets", timeout=30,
+              headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+              json={"expires_after": {"anchor": "created_at", "seconds": 60}, "session": session})
+          # Only the error is printed; a success would contain a short-lived key.
+          print("OPENAI_STATUS", r.status_code, "model", settings.VOICE_ASSISTANT_MODEL, "voice", settings.MIRA_HOST_VOICE)
+          print("OPENAI_ERROR", r.text[:1500] if r.is_error else "ok")
+          '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
           Write-Output '--- Mira Host lines from the Discord bot logs'
           Get-ChildItem 'C:\pm2-system\logs\primeflow-discord*' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 3 | ForEach-Object {
             Write-Output ('FILE ' + $_.Name + ' ' + $_.LastWriteTime)
