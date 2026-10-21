@@ -103,7 +103,8 @@ class RecordingAnalysisProviderTests(unittest.IsolatedAsyncioTestCase):
             text = await transcribe(wav_bytes(tone(3, 8000)), 'sq', vocabulary=['Arbën Krasniqi', 'PrimeFlow'], previous='fundi i pjesës')
         self.assertEqual(text, 'Mirëdita.')
         data = request.call_args.kwargs['data']
-        self.assertEqual(data['language'], 'sq')
+        self.assertNotIn('language', data)
+        self.assertNotIn('languages[]', data)
         self.assertIn('Arbën Krasniqi', data['prompt'])
         self.assertIn('fundi i pjesës', data['prompt'])
         self.assertGreaterEqual(request.call_args.kwargs['timeout'], 120)
@@ -113,6 +114,25 @@ class RecordingAnalysisProviderTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.services.recording_analysis_provider.request', new=AsyncMock(return_value={'text': 'Hello, mirëdita.'})) as request:
             await transcribe(wav_bytes(tone(3, 8000)), 'auto')
         self.assertNotIn('language', request.call_args.kwargs['data'])
+        self.assertNotIn('languages[]', request.call_args.kwargs['data'])
+
+    async def test_gpt_transcribe_uses_plural_language_hint(self):
+        from app.services import recording_analysis_provider as provider
+        with patch.object(provider.settings, 'RECORDING_TRANSCRIBE_MODEL', 'gpt-transcribe'), \
+                patch.object(provider.settings, 'RECORDING_TRANSCRIBE_LANGUAGE_HINT', True), \
+                patch.object(provider, 'request', new=AsyncMock(return_value={'text': 'Hello.'})) as request:
+            await provider.transcribe(wav_bytes(tone(3, 8000)), 'en')
+        data = request.call_args.kwargs['data']
+        self.assertEqual(data['languages[]'], ['en'])
+        self.assertNotIn('language', data)
+
+    async def test_legacy_transcription_keeps_singular_language_hint(self):
+        from app.services import recording_analysis_provider as provider
+        with patch.object(provider.settings, 'RECORDING_TRANSCRIBE_MODEL', 'whisper-1'), \
+                patch.object(provider.settings, 'RECORDING_TRANSCRIBE_LANGUAGE_HINT', True), \
+                patch.object(provider, 'request', new=AsyncMock(return_value={'text': 'Hallo.'})) as request:
+            await provider.transcribe(wav_bytes(tone(3, 8000)), 'de')
+        self.assertEqual(request.call_args.kwargs['data']['language'], 'de')
 
     async def test_transient_provider_failure_is_retried(self):
         from app.services.recording_analysis_provider import transcribe

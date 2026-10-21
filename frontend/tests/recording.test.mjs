@@ -13,6 +13,15 @@ function load(name, globals = {}) {
   return loaded.exports
 }
 
+test("transcript paragraphs separate sentences and quoted task boundaries without losing text", () => {
+  const { transcriptParagraphs } = load("recording-transcript")
+  const text = "Hapja e takimit. Elsa përgatit PDF, Laurenti kontrollon raportin.\nFundi."
+  const paragraphs = Array.from(transcriptParagraphs(text, ["Elsa përgatit PDF", "Laurenti kontrollon raportin."]))
+  assert.deepEqual(paragraphs, ["Hapja e takimit.", "Elsa përgatit PDF,", "Laurenti kontrollon raportin.", "Fundi."])
+  assert.equal(paragraphs.join(" "), text.replace(/\s+/g, " "))
+  assert.deepEqual(Array.from(transcriptParagraphs("", [])), [])
+})
+
 function captureHarness({ system = true, micDenied = false, displayDenied = false, delayedMic } = {}) {
   class Track extends EventTarget {
     constructor(kind) { super(); this.kind = kind; this.readyState = "live"; this.enabled = true; this.muted = false }

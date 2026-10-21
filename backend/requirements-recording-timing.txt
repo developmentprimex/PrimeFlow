@@ -1,0 +1,8 @@
+# Dedicated environment only; do not add these to the API environment.
+# Tested Python 3.11 and 3.13 on Windows, CPU only.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.8.0+cpu
+torchaudio==2.8.0+cpu
+transformers==4.57.1
+numpy==2.2.6
+psutil==7.2.2

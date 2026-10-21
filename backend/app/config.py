@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     MEETING_RECORDINGS_FFMPEG: str = "ffmpeg"
     MEETING_RECORDINGS_FFPROBE: str = "ffprobe"
     RECORDING_ANALYSIS_ENABLED: bool = True
+    RECORDING_TIMING_ENABLED: bool = False
+    RECORDING_TIMING_PYTHON: str = ""
+    RECORDING_TIMING_MODEL_CACHE: str = "private-data/alignment-pilot/model-cache"
     RECORDING_ANALYSIS_MODEL: str = "gpt-6-luna"
     RECORDING_TRANSCRIBE_MODEL: str = "gpt-transcribe"
     # Sends the chosen language code to the transcription API; disable if a model rejects it.

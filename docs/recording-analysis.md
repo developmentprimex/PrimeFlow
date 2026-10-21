@@ -1,5 +1,64 @@
 # Transcription, summary and reviewed Tasks
 
+## On-demand citation times
+
+The owner can explicitly click **Gjej kohët e citimeve** after an Albanian
+analysis is READY. New recordings and page views never enqueue this work.
+`POST /api/meeting-recordings/{id}/citation-times` is owner-only and idempotent.
+Pending/completed requests return their existing status. The existing analysis
+GET exposes timing progress and cached results to authorized recording viewers.
+Clicking a time seeks the video, with 250 ms of context. Missing/ambiguous or weak
+matches show no invented time; all returned times are labeled approximate.
+
+Migration `0156_recording_timing` adds one nullable JSONB checkpoint column.
+Deploy it before restarting the updated API. Timing is disabled by default.
+Use a separate ML environment; never install Torch in the API environment:
+
+```powershell
+python -m venv D:\PrimeFlow-alignment-pilot\venv
+D:\PrimeFlow-alignment-pilot\venv\Scripts\python.exe -m pip install -r requirements-recording-timing.txt
+```
+
+Provision the pinned Albanian model cache using the documented alignment pilot
+before enabling this feature. The production runner uses offline-only loading;
+it never uploads recordings and never downloads a model in response to a click.
+On the tested server the cache already exists at the following location:
+
+```dotenv
+RECORDING_TIMING_ENABLED=true
+RECORDING_TIMING_PYTHON=D:/PrimeFlow-alignment-pilot/venv/Scripts/python.exe
+RECORDING_TIMING_MODEL_CACHE=D:/PrimeFlow-alignment-pilot/model-cache
+```
+
+Run `python -m app.jobs.recording_timing` from `backend/` in the **application**
+environment, with the same database and recording storage as the API. Supervise
+it as a separate worker; do not attach it to the transcription/Celery queue.
+A PostgreSQL advisory lock serializes timing workers globally. Each relevant
+transcript segment checkpoints independently, preserving finished segments on
+retry/restart. Only segments containing task citations are processed. Quotes
+crossing transcript segment boundaries may remain unavailable.
+
+The subprocess uses at most two CPU cores, low priority, and 20-second acoustic
+windows within each <=302-second transcript segment. It requires 6 GiB available
+RAM to start and exits if free RAM falls below 4 GiB or its RSS exceeds 5 GiB.
+Each segment has a 30-minute timeout; temporary audio is removed on normal exit
+or failure. No citation processing runs until a user explicitly queues a job.
+The pinned TorchAudio alignment API is deprecated: do not upgrade it to 2.9;
+replace/revalidate the aligner before upgrading the isolated dependencies.
+
+The short server pilot measured 59.7 seconds to align 23.4 seconds of audio and
+3.24 GiB peak memory, with no failed login/health probes. That is not a long-meeting
+capacity or human accuracy guarantee. Review names, mixed language and overlapping
+speech by listening. The bounded production runner is separately smoke-tested.
+
+Verification: four PostgreSQL/API tests passed (including migration upgrade and
+downgrade, owner-only timing requests, no automatic enqueue, idempotency,
+checkpoint retry and global worker locking); five quote-matching tests and four
+Chromium tests passed. Scoped TypeScript and ESLint passed. The bounded offline
+runner completed on the isolated server environment with the saved 23.4-second
+sample, producing all four citation ranges. Production activation/migration and
+worker supervision have not been applied by this implementation.
+
 Recording details now offer **Transkripto dhe përmblidh**. The recording owner
 selects the conversation language (Albanian, English, German or automatic),
 acknowledges external processing and starts a durable job. The original video
@@ -79,7 +138,8 @@ recording; there is no destructive regenerate endpoint.
 
 Task proposals are structured, size-validated and require a verbatim quote
 from the source transcript. They cannot execute tools or create Tasks.
-The owner edits the title/description, chooses a department and optionally
+The owner reviews a multiline title: only the first line is uppercase; the
+generated task details on the next line retain their original case. The owner chooses a department and optionally
 an active assignee and date, then clicks **Konfirmo dhe krijo detyrën**.
 This calls the existing Tasks creation flow, including its permissions,
 business rules, assignment notifications and audit. An internal callback
@@ -88,11 +148,12 @@ response returns the same task ID. Deleting a confirmed task does not permit
 the proposal to silently recreate it. Project association can be edited later
 using existing Tasks controls.
 
-The task receives only a generated source reference after the reviewed
-description. Evidence quotes remain in the recording analysis. This prevents
-an `@username` inside an automatically appended quote from notifying someone
-the reviewer did not select. Mentions deliberately left in the reviewed title
-or description retain existing Tasks behavior.
+New recording tasks leave the description empty; task details belong to the
+second line of the reviewed title. No source footer is appended to the description.
+The recording action retains the created-task link and evidence quote. Evidence
+quotes are not copied automatically into task text, avoiding unintended mention
+notifications. Mentions deliberately left in the reviewed title retain existing
+Tasks behavior. Existing task descriptions are preserved when editing.
 
 ## API
 

@@ -1,6 +1,7 @@
 """Restart-safe, fenced analysis. Celery beat or `python -m app.jobs.recording_analysis`."""
 import asyncio
 import hashlib
+import logging
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from app.services.meeting_recording_storage import LocalMeetingStorage
 MAX_ATTEMPTS = 3
 # Failures that retrying cannot fix go straight to FAILED.
 PERMANENT_ERRORS = {'empty_transcript', 'invalid_recording_duration', 'audio_extraction_failed', 'invalid_audio_format'}
+logger = logging.getLogger(__name__)
 
 
 def now():
@@ -122,6 +124,8 @@ async def process_recording_analyses():
             await db.commit()
     except Exception as exc:
         # Never log provider bodies, transcript text, credentials or user media paths.
+        safe_code = str(exc) if str(exc) in PERMANENT_ERRORS | {'meeting_provider_failed', 'invalid_transcript', 'invalid_audio_duration', 'invalid_audio_segment_size', 'invalid_audio_segment', 'audio_too_large', 'analysis_lease_changed'} else type(exc).__name__
+        logger.warning('Recording analysis failed: recording=%s code=%s', sid, safe_code)
         async with SessionLocal() as db:
             current = (await db.execute(select(Analysis).where(Analysis.recording_id == sid).with_for_update())).scalar_one()
             if current.lease_token == token:
