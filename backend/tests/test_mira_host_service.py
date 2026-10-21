@@ -80,7 +80,8 @@ class TickTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.row = MiraHostSettings(id=1, enabled_until=datetime(2026, 10, 21, 16, 45, tzinfo=TZ),
                                     ga_participants=host.DEFAULT_GA_PARTICIPANTS, protocol_text=host.DEFAULT_PROTOCOL)
-        self.db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=None))),
+        self.db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=None),
+                                                                     scalars=Mock(return_value=[]))),
                                   commit=AsyncMock())
         self.data = payload([item('EF', '10:00', 'A', rank=0), item('RA', '11:00', 'B', rank=0)])
         targets = {uid: {'discord_user_id': str(n), 'guild_id': '1', 'channel_id': str(100 + n)} for n, uid in enumerate(IDS.values())}
@@ -111,6 +112,24 @@ class TickTests(unittest.IsolatedAsyncioTestCase):
     async def test_nothing_happens_until_mira_is_started(self):
         self.row.enabled_until = None
         self.assertEqual(await self.kinds(9, 58), [])
+
+
+class RealtimeSessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_no_fixed_language_because_openai_rejects_sq(self):
+        sent = {}
+
+        class Client:
+            def __init__(self, **kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            async def post(self, url, headers, json):
+                sent.update(json)
+                return SimpleNamespace(is_error=False, json=lambda: {'value': 'ek_test'})
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:50')
+        with patch.object(settings, 'OPENAI_API_KEY', 'sk-test'), patch('httpx.AsyncClient', Client),              patch.object(host, 'get_settings', AsyncMock(return_value=MiraHostSettings(knowledge_char_budget=1000))),              patch.object(host, 'instructions', AsyncMock(return_value='Test')):
+            result = await host.realtime_session(SimpleNamespace(), meeting)
+        self.assertEqual(result['client_secret'], 'ek_test')
+        self.assertNotIn('language', sent['session']['audio']['input']['transcription'])
 
 
 class ProgressTests(unittest.IsolatedAsyncioTestCase):

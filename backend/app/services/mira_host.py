@@ -315,6 +315,12 @@ async def claim_event(db: AsyncSession, key: str, *, day: date, slot: str, kind:
 
 async def tick(db: AsyncSession, at: datetime | None = None) -> dict:
     at = at or now()
+    # A meeting whose bot process died never reports its end; close it so it stops showing as live.
+    for stale in (await db.execute(select(Mira1HMeeting).where(Mira1HMeeting.status.in_(("PREP", "GA_PHASE", "STAFF_PHASE")),
+            Mira1HMeeting.started_at < at - timedelta(minutes=75)))).scalars():
+        await finish_meeting(db, stale, "stale")
+        # Nobody will schedule its summary now; "FAILED" offers "Provo përsëri" in the Mira view.
+        stale.summary_status = "FAILED" if stale.host_transcript else "SKIPPED"
     row = await get_settings(db)
     if not is_enabled(row, at) or at.weekday() >= 5:
         await db.commit()
@@ -762,8 +768,9 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
         "audio": {
             "input": {
                 "format": {"type": "audio/pcm", "rate": 24000},
-                "transcription": {"model": "gpt-4o-transcribe", "language": "sq",
-                                  "prompt": "Takim 1H i Primex në shqip (Kosovë). PrimeFlow, PX Notes, strike, done, slot, deadline."},
+                # No "language": OpenAI does not accept "sq"; the prompt keeps the transcript Albanian.
+                "transcription": {"model": "gpt-4o-transcribe",
+                                  "prompt":"Takim 1H i Primex në shqip (Kosovë). PrimeFlow, PX Notes, strike, done, slot, deadline."},
                 "turn_detection": {"type": "semantic_vad", "eagerness": "high", "create_response": True, "interrupt_response": True},
                 "noise_reduction": {"type": "near_field"},
             },
@@ -781,7 +788,12 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
     except httpx.RequestError:
         raise HTTPException(502, "Nuk u lidhëm me OpenAI Realtime.") from None
     if response.is_error:
-        log.warning("Mira host realtime secret refused status=%s", response.status_code)
+        try:
+            reason = (response.json().get("error") or {}).get("message", "")[:300]
+        except ValueError:
+            reason = ""
+        # OpenAI's error names the rejected setting and never contains the key.
+        log.warning("Mira host realtime secret refused status=%s reason=%s", response.status_code, reason)
         raise HTTPException(502, "OpenAI refuzoi sesionin zanor të Mira-s.")
     body = response.json()
     return {"client_secret": body.get("value") or (body.get("client_secret") or {}).get("value"),
