@@ -25,6 +25,7 @@ from app.models.department import Department
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.microsoft_token import MicrosoftToken
 from app.models.user import User
+from app.services.meeting_cancellation import external_meeting_is_canceled
 
 
 _sync_lock = asyncio.Lock()
@@ -714,6 +715,9 @@ async def sync_external_calendar_events(
             # This set contains only users assigned manually in PrimeFlow and is
             # preserved across subsequent calendar syncs.
             existing_participant_ids = existing_participant_ids_by_meeting.setdefault(row.id, set())
+
+            if await external_meeting_is_canceled(db, row):
+                continue
 
             await ensure_calendar_internal_pair(
                 db,

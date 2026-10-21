@@ -2635,7 +2635,7 @@ export default function CommonViewPage() {
     [meetingOccurrenceDateIso, meetingOccurrenceStatuses, occurrenceStatusKey]
   )
 
-  // Marking a TAK INT as held closes its auto 1H tasks on the server; reload tasks afterwards.
+  // Refresh generated tasks after changing a meeting status.
   const refreshCommonTasksRef = React.useRef<(() => Promise<void>) | null>(null)
 
   const updateMeetingOccurrenceStatus = React.useCallback(
@@ -2652,6 +2652,11 @@ export default function CommonViewPage() {
         if (!res.ok) throw new Error(await res.text())
         const row = (await res.json()) as MeetingOccurrenceStatus
         setMeetingOccurrenceStatuses((prev) => new Map(prev).set(occurrenceStatusKey(row.meeting_id, row.occurrence_date), row))
+        if (meeting.meeting_type === "external" && status === "canceled") {
+          setInternalMeetings((prev) => prev.filter((item) =>
+            item.pre_external_meeting_id !== meeting.id && item.paired_external_meeting_id !== meeting.id
+          ))
+        }
         void refreshCommonTasksRef.current?.()
       } catch (error) {
         toast.error("Meeting status update failed", { description: String(error) })

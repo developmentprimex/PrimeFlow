@@ -19,6 +19,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.meeting_participants import manual_participant_ids
+from app.services.meeting_cancellation import external_meeting_is_canceled
 from app.services.microsoft_calendar_sync import is_routine_external_meeting
 
 EXTERNAL_MEETING_TASK_KIND = "external_meeting_prepare"
@@ -449,6 +450,8 @@ async def reconcile_agent_test_task_for_meeting(
     now_utc: datetime | None = None,
 ) -> int:
     agent_qualifies = is_one_time_external_meeting(meeting)
+    if agent_qualifies and await external_meeting_is_canceled(db, meeting):
+        return 0
     agent_ids = await _fixed_assignee_ids(db) if agent_qualifies else []
     agent_template = await ensure_external_meeting_trigger_template(db) if agent_qualifies and agent_ids else None
     return await _reconcile_external_meeting_task_kind(
@@ -471,6 +474,8 @@ async def reconcile_pim_image_test_task_for_meeting(
     now_utc: datetime | None = None,
 ) -> int:
     pim_qualifies = is_one_time_external_pim_image_meeting(meeting)
+    if pim_qualifies and await external_meeting_is_canceled(db, meeting):
+        return 0
     pim_ids = await _graphic_design_assignee_ids(db) if pim_qualifies else []
     pim_template = await ensure_pim_image_meeting_trigger_template(db) if pim_qualifies and pim_ids else None
     return await _reconcile_external_meeting_task_kind(
@@ -661,6 +666,8 @@ async def reconcile_tak_int_one_h_tasks_for_meeting(
         return 0
 
     qualifies = qualifies_for_tak_int_one_h_tasks(external)
+    if qualifies and await external_meeting_is_canceled(db, external):
+        return 0
     # Weekly/routine calendar meetings have only a follow-up TAK INT. Keep
     # their tasks consistent, including deactivating old open preparation tasks.
     needs_preparation = qualifies and not is_routine_external_meeting(

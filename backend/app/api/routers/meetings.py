@@ -41,6 +41,7 @@ from app.services.meeting_system_tasks import (
     reconcile_tak_int_one_h_tasks_for_meeting,
 )
 from app.services.meeting_scheduler import one_h_schedule_conflicts
+from app.services.meeting_cancellation import delete_external_meeting_dependents
 from app.services.audit import add_audit_log
 from app.services.meeting_participants import (
     add_participants_to_linked_internal_meetings,
@@ -232,6 +233,8 @@ async def update_meeting_occurrence_status(
     row.note = payload.note
     row.checked_by_user_id = user.id
     row.checked_at = datetime.now().astimezone()
+    if meeting.meeting_type == "external" and payload.status == "canceled":
+        await delete_external_meeting_dependents(db, meeting)
     await db.commit()
     await db.refresh(row)
     return _occurrence_status_out(row)
