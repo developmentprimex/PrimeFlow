@@ -225,6 +225,8 @@ jobs:
           DISCORD_MEETING_NOTES_ENABLED: ${{ vars.DISCORD_MEETING_NOTES_ENABLED }}
           DISCORD_VOICE_NODE_BINARY: ${{ vars.DISCORD_VOICE_NODE_BINARY }}
           MIRA_MEMORY_ENABLED: ${{ vars.MIRA_MEMORY_ENABLED }}
+          MIRA_HOST_ENABLED: ${{ vars.MIRA_HOST_ENABLED }}
+          MIRA_HOST_BOT_TOKEN: ${{ secrets.MIRA_HOST_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           $ErrorActionPreference = "Stop"

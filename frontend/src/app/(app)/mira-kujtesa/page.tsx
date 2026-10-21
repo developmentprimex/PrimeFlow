@@ -1,5 +1,6 @@
-import { MiraMemoryPage } from "@/components/mira-memory/mira-memory-page"
+import { redirect } from "next/navigation"
 
+// Kujtesa is now a tab of the Mira view; old links keep working.
 export default function MiraKujtesaPage() {
-  return <MiraMemoryPage />
+  redirect("/mira?tab=kujtesa")
 }
