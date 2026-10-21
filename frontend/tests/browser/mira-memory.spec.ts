@@ -70,6 +70,9 @@ test("a stale correction shows the conflict and reloads the item", async ({ page
   await page.getByLabel("Gjendja aktuale").fill("Ndryshim i vjetër.")
   await page.getByRole("button", { name: "Ruaj" }).click()
   await expect(page.getByText("Pika është ndryshuar ndërkohë. U rifreskua.")).toBeVisible()
+  // The stale draft is dropped so the other person's change is what you see, not overwritten by a second save.
+  await expect(page.getByLabel("Gjendja aktuale")).toBeHidden()
+  await expect(page.getByText("Arta e përgatit ofertën. Pret çmimet nga furnitori.")).toBeVisible()
 })
 
 test("on a phone the list and the item take turns", async ({ page }) => {

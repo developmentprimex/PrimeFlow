@@ -43,7 +43,7 @@ jobs:
               $_ -match 'MIRA_DIAGNOSTIC'
             } | Select-Object -Last 45
           }
-          # Mira's memory register runs in the Celery worker; pm2 names its logs celery-worker-*.
-          Get-ChildItem 'C:\pm2-system\logs\celery-worker*' -File -ErrorAction SilentlyContinue | ForEach-Object {
+          # Memory runs in celery_memory_worker; finalization in celery_worker. pm2 writes '_' as '-'.
+          Get-ChildItem 'C:\pm2-system\logs\celery*worker*' -File -ErrorAction SilentlyContinue | ForEach-Object {
             Get-Content -LiteralPath $_.FullName -Tail 4000 | Where-Object { $_ -match 'MIRA_DIAGNOSTIC memory' } | Select-Object -Last 30
           }

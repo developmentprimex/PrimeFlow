@@ -162,6 +162,7 @@ class MemoryProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(payload['store'],False);self.assertEqual(payload['model'],settings.DISCORD_AI_MODEL)
         self.assertNotIn('tools',payload)
         self.assertIn('Mos shpik',payload['input'][0]['content'])
+        self.assertIn(provider.MEMORY_DATA_RULE,payload['input'][0]['content'])
         content=json.loads(payload['input'][1]['content'])
         self.assertEqual(content['kujtesa']['wrong_titles'],['Printeri i ri'])
 

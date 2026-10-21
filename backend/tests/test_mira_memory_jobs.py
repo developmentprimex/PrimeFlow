@@ -164,3 +164,24 @@ class MemoryJobTests(MemoryTests):
             await finalization.process_voice_meetings()
         self.assertIsNone(summary.call_args.kwargs['memory'])
         self.assertEqual((await self.get(sid)).status, 'READY')
+
+    async def test_reclaimed_lease_stops_after_the_attempt_limit(self):
+        sid = await self.meeting(memory_status='RUNNING', memory_attempts=5,
+            memory_lease_until=voice.now()-timedelta(minutes=1))
+        extract = AsyncMock(return_value=[])
+        with self.enabled(), patch('app.services.discord_voice_openai.extract_memory_operations', extract):
+            await jobs.process_mira_memory()
+        extract.assert_not_awaited()
+        row = await self.get(sid)
+        self.assertEqual((row.memory_status, row.memory_error), ('FAILED', 'lease_expired'))
+
+    async def test_notes_fall_back_to_no_memory_when_the_memory_call_fails(self):
+        sid = await self.finalizing()
+        async def summary(title, parts, **kwargs):
+            if kwargs.get('memory') is not None:
+                raise ValueError('invalid_meeting_summary')
+            return 'Shënimet pa kujtesë.'
+        with self.enabled(), patch('app.services.discord_voice_openai.summarize_meeting', summary):
+            await finalization.process_voice_meetings()
+        row = await self.get(sid)
+        self.assertEqual((row.status, row.draft_text, row.memory_status), ('READY', 'Shënimet pa kujtesë.', 'PENDING'))

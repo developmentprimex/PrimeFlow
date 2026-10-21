@@ -65,6 +65,8 @@ def text_field(value, limit):
 async def apply_operations(db, meeting, operations: list[dict], versions: dict[str, int]) -> dict:
     """Apply Mira's operations for one meeting. The caller owns the transaction."""
     stats = {'applied': 0, 'rejected': 0, 'dropped': 0}
+    # Mira's own changes in this meeting raise the version she expects; a meeting counts once per item.
+    expected, seen = dict(versions), set()
     when = meeting.started_at or meeting.created_at or now()
     wrong = {title.strip().lower() for title in (await db.execute(select(Item.title).where(Item.status == 'WRONG'))).scalars()}
 
@@ -101,10 +103,12 @@ async def apply_operations(db, meeting, operations: list[dict], versions: dict[s
         if item is None or (action == 'change' and not description):
             stats['rejected'] += 1
             continue
-        item.mention_count += 1
+        if item.id not in seen:
+            seen.add(item.id)
+            item.mention_count += 1
         item.last_mentioned_at = max(filter(None, (item.last_mentioned_at, when)))
         item.people = list(dict.fromkeys([*(item.people or []), *people]))
-        if action != 'mention' and (item.version != versions[item_id] or item.status == 'WRONG'):
+        if action != 'mention' and (item.version != expected[item_id] or item.status == 'WRONG'):
             # A person changed it while Mira was reading: keep what was said, not her change.
             event(item, 'MENTION', said, segments)
             stats['dropped'] += 1
@@ -116,6 +120,7 @@ async def apply_operations(db, meeting, operations: list[dict], versions: dict[s
         if action != 'mention':
             item.version += 1
             item.updated_by_user_id = None
+            expected[item_id] = item.version
         event(item, {'mention': 'MENTION', 'change': 'CHANGE', 'close': 'CLOSE'}[action], said, segments)
         stats['applied'] += 1
     await db.flush()

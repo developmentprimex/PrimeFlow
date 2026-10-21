@@ -63,8 +63,15 @@ async def process_voice_meetings():
                 current.summary_progress=dict(progress);current.lease_until=now()+timedelta(seconds=180)
                 await db.commit()
         try:
-            draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
-                cache=cache,checkpoint=checkpoint,memory=memory)
+            try:
+                draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
+                    cache=cache,checkpoint=checkpoint,memory=memory)
+            except ValueError:
+                if memory is None:raise
+                # Memory must never cost the notes: write them as before.
+                log.warning('MIRA_DIAGNOSTIC memory meeting=%s stage=notes fallback=no_memory',sid)
+                draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
+                    cache=cache,checkpoint=checkpoint)
             error=None
         except ValueError:
             draft=None;error='Përmbledhja dështoi. Transkripti i marrë mbetet i ruajtur.'

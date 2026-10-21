@@ -97,4 +97,15 @@ class MemoryDeployTests(unittest.TestCase):
         self.assertTrue(callable(celery_tasks.process_mira_memory))
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/mira-diagnostics.yml').read_text()
         self.assertIn('memory_status', workflow)
-        self.assertIn('celery-worker', workflow)
+        self.assertIn(r"logs\celery*worker*", workflow)
+
+    def test_memory_job_runs_on_its_own_worker_so_notes_never_wait(self):
+        from app.celery_app import celery_app
+        self.assertEqual(celery_app.conf.task_routes['app.celery_tasks.process_mira_memory'], {'queue': 'mira_memory'})
+        root = Path(__file__).resolve().parents[2]
+        ecosystem = (root/'backend/ecosystem.config.cjs').read_text()
+        self.assertIn('name: "celery_memory_worker"', ecosystem)
+        self.assertIn('-Q mira_memory', ecosystem)
+        workflow = (root/'.github/workflows/deploy.yml').read_text()
+        for line in ('call pm2 delete celery_memory_worker', 'call pm2 start ecosystem.config.cjs --only celery_memory_worker'):
+            self.assertIn(line, workflow)
