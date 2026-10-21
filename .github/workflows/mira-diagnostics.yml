@@ -55,6 +55,33 @@ jobs:
               await engine.dispose()
           asyncio.run(main())
           '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
+          Write-Output '--- Who Mira counts for the 11:50 slot (read-only)'
+          @'
+          import asyncio
+          from datetime import date
+          from sqlalchemy import text, select
+          from app.db import SessionLocal
+          from app.models.user import User
+          from app.services import mira_host as h
+          async def main():
+              day = date(2026, 10, 21)
+              async with SessionLocal() as db:
+                  await db.execute(text('SET TRANSACTION READ ONLY'))
+                  data = h.SlotData(await h.common_payload(db, day, fresh=True), day)
+                  for slot in ('11:50', '14:20'):
+                      people = data.participants(slot)
+                      targets = await h.discord_targets(db, people)
+                      print('SLOT', slot, 'participants', [(data.name(u), 'linked' if u in targets else 'NOT LINKED') for u in people])
+                      for item in data.slots[slot]:
+                          print('  ITEM', str(item.get('title'))[:60], '| assignees', item.get('assignees'), '| owners', [data.name(u) for u in data.owners(item)])
+                  for uid in (await db.execute(text("SELECT user_id FROM mira_1h_events WHERE kind='BRIEF'"))).scalars().all():
+                      user = await db.get(User, uid)
+                      print('BRIEF_SENT_TO', user.full_name if user else uid)
+                  laurent = (await db.execute(select(User).where(User.username == 'laurent.hoxha'))).scalar_one_or_none()
+                  if laurent:
+                      print('LAURENT available', data.available(str(laurent.id)), 'linked', bool(await h.discord_targets(db, [str(laurent.id)])))
+          asyncio.run(main())
+          '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
           Write-Output '--- OpenAI answer to the Mira Host session settings'
           @'
           import httpx, json
