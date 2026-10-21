@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from app.api.routers.private_profile_photo import router as private_profile_photo_router
 from app.api.routers.discord_assistant import router as discord_assistant_router
+from app.api.routers.mira_memory import router as mira_memory_router
 
 from app.api.routers.auth import router as auth_router
 from app.api.routers.checklist_items import router as checklist_items_router
@@ -63,6 +64,7 @@ from app.api.routers.discord_voice_meetings import router as discord_voice_meeti
 api_router = APIRouter()
 api_router.include_router(discord_voice_meetings_router, prefix="/discord/bot/voice-meetings", tags=["discord"])
 api_router.include_router(private_profile_photo_router, prefix="/profile-photo", tags=["profile-photo"])
+api_router.include_router(mira_memory_router, prefix="/mira-memory", tags=["mira-memory"])
 from app.api.routers.discord_agents import router as discord_agents_router
 api_router.include_router(discord_agents_router, prefix="/discord/bot/agents", tags=["discord"])
 api_router.include_router(discord_assistant_router, prefix="/discord", tags=["discord"])

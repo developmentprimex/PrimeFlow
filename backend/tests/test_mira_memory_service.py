@@ -16,10 +16,10 @@ def op(action, item_id=None, title=None, description=None, kind=None, people=(),
 
 
 class MemoryServiceTests(MemoryTests):
-    async def meeting(self, minutes_ago=0, **values):
+    async def meeting(self, minutes_ago=0, title='1H', **values):
         row = Meeting(id=uuid.uuid4(), user_id=self.uid, link_id=self.lid, department_id=self.did, guild_id='123',
             voice_channel_id='55', private_channel_id='44', request_id=uuid.uuid4().hex[:20], instance_id=uuid.uuid4(),
-            capture_token_hash='h', title='1H', status='READY', partial=False, stop_authorized=True,
+            capture_token_hash='h', title=title, status='READY', partial=False, stop_authorized=True,
             started_at=voice.now()-timedelta(minutes=minutes_ago), **values)
         async with self.sessions() as db:
             db.add(row)

@@ -5,10 +5,13 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from sqlalchemy import select, or_, and_
+from fastapi import HTTPException
+from sqlalchemy import select, or_, and_, func, update
 from app.config import settings
 from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting
+from app.models.enums import UserRole
 from app.models.mira_memory import MiraMemoryItem as Item, MiraMemoryEvent as Event
+from app.models.user import User
 
 KINDS = ('TASK', 'TOPIC', 'DECISION', 'INFO')
 ACTIONS = ('add', 'mention', 'change', 'close')
@@ -117,3 +120,82 @@ async def apply_operations(db, meeting, operations: list[dict], versions: dict[s
         stats['applied'] += 1
     await db.flush()
     return stats
+
+
+# The page: everyone who is signed in reads and corrects the same register.
+
+STALE = 'Pika është ndryshuar ndërkohë. U rifreskua.'
+EVENT_KINDS = {'close': ('CLOSED', 'CLOSE'), 'reopen': ('OPEN', 'REOPEN'), 'wrong': ('WRONG', 'WRONG')}
+
+
+def summary(row, quiet_before):
+    return {'id': str(row.id), 'title': row.title, 'kind': row.kind, 'status': row.status,
+        'quiet': row.status == 'OPEN' and row.last_mentioned_at is not None and row.last_mentioned_at < quiet_before,
+        'mention_count': row.mention_count,
+        'last_mentioned_at': row.last_mentioned_at.isoformat() if row.last_mentioned_at else None}
+
+
+async def list_items(db, status: str) -> dict:
+    quiet_before = now() - timedelta(days=settings.MIRA_MEMORY_QUIET_DAYS)
+    groups = {'open': ['OPEN'], 'closed': ['CLOSED', 'WRONG'], 'all': ['OPEN', 'CLOSED', 'WRONG']}
+    rows = (await db.execute(ordered(select(Item).where(Item.status.in_(groups[status]))))).scalars()
+    counts = dict((await db.execute(select(Item.status, func.count()).group_by(Item.status))).all())
+    failed = await db.scalar(select(func.count()).select_from(Meeting).where(Meeting.memory_status == 'FAILED'))
+    return {'items': [summary(row, quiet_before) for row in rows],
+        'counts': {'open': counts.get('OPEN', 0), 'closed': counts.get('CLOSED', 0) + counts.get('WRONG', 0)},
+        'failed_meetings': failed}
+
+
+async def get_item(db, item_id) -> dict:
+    row = await db.get(Item, item_id, populate_existing=True)
+    if row is None:
+        raise HTTPException(404, 'Pika nuk u gjet.')
+    events = await db.execute(select(Event, Meeting.title, User.full_name, User.username)
+        .outerjoin(Meeting, Meeting.id == Event.meeting_id).outerjoin(User, User.id == Event.user_id)
+        .where(Event.item_id == row.id).order_by(Event.created_at.desc()))
+    return {**summary(row, now() - timedelta(days=settings.MIRA_MEMORY_QUIET_DAYS)),
+        'description': row.description, 'people': list(row.people or []), 'version': row.version,
+        'human_edited': row.human_edited,
+        'events': [{'kind': event.kind, 'text': event.text, 'created_at': event.created_at.isoformat(),
+            'meeting_title': title, 'user_name': full_name or username, 'partial': event.partial}
+            for event, title, full_name, username in events]}
+
+
+async def locked_item(db, item_id, version):
+    row = (await db.execute(select(Item).where(Item.id == item_id).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, 'Pika nuk u gjet.')
+    if row.version != version:
+        raise HTTPException(409, STALE)
+    return row
+
+
+def touched(db, row, user, kind, text):
+    row.version += 1
+    row.human_edited, row.updated_by_user_id = True, user.id
+    db.add(Event(id=uuid.uuid4(), item_id=row.id, kind=kind, text=text, user_id=user.id, created_at=now()))
+
+
+async def edit_item(db, user, item_id, payload) -> dict:
+    row = await locked_item(db, item_id, payload.version)
+    row.title, row.description = payload.title.strip(), payload.description.strip()
+    touched(db, row, user, 'EDIT', row.description)
+    await db.commit()
+    return await get_item(db, item_id)
+
+
+async def set_status(db, user, item_id, payload) -> dict:
+    row = await locked_item(db, item_id, payload.version)
+    row.status, kind = EVENT_KINDS[payload.action]
+    touched(db, row, user, kind, '')
+    await db.commit()
+    return await get_item(db, item_id)
+
+
+async def retry_failed(db, user) -> dict:
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        raise HTTPException(403, 'Vetëm adminët dhe menaxherët mund ta provojnë sërish.')
+    result = await db.execute(update(Meeting).where(Meeting.memory_status == 'FAILED')
+        .values(memory_status='PENDING', memory_attempts=0, memory_error=None))
+    await db.commit()
+    return {'retried': result.rowcount}
