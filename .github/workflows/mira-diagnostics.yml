@@ -65,7 +65,7 @@ jobs:
               "audio": {
                   "input": {
                       "format": {"type": "audio/pcm", "rate": 24000},
-                      "transcription": {"model": "gpt-4o-transcribe", "language": "sq", "prompt": "Takim 1H."},
+                      "transcription": {"model": "gpt-4o-transcribe", "prompt": "Takim 1H."},
                       "turn_detection": {"type": "semantic_vad", "eagerness": "high", "create_response": True, "interrupt_response": True},
                       "noise_reduction": {"type": "near_field"},
                   },
