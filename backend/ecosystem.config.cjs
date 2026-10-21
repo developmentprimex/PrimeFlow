@@ -69,6 +69,12 @@ module.exports = {
   apps: [
     {
       ...apiProcess,
+      name: "primeflow-recording-timing",
+      args: "-m app.jobs.recording_timing",
+      env: sharedEnv,
+    },
+    {
+      ...apiProcess,
       name: "primex-backend",
       args: "-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 15 --backlog 2048",
       env: {

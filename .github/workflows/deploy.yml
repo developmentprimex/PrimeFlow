@@ -166,6 +166,9 @@ jobs:
           echo DB_MAX_OVERFLOW=20 >> backend\.env
           echo DB_POOL_TIMEOUT=30 >> backend\.env
           echo DB_POOL_RECYCLE=1800 >> backend\.env
+          echo RECORDING_TIMING_ENABLED=true >> backend\.env
+          echo RECORDING_TIMING_PYTHON=D:/PrimeFlow-alignment-pilot/venv/Scripts/python.exe >> backend\.env
+          echo RECORDING_TIMING_MODEL_CACHE=D:/PrimeFlow-alignment-pilot/model-cache >> backend\.env
           echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend\.env
           echo REDIS_ENABLED=true >> backend\.env
           echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend\.env
@@ -225,6 +228,8 @@ jobs:
           DISCORD_MEETING_NOTES_ENABLED: ${{ vars.DISCORD_MEETING_NOTES_ENABLED }}
           DISCORD_VOICE_NODE_BINARY: ${{ vars.DISCORD_VOICE_NODE_BINARY }}
           MIRA_MEMORY_ENABLED: ${{ vars.MIRA_MEMORY_ENABLED }}
+          MIRA_HOST_ENABLED: ${{ vars.MIRA_HOST_ENABLED }}
+          MIRA_HOST_BOT_TOKEN: ${{ secrets.MIRA_HOST_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           $ErrorActionPreference = "Stop"
@@ -346,6 +351,7 @@ jobs:
           REM single ecosystem app name; a comma-separated value leaves the old
           REM scheduler supervised and PM2 immediately respawns it after it is killed.
           call pm2 delete primex-backend || ver > NUL
+          call pm2 delete primeflow-recording-timing || ver > NUL
           call pm2 delete primeflow-mcp || ver > NUL
           call pm2 delete primeflow-discord || ver > NUL
           call pm2 delete primeflow-report-scheduler || ver > NUL
@@ -386,6 +392,8 @@ jobs:
           powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8010'); Stop-Process -Id $_ -Force }"
 
           call pm2 start ecosystem.config.cjs --only primex-backend --update-env
+          if errorlevel 1 exit /b 1
+          call pm2 start ecosystem.config.cjs --only primeflow-recording-timing --update-env
           if errorlevel 1 exit /b 1
           call pm2 start ecosystem.config.cjs --only primeflow-mcp --update-env
           if errorlevel 1 exit /b 1

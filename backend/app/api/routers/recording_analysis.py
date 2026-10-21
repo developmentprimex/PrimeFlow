@@ -14,6 +14,7 @@ from app.models.recording_analysis import RecordingAnalysis as Analysis, Recordi
 from app.models.user import User
 from app.models.department import Department
 from app.schemas.task import TaskCreate
+from app.models.enums import TaskPriority, TaskFinishPeriod, TaskSkillCategory
 
 router = APIRouter()
 
@@ -25,11 +26,25 @@ class AnalysisStart(BaseModel):
 
 class TaskConfirmation(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    title: str = Field(min_length=2, max_length=200)
+    title: str = Field(min_length=2, max_length=6000)
     description: str = Field(default='', max_length=5000)
     department_id: uuid.UUID
     assigned_to: uuid.UUID | None = None
     due_date: datetime | None = None
+    start_date: datetime | None = None
+    assignees: list[uuid.UUID] | None = None
+    project_id: uuid.UUID | None = None
+    priority: TaskPriority | None = None
+    finish_period: TaskFinishPeriod | None = None
+    is_deadline_important: bool = False
+    is_bllok: bool = False
+    is_1h_report: bool = False
+    is_r1: bool = False
+    is_personal: bool = False
+    one_h_report_slot: str | None = Field(default=None, pattern=r'^(10:00|11:00|11:50|14:20|16:00)$')
+    one_h_marker: str | None = Field(default=None, pattern=r'^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$')
+    one_h_marker_comment: str | None = Field(default=None, max_length=1000)
+    skill_category: TaskSkillCategory | None = None
 
 
 def available():
@@ -46,6 +61,8 @@ async def get_analysis(recording_id: uuid.UUID, db: AsyncSession = Depends(get_d
         audit(db, user, row, 'recording_analysis_viewed')
         await db.commit()
     return {'configured': available(), 'can_manage': row.created_by == user.id,
+        'timing_configured': bool(settings.RECORDING_TIMING_ENABLED and settings.RECORDING_TIMING_PYTHON),
+        'timing': job.timing if job else None,
         'analysis': {**{key: getattr(job, key) for key in ('status', 'language', 'total_segments', 'segments_done', 'summary', 'error_message', 'updated_at')},
             # Analyses from before meeting-level notes kept decisions per segment.
             'decisions': job.decisions if job.decisions is not None else [d for s in segments for d in (s.notes or {}).get('decisions', [])]} if job else None,
@@ -81,6 +98,28 @@ async def start_analysis(recording_id: uuid.UUID, payload: AnalysisStart, db: As
     return {'status': job.status}
 
 
+@router.post('/{recording_id}/citation-times', status_code=202)
+async def request_citation_times(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    row = await load_recording(db, recording_id, user, write=True)
+    job = (await db.execute(select(Analysis).where(Analysis.recording_id == row.id).with_for_update())).scalar_one_or_none()
+    if row.status != 'READY' or not job or job.status != 'READY':
+        raise HTTPException(409, 'Përfundoni transkriptimin para se të kërkoni kohët.')
+    # Cached or pending requests never enqueue duplicate work.
+    if job.timing and job.timing.get('status') != 'FAILED':
+        return {'status': job.timing['status']}
+    if not settings.RECORDING_TIMING_ENABLED or not settings.RECORDING_TIMING_PYTHON:
+        raise HTTPException(503, 'Gjetja e kohëve nuk është aktivizuar ende.')
+    if job.language != 'sq':
+        raise HTTPException(422, 'Gjetja e kohëve aktualisht mbështet regjistrimet në shqip.')
+    if not (await db.execute(select(Action.id).where(Action.recording_id == row.id).limit(1))).first():
+        raise HTTPException(409, 'Nuk ka citime detyrash për t’u kërkuar.')
+    job.timing = {**(job.timing or {}), 'status': 'QUEUED', 'error': None,
+        'requested_at': datetime.now(timezone.utc).isoformat(), 'requested_by': str(user.id)}
+    audit(db, user, row, 'recording_timing_requested')
+    await db.commit()
+    return {'status': 'QUEUED'}
+
+
 @router.post('/{recording_id}/actions/{action_id}/task')
 async def confirm_task(recording_id: uuid.UUID, action_id: uuid.UUID, payload: TaskConfirmation,
         db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
@@ -94,23 +133,24 @@ async def confirm_task(recording_id: uuid.UUID, action_id: uuid.UUID, payload: T
         return {'task_id': proposal.created_task_id, 'duplicate': True}
     if not await db.get(Department, payload.department_id):
         raise HTTPException(422, 'Departamenti nuk u gjet.')
-    if payload.assigned_to:
-        assignee = await db.get(User, payload.assigned_to)
+    for assignee_id in set([*(payload.assignees or []), *([payload.assigned_to] if payload.assigned_to else [])]):
+        assignee = await db.get(User, assignee_id)
         if assignee is None or not assignee.is_active:
             raise HTTPException(422, 'Zgjidhni një përdorues aktiv.')
     if payload.due_date and payload.due_date.tzinfo is None:
         raise HTTPException(422, 'Afati duhet të përmbajë zonën kohore.')
+    if payload.start_date and payload.start_date.tzinfo is None:
+        raise HTTPException(422, 'Data e fillimit duhet të përmbajë zonën kohore.')
     if len(payload.title.strip()) < 2:
         raise HTTPException(422, 'Titulli duhet të ketë të paktën dy shkronja.')
-    # AI cannot set task fields, recipients, dates or privileged origins. The
-    # owner reviews this limited payload; existing Tasks validates it normally.
+    # Only owner-reviewed task fields are accepted. Privileged origins remain
+    # unavailable; existing Tasks validates permissions and business rules.
     from app.api.routers.tasks import create_task_in_session
     def attach(task):
         proposal.created_task_id, proposal.confirmed_by = task.id, user.id
         proposal.confirmed_at = datetime.now(timezone.utc)
         audit(db, user, row, 'recording_task_confirmed', action_id=str(proposal.id), task_id=str(task.id))
-    from app.services.recording_analysis_provider import SEGMENT_SECONDS, clock
-    description = (payload.description + '\n\nBurimi: regjistrimi ' + str(row.id)
-        + ', rreth ' + clock(proposal.segment_index * SEGMENT_SECONDS))
-    result = await create_task_in_session(TaskCreate(**payload.model_dump(exclude={'description'}), description=description), db, user, before_commit=attach)
+    title_lines = payload.title.strip().replace('\r\n', '\n').split('\n')
+    title_lines[0] = title_lines[0].upper()
+    result = await create_task_in_session(TaskCreate(**payload.model_dump(exclude={'description', 'title'}), title='\n'.join(title_lines), description=payload.description.strip() or None), db, user, before_commit=attach)
     return {'task_id': result.id, 'duplicate': False}

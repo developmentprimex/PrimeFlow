@@ -25,6 +25,8 @@ class RecordingAnalysis(Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Null until the owner explicitly requests citation timing. Never auto-created.
+    timing: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class RecordingTranscript(Base):

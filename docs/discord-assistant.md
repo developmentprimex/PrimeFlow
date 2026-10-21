@@ -80,7 +80,7 @@ kaluarën vetëm kur është qartë e njëjta çështje, p.sh. "(1H, 21.10 09:58
   Si parazgjedhje është `false`, dhe shënimet punojnë saktësisht si më parë.
 - Hyjnë të gjitha takimet, edhe ato të `/takimi fillo` që nuk u ruajtën në PX Notes.
   Takimet para aktivizimit nuk përfshihen; regjistri nis bosh.
-- Faqja **Kujtesa e Mira-s** (`/mira-kujtesa`) e tregon regjistrin për të gjithë
+- Tabi **Kujtesa** te faqja **Mira** (`/mira?tab=kujtesa`) e tregon regjistrin për të gjithë
   stafin. Çdokush mund ta korrigjojë një pikë, ta mbyllë, ta rihapë ose ta shënojë si
   të gabuar. Korrigjimi i një personi ka përparësi; asgjë nuk fshihet nga historiku.
 - Shënimet nuk e presin kurrë kujtesën. Një përditësim që dështon provohet deri në 5
@@ -89,6 +89,47 @@ kaluarën vetëm kur është qartë e njëjta çështje, p.sh. "(1H, 21.10 09:58
 - `gh workflow run mira-diagnostics.yml --ref main` tregon `memory_status` për
   takimet e fundit dhe rreshtat `MIRA_DIAGNOSTIC memory` nga Celery worker, pa
   përmbajtje takimesh.
+
+## Mira mban vetë takimet 1H (test)
+
+Mira mund ta mbajë vetë 1H-në. Thërret njerëzit, flet me ta, pyet dhe krijon detyra nga PX Notes.
+Në mënyrë parazgjedhëse është joaktive dhe niset vetëm me komandë. Dëgjimi i heshtur më lart
+nuk ndryshon: ai vazhdon të transkriptojë si më parë, edhe kur Mira e mban takimin.
+
+**Si funksionon.** Zëri i Mira-s është një bot i dytë Discord, "Mira Host", me token të vetin,
+sepse një bot mund të jetë vetëm në një voice channel për server. Mira Host hyn në kanalin 1H dhe
+flet përmes OpenAI Realtime (`VOICE_ASSISTANT_MODEL`). Kur dikush flet, ajo ndalet menjëherë dhe dëgjon.
+Mesazhet me shkrim i dërgon boti ekzistues PrimeFlow në kanalet private të `/lidh`.
+
+| Kur | Çka ndodh |
+|---|---|
+| 5 min para (11:00, 11:50, 14:20, 16:00; jo 10:00) | Secili me detyra 1H në atë slot merr protokollin, detyrat e slotit dhe detyrat në proces / pa progres nga sloti paraprak |
+| 2 min para | Thirren në 1H Diellza, Gane dhe Elza; Olsa, nëse Elza mungon sot ose s'është kyçur në fillim të slotit. Mira hyn në kanal |
+| Deri në orën e slotit | Faza GA: "Notes të reja?" (për secilin note: personi, data, AM/PM, deadline, simboli; pas "po" krijohet detyra 1H). Pastaj "A ka Done?", vetëm Done dhe Strike të reja, pa përsëritur çka u përmend në 1H-të e mëparshme të sotme |
+| Ora e slotit | Stafi një nga një sipas renditjes së Common View. Mira thërret të radhës pak para se të mbarojë personi aktual, që askush të mos presë. Regjistrohet kur ka filluar dhe kur ka mbaruar secili |
+| Fundi | Transkripti dhe përmbledhja ruhen te faqja **Mira → Takimet 1H** |
+
+**Komandat** (vetëm admin/menaxher; edhe nga faqja **Mira → Cilësimet**):
+
+| Komanda | Çka bën |
+|---|---|
+| `/mira mbaj-takimet [deri_ne_ore]` | Mira i mban 1H-të sot, deri në orën e dhënë ose deri në 16:45 |
+| `/mira ndalo` | Mira ndalet menjëherë |
+| `/mira statusi` | Tregon a është aktive dhe kush është në radhë tani |
+
+**Aktivizimi në server**
+
+1. Krijo në Discord Developer Portal një aplikacion të ri "Mira Host". Në tab-in Bot merr token-in.
+   Nuk duhen privileged intents.
+2. Fto botin në server me lejet View Channel, Connect dhe Speak në kanalin 1H.
+3. Shto Actions secret `MIRA_HOST_BOT_TOKEN` dhe variable `MIRA_HOST_ENABLED=true`, pastaj deploy.
+   Migrimi `0157_mira_host` krijon tabelat.
+4. Sigurohu që Diellza, Gane, Elza, Olsa dhe stafi kanë bërë `/lidh`; kush s'e ka bërë nuk merr mesazhe.
+   Emrat e ekipit GA, protokolli dhe minutat për person ndryshohen te **Mira → Cilësimet**.
+5. **Knowledge** (Mira → Knowledge): shto strukturën e Primex, rregulloret dhe definimet si tekst
+   ose si skedar `.txt`, `.md`, `.csv`, `.json` ose `.docx`. Për PDF, ngjit tekstin manualisht.
+   Dokumentet aktive i lexon para çdo takimi brenda kufirit të shenjave; pjesën tjetër e kërkon
+   vetëm kur pyetet. Pikat e hapura të Kujtesës hyjnë gjithashtu, kur `MIRA_MEMORY_ENABLED=true`.
 
 ## Aktivizimi fillestar
 

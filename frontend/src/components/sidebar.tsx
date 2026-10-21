@@ -91,7 +91,7 @@ const primaryItems: NavItem[] = [
     label: "PX Notes",
     icon: StickyNote,
   },
-  { href: "/mira-kujtesa", label: "Kujtesa e Mira-s", icon: Brain },
+  { href: "/mira", label: "Mira", icon: Brain },
   {
     href: "/next-week-plan",
     label: "PX JAV",

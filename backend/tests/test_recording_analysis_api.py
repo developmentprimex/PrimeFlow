@@ -79,6 +79,70 @@ class AnalysisApiTests(unittest.TestCase):
         from app.jobs.recording_analysis import process_recording_analyses
         return asyncio.run(process_recording_analyses())
 
+    def test_citation_times_are_explicit_cached_authorized_and_restart_safe(self):
+        from app.jobs import recording_timing as worker
+        from app.models.recording_analysis import RecordingAnalysis, RecordingAction, RecordingTranscript
+        from sqlalchemy import text
+        from types import SimpleNamespace
+        repeated = [SimpleNamespace(text='Dergo raportin.'), SimpleNamespace(text='Dergo raportin.')]
+        self.assertFalse(worker.unique_evidence('Dergo raportin', repeated))
+        self.assertFalse(worker.unique_evidence('Mungon citimi', repeated))
+        self.assertTrue(worker.unique_evidence('Dergo raportin', repeated[:1]))
+        async def competing_worker():
+            async with self.session.kw['bind'].connect() as lock:
+                await lock.execute(text('SELECT pg_advisory_lock(:key)'), {'key': worker.LOCK_ID})
+                try:
+                    with patch.object(worker, 'engine', self.session.kw['bind']), patch.object(worker, 'process_locked', new=AsyncMock()) as process:
+                        self.assertEqual(await worker.process_recording_timings(), 0)
+                        process.assert_not_awaited()
+                finally:
+                    await lock.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': worker.LOCK_ID})
+        sid = self.saved()
+        async def seed():
+            async with self.session() as db:
+                db.add(RecordingAnalysis(recording_id=uuid.UUID(sid), requested_by=uuid.UUID(self.fixture['owner']['id']),
+                    status='READY', language='sq', total_segments=2, segments_done=2))
+                await db.flush()
+                for index in range(2):
+                    db.add(RecordingTranscript(recording_id=uuid.UUID(sid), index=index, start_seconds=index * 300,
+                        duration_seconds=20, text=f'Dergo raportin {index}.'))
+                    db.add(RecordingAction(recording_id=uuid.UUID(sid), segment_index=index, fingerprint=str(index),
+                        title='Dergo raportin', description='', evidence=f'Dergo raportin {index}.'))
+                await db.commit()
+        asyncio.run(seed())
+        url = f'/api/meeting-recordings/{sid}/citation-times'
+        with patch.object(self.settings, 'RECORDING_TIMING_ENABLED', True), patch.object(self.settings, 'RECORDING_TIMING_PYTHON', 'isolated-python'), patch.object(worker, 'SessionLocal', self.session):
+            asyncio.run(competing_worker())
+            self.assertIsNone(self.get(sid).json()['timing'])
+            self.assertEqual(asyncio.run(worker.process_locked()), 0, 'Reading/creating a recording must not enqueue timing')
+            for who in ['participant', 'other', 'manager']:
+                self.assertEqual(self.client.post(url, headers=self.auth(who)).status_code, 404)
+            self.assertEqual(self.client.post(url, headers=self.auth()).status_code, 202)
+            requested = self.get(sid).json()['timing']['requested_at']
+            self.client.post(url, headers=self.auth())
+            self.assertEqual(self.get(sid).json()['timing']['requested_at'], requested)
+            def result(source, segment, actions):
+                return {str(a.id): {'start': segment.start_seconds + 1.2, 'end': segment.start_seconds + 2, 'approximate': True} for a in actions}
+            with patch.object(worker, 'measure_segment', side_effect=result) as measure:
+                asyncio.run(worker.process_locked())
+                self.assertEqual(self.get(sid).json()['timing']['completed'], 1)
+                self.client.post(url, headers=self.auth())
+                with patch.object(worker, 'measure_segment', side_effect=RuntimeError('private detail')):
+                    asyncio.run(worker.process_locked())
+                failed = self.get(sid).json()['timing']
+                self.assertEqual(failed['status'], 'FAILED')
+                self.assertNotIn('private detail', failed['error'])
+                self.assertEqual(failed['done'], [0])
+                self.client.post(url, headers=self.auth())
+                asyncio.run(worker.process_locked())
+                self.assertEqual(measure.call_count, 2, 'Retry must skip completed segments')
+                ready = self.get(sid, 'participant').json()['timing']
+                self.assertEqual(ready['status'], 'READY')
+                self.assertEqual(len(ready['results']), 2)
+                self.client.post(url, headers=self.auth())
+                self.assertEqual(asyncio.run(worker.process_locked()), 0)
+                self.assertEqual(measure.call_count, 2)
+
     def test_authorization_consent_and_provider_configuration(self):
         sid = self.saved()
         self.assertEqual(self.get(sid, 'other').status_code, 404)
@@ -135,7 +199,7 @@ class AnalysisApiTests(unittest.TestCase):
         path = f"/api/meeting-recordings/{sid}/actions/{action['id']}/task"
         for who in ['other', 'participant', 'manager']:
             self.assertEqual(self.client.post(path, headers=self.auth(who), json=body).status_code, 404)
-        self.assertEqual(self.client.post(path, headers=self.auth(), json={**body, 'is_personal': True}).status_code, 422)
+        self.assertEqual(self.client.post(path, headers=self.auth(), json={**body, 'ga_note_origin_id': str(uuid.uuid4())}).status_code, 422)
         first = self.client.post(path, headers=self.auth(), json=body)
         self.assertEqual(first.status_code, 200, first.text)
         second = self.client.post(path, headers=self.auth(), json=body)

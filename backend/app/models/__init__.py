@@ -230,3 +230,4 @@ from app.models.meeting_recording import MeetingRecording, MeetingRecordingChunk
 from app.models.recording_analysis import RecordingAnalysis, RecordingTranscript, RecordingAction
 from app.models.discord_voice_meeting import DiscordVoiceMeeting, DiscordVoiceSegment
 from app.models.mira_memory import MiraMemoryItem, MiraMemoryEvent
+from app.models.mira_host import MiraHostSettings, Mira1HMeeting, Mira1HTurn, Mira1HMention, Mira1HEvent, MiraKnowledgeItem

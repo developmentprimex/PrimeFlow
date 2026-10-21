@@ -130,8 +130,13 @@ async def transcribe(wav: bytes, language: str, *, vocabulary=(), previous=''):
     if speech_seconds(pcm) < MIN_SPEECH_SECONDS:
         return ''
     data = {'model': settings.RECORDING_TRANSCRIBE_MODEL, 'prompt': transcription_prompt(language, vocabulary, previous)}
-    if language != 'auto' and settings.RECORDING_TRANSCRIBE_LANGUAGE_HINT:
-        data['language'] = language
+    # The provider rejects the Albanian code `sq`; keep its Albanian prompt
+    # and let it detect the spoken language instead of rejecting the upload.
+    if language not in ('auto', 'sq') and settings.RECORDING_TRANSCRIBE_LANGUAGE_HINT:
+        if settings.RECORDING_TRANSCRIBE_MODEL.startswith('gpt-transcribe'):
+            data['languages[]'] = [language]
+        else:
+            data['language'] = language
     body = await with_retries(lambda: request('audio/transcriptions', timeout=TRANSCRIBE_TIMEOUT,
         data=data, files={'file': ('segment.wav', wav, 'audio/wav')}))
     text = body.get('text')

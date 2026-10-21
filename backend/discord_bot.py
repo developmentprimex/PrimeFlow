@@ -21,6 +21,7 @@ from app.config import settings
 import discord_ui as ui
 import discord_agent_client as agent_client
 import discord_voice_meetings as voice_meetings
+import mira_host
 
 log = logging.getLogger("primeflow.discord")
 ACTION_CHOICES = [
@@ -137,6 +138,7 @@ class PrimeFlowBot(discord.Client):
         intents.message_content = settings.DISCORD_MESSAGE_CONTENT_ENABLED
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none(), enable_debug_events=settings.DISCORD_MEETING_NOTES_ENABLED)
         self.meeting_capture = voice_meetings.MeetingCaptureCoordinator(self)
+        self.mira_host = mira_host.MiraHost(self)
         self.tree = app_commands.CommandTree(self)
         self.task_details = {}
         self.task_cards = {}
@@ -329,10 +331,13 @@ class PrimeFlowBot(discord.Client):
                 await interaction.followup.send(self.error_message(exc), ephemeral=True)
 
         voice_meetings.register_meeting_commands(self, guild)
+        mira_host.register_host_commands(self, guild)
         await self.tree.sync(guild=guild)
         if settings.DISCORD_MEETING_NOTES_ENABLED:
             self.voice_meeting_results.start()
             self.voice_meeting_schedule.start()
+        if settings.MIRA_HOST_ENABLED and settings.MIRA_HOST_BOT_TOKEN:
+            self.mira_host_schedule.start()
         self.reminders.start()
         self.meeting_alerts.start()
         self.agent_results.start()
@@ -948,9 +953,23 @@ class PrimeFlowBot(discord.Client):
     async def before_voice_meeting_schedule(self):
         await self.wait_until_ready()
 
+    @tasks.loop(seconds=10)
+    async def mira_host_schedule(self):
+        # Mira Host (test): invitations and the meetings she leads, only after /mira mbaj-takimet.
+        try:
+            await self.mira_host.tick(datetime.now(ZoneInfo(settings.APP_TIMEZONE)))
+        except Exception as exc:
+            log.warning("Mira host schedule failed: %s", type(exc).__name__)
+
+    @mira_host_schedule.before_loop
+    async def before_mira_host_schedule(self):
+        await self.wait_until_ready()
+
     async def close(self):
         self.voice_meeting_schedule.cancel()
         self.voice_meeting_results.cancel()
+        self.mira_host_schedule.cancel()
+        await self.mira_host.stop("shutdown")
         await self.meeting_capture.close()
         self.clear_ready_status()
         self.reminders.cancel()

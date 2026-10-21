@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     MEETING_RECORDINGS_FFMPEG: str = "ffmpeg"
     MEETING_RECORDINGS_FFPROBE: str = "ffprobe"
     RECORDING_ANALYSIS_ENABLED: bool = True
+    RECORDING_TIMING_ENABLED: bool = False
+    RECORDING_TIMING_PYTHON: str = ""
+    RECORDING_TIMING_MODEL_CACHE: str = "private-data/alignment-pilot/model-cache"
     RECORDING_ANALYSIS_MODEL: str = "gpt-6-luna"
     RECORDING_TRANSCRIBE_MODEL: str = "gpt-transcribe"
     # Sends the chosen language code to the transcription API; disable if a model rejects it.
@@ -145,6 +148,14 @@ class Settings(BaseSettings):
     MIRA_MEMORY_MAX_ATTEMPTS: int = 5
     MIRA_MEMORY_WAIT_MINUTES: int = 15
     MIRA_MEMORY_CONTEXT_CHARS: int = 40000
+    # Mira Host (test): a second Discord bot that speaks and leads the 1H meetings.
+    # Off by default; even when on it only runs after /mira mbaj-takimet.
+    MIRA_HOST_ENABLED: bool = False
+    MIRA_HOST_BOT_TOKEN: str | None = None
+    MIRA_HOST_PRE_BRIEF_MINUTES: int = 5
+    MIRA_HOST_GA_CALL_MINUTES: int = 2
+    MIRA_HOST_VOICE: str = "marin"
+    MIRA_HOST_SPEED: float = 1.15
     DISCORD_AI_TIMEOUT_SECONDS: int = 45
     DISCORD_AGENT_MODEL: str = "gpt-6-luna"
     SKILLS_AI_MODEL: str = "gpt-5.4-nano"
