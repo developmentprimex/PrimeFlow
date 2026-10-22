@@ -108,7 +108,9 @@ class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(auto_join_slot(monday(9,58,30),times),monday(9,58))
         self.assertEqual(auto_join_slot(monday(11,49,59),times),monday(11,48))
         self.assertIsNone(auto_join_slot(monday(9,57,59),times))
-        self.assertIsNone(auto_join_slot(monday(10,0,0),times))
+        # Failed connections are retried until 2 minutes after the 1H starts.
+        self.assertEqual(auto_join_slot(monday(10,1,59),times),monday(9,58))
+        self.assertIsNone(auto_join_slot(monday(10,2,0),times))
         self.assertIsNone(auto_join_slot(datetime(2026,10,24,9,58,tzinfo=tz),times))  # Saturday
 
     def auto_fixture(self):
@@ -133,6 +135,32 @@ class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
         kwargs=begin.await_args.kwargs
         self.assertEqual(kwargs['actor'],{'discord_user_id':'77','guild_id':'123','channel_id':'44','voice_channel_id':'55'})
         self.assertEqual(kwargs['request_id'],'auto1h-202610190958');self.assertIs(kwargs['voice'],voice)
+
+    async def test_failed_join_is_retried_in_the_slot_and_the_organizer_hears_when_mira_gives_up(self):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        bot,c,voice,private,guild=self.auto_fixture()
+        when=datetime(2026,10,19,9,58,tzinfo=ZoneInfo('Europe/Tirane'))
+        with patch('discord_voice_meetings.settings') as s,patch.object(c,'begin',AsyncMock(side_effect=ValueError('connect_timeout'))) as begin:
+            s.DISCORD_GUILD_ID='123';s.DISCORD_1H_VOICE_CHANNEL_ID='55';s.DISCORD_1H_AUTO_OWNER_DISCORD_ID='77'
+            s.DISCORD_1H_AUTO_JOIN_TIMES='09:58'
+            for second in (0,40,80,120,160):await c.tick(when+timedelta(seconds=second))
+        self.assertEqual([x.kwargs['request_id'] for x in begin.await_args_list],
+            ['auto1h-202610190958','auto1h-202610190958-2','auto1h-202610190958-3'])
+        private.send.assert_awaited_once()
+        self.assertIn('nuk po regjistrohet',private.send.await_args.args[0])
+
+    async def test_a_retry_that_connects_ends_the_attempts_for_the_slot(self):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        bot,c,voice,private,guild=self.auto_fixture()
+        when=datetime(2026,10,19,9,58,tzinfo=ZoneInfo('Europe/Tirane'))
+        with patch('discord_voice_meetings.settings') as s,patch.object(c,'begin',AsyncMock(side_effect=[ValueError('connect_timeout'),None])) as begin:
+            s.DISCORD_GUILD_ID='123';s.DISCORD_1H_VOICE_CHANNEL_ID='55';s.DISCORD_1H_AUTO_OWNER_DISCORD_ID='77'
+            s.DISCORD_1H_AUTO_JOIN_TIMES='09:58'
+            # Everyone already left by 09:59:40 (no active meeting), yet Mira does not rejoin the slot.
+            for second in (0,30,100):await c.tick(when+timedelta(seconds=second))
+        self.assertEqual(begin.await_count,2);private.send.assert_not_awaited()
 
     async def test_meeting_already_running_is_not_replaced_by_the_schedule(self):
         from datetime import datetime

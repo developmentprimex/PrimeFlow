@@ -108,7 +108,7 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
             systems.append(kwargs['json']['input'][0]['content'])
             return {'output':[{'type':'message','content':[{'type':'output_text','text':'Pjesë [0].'}]}]}
         with patch.object(provider,'request',respond):
-            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*12000} for i in range(3)])
+            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*50000} for i in range(3)])
         self.assertGreater(len(systems),1)
         self.assertTrue(all('Detyrat e Takimit:' not in s and 'pyetjet' in s for s in systems[:-1]))
         self.assertIn('Detyrat e Takimit:',systems[-1])
@@ -119,8 +119,60 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
             seen.append(kwargs['json']['input'][1]['content'])
             return {'output':[{'type':'message','content':[{'type':'output_text','text':'Përmbledhje me burime [0,1,2].'}]}]}
         with patch.object(provider,'request',respond):
-            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':('x'*12000 if i<2 else 'LAST_DECISION')} for i in range(3)])
+            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':('x'*50000 if i<2 else 'x'*30000+'LAST_DECISION')} for i in range(3)])
         self.assertGreater(len(seen),1);self.assertTrue(any('LAST_DECISION' in item for item in seen))
+
+    async def test_a_20_minute_meeting_is_written_in_one_pass(self):
+        # About 450 audio chunks of 50 characters: the compacted meeting needs no part summaries.
+        chunks=[{'sequence':i,'speaker_id':str(10+i//20%3),'speaker_name':'Folës '+str(i//20%3),
+            'start_ms':i*2600,'end_ms':i*2600+2500,'transcript':'y'*50} for i in range(450)]
+        with patch.object(provider,'request',AsyncMock(return_value=text_response('**Përmbledhja:** x'))) as call:
+            await provider.summarize_meeting('1H',provider.compact_transcript(chunks))
+        self.assertEqual(call.await_count,1)
+
+    async def test_final_notes_are_asked_to_be_complete_and_grow_with_the_meeting(self):
+        with patch.object(provider,'request',AsyncMock(return_value=text_response('**Përmbledhja:** x'))) as call:
+            await provider.summarize_meeting('1H',[{'segment':0,'speaker':'Ana','time':'00:00–00:05','text':'Po.'}])
+        system=call.call_args.kwargs['json']['input'][0]['content']
+        self.assertIn('Mos lër jashtë',system);self.assertIn('Gjatësia ndjek takimin',system)
+        self.assertNotIn('të shkurtra',system);self.assertNotIn('një fjali për secilën',system)
+
+    async def test_rate_limited_notes_wait_and_retry_with_a_long_timeout(self):
+        seen,client=self.openai((429,{'retry-after':'7'},{'error':{}}),(200,{},text_response('**Përmbledhja:** x')))
+        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
+            result=await provider.summarize_meeting('1H',[{'segment':0,'speaker':'Ana','time':'00:00–00:05','text':'Po.'}])
+        self.assertTrue(result.endswith('**Përmbledhja:** x'));self.assertEqual(len(seen),2)
+        self.assertEqual([c.args[0] for c in sleep.await_args_list],[7.0])
+        self.assertGreaterEqual(provider.SUMMARY_TIMEOUT,180)
+
+    async def test_rejected_notes_request_is_not_retried(self):
+        seen,client=self.openai((400,{},{'error':{}}))
+        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()):
+            with self.assertRaises(provider.ProviderError) as caught:
+                await provider.summarize_meeting('1H',[{'segment':0,'speaker':'Ana','time':'','text':'Po.'}])
+        self.assertEqual(len(seen),1);self.assertFalse(caught.exception.transient)
+
+
+class CompactTranscriptTests(unittest.TestCase):
+    def chunk(self,sequence,speaker,start,end,text):
+        return {'sequence':sequence,'speaker_id':speaker,'speaker_name':'Ana' if speaker=='1' else 'Besa',
+            'start_ms':start,'end_ms':end,'transcript':text}
+
+    def test_one_speakers_chunks_become_a_passage_until_someone_else_speaks(self):
+        result=provider.compact_transcript([self.chunk(0,'1',0,10000,'Oferta'),self.chunk(1,'1',10000,14000,'del sot.'),
+            self.chunk(2,'2',15000,17000,'Mirë.'),self.chunk(3,'1',18000,20000,'Faleminderit.')])
+        self.assertEqual(result,[
+            {'segment':0,'speaker':'Ana','time':'00:00–00:14','text':'Oferta del sot.'},
+            {'segment':2,'speaker':'Besa','time':'00:15–00:17','text':'Mirë.'},
+            {'segment':3,'speaker':'Ana','time':'00:18–00:20','text':'Faleminderit.'}])
+
+    def test_a_long_pause_or_a_long_passage_starts_a_new_one(self):
+        paused=provider.compact_transcript([self.chunk(0,'1',0,1000,'Po.'),self.chunk(1,'1',7000,8000,'Tjetra.')])
+        self.assertEqual([p['segment'] for p in paused],[0,1])
+        long=provider.compact_transcript([self.chunk(i,'1',i*1000,i*1000+1000,'z'*1000) for i in range(4)])
+        self.assertEqual([p['segment'] for p in long],[0,2])
+        self.assertTrue(all(len(p['text'])<provider.PASSAGE_MAX_CHARS for p in long))
+        self.assertEqual(provider.compact_transcript([self.chunk(0,'1',3725000,3726000,'x')])[0]['time'],'62:05–62:06')
 
 
 MEMORY={'items':[{'id':'a1','title':'Oferta Albaniaplast','description':'Arta e përgatit.','kind':'TASK','status':'OPEN',
@@ -143,7 +195,7 @@ class MemoryProviderTests(unittest.IsolatedAsyncioTestCase):
         async def respond(path,**kwargs):
             calls.append(kwargs['json']);return text_response('Pjesë [0].')
         with patch.object(provider,'request',respond):
-            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*12000} for i in range(3)],memory=MEMORY)
+            await provider.summarize_meeting('Staff',[{'sequence':i,'transcript':'x'*50000} for i in range(3)],memory=MEMORY)
         final,parts=calls[-1],calls[:-1]
         self.assertTrue(final['input'][0]['content'].endswith(provider.MEMORY_NOTES_RULES))
         sent=json.loads(final['input'][1]['content'])['kujtesa']

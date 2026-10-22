@@ -12,7 +12,7 @@ class VoiceActor(StrictModel):
 
 class VoiceStart(VoiceActor):
     # A Discord interaction ID, or auto1h-YYYYMMDDHHMM for a scheduled 1H meeting.
-    request_id: str = Field(pattern=r'^(\d{1,32}|auto1h-\d{12})$')
+    request_id: str = Field(pattern=r'^(\d{1,32}|auto1h-\d{12}(-\d)?)$')
     instance_id: uuid.UUID
     capture_token: str = Field(min_length=32, max_length=128)
     title: str = Field(min_length=1, max_length=200)

@@ -19,15 +19,19 @@ log=logging.getLogger('primeflow.discord.voice')
 # or when nobody arrived this long after she joined.
 EMPTY_AFTER_LAST_LEFT=30
 EMPTY_BEFORE_ANYONE_CAME=600
+# A failed voice connection is retried within the slot's join window; one attempt
+# takes at most ~40 s (preflight + ready), so three fit before the window closes.
+AUTO_JOIN_WINDOW=timedelta(minutes=4)
+AUTO_JOIN_ATTEMPTS=3
 
 
 def auto_join_slot(now,times):
-    """The weekday 1H join time whose 2-minute window contains now, else None."""
+    """The weekday 1H join time whose join window contains now, else None."""
     if now.weekday()>=5:return None
     for item in filter(None,(part.strip() for part in (times or '').split(','))):
         hour,minute=map(int,item.split(':'))
         slot=now.replace(hour=hour,minute=minute,second=0,microsecond=0)
-        if slot<=now<slot+timedelta(minutes=2):return slot
+        if slot<=now<slot+AUTO_JOIN_WINDOW:return slot
     return None
 
 
@@ -40,7 +44,8 @@ def identity(interaction):
 class MeetingCaptureCoordinator:
     def __init__(self,bot):
         self.bot=bot;self.active=None;self.lock=asyncio.Lock();self.finalization=None;self.background=set()
-        self.scheduled=set()  # 1H slots already attempted by this process
+        self.scheduled=set()  # 1H slots joined or given up by this process
+        self.attempts={}  # failed join attempts per 1H slot
 
     async def preflight(self):
         process=await asyncio.create_subprocess_exec(settings.DISCORD_VOICE_NODE_BINARY,str(VOICE_DIR/'worker.mjs'),'--check',
@@ -172,21 +177,36 @@ class MeetingCaptureCoordinator:
         owner=settings.DISCORD_1H_AUTO_OWNER_DISCORD_ID
         slot=auto_join_slot(now,settings.DISCORD_1H_AUTO_JOIN_TIMES)
         if not owner or slot is None or slot in self.scheduled or self.active:return
-        self.scheduled.add(slot)
-        try:await self.auto_start(slot,owner)
-        except Exception as exc:log.warning('Mira could not join the 1H slot %s: %s',slot.strftime('%H:%M'),exc)
+        attempt=self.attempts.get(slot,0)+1;self.attempts[slot]=attempt
+        try:
+            await self.auto_start(slot,owner,attempt)
+            self.scheduled.add(slot)
+        except Exception as exc:
+            log.warning('MIRA_DIAGNOSTIC Mira could not join the 1H slot %s attempt=%s: %s',slot.strftime('%H:%M'),attempt,exc)
+            if attempt>=AUTO_JOIN_ATTEMPTS:
+                self.scheduled.add(slot)
+                # The organizer hears about a 1H that is not being recorded.
+                with suppress(Exception):
+                    await self.organizer_channel(owner)[1].send(f'Mira nuk arriti të hyjë në 1H ({slot.strftime("%H:%M")}) pas '
+                        f'{attempt} përpjekjesh. Ky takim nuk po regjistrohet.',allowed_mentions=discord.AllowedMentions.none())
 
-    async def auto_start(self,slot,owner):
+    def organizer_channel(self,owner):
         guild=self.bot.get_guild(int(settings.DISCORD_GUILD_ID))
         if not guild:raise ValueError('guild_unavailable')
+        private=next((c for c in guild.text_channels if c.topic==f'PrimeFlow personal workspace: {owner}'),None)
+        if private is None:raise ValueError('organizer_private_channel_missing')
+        return guild,private
+
+    async def auto_start(self,slot,owner,attempt=1):
+        guild,private=self.organizer_channel(owner)
         voice=guild.get_channel(int(settings.DISCORD_1H_VOICE_CHANNEL_ID or 0))
         if not isinstance(voice,discord.VoiceChannel):
             voice=next((c for c in guild.voice_channels if c.name.upper().startswith('1H')),None)
         if voice is None:raise ValueError('1h_voice_channel_missing')
-        private=next((c for c in guild.text_channels if c.topic==f'PrimeFlow personal workspace: {owner}'),None)
-        if private is None:raise ValueError('organizer_private_channel_missing')
         actor=dict(discord_user_id=str(owner),guild_id=str(guild.id),channel_id=str(private.id),voice_channel_id=str(voice.id))
-        await self.begin(actor=actor,guild=guild,voice=voice,request_id=f"auto1h-{slot.strftime('%Y%m%d%H%M')}",
+        # Each attempt needs its own request id: the API replays a known id instead of starting again.
+        request_id=f"auto1h-{slot.strftime('%Y%m%d%H%M')}"+(f'-{attempt}' if attempt>1 else '')
+        await self.begin(actor=actor,guild=guild,voice=voice,request_id=request_id,
             title=None,department_id=None,notify=private.send)
 
     async def check_presence(self,now):
