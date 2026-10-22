@@ -5,7 +5,7 @@ import { flushSync } from "react-dom"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Bold, Calendar as CalendarIcon, Check, Clock, Cloud, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
+import { Bold, Calendar as CalendarIcon, Check, ChevronDown, ChevronUp, Clock, Cloud, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -682,6 +682,12 @@ function renderMarkedNoteContent(content?: string | null, showStrikeTimestamps =
   return renderNoteContentWithRanges(parsed.text, parsed.doneRanges, parsed.addedRanges, showStrikeTimestamps)
 }
 
+// Mira notes start with their date and title, then a blank line before the notes.
+function miraNoteTitle(content?: string | null) {
+  const text = content ? parseMarkedNoteContentWithProgress(content).text.trim() : ""
+  return text.split(/\n\s*\n/)[0].trim() || "Shënim nga Mira"
+}
+
 type MarkedSegment = {
   text: string
   isDone: boolean
@@ -1329,6 +1335,14 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
+  const [expandedMiraNoteIds, setExpandedMiraNoteIds] = React.useState<Set<string>>(() => new Set())
+  const toggleMiraNote = React.useCallback((noteId: string) => {
+    setExpandedMiraNoteIds((current) => {
+      const next = new Set(current)
+      if (!next.delete(noteId)) next.add(noteId)
+      return next
+    })
+  }, [])
   const contentTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
 
@@ -4718,6 +4732,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     // 1. Note has a project (always show projects)
                     // 2. We're currently filtering by department/project (on a specific page)
                     // 3. Note's department_id is different from user's department (explicitly set, not auto-assigned)
+                    const miraCollapsed = Boolean(note.from_mira) && !expandedMiraNoteIds.has(note.id)
                     const isFilteredView = departmentId !== "ALL" || projectId !== "NONE"
                     const isExplicitDepartment = note.department_id && note.department_id !== user?.department_id
                     const shouldShowDepartment = displayDepartment && (displayProject || isFilteredView || isExplicitDepartment)
@@ -4733,12 +4748,27 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0 flex flex-wrap items-center gap-1">
                                 {note.from_mira ? (
-                                  <img
-                                    src="/mira-avatar.png"
-                                    alt="Mira"
-                                    title="Shënim nga Mira (takim në Discord)"
-                                    className="h-10 w-10 shrink-0 rounded-full border-2 border-violet-300"
-                                  />
+                                  <button
+                                    type="button"
+                                    className="flex min-w-0 items-center gap-2 rounded-md text-left hover:bg-violet-200/60"
+                                    aria-expanded={!miraCollapsed}
+                                    title={miraCollapsed ? "Hap shënimin e Mira-s" : "Mbyll shënimin e Mira-s"}
+                                    onClick={() => toggleMiraNote(note.id)}
+                                  >
+                                    <img
+                                      src="/mira-avatar.png"
+                                      alt="Mira"
+                                      className="h-10 w-10 shrink-0 rounded-full border-2 border-violet-300"
+                                    />
+                                    {miraCollapsed ? (
+                                      <span className="min-w-0 text-sm font-semibold break-words">{miraNoteTitle(note.content)}</span>
+                                    ) : null}
+                                    {miraCollapsed ? (
+                                      <ChevronDown className="h-4 w-4 shrink-0 text-violet-700" />
+                                    ) : (
+                                      <ChevronUp className="h-4 w-4 shrink-0 text-violet-700" />
+                                    )}
+                                  </button>
                                 ) : null}
                                 {showMobileDeptBadge || assignees.length > 0 ? (
                                   <span className="sm:hidden inline-flex items-center gap-1 mr-1">
@@ -4786,10 +4816,12 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                     {noteKnowledgeText(note, "Prompt")}
                                   </Link>
                                 ) : null}
-                                <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
-                                  {note.one_h_marker ? <TaskMarkerComment comment={note.one_h_marker_comment} /> : null}
-                                  {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
-                                </span>
+                                {miraCollapsed ? null : (
+                                  <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
+                                    {note.one_h_marker ? <TaskMarkerComment comment={note.one_h_marker_comment} /> : null}
+                                    {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
                                 {!editDisabled ? (
