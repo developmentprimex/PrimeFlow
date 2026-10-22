@@ -111,7 +111,7 @@ def _note_out(
         is_discussed=note.is_discussed,
         one_h_marker=active_one_h_marker(note),
         one_h_marker_by_ga=bool(active_one_h_marker(note) and note.one_h_marker_by_ga),
-        one_h_marker_comment=note.one_h_marker_comment if active_one_h_marker(note) else None,
+        one_h_marker_comment=note.one_h_marker_comment,
         next_week=note.next_week,
         project_id=note.project_id,
         department_id=note.department_id,

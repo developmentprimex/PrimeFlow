@@ -27,7 +27,7 @@ def marker_comment_source_key(task: Task) -> str:
 async def record_initial_marker_comments(db: AsyncSession, tasks: list[Task], *, actor_email: str | None) -> None:
     seen: set[str] = set()
     for task in tasks:
-        if not task.one_h_marker:
+        if not task.one_h_marker and not task.one_h_marker_comment:
             continue
         key = marker_comment_source_key(task)
         if key in seen:
@@ -76,28 +76,28 @@ async def record_marker_change(
     )).scalars()}
     now = datetime.now(timezone.utc)
     revision = uuid.uuid4()
-    comment = (comment or "").strip() if marker else ""
-    # A symbol without a comment is still an inbox item. Only removing the
-    # symbol (or a recipient) removes its acknowledgement requirement.
+    comment = (comment or "").strip()
+    has_content = bool(marker or comment)
+    # A symbol or a standalone comment requires acknowledgement.
     await db.execute(delete(TaskMarkerCommentInbox).where(
         TaskMarkerCommentInbox.source_key == source_key,
-        *([TaskMarkerCommentInbox.user_id.not_in(active_ids)] if marker else []),
+        *([TaskMarkerCommentInbox.user_id.not_in(active_ids)] if has_content else []),
     ))
     actor_name = (actor.full_name or actor.username or actor.email) if actor else "Përdorues"
     for user_id, task in recipients.items():
         if user_id not in active_ids:
             continue
         previous = existing.get(user_id)
-        if marker and previous and (previous.marker, previous.comment) == (marker, comment):
+        if has_content and previous and (previous.marker, previous.comment) == (marker or "", comment):
             previous.task_id = task.id
             previous.task_ids = [str(value) for value in task_ids]
             continue
         inbox_id = uuid.uuid4()
-        if marker:
+        if has_content:
             stmt = insert(TaskMarkerCommentInbox).values(
                 id=inbox_id, source_key=source_key, user_id=user_id, task_id=task.id,
                 task_ids=[str(value) for value in task_ids], author_id=actor.id if actor else None,
-                revision=revision, marker=marker, comment=comment, updated_at=now,
+                revision=revision, marker=marker or "", comment=comment, updated_at=now,
                 # Writing a comment never acknowledges it, even for its author.
                 read_at=None,
             )
@@ -112,12 +112,12 @@ async def record_marker_change(
         symbol = one_h_marker_label(marker)
         notification = add_notification(
             db=db, user_id=user_id, type=NotificationType.status_change,
-            title=f"{actor_name}: {'koment te simboli ' + symbol if comment else 'simboli ' + (symbol or 'u hoq')}",
+            title=f"{actor_name}: {('koment te simboli ' + symbol if symbol else 'koment te detyra') if comment else 'simboli ' + (symbol or 'u hoq')}",
             body=f"{task.title.splitlines()[0]}\n{comment}" if comment else task.title.splitlines()[0],
             data={
                 "kind": "task_marker_comment" if comment else "task_marker",
-                "task_id": str(task.id), "comment_id": str(inbox_id) if marker else None,
-                "open_url": f"/comments?comment={inbox_id}" if marker else f"/tasks/{task.id}",
+                "task_id": str(task.id), "comment_id": str(inbox_id) if has_content else None,
+                "open_url": f"/comments?comment={inbox_id}" if has_content else f"/tasks/{task.id}",
             },
         )
         db.info.setdefault("pending_marker_notifications", []).append(notification)

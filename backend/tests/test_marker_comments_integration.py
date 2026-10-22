@@ -240,6 +240,19 @@ async def _exercise_inbox():
                         await read_marker_comment(uuid.UUID(symbol_only["id"]), ReadComment(revision=uuid.UUID(symbol_only["revision"])), db, first)
                     assert stale_symbol.value.status_code == 409
 
+                    # A comment alone is persistent, readable, and shared without
+                    # requiring a symbol or inventing one in the task fields.
+                    await sync_task_marker(db, tasks[0], None, marker_comment="Standalone comment", actor_email=actor.email)
+                    standalone = (await list_marker_comments(db, first))["items"][0]
+                    assert standalone["marker"] == "" and standalone["symbol"] == ""
+                    assert standalone["comment"] == "Standalone comment"
+                    await db.refresh(tasks[0])
+                    assert tasks[0].one_h_marker is None
+                    assert tasks[0].one_h_marker_comment == "Standalone comment"
+                    assert (await list_marker_comments(db, second))["items"][0]["comment"] == "Standalone comment"
+                    await read_marker_comment(uuid.UUID(standalone["id"]), ReadComment(revision=uuid.UUID(standalone["revision"])), db, first)
+                    assert (await list_marker_comments(db, first))["items"][0]["read_at"] is not None
+
                     await sync_task_marker(db, tasks[0], None, marker_comment=None, actor_email=actor.email)
                     assert not (await list_marker_comments(db, first))["items"]
                     assert not (await list_marker_comments(db, second))["items"]

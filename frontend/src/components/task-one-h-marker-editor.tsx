@@ -38,7 +38,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   const [byGa, setByGa] = React.useState(Boolean(markerByGa))
   const [comment, setComment] = React.useState(markerComment || "")
   const [draftComment, setDraftComment] = React.useState(markerComment || "")
-  const [pendingMarker, setPendingMarker] = React.useState<TaskMarker | null>(null)
+  const [pendingMarker, setPendingMarker] = React.useState<TaskMarker | typeof NONE | null>(null)
   const [commentOpen, setCommentOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const inboxItem = taskId ? comments?.byTask.get(taskId) : undefined
@@ -64,7 +64,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   React.useEffect(() => {
     if (!inboxItem || saving || commentOpen || appliedInboxRevision.current === inboxItem.revision) return
     appliedInboxRevision.current = inboxItem.revision
-    setValue(inboxItem.marker as TaskMarker)
+    setValue((inboxItem.marker || NONE) as TaskMarker | typeof NONE)
     setByGa(Boolean(inboxItem.marker_by_ga))
     setComment(inboxItem.comment)
     setDraftComment(inboxItem.comment)
@@ -97,12 +97,12 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
     const previous = { value, byGa, comment }
     setValue(next)
     setByGa(Boolean(next !== NONE && user?.email?.trim().toLowerCase() === "ga@primexeu.com"))
-    setComment(next === NONE ? "" : nextComment)
+    setComment(nextComment)
     setSaving(true)
     try {
       const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ one_h_marker: next === NONE ? null : next, one_h_marker_comment: next === NONE ? null : nextComment.trim() || null }),
+        body: JSON.stringify({ one_h_marker: next === NONE ? null : next, one_h_marker_comment: nextComment.trim() || null }),
       })
       if (!response?.ok) throw new Error("Could not update task symbol")
       const updated = await response.json() as { one_h_marker_by_ga?: boolean; one_h_marker_comment?: string | null }
@@ -118,7 +118,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   }
 
   const chooseMarker = (nextValue: string) => {
-    if (nextValue === NONE) { void updateMarker(NONE); return }
+    if (nextValue === NONE) { void updateMarker(NONE, comment); return }
     const next = nextValue as TaskMarker
     setPendingMarker(next); setDraftComment(next === value ? comment : ""); setCommentOpen(true)
   }
@@ -138,17 +138,18 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
           {OPTIONS.map((option) => <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{byGa && value === option.value ? `(${option.label})` : option.label}</SelectItem>)}
         </SelectContent>
       </Select>
-      {value !== NONE ? (
+      {taskId ? (
         <button
           type="button"
+          disabled={saving}
           className={cn(
             "absolute z-10 flex items-center justify-center rounded-full p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700",
             hasComment
               ? "-right-2 -top-2 h-6 w-6 border-2 border-blue-950 bg-[#0055FF] text-white shadow-md ring-2 ring-white hover:bg-blue-700"
               : "-right-1 -top-1 h-4 w-4 border border-blue-300 bg-white text-blue-400 shadow-sm hover:bg-blue-50"
           )}
-          title={hasComment ? comment : "Add symbol comment"}
-          aria-label={hasComment ? "View symbol comment" : "Add symbol comment"}
+          title={hasComment ? comment : "Add task comment"}
+          aria-label={hasComment ? "View task comment" : "Add task comment"}
           onClick={() => { setPendingMarker(value); setDraftComment(comment); setCommentOpen(true); if (taskId && hasComment) comments?.markTaskRead(taskId, comment) }}
         >
           <MessageCircle className={hasComment ? "h-4 w-4" : "h-3 w-3"} strokeWidth={hasComment ? 3 : 2.5} aria-hidden="true" />
@@ -156,7 +157,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
       ) : null}
       <Dialog open={commentOpen} onOpenChange={setCommentOpen}>
         <DialogContent onClick={(event) => event.stopPropagation()}>
-          <DialogHeader><DialogTitle>Symbol comment</DialogTitle><DialogDescription>Add an optional comment. It appears above the task title wherever the task is shown.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Task comment</DialogTitle><DialogDescription>Add a comment with or without a symbol. It appears above the task title wherever the task is shown.</DialogDescription></DialogHeader>
           <Textarea value={draftComment} onChange={(event) => setDraftComment(event.target.value)} maxLength={1000} placeholder="Write an optional comment..." rows={5} />
           <DialogFooter>
             {comment ? <Button type="button" variant="outline" onClick={() => void navigator.clipboard.writeText(comment)}>Copy current</Button> : null}

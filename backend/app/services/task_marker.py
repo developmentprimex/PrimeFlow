@@ -52,8 +52,6 @@ def marker_is_by_ga(actor_email: str | None) -> bool:
 
 
 def normalize_marker_comment(marker: str | None, comment: str | None) -> str | None:
-    if not marker:
-        return None
     normalized = (comment or "").strip()
     return normalized or None
 
@@ -68,7 +66,7 @@ def historical_marker_for_day(rows, target_date: date) -> tuple[str | None, bool
     return (
         marker,
         bool(marker and latest.one_h_marker_by_ga),
-        latest.one_h_marker_comment if marker else None,
+        latest.one_h_marker_comment,
     )
 
 

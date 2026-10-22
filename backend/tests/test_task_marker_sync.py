@@ -6,7 +6,17 @@ import pytest
 
 from app.schemas.ga_note import GaNoteTaskAssigneeStateUpdate, GaNoteTaskBundleUpdate
 from app.models.enums import TaskStatus
-from app.services.task_marker import historical_marker_for_day, note_bundle_marker_update, one_h_marker_label
+from app.services.task_marker import historical_marker_for_day, normalize_marker_comment, note_bundle_marker_update, one_h_marker_label
+
+
+def test_comment_can_be_saved_without_a_symbol():
+    assert normalize_marker_comment(None, "  Check this task  ") == "Check this task"
+    assert normalize_marker_comment(None, " \n ") is None
+    payload = GaNoteTaskBundleUpdate(one_h_marker=None, one_h_marker_comment="Check this task")
+    assert note_bundle_marker_update(SimpleNamespace(one_h_marker=None, one_h_marker_comment=None), payload, []) == (True, None)
+    row = SimpleNamespace(marker_date=date(2026, 10, 22), one_h_marker=None,
+        one_h_marker_by_ga=False, one_h_marker_comment="Check this task")
+    assert historical_marker_for_day([row], date(2026, 10, 23)) == (None, False, "Check this task")
 
 
 def _task(assignee_id, marker):

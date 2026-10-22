@@ -42,7 +42,9 @@ function load(relativePath, mockContextHook = false) {
       delete props.asChild
       return React.createElement("button", props, children)
     } }
-    if (name === "@/components/ui/dialog") return Object.fromEntries(["Dialog", "DialogContent", "DialogDescription", "DialogHeader", "DialogTitle"].map(name => [name, component()]))
+    if (name === "@/components/ui/dialog") return Object.fromEntries(["Dialog", "DialogContent", "DialogDescription", "DialogFooter", "DialogHeader", "DialogTitle"].map(name => [name, component()]))
+    if (name === "@/components/ui/select") return Object.fromEntries(["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"].map(name => [name, component()]))
+    if (name === "@/components/ui/textarea") return { Textarea: component("textarea") }
     return require(name)
   }
   const { outputText } = ts.transpileModule(source, { compilerOptions: {
@@ -54,6 +56,7 @@ function load(relativePath, mockContextHook = false) {
 }
 
 const { TaskMarkerComment } = load("../src/components/task-marker-comment.tsx", true)
+const { TaskOneHMarkerEditor } = load("../src/components/task-one-h-marker-editor.tsx", true)
 const { MarkerCommentsPanel } = load("../src/components/marker-comments-context.tsx")
 const { default: CommentsPage } = load("../src/app/(app)/comments/page.tsx")
 const { TeamMarkerCommentsButton } = load("../src/components/team-marker-comments-button.tsx")
@@ -64,6 +67,17 @@ function setContext(values = [item]) {
     loading: false, error: null, open: noop, openTask: noop, refresh: noop, markRead: noop,
   }
 }
+
+test("tasks without symbols still expose a comment editor", () => {
+  setContext([])
+  const html = renderToStaticMarkup(React.createElement(TaskOneHMarkerEditor, { taskId: "task", marker: null }))
+  assert.match(html, /aria-label="Add task comment"/)
+  const withComment = renderToStaticMarkup(React.createElement(TaskOneHMarkerEditor, {
+    taskId: "task", marker: null, markerComment: "Standalone comment",
+  }))
+  assert.match(withComment, /aria-label="View task comment"/)
+  assert.match(withComment, /title="Standalone comment"/)
+})
 
 test("a shared task copy shows NEW only for its matching unread comment", () => {
   setContext()

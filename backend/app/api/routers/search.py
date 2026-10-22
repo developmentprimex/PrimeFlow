@@ -55,7 +55,7 @@ async def search(
                 department_id=t.department_id,
                 one_h_marker=active_one_h_marker(t),
                 one_h_marker_by_ga=bool(active_one_h_marker(t) and t.one_h_marker_by_ga),
-                one_h_marker_comment=t.one_h_marker_comment if active_one_h_marker(t) else None,
+                one_h_marker_comment=t.one_h_marker_comment,
             )
             for t in tasks
         ],

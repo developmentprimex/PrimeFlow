@@ -44,7 +44,7 @@ def task_membership(user_id):
 def visible_comments(user_id):
     return select(Inbox).join(Task, Task.id == Inbox.task_id).where(
         Inbox.user_id == user_id, marker_alert_task(Task),
-        task_membership(user_id), Inbox.marker == Task.one_h_marker,
+        task_membership(user_id), Inbox.marker == func.coalesce(Task.one_h_marker, ""),
         Inbox.comment == func.btrim(func.coalesce(Task.one_h_marker_comment, "")),
     )
 
@@ -90,7 +90,7 @@ async def list_marker_comments(
     # Team browsing shows acknowledgement by current responsible recipients.
     mine = and_(Inbox.user_id == user.id, task_membership(user.id))
     stmt = visible_comments(user.id) if scope == "mine" else select(Inbox).join(Task, Task.id == Inbox.task_id).where(
-        marker_alert_task(Task), Inbox.marker == Task.one_h_marker,
+        marker_alert_task(Task), Inbox.marker == func.coalesce(Task.one_h_marker, ""),
         Inbox.comment == func.btrim(func.coalesce(Task.one_h_marker_comment, "")),
     )
     stmt = stmt.add_columns(Task.title, User.full_name, Task.one_h_marker_by_ga, mine.label("is_mine"))

@@ -996,7 +996,7 @@ def _task_to_out(
         one_h_report_slot=task.one_h_report_slot,
         one_h_marker=active_one_h_marker(task),
         one_h_marker_by_ga=bool(active_one_h_marker(task) and task.one_h_marker_by_ga),
-        one_h_marker_comment=task.one_h_marker_comment if active_one_h_marker(task) else None,
+        one_h_marker_comment=task.one_h_marker_comment,
         is_r1=task.is_r1,
         is_personal=task.is_personal,
         fast_task_order=task.fast_task_order,

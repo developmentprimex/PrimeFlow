@@ -589,10 +589,10 @@ export function PrintReportPage({
       const panel = hostDocument.createElement("div")
       panel.style.cssText = "box-sizing:border-box;width:min(460px,calc(100vw - 40px));max-height:calc(100vh - 40px);overflow:auto;border:1px solid #94A3B8;border-radius:14px;background:#FFF;padding:20px;box-shadow:0 18px 50px rgba(15,23,42,.28);color:#0F172A"
       const title = hostDocument.createElement("div")
-      title.textContent = "Symbol comment"
+      title.textContent = "Task comment"
       title.style.cssText = "margin-bottom:5px;font-size:18px;font-weight:800"
       const description = hostDocument.createElement("div")
-      description.textContent = "Add an optional comment for this symbol."
+      description.textContent = "Add a comment, with or without a symbol."
       description.style.cssText = "margin-bottom:14px;color:#64748B;font-size:13px"
       const textarea = hostDocument.createElement("textarea")
       textarea.value = initialValue
@@ -770,9 +770,9 @@ export function PrintReportPage({
         "cursor:pointer",
         "box-shadow:0 1px 2px rgba(15,23,42,.16)",
       ].join(";")
-      const updateCommentButton = (marker: string, comment: string) => {
+      const updateCommentButton = (comment: string) => {
         const hasComment = Boolean(comment.trim())
-        commentButton.style.display = marker ? "flex" : "none"
+        commentButton.style.display = "flex"
         commentButton.style.right = hasComment ? "-8px" : "-4px"
         commentButton.style.top = hasComment ? "-8px" : "-5px"
         commentButton.style.width = hasComment ? "24px" : "16px"
@@ -785,10 +785,10 @@ export function PrintReportPage({
         commentIcon.setAttribute("width", hasComment ? "16" : "12")
         commentIcon.setAttribute("height", hasComment ? "16" : "12")
         commentIcon.setAttribute("stroke-width", hasComment ? "3" : "2.5")
-        commentButton.title = hasComment ? comment : "Add symbol comment"
-        commentButton.setAttribute("aria-label", hasComment ? "View symbol comment" : "Add symbol comment")
+        commentButton.title = hasComment ? comment : "Add task comment"
+        commentButton.setAttribute("aria-label", hasComment ? "View task comment" : "Add task comment")
       }
-      updateCommentButton(select.value, cell.dataset.taskMarkerComment || "")
+      updateCommentButton(cell.dataset.taskMarkerComment || "")
 
       select.addEventListener("change", async () => {
         if (select.disabled) return
@@ -799,7 +799,7 @@ export function PrintReportPage({
         try {
           const nextComment = nextValue
             ? await openMarkerCommentModal(nextValue === previousValue ? previousComment : "")
-            : ""
+            : previousComment
           if (nextValue && nextComment === null) {
             select.value = previousValue
             resizeMarkerSelect(previousValue, cell.dataset.taskMarkerByGa === "true")
@@ -808,7 +808,7 @@ export function PrintReportPage({
           const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ one_h_marker: nextValue || null, one_h_marker_comment: nextValue ? nextComment?.trim() || null : null }),
+            body: JSON.stringify({ one_h_marker: nextValue || null, one_h_marker_comment: nextComment?.trim() || null }),
           })
           if (!response?.ok) {
             const detail = await response?.json().catch(() => null)
@@ -820,7 +820,7 @@ export function PrintReportPage({
           cell.dataset.taskMarkerComment = updated.one_h_marker_comment || ""
           select.title = updated.one_h_marker_comment || "Task marker"
           resizeMarkerSelect(nextValue, Boolean(updated.one_h_marker_by_ga))
-          updateCommentButton(nextValue, updated.one_h_marker_comment || "")
+          updateCommentButton(updated.one_h_marker_comment || "")
           updateCommentBlock(updated.one_h_marker_comment || "")
           window.dispatchEvent(new Event("primeflow:task-marker-updated"))
           taskMarkerOptions.forEach((option, index) => {
@@ -846,7 +846,7 @@ export function PrintReportPage({
         event.preventDefault()
         event.stopPropagation()
         const marker = cell.dataset.taskMarker || ""
-        if (!marker || select.disabled) return
+        if (select.disabled) return
         const value = cell.dataset.taskMarkerComment || ""
         markerCommentsRef.current?.markTaskRead(taskId, value)
         const nextComment = await openMarkerCommentModal(value)
@@ -857,14 +857,14 @@ export function PrintReportPage({
           const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ one_h_marker: marker, one_h_marker_comment: nextComment.trim() || null }),
+            body: JSON.stringify({ one_h_marker: marker || null, one_h_marker_comment: nextComment.trim() || null }),
           })
           if (!response?.ok) throw new Error("Could not update symbol comment")
           const updated = await response.json() as { one_h_marker_comment?: string | null }
           const savedComment = updated.one_h_marker_comment || ""
           cell.dataset.taskMarkerComment = savedComment
           select.title = savedComment || "Task marker"
-          updateCommentButton(marker, savedComment)
+          updateCommentButton(savedComment)
           updateCommentBlock(savedComment)
           window.dispatchEvent(new Event("primeflow:task-marker-updated"))
           toast.success("Symbol comment updated")
