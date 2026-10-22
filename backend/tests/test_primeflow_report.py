@@ -32,12 +32,54 @@ from app.services.primeflow_report_delivery import (
     _undiscussed_px_notes_statement,
     _optional_attachment,
     load_1h_reminder_questions,
+    load_undiscussed_notes,
     strike_interval_end,
     strike_interval_start,
 )
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_undiscussed_mira_notes_show_only_px_notes_title_in_reports(self) -> None:
+        title = "1H 820/10/11/1150/1420/16 · 22.10.2026 14:18"
+        summary = title + "\r\n\r\n**Përmbledhja:**\r\nFull Mira summary must stay in PX Notes."
+        ordinary = "Regular PX note\n\nKeep all its details."
+        created = datetime(2026, 10, 22, 12, 18, tzinfo=timezone.utc)
+        mira = SimpleNamespace(content=summary, from_mira=True, created_at=created)
+        rows = [
+            (mira, "Elsa", None, None),
+            (SimpleNamespace(content=ordinary, from_mira=False, created_at=created), None, "tester", None),
+            (SimpleNamespace(content=" ", from_mira=False, created_at=created), None, None, None),
+        ]
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def execute(self, _statement):
+                return SimpleNamespace(all=lambda: rows)
+
+        with patch("app.services.primeflow_report_delivery.SessionLocal", return_value=FakeSession()):
+            notes = asyncio.run(load_undiscussed_notes())
+            full_notes = asyncio.run(load_undiscussed_notes(show_full_mira_notes=True))
+        self.assertEqual([note.content for note in notes], [title, ordinary])
+        self.assertEqual([note.author for note in notes], ["Elsa", "tester"])
+        self.assertEqual(mira.content, summary)
+        self.assertEqual(full_notes[0].content, clean_description(summary))
+        self.assertEqual(full_notes[1].content, ordinary)
+        document = build_report_document({"items": {}}, date(2026, 10, 22), "10:00", undiscussed_notes=notes)
+        outputs = [render_html(document), render_plain_text(document),
+            zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode("utf-8")]
+        for output in outputs:
+            self.assertIn(title, output)
+            self.assertIn("Keep all its details.", output)
+            self.assertNotIn("Full Mira summary", output)
+        full_document = build_report_document({"items": {}}, date(2026, 10, 22), "10:00", undiscussed_notes=full_notes)
+        self.assertIn("Full Mira summary", render_html(full_document))
+        self.assertIn("Full Mira summary", render_plain_text(full_document))
+
     def test_extra_questions_share_title_in_html_word_and_text(self) -> None:
         from docx import Document
 
