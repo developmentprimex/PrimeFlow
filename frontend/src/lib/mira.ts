@@ -146,6 +146,7 @@ export function eventText(event: MeetingEvent): string {
     case "GA_CALL": return `${event.initials ?? ""} u thirr në 1H (2 min para)`
     case "GA_FALLBACK": return `Zëvendësim i mundshëm: ${event.initials ?? ""} (thirret vetëm nëse mungon kolegia)`
     case "NOTE": return `Shënim: ${String(data.text ?? "")}`
+    case "PX_NOTE": return `Shënim i ri në PX Notes: ${String(data.text ?? "")}${data.symbol ? ` · simboli ${data.symbol}` : ""}`
     default: return event.kind
   }
 }

@@ -35,7 +35,8 @@ def tz():
 
 def task_lines(tasks: list[dict]) -> str:
     def line(t):
-        parts = [t.get("spoken") or t["title"], t["status"], t["period"]]
+        # The Albanian label, so Mira never says "IN_PROGRESS" aloud.
+        parts = [t.get("spoken") or t["title"], t.get("status_label") or t["status"], t["period"]]
         if t.get("symbol"):
             parts.append("simboli " + t["symbol"])
         if t.get("deadline"):

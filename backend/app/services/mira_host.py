@@ -233,6 +233,7 @@ def task_line(item: dict) -> dict:
         "title": title,
         "spoken": spoken_title(title, _assignees(item) + owner_initials(title).split("/")),
         "status": str(item.get("status") or "TODO").upper(),
+        "status_label": STATUS_LABELS.get(str(item.get("status") or "TODO").upper(), str(item.get("status") or "TODO")),
         "period": _task_period_label(item),
         "symbol": _task_marker_label(item) or None,
         "symbol_comment": (item.get("one_h_marker_comment") or None),
@@ -498,7 +499,8 @@ async def next_turn(db: AsyncSession, meeting: Mira1HMeeting, summary: str | Non
     result = {"ended": view.get(str(ended.id)) if ended else None, "current": None, "upcoming": None}
     if current:
         brief = person_brief(data, meeting.slot, str(current.user_id))
-        brief["new_progress"] = await new_progress(db, meeting, data, [str(current.user_id)])
+        brief["new_progress"] = await new_progress(db, meeting, data, [str(current.user_id)],
+                                                   since=await progress_since(db, meeting))
         result["current"] = {**view[str(current.id)], "brief": brief}
     if len(waiting) > 1:
         result["upcoming"] = view[str(waiting[1].id)]
@@ -548,11 +550,13 @@ async def summarize(meeting_id: uuid.UUID) -> None:
         title = f"1H {meeting.slot} · {meeting.meeting_date:%d.%m.%Y}"
         events = await meeting_events(db, meeting)
         created = [e["data"].get("title") for e in events if e["kind"] == "TASK_CREATED"]
-        if turns or created:
+        px_notes = [e["data"].get("text") for e in events if e["kind"] == "PX_NOTE"]
+        if turns or created or px_notes:
             segments.append({"segment": len(segments), "speaker": "PrimeFlow", "time": "",
                 "text": "Radha e stafit: " + "; ".join(f"{t['initials']} {t['started_at'] and t['started_at'][11:16] or '-'}–"
                                                          f"{t['ended_at'] and t['ended_at'][11:16] or '-'}" for t in turns)
-                        + (". Detyra të krijuara: " + "; ".join(filter(None, created)) if created else "")})
+                        + (". Detyra të krijuara: " + "; ".join(filter(None, created)) if created else "")
+                        + (". Shënime në PX Notes: " + "; ".join(filter(None, px_notes)) if px_notes else "")})
         try:
             meeting.summary = await provider.summarize_meeting(title, segments, meeting_date=meeting.meeting_date)
             meeting.summary_status = "READY"
@@ -637,10 +641,46 @@ async def remember(db: AsyncSession, meeting: Mira1HMeeting, task_id: str, kind:
         .on_conflict_do_nothing(constraint="uq_mira_1h_mention"))
 
 
+def report_window_start(day: date, slot: str) -> datetime:
+    """Start of the 1H report's interval for a slot (11:00 covers 10:00-11:00), the same blue-strike window."""
+    from app.services.primeflow_report_delivery import strike_interval_start
+    return strike_interval_start(day, slot)
+
+
+async def progress_since(db: AsyncSession, meeting: Mira1HMeeting) -> datetime:
+    """Where "new" Done/Strike begins for this 1H: the 1H report's window for the slot.
+
+    Mira reads progress a few minutes before the slot, so work finished between that reading and the
+    previous slot's hour would fall between two windows; when Mira held the previous 1H, the window
+    starts at her reading instead. Anything already read stays out through the mentions.
+    """
+    start = report_window_start(meeting.meeting_date, meeting.slot)
+    previous = previous_slot(meeting.slot)
+    if not previous:
+        return start
+    read_at = (await db.execute(select(func.max(Mira1HEvent.sent_at)).where(
+        Mira1HEvent.meeting_date == meeting.meeting_date, Mira1HEvent.kind == "PROGRESS_READ",
+        Mira1HEvent.meeting_id != meeting.id,
+        Mira1HEvent.sent_at >= report_window_start(meeting.meeting_date, previous)))).scalar_one_or_none()
+    return min(start, read_at) if read_at else start
+
+
+def completed_after(item: dict, since: datetime) -> bool:
+    raw = item.get("completed_at")
+    if not raw:
+        return True  # an old DONE row without a time; the mentions still keep it from repeating
+    try:
+        completed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (completed if completed.tzinfo else completed.replace(tzinfo=since.tzinfo)) > since
+
+
 async def new_progress(db: AsyncSession, meeting: Mira1HMeeting, data: SlotData, user_ids: list[str] | None = None,
-                       *, record: bool = False) -> dict:
-    """Done tasks and struck points (any 1H slot) not reported in an earlier 1H today."""
+                       *, since: datetime | None = None, record: bool = False) -> dict:
+    """Done tasks and struck points (any 1H slot) done after `since` and not read in an earlier 1H today."""
     from app.services.task_strike_events import split_strike_timestamp
+    since = since or datetime.combine(meeting.meeting_date, time.min, ZoneInfo(settings.APP_TIMEZONE))
     items = {}
     for slot, values in data.slots.items():
         for item in values:
@@ -651,17 +691,18 @@ async def new_progress(db: AsyncSession, meeting: Mira1HMeeting, data: SlotData,
     seen = await mentioned(db, meeting)
     done = []
     for task_id, (slot, item) in items.items():
-        if str(item.get("status") or "").upper() == "DONE" and (task_id, "DONE", "") not in seen:
+        if str(item.get("status") or "").upper() == "DONE" and (task_id, "DONE", "") not in seen \
+                and completed_after(item, since):
             done.append({**task_line(item), "slot": slot})
-    day_start = datetime.combine(meeting.meeting_date, time.min, ZoneInfo(settings.APP_TIMEZONE))
     events = (await db.execute(select(TaskStrikeEvent).where(
         TaskStrikeEvent.task_id.in_([uuid.UUID(t) for t in items if t]),
-        TaskStrikeEvent.occurred_at >= day_start).order_by(TaskStrikeEvent.occurred_at))).scalars().all()
+        TaskStrikeEvent.occurred_at > since).order_by(TaskStrikeEvent.occurred_at))).scalars().all()
     latest = {}
     for event in events:
-        latest[(str(event.task_id), event.point_key)] = event
+        # The last change of a point decides: struck and later reopened is not progress.
+        latest[(str(event.task_id), getattr(event, "field_name", "DESCRIPTION"), event.point_key)] = event
     strikes: dict[str, dict] = {}
-    for (task_id, key), event in latest.items():
+    for (task_id, _, key), event in latest.items():
         if event.action != "STRUCK" or (task_id, "STRIKE", key) in seen:
             continue
         slot, item = items[task_id]
@@ -707,6 +748,29 @@ async def open_notes(db: AsyncSession, limit: int = 40) -> list[dict]:
              "due": n.due_date.date().isoformat() if n.due_date else None,
              "symbol": MARKERS.get(n.one_h_marker or "")}
             for i, (n, name) in enumerate(rows, 1)]
+
+
+NOTE_INITIALS = re.compile(r"\b[A-ZË]{2,3}\b")
+
+
+def note_people(data: SlotData, text: str) -> list[str]:
+    """Initials of the people a note names ("EF: ..." or a full name), proposed to GA instead of asked.
+
+    Only an exact match counts; markers like "GA", "KA" or "M2" are never people.
+    """
+    skip = NO_TURN_INITIALS | {label.upper() for label in MARKERS.values()}
+    found = []
+    for token in NOTE_INITIALS.findall(text or ""):
+        users = [] if token in skip else data.find_user(token)
+        if len(users) == 1 and initials(data.name(users[0])) == token and token not in found:
+            found.append(token)
+    folded = (text or "").casefold()
+    for user in data.users.values():
+        name = (user.get("full_name") or "").strip()
+        code = initials(name)
+        if " " in name and name.casefold() in folded and code not in found and code not in skip:
+            found.append(code)
+    return found[:6]
 
 
 # ---------------------------------------------------------------- knowledge
@@ -805,6 +869,11 @@ class Note(Args):
     text: str = Field(max_length=2000)
 
 
+class PxNote(Args):
+    text: str = Field(min_length=3, max_length=4000, description="Teksti i shënimit, siç u diktua (pa 'Mira, shëno...')")
+    symbol: str | None = Field(default=None, description="Simboli 1H nëse e thanë: " + ", ".join(MARKERS) + "; ndryshe null")
+
+
 TOOLS = {
     "list_new_px_notes": (NoArgs, "Lexo PX Notes të hapura që ende nuk janë kthyer në detyrë. Thirre në fazën GA te pyetja 'Notes të reja?'."),
     "create_task_from_note": (CreateTask, "Krijo detyrë 1H nga një PX Note. Thirre VETËM pasi ia ke lexuar prapa të dhënat (personi, data, AM/PM, deadline, simboli) dhe ke dëgjuar 'po'."),
@@ -812,9 +881,13 @@ TOOLS = {
     "get_person_brief": (Person, "Detyrat e një personi për slotin aktual, të paplotësuarat nga sloti paraprak dhe progresi i ri."),
     "find_user": (Person, "Gjej përdoruesin sipas emrit ose inicialeve."),
     "search_knowledge": (Query, "Kërko në Knowledge të Mira-s (struktura e Primex, rregulloret, definimet) kur pyetja s'mbulohet nga konteksti."),
-    "add_meeting_note": (Note, "Ruaj një vendim ose shënim të rëndësishëm të takimit."),
+    "add_meeting_note": (Note, "Ruaj një vendim ose shënim të rëndësishëm të takimit (vetëm në shënimet e takimit)."),
+    "save_px_note": (PxNote, "Ruaj një shënim të ri në PX Notes kur dikush të thotë 'shënoje/vendose në PX Notes'. "
+                             "Thirre pasi ia ke thënë tekstin prapa shkurt dhe ke dëgjuar 'po'."),
     "end_person_turn": (EndTurn, "Thirre MENJËHERË sapo personi ka përfunduar, pa e përmbledhur me zë. Rezultati të jep personin e radhës."),
     "call_next_person": (NoArgs, "Njofto personin e radhës të kyçet (thirre kur personi aktual është te detyra e fundit)."),
+    # Answered inside host-worker.mjs: it keeps Mira quiet and never reaches PrimeFlow.
+    "wait_for_user": (NoArgs, "Qëndro në heshtje: për zhurmë, heshtje, 'aha/po/mhm' ose fjalë që s'janë për ty."),
 }
 
 
@@ -831,40 +904,74 @@ async def instructions(db: AsyncSession, meeting: Mira1HMeeting, row: MiraHostSe
     people = data.participants(meeting.slot)
     earlier = (await db.execute(select(func.count()).select_from(Mira1HMention).where(
         Mira1HMention.meeting_date == meeting.meeting_date, Mira1HMention.meeting_id != meeting.id))).scalar_one()
-    return f"""Je Mira, asistentja e takimeve interne të Primex. Tani po e MBAN VETË takimin 1H të orës {meeting.slot}
-në Discord. Data: {meeting.meeting_date:%d.%m.%Y}, ora tani {now():%H:%M} ({settings.APP_TIMEZONE}).
+    return f"""ROLI
+Je Mira, kolegia që e mban takimin 1H të orës {meeting.slot} në Discord për Primex. Data: {meeting.meeting_date:%d.%m.%Y},
+ora kur u lidhe {now():%H:%M} ({settings.APP_TIMEZONE}). Qëllimi: takimi të ecë shpejt, askush të mos presë,
+dhe secili ta dijë qartë çka ka me bë.
 
-SI FLET
-- Shqip, natyrshëm, si njeri me njeri, duke kuptuar të folmen e Kosovës.
-- SHUMË shkurt: zakonisht një fjali, maksimum dy. Pa hyrje, pa përsëritje, pa shpjeguar çfarë po bën.
-- Kur dikush të ndërpret, ndalo menjëherë dhe dëgjo. Mos e përsërit atë që ke thënë para ndërprerjes, vazhdo nga përgjigja e tij.
-- Mos lexo ID, UUID ose kode. Datat thuaji shkurt (p.sh. "23 tetor").
-- Qëllimi: takimi të kryhet SHPEJT dhe askush të mos presë.
-- MOS trego çfarë po bën ("po e përmbledh", "po e shikoj", "po e mbyll", "kalojmë te tjetri") dhe MOS përmend
-  sistemin, mesazhet "RADHA"/"SISTEMI" apo mjetet. Thjesht vepro.
-- Titujt e detyrave thuaji me fushën "spoken": pa inicialet ("EF:", "OH/EP:") dhe pa numrin në fillim
-  ("evente asistent", jo "13 evente asistent").
-- Zhurma ose fjalët pa kuptim nuk janë pyetje: mos u përgjigj, prit që personi të flasë qartë.
+PERSONALITETI DHE TONI
+- E ngrohtë, e qetë dhe e sigurt, si një koleg që i njeh të gjithë, jo si sekretare që lexon listë.
+- Flet natyrshëm, me ritëm të rehatshëm, as e nxituar as e ngadaltë. Buzëqeshja ndjehet në zë.
+- Kur dikush ka kryer diçka, njihe shkurt ("Bravo", "Super, kjo u kry"). Kur diçka ka ngecur, mos gjyko:
+  pyet çka i duhet.
+
+GJUHA
+- Gjithmonë shqip, me të folmen e Kosovës që e kuptojnë të gjithë në zyrë ("qysh", "a ka", "s'ka problem",
+  "e shënova"). Fjalët e punës mbeten siç i thonë ata: "done", "strike", "deadline", "slot", "share".
+- Emrat dhe inicialet ("EF", "OH") thuaji siç janë. Mos lexo ID, UUID ose kode. Datat shkurt: "nesër",
+  "23 tetor", jo "2026-10-23".
+
+GJATËSIA
+- Zakonisht një fjali, maksimum dy. Pa hyrje të gjata dhe pa e përsëritur atë që tha personi.
+- Mos i shpjego hapat e tu ("po e përmbledh", "po kaloj te tjetri") dhe mos përmend sistemin, "RADHA",
+  "SISTEMI" apo mjetet. Thjesht vepro.
+
+LLOJLLOJSHMËRIA
+- Mos e thuaj të njëjtën frazë dy herë rresht. Ndryshoji pranimet dhe pyetjet.
+- Shembuj, si frymë dhe jo si skript (mos i përdor gjithmonë): "Mirë.", "Okej, e shënova.", "Super.",
+  "S'ka problem.", "Qysh po shkon me…?", "A u kry ajo e…?", "Çka mbetet edhe te…?", "A ka diçka t're?"
+
+PARA MJETEVE
+- Para një mjeti që merr pak kohë (create_task_from_note, end_person_turn, list_new_px_notes,
+  list_new_done_and_strikes) mund të thuash një fjalë të shkurtër dhe ta thërrasësh menjëherë
+  ("Mirë, faleminderit." / "Okej, po e krijoj."). Mos e bë këtë te pyetjet e thjeshta.
+
+KUR S'E KUPTON OSE S'ËSHTË PËR TY
+- Përgjigju vetëm kur e ke kuptuar qartë. Mos hamendëso fjalë që mungojnë dhe mos thirr mjete nga zë i paqartë.
+- Nëse s'e kuptove, pyet shkurt ("Më fal, a e përsërit?"), por jo dy herë njësoj.
+- Zhurmë, heshtje, "aha", "po", "mhm" ndërsa flet ti, ose biseda mes tyre që s'është për ty: thirr
+  wait_for_user dhe mos thuaj asgjë. Nëse të ndërpret dikush me diçka të vërtetë, ndalo dhe vazhdo nga
+  përgjigja e tij, pa e përsëritur atë që the.
 
 RRJEDHA E TAKIMIT
-1) Faza GA (nga hyrja deri në {meeting.slot}): janë {ga}.
-   a) Pyet "Notes të reja?" dhe thirr list_new_px_notes. Për çdo note: thuaje shkurt dhe pyet për personin,
-      datën, AM/PM, a ka deadline dhe simbolin. Lexoji prapa në një fjali dhe vetëm pas "po" thirr
-      create_task_from_note. Detyrat nga PX Notes janë GJITHMONË 1H. Nëse thonë "jo/kalo", kalo te tjetri.
-   b) Pyet "A ka detyra të kryera?" dhe thirr list_new_done_and_strikes. Thuaj vetëm të rejat:
-      detyrat Done dhe pikat Strike me nga një fjali secila. Mos i përmend më ato të përmendura më herët sot
-      ({earlier} gjëra janë përmendur tashmë në 1H-të e mëparshme të sotme).
+1) Faza GA (nga hyrja deri në {meeting.slot}): janë {ga}. Përshëndeti shkurt dhe fillo.
+   a) Notes: pyet nëse ka notes të reja dhe thirr list_new_px_notes. Për çdo note bëje një propozim të plotë
+      në një fjali, me atë që e di tashmë: "suggested_people", "due" dhe "symbol" të note-it. Pyet vetëm atë
+      që mungon (zakonisht personi ose data), të gjitha në një pyetje. AM/PM dhe deadline propozoji si
+      "pa AM/PM, pa deadline" nëse s'ka të dhëna; ata e korrigjojnë nëse duhet.
+      P.sh.: "Note nga Gane: oferta për klientin X, për EF nesër, simboli pikëpyetje, pa deadline. A e krijoj?"
+      Pas "po" thirr create_task_from_note. Pas korrigjimit ("jo, OH") ndrysho vetëm atë pjesë dhe krijoje
+      pa e lexuar prapë gjithçka. Detyrat nga PX Notes janë GJITHMONË 1H. "Kalo" ose "jo" = te tjetri.
+   b) Done: pyet a ka diçka të kryer dhe thirr list_new_done_and_strikes. Grupoji sipas personit, me një
+      fjali për person ("EF i ka kry ofertën dhe raportin; OH e ka bë strike te…"). Vetëm të rejat:
+      {earlier} gjëra janë përmendur tashmë në 1H-të e mëparshme të sotme.
 2) Faza e stafit (nga ora {meeting.slot}): merr "RADHA" me detyrat e personit. Që nga ai moment fol VETËM me
    personin e ri; mos i përsërit pyetjet e personit të mëparshëm.
    Me secilin person ndiq protokollin:
 {(row.protocol_text or DEFAULT_PROTOCOL).strip()}
-   Pyet për detyrat e slotit paraprak që janë në proces / pa progres, pastaj për detyrat e slotit aktual.
-   Thuaj progresin e ri (strike/done) vetëm një herë. MOS pyet "a ka detyra nga stafi për GA" (as BZ):
-   pikën 4 të protokollit stafi e bën vetë.
-   Kur personi është te detyra e fundit thirr call_next_person. Sapo përfundon, thirr end_person_turn PA
-   përmbledhje me zë, dhe në të njëjtën fjali përshëndet të riun, p.sh. "Faleminderit. Rinesa, si po ecën ...?".
-   Përmbledhjet i shkruan PrimeFlow pas takimit. Synimi: rreth {row.target_minutes_per_person} minuta për person.
-3) Kur sistemi thotë "FUNDI", falënderoji shkurt dhe mbyll.
+   Fillo me detyrat e slotit paraprak që janë në proces / pa progres, pastaj ato të slotit aktual.
+   Titujt thuaji me fushën "spoken" (pa "EF:" dhe pa numrin në fillim). Progresin e ri (strike/done)
+   përmende vetëm një herë. MOS pyet "a ka detyra nga stafi për GA" (as BZ): pikën 4 stafi e bën vetë.
+   Kur personi është te detyra e fundit thirr call_next_person. Kur mbaron, thuaj shkurt "Faleminderit"
+   dhe thirr end_person_turn pa përmbledhje me zë; pastaj thirre të riun me emër, p.sh. "Rinesa, qysh po
+   shkon me…?". Përmbledhjet i shkruan PrimeFlow pas takimit. Synimi: rreth {row.target_minutes_per_person}
+   minuta për person.
+3) Kur sistemi thotë "FUNDI", falënderoji shkurt e ngrohtë dhe mbyll.
+
+SHËNIM NË PX NOTES (në çdo moment të takimit)
+- Kur dikush thotë "Mira, shënoje/vendose në PX Notes…", përmblidhe tekstin si shënim të qartë (pa "Mira, shëno"),
+  thuaje prapa në një fjali ("Po e shënoj: …, a është mirë?") dhe pas "po" thirr save_px_note.
+  Pastaj vazhdo aty ku ishit. Për vendime që s'janë për PX Notes përdor add_meeting_note.
 
 Radha e stafit për këtë slot: {", ".join(initials(data.name(u)) for u in people) or "askush me detyra 1H"}.
 Mesazhet që fillojnë me "SISTEMI:" vijnë nga PrimeFlow, jo nga njerëzit; ndiqi.
@@ -893,9 +1000,11 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
                 # No "language" (OpenAI rejects "sq") and no "prompt": on noise or silence the transcriber
                 # wrote the prompt back as if someone had said it.
                 "transcription": {"model": "gpt-4o-transcribe"},
-                # A higher threshold than the default keeps background noise from interrupting Mira.
-                "turn_detection": {"type": "server_vad", "threshold": 0.7, "prefix_padding_ms": 300,
-                                   "silence_duration_ms": 550, "create_response": True, "interrupt_response": True},
+                # Semantic VAD waits while a sentence is unfinished, so a pause to read the next task is not
+                # taken as the end of the turn. Interruptions are decided by host-worker.mjs, which lets a
+                # short "aha" or "po" pass instead of cutting Mira off.
+                "turn_detection": {"type": "semantic_vad", "eagerness": "low", "create_response": True,
+                                   "interrupt_response": False},
                 "noise_reduction": {"type": "near_field"},
             },
             "output": {"format": {"type": "audio/pcm", "rate": 24000}, "voice": settings.MIRA_HOST_VOICE,
@@ -904,6 +1013,8 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
         "tools": tool_definitions(),
         "tool_choice": "auto",
     }
+    if settings.MIRA_HOST_REASONING_EFFORT:
+        session["reasoning"] = {"effort": settings.MIRA_HOST_REASONING_EFFORT}
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post("https://api.openai.com/v1/realtime/client_secrets",
@@ -933,9 +1044,14 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
     data = SlotData(await common_payload(db, meeting.meeting_date), meeting.meeting_date)
     if name == "list_new_px_notes":
         notes = await open_notes(db)
+        for note in notes:
+            note["suggested_people"] = note_people(data, note["text"])
         return {"total": len(notes), "notes": notes}
     if name == "list_new_done_and_strikes":
-        progress = await new_progress(db, meeting, data, record=True)
+        progress = await new_progress(db, meeting, data, since=await progress_since(db, meeting), record=True)
+        # The next 1H's window starts at this reading, so nothing done meanwhile is lost.
+        db.add(Mira1HEvent(meeting_date=meeting.meeting_date, slot=meeting.slot, meeting_id=meeting.id,
+                           kind="PROGRESS_READ", sent_at=now(), data={}))
         return {"done": [{"spoken": d["spoken"], "owners": d["owners"], "slot": d["slot"]} for d in progress["done"]],
                 "strikes": [{"spoken": s["spoken"], "owners": s["owners"], "slot": s["slot"],
                              "points": [p["text"] for p in s["points"]]} for s in progress["strikes"]]}
@@ -946,7 +1062,7 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
         if name == "find_user":
             return {"name": data.name(found[0]), "initials": initials(data.name(found[0]))}
         brief = person_brief(data, meeting.slot, found[0])
-        brief["new_progress"] = await new_progress(db, meeting, data, [found[0]])
+        brief["new_progress"] = await new_progress(db, meeting, data, [found[0]], since=await progress_since(db, meeting))
         return brief
     if name == "search_knowledge":
         return {"results": await search_knowledge(db, args.query)}
@@ -957,7 +1073,31 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
         return {"ok": True}
     if name == "create_task_from_note":
         return await create_task(db, meeting, data, args)
+    if name == "save_px_note":
+        return await save_px_note(db, meeting, args)
     return {"ok": True}
+
+
+async def save_px_note(db: AsyncSession, meeting: Mira1HMeeting, args: PxNote) -> dict:
+    """A PX Note dictated in the 1H, written through the notes API as the 1H organizer and linked to the meeting."""
+    from app.services import discord_task_tools as tools
+    symbol = (args.symbol or "").upper() or None
+    symbol = next((key for key, label in MARKERS.items() if symbol in {key, label.upper()}), None) if symbol else None
+    actor = await acting_user(db)
+    body = {"content": args.text.strip(), "one_h_marker": symbol,
+            # Admins and managers may save a note without a department; anyone else saves it in their own.
+            "department_id": None if actor.role in (UserRole.ADMIN, UserRole.MANAGER) else
+            (str(actor.department_id) if actor.department_id else None)}
+    await db.commit()  # the notes API runs in its own transaction
+    try:
+        created = await tools.user_api(actor, "POST", "/api/ga-notes", body=body)
+    except HTTPException as exc:
+        return {"success": False, "error": str(exc.detail)[:300]}
+    note_id = (created or {}).get("id")
+    db.add(Mira1HEvent(meeting_date=meeting.meeting_date, slot=meeting.slot, meeting_id=meeting.id, kind="PX_NOTE",
+                       note_id=uuid.UUID(str(note_id)) if note_id else None, sent_at=now(),
+                       data={"text": args.text.strip()[:1000], "symbol": MARKERS.get(symbol or "")}))
+    return {"success": True}
 
 
 async def create_task(db: AsyncSession, meeting: Mira1HMeeting, data: SlotData, args: CreateTask) -> dict:

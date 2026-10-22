@@ -61,7 +61,7 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
   detail: MeetingDetail; onBack: () => void; onResummarize: () => void; canManage: boolean
 }) {
   const [showRecorder, setShowRecorder] = React.useState(false)
-  const created = detail.events.filter((e) => e.kind === "TASK_CREATED")
+  const created = detail.events.filter((e) => e.kind === "TASK_CREATED" || e.kind === "PX_NOTE")
   const invitations = detail.events.filter((e) => ["BRIEF", "GA_CALL", "GA_FALLBACK", "NOTE"].includes(e.kind))
   const done = detail.mentions.filter((m) => m.kind === "DONE")
   const strikes = detail.mentions.filter((m) => m.kind === "STRIKE")

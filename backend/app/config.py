@@ -157,7 +157,9 @@ class Settings(BaseSettings):
     # Mira joins this early (silent), so a failed connection is retried before she must talk.
     MIRA_HOST_CONNECT_MINUTES: int = 6
     MIRA_HOST_VOICE: str = "marin"
-    MIRA_HOST_SPEED: float = 1.15
+    MIRA_HOST_SPEED: float = 1.05
+    # minimal/low/medium/high/xhigh; higher answers better but later. Empty = the model's default.
+    MIRA_HOST_REASONING_EFFORT: str = "low"
     DISCORD_AI_TIMEOUT_SECONDS: int = 45
     DISCORD_AGENT_MODEL: str = "gpt-6-luna"
     SKILLS_AI_MODEL: str = "gpt-5.4-nano"

@@ -9,6 +9,14 @@ export const MAX_LINE=2000000;
 const INPUT_CHUNK_MS=100;
 const SILENCE=Buffer.from([0xf8,0xff,0xfe]);
 const COMMANDS=new Set(['start','say','tool_result','stop','shutdown']);
+// Someone who is still talking this long after they started interrupts Mira; a short "aha" or "po" does not.
+export const BARGE_IN_MS=450;
+// Voice heard within this window counts as "still talking"; louder than this average is speech, not hiss.
+const VOICE_RECENT_MS=200,VOICE_LEVEL=300;
+// A system instruction waits for the speaker to stop, but never longer than this.
+export const SAY_WAIT_MS=12000;
+// After someone stops, Realtime answers them first; a waiting instruction follows that answer.
+const AFTER_SPEECH_MS=1200;
 
 export function decodeCommand(line){
   if(Buffer.byteLength(line)>MAX_LINE)throw Error('ipc_size');
@@ -27,23 +35,33 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   // Mira joins early and silent: until the first instruction nobody's voice reaches Realtime,
   // so she cannot answer people who are already chatting in the channel.
   let listening=false;
+  // Who is talking: set by Realtime's VAD; lastVoiceAt is our own measure of audible speech.
+  let userSpeaking=false,speechStartedAt=0,lastVoiceAt=-Infinity,bargeTimer=null,sayTimer=null,retryResponse=false;
   const mixer=new Mixer(),pendingCalls=new Set(),queuedSays=[],cancelled=new Set(),speakerOf=new Map();
   const streams=new Map();
   let encoder,playback;
 
   function rt(event){if(realtime?.readyState===1)realtime.send(JSON.stringify(event));}
   function fail(reason,extra={}){if(closed)return;emit({type:'interrupted',reason,...extra});stop();}
+  function heard(samples){
+    let sum=0;for(let i=0;i<samples.length;i++)sum+=Math.abs(samples[i]);
+    if(samples.length&&sum/samples.length>VOICE_LEVEL)lastVoiceAt=now();
+  }
+  function later(ms){clearTimer(sayTimer);sayTimer=setTimer(()=>{sayTimer=null;maybeContinue();},ms);}
 
   // ---- Realtime
+  // System instructions ("RADHA", "koha ka kaluar") wait for a pause, so Mira never talks over someone.
   function maybeContinue(){
-    if(responseActive||pendingCalls.size)return;
-    if(queuedSays.length){
-      const text=queuedSays.shift();
-      rt({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text}]}});
-      rt({type:'response.create'});responseActive=true;
-    }
+    if(responseActive||pendingCalls.size||!queuedSays.length)return;
+    const waited=now()-speechStartedAt;
+    if(userSpeaking&&waited<SAY_WAIT_MS){later(SAY_WAIT_MS-waited);return;}
+    const text=queuedSays.shift();
+    rt({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text}]}});
+    rt({type:'response.create'});responseActive=true;
   }
   function interrupt(){
+    // Realtime no longer cancels by itself (interrupt_response is off), so an answer still being generated is cancelled here.
+    if(currentResponse){cancelled.add(currentResponse);if(responseActive)rt({type:'response.cancel'});}
     const state=playback.clear();
     silenceLeft=5;
     if(state.item&&state.dropped>0){
@@ -51,14 +69,23 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
       emit({type:'log',event:'interrupted_by_speaker',played_ms:state.playedMs});
     }
   }
+  function checkBargeIn(){
+    bargeTimer=null;
+    if(playback.playing&&now()-lastVoiceAt<=VOICE_RECENT_MS)interrupt();
+  }
   function onRealtime(message){
     switch(message.type){
       case 'session.created':emit({type:'realtime_ready'});break;
       case 'input_audio_buffer.speech_started':
         mixer.takeLoudest();
-        if(playback.playing){if(currentResponse)cancelled.add(currentResponse);interrupt();}
+        userSpeaking=true;speechStartedAt=now();
+        if(playback.playing&&bargeTimer===null)bargeTimer=setTimer(checkBargeIn,BARGE_IN_MS);
         break;
-      case 'input_audio_buffer.speech_stopped':speakerOf.set(message.item_id,mixer.takeLoudest());break;
+      case 'input_audio_buffer.speech_stopped':
+        speakerOf.set(message.item_id,mixer.takeLoudest());
+        userSpeaking=false;
+        if(queuedSays.length)later(AFTER_SPEECH_MS);
+        break;
       case 'conversation.item.input_audio_transcription.completed':
         if(message.transcript?.trim())emit({type:'transcript',role:'staff',speaker_id:speakerOf.get(message.item_id)??null,text:message.transcript.trim()});
         speakerOf.delete(message.item_id);break;
@@ -70,15 +97,22 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
       case 'response.output_audio_transcript.done':case 'response.audio_transcript.done':
         if(message.transcript?.trim())emit({type:'transcript',role:'mira',text:message.transcript.trim()});break;
       case 'response.output_item.done':
-        if(message.item?.type==='function_call'){
+        if(message.item?.type==='function_call'&&message.item.name==='wait_for_user'){
+          // Mira chose silence: answer here and do not ask for another response.
+          rt({type:'conversation.item.create',item:{type:'function_call_output',call_id:message.item.call_id,output:'{"ok":true}'}});
+        }else if(message.item?.type==='function_call'){
           pendingCalls.add(message.item.call_id);
           emit({type:'tool_call',call_id:message.item.call_id,name:message.item.name,arguments:message.item.arguments||'{}'});
         }
         break;
-      case 'response.done':responseActive=false;cancelled.delete(message.response?.id);maybeContinue();break;
+      case 'response.done':
+        responseActive=false;cancelled.delete(message.response?.id);
+        // A response.create refused while Realtime was answering someone is sent again now.
+        if(retryResponse){retryResponse=false;rt({type:'response.create'});responseActive=true;break;}
+        maybeContinue();break;
       case 'error':
         emit({type:'log',event:'realtime_error',code:message.error?.code??null});
-        if(message.error?.code==='conversation_already_has_active_response')responseActive=true;
+        if(message.error?.code==='conversation_already_has_active_response'){responseActive=true;retryResponse=true;}
         break;
     }
   }
@@ -126,7 +160,10 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
     const release=()=>{if(streams.get(id)===stream)streams.delete(id);decoder?.delete?.();decoder=null;};
     stream.on('data',packet=>{
       if(closed||!decoder)return;
-      try{const pcm=decoder.decode(packet);if(pcm.length)mixer.push(id,toRealtime(pcm));}catch{/* one bad packet is skipped */}
+      try{
+        const pcm=decoder.decode(packet);
+        if(pcm.length){const samples=toRealtime(pcm);heard(samples);mixer.push(id,samples);}
+      }catch{/* one bad packet is skipped */}
     });
     stream.once('end',release);stream.once('close',release);stream.on('error',release);
   }
@@ -173,7 +210,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
 
   function stop(){
     if(closed)return;closed=true;
-    clearTimer(inputTimer);clearTimer(outputTimer);
+    clearTimer(inputTimer);clearTimer(outputTimer);clearTimer(bargeTimer);clearTimer(sayTimer);
     for(const stream of streams.values())stream.destroy?.();
     try{connection?.destroy();}catch{}
     try{realtime?.close();}catch{}
@@ -194,7 +231,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
       if(!pendingCalls.size&&!responseActive){rt({type:'response.create'});responseActive=true;}
     },
     // Exposed for tests.
-    _onRealtime:onRealtime,get _playback(){return playback;},get _listening(){return listening;},
+    _onRealtime:onRealtime,_heard:heard,get _playback(){return playback;},get _listening(){return listening;},
   };
 }
 

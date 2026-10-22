@@ -54,6 +54,7 @@ class SlotDataTests(unittest.TestCase):
         self.assertEqual(brief['current'][0]['symbol'], 'M2/3')
         self.assertTrue(brief['current'][0]['deadline'])
         self.assertEqual([t['title'] for t in brief['previous_open']], ['EF: E PAPERFUNDUAR'])
+        self.assertEqual(brief['current'][0]['status_label'], 'në proces')
         text = host.brief_message(brief, host.DEFAULT_PROTOCOL)
         self.assertIn('Share screen side by side', text)
         self.assertIn('Nga sloti paraprak 10:00', text)
@@ -136,6 +137,11 @@ class RealtimeSessionTests(unittest.IsolatedAsyncioTestCase):
             result = await host.realtime_session(SimpleNamespace(), meeting)
         self.assertEqual(result['client_secret'], 'ek_test')
         self.assertNotIn('language', sent['session']['audio']['input']['transcription'])
+        # Mira waits for unfinished sentences; the worker, not OpenAI, decides when she is interrupted.
+        self.assertEqual(sent['session']['audio']['input']['turn_detection'],
+                         {'type': 'semantic_vad', 'eagerness': 'low', 'create_response': True, 'interrupt_response': False})
+        self.assertEqual(sent['session']['reasoning'], {'effort': settings.MIRA_HOST_REASONING_EFFORT})
+        self.assertIn('wait_for_user', [tool['name'] for tool in sent['session']['tools']])
 
 
 class ProgressTests(unittest.IsolatedAsyncioTestCase):
@@ -153,6 +159,29 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
             progress = await host.new_progress(db, meeting, data)
         self.assertEqual([d['title'] for d in progress['done']], ['RA: NEW'])
         self.assertEqual(progress['strikes'][0]['points'][0]['text'], 'Me u nxerr transkripta')
+
+    async def test_only_work_done_in_the_1h_report_window_is_new(self):
+        data = host.SlotData(payload([
+            item('EF', '11:00', 'BEFORE 10', rank=0, status='DONE', completed_at=datetime(2026, 10, 21, 9, 40, tzinfo=TZ).isoformat()),
+            item('RA', '16:00', 'AT 10:30', rank=1, status='DONE', completed_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ).isoformat()),
+        ]), DAY)
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[]))))))
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
+        with patch.object(host, 'mentioned', AsyncMock(return_value=set())):
+            progress = await host.new_progress(db, meeting, data, since=datetime(2026, 10, 21, 10, tzinfo=TZ))
+        # Like the 11:00 1H report: 10:00-11:00 only, from any slot.
+        self.assertEqual([d['title'] for d in progress['done']], ['RA: AT 10:30'])
+
+    async def test_the_window_follows_the_1h_report_and_closes_the_gap_after_miras_last_reading(self):
+        def db(read_at):
+            return SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=read_at))))
+        at = lambda h, m: datetime(2026, 10, 21, h, m, tzinfo=TZ)
+        first = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='10:00')
+        self.assertEqual(await host.progress_since(db(None), first), at(8, 0))
+        later = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:50')
+        self.assertEqual(await host.progress_since(db(None), later), at(11, 0))
+        # Mira read the 11:00 progress at 10:58; what was done 10:58-11:00 is still new at 11:50.
+        self.assertEqual(await host.progress_since(db(at(10, 58)), later), at(10, 58))
 
 
 class CreateTaskTests(unittest.IsolatedAsyncioTestCase):
@@ -174,6 +203,28 @@ class CreateTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body['title'], 'Thirr klientin per oferten')
         self.assertEqual(body['assignees'], [IDS['EF']])
         self.assertTrue(body['is_deadline_important'])
+
+    async def test_a_dictated_px_note_is_saved_through_the_api_and_linked_to_mira(self):
+        db = SimpleNamespace(commit=AsyncMock(), add=Mock())
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:50')
+        note_id = str(uuid.uuid4())
+        api = AsyncMock(return_value={'id': note_id})
+        actor = SimpleNamespace(id=uuid.uuid4(), role=host.UserRole.ADMIN, department_id=None)
+        with patch('app.services.discord_task_tools.user_api', api), \
+             patch.object(host, 'acting_user', AsyncMock(return_value=actor)):
+            result = await host.save_px_note(db, meeting, host.PxNote(text=' Oferta per klientin X ', symbol='?'))
+        self.assertTrue(result['success'])
+        self.assertEqual(api.await_args.args[1:], ('POST', '/api/ga-notes'))
+        self.assertEqual(api.await_args.kwargs['body'], {'content': 'Oferta per klientin X', 'one_h_marker': 'QUESTION',
+                                                         'department_id': None})
+        event = db.add.call_args.args[0]
+        self.assertEqual((event.kind, str(event.note_id), event.meeting_id), ('PX_NOTE', note_id, meeting.id))
+
+    def test_people_named_in_a_note_are_proposed_but_markers_are_not(self):
+        data = host.SlotData(payload([]), DAY)
+        self.assertEqual(host.note_people(data, 'EF: oferta per klientin, GA !, M2'), ['EF'])
+        self.assertEqual(host.note_people(data, 'Ta thirr Rinesa Ahmeti dhe OH per PDF'), ['OH', 'RA'])
+        self.assertEqual(host.note_people(data, 'Thirr klientin ZZ'), [])
 
     async def test_unknown_person_is_asked_again_not_guessed(self):
         note = SimpleNamespace(id=uuid.uuid4(), is_converted_to_task=False, content='X', department_id=None)

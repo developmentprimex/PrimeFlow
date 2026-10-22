@@ -84,6 +84,8 @@ class Mira1HEvent(Base):
     kind: Mapped[str] = mapped_column(String(30))
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'))
     data: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # A PX Note Mira saved during the 1H (kind PX_NOTE); PX Notes shows it with Mira's avatar.
+    note_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('ga_notes.id', ondelete='SET NULL'), index=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (Index('ix_mira_1h_events_day_slot', 'meeting_date', 'slot'),)
