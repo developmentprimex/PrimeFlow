@@ -1335,7 +1335,7 @@ export default function ProjectPage() {
     setEditingTaskId(task.id)
     setEditTitle(task.title || "")
     setEditDescription(task.description || "")
-    setEditStatus(task.status || "TODO")
+    setEditStatus(TASK_STATUSES.find((status) => status === task.status) || "TODO")
     setEditTaskType(getProjectTaskType(task))
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
     const assigneeIds = task.assignees && task.assignees.length > 0
@@ -3092,7 +3092,7 @@ export default function ProjectPage() {
             {meetingFocusItems.length ? (
               meetingFocusItems.map((item, index) => {
                 const isEditing = meetingFocusEditingId === item.id
-                const displayNumber = item.position > 0 ? item.position : index + 1
+                const displayNumber = item.position != null && item.position > 0 ? item.position : index + 1
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
                     <div className="mt-0.5 w-16 shrink-0 text-right text-sm text-muted-foreground">
@@ -3191,7 +3191,7 @@ export default function ProjectPage() {
             {meetingChecklist.length ? (
               meetingChecklist.map((item, index) => {
                 const isEditing = editingMeetingItemId === item.id
-                const displayNumber = item.position > 0 ? item.position : index + 1
+                const displayNumber = item.position != null && item.position > 0 ? item.position : index + 1
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
                     <div className="mt-0.5 w-16 shrink-0 text-right text-sm text-muted-foreground">
@@ -3345,7 +3345,7 @@ export default function ProjectPage() {
             {testingChecklist.length ? (
               testingChecklist.map((item, index) => {
                 const isEditing = testingEditingId === item.id
-                const displayNumber = item.position > 0 ? item.position : index + 1
+                const displayNumber = item.position != null && item.position > 0 ? item.position : index + 1
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
                     <div className="mt-0.5 w-16 shrink-0 text-right text-sm text-muted-foreground">
@@ -3650,7 +3650,7 @@ export default function ProjectPage() {
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Status</Label>
-                      <Select value={editStatus} onValueChange={(v) => setEditStatus(v as Task["status"])}>
+                      <Select value={editStatus} onValueChange={(v) => setEditStatus(v as (typeof TASK_STATUSES)[number])}>
                         <SelectTrigger>
                           <SelectValue placeholder="Status" />
                         </SelectTrigger>
@@ -4079,7 +4079,7 @@ export default function ProjectPage() {
                                     disabled={
                                       !canEditTaskChecklist ||
                                       taskChecklistItemBusy[item.id] ||
-                                      (item.is_checked && !canUncheckTaskChecklist)
+                                      (Boolean(item.is_checked) && !canUncheckTaskChecklist)
                                     }
                                   />
                                   <div className={item.is_checked ? "text-muted-foreground line-through flex-1" : "text-slate-700 flex-1"}>

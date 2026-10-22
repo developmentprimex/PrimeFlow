@@ -27,6 +27,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { DailyRlzCommentField, DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
 import { DailyReportMeetingsTable } from "@/components/daily-report-meetings-table"
+import { MeetingCanceledBadge } from "@/components/meeting-canceled-badge"
+import { useCanceledMeetings } from "@/lib/use-canceled-meetings"
 import { PxJavPlanningBriefView } from "@/components/px-jav-planning-brief-view"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
@@ -146,16 +148,19 @@ const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   NORMAL: "Normal",
   HIGH: "High",
+  BLLOK: "Bllok",
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
   NORMAL: "border-amber-200 bg-amber-50 text-amber-700",
   HIGH: "border-red-200 bg-red-50 text-red-700",
+  BLLOK: "border-[#A78BFA] bg-[#EDE9FE] text-[#6D28D9]",
 }
 
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
   NORMAL: "border-l-amber-500",
   HIGH: "border-l-red-600",
+  BLLOK: "border-l-[#8B5CF6]",
 }
 
 
@@ -1648,7 +1653,7 @@ export default function DepartmentKanban() {
         handleAfterPrint()
       }
     }
-    if ("addEventListener" in mediaQuery) {
+    if (typeof mediaQuery.addEventListener === "function") {
       mediaQuery.addEventListener("change", handleMediaChange)
     } else {
       mediaQuery.addListener(handleMediaChange)
@@ -1656,7 +1661,7 @@ export default function DepartmentKanban() {
     return () => {
       window.removeEventListener("beforeprint", handleBeforePrint)
       window.removeEventListener("afterprint", handleAfterPrint)
-      if ("removeEventListener" in mediaQuery) {
+      if (typeof mediaQuery.removeEventListener === "function") {
         mediaQuery.removeEventListener("change", handleMediaChange)
       } else {
         mediaQuery.removeListener(handleMediaChange)
@@ -1838,6 +1843,7 @@ export default function DepartmentKanban() {
     })
   }, [templateProjects])
   const todayDate = React.useMemo(() => new Date(), [])
+  const canceledTodayMeetings = useCanceledMeetings(toDateInputValue(todayDate))
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
   const tomorrowDate = React.useMemo(
     () => new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() + 1),
@@ -4000,7 +4006,7 @@ export default function DepartmentKanban() {
   const allTodayPrintItems = React.useMemo(() => {
     const items: Array<{
       userId: string
-      period: "AM" | "PM"
+      period: "AM" | "PM" | "AM/PM"
       label: string
       category: "PRJK" | "FT" | "SYS" | "EXM" | "GA" | "IN"
       fastType?: string
@@ -4107,12 +4113,12 @@ export default function DepartmentKanban() {
     const categories = ["PRJK", "FT", "SYS", "EXM", "GA", "IN"] as const
     const map = new Map<
       string,
-      Record<string, Array<{ period: "AM" | "PM"; label: string; fastType?: string }>>
+      Record<string, Array<{ period: "AM" | "PM" | "AM/PM"; label: string; fastType?: string }>>
     >()
     const ensure = (userId: string) => {
       if (!map.has(userId)) {
         const emptyBuckets = categories.reduce<
-          Record<string, Array<{ period: "AM" | "PM"; label: string; fastType?: string }>>
+          Record<string, Array<{ period: "AM" | "PM" | "AM/PM"; label: string; fastType?: string }>>
         >((acc, category) => {
           acc[category] = []
           return acc
@@ -4692,6 +4698,7 @@ export default function DepartmentKanban() {
     const priorityOrder: Record<TaskPriority, number> = {
       HIGH: 0,
       NORMAL: 1,
+      BLLOK: 2,
     }
     return [...visibleSystemTasks].sort((a, b) => {
       const aInactive = !a.is_active
@@ -6884,6 +6891,7 @@ export default function DepartmentKanban() {
                             <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
                               <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                                 <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
+                            {canceledTodayMeetings.has(meeting.id) ? <MeetingCanceledBadge /> : null}
                               </TableCell>
                               <TableCell className={TODAY_TASK_CELL_CLASS}>{formatMeetingDateTime(meeting)}</TableCell>
                             </TableRow>
@@ -6902,6 +6910,7 @@ export default function DepartmentKanban() {
                             <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
                               <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                                 <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
+                            {canceledTodayMeetings.has(meeting.id) ? <MeetingCanceledBadge /> : null}
                               </TableCell>
                               <TableCell className={TODAY_TASK_CELL_CLASS}>{formatMeetingDateTime(meeting)}</TableCell>
                             </TableRow>
@@ -9136,6 +9145,7 @@ export default function DepartmentKanban() {
                   projectTitle?: string | null
                   description: string
                   status: string
+                  statusKey?: string
                   bz: string
                   kohaBz: string
                   tyo: string

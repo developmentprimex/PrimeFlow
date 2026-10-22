@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 from datetime import date, datetime, time, timedelta
@@ -210,19 +211,25 @@ def _undiscussed_px_notes_statement():
     )
 
 
-async def load_undiscussed_notes() -> list[ReportUndiscussedNote]:
+async def load_undiscussed_notes(*, show_full_mira_notes: bool = False) -> list[ReportUndiscussedNote]:
     """Load the PX Notes rows that still need discussion in the 1H report."""
     async with SessionLocal() as db:
         rows = (await db.execute(_undiscussed_px_notes_statement())).all()
-    return [
-        ReportUndiscussedNote(
-            content=clean_description(note.content),
+    notes = []
+    for note, full_name, username, email in rows:
+        content = clean_description(note.content)
+        if getattr(note, "from_mira", False) and not show_full_mira_notes:
+            # Match the collapsed PX Notes label: title/date before the first
+            # blank line. Keep the stored summary intact.
+            content = re.split(r"\n\s*\n", content, maxsplit=1)[0].strip()
+        if not content:
+            continue
+        notes.append(ReportUndiscussedNote(
+            content=content,
             author=(full_name or username or email or "-"),
             created_at=note.created_at,
-        )
-        for note, full_name, username, email in rows
-        if clean_description(note.content)
-    ]
+        ))
+    return notes
 
 
 def _report_task_text(data: dict) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, str | None]]:
@@ -376,10 +383,11 @@ async def generate_fresh(
     recipients: dict[str, list[str]] | None = None,
     *,
     data: dict | None = None,
+    show_full_mira_notes: bool = False,
 ) -> ReportDocument:
     data = data or await load_common_view(day)
     reminders = await load_1h_reminder_questions(slot, day)
-    undiscussed_notes = await load_undiscussed_notes()
+    undiscussed_notes = await load_undiscussed_notes(show_full_mira_notes=show_full_mira_notes)
     title_overrides, description_overrides = await _text_overrides_for_1h_interval(
         data, day, slot, interval_end=strike_interval_end(day, slot),
     )
@@ -434,6 +442,7 @@ async def deliver_report(
     recipient_map: dict[str, list[str]] | None = None, trigger_type: str = "SCHEDULED",
     triggered_by_user_id=None, manual_reason: str | None = None, schedule_id=None,
     schedule_version: int | None = None, recipient_group: str = "default",
+    show_full_mira_notes: bool = False,
 ) -> PrimeFlowReportDeliveryRun:
     if trigger_type == "MANUAL" and recipient_group == "default":
         recipient_group = f"manual-{uuid.uuid4().hex}"
@@ -486,7 +495,7 @@ async def deliver_report(
                     await db.commit()
                     return run
             source_data = await load_common_view(day)
-            document = await generate_fresh(day, slot, recipient_map, data=source_data)
+            document = await generate_fresh(day, slot, recipient_map, data=source_data, show_full_mira_notes=show_full_mira_notes)
             attachment_warnings: list[str] = []
             try:
                 today_print_report = await build_today_print_report(

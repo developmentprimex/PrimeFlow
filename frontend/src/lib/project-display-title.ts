@@ -1,5 +1,3 @@
-import type { Project } from "@/lib/types"
-
 type ProjectLike = {
   title?: string | null
   name?: string | null
@@ -7,7 +5,7 @@ type ProjectLike = {
   display_title?: string | null
 }
 
-export function resolveProjectTitle(project?: ProjectLike | Project | null): string {
+export function resolveProjectTitle(project?: ProjectLike | null): string {
   if (!project) return ""
   return (
     project.display_title?.trim() ||

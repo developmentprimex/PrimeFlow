@@ -1,4 +1,8 @@
+"use client"
+
 import type { Meeting, UserLookup } from "@/lib/types"
+import { useCanceledMeetings } from "@/lib/use-canceled-meetings"
+import { MeetingCanceledBadge } from "@/components/meeting-canceled-badge"
 
 type DailyReportMeetingsTableProps = {
   meetings: Meeting[]
@@ -57,6 +61,7 @@ export function DailyReportMeetingsTable({
   users,
   reportDateIso,
 }: DailyReportMeetingsTableProps) {
+  const canceledMeetings = useCanceledMeetings(reportDateIso)
   const reportDate = parseDateOnly(reportDateIso)
   const userNames = new Map(users.map((user) => [user.id, participantLabel(user)]))
   const reportMeetings = reportDate
@@ -123,6 +128,7 @@ export function DailyReportMeetingsTable({
                     </td>
                     <td className="border border-slate-200 px-2 py-2 align-top font-semibold text-slate-900">
                       {meeting.title || "Meeting"}
+                      {canceledMeetings.has(meeting.id) ? <MeetingCanceledBadge /> : null}
                     </td>
                     <td className="border border-slate-200 px-2 py-2 align-top text-slate-700">
                       {persons.length ? persons.join(", ") : "-"}

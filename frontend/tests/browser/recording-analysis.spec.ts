@@ -80,12 +80,12 @@ test('citation timing requires a click and survives reload without reprocessing'
   await page.reload()
   const jump = page.getByRole('button', { name: /Rreth 00:00:07/ })
   await expect(jump).toBeVisible()
-  await page.locator('video').evaluate(video => {
+  await page.locator('video').evaluate((video: HTMLVideoElement) => {
     Object.defineProperty(video, 'currentTime', { writable: true, value: 0 })
     video.play = () => Promise.resolve()
   })
   await jump.click()
-  expect(await page.locator('video').evaluate(video => video.currentTime)).toBeCloseTo(7.58)
+  expect(await page.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeCloseTo(7.58)
   expect(harness.writes).toHaveLength(1)
 })
 

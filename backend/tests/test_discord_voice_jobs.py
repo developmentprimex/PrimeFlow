@@ -76,6 +76,29 @@ class VoiceJobTests(PostgresMeetingTests):
         async with self.sessions() as db:
             self.assertEqual((await service.claim_deliveries(db))['jobs'],[])
 
+    async def test_a_mira_note_opens_the_transcript_it_was_written_from(self):
+        from fastapi import HTTPException
+        from app.models.ga_note import GaNote
+        from app.models.mira_host import Mira1HEvent,Mira1HMeeting
+        from app.services import mira_host as host
+        sid=await self.scheduled_meeting(timedelta(minutes=2))
+        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='**Përmbledhja:** Raporti.')):
+            await jobs.process_voice_meetings()
+        async with self.sessions() as db:
+            note_id=(await db.get(Meeting,sid)).saved_note_id
+            result=await host.note_transcript(db,note_id)
+            self.assertEqual(result['passages'],[{'speaker':'Ana','time':'00:00–00:01','text':'Ana dërgon raportin.'}])
+            # A note Mira Host saved during that 1H opens the same recording.
+            other=GaNote(id=uuid.uuid4(),content='Shënim',created_by=self.uid);db.add(other)
+            meeting=Mira1HMeeting(id=uuid.uuid4(),meeting_date=service.now().date(),slot='16:00',voice_meeting_id=sid);db.add(meeting)
+            await db.flush()
+            db.add(Mira1HEvent(id=uuid.uuid4(),meeting_date=meeting.meeting_date,slot='16:00',meeting_id=meeting.id,
+                kind='PX_NOTE',note_id=other.id))
+            await db.flush()
+            self.assertEqual((await host.note_transcript(db,other.id))['passages'],result['passages'])
+            with self.assertRaises(HTTPException) as missing:await host.note_transcript(db,uuid.uuid4())
+            self.assertEqual(missing.exception.status_code,404)
+
     async def scheduled_meeting(self,stopped_ago):
         from app.models.discord_voice_meeting import DiscordVoiceSegment as Segment
         sid=uuid.uuid4()

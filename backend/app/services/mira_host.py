@@ -1301,6 +1301,32 @@ async def meeting_detail(db: AsyncSession, meeting_id: uuid.UUID) -> dict:
             "recorder": recorder}
 
 
+async def note_transcript(db: AsyncSession, note_id: uuid.UUID) -> dict:
+    """The silent recorder's transcript behind a PX Note from Mira, as passages per speaker."""
+    from app.services import discord_voice_openai as provider
+    # The recorder saved the note itself, or Mira Host saved it in a 1H the recorder heard.
+    voice_id = (await db.execute(select(DiscordVoiceMeeting.id).where(DiscordVoiceMeeting.saved_note_id == note_id)
+        .limit(1))).scalar_one_or_none()
+    if voice_id is None:
+        voice_id = (await db.execute(select(Mira1HMeeting.voice_meeting_id)
+            .join(Mira1HEvent, Mira1HEvent.meeting_id == Mira1HMeeting.id)
+            .where(Mira1HEvent.note_id == note_id, Mira1HMeeting.voice_meeting_id.is_not(None))
+            .limit(1))).scalar_one_or_none()
+    voice = await db.get(DiscordVoiceMeeting, voice_id) if voice_id else None
+    if voice is None:
+        raise HTTPException(404, "Ky shënim nuk ka transkript.")
+    segments = (await db.execute(select(DiscordVoiceSegment).where(DiscordVoiceSegment.session_id == voice.id,
+        DiscordVoiceSegment.status == "DONE").order_by(DiscordVoiceSegment.start_ms, DiscordVoiceSegment.sequence))).scalars().all()
+    passages = provider.compact_transcript([{"sequence": s.sequence, "speaker_id": s.speaker_id,
+        "speaker_name": s.speaker_name, "start_ms": s.start_ms, "end_ms": s.end_ms, "transcript": s.transcript}
+        for s in segments if s.transcript])
+    started = voice.started_at or voice.created_at
+    return {"note_id": str(note_id), "title": voice.title, "status": voice.status, "partial": voice.partial,
+            "started_at": started.isoformat() if started else None,
+            "stopped_at": voice.stopped_at.isoformat() if voice.stopped_at else None,
+            "passages": [{"speaker": p["speaker"], "time": p["time"], "text": p["text"]} for p in passages]}
+
+
 async def mira_notes(db: AsyncSession, limit: int) -> list[dict]:
     """Mira's notes: what she wrote after each 1H she held, plus meeting notes saved to PX Notes."""
     notes = []

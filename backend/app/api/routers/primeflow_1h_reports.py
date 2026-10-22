@@ -111,6 +111,7 @@ class PreviewRequest(BaseModel):
     cc: list[EmailStr] = Field(default_factory=list)
     bcc: list[EmailStr] = Field(default_factory=list)
     use_default_recipients: bool = True
+    show_full_mira_notes: bool = False
 
     @field_validator("report_slot")
     @classmethod
@@ -284,7 +285,8 @@ async def preview(
     # Load Common View once; the GA email body below reuses it instead of
     # fetching the same data a second time.
     source_data = await load_common_view(payload.report_date)
-    document = await generate_fresh(payload.report_date, payload.report_slot, recipients, data=source_data)
+    document = await generate_fresh(payload.report_date, payload.report_slot, recipients, data=source_data,
+        show_full_mira_notes=payload.show_full_mira_notes)
     filename = f"PrimeFlow_1H_{payload.report_date:%d.%m.%Y}_{payload.report_slot.replace(':', '-')}"
     if payload.format == "docx":
         return _file_response(render_docx(document), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename + ".docx")
@@ -308,6 +310,7 @@ async def manual_send(payload: SendRequest, db: AsyncSession = Depends(get_db), 
     run = await deliver_report(
         payload.report_date, payload.report_slot, recipient_map=recipients, trigger_type="MANUAL",
         triggered_by_user_id=user.id, manual_reason=payload.reason,
+        show_full_mira_notes=payload.show_full_mira_notes,
     )
     add_audit_log(db=db, actor_user_id=user.id, entity_type="primeflow_report_run", entity_id=run.id, action="MANUAL_SEND", after={"status": run.status, "reason": payload.reason})
     await db.commit()
