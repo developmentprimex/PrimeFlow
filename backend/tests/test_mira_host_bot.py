@@ -80,3 +80,35 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ConnectRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_failed_connection_is_retried_before_mira_must_talk(self):
+        outcomes = iter([{'type': 'interrupted', 'reason': 'connect_timeout'}, {'type': 'ready'}])
+        started = []
+
+        class FakeProcess:
+            def __init__(self, on_message):
+                self.on_message = on_message
+                started.append(self)
+
+            async def start(self, **kwargs):
+                asyncio.get_running_loop().call_soon(lambda: asyncio.ensure_future(self.on_message(next(outcomes))))
+
+            async def send(self, message):
+                pass
+
+            async def close(self):
+                await self.on_message({'type': 'process_exit'})  # a late event of the failed attempt
+
+        fake, calls = bot({'/session/start': {'meeting': {'id': 'm1'}, 'client_secret': 'ek', 'model': 'm', 'target_minutes': 4}})
+        host = mira_host.MiraHost(fake)
+        state = session()
+        state.update(attempt=0, failed=asyncio.Event(), reason='completed')
+        with patch.object(mira_host, 'HostProcess', FakeProcess), patch.object(mira_host.asyncio, 'sleep', AsyncMock()):
+            result = await host.connect(state, '10:00', SimpleNamespace(id=1), SimpleNamespace(id=5))
+        self.assertEqual(result['meeting']['id'], 'm1')
+        self.assertEqual(len(started), 2)
+        self.assertEqual([c[0] for c in calls].count('/bot/mira-host/session/start'), 2)
+        self.assertFalse(state['closed'].is_set())
+        self.assertEqual(state['reason'], 'completed')

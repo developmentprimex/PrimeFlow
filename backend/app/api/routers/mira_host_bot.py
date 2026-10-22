@@ -91,7 +91,13 @@ async def start(payload: Start, db: AsyncSession = Depends(get_db)):
         raise HTTPException(409, "Mira nuk është nisur si mbajtëse takimesh.")
     meeting = await host.start_meeting(db, payload.slot)
     await db.commit()
-    session = await host.realtime_session(db, meeting)
+    try:
+        session = await host.realtime_session(db, meeting)
+    except HTTPException as exc:
+        # The meeting never started; it must not stay "live" in the Mira view.
+        await host.finish_meeting(db, meeting, f"realtime:{exc.detail}")
+        await db.commit()
+        raise
     await db.commit()
     return {"meeting": host.meeting_row(meeting), **session,
             "starts_at": host.slot_at(meeting.meeting_date, meeting.slot).isoformat(),

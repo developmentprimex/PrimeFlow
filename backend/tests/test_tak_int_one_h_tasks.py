@@ -84,6 +84,11 @@ class TestTakIntOneHSlots(unittest.TestCase):
 
 @patch("app.services.meeting_system_tasks.settings.APP_TIMEZONE", "Europe/Budapest")
 class TestTakIntOneHReconciliation(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        cancellation = patch("app.services.meeting_system_tasks.external_meeting_is_canceled", new_callable=AsyncMock, return_value=False)
+        cancellation.start()
+        self.addCleanup(cancellation.stop)
+
     async def test_weekly_category_creates_only_post_tasks_and_regular_meeting_keeps_both(self) -> None:
         for categories, expects_pre in ((["Weekly"], False), (["Team WEEKLY"], False), (["Online"], True)):
             with self.subTest(categories=categories):

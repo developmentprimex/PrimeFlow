@@ -60,6 +60,28 @@ class _FakeDb:
 
 
 class TestMicrosoftCalendarInternalPair(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        cancellation = patch("app.services.microsoft_calendar_sync.external_meeting_is_canceled", new_callable=AsyncMock, return_value=False)
+        self.cancellation = cancellation.start()
+        self.addCleanup(cancellation.stop)
+
+    async def test_sync_does_not_recreate_pairs_after_common_view_cancellation(self):
+        self.cancellation.return_value = True
+        department = SimpleNamespace(id=uuid.uuid4(), code="DEV", name="Development")
+        db = _FakeDb(execute_results=[[], [department], []])
+        event = {
+            "id": "canceled-in-common-view", "subject": "Customer review",
+            "start": {"dateTime": "2026-09-08T10:00:00Z"},
+            "end": {"dateTime": "2026-09-08T11:00:00Z"},
+        }
+        with patch("app.services.microsoft_calendar_sync.fetch_calendar_events", new=AsyncMock(return_value=[event])):
+            await sync_external_calendar_events(db, access_token="mock", connected_by_user_id=uuid.uuid4(),
+                start=datetime(2026, 9, 8, tzinfo=timezone.utc), end=datetime(2026, 9, 9, tzinfo=timezone.utc))
+        meetings = [row for row in db.added if isinstance(row, Meeting)]
+        self.assertEqual(len(meetings), 1)
+        self.assertEqual(meetings[0].meeting_type, "external")
+        self.cancellation.assert_awaited_once()
+
     async def test_calendar_sync_creates_external_before_and_after_meetings(self) -> None:
         participant_id = uuid.uuid4()
         department_id = uuid.uuid4()

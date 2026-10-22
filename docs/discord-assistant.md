@@ -98,14 +98,17 @@ nuk ndryshon: ai vazhdon të transkriptojë si më parë, edhe kur Mira e mban t
 
 **Si funksionon.** Zëri i Mira-s është një bot i dytë Discord, "Mira Host", me token të vetin,
 sepse një bot mund të jetë vetëm në një voice channel për server. Mira Host hyn në kanalin 1H dhe
-flet përmes OpenAI Realtime (`VOICE_ASSISTANT_MODEL`). Kur dikush flet, ajo ndalet menjëherë dhe dëgjon.
+flet përmes OpenAI Realtime (`VOICE_ASSISTANT_MODEL`). Kur dikush flet më shumë se një "aha" ose "po", ajo ndalet
+dhe dëgjon; nuk flet përmbi askënd dhe pret kur dikush ndalet në mes të fjalisë.
 Mesazhet me shkrim i dërgon boti ekzistues PrimeFlow në kanalet private të `/lidh`.
 
 | Kur | Çka ndodh |
 |---|---|
 | 5 min para (11:00, 11:50, 14:20, 16:00; jo 10:00) | Secili me detyra 1H në atë slot merr protokollin, detyrat e slotit dhe detyrat në proces / pa progres nga sloti paraprak |
-| 2 min para | Thirren në 1H Diellza, Gane dhe Elza; Olsa, nëse Elza mungon sot ose s'është kyçur në fillim të slotit. Mira hyn në kanal |
-| Deri në orën e slotit | Faza GA: "Notes të reja?" (për secilin note: personi, data, AM/PM, deadline, simboli; pas "po" krijohet detyra 1H). Pastaj "A ka Done?", vetëm Done dhe Strike të reja, pa përsëritur çka u përmend në 1H-të e mëparshme të sotme |
+| 6 min para | Mira Host hyn në kanal dhe pret në heshtje (nuk dëgjon dhe nuk flet). Nëse lidhja dështon, provon sërish deri në 3 herë |
+| 2 min para | Thirren në 1H Diellza, Gane dhe Elza; Olsa, nëse Elza mungon sot ose s'është kyçur në fillim të slotit. Mira fillon të flasë |
+| Deri në orën e slotit | Faza GA: "Notes të reja?" (për secilin note: personi, data, AM/PM, deadline, simboli; pas "po" krijohet detyra 1H). Pastaj "A ka Done?": vetëm Done dhe Strike të bëra në intervalin e 1H Reports për atë slot (p.sh. 11:00 = 10:00–11:00, nga çdo slot), pa përsëritur çka është lexuar në 1H-të e mëparshme të sotme |
+| Gjatë gjithë takimit | "Mira, shënoje në PX Notes…": Mira e lexon prapa, pas "po" e ruan në PX Notes me avatarin e Mira-s dhe e shënon te takimi |
 | Ora e slotit | Stafi një nga një sipas renditjes së Common View. Mira thërret të radhës pak para se të mbarojë personi aktual, që askush të mos presë. Regjistrohet kur ka filluar dhe kur ka mbaruar secili |
 | Fundi | Transkripti dhe përmbledhja ruhen te faqja **Mira → Takimet 1H** |
 

@@ -25,6 +25,7 @@ PREFIX = "/bot/mira-host"
 MAX_LINE = 2_000_000
 # OpenAI Realtime sessions end after 60 minutes; a 1H never needs that long.
 MAX_MEETING_MINUTES = 55
+CONNECT_ATTEMPTS = 3
 log = logging.getLogger("primeflow.discord.mira_host")
 
 
@@ -34,7 +35,8 @@ def tz():
 
 def task_lines(tasks: list[dict]) -> str:
     def line(t):
-        parts = [t["title"], t["status"], t["period"]]
+        # The Albanian label, so Mira never says "IN_PROGRESS" aloud.
+        parts = [t.get("spoken") or t["title"], t.get("status_label") or t["status"], t["period"]]
         if t.get("symbol"):
             parts.append("simboli " + t["symbol"])
         if t.get("deadline"):
@@ -53,8 +55,8 @@ def turn_brief(current: dict) -> dict:
         "detyrat_e_slotit": task_lines(brief["current"]),
         "slot_paraprak": brief.get("previous_slot"),
         "nga_sloti_paraprak_ne_proces_ose_pa_progres": task_lines(brief["previous_open"]),
-        "progres_i_ri": {"done": [d["title"] for d in progress.get("done", [])],
-                          "strikes": [{"detyra": s["title"], "pikat": [p["text"] for p in s["points"]]}
+        "progres_i_ri": {"done": [d.get("spoken") or d["title"] for d in progress.get("done", [])],
+                          "strikes": [{"detyra": s.get("spoken") or s["title"], "pikat": [p["text"] for p in s["points"]]}
                                       for s in progress.get("strikes", [])]},
     }
 
@@ -154,7 +156,8 @@ class MiraHost:
                         if guild and not self.in_voice(guild, voice, job["primary_discord_user_id"]):
                             await self.notify(job, f"📞 **1H {job['slot']}** – mungon kolegia jote GA, të lutem kyçu në vend të saj. {link}")
                     elif job["kind"] == "join" and self.session is None and guild and voice:
-                        self.task = asyncio.create_task(self.run(job["slot"], guild, voice))
+                        talk_at = datetime.fromisoformat(job["talk_at"]) if job.get("talk_at") else None
+                        self.task = asyncio.create_task(self.run(job["slot"], guild, voice, talk_at))
                 except Exception as exc:
                     log.warning("MIRA_HOST job %s failed: %s", job.get("kind"), type(exc).__name__)
         finally:
@@ -162,20 +165,47 @@ class MiraHost:
 
     # ------------------------------------------------------------ one meeting
 
-    async def run(self, slot: str, guild, voice):
-        session = {"slot": slot, "guild": guild, "voice": voice, "lines": [], "ready": asyncio.Event(),
-                   "closed": asyncio.Event(), "turn_started": None, "turn_nudged": False, "upcoming": None,
-                   "finished": False, "ending": False, "meeting": None, "process": None, "reason": "completed"}
-        self.session = session
-        try:
+    async def connect(self, session, slot: str, guild, voice) -> dict:
+        """Join silently, retrying a failed Discord/OpenAI connection; returns the started session."""
+        for attempt in range(1, CONNECT_ATTEMPTS + 1):
             started = await self.bot.bridge(PREFIX + "/session/start", {"slot": slot})
             session["meeting"] = started["meeting"]["id"]
             session["target"] = started.get("target_minutes") or 4
-            process = HostProcess(lambda message: self.on_worker(session, message))
+            session["attempt"], session["ready"], session["failed"] = attempt, asyncio.Event(), asyncio.Event()
+            # Each attempt has its own process; events of an earlier one are ignored by on_worker.
+            process = HostProcess(lambda message, number=attempt: self.on_worker(session, message, number))
             session["process"] = process
             await process.start(guild_id=str(guild.id), channel_id=str(voice.id), token=settings.MIRA_HOST_BOT_TOKEN,
                                 client_secret=started["client_secret"], model=started["model"])
-            await asyncio.wait_for(session["ready"].wait(), 40)
+            waiters = [asyncio.create_task(session["ready"].wait()), asyncio.create_task(session["failed"].wait()),
+                       asyncio.create_task(session["closed"].wait())]
+            await asyncio.wait(waiters, timeout=70, return_when=asyncio.FIRST_COMPLETED)
+            for waiter in waiters:
+                waiter.cancel()
+            if session["closed"].is_set():
+                raise ValueError("stopped")
+            if session["ready"].is_set() and not session["failed"].is_set():
+                session["reason"] = "completed"
+                return started
+            log.warning("MIRA_HOST connect attempt %s/%s for %s failed: %s", attempt, CONNECT_ATTEMPTS, slot, session["reason"])
+            session["process"] = None
+            await process.close()
+            await asyncio.sleep(3)
+        raise ValueError("connect_failed")
+
+    async def run(self, slot: str, guild, voice, talk_at: datetime | None = None):
+        session = {"slot": slot, "guild": guild, "voice": voice, "lines": [], "ready": asyncio.Event(),
+                   "failed": asyncio.Event(), "closed": asyncio.Event(), "attempt": 0, "turn_started": None,
+                   "turn_nudged": False, "upcoming": None, "finished": False, "ending": False, "meeting": None,
+                   "process": None, "reason": "completed"}
+        self.session = session
+        try:
+            # Mira joins a few minutes early and stays silent, so a failed connection is retried
+            # before the GA team arrives; she starts talking exactly at talk_at.
+            started = await self.connect(session, slot, guild, voice)
+            await self.wait_until(session, talk_at or datetime.now(tz()))
+            if session["closed"].is_set():
+                raise ValueError("stopped")
             await self.say(session, f"SISTEMI: Je në kanalin e 1H {slot}. Faza GA: përshëndet shkurt dhe pyet 'Notes të reja?'.")
             starts_at = datetime.fromisoformat(started["starts_at"])
             deadline = datetime.now(tz()) + timedelta(minutes=MAX_MEETING_MINUTES)
@@ -197,8 +227,9 @@ class MiraHost:
                     await asyncio.wait_for(session["closed"].wait(), 5)
                 await self.flush_lines(session)
         except Exception as exc:
-            session["reason"] = f"error:{type(exc).__name__}"
-            log.warning("MIRA_HOST meeting %s failed: %s", slot, exc)
+            if session["reason"] == "completed":
+                session["reason"] = f"error:{type(exc).__name__}"
+            log.warning("MIRA_HOST meeting %s failed: %s (%s)", slot, exc, session["reason"])
         finally:
             await self.finish(session)
 
@@ -260,7 +291,9 @@ class MiraHost:
 
     # ------------------------------------------------------------ worker events
 
-    async def on_worker(self, session, message: dict):
+    async def on_worker(self, session, message: dict, attempt: int | None = None):
+        if attempt is not None and attempt != session.get("attempt"):
+            return
         kind = message.get("type")
         if kind == "ready":
             session["ready"].set()
@@ -277,11 +310,13 @@ class MiraHost:
         elif kind == "tool_call":
             asyncio.create_task(self.tool(session, message))
         elif kind in ("interrupted", "process_exit", "stopped"):
-            if not session["closed"].is_set():
-                if kind == "interrupted":
-                    session["reason"] = f"interrupted:{message.get('reason')}"[:100]
-                    log.warning("MIRA_HOST interrupted reason=%s close_code=%s", message.get("reason"), message.get("close_code"))
-                session["ready"].set()
+            if kind == "interrupted":
+                session["reason"] = f"interrupted:{message.get('reason')}"[:100]
+                log.warning("MIRA_HOST interrupted reason=%s close_code=%s voice_status=%s", message.get("reason"),
+                            message.get("close_code"), message.get("voice_status"))
+            if not session["ready"].is_set():
+                session["failed"].set()  # still connecting: connect() tries again
+            elif not session["closed"].is_set():
                 session["closed"].set()
         elif kind == "log":
             log.info("MIRA_HOST %s", {k: v for k, v in message.items() if k != "type"})

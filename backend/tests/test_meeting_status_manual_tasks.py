@@ -5,7 +5,7 @@ import unittest
 import uuid
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost/primex_test")
 os.environ.setdefault("JWT_SECRET", "test-secret")
@@ -44,10 +44,15 @@ class TestMeetingStatusManualTasks(unittest.IsolatedAsyncioTestCase):
 
                     db = AsyncMock()
                     db.execute.side_effect = execute
-                    result = await update_meeting_occurrence_status(
-                        meeting.id, MeetingOccurrenceStatusUpdate(occurrence_date=day, status=status),
-                        db=db, user=SimpleNamespace(id=uuid.uuid4()),
-                    )
+                    with patch("app.api.routers.meetings.delete_external_meeting_dependents", new_callable=AsyncMock) as cleanup:
+                        result = await update_meeting_occurrence_status(
+                            meeting.id, MeetingOccurrenceStatusUpdate(occurrence_date=day, status=status),
+                            db=db, user=SimpleNamespace(id=uuid.uuid4()),
+                        )
+                        if link == "external" and status == "canceled":
+                            cleanup.assert_awaited_once_with(db, meeting)
+                        else:
+                            cleanup.assert_not_awaited()
                     self.assertEqual(result.status, status)
                     self.assertEqual(db.execute.await_count, 2)
                     db.commit.assert_awaited_once()

@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 import { MiraMemoryPage } from "@/components/mira-memory/mira-memory-page"
 import { KnowledgeTab } from "@/components/mira/knowledge-tab"
-import { MeetingsTab } from "@/components/mira/meetings-tab"
+import { MeetingsTab, Summary } from "@/components/mira/meetings-tab"
 import { SettingsTab } from "@/components/mira/settings-tab"
 import { clock, json, type HostStatus, type MiraNote, type MiraTab } from "@/lib/mira"
 
@@ -33,7 +33,7 @@ function NotesTab() {
       }
     })()
   }, [apiFetch])
-  if (notes && notes.length === 0) return <p className="py-16 text-center text-sm text-muted-foreground">Mira nuk ka ruajtur ende shënime në PX Notes.</p>
+  if (notes && notes.length === 0) return <p className="py-16 text-center text-sm text-muted-foreground">Mira nuk ka mbajtur ende shënime. Ato shfaqen pas takimit të parë 1H.</p>
   return (
     <ul className="divide-y py-3">
       {notes?.map((note) => (
@@ -41,12 +41,14 @@ function NotesTab() {
           <button type="button" onClick={() => setOpen(open === note.id ? null : note.id)}
             className="flex w-full items-baseline gap-3 text-left text-sm hover:underline">
             <span className="min-w-0 flex-1 truncate font-medium">{note.title}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">{note.status === "OPEN" ? "e hapur" : "e mbyllur"}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {note.kind === "1H" ? "takimi 1H" : note.status === "OPEN" ? "PX Notes · e hapur" : "PX Notes · e mbyllur"}
+            </span>
           </button>
           {open === note.id && (
             <div className="mt-2">
-              <pre className="max-h-[420px] overflow-y-auto whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground/80">{note.content}</pre>
-              <a href={note.url} className="mt-2 inline-block text-xs underline underline-offset-4">Hap te PX Notes</a>
+              <div className="max-h-[520px] overflow-y-auto"><Summary text={note.content} /></div>
+              {note.kind === "PX_NOTE" && <a href={note.url} className="mt-2 inline-block text-xs underline underline-offset-4">Hap te PX Notes</a>}
             </div>
           )}
         </li>

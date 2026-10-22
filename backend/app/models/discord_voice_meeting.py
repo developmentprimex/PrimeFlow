@@ -67,10 +67,15 @@ class DiscordVoiceSegment(Base):
     __table_args__ = (UniqueConstraint('session_id', 'sequence', name='uq_voice_segment_sequence'),)
 
 
-from sqlalchemy import exists  # noqa: E402
+from sqlalchemy import exists, or_  # noqa: E402
 from sqlalchemy.orm import column_property  # noqa: E402
 from app.models.ga_note import GaNote  # noqa: E402
+from app.models.mira_host import Mira1HEvent  # noqa: E402
 
-# A PX Note saved from a Mira meeting; loaded with every GaNote query so all
-# notes endpoints can mark it without a stored column.
-GaNote.from_mira = column_property(exists().where(DiscordVoiceMeeting.saved_note_id == GaNote.id))
+# A PX Note saved from a Mira meeting (the recorder's notes, or a note Mira Host
+# was asked to save in the 1H); loaded with every GaNote query so all notes
+# endpoints can mark it without a stored column.
+GaNote.from_mira = column_property(or_(
+    exists().where(DiscordVoiceMeeting.saved_note_id == GaNote.id),
+    exists().where(Mira1HEvent.note_id == GaNote.id),
+))
