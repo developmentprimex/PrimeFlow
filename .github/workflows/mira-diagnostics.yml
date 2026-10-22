@@ -27,7 +27,7 @@ jobs:
           async def main():
               async with engine.connect() as c:
                   await c.execute(text('SET TRANSACTION READ ONLY'))
-                  meetings = (await c.execute(text('SELECT id, status, partial, error, created_at, started_at, stopped_at, heartbeat_at, memory_status, memory_attempts, memory_error FROM discord_voice_meetings ORDER BY created_at DESC LIMIT 5'))).mappings().all()
+                  meetings = (await c.execute(text('SELECT id, request_id, status, partial, error, created_at, started_at, stopped_at, heartbeat_at, memory_status, memory_attempts, memory_error FROM discord_voice_meetings ORDER BY created_at DESC LIMIT 5'))).mappings().all()
                   for row in meetings:
                       print('MIRA_SESSION', json.dumps(dict(row), default=str))
                       segments = (await c.execute(text('SELECT sequence, status, error, start_ms, end_ms FROM discord_voice_segments WHERE session_id=:id ORDER BY sequence'), {'id': row['id']})).mappings().all()
@@ -43,7 +43,7 @@ jobs:
               $_ -match 'MIRA_DIAGNOSTIC'
             } | Select-Object -Last 45
           }
-          # Mira's memory register runs in the Celery worker; pm2 names its logs celery-worker-*.
-          Get-ChildItem 'C:\pm2-system\logs\celery-worker*' -File -ErrorAction SilentlyContinue | ForEach-Object {
-            Get-Content -LiteralPath $_.FullName -Tail 4000 | Where-Object { $_ -match 'MIRA_DIAGNOSTIC memory' } | Select-Object -Last 30
+          # Memory runs in celery_memory_worker; notes (finalization) in celery_worker. pm2 writes '_' as '-'.
+          Get-ChildItem 'C:\pm2-system\logs\celery*worker*' -File -ErrorAction SilentlyContinue | ForEach-Object {
+            Get-Content -LiteralPath $_.FullName -Tail 4000 | Where-Object { $_ -match 'MIRA_DIAGNOSTIC' } | Select-Object -Last 30
           }

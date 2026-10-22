@@ -172,6 +172,15 @@ module.exports = {
       env: sharedEnv,
     },
     {
+      name: "celery_memory_worker",
+      cwd,
+      script: python,
+      args: "-m celery -A app.celery_app.celery_app worker -l info --pool=solo -Q mira_memory -n mira_memory@%h",
+      autorestart: true,
+      max_restarts: 10,
+      env: sharedEnv,
+    },
+    {
       name: "celery_beat",
       cwd,
       script: python,

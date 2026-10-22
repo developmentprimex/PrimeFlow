@@ -98,15 +98,19 @@ nuk ndryshon: ai vazhdon të transkriptojë si më parë, edhe kur Mira e mban t
 
 **Si funksionon.** Zëri i Mira-s është një bot i dytë Discord, "Mira Host", me token të vetin,
 sepse një bot mund të jetë vetëm në një voice channel për server. Mira Host hyn në kanalin 1H dhe
-flet përmes OpenAI Realtime (`VOICE_ASSISTANT_MODEL`). Kur dikush flet, ajo ndalet menjëherë dhe dëgjon.
+flet përmes OpenAI Realtime (`VOICE_ASSISTANT_MODEL`). Kur dikush flet më shumë se një "aha" ose "po", ajo ndalet
+dhe dëgjon; nuk flet përmbi askënd dhe pret kur dikush ndalet në mes të fjalisë.
 Mesazhet me shkrim i dërgon boti ekzistues PrimeFlow në kanalet private të `/lidh`.
 
 | Kur | Çka ndodh |
 |---|---|
 | 5 min para (11:00, 11:50, 14:20, 16:00; jo 10:00) | Secili me detyra 1H në atë slot merr protokollin, detyrat e slotit dhe detyrat në proces / pa progres nga sloti paraprak |
-| 2 min para | Thirren në 1H Diellza, Gane dhe Elza; Olsa, nëse Elza mungon sot ose s'është kyçur në fillim të slotit. Mira hyn në kanal |
-| Deri në orën e slotit | Faza GA: "Notes të reja?" (për secilin note: personi, data, AM/PM, deadline, simboli; pas "po" krijohet detyra 1H). Pastaj "A ka Done?", vetëm Done dhe Strike të reja, pa përsëritur çka u përmend në 1H-të e mëparshme të sotme |
-| Ora e slotit | Stafi një nga një sipas renditjes së Common View. Mira thërret të radhës pak para se të mbarojë personi aktual, që askush të mos presë. Regjistrohet kur ka filluar dhe kur ka mbaruar secili |
+| 6 min para | Mira Host hyn në kanal dhe pret në heshtje (nuk dëgjon dhe nuk flet). Nëse lidhja dështon, provon sërish deri në 3 herë |
+| 2 min para | Thirren në 1H Diellza, Gane dhe Elza; Olsa, nëse Elza mungon sot ose s'është kyçur në fillim të slotit. Mira fillon të flasë |
+| 2 min para, faza GA | 1) "A ka reply nga GA te detyrat për GA?" (detyrat me simbolin GA, sipas personave). 2) "Notes të reja?": për secilin note "A krijojmë detyrë për dikë?"; kur thonë për kë, detyra 1H krijohet menjëherë. 3) Done dhe Strike të bëra në intervalin e 1H Reports për atë slot (p.sh. 11:00 = 10:00–11:00, nga çdo slot), sipas personave në renditjen e 1H SHTYPI, pa përsëritur çka është lexuar më herët sot. Stafi fillon kur mbaron GA (jo para orës së slotit, e shumta 8 min pas saj) |
+| Gjatë gjithë takimit | "Mira, shënoje në PX Notes…": Mira e ruan menjëherë në PX Notes me avatarin e Mira-s dhe e shënon te takimi |
+| Stafi | Një nga një sipas renditjes së Common View: së pari detyrat e slotit paraprak në proces / pa progres (në 11:50 të të gjitha sloteve paraprake), pastaj ato të slotit. Pyetja sipas ngjyrës: e verdhë "A ke me vazhdu, kur pritet me u kry?", rozë "Pse s'ke vazhdu, kur vazhdon?", e gjelbër (kur janë kryer të gjitha) "Me çka vazhdon në slotin tjetër?". Në 16:00 edhe detyrat BLLOK. Mira thërret të radhës pak para se të mbarojë personi aktual |
+| 11:50, në fund | Rishikimi PM: për secilin detyrat PM të hapura: a vazhdon, a shtyhet ndonjë (për nesër / datë tjetër) dhe pse. Shtyrjet ruhen si shënime të takimit; Mira nuk i ndryshon detyrat |
 | Fundi | Transkripti dhe përmbledhja ruhen te faqja **Mira → Takimet 1H** |
 
 **Komandat** (vetëm admin/menaxher; edhe nga faqja **Mira → Cilësimet**):

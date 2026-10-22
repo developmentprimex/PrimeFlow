@@ -31,7 +31,9 @@ class VoiceJobTests(PostgresMeetingTests):
         async with self.sessions() as db:await service.finish_session(db,sid,Finish(capture_token=token,instance_id=instance,segment_count=2))
         with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='Vendime: kontrollo.')) as summary:
             await jobs.process_voice_meetings()
-            self.assertEqual([s['sequence'] for s in summary.call_args.args[1]],[0,1])
+            # One speaker's consecutive chunks reach the notes model as one passage.
+            self.assertEqual(summary.call_args.args[1],[{'segment':0,'speaker':'Ana','time':'00:00–00:02',
+                'text':'Kontrollo raportin. Kontrollo raportin.'}])
             async with self.sessions() as db:self.assertEqual((await db.get(Meeting,sid)).status,'READY')
 
     async def test_failed_segment_records_the_openai_status_for_diagnostics(self):
@@ -73,6 +75,77 @@ class VoiceJobTests(PostgresMeetingTests):
             self.assertEqual(note.content,'**Përmbledhja:** Raporti.');self.assertEqual(note.created_by,self.uid)
         async with self.sessions() as db:
             self.assertEqual((await service.claim_deliveries(db))['jobs'],[])
+
+    async def test_a_mira_note_opens_the_transcript_it_was_written_from(self):
+        from fastapi import HTTPException
+        from app.models.ga_note import GaNote
+        from app.models.mira_host import Mira1HEvent,Mira1HMeeting
+        from app.services import mira_host as host
+        sid=await self.scheduled_meeting(timedelta(minutes=2))
+        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='**Përmbledhja:** Raporti.')):
+            await jobs.process_voice_meetings()
+        async with self.sessions() as db:
+            note_id=(await db.get(Meeting,sid)).saved_note_id
+            result=await host.note_transcript(db,note_id)
+            self.assertEqual(result['passages'],[{'speaker':'Ana','time':'00:00–00:01','text':'Ana dërgon raportin.'}])
+            # A note Mira Host saved during that 1H opens the same recording.
+            other=GaNote(id=uuid.uuid4(),content='Shënim',created_by=self.uid);db.add(other)
+            meeting=Mira1HMeeting(id=uuid.uuid4(),meeting_date=service.now().date(),slot='16:00',voice_meeting_id=sid);db.add(meeting)
+            await db.flush()
+            db.add(Mira1HEvent(id=uuid.uuid4(),meeting_date=meeting.meeting_date,slot='16:00',meeting_id=meeting.id,
+                kind='PX_NOTE',note_id=other.id))
+            await db.flush()
+            self.assertEqual((await host.note_transcript(db,other.id))['passages'],result['passages'])
+            with self.assertRaises(HTTPException) as missing:await host.note_transcript(db,uuid.uuid4())
+            self.assertEqual(missing.exception.status_code,404)
+
+    async def scheduled_meeting(self,stopped_ago):
+        from app.models.discord_voice_meeting import DiscordVoiceSegment as Segment
+        sid=uuid.uuid4()
+        async with self.sessions() as db:
+            db.add(Meeting(id=sid,user_id=self.uid,link_id=self.lid,department_id=self.did,guild_id='123',
+                voice_channel_id='55',private_channel_id='44',request_id='auto1h-202610201558',instance_id=uuid.uuid4(),
+                capture_token_hash=service.token_hash('x'*40),title='1H',status='FINALIZING',stop_authorized=True,
+                expected_segments=1,stopped_at=service.now()-stopped_ago))
+            db.add(Segment(id=uuid.uuid4(),session_id=sid,sequence=0,speaker_id='12',speaker_name='Ana',start_ms=0,
+                end_ms=1000,content_hash='h',status='DONE',transcript='Ana dërgon raportin.'))
+            await db.commit()
+        return sid
+
+    async def test_openai_outage_keeps_the_1h_notes_for_a_later_retry(self):
+        from app.services.discord_voice_openai import ProviderError
+        sid=await self.scheduled_meeting(timedelta(minutes=2))
+        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',
+                AsyncMock(side_effect=ProviderError(503))),patch.object(jobs.settings,'DISCORD_GUILD_ID','123'):
+            stats=await jobs.process_voice_meetings()
+            self.assertEqual(stats['retrying'],1)
+            async with self.sessions() as db:
+                row=await db.get(Meeting,sid)
+                self.assertEqual(row.status,'FINALIZING');self.assertGreater(row.lease_until,service.now())
+                self.assertEqual((await service.claim_deliveries(db))['jobs'],[])
+            # The next tick inside the back-off leaves it alone.
+            self.assertEqual((await jobs.process_voice_meetings())['retrying'],0)
+
+    async def test_1h_notes_that_cannot_be_written_reach_the_organizer_instead_of_vanishing(self):
+        from app.services.discord_voice_openai import ProviderError
+        sid=await self.scheduled_meeting(timedelta(minutes=40))
+        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',
+                AsyncMock(side_effect=ProviderError(503))),patch.object(service.settings,'DISCORD_GUILD_ID','123'):
+            await jobs.process_voice_meetings()
+            async with self.sessions() as db:
+                row=await db.get(Meeting,sid)
+                self.assertEqual(row.status,'FAILED');self.assertIsNone(row.delivered_at)
+                self.assertEqual([j['id'] for j in (await service.claim_deliveries(db))['jobs']],[str(sid)])
+
+    async def test_1h_notes_that_px_notes_refuses_stay_ready_for_the_save_button(self):
+        sid=await self.scheduled_meeting(timedelta(minutes=2))
+        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',
+                AsyncMock(return_value='**Përmbledhja:** Raporti.')),patch.object(service,'store_note',AsyncMock(side_effect=RuntimeError('x'))):
+            with self.assertLogs(jobs.log,'WARNING') as logs:await jobs.process_voice_meetings()
+        self.assertIn('stage=px_notes',logs.output[0])
+        async with self.sessions() as db:
+            row=await db.get(Meeting,sid)
+            self.assertEqual(row.status,'READY');self.assertIsNone(row.delivered_at);self.assertIsNone(row.saved_note_id)
 
     async def test_stale_capture_recovers_as_partial_without_starting_audio(self):
         sid=uuid.uuid4()

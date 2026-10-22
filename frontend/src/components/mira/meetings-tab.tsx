@@ -12,7 +12,7 @@ import {
 const ACCENT = "#2f5d8a"
 
 // Mira's notes use **bold** section titles and "-" lists; nothing else is rendered as markup.
-function Summary({ text }: { text: string }) {
+export function Summary({ text }: { text: string }) {
   return (
     <div className="max-w-[70ch] space-y-1.5 text-sm leading-relaxed">
       {text.split("\n").map((line, index) => (
@@ -61,7 +61,7 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
   detail: MeetingDetail; onBack: () => void; onResummarize: () => void; canManage: boolean
 }) {
   const [showRecorder, setShowRecorder] = React.useState(false)
-  const created = detail.events.filter((e) => e.kind === "TASK_CREATED")
+  const created = detail.events.filter((e) => e.kind === "TASK_CREATED" || e.kind === "PX_NOTE")
   const invitations = detail.events.filter((e) => ["BRIEF", "GA_CALL", "GA_FALLBACK", "NOTE"].includes(e.kind))
   const done = detail.mentions.filter((m) => m.kind === "DONE")
   const strikes = detail.mentions.filter((m) => m.kind === "STRIKE")

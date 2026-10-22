@@ -27,6 +27,9 @@ celery_app.conf.task_serializer = "json"
 celery_app.conf.result_serializer = "json"
 celery_app.conf.accept_content = ["json"]
 
+# Mira's memory has its own worker so a long extraction never delays meeting notes.
+celery_app.conf.task_routes = {"app.celery_tasks.process_mira_memory": {"queue": "mira_memory"}}
+
 celery_app.conf.beat_schedule = {
     "process-recording-analyses": {"task": "app.celery_tasks.process_recording_analyses", "schedule": 5.0},
     "process-discord-voice-meetings": {"task": "app.celery_tasks.process_discord_voice_meetings", "schedule": 30.0},

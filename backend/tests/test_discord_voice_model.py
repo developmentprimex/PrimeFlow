@@ -25,8 +25,11 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
         self.schema = 'mira_test_' + uuid.uuid4().hex
         self.engine = create_async_engine(os.environ['VOICE_TEST_DATABASE_URL'], execution_options={'schema_translate_map':{None:self.schema}})
         from app.models.ga_note_attachment import GaNoteAttachment
-        # GaNote always loads its attachments, which no foreign key from these tables reaches.
-        tables = {Segment.__table__, Meeting.__table__, GaNote.__table__, DiscordLink.__table__, GaNoteAttachment.__table__}
+        from app.models.mira_host import Mira1HEvent
+        # GaNote always loads its attachments and asks whether Mira wrote it (mira_1h_events),
+        # which no foreign key from these tables reaches.
+        tables = {Segment.__table__, Meeting.__table__, GaNote.__table__, DiscordLink.__table__, GaNoteAttachment.__table__,
+            Mira1HEvent.__table__}
         while True:
             expanded = tables | {fk.column.table for t in tables for fk in t.foreign_keys}
             if expanded == tables: break
@@ -86,8 +89,8 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
         path=Path(__file__).resolve().parents[1]/'alembic/versions/0152_discord_voice_meetings.py'
         spec=importlib.util.spec_from_file_location('voice_migration',path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         async with self.engine.begin() as conn:
-            await conn.run_sync(lambda c: Segment.__table__.drop(c))
-            await conn.run_sync(lambda c: Meeting.__table__.drop(c))
+            # CASCADE only drops the Mira Host foreign keys that point at these tables.
+            await conn.execute(text(f'DROP TABLE {self.schema}.{Segment.__tablename__}, {self.schema}.{Meeting.__tablename__} CASCADE'))
             await conn.execute(text(f'SET LOCAL search_path TO {self.schema},public'))
             def upgrade(c):
                 with patch.object(module,'op',Operations(MigrationContext.configure(c))):module.upgrade()

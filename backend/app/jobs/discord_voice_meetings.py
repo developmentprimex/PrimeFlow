@@ -13,10 +13,15 @@ from app.services import mira_memory
 from app.config import settings
 
 log=logging.getLogger(__name__)
+# Covers the provider's own retries (provider.SUMMARY_*) for one notes call.
+FINALIZE_LEASE=timedelta(minutes=15)
+# An OpenAI outage or rate limit is retried on later ticks for this long after the meeting.
+SUMMARY_RETRY_FOR=timedelta(minutes=30)
+SUMMARY_RETRY_AFTER=timedelta(minutes=2)
 
 
 async def process_voice_meetings():
-    stats={'ready':0,'failed':0,'interrupted':0}
+    stats={'ready':0,'failed':0,'interrupted':0,'retrying':0}
     async with SessionLocal() as db:
         result=await db.execute(update(Meeting).where(Meeting.status.in_(['STARTING','LISTENING']),
             Meeting.heartbeat_at<now()-timedelta(seconds=60)).values(status='INTERRUPTED',partial=True,
@@ -37,17 +42,18 @@ async def process_voice_meetings():
             expected=row.expected_segments
             if expected is not None and len(segments)<expected and row.stopped_at>now()-timedelta(seconds=60):continue
             partial=bool(row.partial or expected is None or len(segments)!=(expected or 0) or any(s.status!='DONE' for s in segments))
-            parts=[{'sequence':s.sequence,'speaker_id':s.speaker_id,'speaker_name':s.speaker_name,
+            parts=provider.compact_transcript([{'sequence':s.sequence,'speaker_id':s.speaker_id,'speaker_name':s.speaker_name,
                 'start_ms':s.start_ms,'end_ms':s.end_ms,'transcript':s.transcript}
-                for s in segments if s.status=='DONE' and s.transcript]
+                for s in segments if s.status=='DONE' and s.transcript])
             if not parts:
                 row.status='FAILED';row.error='Nuk u dëgjua të folur i kuptueshëm.';row.partial=partial
                 row.memory_status='SKIPPED'
                 # A scheduled 1H slot nobody spoke in is not worth a Discord message.
                 if service.is_scheduled(row):row.delivered_at=now()
                 await db.commit();stats['failed']+=1;continue
-            lease=uuid.uuid4();row.lease_token=lease;row.lease_until=now()+timedelta(seconds=180)
+            lease=uuid.uuid4();row.lease_token=lease;row.lease_until=now()+FINALIZE_LEASE
             title,cache,meeting_date=row.title,row.summary_progress or {},row.started_at or row.created_at
+            stopped=row.stopped_at or row.created_at
             memory=None
             if settings.MIRA_MEMORY_ENABLED:
                 # Notes never wait on memory: without a snapshot they are written as before.
@@ -60,29 +66,47 @@ async def process_voice_meetings():
             async with SessionLocal() as db:
                 current=(await db.execute(select(Meeting).where(Meeting.id==sid).with_for_update())).scalar_one()
                 if current.lease_token!=lease:raise ValueError('finalization_lease_changed')
-                current.summary_progress=dict(progress);current.lease_until=now()+timedelta(seconds=180)
+                current.summary_progress=dict(progress);current.lease_until=now()+FINALIZE_LEASE
                 await db.commit()
+        retry=False
         try:
-            draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
-                cache=cache,checkpoint=checkpoint,memory=memory)
+            try:
+                draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
+                    cache=cache,checkpoint=checkpoint,memory=memory)
+            except ValueError:
+                if memory is None:raise
+                # Memory must never cost the notes: write them as before.
+                log.warning('MIRA_DIAGNOSTIC memory meeting=%s stage=notes fallback=no_memory',sid)
+                draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
+                    cache=cache,checkpoint=checkpoint)
             error=None
-        except ValueError:
+        except ValueError as exc:
+            # A rate limit or outage is retried on a later tick; finished parts stay in
+            # summary_progress, so the retry continues where this one stopped.
+            retry=getattr(exc,'transient',False) and now()-stopped<SUMMARY_RETRY_FOR
+            log.warning('MIRA_DIAGNOSTIC meeting=%s stage=notes error=%s http_status=%s retry=%s',
+                sid,exc,getattr(exc,'status',None),retry)
             draft=None;error='Përmbledhja dështoi. Transkripti i marrë mbetet i ruajtur.'
         async with SessionLocal() as db:
             current=(await db.execute(select(Meeting).where(Meeting.id==sid).with_for_update())).scalar_one()
             if current.lease_token!=lease or current.status not in ('FINALIZING','INTERRUPTED'):continue
+            if retry:
+                current.lease_until=now()+SUMMARY_RETRY_AFTER
+                await db.commit();stats['retrying']+=1;continue
             current.status='FAILED' if error else 'READY';current.error=error
             current.draft_text=draft;current.partial=partial;current.lease_until=None
             current.memory_status='PENDING' if settings.MIRA_MEMORY_ENABLED else 'SKIPPED'
-            if service.is_scheduled(current):
+            if service.is_scheduled(current) and not error:
                 # Scheduled 1H meetings go straight to PX Notes, in the same commit so
                 # Discord delivery never sees them READY. If saving fails, the savepoint
-                # rolls back and the notes are delivered in Discord as usual.
+                # rolls back and the notes reach the organizer in Discord with the save
+                # button. Failed notes are delivered too, so no 1H is lost silently.
                 try:
                     async with db.begin_nested():
-                        if not error:await service.store_note(db,current,await db.get(User,current.user_id))
+                        await service.store_note(db,current,await db.get(User,current.user_id))
                         current.delivered_at=now()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.warning('MIRA_DIAGNOSTIC meeting=%s stage=px_notes error=%s detail=%s',
+                        sid,type(exc).__name__,getattr(exc,'detail',None))
             await db.commit();stats['failed' if error else 'ready']+=1
     return stats

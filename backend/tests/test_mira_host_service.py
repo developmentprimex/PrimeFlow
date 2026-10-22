@@ -54,9 +54,45 @@ class SlotDataTests(unittest.TestCase):
         self.assertEqual(brief['current'][0]['symbol'], 'M2/3')
         self.assertTrue(brief['current'][0]['deadline'])
         self.assertEqual([t['title'] for t in brief['previous_open']], ['EF: E PAPERFUNDUAR'])
+        self.assertEqual(brief['current'][0]['status_label'], 'në proces')
         text = host.brief_message(brief, host.DEFAULT_PROTOCOL)
         self.assertIn('Share screen side by side', text)
         self.assertIn('Nga sloti paraprak 10:00', text)
+
+    def test_at_1150_open_tasks_of_every_earlier_slot_are_asked_and_colours_are_given(self):
+        data = host.SlotData(payload([
+            item('EF', '10:00', 'NGA DHJETA', rank=0, status='TODO'),
+            item('EF', '11:00', 'NGA NJEMBEDHJETA', rank=0, status='IN_PROGRESS'),
+            item('EF', '11:50', 'E KRYER', rank=0, status='DONE', completed_at=datetime(2026, 10, 21, 11, 20, tzinfo=TZ).isoformat()),
+        ]), DAY)
+        brief = host.person_brief(data, '11:50', IDS['EF'])
+        self.assertEqual([t['color'] for t in brief['previous_open']], ['rozë', 'e verdhë'])
+        self.assertEqual(brief['previous_slot'], '10:00, 11:00')
+        self.assertTrue(brief['all_done'])
+        # Other slots ask only the slot right before them.
+        self.assertEqual(host.person_brief(data, '11:00', IDS['EF'])['previous_slot'], '10:00')
+
+    def test_blocked_tasks_are_asked_only_at_1600(self):
+        source = payload([item('EF', '16:00', 'MBYLLJA', rank=0)])
+        blocked = item('EF', None, 'BLLOK RAPORTI', rank=0)
+        blocked.pop('one_h_report_slot')
+        source['items']['blocked'] = [blocked]
+        data = host.SlotData(source, DAY)
+        self.assertEqual([t['spoken'] for t in host.person_brief(data, '16:00', IDS['EF'])['blocked']], ['BLLOK RAPORTI'])
+        self.assertEqual(host.person_brief(data, '14:20', IDS['EF'])['blocked'], [])
+
+    def test_ga_tasks_pm_review_and_progress_follow_the_common_view_order(self):
+        data = host.SlotData(payload([
+            item('RA', '10:00', 'PER GA', rank=0, one_h_marker='FLAG'),
+            item('EF', '11:00', 'PM PUNE', rank=0, finish_period='PM'),
+            item('EF', '11:00', 'PER GA EDHE', rank=1, one_h_marker='FLAG'),
+        ]), DAY)
+        self.assertEqual([p['person'] for p in data.ga_flagged()], ['RA', 'EF'])
+        self.assertEqual(data.pm_open()[0]['initials'], 'EF')
+        self.assertEqual(data.pm_open()[0]['detyrat_pm'], ['PM PUNE (e verdhë)'])
+        progress = {'done': [{'spoken': 'A', 'owners': ['EF']}],
+                    'strikes': [{'spoken': 'B', 'owners': ['RA'], 'points': [{'text': 'p1'}]}]}
+        self.assertEqual([g['person'] for g in host.by_person(data, progress)], ['RA', 'EF'])
 
     def test_ga_fallback_is_used_when_the_primary_is_absent_today(self):
         row = MiraHostSettings(ga_participants=host.DEFAULT_GA_PARTICIPANTS)
@@ -101,8 +137,14 @@ class TickTests(unittest.IsolatedAsyncioTestCase):
         return [(j['kind'], j['slot']) for j in result['jobs']]
 
     async def test_no_pre_brief_for_10_but_for_11(self):
-        self.assertEqual(await self.kinds(9, 55), [])
-        self.assertEqual(await self.kinds(10, 55), [('brief', '11:00')])
+        self.assertNotIn(('brief', '10:00'), await self.kinds(9, 55))
+        self.assertIn(('brief', '11:00'), await self.kinds(10, 55))
+
+    async def test_mira_connects_six_minutes_early_and_talks_two_minutes_before(self):
+        self.assertEqual(await self.kinds(9, 53), [])
+        result = await host.tick(self.db, datetime(2026, 10, 21, 9, 54, 10, tzinfo=TZ))
+        join = next(j for j in result['jobs'] if j['kind'] == 'join')
+        self.assertEqual(datetime.fromisoformat(join['talk_at']).strftime('%H:%M'), '09:58')
 
     async def test_ga_is_called_two_minutes_before_and_mira_joins(self):
         kinds = await self.kinds(9, 58)
@@ -130,6 +172,11 @@ class RealtimeSessionTests(unittest.IsolatedAsyncioTestCase):
             result = await host.realtime_session(SimpleNamespace(), meeting)
         self.assertEqual(result['client_secret'], 'ek_test')
         self.assertNotIn('language', sent['session']['audio']['input']['transcription'])
+        # Mira waits for unfinished sentences; the worker, not OpenAI, decides when she is interrupted.
+        self.assertEqual(sent['session']['audio']['input']['turn_detection'],
+                         {'type': 'semantic_vad', 'eagerness': 'low', 'create_response': True, 'interrupt_response': False})
+        self.assertEqual(sent['session']['reasoning'], {'effort': settings.MIRA_HOST_REASONING_EFFORT})
+        self.assertIn('wait_for_user', [tool['name'] for tool in sent['session']['tools']])
 
 
 class ProgressTests(unittest.IsolatedAsyncioTestCase):
@@ -147,6 +194,29 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
             progress = await host.new_progress(db, meeting, data)
         self.assertEqual([d['title'] for d in progress['done']], ['RA: NEW'])
         self.assertEqual(progress['strikes'][0]['points'][0]['text'], 'Me u nxerr transkripta')
+
+    async def test_only_work_done_in_the_1h_report_window_is_new(self):
+        data = host.SlotData(payload([
+            item('EF', '11:00', 'BEFORE 10', rank=0, status='DONE', completed_at=datetime(2026, 10, 21, 9, 40, tzinfo=TZ).isoformat()),
+            item('RA', '16:00', 'AT 10:30', rank=1, status='DONE', completed_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ).isoformat()),
+        ]), DAY)
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[]))))))
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
+        with patch.object(host, 'mentioned', AsyncMock(return_value=set())):
+            progress = await host.new_progress(db, meeting, data, since=datetime(2026, 10, 21, 10, tzinfo=TZ))
+        # Like the 11:00 1H report: 10:00-11:00 only, from any slot.
+        self.assertEqual([d['title'] for d in progress['done']], ['RA: AT 10:30'])
+
+    async def test_the_window_follows_the_1h_report_and_closes_the_gap_after_miras_last_reading(self):
+        def db(read_at):
+            return SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=read_at))))
+        at = lambda h, m: datetime(2026, 10, 21, h, m, tzinfo=TZ)
+        first = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='10:00')
+        self.assertEqual(await host.progress_since(db(None), first), at(8, 0))
+        later = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:50')
+        self.assertEqual(await host.progress_since(db(None), later), at(11, 0))
+        # Mira read the 11:00 progress at 10:58; what was done 10:58-11:00 is still new at 11:50.
+        self.assertEqual(await host.progress_since(db(at(10, 58)), later), at(10, 58))
 
 
 class CreateTaskTests(unittest.IsolatedAsyncioTestCase):
@@ -169,6 +239,28 @@ class CreateTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body['assignees'], [IDS['EF']])
         self.assertTrue(body['is_deadline_important'])
 
+    async def test_a_dictated_px_note_is_saved_through_the_api_and_linked_to_mira(self):
+        db = SimpleNamespace(commit=AsyncMock(), add=Mock())
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:50')
+        note_id = str(uuid.uuid4())
+        api = AsyncMock(return_value={'id': note_id})
+        actor = SimpleNamespace(id=uuid.uuid4(), role=host.UserRole.ADMIN, department_id=None)
+        with patch('app.services.discord_task_tools.user_api', api), \
+             patch.object(host, 'acting_user', AsyncMock(return_value=actor)):
+            result = await host.save_px_note(db, meeting, host.PxNote(text=' Oferta per klientin X ', symbol='?'))
+        self.assertTrue(result['success'])
+        self.assertEqual(api.await_args.args[1:], ('POST', '/api/ga-notes'))
+        self.assertEqual(api.await_args.kwargs['body'], {'content': 'Oferta per klientin X', 'one_h_marker': 'QUESTION',
+                                                         'department_id': None})
+        event = db.add.call_args.args[0]
+        self.assertEqual((event.kind, str(event.note_id), event.meeting_id), ('PX_NOTE', note_id, meeting.id))
+
+    def test_people_named_in_a_note_are_proposed_but_markers_are_not(self):
+        data = host.SlotData(payload([]), DAY)
+        self.assertEqual(host.note_people(data, 'EF: oferta per klientin, GA !, M2'), ['EF'])
+        self.assertEqual(host.note_people(data, 'Ta thirr Rinesa Ahmeti dhe OH per PDF'), ['OH', 'RA'])
+        self.assertEqual(host.note_people(data, 'Thirr klientin ZZ'), [])
+
     async def test_unknown_person_is_asked_again_not_guessed(self):
         note = SimpleNamespace(id=uuid.uuid4(), is_converted_to_task=False, content='X', department_id=None)
         db = SimpleNamespace(get=AsyncMock(return_value=note), commit=AsyncMock(), add=Mock())
@@ -187,3 +279,61 @@ class KnowledgeTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SpokenTitleTests(unittest.TestCase):
+    def test_owners_and_leading_numbers_are_not_read_aloud(self):
+        self.assertEqual(host.spoken_title('RA/OH: 13 EVENTE ASISTENT'), 'EVENTE ASISTENT')
+        self.assertEqual(host.spoken_title('EH: 39/10 WKF VS API'), 'WKF VS API')
+        self.assertEqual(host.spoken_title('OH: 08:00 OH: FRG: EM: SB', ['OH']), 'FRG: EM: SB')
+        self.assertEqual(host.spoken_title('EH: EH: CODEX ACC', ['EH']), 'CODEX ACC')
+        self.assertEqual(host.spoken_title('EP/ESH/DV: 5 PIM- IDENTIFIKIMI'), 'PIM- IDENTIFIKIMI')
+        self.assertEqual(host.spoken_title('LH: SRV DE DEAKTIVIZIM'), 'SRV DE DEAKTIVIZIM')
+        self.assertEqual(host.spoken_title('2026'), '2026')
+
+
+class SharedTaskTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_task_shared_by_two_people_is_reported_once(self):
+        first, second = str(uuid.uuid4()), str(uuid.uuid4())
+        done_at = datetime(2026, 10, 21, 10, 30, tzinfo=TZ).isoformat()
+        data = host.SlotData(payload([
+            item('EF', '10:00', 'ASISTENTI PER TAK', rank=0, status='DONE', task_id=first, completed_at=done_at),
+            item('RA', '10:00', 'ASISTENTI PER TAK', rank=1, status='DONE', task_id=second, completed_at=done_at),
+        ]), DAY)
+        strikes = [SimpleNamespace(task_id=uuid.UUID(t), point_key=f'k{t}', action='STRUCK', point_text='Sekuenca vetem kur duhet',
+                                   occurred_at=datetime(2026, 10, 21, 9, tzinfo=timezone.utc)) for t in (first, second)]
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=strikes))))))
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
+        with patch.object(host, 'mentioned', AsyncMock(return_value=set())):
+            progress = await host.new_progress(db, meeting, data)
+        self.assertEqual(len(progress['done']), 1)
+        self.assertEqual(progress['done'][0]['owners'], ['EF', 'RA'])
+        self.assertEqual(len(progress['strikes']), 1)
+        self.assertEqual([p['text'] for p in progress['strikes'][0]['points']], ['Sekuenca vetem kur duhet'])
+
+
+class TurnNotesTests(unittest.TestCase):
+    def test_only_the_lines_spoken_during_a_turn_belong_to_it(self):
+        transcript = [{'at': f'2026-10-21T14:2{m}:00+02:00', 'speaker': s, 'text': t}
+                      for m, s, t in ((0, 'Mira', 'Rinesa?'), (1, 'Rinesa', '299 kompani'), (3, 'Endi', 'skema'))]
+        lines = host.lines_during(transcript, '2026-10-21T14:20:30+02:00', '2026-10-21T14:22:00+02:00')
+        self.assertEqual([l['speaker'] for l in lines], ['Rinesa'])
+
+
+class JoinRetryTests(unittest.TestCase):
+    def setUp(self):
+        self.row = MiraHostSettings(updated_at=datetime(2026, 10, 21, 16, 1, tzinfo=TZ))
+
+    def meeting(self, error, attempts=1, ended=datetime(2026, 10, 21, 15, 58, 39, tzinfo=TZ), status='ABORTED'):
+        return Mira1HMeeting(status=status, error=error, join_attempts=attempts, ended_at=ended)
+
+    def test_a_failed_voice_connection_is_retried_a_few_times(self):
+        self.assertTrue(host.can_retry(self.meeting('interrupted:connect_timeout'), self.row))
+        self.assertTrue(host.can_retry(self.meeting('realtime:OpenAI refuzoi'), self.row))
+        self.assertFalse(host.can_retry(self.meeting('interrupted:connect_timeout', attempts=3), self.row))
+
+    def test_restarting_after_mira_ndalo_rejoins_but_a_held_meeting_never_repeats(self):
+        self.assertTrue(host.can_retry(self.meeting('stopped_by_command'), self.row))
+        self.assertFalse(host.can_retry(self.meeting('stopped_by_command', ended=datetime(2026, 10, 21, 16, 5, tzinfo=TZ)), self.row))
+        self.assertFalse(host.can_retry(self.meeting(None, status='DONE'), self.row))
+        self.assertFalse(host.can_retry(self.meeting('stale'), self.row))

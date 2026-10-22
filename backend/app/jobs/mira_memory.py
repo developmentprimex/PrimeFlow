@@ -37,6 +37,11 @@ async def claim(db):
         .order_by(started()).limit(1).with_for_update())).scalar_one_or_none()
     if row is None:
         return None, False
+    if row.memory_status == 'RUNNING' and row.memory_attempts >= settings.MIRA_MEMORY_MAX_ATTEMPTS:
+        # The worker died mid-run on every attempt; stop so later meetings are not held forever.
+        row.memory_status, row.memory_error, row.memory_lease_until = 'FAILED', 'lease_expired', None
+        log.warning('MIRA_DIAGNOSTIC memory meeting=%s stage=claim error=lease_expired attempt=%s', row.id, row.memory_attempts)
+        return None, False
     # An earlier meeting still preparing its notes goes first, but holds the queue only so long.
     earlier = await db.scalar(select(Meeting.id).where(Meeting.status.in_(['FINALIZING', 'INTERRUPTED']),
         started() < (row.started_at or row.created_at),

@@ -359,6 +359,7 @@ jobs:
           call pm2 delete primeflow-report-scheduler || ver > NUL
           call pm2 delete primex-tomorrow-shtypi-scheduler || ver > NUL
           call pm2 delete celery_worker || ver > NUL
+          call pm2 delete celery_memory_worker || ver > NUL
           call pm2 delete celery_beat || ver > NUL
 
           REM PM2 can only delete processes it still owns. Remove any orphaned
@@ -404,6 +405,8 @@ jobs:
           if errorlevel 1 exit /b 1
           call pm2 start ecosystem.config.cjs --only celery_worker --update-env
           if errorlevel 1 exit /b 1
+          call pm2 start ecosystem.config.cjs --only celery_memory_worker --update-env
+          if errorlevel 1 exit /b 1
           call pm2 start ecosystem.config.cjs --only celery_beat --update-env
           if errorlevel 1 exit /b 1
           call pm2 describe primex-backend | findstr /I "status"
@@ -411,6 +414,7 @@ jobs:
           call pm2 describe primeflow-report-scheduler | findstr /I "status"
           call pm2 describe primex-tomorrow-shtypi-scheduler | findstr /I "status"
           call pm2 describe celery_worker | findstr /I "status"
+          call pm2 describe celery_memory_worker | findstr /I "status"
           call pm2 describe celery_beat | findstr /I "status"
           echo PM2 backend restart/start completed.
  

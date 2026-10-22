@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import {FRAME_BYTES,Mixer,Playback,createOpusEncoder,toDiscord,toRealtime,int16FromBase64,int16ToBase64} from '../host-audio.mjs';
 import {createOpusDecoder} from '../opus.mjs';
-import {createHost,decodeCommand} from '../host-worker.mjs';
+import {BARGE_IN_MS,SAY_WAIT_MS,createHost,decodeCommand} from '../host-worker.mjs';
 
 test('48 kHz stereo becomes 24 kHz mono and back without changing the level',()=>{
   const pcm=Buffer.alloc(960*4);
@@ -75,10 +75,27 @@ function fakes(){
     EndBehaviorType:{AfterSilence:1}};
   let dispatch;
   const gatewayFactory=options=>{dispatch=options.onDispatch;return {userId:'9',raw(){},close(){}};};
+  // A manual clock: advance(ms) moves time and runs the timers that are due.
+  const clock={at:0,timers:new Map(),id:0};
+  const setTimer=(fn,ms)=>{const id=++clock.id;clock.timers.set(id,{fn,at:clock.at+ms});return id;};
+  const advance=ms=>{
+    clock.at+=ms;
+    for(const [id,timer] of [...clock.timers].sort((a,b)=>a[1].at-b[1].at))
+      if(timer.at<=clock.at&&clock.timers.delete(id))timer.fn();
+  };
   const host=createHost({emit:m=>events.push(m),voice,makeDecoder:()=>({decode:()=>Buffer.alloc(0)}),
-    makeEncoder:()=>({encode:f=>f.subarray(0,3),delete(){}}),WebSocketImpl:FakeSocket,gatewayFactory,setTimer:()=>0,clearTimer:()=>{}});
+    makeEncoder:()=>({encode:f=>f.subarray(0,3),delete(){}}),WebSocketImpl:FakeSocket,gatewayFactory,
+    now:()=>clock.at,setTimer,clearTimer:id=>clock.timers.delete(id)});
   host.start({guild_id:'1',channel_id:'2',token:'t',client_secret:'ek_1',model:'gpt-realtime'});
-  return {host,sent,events,socket:FakeSocket.last,dispatch:(...a)=>dispatch(...a)};
+  return {host,sent,events,advance,socket:FakeSocket.last,dispatch:(...a)=>dispatch(...a)};
+}
+
+const speech=()=>Int16Array.from({length:240},(_,i)=>i%2?2000:-2000);
+
+function speaking(host){
+  host._onRealtime({type:'response.created',response:{id:'r1'}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'r1',item_id:'i1',delta:int16ToBase64(new Int16Array(480*30))});
+  host._playback.next();host._playback.next();
 }
 
 test('the realtime key goes in the WebSocket subprotocol, never in the URL',()=>{
@@ -87,17 +104,74 @@ test('the realtime key goes in the WebSocket subprotocol, never in the URL',()=>
   assert.deepEqual(socket.protocols,['realtime','openai-insecure-api-key.ek_1']);
 });
 
-test('when someone starts speaking Mira stops and the unheard audio is truncated',()=>{
-  const {host,sent}=fakes();
-  host._onRealtime({type:'response.created',response:{id:'r1'}});
-  host._onRealtime({type:'response.output_audio.delta',response_id:'r1',item_id:'i1',delta:int16ToBase64(new Int16Array(480*10))});
-  host._playback.next();host._playback.next();
+test('someone who keeps talking stops Mira and the unheard audio is truncated',()=>{
+  const {host,sent,advance}=fakes();
+  speaking(host);
   host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'u1'});
+  assert.equal(host._playback.playing,true);
+  advance(300);host._heard(speech());advance(BARGE_IN_MS-300);
   assert.equal(host._playback.playing,false);
+  assert.ok(sent.some(e=>e.type==='response.cancel'));
   assert.deepEqual(sent.at(-1),{type:'conversation.item.truncate',item_id:'i1',content_index:0,audio_end_ms:40});
   // Late audio from the interrupted answer is ignored.
   host._onRealtime({type:'response.output_audio.delta',response_id:'r1',item_id:'i1',delta:int16ToBase64(new Int16Array(4800))});
   assert.equal(host._playback.playing,false);
+});
+
+test('a short "aha" while Mira speaks does not cut her off',()=>{
+  const {host,sent,advance}=fakes();
+  speaking(host);
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'u1'});
+  host._heard(speech());advance(BARGE_IN_MS);
+  assert.equal(host._playback.playing,true);
+  assert.ok(!sent.some(e=>e.type==='response.cancel'||e.type==='conversation.item.truncate'));
+});
+
+test('a system instruction waits until the speaker stops, and Realtime answers them first',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: Faza GA');
+  host._onRealtime({type:'response.created',response:{id:'r1'}});
+  host._onRealtime({type:'response.done',response:{id:'r1'}});
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'u1'});
+  host.say('SISTEMI: RADHA EF');
+  advance(3000);
+  assert.ok(!sent.some(e=>e.item?.content?.[0]?.text==='SISTEMI: RADHA EF'));
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'u1'});
+  host._onRealtime({type:'response.created',response:{id:'r2'}});
+  advance(2000);
+  assert.ok(!sent.some(e=>e.item?.content?.[0]?.text==='SISTEMI: RADHA EF'));
+  host._onRealtime({type:'response.done',response:{id:'r2'}});
+  assert.equal(sent.at(-2).item.content[0].text,'SISTEMI: RADHA EF');
+  assert.equal(sent.at(-1).type,'response.create');
+});
+
+test('a system instruction does not wait forever for someone who never stops',()=>{
+  const {host,sent,advance}=fakes();
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'u1'});
+  host.say('SISTEMI: Koha ka kaluar');
+  advance(SAY_WAIT_MS-1);
+  assert.ok(!sent.some(e=>e.type==='response.create'));
+  advance(1);
+  assert.equal(sent.at(-1).type,'response.create');
+});
+
+test('wait_for_user keeps Mira quiet and never reaches PrimeFlow',()=>{
+  const {host,sent,events}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'r1'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'w1',name:'wait_for_user',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'r1'}});
+  assert.ok(!events.some(e=>e.type==='tool_call'));
+  assert.equal(sent.at(-1).item.type,'function_call_output');
+  assert.ok(!sent.some(e=>e.type==='response.create'));
+});
+
+test('a response refused while Realtime is busy is asked for again when it finishes',()=>{
+  const {host,sent}=fakes();
+  host.say('SISTEMI: Faza GA');
+  host._onRealtime({type:'error',error:{code:'conversation_already_has_active_response'}});
+  const before=sent.filter(e=>e.type==='response.create').length;
+  host._onRealtime({type:'response.done',response:{id:'auto'}});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,before+1);
 });
 
 test('tool calls go to PrimeFlow and the answer continues only when all results are back',()=>{
@@ -130,4 +204,11 @@ test('transcripts carry the loudest speaker of the utterance',()=>{
   host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'u1'});
   host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'u1',transcript:' Po, e kreva. '});
   assert.deepEqual(events.at(-1),{type:'transcript',role:'staff',speaker_id:null,text:'Po, e kreva.'});
+});
+
+test('Mira stays deaf while she waits in the channel and starts listening with her first instruction',()=>{
+  const {host}=fakes();
+  assert.equal(host._listening,false);
+  host.say('SISTEMI: Faza GA');
+  assert.equal(host._listening,true);
 });

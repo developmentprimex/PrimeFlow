@@ -125,3 +125,13 @@ class MemoryServiceTests(MemoryTests):
         self.assertEqual(stats['rejected'], 1)
         async with self.sessions() as db:
             self.assertEqual(len((await db.execute(select(Item))).scalars().all()), 1)
+
+    async def test_several_operations_on_one_item_count_one_meeting_and_keep_miras_close(self):
+        meeting = await self.meeting()
+        item = await self.item('Fatura')
+        stats = await self.apply(meeting, [op('change', str(item.id), description='U dërgua sot.'),
+            op('close', str(item.id), said='U konfirmua.'), op('mention', str(item.id))], {str(item.id): 1})
+        self.assertEqual(stats, {'applied': 3, 'rejected': 0, 'dropped': 0})
+        async with self.sessions() as db:
+            row = await db.get(Item, item.id)
+            self.assertEqual((row.status, row.description, row.mention_count, row.version), ('CLOSED', 'U dërgua sot.', 2, 3))

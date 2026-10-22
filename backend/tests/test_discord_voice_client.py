@@ -73,7 +73,9 @@ class VoiceClientTests(unittest.IsolatedAsyncioTestCase):
             instance_id=uuid.uuid4(),capture_token='x'*40,title='1H')
         self.assertEqual(VoiceStart(**base,request_id='auto1h-202610190958').request_id,'auto1h-202610190958')
         self.assertEqual(VoiceStart(**base,request_id='1430000000000000000').request_id,'1430000000000000000')
-        for bad in ('auto1h-2026','auto-202610190958','x1'):
+        # A retried 1H join uses its own request id.
+        self.assertEqual(VoiceStart(**base,request_id='auto1h-202610190958-2').request_id,'auto1h-202610190958-2')
+        for bad in ('auto1h-2026','auto-202610190958','x1','auto1h-202610190958-'):
             with self.assertRaises(ValidationError):VoiceStart(**base,request_id=bad)
 
     def client(self):

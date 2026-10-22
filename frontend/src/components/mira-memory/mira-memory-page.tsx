@@ -75,7 +75,11 @@ export function MiraMemoryPage() {
       await loadList()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
-      if ((e as { status?: number }).status === 409) await loadDetail(detail.id)
+      if ((e as { status?: number }).status === 409) {
+        // Drop the stale draft: show what the other person saved instead of letting a second save overwrite it.
+        setEditing(false)
+        await loadDetail(detail.id)
+      }
     } finally {
       setBusy(false)
     }
