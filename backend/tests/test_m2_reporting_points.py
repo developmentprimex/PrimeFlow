@@ -23,6 +23,56 @@ from openpyxl import load_workbook
 DAY = date(2026, 10, 6)
 
 
+@pytest.mark.parametrize("period", ["PM", "AM/PM"])
+@pytest.mark.parametrize("status", ["TODO", "IN_PROGRESS", "DONE", "WAITING_CLIENT", "WAITING_CONFIRMATION"])
+def test_pm_due_today_includes_all_statuses_without_requiring_a_symbol_or_start_date(period, status):
+    items = [task(finish_period=period, status=status, start_date=None),
+             task(finish_period=period, status=status, start_date=date(2026, 10, 1), one_h_marker="M3")]
+    rows = service.select_task_sections(items, [], DAY)["pm_due_today"]
+    assert [row["task_id"] for row in rows] == [str(item.id) for item in items]
+    assert all(row["due_date"] == "2026-10-06" and row["am_pm"] == period for row in rows)
+
+
+def test_pm_due_today_excludes_other_periods_due_dates_and_future_creation():
+    items = [task(finish_period="AM"), task(finish_period=None),
+             task(finish_period="PM", due_date=None),
+             task(finish_period="PM", due_date=date(2026, 10, 5)),
+             task(finish_period="AM/PM", due_date=date(2026, 10, 7)),
+             task(finish_period="PM", created_at=date(2026, 10, 7))]
+    assert service.select_task_sections(items, [], DAY)["pm_due_today"] == []
+
+
+def test_pm_due_today_is_included_in_preview_text_and_export_tables():
+    value = {"report_date": DAY.isoformat(), "manual_answers": {}, "data": {"pm_due_today": [{
+        "task_id": str(uuid.uuid4()), "title": "Afternoon due task", "am_pm": "AM/PM", "status": "IN_PROGRESS",
+        "due_date": DAY.isoformat(), "assignees": "EF", "department": "DEV", "task_type": "PRJK",
+    }]}}
+    for output in (service.render_html(value), service.render_plain_text(value)):
+        assert "5. DET PM ME DUE DATE SOT" in output
+        assert "Afternoon due task" in output
+        assert "06.10.2026" in output
+    table = next(block for block in service.export_blocks(value) if block["kind"] == "table")
+    assert "due_date" in [column[0] for column in table["columns"]]
+    assert all(cell["fill"] == "#FFFF00" for cell in table["rows"][0])
+
+
+def test_pm_due_today_places_done_last_in_saved_payload_and_exports_without_reordering_other_rows():
+    items = [{"task_id": str(index), "title": title, "status": status}
+             for index, (title, status) in enumerate([
+                 ("Done first", "DONE"), ("Afternoon task", "IN_PROGRESS"),
+                 ("Done second", "DONE"), ("Full day task", "TODO")])]
+    stored = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={},
+                                     data={"pm_due_today": items, "delivery": items}, status="DRAFT")
+    payload = service.report_payload(stored)
+    expected = ["Afternoon task", "Full day task", "Done first", "Done second"]
+    assert [row["title"] for row in payload["data"]["pm_due_today"]] == expected
+    assert payload["data"]["delivery"] == stored.data["pm_due_today"] == items
+    raw_report = {"report_date": DAY.isoformat(), "manual_answers": {}, "data": {"pm_due_today": items}}
+    for output in (service.render_html(raw_report), service.render_plain_text(raw_report)):
+        positions = [output.index(title) for title in expected]
+        assert positions == sorted(positions)
+
+
 def task(**changes):
     return SimpleNamespace(**{
         "id": uuid.uuid4(), "title": "EF: Detyre", "status": "TODO", "progress_percentage": 0,
@@ -235,7 +285,7 @@ def test_ga_progress_exports_task_columns_before_delivery():
     assert headers == ["nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title"]
     assert cells["marker"]["text"] == "GA"
     html = service.render_html(value)
-    assert html.index("4. PROGRESI I DET ME GA (AM)") < html.index("5. SA PER DOREZIM M2?")
+    assert html.index("4. PROGRESI I DET ME GA (AM)") < html.index("5. DET PM ME DUE DATE SOT") < html.index("6. SA PER DOREZIM M2?")
     attachments = service.report_attachments(value)
     word = Document(io.BytesIO(attachments[0][1]))
     assert word.tables[0].rows[0].cells[-1].text == "TITULLI"
@@ -594,7 +644,7 @@ def test_removed_ga_reply_is_ignored_when_saving_and_exporting_old_reports():
         assert "Pergjigje e vjeter" not in html
         assert "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET" in html
         titles = [block["text"] for block in service.export_blocks(result) if block["kind"] == "text" and block["level"] == 2]
-        assert [title.split(". ")[0] for title in titles if ". " in title] == ["1", "2", "3", "4", "5"]
+        assert [title.split(". ")[0] for title in titles if ". " in title] == ["1", "2", "3", "4", "5", "6"]
         assert service.AUTO_TITLES["postponed_am"] in titles
         plain = service.render_plain_text(result)
         assert "A KA REPLY NGA GA" not in plain and "Pergjigje e vjeter" not in plain

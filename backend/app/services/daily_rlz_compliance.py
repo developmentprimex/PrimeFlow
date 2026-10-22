@@ -28,7 +28,6 @@ from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
 from app.services.daily_realization_close_state import resolve_daily_close_state
 
-EDIT_CUTOFF = time(17, 0)
 RLZ_CLOSE_OPEN = time(15, 30)
 UNFINISHED = {"TODO", "IN_PROGRESS"}
 REASON_DEFINITIONS = (
@@ -57,21 +56,25 @@ def next_working_day(day: date) -> date:
     return result
 
 
-def editable_until(day: date) -> datetime:
-    return datetime.combine(day, EDIT_CUTOFF, tzinfo=ZoneInfo(settings.REALIZATION_TIMEZONE))
-
-
 def closable_from(day: date) -> datetime:
     return datetime.combine(day, RLZ_CLOSE_OPEN, tzinfo=ZoneInfo(settings.REALIZATION_TIMEZONE))
 
 
 def is_editable_day(day: date, now: datetime | None = None) -> bool:
+    """A report workday remains open for closing and later corrections."""
+    return day.weekday() < 5 and is_explanation_editable_day(day, now)
+
+
+def is_explanation_editable_day(day: date, now: datetime | None = None) -> bool:
+    """Reasons and comments have no cutoff, including for past report days."""
     current = now or tirana_now()
-    return day.weekday() < 5 and day == current.date() and current < editable_until(day)
+    if current.tzinfo is not None:
+        current = current.astimezone(ZoneInfo(settings.REALIZATION_TIMEZONE))
+    return day <= current.date()
 
 
 def is_closable_day(day: date, now: datetime | None = None) -> bool:
-    """Daily RLZ can be saved after the 1H slots roll over at 15:30."""
+    """Daily RLZ can be saved from 15:30 onward, with no expiration."""
     current = now or tirana_now()
     return is_editable_day(day, current) and current >= closable_from(day)
 
@@ -339,7 +342,7 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
             "closed_by_user_id": str(latest_close.actor_user_id) if saved and latest_close and latest_close.actor_user_id else None,
             "is_editable": is_closable_day(day, now),
             "closable_from": closable_from(day).isoformat(),
-            "editable_until": editable_until(day).isoformat(),
+            "editable_until": None,
         },
     }
 

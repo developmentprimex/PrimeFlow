@@ -57,10 +57,12 @@ def test_generic_task_comment_is_not_daily_rlz_evidence():
     assert result.comment is None
 
 
-def test_edit_window_uses_tirana_and_closes_at_1700():
+def test_daily_editing_has_no_cutoff_for_today_and_past_workdays():
     tz = ZoneInfo("Europe/Tirane")
     assert is_editable_day(DAY, datetime(2026, 8, 12, 16, 59, tzinfo=tz))
-    assert not is_editable_day(DAY, datetime(2026, 8, 12, 17, 0, tzinfo=tz))
+    assert is_editable_day(DAY, datetime(2026, 8, 12, 17, 0, tzinfo=tz))
+    assert is_editable_day(DAY, datetime(2026, 8, 13, 9, 0, tzinfo=tz))
+    assert not is_editable_day(date(2026, 8, 13), datetime(2026, 8, 12, 18, 0, tzinfo=tz))
 
 
 def test_close_window_opens_when_slots_roll_over_at_1530():
@@ -68,7 +70,9 @@ def test_close_window_opens_when_slots_roll_over_at_1530():
     assert not is_closable_day(DAY, datetime(2026, 8, 12, 15, 29, 59, tzinfo=tz))
     assert is_closable_day(DAY, datetime(2026, 8, 12, 15, 30, tzinfo=tz))
     assert is_closable_day(DAY, datetime(2026, 8, 12, 16, 59, 59, tzinfo=tz))
-    assert not is_closable_day(DAY, datetime(2026, 8, 12, 17, 0, tzinfo=tz))
+    assert is_closable_day(DAY, datetime(2026, 8, 12, 17, 0, tzinfo=tz))
+    assert is_closable_day(DAY, datetime(2026, 8, 12, 23, 59, tzinfo=tz))
+    assert is_closable_day(DAY, datetime(2026, 8, 13, 9, 0, tzinfo=tz))
 
 
 class _EmptyScalars:

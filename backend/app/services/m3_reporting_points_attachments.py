@@ -58,6 +58,7 @@ def export_blocks(report: dict) -> list[dict]:
     from app.services.m3_reporting_points import (
         AUTO_TITLES, M3_TITLE, MANUAL_POINTS,
         report_table_columns, report_table_value, task_table_groups, task_row_appearance, realization_department_rows,
+        delivery_summary,
     )
 
     from app.services.m3_unheld_meetings import MEETING_COLUMNS, MEETING_TITLE, meeting_cells, meeting_groups
@@ -73,6 +74,8 @@ def export_blocks(report: dict) -> list[dict]:
 
     def tasks(key: str):
         text(AUTO_TITLES[key], 2)
+        if key == "delivery":
+            text(delivery_summary(report))
         if key == "postponed":
             blocks.append({"kind": "legend", "runs": [
                 ("Shtyrjet e bëra gjatë ditës. ", None, "#000000"),
@@ -92,13 +95,18 @@ def export_blocks(report: dict) -> list[dict]:
                 row_fill, row_color, eight_am = task_row_appearance(row)
                 for column_index, (column, _, _) in enumerate(columns):
                     fill = row_fill
-                    color, bold = row_color, column == "title"
+                    color, bold = row_color, column in {"title", "marker", "choice"}
+                    if key == "delivery" and column in {"choice", "answer"}:
+                        fill, color = "#ffffff", "#000000"
+                        choice = report_table_value(row, column, index, movement, report, key)
+                        if column == "choice" and choice in {"PO", "JO"}:
+                            fill, color = ("#16a34a" if choice == "PO" else "#dc2626"), "#ffffff"
                     if column == "risk":
                         fill, color = (RED, RED_TEXT) if row.get("risk") == "RREZIK" else (GREEN, GREEN_TEXT)
                         bold = True
                     cells.append({"text": _text(report_table_value(row, column, index, movement, report, key)),
                                   "fill": fill, "color": color, "bold": bold,
-                                  "marker": row.get("marker") if column == "title" else None,
+                                  "marker": row.get("marker") if column == "title" and key != "delivery" else None,
                                   "eight_am": eight_am, "first": column_index == 0, "last": column_index == len(columns) - 1,
                                   "divider": column in {"from", "to"} and movement == "start_due"})
                 rendered_rows.append(cells)
@@ -119,6 +127,7 @@ def export_blocks(report: dict) -> list[dict]:
             ]})
         else:
             text("Asnjë takim i anuluar për këtë datë.")
+    tasks("delivery")
     text(AUTO_TITLES["realization"], 2)
     realization = report.get("realization")
     if realization:

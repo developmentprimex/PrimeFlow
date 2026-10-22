@@ -276,7 +276,7 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
       {state?.status === "NOT_SAVED" ? <span className="text-xs font-medium text-slate-600">Dita e hapur</span> : null}
       {state?.status === "STALE" ? <span className="max-w-[310px] text-xs font-medium text-amber-700"><AlertTriangle className="mr-1 inline h-4 w-4"/>Ka ndryshime pas mbylljes<span className="block font-normal">Realizimi ka ndryshuar pas mbylljes së ditës.</span></span> : null}
       {state?.status === "REOPENED" ? <span className="text-xs font-medium text-blue-700">Dita është rihapur</span> : null}
-      {state?.status === "CLOSED_EDIT_WINDOW" ? <span className="text-xs font-medium text-rose-700">Afati i mbylljes ka përfunduar</span> : null}
+      {state?.status === "CLOSED_EDIT_WINDOW" ? <span className="text-xs font-medium text-rose-700">Kjo ditë nuk është e hapur për mbyllje</span> : null}
       {state?.status !== "SAVED" && state?.status !== "CLOSED_EDIT_WINDOW" ? <Button type="button" className="h-8 bg-blue-600 px-3 text-xs hover:bg-blue-700" onClick={() => void prepareClose()}
         disabled={saving || !state?.is_editable}>
         {saving ? "Duke kontrolluar…" : actionLabel}

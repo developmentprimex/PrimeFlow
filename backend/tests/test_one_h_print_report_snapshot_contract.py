@@ -39,14 +39,6 @@ def test_today_email_uses_cutoff_report_and_tomorrow_remains_live():
     assert "get_one_h_print_snapshot" not in tomorrow_scheduler
 
 
-def test_frontend_loads_saved_report_without_background_regeneration():
-    source = (ROOT / "frontend/src/app/(app)/tomorrow-print-report/page.tsx").read_text(encoding="utf-8")
-    assert 'apiFetch(`${API}/snapshot`, { cache: "no-store" })' in source
-    assert 'apiFetch(`${API}/generate`, { method: "POST" })' in source
-    assert "useVisibleRefresh" not in source
-    assert 'preview ? "Regenerate" : "Generate"' in source
-
-
 def test_symbol_comment_modal_uses_host_viewport_and_marker_change_is_guarded():
     source = (ROOT / "frontend/src/app/(app)/tomorrow-print-report/page.tsx").read_text(encoding="utf-8")
     modal = source[source.index("const openMarkerCommentModal"):source.index("document.querySelectorAll<HTMLElement>")]

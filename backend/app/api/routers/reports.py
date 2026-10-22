@@ -53,7 +53,7 @@ from app.services.daily_report_logic import (
 )
 from app.services.daily_rlz_compliance import (
     REASON_LABELS, build_daily_rlz_compliance, build_daily_rlz_control,
-    editable_until, is_editable_day,
+    is_explanation_editable_day,
 )
 from app.services.audit import add_audit_log
 from app.services.daily_realization_explanation import requires_daily_explanation
@@ -694,8 +694,8 @@ def _daily_rlz_state_out(
         reason_label=REASON_LABELS.get(row.reason_code) if row else None,
         comment=row.comment if row else None,
         updated_at=row.updated_at if row else None,
-        is_editable=is_editable_day(day),
-        editable_until=editable_until(day),
+        is_editable=is_explanation_editable_day(day),
+        editable_until=None,
         requires_explanation=explanation_required,
         reason_required=explanation_required,
         comment_required=explanation_required,
@@ -711,10 +711,10 @@ async def upsert_daily_rlz_state(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> DailyRlzTaskStateOut:
-    if not is_editable_day(payload.day):
+    if not is_explanation_editable_day(payload.day):
         raise HTTPException(status_code=409, detail={
-            "code": "DAILY_RLZ_EDIT_WINDOW_CLOSED",
-            "message": "Arsyeja dhe komenti për këtë ditë mund të ndryshohen vetëm deri në orën 17:00.",
+            "code": "DAILY_RLZ_FUTURE_DAY",
+            "message": "Arsyeja dhe komenti nuk mund të plotësohen për një ditë të ardhshme.",
         })
     task = await db.get(Task, task_id)
     if task is None or not task.is_active:

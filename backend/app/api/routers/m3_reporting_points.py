@@ -51,12 +51,15 @@ class ManualAnswersPayload(BaseModel):
             raise ValueError("Pike manuale e panjohur.")
         if any(len(answer) > 10000 for answer in value.values()):
             raise ValueError("Pergjigjja nuk mund te kete mbi 10000 karaktere.")
+        if any(key.startswith("delivery_choice:") and answer not in {"", "PO", "JO"}
+               for key, answer in value.items()):
+            raise ValueError("Zgjedhja duhet te jete PO ose JO.")
         return value
 
 
 def is_task_comment_key(key: str) -> bool:
     prefix, _, task_id = key.partition(":")
-    if prefix != "untouched_comment":
+    if prefix not in {"untouched_comment", "delivery", "delivery_choice"}:
         return False
     try:
         return str(uuid.UUID(task_id)) == task_id
@@ -128,6 +131,9 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     before = dict(row.manual_answers or {})
     valid_comments = {f"untouched_comment:{item['task_id']}"
                       for item in (row.data or {}).get("untouched", []) if item.get("task_id")}
+    valid_comments.update(f"{prefix}:{item['task_id']}"
+                          for item in (row.data or {}).get("delivery", []) if item.get("task_id")
+                          for prefix in ("delivery", "delivery_choice"))
     if any(is_task_comment_key(key) and key not in valid_comments and key not in before
            for key in payload.manual_answers):
         raise HTTPException(422, "Detyra nuk gjendet ne kete raport.")

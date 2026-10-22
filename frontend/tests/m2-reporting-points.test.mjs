@@ -62,7 +62,7 @@ test("postponements display their source explanation alongside the manual report
   assert.match(html, /Manager comment/)
 })
 
-test("M2 presents five points with a final per-task manual answer", () => {
+test("M2 presents six points with a per-task delivery answer", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: { reorganization: "Riorganizo", [answerKey]: "Dorezuar", [`delivery_choice:${taskId}`]: "PO" }, disabled: false, onAnswerChange: () => {},
   }))
@@ -71,7 +71,9 @@ test("M2 presents five points with a final per-task manual answer", () => {
   assert.match(html, /3\. A KA DET QË SHTYHEN \(SOT\/SOT\) OSE DEADLINE\?/)
   assert.match(html, /DET QË JANË SHTYER SOT AM/)
   assert.match(html, /4\. PROGRESI I DET ME GA \(AM\)/)
-  assert.match(html, /5\. SA PER DOREZIM M2\?/)
+  assert.match(html, /5\. DET PM ME DUE DATE SOT/)
+  assert.match(html, /6\. SA PER DOREZIM M2\?/)
+  assert.ok(html.indexOf('id="m2-pm-due-today"') < html.indexOf('id="m2-delivery"'))
   assert.equal((html.match(/<textarea/g) || []).length, 2)
   assert.match(html, /Dorezuar/)
   assert.match(html, /M2\/3/)
@@ -84,6 +86,31 @@ test("M2 presents five points with a final per-task manual answer", () => {
   assert.match(deliveryTable, /<option value="JO">JO<\/option>/)
   assert.match(html, /Detyra &lt;script&gt;/)
   assert.match(html, /P.RGJIGJJA MANUALE<\/th><\/tr>/)
+})
+
+test("M2 afternoon due section lists task details, due date, symbols and status colors", () => {
+  const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+    report: { ...report, data: { pm_due_today: [
+      { ...row, task_id: "done-first", title: "Done first", am_pm: "PM", due_date: "2026-10-06", status: "DONE" },
+      { ...row, task_id: "pm", title: "Afternoon task", am_pm: "PM", due_date: "2026-10-06", status: "IN_PROGRESS" },
+      { ...row, task_id: "done-second", title: "Done second", am_pm: "PM", due_date: "2026-10-06", status: "DONE" },
+      { ...row, task_id: "both", title: "Full day task", am_pm: "AM/PM", due_date: "2026-10-06", deadline_important: true },
+    ] } }, answers: {}, disabled: true, onAnswerChange: () => {},
+  }))
+  const section = html.slice(html.indexOf('aria-labelledby="m2-pm-due-today"'), html.indexOf('aria-labelledby="m2-delivery"'))
+  assert.match(section, /5\. DET PM ME DUE DATE SOT/)
+  assert.ok(section.indexOf("Afternoon task") < section.indexOf("Full day task"))
+  assert.ok(section.indexOf("Full day task") < section.indexOf("Done first"))
+  assert.ok(section.indexOf("Done first") < section.indexOf("Done second"))
+  assert.match(section, /Afternoon task/)
+  assert.match(section, /Full day task/)
+  assert.match(section, /DUE DATE<\/th>/)
+  assert.match(section, /06\.10\.2026/)
+  assert.match(section, />PM<\/td>/)
+  assert.match(section, />AM\/PM<\/td>/)
+  assert.match(section, /background:#FFFF00;color:black/)
+  assert.match(section, /background:#dc2626;color:white/)
+  assert.doesNotMatch(section, /<textarea|<select/)
 })
 
 test("unfinished priority tasks appear second with due labels and priority styling", () => {
@@ -429,7 +456,7 @@ test("GA morning tasks appear after postponements with matching colors and eight
   }))
   assert.ok(html.indexOf('id="m2-postponed"') < html.indexOf('id="m2-ga-progress"'))
   assert.ok(html.indexOf('id="m2-ga-progress"') < html.indexOf('id="m2-delivery"'))
-  const section = html.slice(html.indexOf('id="m2-ga-progress"'), html.indexOf('aria-labelledby="m2-delivery"'))
+  const section = html.slice(html.indexOf('id="m2-ga-progress"'), html.indexOf('aria-labelledby="m2-pm-due-today"'))
   assert.equal((section.match(/<th /g) || []).length, 8)
   assert.doesNotMatch(section, /START DATE|DUE DATE|PROGRESI<\/th>|37.5%|100%/)
   assert.match(section, /background:#FFFF00/)

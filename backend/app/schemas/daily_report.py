@@ -15,7 +15,7 @@ class DailyRlzTaskStateOut(BaseModel):
     comment: str | None = None
     updated_at: datetime | None = None
     is_editable: bool
-    editable_until: datetime
+    editable_until: datetime | None = None
     requires_explanation: bool = False
     reason_required: bool = False
     comment_required: bool = False
