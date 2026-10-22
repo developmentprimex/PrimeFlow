@@ -310,6 +310,7 @@ export interface PxJavPlanningBrief {
 
 export interface Task {
   id: string
+  is_active?: boolean
   skill_category?: SkillCategory | null
   department_id?: string
   board_id?: string

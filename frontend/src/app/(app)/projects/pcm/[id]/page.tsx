@@ -519,8 +519,8 @@ const MEETING_TABS = [
 
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
-const PCM_SELECTABLE_STATUSES: Task["status"][] = ["TODO", "IN_PROGRESS", "DONE"]
-const LEGACY_WAITING_STATUS: Task["status"] = "WAITING_CONFIRMATION"
+const PCM_SELECTABLE_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
+const LEGACY_WAITING_STATUS = "WAITING_CONFIRMATION"
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
 const MEETING_POINTS = [
@@ -3155,6 +3155,64 @@ export default function PcmProjectPage() {
     return `${normalizedBase} (${totalForTitle}/${completed})`
   })()
 
+  const patchTask = async (taskId: string, payload: Record<string, unknown>, errorMessage: string) => {
+    const nextStatus = typeof payload.status === "string" ? payload.status : null
+    const currentTask = tasks.find((t) => t.id === taskId)
+    if (
+      isWaitingConfirmation(nextStatus) &&
+      !currentTask?.confirmation_assignee_id &&
+      !payload.confirmation_assignee_id
+    ) {
+      setPendingStatusTaskId(taskId)
+      setPendingStatusValue((nextStatus || "TODO") as Task["status"])
+      setPendingConfirmationAssigneeId("")
+      return null
+    }
+    const res = await apiFetch(`/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      try {
+        const data = (await res.json()) as { detail?: string }
+        if (typeof data?.detail === "string" && data.detail.trim()) {
+          toast.error(data.detail)
+          return null
+        }
+      } catch {
+        // ignore
+      }
+      toast.error(errorMessage)
+      return null
+    }
+    const updated = (await res.json()) as Task
+    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+    return updated
+  }
+
+  const submitPendingStatusUpdate = async () => {
+    if (!pendingStatusTaskId) return
+    const validation = validateWaitingConfirmation(pendingStatusValue, pendingConfirmationAssigneeId)
+    if (validation) {
+      toast.error(validation)
+      return
+    }
+    const updated = await patchTask(
+      pendingStatusTaskId,
+      {
+        status: pendingStatusValue,
+        confirmation_assignee_id: pendingConfirmationAssigneeId,
+      },
+      "Failed to update status"
+    )
+    if (updated) {
+      setPendingStatusTaskId(null)
+      setPendingStatusValue("TODO")
+      setPendingConfirmationAssigneeId("")
+    }
+  }
+
   const renderProjectTitle = () => {
     if (!canEditProjectTitle) {
       return <span className="text-3xl font-semibold">{title}</span>
@@ -3348,64 +3406,6 @@ export default function PcmProjectPage() {
     const vsVlChecklistGridCols = showVsVlKo2
       ? "grid-cols-[40px_1fr_1fr_60px_70px_1fr_60px_80px]"
       : "grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px]"
-
-    const patchTask = async (taskId: string, payload: Record<string, unknown>, errorMessage: string) => {
-      const nextStatus = typeof payload.status === "string" ? payload.status : null
-      const currentTask = tasks.find((t) => t.id === taskId)
-      if (
-        isWaitingConfirmation(nextStatus) &&
-        !currentTask?.confirmation_assignee_id &&
-        !payload.confirmation_assignee_id
-      ) {
-        setPendingStatusTaskId(taskId)
-        setPendingStatusValue((nextStatus || "TODO") as Task["status"])
-        setPendingConfirmationAssigneeId("")
-        return null
-      }
-      const res = await apiFetch(`/tasks/${taskId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (typeof data?.detail === "string" && data.detail.trim()) {
-            toast.error(data.detail)
-            return null
-          }
-        } catch {
-          // ignore
-        }
-        toast.error(errorMessage)
-        return null
-      }
-      const updated = (await res.json()) as Task
-      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-      return updated
-    }
-
-    const submitPendingStatusUpdate = async () => {
-      if (!pendingStatusTaskId) return
-      const validation = validateWaitingConfirmation(pendingStatusValue, pendingConfirmationAssigneeId)
-      if (validation) {
-        toast.error(validation)
-        return
-      }
-      const updated = await patchTask(
-        pendingStatusTaskId,
-        {
-          status: pendingStatusValue,
-          confirmation_assignee_id: pendingConfirmationAssigneeId,
-        },
-        "Failed to update status"
-      )
-      if (updated) {
-        setPendingStatusTaskId(null)
-        setPendingStatusValue("TODO")
-        setPendingConfirmationAssigneeId("")
-      }
-    }
 
     const queueDescriptionSave = (taskId: string, description: string) => {
       const timers = vsVlDescriptionTimersRef.current
@@ -6028,7 +6028,7 @@ export default function PcmProjectPage() {
         const originTaskId = getOriginTaskId(notes)
         if (originTaskId) {
           const originTask = tasks.find((t) => t.id === originTaskId)
-          if (originTask?.daily_products !== null && originTask.daily_products !== undefined) {
+          if (originTask?.daily_products != null) {
             totalValue = originTask.daily_products.toString()
           }
         }
@@ -6077,7 +6077,7 @@ export default function PcmProjectPage() {
           const originTaskId = getOriginTaskId(currentNotes)
           if (originTaskId) {
             const originTask = tasks.find((t) => t.id === originTaskId)
-            if (originTask?.daily_products !== null && originTask.daily_products !== undefined) {
+            if (originTask?.daily_products != null) {
               totalValue = originTask.daily_products.toString()
             }
           }

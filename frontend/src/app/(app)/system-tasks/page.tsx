@@ -2669,7 +2669,7 @@ export function SystemTasksView({
       const assigneeId = assigneeIdForValue(row[idxAssignee] || "")
       const zv1UserId = assigneeIdForValue(row[idxZv1] || "")
       const zv2UserId = assigneeIdForValue(row[idxZv2] || "")
-      if (replacementSelectionError(zv1UserId, zv2UserId, assigneeId ? [assigneeId] : [])) {
+      if (replacementSelectionError(zv1UserId || "", zv2UserId || "", assigneeId ? [assigneeId] : [])) {
         toast.error(`Skipped "${title}": invalid ZV1/ZV2.`)
         continue
       }

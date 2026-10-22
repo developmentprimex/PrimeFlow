@@ -291,6 +291,7 @@ export default function DevelopmentProjectPage() {
     DOCUMENTATION_CHECKLIST_QUESTIONS.map((question, index) => ({
       id: `doc-${index}`,
       question,
+      position: index + 1,
       isChecked: false,
     }))
   )

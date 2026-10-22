@@ -33,6 +33,7 @@ import type {
   DailyReportSystemOccurrence,
   Department,
   SystemTaskOut,
+  SystemTaskScope,
   Task,
   TaskFinishPeriod,
   TaskPriority,
@@ -2071,7 +2072,7 @@ const parseTimeToMinutes = (value?: string | null) => {
   if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
   return hours * 60 + minutes
 }
-const formatTimeLabel = (value?: string) => {
+const formatTimeLabel = (value?: string): string => {
   if (!value) return ""
   const normalized = value.trim()
   if (!normalized || normalized.toLowerCase() === "tbd") return normalized
@@ -3616,6 +3617,7 @@ export default function AdminTasksPage() {
       rows.push({
         typeLabel: isProject ? "PRJK" : "FT",
         subtype: isProject ? "-" : fastReportSubtypeShort(task),
+        frequency: "",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
         title: task.title || "-",
@@ -3662,6 +3664,7 @@ export default function AdminTasksPage() {
       rows.push({
         typeLabel: "FT",
         subtype: fastReportSubtypeShort(task),
+        frequency: "",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
         title: task.title || "-",
@@ -3709,6 +3712,7 @@ export default function AdminTasksPage() {
       rows.push({
         typeLabel: "SYS",
         subtype: systemSubtype,
+        frequency: systemSubtype,
         period: "AM",
         department: resolveDepartmentLabel(occ.department_id, occ.scope || null, false),
         title: occ.title || "-",
@@ -4389,6 +4393,7 @@ export default function AdminTasksPage() {
     const rows: Array<{
       typeLabel: string
       subtype: string
+      frequency: string
       period: string
       department: string
       title: string
@@ -6525,15 +6530,15 @@ export default function AdminTasksPage() {
         if (!entries.length) return []
 
         if (rowId === "late") {
-          return entries.map((e: LateItem, idx: number) =>
+          return dayData.late.map((e: LateItem, idx: number) =>
             `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "absent") {
-          return entries.map((e: AbsentItem, idx: number) => `${idx + 1}. ${e.from} - ${e.to}${assigneesSuffix(e)}`)
+          return dayData.absent.map((e: AbsentItem, idx: number) => `${idx + 1}. ${e.from} - ${e.to}${assigneesSuffix(e)}`)
         }
         if (rowId === "leave") {
-          return entries.map((e: LeaveItem, idx: number) => {
+          return dayData.leave.map((e: LeaveItem, idx: number) => {
             const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
             const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
             const label = isAllUsers ? `${timeLabel} ALL` : timeLabel
@@ -6542,12 +6547,12 @@ export default function AdminTasksPage() {
           })
         }
         if (rowId === "blocked") {
-          return entries.map((e: BlockedItem, idx: number) =>
+          return dayData.blocked.map((e: BlockedItem, idx: number) =>
             `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "problem" || rowId === "feedback") {
-          return entries.map((e: ProblemItem | FeedbackItem, idx: number) => {
+          return (rowId === "problem" ? dayData.problems : dayData.feedback).map((e: ProblemItem | FeedbackItem, idx: number) => {
             const dateLabel = e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)
             const noteLabel = e.note ? ` - ${e.note}` : ""
             return `${idx + 1}. ${e.title} - ${dateLabel}${noteLabel}${assigneesSuffix(e)}`
@@ -6564,17 +6569,17 @@ export default function AdminTasksPage() {
           )
         }
         if (rowId === "external") {
-          return entries.map((e: ExternalItem, idx: number) =>
+          return dayData.external.map((e: ExternalItem, idx: number) =>
             `${idx + 1}. ${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "internal") {
-          return entries.map((e: InternalItem, idx: number) =>
+          return dayData.internal.map((e: InternalItem, idx: number) =>
             `${idx + 1}. ${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "priority") {
-          return entries.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
+          return dayData.priority.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
         }
         return []
       }
@@ -6702,7 +6707,7 @@ export default function AdminTasksPage() {
       if (!entries.length) return null
 
       if (rowId === "late") {
-        return entries.map((e: LateItem, idx: number) => (
+        return dayData.late.map((e: LateItem, idx: number) => (
           <div key={idx} className="week-table-entry">
             <span>{idx + 1}. {e.start || "08:00"}-{e.until}</span>
             <div className="week-table-avatars">
@@ -6716,7 +6721,7 @@ export default function AdminTasksPage() {
         ))
       }
       if (rowId === "absent") {
-        return entries.map((e: AbsentItem, idx: number) => (
+        return dayData.absent.map((e: AbsentItem, idx: number) => (
           <div key={idx} className="week-table-entry">
             <span>{idx + 1}. {e.from} - {e.to}</span>
             <div className="week-table-avatars">
@@ -6730,7 +6735,7 @@ export default function AdminTasksPage() {
         ))
       }
       if (rowId === "leave") {
-        return entries.map((e: LeaveItem, idx: number) => {
+        return dayData.leave.map((e: LeaveItem, idx: number) => {
           const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
           const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
           const noteLabel = e.note ? ` - ${e.note}` : ""
@@ -6754,7 +6759,7 @@ export default function AdminTasksPage() {
         })
       }
       if (rowId === "blocked") {
-        return entries.map((e: BlockedItem, idx: number) => (
+        return dayData.blocked.map((e: BlockedItem, idx: number) => (
           <div
             key={idx}
             className={["week-table-entry", repeatedTaskClassName(rowId, e, iso)].filter(Boolean).join(" ")}
@@ -6773,7 +6778,7 @@ export default function AdminTasksPage() {
         ))
       }
       if (rowId === "problem" || rowId === "feedback") {
-        return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
+        return (rowId === "problem" ? dayData.problems : dayData.feedback).map((e: ProblemItem | FeedbackItem, idx: number) => (
           <div key={idx} className="week-table-entry">
             <span className={rowId === "feedback" ? "feedback-print-clamp" : undefined}>
               {idx + 1}. {e.title}
@@ -6851,7 +6856,7 @@ export default function AdminTasksPage() {
         ))
       }
       if (rowId === "internal") {
-        return entries.map((e: InternalItem, idx: number) => (
+        return dayData.internal.map((e: InternalItem, idx: number) => (
           <div key={idx} className="week-table-entry">
             <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
             <div className="week-table-avatars">

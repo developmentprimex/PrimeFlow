@@ -327,13 +327,6 @@ function checklistItemsForPhase(phase: string, items: ChecklistItem[]) {
   return []
 }
 
-function noteToTaskTitle(content: string) {
-  const trimmed = content.trim().replace(/\s+/g, " ")
-  if (!trimmed) return "GA/KA note task"
-  return trimmed
-}
-
-
 export default function DesignProjectPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
@@ -2040,51 +2033,6 @@ export default function DesignProjectPage() {
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
-  const createTaskFromNote = async (note: GaNote) => {
-    if (!project) return
-    if (!gaNoteTaskDueDate) {
-      toast.error("Due date is required")
-      return
-    }
-    setCreatingNoteTaskId(note.id)
-    try {
-      const res = await apiFetch("/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: gaNoteTaskTitle.trim() || noteToTaskTitle(note.content),
-          description: gaNoteTaskDescription.trim() || note.content,
-          project_id: project.id,
-          department_id: project.department_id,
-          assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
-          status: "TODO",
-          priority: gaNoteTaskPriority === "HIGH" ? "HIGH" : "NORMAL",
-          is_1h_report: gaNoteTaskPriority === "1H",
-          phase: project.current_phase || "PLANNING",
-          due_date: new Date(gaNoteTaskDueDate).toISOString(),
-          ga_note_origin_id: note.id,
-        }),
-      })
-      if (!res.ok) {
-        let detail = "Failed to create task from note"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
-      const created = (await res.json()) as Task
-      setTasks((prev) => [created, ...prev])
-      setGaNoteTaskOpenId(null)
-      toast.success("Task created from note")
-    } finally {
-      setCreatingNoteTaskId(null)
-    }
-  }
-
   const startEditControlChecklistItem = (item: ChecklistItem) => {
     setControlChecklistEditingId(item.id)
     setControlChecklistEditingText(item.title || "")
@@ -2484,12 +2432,12 @@ export default function DesignProjectPage() {
                     />
                   ) : (
                     <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                      {item.title || item.content}
+                      {item.title || ""}
                     </span>
                   )
                 ) : (
                   <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                    {item.title || item.content}
+                    {item.title || ""}
                   </span>
                 )}
               </div>
@@ -3783,7 +3731,7 @@ export default function DesignProjectPage() {
                 onClick={() => setActiveTab(tab.id)}
                 className={[
                   "relative pb-3 text-sm font-medium",
-                  tab.id === "ga" ? "ml-auto" : "",
+                  tab.id === "ga-notes" ? "ml-auto" : "",
                   isActive ? "text-purple-600" : "text-muted-foreground",
                 ].join(" ")}
               >
@@ -5441,7 +5389,7 @@ export default function DesignProjectPage() {
                         onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
                       />
                       <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                        {item.title || item.content}
+                        {item.title || ""}
                       </span>
                     </div>
                     <div className="ml-9 space-y-2">

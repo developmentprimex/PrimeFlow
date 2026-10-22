@@ -521,7 +521,7 @@ export function WeeklyPlannerLegendTable({
                               )}
                               {saveState === "saved" && <Check className="h-4 w-4 text-green-600" />}
                               {saveState === "error" && (
-                                <AlertCircle className="h-4 w-4 text-red-600" title="Failed to save" />
+                                <AlertCircle className="h-4 w-4 text-red-600" aria-label="Failed to save" />
                               )}
                             </div>
                           </div>

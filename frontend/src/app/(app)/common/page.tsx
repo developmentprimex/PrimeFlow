@@ -12,6 +12,7 @@ import { MeetingDetailsDialog } from "@/components/meeting-details-dialog"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
+import { internalMeetingDateOn, internalMeetingWeekDate, type InternalMeetingListFilter } from "@/lib/internal-meeting-list"
 import { fitReportToSinglePage } from "@/lib/print-report-fit"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
@@ -519,7 +520,7 @@ type InternalItem = {
   linked_external_recurrence_type?: string | null
 }
 
-const internalMeetingRelation = (meeting: InternalItem): "PARA" | "PAS" | undefined => {
+const internalMeetingRelation = (meeting: Pick<InternalItem, "preExternalMeetingId" | "pre_external_meeting_id" | "pairedExternalMeetingId" | "paired_external_meeting_id">): "PARA" | "PAS" | undefined => {
   if (meeting.preExternalMeetingId || meeting.pre_external_meeting_id) return "PARA"
   if (meeting.pairedExternalMeetingId || meeting.paired_external_meeting_id) return "PAS"
   return undefined
@@ -1923,7 +1924,8 @@ export default function CommonViewPage() {
   const [externalMeetingDepartmentId, setExternalMeetingDepartmentId] = React.useState("")
   const [internalMeetingsOpen, setInternalMeetingsOpen] = React.useState(false)
   const [internalMeetings, setInternalMeetings] = React.useState<Meeting[]>([])
-  const [internalMeetingListFilter, setInternalMeetingListFilter] = React.useState<"next" | "past" | "all">("next")
+  const [internalMeetingListFilter, setInternalMeetingListFilter] = React.useState<InternalMeetingListFilter>("next")
+  const [internalMeetingDateFilter, setInternalMeetingDateFilter] = React.useState("")
   const [internalMeetingTitle, setInternalMeetingTitle] = React.useState("")
   const [internalMeetingPlatform, setInternalMeetingPlatform] = React.useState("")
   const [internalMeetingStartsAt, setInternalMeetingStartsAt] = React.useState("")
@@ -2580,7 +2582,15 @@ export default function CommonViewPage() {
     })
   }, [internalMeetings])
   const internalMeetingsVisible = React.useMemo(() => {
+    if (internalMeetingDateFilter) {
+      return internalMeetingsSorted.filter((meeting) => internalMeetingDateOn(meeting, internalMeetingDateFilter))
+        .sort((a, b) => internalMeetingDateOn(a, internalMeetingDateFilter)!.getTime() - internalMeetingDateOn(b, internalMeetingDateFilter)!.getTime())
+    }
     if (internalMeetingListFilter === "all") return internalMeetingsSorted
+    if (internalMeetingListFilter === "this_week" || internalMeetingListFilter === "next_week") {
+      return internalMeetingsSorted.filter((meeting) => internalMeetingWeekDate(meeting, internalMeetingListFilter))
+        .sort((a, b) => internalMeetingWeekDate(a, internalMeetingListFilter)!.getTime() - internalMeetingWeekDate(b, internalMeetingListFilter)!.getTime())
+    }
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     return internalMeetingsSorted.filter((meeting) => {
@@ -2590,7 +2600,7 @@ export default function CommonViewPage() {
         ? meetingDate.getTime() < today.getTime()
         : meetingDate.getTime() >= today.getTime()
     })
-  }, [getExternalMeetingListDate, internalMeetingListFilter, internalMeetingsSorted])
+  }, [getExternalMeetingListDate, internalMeetingListFilter, internalMeetingsSorted, internalMeetingDateFilter])
 
   const meetingStatusDate = React.useMemo(() => {
     if (selectedDates.size === 1) return Array.from(selectedDates)[0]!
@@ -2603,17 +2613,25 @@ export default function CommonViewPage() {
 
   const loadMeetingOccurrenceStatuses = React.useCallback(async () => {
     try {
-      const res = await apiFetch(`/meetings/occurrence-statuses?occurrence_date=${meetingStatusDate}`)
-      if (!res.ok) {
-        setMeetingOccurrenceStatuses(new Map())
-        return
+      const dates = new Set([meetingStatusDate])
+      if (internalMeetingsOpen && internalMeetingDateFilter) dates.add(internalMeetingDateFilter)
+      if (internalMeetingsOpen && !internalMeetingDateFilter && (internalMeetingListFilter === "this_week" || internalMeetingListFilter === "next_week")) {
+        for (const meeting of internalMeetingsVisible) {
+          const date = internalMeetingWeekDate(meeting, internalMeetingListFilter)
+          if (date) dates.add(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`)
+        }
       }
-      const rows = (await res.json()) as MeetingOccurrenceStatus[]
+      const groups = await Promise.all(Array.from(dates, async (date) => {
+        const res = await apiFetch(`/meetings/occurrence-statuses?occurrence_date=${date}`)
+        if (!res.ok) throw new Error("Failed to load meeting statuses")
+        return (await res.json()) as MeetingOccurrenceStatus[]
+      }))
+      const rows = groups.flat()
       setMeetingOccurrenceStatuses(new Map(rows.map((row) => [occurrenceStatusKey(row.meeting_id, row.occurrence_date), row])))
     } catch {
       setMeetingOccurrenceStatuses(new Map())
     }
-  }, [apiFetch, meetingStatusDate, occurrenceStatusKey])
+  }, [apiFetch, meetingStatusDate, occurrenceStatusKey, internalMeetingsOpen, internalMeetingListFilter, internalMeetingsVisible, internalMeetingDateFilter])
 
   React.useEffect(() => {
     void loadMeetingOccurrenceStatuses()
@@ -10203,6 +10221,7 @@ export default function CommonViewPage() {
         }
         .external-meeting-list-header {
           display: flex;
+          flex-wrap: wrap;
           align-items: center;
           justify-content: space-between;
           gap: 12px;
@@ -10470,7 +10489,39 @@ export default function CommonViewPage() {
         }
         .external-meeting-cards {
           display: grid;
+          grid-template-columns: minmax(0, 1fr);
           gap: 10px;
+        }
+        .external-meeting-list,
+        .external-meeting-card {
+          min-width: 0;
+          max-width: 100%;
+        }
+        .external-meeting-card-header {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: flex-start;
+          gap: 12px;
+        }
+        .external-meeting-card-copy {
+          flex: 1 1 240px;
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+        .external-meeting-card-actions {
+          display: flex;
+          flex: 0 1 auto;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 6px;
+          min-width: 0;
+          max-width: 100%;
+          margin-left: auto;
+        }
+        .external-meeting-card-actions button {
+          max-width: 100%;
+          white-space: normal;
+          overflow-wrap: anywhere;
         }
         .external-meeting-card {
           border: 1px solid #e2e8f0;
@@ -10488,6 +10539,8 @@ export default function CommonViewPage() {
         .outlook-orange { background: #ffd7ad !important; border-color: #e87922 !important; }
         .outlook-red { background: #ffd5dc !important; border-color: #e55361 !important; }
         .external-meeting-title {
+          overflow-wrap: anywhere;
+          white-space: normal;
           font-size: 13px;
           font-weight: 700;
           color: #0f172a;
@@ -15232,8 +15285,8 @@ export default function CommonViewPage() {
                           </div>
                         ) : (
                           <>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                              <div style={{ flex: 1 }}>
+                            <div className="external-meeting-card-header">
+                              <div className="external-meeting-card-copy">
                                 <div className="external-meeting-title">{meeting.title || "External meeting"}</div>
                                 {meeting.calendar_imported ? (
                                   <div className="external-meeting-meta">
@@ -15276,7 +15329,7 @@ export default function CommonViewPage() {
                                   ) : null}
                                 </div>
                               </div>
-                              <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              <div className="external-meeting-card-actions">
                                   <button
                                     className="btn-surface"
                                     type="button"
@@ -15791,23 +15844,42 @@ export default function CommonViewPage() {
                 <div className="external-meeting-filter" aria-label="Internal meetings filter">
                   {([
                     ["next", "Next"],
+                    ["this_week", "This week"],
+                    ["next_week", "Next week"],
                     ["past", "Past"],
                     ["all", "All"],
                   ] as const).map(([value, label]) => (
                     <button
                       key={value}
                       type="button"
-                      className={internalMeetingListFilter === value ? "active" : ""}
-                      onClick={() => setInternalMeetingListFilter(value)}
+                      className={!internalMeetingDateFilter && internalMeetingListFilter === value ? "active" : ""}
+                      aria-pressed={!internalMeetingDateFilter && internalMeetingListFilter === value}
+                      onClick={() => {
+                        setInternalMeetingDateFilter("")
+                        setInternalMeetingListFilter(value)
+                      }}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
               </div>
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px", marginBottom: "8px" }}>
+                <label htmlFor="internal-meeting-date-filter">Date:</label>
+                <input id="internal-meeting-date-filter" className="input" type="date" style={{ width: "auto" }}
+                  value={internalMeetingDateFilter} onChange={(event) => setInternalMeetingDateFilter(event.target.value)} />
+                {internalMeetingDateFilter ? (
+                  <button type="button" className="btn-surface" onClick={() => setInternalMeetingDateFilter("")}>Clear date</button>
+                ) : null}
+              </div>
               {internalMeetingsVisible.length ? (
                 <div className="external-meeting-cards">
                   {internalMeetingsVisible.map((meeting) => {
+                    const relation = internalMeetingRelation(meeting)
+                    const listDate = internalMeetingDateFilter
+                      ? internalMeetingDateOn(meeting, internalMeetingDateFilter)
+                      : internalMeetingWeekDate(meeting, internalMeetingListFilter)
+                    const displayedMeeting = listDate ? { ...meeting, starts_at: listDate.toISOString(), recurrence_type: "none" } : meeting
                     const department = departments.find((d) => d.id === meeting.department_id) || null
                     const owner = meeting.created_by ? userById.get(meeting.created_by) : null
                     const ownerName = owner?.full_name || owner?.username || "Unknown"
@@ -16021,11 +16093,14 @@ export default function CommonViewPage() {
                           </div>
                         ) : (
                           <>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                              <div style={{ flex: 1 }}>
-                                <div className="external-meeting-title">{meeting.title || "Internal meeting"}</div>
+                            <div className="external-meeting-card-header">
+                              <div className="external-meeting-card-copy">
+                                <div className="external-meeting-title">
+                                  {relation ? <span className="meeting-relation-badge" style={{ marginRight: "6px" }} title={`${relation === "PARA" ? "Para" : "Pas"} takimit extern`}>{relation}</span> : null}
+                                  {meeting.title || "Internal meeting"}
+                                </div>
                                 <div className="external-meeting-meta">
-                                  <span>{formatExternalMeetingWhen(meeting)}</span>
+                                  <span>{formatExternalMeetingWhen(displayedMeeting)}</span>
                                   <span>{meeting.platform || "-"}</span>
                                 </div>
                                 <div className="external-meeting-meta">
@@ -16043,10 +16118,10 @@ export default function CommonViewPage() {
                                   </div>
                                 ) : null}
                                 <div className="external-meeting-meta" style={{ marginTop: "8px" }}>
-                                  <span>Status: {renderMeetingStatusControl(meeting)}</span>
+                                  <span>Status: {renderMeetingStatusControl(displayedMeeting)}</span>
                                 </div>
                               </div>
-                              <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              <div className="external-meeting-card-actions">
                                   <button
                                     className="btn-surface"
                                     type="button"
@@ -16091,8 +16166,14 @@ export default function CommonViewPage() {
                 </div>
               ) : (
                 <div className="external-meeting-empty">
-                  {internalMeetingListFilter === "past"
+                  {internalMeetingDateFilter
+                    ? "No internal meetings on this date."
+                    : internalMeetingListFilter === "past"
                     ? "No past internal meetings."
+                    : internalMeetingListFilter === "this_week"
+                      ? "No internal meetings this week."
+                    : internalMeetingListFilter === "next_week"
+                      ? "No internal meetings next week."
                     : internalMeetingListFilter === "next"
                       ? "No upcoming internal meetings."
                       : "No internal meetings yet."}

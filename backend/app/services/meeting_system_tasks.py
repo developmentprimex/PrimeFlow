@@ -19,7 +19,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.meeting_participants import manual_participant_ids
-from app.services.meeting_cancellation import external_meeting_is_canceled
+from app.services.meeting_cancellation import external_meeting_is_canceled, internal_meeting_task_is_canceled
 from app.services.microsoft_calendar_sync import is_routine_external_meeting
 
 EXTERNAL_MEETING_TASK_KIND = "external_meeting_prepare"
@@ -694,6 +694,8 @@ async def reconcile_tak_int_one_h_tasks_for_meeting(
             tak_int_post_one_h_slot(external, post_internal) if post_internal is not None else None,
         ),
     ):
+        if slot is not None and await internal_meeting_task_is_canceled(db, external.id, task_kind, slot[0]):
+            continue
         changed += await _reconcile_tak_int_one_h_task_kind(
             db,
             external,

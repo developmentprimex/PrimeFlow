@@ -88,6 +88,9 @@ class TestTakIntOneHReconciliation(unittest.IsolatedAsyncioTestCase):
         cancellation = patch("app.services.meeting_system_tasks.external_meeting_is_canceled", new_callable=AsyncMock, return_value=False)
         cancellation.start()
         self.addCleanup(cancellation.stop)
+        internal_cancellation = patch("app.services.meeting_system_tasks.internal_meeting_task_is_canceled", new_callable=AsyncMock, return_value=False)
+        self.internal_cancellation = internal_cancellation.start()
+        self.addCleanup(internal_cancellation.stop)
 
     async def test_weekly_category_creates_only_post_tasks_and_regular_meeting_keeps_both(self) -> None:
         for categories, expects_pre in ((["Weekly"], False), (["Team WEEKLY"], False), (["Online"], True)):
@@ -112,6 +115,22 @@ class TestTakIntOneHReconciliation(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(post.kwargs["task_kind"], TAK_INT_POST_ONE_H_TASK_KIND)
                 self.assertEqual(post.kwargs["slot"], (date(2026, 10, 15), "14:20"))
                 self.assertEqual(post.kwargs["participant_ids"], [participant_id])
+
+    async def test_canceled_internal_task_kind_is_not_recreated(self) -> None:
+        external = _meeting(datetime(2026, 10, 22, 13, 0, tzinfo=TZ),
+            id=uuid.uuid4(), title="Customer meeting", calendar_categories=[])
+        internal = SimpleNamespace(starts_at=datetime(2026, 10, 22, 14, 20, tzinfo=TZ))
+        for canceled_kind in (TAK_INT_PRE_ONE_H_TASK_KIND, TAK_INT_POST_ONE_H_TASK_KIND):
+            with self.subTest(canceled_kind=canceled_kind):
+                self.internal_cancellation.side_effect = lambda db, external_id, kind, day: kind == canceled_kind
+                with (
+                    patch("app.services.meeting_system_tasks.manual_participant_ids", new=AsyncMock(return_value={external.id: [uuid.uuid4()]})),
+                    patch("app.services.meeting_system_tasks._post_internal_meeting", new=AsyncMock(return_value=internal)),
+                    patch("app.services.meeting_system_tasks._reconcile_tak_int_one_h_task_kind", new=AsyncMock(return_value=0)) as reconcile,
+                ):
+                    await reconcile_tak_int_one_h_tasks_for_meeting(AsyncMock(), external)
+                reconcile.assert_awaited_once()
+                self.assertNotEqual(reconcile.await_args.kwargs["task_kind"], canceled_kind)
 
     async def test_unneeded_preparation_deactivates_open_tasks_and_preserves_completed_tasks(self) -> None:
         participant_id = uuid.uuid4()

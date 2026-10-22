@@ -572,11 +572,10 @@ export function PrimeflowQuestionsPage() {
               <DropdownMenuContent
                 align="start"
                 sideOffset={4}
-                className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[var(--radix-dropdown-menu-trigger-width)]"
-                onOpenAutoFocus={(event) => {
-                  event.preventDefault()
-                  requestAnimationFrame(() => categorySearchRef.current?.focus())
+                ref={(content) => {
+                  if (content) requestAnimationFrame(() => categorySearchRef.current?.focus())
                 }}
+                className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[var(--radix-dropdown-menu-trigger-width)]"
               >
                 <div
                   className="relative mb-1"

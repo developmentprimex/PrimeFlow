@@ -44,7 +44,9 @@ class TestMeetingStatusManualTasks(unittest.IsolatedAsyncioTestCase):
 
                     db = AsyncMock()
                     db.execute.side_effect = execute
-                    with patch("app.api.routers.meetings.delete_external_meeting_dependents", new_callable=AsyncMock) as cleanup:
+                    with patch("app.api.routers.meetings.delete_external_meeting_dependents", new_callable=AsyncMock) as cleanup, patch(
+                        "app.api.routers.meetings.delete_internal_meeting_tasks", new_callable=AsyncMock
+                    ) as internal_cleanup:
                         result = await update_meeting_occurrence_status(
                             meeting.id, MeetingOccurrenceStatusUpdate(occurrence_date=day, status=status),
                             db=db, user=SimpleNamespace(id=uuid.uuid4()),
@@ -53,6 +55,10 @@ class TestMeetingStatusManualTasks(unittest.IsolatedAsyncioTestCase):
                             cleanup.assert_awaited_once_with(db, meeting)
                         else:
                             cleanup.assert_not_awaited()
+                        if link != "external" and status == "canceled":
+                            internal_cleanup.assert_awaited_once_with(db, meeting, day)
+                        else:
+                            internal_cleanup.assert_not_awaited()
                     self.assertEqual(result.status, status)
                     self.assertEqual(db.execute.await_count, 2)
                     db.commit.assert_awaited_once()
