@@ -5,7 +5,7 @@ import { flushSync } from "react-dom"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Bold, Calendar as CalendarIcon, Check, ChevronDown, ChevronUp, Clock, Cloud, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
+import { Bold, Calendar as CalendarIcon, Check, ChevronDown, ChevronUp, Clock, Cloud, FileText, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -4824,6 +4824,24 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                 )}
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
+                                {note.from_mira ? (
+                                  <Button
+                                    asChild
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7 shrink-0 border-violet-300 text-violet-700 hover:bg-violet-50"
+                                  >
+                                    <Link
+                                      href={`/mira/transkripti/${note.id}`}
+                                      target="_blank"
+                                      rel="noopener"
+                                      aria-label="Hap transkriptin e takimit"
+                                      title="Hap transkriptin e takimit"
+                                    >
+                                      <FileText className="h-4 w-4" />
+                                    </Link>
+                                  </Button>
+                                ) : null}
                                 {!editDisabled ? (
                                   <Button
                                     variant="outline"

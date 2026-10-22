@@ -150,3 +150,13 @@ export function eventText(event: MeetingEvent): string {
     default: return event.kind
   }
 }
+
+export type NoteTranscript = {
+  note_id: string
+  title: string
+  status: string
+  partial: boolean
+  started_at: string | null
+  stopped_at: string | null
+  passages: { speaker: string; time: string; text: string }[]
+}
