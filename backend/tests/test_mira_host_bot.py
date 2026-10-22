@@ -55,6 +55,36 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(state['ending'])
         self.assertTrue(state['process'].send.await_args.args[0]['output']['FUNDI'])
 
+    async def test_at_1150_the_last_turn_leads_to_the_pm_review_and_then_the_end(self):
+        pm = [{'person': 'Elsa Ferati', 'initials': 'EF', 'detyrat_pm': ['oferta (e verdhë)']}]
+        fake, _ = bot({'/turns/next': {'current': None, 'upcoming': None, 'pm_review': pm}})
+        host = mira_host.MiraHost(fake)
+        state = {**session(), 'slot': '11:50', 'pm_reviewed': False}
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c1', 'arguments': '{}'})
+        self.assertEqual(state['process'].send.await_args.args[0]['output']['PM_RISHIKIMI'], pm)
+        self.assertFalse(state['ending'])
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c2', 'arguments': '{}'})
+        self.assertTrue(state['process'].send.await_args.args[0]['output']['FUNDI'])
+        self.assertTrue(state['ending'])
+
+    async def test_staff_starts_when_ga_is_done_but_not_before_the_hour(self):
+        fake, calls = bot({'/staff': {'turns': [{'id': 't1'}]},
+                           '/turns/next': {'current': {'id': 't1', 'name': 'Rinesa Ahmeti', 'initials': 'RA', 'discord': None,
+                                                       'brief': BRIEF}, 'upcoming': None}})
+        host = mira_host.MiraHost(fake)
+        state = {**session(), 'ga_done': asyncio.Event(), 'staff_started': False,
+                 'starts_at': mira_host.datetime.now(mira_host.tz()) + mira_host.timedelta(minutes=1)}
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_ga_phase', 'call_id': 'g1', 'arguments': '{}'})
+        self.assertTrue(state['process'].send.await_args.args[0]['output']['prit'])
+        self.assertTrue(state['ga_done'].is_set())
+        self.assertFalse(calls)
+        # GA ran past the hour: the first person comes back in the same answer.
+        state = {**session(), 'ga_done': asyncio.Event(), 'staff_started': False,
+                 'starts_at': mira_host.datetime.now(mira_host.tz()) - mira_host.timedelta(minutes=1)}
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_ga_phase', 'call_id': 'g2', 'arguments': '{}'})
+        self.assertEqual(state['process'].send.await_args.args[0]['output']['RADHA']['initials'], 'RA')
+        self.assertTrue(state['staff_started'])
+
     async def test_other_tools_are_answered_by_primeflow(self):
         fake, calls = bot({'/tools/list_new_px_notes': {'total': 0, 'notes': []}})
         host = mira_host.MiraHost(fake)

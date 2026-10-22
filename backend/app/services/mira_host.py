@@ -149,10 +149,13 @@ class SlotData:
         items = payload.get("items") or {}
         self.all_unavailable, self.unavailable_ids, self.unavailable_names = _full_day_unavailable(items, day)
         self.slots: dict[str, list[dict]] = {slot: [] for slot in SLOTS}
+        self.blocked: list[dict] = []
         for label, values, _ in _task_rows(items, day, include_completed_today=True, users=payload.get("users")):
             slot = label.removeprefix("1H ").strip()
             if label.startswith("1H ") and slot in self.slots:
                 self.slots[slot] = values
+            elif label.startswith("BLL"):
+                self.blocked = values
 
     def owners(self, item: dict) -> list[str]:
         ids = []
@@ -184,6 +187,51 @@ class SlotData:
             return []
         return [item for item in self.slots.get(slot, []) if user_id in self.owners(item)
                 and (not open_only or str(item.get("status") or "TODO").upper() in {"TODO", "IN_PROGRESS"})]
+
+    def order(self) -> list[str]:
+        """Everyone with 1H tasks today, in Common View order across the slots (GA/KA excluded)."""
+        result = []
+        for slot in SLOTS:
+            for uid in self.participants(slot):
+                if uid not in result:
+                    result.append(uid)
+        return result
+
+    def ga_flagged(self) -> list[dict]:
+        """Open tasks marked GA (the staff's tasks for GA, "DET ME GA" in 1H Reports), per person in order."""
+        people: dict[str, list[dict]] = {}
+        for slot in SLOTS:
+            for item in self.slots.get(slot, []):
+                if str(item.get("one_h_marker") or item.get("oneHMarker") or "").upper() != "FLAG" or \
+                        str(item.get("status") or "").upper() == "DONE":
+                    continue
+                line = task_line(item)
+                for uid in self.owners(item) or [""]:
+                    tasks = people.setdefault(uid, [])
+                    if line["task_id"] not in {t["task_id"] for t in tasks}:
+                        tasks.append(line)
+        order = self.order()
+        ranked = sorted(people, key=lambda uid: order.index(uid) if uid in order else len(order))
+        return [{"person": initials(self.name(uid)) if uid else "?", "tasks": [t["spoken"] for t in people[uid]]}
+                for uid in ranked]
+
+    def pm_open(self) -> list[dict]:
+        """Unfinished PM tasks of today's 1H, per person in order (the 11:50 review)."""
+        result = []
+        for uid in self.order():
+            tasks = []
+            for slot in SLOTS:
+                for item in self.user_tasks(slot, uid, open_only=True):
+                    line = task_line(item)
+                    if line["period"] == "PM" and line["task_id"] not in {t["task_id"] for t in tasks}:
+                        tasks.append(line)
+            if tasks:
+                result.append({"person": self.name(uid), "initials": initials(self.name(uid)),
+                               "detyrat_pm": [f"{t['spoken']} ({t['color']})" for t in tasks]})
+        return result
+
+    def blocked_tasks(self, user_id: str) -> list[dict]:
+        return [item for item in self.blocked if user_id in self.owners(item)]
 
     def name(self, user_id: str) -> str:
         return (self.users.get(user_id) or {}).get("full_name") or "?"
@@ -234,6 +282,7 @@ def task_line(item: dict) -> dict:
         "spoken": spoken_title(title, _assignees(item) + owner_initials(title).split("/")),
         "status": str(item.get("status") or "TODO").upper(),
         "status_label": STATUS_LABELS.get(str(item.get("status") or "TODO").upper(), str(item.get("status") or "TODO")),
+        "color": STATUS_COLORS.get(str(item.get("status") or "TODO").upper(), ""),
         "period": _task_period_label(item),
         "symbol": _task_marker_label(item) or None,
         "symbol_comment": (item.get("one_h_marker_comment") or None),
@@ -246,6 +295,13 @@ def task_line(item: dict) -> dict:
 
 STATUS_LABELS = {"TODO": "pa progres (To Do)", "IN_PROGRESS": "në proces", "DONE": "kryer",
                  "WAITING_CLIENT": "WFE", "WAITING_CONFIRMATION": "në pritje konfirmimi"}
+# The colours of 1H SHTYPI; the questions in the 1H follow them.
+STATUS_COLORS = {"TODO": "rozë", "IN_PROGRESS": "e verdhë", "DONE": "e gjelbër"}
+# At 11:50 the open tasks of every earlier slot are asked, not only the last one.
+ALL_EARLIER_SLOTS = {"11:50"}
+# After the last person at 11:50, everyone's open PM tasks are reviewed (continue or postpone, and why).
+PM_REVIEW_SLOT = "11:50"
+BLOCKED_SLOT = "16:00"
 
 
 def task_text(line: dict) -> str:
@@ -261,11 +317,22 @@ def task_text(line: dict) -> str:
 
 def person_brief(data: SlotData, slot: str, user_id: str) -> dict:
     previous = previous_slot(slot)
+    earlier = list(SLOTS[:SLOTS.index(slot)]) if slot in ALL_EARLIER_SLOTS else [previous] if previous else []
+    open_lines: list[dict] = []
+    for earlier_slot in earlier:
+        for item in data.user_tasks(earlier_slot, user_id, open_only=True):
+            line = task_line(item)
+            if line["task_id"] not in {t["task_id"] for t in open_lines}:
+                open_lines.append(line)
+    current = [task_line(i) for i in data.user_tasks(slot, user_id)]
     return {
         "user_id": user_id, "name": data.name(user_id), "initials": initials(data.name(user_id)), "slot": slot,
-        "current": [task_line(i) for i in data.user_tasks(slot, user_id)],
-        "previous_slot": previous,
-        "previous_open": [task_line(i) for i in data.user_tasks(previous, user_id, open_only=True)],
+        "current": current,
+        "previous_slot": ", ".join(earlier) or None,
+        "previous_open": open_lines,
+        # Everything in the slot is done: Mira asks what comes next instead of asking about each task.
+        "all_done": bool(current) and all(t["status"] == "DONE" for t in current),
+        "blocked": [task_line(i) for i in data.blocked_tasks(user_id)] if slot == BLOCKED_SLOT else [],
     }
 
 
@@ -275,7 +342,8 @@ def brief_message(brief: dict, protocol: str) -> str:
         lines.append(f"**Detyrat e tua në slotin {brief['slot']}:**")
         lines += [f"{n}. {task_text(t)}" for n, t in enumerate(brief["current"], 1)]
     if brief["previous_open"]:
-        lines += ["", f"**Nga sloti paraprak {brief['previous_slot']} (në proces / pa progres):**"]
+        label = "slotet paraprake" if "," in (brief["previous_slot"] or "") else "sloti paraprak"
+        lines += ["", f"**Nga {label} {brief['previous_slot']} (në proces / pa progres):**"]
         lines += [f"{n}. {task_text(t)}" for n, t in enumerate(brief["previous_open"], 1)]
     lines += ["", "Mira do të të thërrasë kur të vijë radha jote."]
     return "\n".join(lines)[:1990]
@@ -504,6 +572,8 @@ async def next_turn(db: AsyncSession, meeting: Mira1HMeeting, summary: str | Non
         result["current"] = {**view[str(current.id)], "brief": brief}
     if len(waiting) > 1:
         result["upcoming"] = view[str(waiting[1].id)]
+    if not current and meeting.slot == PM_REVIEW_SLOT:
+        result["pm_review"] = data.pm_open()
     return result
 
 
@@ -729,6 +799,27 @@ async def new_progress(db: AsyncSession, meeting: Mira1HMeeting, data: SlotData,
     return {"done": list(merged_done.values()), "strikes": list(merged_strikes.values())}
 
 
+def by_person(data: SlotData, progress: dict) -> list[dict]:
+    """Done and Strike grouped per person, in the Common View order of 1H SHTYPI."""
+    order = [initials(data.name(uid)) for uid in data.order()]
+    groups: dict[str, dict] = {}
+
+    def owners_of(entry: dict) -> str:
+        return "/".join(dict.fromkeys(p for o in entry["owners"] for p in o.split("/") if p)) or "?"
+    for entry in progress["done"]:
+        owners = owners_of(entry)
+        groups.setdefault(owners, {"person": owners, "done": [], "strike": []})["done"].append(entry["spoken"])
+    for entry in progress["strikes"]:
+        owners = owners_of(entry)
+        groups.setdefault(owners, {"person": owners, "done": [], "strike": []})["strike"].append(
+            {"detyra": entry["spoken"], "pikat": [p["text"] for p in entry["points"]]})
+
+    def rank(owners: str) -> int:
+        found = [order.index(part) for part in owners.split("/") if part in order]
+        return min(found) if found else len(order)
+    return [groups[key] for key in sorted(groups, key=rank)]
+
+
 def owner_initials(title: str) -> str:
     match = LEADING_OWNERS.match(plain(title))
     return match.group(0).strip(" :") if match else ""
@@ -875,16 +966,20 @@ class PxNote(Args):
 
 
 TOOLS = {
+    "list_ga_tasks": (NoArgs, "Detyrat e hapura me simbolin GA (detyrat nga stafi për GA), sipas personave. Thirre në fillim të fazës GA."),
     "list_new_px_notes": (NoArgs, "Lexo PX Notes të hapura që ende nuk janë kthyer në detyrë. Thirre në fazën GA te pyetja 'Notes të reja?'."),
-    "create_task_from_note": (CreateTask, "Krijo detyrë 1H nga një PX Note. Thirre VETËM pasi ia ke lexuar prapa të dhënat (personi, data, AM/PM, deadline, simboli) dhe ke dëgjuar 'po'."),
-    "list_new_done_and_strikes": (NoArgs, "Detyrat Done dhe pikat e reja Strike (në çdo slot) që nuk janë përmendur në 1H më herët sot. Pas leximit shënohen si të përmendura."),
+    "create_task_from_note": (CreateTask, "Krijo detyrë 1H nga një PX Note, pasi GA ka thënë për kë dhe ka konfirmuar."),
+    "list_new_done_and_strikes": (NoArgs, "Done dhe Strike të reja që nga 1H-ja e kaluar, sipas personave në renditjen e 1H SHTYPI. Pas leximit shënohen si të lexuara."),
+    # Answered by the bot: the staff starts as soon as GA is done (or at the slot hour, if GA finishes earlier).
+    "end_ga_phase": (NoArgs, "Thirre sapo ke mbaruar me GA (detyrat GA, notes, done/strike). Rezultati të jep personin e parë ose të thotë të presësh."),
     "get_person_brief": (Person, "Detyrat e një personi për slotin aktual, të paplotësuarat nga sloti paraprak dhe progresi i ri."),
     "find_user": (Person, "Gjej përdoruesin sipas emrit ose inicialeve."),
     "search_knowledge": (Query, "Kërko në Knowledge të Mira-s (struktura e Primex, rregulloret, definimet) kur pyetja s'mbulohet nga konteksti."),
     "add_meeting_note": (Note, "Ruaj një vendim ose shënim të rëndësishëm të takimit (vetëm në shënimet e takimit)."),
     "save_px_note": (PxNote, "Ruaj një shënim të ri në PX Notes kur dikush të thotë 'shënoje/vendose në PX Notes'. "
-                             "Thirre pasi ia ke thënë tekstin prapa shkurt dhe ke dëgjuar 'po'."),
-    "end_person_turn": (EndTurn, "Thirre MENJËHERË sapo personi ka përfunduar, pa e përmbledhur me zë. Rezultati të jep personin e radhës."),
+                             "Thirre menjëherë, pa ia lexuar prapa."),
+    "end_person_turn": (EndTurn, "Thirre MENJËHERË sapo personi ka përfunduar, pa e përmbledhur me zë. Rezultati të jep personin e radhës "
+                                 "(ose, në 11:50 pas të fundit, rishikimin e detyrave PM)."),
     "call_next_person": (NoArgs, "Njofto personin e radhës të kyçet (thirre kur personi aktual është te detyra e fundit)."),
     # Answered inside host-worker.mjs: it keeps Mira quiet and never reaches PrimeFlow.
     "wait_for_user": (NoArgs, "Qëndro në heshtje: për zhurmë, heshtje, 'aha/po/mhm' ose fjalë që s'janë për ty."),
@@ -921,20 +1016,18 @@ GJUHA
 - Emrat dhe inicialet ("EF", "OH") thuaji siç janë. Mos lexo ID, UUID ose kode. Datat shkurt: "nesër",
   "23 tetor", jo "2026-10-23".
 
-GJATËSIA
-- Zakonisht një fjali, maksimum dy. Pa hyrje të gjata dhe pa e përsëritur atë që tha personi.
-- Mos i shpjego hapat e tu ("po e përmbledh", "po kaloj te tjetri") dhe mos përmend sistemin, "RADHA",
-  "SISTEMI" apo mjetet. Thjesht vepro.
+SHPEJTËSIA (më e rëndësishmja)
+- Takimi duhet të ecë shpejt dhe të jetë bashkëbisedim: ti pyet shkurt, ata flasin.
+- Zakonisht një fjali, maksimum dy. Pa hyrje, pa e përsëritur atë që tha personi, pa përmbledhje.
+- KURRË mos thuaj "po e procesoj", "po e kontrolloj", "një moment", "po e shikoj", "po e shënoj",
+  "po e përmbledh", "po kaloj te tjetri", dhe mos përmend sistemin, "RADHA", "SISTEMI" apo mjetet.
+  Thirr mjetin pa folur dhe fol vetëm me rezultatin.
+- Mos kërko konfirmim për gjëra që i tha qartë personi. Konfirmo vetëm kur mungon diçka ose s'je e sigurt.
 
 LLOJLLOJSHMËRIA
 - Mos e thuaj të njëjtën frazë dy herë rresht. Ndryshoji pranimet dhe pyetjet.
-- Shembuj, si frymë dhe jo si skript (mos i përdor gjithmonë): "Mirë.", "Okej, e shënova.", "Super.",
+- Shembuj, si frymë dhe jo si skript (mos i përdor gjithmonë): "Mirë.", "Okej.", "Super.",
   "S'ka problem.", "Qysh po shkon me…?", "A u kry ajo e…?", "Çka mbetet edhe te…?", "A ka diçka t're?"
-
-PARA MJETEVE
-- Para një mjeti që merr pak kohë (create_task_from_note, end_person_turn, list_new_px_notes,
-  list_new_done_and_strikes) mund të thuash një fjalë të shkurtër dhe ta thërrasësh menjëherë
-  ("Mirë, faleminderit." / "Okej, po e krijoj."). Mos e bë këtë te pyetjet e thjeshta.
 
 KUR S'E KUPTON OSE S'ËSHTË PËR TY
 - Përgjigju vetëm kur e ke kuptuar qartë. Mos hamendëso fjalë që mungojnë dhe mos thirr mjete nga zë i paqartë.
@@ -944,34 +1037,46 @@ KUR S'E KUPTON OSE S'ËSHTË PËR TY
   përgjigja e tij, pa e përsëritur atë që the.
 
 RRJEDHA E TAKIMIT
-1) Faza GA (nga hyrja deri në {meeting.slot}): janë {ga}. Përshëndeti shkurt dhe fillo.
-   a) Notes: pyet nëse ka notes të reja dhe thirr list_new_px_notes. Për çdo note bëje një propozim të plotë
-      në një fjali, me atë që e di tashmë: "suggested_people", "due" dhe "symbol" të note-it. Pyet vetëm atë
-      që mungon (zakonisht personi ose data), të gjitha në një pyetje. AM/PM dhe deadline propozoji si
-      "pa AM/PM, pa deadline" nëse s'ka të dhëna; ata e korrigjojnë nëse duhet.
-      P.sh.: "Note nga Gane: oferta për klientin X, për EF nesër, simboli pikëpyetje, pa deadline. A e krijoj?"
-      Pas "po" thirr create_task_from_note. Pas korrigjimit ("jo, OH") ndrysho vetëm atë pjesë dhe krijoje
-      pa e lexuar prapë gjithçka. Detyrat nga PX Notes janë GJITHMONË 1H. "Kalo" ose "jo" = te tjetri.
-   b) Done: pyet a ka diçka të kryer dhe thirr list_new_done_and_strikes. Grupoji sipas personit, me një
-      fjali për person ("EF i ka kry ofertën dhe raportin; OH e ka bë strike te…"). Vetëm të rejat:
-      {earlier} gjëra janë përmendur tashmë në 1H-të e mëparshme të sotme.
-2) Faza e stafit (nga ora {meeting.slot}): merr "RADHA" me detyrat e personit. Që nga ai moment fol VETËM me
-   personin e ri; mos i përsërit pyetjet e personit të mëparshëm.
-   Me secilin person ndiq protokollin:
+1) Faza GA (fillon 2 minuta para {meeting.slot}): janë {ga}. Përshëndeti me një fjalë dhe fillo, me këtë radhë:
+   a) Detyrat për GA: thirr list_ga_tasks. Nëse ka, pyet GA-në një herë: "A ka reply nga GA te detyrat për GA?"
+      dhe thuaj shkurt të kujt janë (p.sh. "OH dy, EF një"). Dëgjo përgjigjen; mos i lexo të gjitha titujt
+      përveç nëse të pyesin. Nëse s'ka, kalo pa e përmendur.
+   b) Notes: pyet "Notes të reja?" dhe thirr list_new_px_notes. Për çdo note: lexoje shkurt dhe pyet
+      "A krijojmë detyrë për dikë?". Nëse thonë "jo/kalo", kalo te tjetri. Nëse thonë për kë (dhe ndoshta kur),
+      plotëso vetë pjesën tjetër nga note-i ("due", "symbol"; data nëse s'thuhet = sot; pa AM/PM dhe pa deadline
+      nëse s'thuhet) dhe thirr create_task_from_note menjëherë, pa e lexuar prapa. Pastaj thuaj vetëm
+      "Okej, EF nesër." dhe kalo te note-i tjetër. Pyet vetëm kur personi s'është i qartë.
+      Detyrat nga PX Notes janë GJITHMONË 1H.
+   c) Done dhe Strike: thirr list_new_done_and_strikes dhe lexoji sipas personave, me radhën që vjen në
+      "sipas_personave", një fjali për person: "EF: e kreu ofertën, strike te raporti, pika e dytë." Vetëm të rejat;
+      {earlier} gjëra janë lexuar tashmë në 1H-të e mëparshme të sotme. Nëse s'ka, thuaj "S'ka done të reja."
+   d) Sapo mbaron me GA, thirr end_ga_phase. Nëse rezultati thotë të presësh, thuaj vetëm "Fillojmë në
+      {meeting.slot}." dhe hesht; përndryshe vazhdo me personin që të jep.
+2) Faza e stafit: merr "RADHA" me detyrat e personit. Fol VETËM me personin e ri; mos i përsërit pyetjet e
+   personit të mëparshëm. Me secilin person ndiq protokollin:
 {(row.protocol_text or DEFAULT_PROTOCOL).strip()}
-   Fillo me detyrat e slotit paraprak që janë në proces / pa progres, pastaj ato të slotit aktual.
-   Titujt thuaji me fushën "spoken" (pa "EF:" dhe pa numrin në fillim). Progresin e ri (strike/done)
-   përmende vetëm një herë. MOS pyet "a ka detyra nga stafi për GA" (as BZ): pikën 4 stafi e bën vetë.
-   Kur personi është te detyra e fundit thirr call_next_person. Kur mbaron, thuaj shkurt "Faleminderit"
-   dhe thirr end_person_turn pa përmbledhje me zë; pastaj thirre të riun me emër, p.sh. "Rinesa, qysh po
-   shkon me…?". Përmbledhjet i shkruan PrimeFlow pas takimit. Synimi: rreth {row.target_minutes_per_person}
-   minuta për person.
-3) Kur sistemi thotë "FUNDI", falënderoji shkurt e ngrohtë dhe mbyll.
+   Fillo me detyrat nga slotet paraprake që kanë mbetur në proces / pa progres, pastaj me ato të slotit aktual.
+   Për ÇDO detyrë pyet sipas ngjyrës ("ngjyra" te detyra), një pyetje e shkurtër:
+   - e verdhë (në proces): "A ke me vazhdu me …? Kur pritet me u kry?"
+   - rozë (pa progres): "Pse s'ke vazhdu me …? Kur vazhdon?"
+   - e gjelbër (kryer): njihe me një fjalë ("Super.") dhe kalo. Nëse "te_gjitha_kryer" është true:
+     "Me çka ke me vazhdu në slotin tjetër?"
+   - BLLOK (vetëm në 16:00, kur ka "bllok"): pyet për secilën detyrë bllok si më lart.
+   Titujt thuaji me fushën "spoken" (pa "EF:" dhe pa numrin në fillim). Progresin e ri (strike/done) mos e
+   lexo përsëri; e ke lexuar te GA. MOS pyet stafin "a ka detyra për GA" (as BZ): pikën 4 stafi e bën vetë.
+   Kur personi është te detyra e fundit thirr call_next_person. Kur mbaron, thuaj "Faleminderit" dhe thirr
+   end_person_turn pa përmbledhje me zë; pastaj thirre të riun me emër ("Rinesa, …?"). Synimi: rreth
+   {row.target_minutes_per_person} minuta për person.
+3) Rishikimi PM (vetëm në 11:50, kur end_person_turn kthen "PM_RISHIKIMI"): për secilin person me radhë, thuaj
+   detyrat PM shkurt dhe pyet: "A vazhdon me këto PM? A ka ndonjë që shtyhet për nesër ose për datë tjetër?"
+   Për çdo shtyrje pyet "Pse?" dhe thirr add_meeting_note me "SHTYRJE: <inicialet> – <detyra> → <data>;
+   arsyeja: …". Mos e ndrysho vetë detyrën. Kur mbaron me të gjithë, thirr end_person_turn përsëri.
+4) Kur sistemi thotë "FUNDI", falënderoji me një fjali dhe mbyll.
 
 SHËNIM NË PX NOTES (në çdo moment të takimit)
-- Kur dikush thotë "Mira, shënoje/vendose në PX Notes…", përmblidhe tekstin si shënim të qartë (pa "Mira, shëno"),
-  thuaje prapa në një fjali ("Po e shënoj: …, a është mirë?") dhe pas "po" thirr save_px_note.
-  Pastaj vazhdo aty ku ishit. Për vendime që s'janë për PX Notes përdor add_meeting_note.
+- Kur dikush thotë "Mira, shënoje/vendose në PX Notes…", thirr save_px_note menjëherë me tekstin si shënim të
+  qartë (pa "Mira, shëno"), pa ia lexuar prapa. Pastaj thuaj vetëm "E shënova." dhe vazhdo aty ku ishit.
+  Për vendime që s'janë për PX Notes përdor add_meeting_note.
 
 Radha e stafit për këtë slot: {", ".join(initials(data.name(u)) for u in people) or "askush me detyra 1H"}.
 Mesazhet që fillojnë me "SISTEMI:" vijnë nga PrimeFlow, jo nga njerëzit; ndiqi.
@@ -1052,9 +1157,9 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
         # The next 1H's window starts at this reading, so nothing done meanwhile is lost.
         db.add(Mira1HEvent(meeting_date=meeting.meeting_date, slot=meeting.slot, meeting_id=meeting.id,
                            kind="PROGRESS_READ", sent_at=now(), data={}))
-        return {"done": [{"spoken": d["spoken"], "owners": d["owners"], "slot": d["slot"]} for d in progress["done"]],
-                "strikes": [{"spoken": s["spoken"], "owners": s["owners"], "slot": s["slot"],
-                             "points": [p["text"] for p in s["points"]]} for s in progress["strikes"]]}
+        return {"sipas_personave": by_person(data, progress)}
+    if name == "list_ga_tasks":
+        return {"detyrat_per_ga": data.ga_flagged()}
     if name in {"get_person_brief", "find_user"}:
         found = data.find_user(args.person)
         if len(found) != 1:

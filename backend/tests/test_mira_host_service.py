@@ -59,6 +59,41 @@ class SlotDataTests(unittest.TestCase):
         self.assertIn('Share screen side by side', text)
         self.assertIn('Nga sloti paraprak 10:00', text)
 
+    def test_at_1150_open_tasks_of_every_earlier_slot_are_asked_and_colours_are_given(self):
+        data = host.SlotData(payload([
+            item('EF', '10:00', 'NGA DHJETA', rank=0, status='TODO'),
+            item('EF', '11:00', 'NGA NJEMBEDHJETA', rank=0, status='IN_PROGRESS'),
+            item('EF', '11:50', 'E KRYER', rank=0, status='DONE', completed_at=datetime(2026, 10, 21, 11, 20, tzinfo=TZ).isoformat()),
+        ]), DAY)
+        brief = host.person_brief(data, '11:50', IDS['EF'])
+        self.assertEqual([t['color'] for t in brief['previous_open']], ['rozë', 'e verdhë'])
+        self.assertEqual(brief['previous_slot'], '10:00, 11:00')
+        self.assertTrue(brief['all_done'])
+        # Other slots ask only the slot right before them.
+        self.assertEqual(host.person_brief(data, '11:00', IDS['EF'])['previous_slot'], '10:00')
+
+    def test_blocked_tasks_are_asked_only_at_1600(self):
+        source = payload([item('EF', '16:00', 'MBYLLJA', rank=0)])
+        blocked = item('EF', None, 'BLLOK RAPORTI', rank=0)
+        blocked.pop('one_h_report_slot')
+        source['items']['blocked'] = [blocked]
+        data = host.SlotData(source, DAY)
+        self.assertEqual([t['spoken'] for t in host.person_brief(data, '16:00', IDS['EF'])['blocked']], ['BLLOK RAPORTI'])
+        self.assertEqual(host.person_brief(data, '14:20', IDS['EF'])['blocked'], [])
+
+    def test_ga_tasks_pm_review_and_progress_follow_the_common_view_order(self):
+        data = host.SlotData(payload([
+            item('RA', '10:00', 'PER GA', rank=0, one_h_marker='FLAG'),
+            item('EF', '11:00', 'PM PUNE', rank=0, finish_period='PM'),
+            item('EF', '11:00', 'PER GA EDHE', rank=1, one_h_marker='FLAG'),
+        ]), DAY)
+        self.assertEqual([p['person'] for p in data.ga_flagged()], ['RA', 'EF'])
+        self.assertEqual(data.pm_open()[0]['initials'], 'EF')
+        self.assertEqual(data.pm_open()[0]['detyrat_pm'], ['PM PUNE (e verdhë)'])
+        progress = {'done': [{'spoken': 'A', 'owners': ['EF']}],
+                    'strikes': [{'spoken': 'B', 'owners': ['RA'], 'points': [{'text': 'p1'}]}]}
+        self.assertEqual([g['person'] for g in host.by_person(data, progress)], ['RA', 'EF'])
+
     def test_ga_fallback_is_used_when_the_primary_is_absent_today(self):
         row = MiraHostSettings(ga_participants=host.DEFAULT_GA_PARTICIPANTS)
         present = host.ga_people(host.SlotData(payload([]), DAY), row)
