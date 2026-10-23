@@ -277,10 +277,12 @@ export function MarkedTaskBlock({
   content,
   ordinal,
   className,
+  headingLevel,
 }: {
   content?: string | null
   ordinal?: number
   className?: string
+  headingLevel?: number
 }) {
   const parsed = parseMarkedNoteContent(content)
   const lineRanges: Array<{ start: number; end: number; meaningful: boolean }> = []
@@ -305,7 +307,7 @@ export function MarkedTaskBlock({
           if (index < titleIndex) return null
           const contentNode = renderParsedMarkedRange(parsed, line.start, line.end)
           return index === titleIndex ? (
-            <div key={line.start} className="font-semibold leading-5 text-slate-900">{contentNode}</div>
+            <div key={line.start} role={headingLevel ? "heading" : undefined} aria-level={headingLevel} className="font-semibold leading-5 text-slate-900">{contentNode}</div>
           ) : (
             <div key={line.start} className="min-h-[1.15rem] text-xs font-normal leading-[1.15rem] text-slate-700">{contentNode}</div>
           )

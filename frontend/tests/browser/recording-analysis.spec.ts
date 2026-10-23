@@ -47,7 +47,7 @@ async function shell(page: Page, configured = true) {
     }
     if (path.endsWith(`/actions/${actionId}/task`)) {
       writes.push({ url: path, body: request.postDataJSON() })
-      savedTask = { ...savedTask, ...request.postDataJSON(), assignees: [user] }
+      savedTask = { ...savedTask, ...request.postDataJSON(), assignees: [user], ga_note_origin_id: "77777777-7777-4777-8777-777777777777" }
       state = { ...state, actions: [{ ...action, created_task_id: taskId, confirmed_at: new Date().toISOString() }] }
       return route.fulfill({ json: { task_id: taskId, duplicate: false } })
     }
@@ -188,4 +188,20 @@ test("task dialog scrolls on a small screen and keeps confirmation visible", asy
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
   await expect(dialog).toHaveCount(0)
   expect(harness.writes).toHaveLength(0)
+})
+
+
+test("created recording task links PX Notes and renders completed points with strike", async ({ page }) => {
+  const harness = await shell(page)
+  harness.ready()
+  await page.reload()
+  await page.getByRole("button", { name: "Krijo detyr\u00eb", exact: true }).click()
+  await page.getByLabel("Titulli i detyr\u00ebs").fill("TASK TITLE\n[[done]]Completed point[[/done]]\nOpen point")
+  await page.getByLabel("Assign to", { exact: true }).selectOption(owner)
+  await page.getByRole("button", { name: "Konfirmo dhe krijo detyr\u00ebn" }).click()
+  const table = page.getByRole("table", { name: "Detyrat e regjistrimit" })
+  await expect(table.getByRole("link", { name: "Hap n\u00eb PX Notes" })).toHaveAttribute("href", "/ga-ka-notes")
+  await expect(table.locator("span.line-through", { hasText: "Completed point" })).toBeVisible()
+  await expect(table.getByText("Open point", { exact: true })).toBeVisible()
+  await expect(table.getByRole("heading", { name: "TASK TITLE", exact: true })).toBeVisible()
 })

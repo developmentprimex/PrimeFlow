@@ -11548,6 +11548,8 @@ export default function CommonViewPage() {
         }
         .week-table {
           width: 100%;
+          table-layout: fixed;
+          overflow-wrap: anywhere;
           border-collapse: collapse;
           border: 3px solid #111827;
           font-size: 11px;
@@ -12068,23 +12070,36 @@ export default function CommonViewPage() {
         }
         .week-table-avatars {
           display: flex;
-          flex-wrap: wrap;
-          gap: 5px;
-          margin-top: 2px;
+          align-items: center;
+          flex-wrap: nowrap;
+          flex-shrink: 0;
+          gap: 2px;
+          margin-top: 0;
         }
         .week-table-avatar {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 24px;
-          height: 24px;
+          width: 18px;
+          height: 18px;
+          flex: 0 0 auto;
           border-radius: 999px;
           background: #e2e8f0;
           color: #0f172a;
           font-weight: 600;
-          font-size: 11px;
+          font-size: 8px;
           line-height: 1;
           border: 1px solid #cbd5e1;
+        }
+        .week-table-meeting-main > .meeting-origin-row {
+          width: 100%;
+          flex-wrap: wrap;
+          gap: 3px;
+        }
+        .week-table-meeting-main .week-table-avatars {
+          margin-left: auto;
+          max-width: 100%;
+          overflow-x: auto;
         }
         @media screen {
           .week-table-entry:has(> .week-table-avatars > .week-table-avatar:nth-child(6)) {
@@ -16607,21 +16622,21 @@ export default function CommonViewPage() {
                                   <span className="calendar-meeting-badge">CAL</span>
                                 ) : null}
                                 {renderWeekMeetingStatus(e, iso)}
+                                {!e.calendarImported ? (
+                                  <span className="week-table-avatars">
+                                    {entryAssignees(e).map((name: string) => (
+                                      <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                        {initials(name)}
+                                      </span>
+                                    ))}
+                                  </span>
+                                ) : null}
                               </span>
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
                                 {commonPrintTitleLine(e.title)}
                               </span>
                             </div>
-                            {!e.calendarImported ? (
-                              <div className="week-table-avatars">
-                                {entryAssignees(e).map((name: string) => (
-                                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
-                                    {initials(name)}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
                           </div>
                         ))
                       } else if (row.id === "internal") {
@@ -16650,6 +16665,15 @@ export default function CommonViewPage() {
                                   <span className="calendar-meeting-badge">CAL</span>
                                 ) : null}
                                 {renderWeekMeetingStatus(e, iso)}
+                                {!isCalendarLinkedInternalMeeting(e) ? (
+                                  <span className="week-table-avatars">
+                                    {entryAssignees(e).map((name: string) => (
+                                      <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                        {initials(name)}
+                                      </span>
+                                    ))}
+                                  </span>
+                                ) : null}
                               </span>
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
@@ -16661,15 +16685,6 @@ export default function CommonViewPage() {
                                 {commonPrintTitleLine(e.title)}
                               </span>
                             </div>
-                            {!isCalendarLinkedInternalMeeting(e) ? (
-                              <div className="week-table-avatars">
-                                {entryAssignees(e).map((name: string) => (
-                                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
-                                    {initials(name)}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
                           </div>
                         ))
                       } else if (row.id === "bz") {

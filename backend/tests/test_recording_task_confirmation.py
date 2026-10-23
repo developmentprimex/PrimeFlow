@@ -14,9 +14,9 @@ class RecordingTaskConfirmationTests(unittest.IsolatedAsyncioTestCase):
         self.sid, self.aid, self.uid, self.did, self.second = [uuid.uuid4() for _ in range(5)]
         self.proposal = SimpleNamespace(id=self.aid, confirmed_at=None, created_task_id=None, segment_index=0)
         self.row = SimpleNamespace(id=self.sid)
-        self.user = SimpleNamespace(id=self.uid)
+        self.user = SimpleNamespace(id=self.uid, email='owner@example.com')
         self.db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=self.proposal))),
-                                  get=AsyncMock(return_value=SimpleNamespace(is_active=True)))
+                                  get=AsyncMock(return_value=SimpleNamespace(is_active=True)), add=Mock(), flush=AsyncMock())
 
     def payload(self, **overrides):
         return router.TaskConfirmation(**{'title': 'Përgatit raportin', 'description': 'Raporti i kontrolluar.',
@@ -29,6 +29,7 @@ class RecordingTaskConfirmationTests(unittest.IsolatedAsyncioTestCase):
             one_h_marker='QUESTION', one_h_marker_comment='Kontrollo', skill_category='management')
         created = SimpleNamespace(id=uuid.uuid4())
         async def create(task, db, user, *, before_commit):
+            created.title = task.title
             before_commit(created)
             return created
         with patch.object(router, 'load_recording', new=AsyncMock(return_value=self.row)), \
@@ -43,10 +44,16 @@ class RecordingTaskConfirmationTests(unittest.IsolatedAsyncioTestCase):
                           'one_h_marker', 'one_h_marker_comment', 'skill_category'):
                 self.assertEqual(getattr(task, field), getattr(payload, field), field)
             self.assertIsNone(task.description)
+            note = self.db.add.call_args.args[0]
+            self.assertEqual(task.ga_note_origin_id, note.id)
+            self.assertEqual(note.content, created.title)
+            self.assertTrue(note.is_converted_to_task)
+            self.assertEqual(note.knowledge_type, 'RECORDING')
             duplicate = await router.confirm_task(self.sid, self.aid, payload, self.db, self.user)
             self.assertTrue(duplicate['duplicate'])
             self.assertEqual(result['task_id'], duplicate['task_id'])
             create_task.assert_awaited_once()
+            self.db.add.assert_called_once()
 
     async def test_inactive_additional_assignee_is_rejected(self):
         async def get(model, key):

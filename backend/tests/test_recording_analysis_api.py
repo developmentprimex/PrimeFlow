@@ -206,6 +206,17 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(second.status_code, 200, second.text)
         self.assertTrue(second.json()['duplicate'])
         self.assertEqual(first.json()['task_id'], second.json()['task_id'])
+        async def verify_px_note():
+            from app.models.task import Task
+            from app.models.ga_note import GaNote
+            async with self.session() as db:
+                task = await db.get(Task, uuid.UUID(first.json()['task_id']))
+                self.assertEqual(str(task.ga_note_origin_id), first.json()['ga_note_id'])
+                note = await db.get(GaNote, task.ga_note_origin_id)
+                self.assertTrue(note.is_converted_to_task)
+                self.assertEqual(note.knowledge_type, 'RECORDING')
+                self.assertEqual(note.content, task.title)
+        asyncio.run(verify_px_note())
         async def unintended_notifications():
             from sqlalchemy import select, func
             from app.models.notification import Notification

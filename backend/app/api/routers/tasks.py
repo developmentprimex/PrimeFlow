@@ -1891,12 +1891,12 @@ async def create_task(
 async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *, before_commit=None) -> TaskOut:
     """Existing creation flow; an internal hook can attach provenance atomically.
 
-    The hook is not an API parameter. Callers using it must supply a single,
-    ordinary task without note origins, dependencies or multiple assignees.
+    The hook is not an API parameter. It supports an ordinary task or one
+    note's per-assignee tasks. For a group, the hook receives its
+    representative first task once, after all copies have been constructed.
     """
-    if before_commit is not None and (payload.ga_note_origin_id or payload.plan_note_origin_id
-            or payload.dependency_task_id or len(payload.assignees or []) > 1):
-        raise ValueError("Provenance hook requires a single ordinary task")
+    if before_commit is not None and (payload.plan_note_origin_id or payload.dependency_task_id):
+        raise ValueError("Provenance hook does not support plan notes or dependencies")
     # ensures_manager_or_admin(user) - Removed to allow all department members to create tasks
     payload.title = _normalize_email_task_title(payload.title)
     _validate_eight_am_one_h_slot(payload.title, payload.one_h_report_slot)
@@ -2331,6 +2331,8 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 )
 
             await record_initial_marker_comments(db, created_tasks, actor_email=user.email)
+            if before_commit is not None:
+                before_commit(created_tasks[0])
             await db.commit()
 
             for n in created_notifications:
@@ -2462,6 +2464,8 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                         )
 
                     await record_initial_marker_comments(db, created_tasks, actor_email=user.email)
+                    if before_commit is not None:
+                        before_commit(created_tasks[0])
                     await db.commit()
 
                     for n in created_notifications:
@@ -2572,6 +2576,8 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
             )
 
         await record_initial_marker_comments(db, created_tasks, actor_email=user.email)
+        if before_commit is not None:
+            before_commit(created_tasks[0])
         await db.commit()
 
         for n in created_notifications:
@@ -2678,6 +2684,8 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
             )
 
         await record_initial_marker_comments(db, created_tasks, actor_email=user.email)
+        if before_commit is not None:
+            before_commit(created_tasks[0])
         await db.commit()
 
         for n in created_notifications:
@@ -3788,6 +3796,8 @@ async def update_task(
         ).scalar_one_or_none()
         if source_note is not None:
             source_note.is_converted_to_task = True
+            from app.services.recording_task_notes import sync_recording_note_from_task
+            await sync_recording_note_from_task(db, source_note, task, payload.model_fields_set, user.id)
     if task.is_active and task.plan_note_origin_id is not None:
         source_plan_note = (
             await db.execute(select(PlanNote).where(PlanNote.id == task.plan_note_origin_id))

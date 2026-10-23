@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
+import { MarkedTaskBlock } from "@/lib/note-markup"
 import type { Task } from "@/lib/types"
 import { useAuth } from "@/lib/auth"
 import { recordingJson } from "@/lib/recording-outbox"
@@ -52,15 +54,13 @@ function ActionReview({ action, number, recordingId, people, departments, canMan
   }
   const responsible = savedTask ? (savedTask.assignees || []).map(person => person.full_name || person.email).filter(Boolean).join(", ") || people.find(person => person.id === savedTask.assigned_to)?.full_name || "Pa përgjegjës" : people.find(person => person.id === action.suggested_assignee_id)?.full_name || action.assignee_text || "Pa përgjegjës"
   const description = (savedTask ? savedTask.description || "" : action.description).split(/\n\s*Burimi: regjistrimi /)[0].replace(/<br\s*\/?\s*>/gi, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ")
-  const titleLines = (savedTask?.title || action.title).split(/\r?\n/)
-  const titleDetails = savedTask ? titleLines.slice(1).join("\n") || description : action.description
+  const taskContent = savedTask ? [savedTask.title, !savedTask.title.includes("\n") ? description : ""].filter(Boolean).join("\n") : [action.title.toLocaleUpperCase("sq-AL"), action.description].filter(Boolean).join("\n")
   const due = savedTask ? savedTask.due_date : action.suggested_due_date
   const taskStatus = savedTask ? ({ TODO: "Për t’u bërë", IN_PROGRESS: "Në progres", WAITING_CLIENT: "WFE", WAITING_CONFIRMATION: "Në konfirmim", DONE: "E përfunduar" }[savedTask.status || "TODO"] || savedTask.status) : createdId ? "E krijuar" : action.confirmed_at ? "E fshirë" : "Propozim AI"
   return <><TableRow className="align-top">
     <TableCell className="py-4 text-muted-foreground">{number}</TableCell>
     <TableCell className="min-w-72 whitespace-normal py-4">
-      <h4 className="font-semibold uppercase">{titleLines[0].toLocaleUpperCase("sq-AL")}</h4>
-      {titleDetails && <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">{titleDetails}</p>}
+      <MarkedTaskBlock content={taskContent} headingLevel={4} />
       <details className="mt-2 text-xs text-muted-foreground"><summary className="cursor-pointer">Nga biseda</summary><blockquote className="mt-2 border-l-2 pl-2">{action.evidence}</blockquote></details>
       {timing?.start != null ? <button type="button" disabled={!onSeek} className="mt-2 text-xs text-primary underline disabled:opacity-50" onClick={() => onSeek?.(timing.start!)}>▶ Rreth {recordingTime(timing.start)}</button> : timing || timingStatus === "READY" ? <p className="mt-2 text-xs text-muted-foreground">Koha nuk u përcaktua për këtë citim.</p> : null}
     </TableCell>
@@ -72,6 +72,7 @@ function ActionReview({ action, number, recordingId, people, departments, canMan
       : action.confirmed_at ? <p className="text-sm">Detyra e konfirmuar është fshirë nga Tasks.</p>
       : canManage ? <Button size="sm" onClick={() => setOpen(true)}>Krijo detyrë</Button>
       : <p className="text-sm">Autori i regjistrimit mund ta konfirmojë detyrën.</p>}
+    {savedTask?.ga_note_origin_id && <Link className="mt-2 block text-sm underline" href="/ga-ka-notes">Hap në PX Notes</Link>}
     {editError && <p role="alert" className="mt-2 max-w-48 whitespace-normal text-sm text-destructive">{editError}</p>}
     </TableCell>
   </TableRow>

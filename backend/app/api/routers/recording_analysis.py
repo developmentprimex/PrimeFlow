@@ -146,11 +146,16 @@ async def confirm_task(recording_id: uuid.UUID, action_id: uuid.UUID, payload: T
     # Only owner-reviewed task fields are accepted. Privileged origins remain
     # unavailable; existing Tasks validates permissions and business rules.
     from app.api.routers.tasks import create_task_in_session
+    from app.services.recording_task_notes import create_recording_note
+    title_lines = payload.title.strip().replace('\r\n', '\n').split('\n')
+    title_lines[0] = title_lines[0].upper()
+    title = '\n'.join(title_lines)
+    note = await create_recording_note(db, proposal.id, payload, user, title)
     def attach(task):
+        note.content = task.title
         proposal.created_task_id, proposal.confirmed_by = task.id, user.id
         proposal.confirmed_at = datetime.now(timezone.utc)
         audit(db, user, row, 'recording_task_confirmed', action_id=str(proposal.id), task_id=str(task.id))
-    title_lines = payload.title.strip().replace('\r\n', '\n').split('\n')
-    title_lines[0] = title_lines[0].upper()
-    result = await create_task_in_session(TaskCreate(**payload.model_dump(exclude={'description', 'title'}), title='\n'.join(title_lines), description=payload.description.strip() or None), db, user, before_commit=attach)
-    return {'task_id': result.id, 'duplicate': False}
+    result = await create_task_in_session(TaskCreate(**payload.model_dump(exclude={'description', 'title'}),
+        title=title, description=payload.description.strip() or None, ga_note_origin_id=note.id), db, user, before_commit=attach)
+    return {'task_id': result.id, 'ga_note_id': note.id, 'duplicate': False}

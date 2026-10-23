@@ -139,14 +139,36 @@ recording; there is no destructive regenerate endpoint.
 Task proposals are structured, size-validated and require a verbatim quote
 from the source transcript. They cannot execute tools or create Tasks.
 The owner reviews a multiline title: only the first line is uppercase; the
-generated task details on the next line retain their original case. The owner chooses a department and optionally
-an active assignee and date, then clicks **Konfirmo dhe krijo detyrën**.
+generated task details on the next line retain their original case. The owner chooses a department,
+one or more active assignees and an optional date, then clicks **Konfirmo dhe krijo detyrën**.
 This calls the existing Tasks creation flow, including its permissions,
 business rules, assignment notifications and audit. An internal callback
 stores the proposal/task link in the same commit. A repeated request or lost
 response returns the same task ID. Deleting a confirmed task does not permit
 the proposal to silently recreate it. Project association can be edited later
 using existing Tasks controls.
+
+Confirming a recording action also creates one PX Note in the same transaction
+and links the real task through `ga_note_origin_id`. The note is an ordinary GA
+note with `knowledge_type=RECORDING`; that marker identifies its provenance but
+does not route it into the Knowledge PX libraries. Retries return the existing
+task without creating another note. Multiple assignees use the normal PX Notes
+per-assignee task copies, linked to the same note. The provenance callback runs
+once for the representative task before committing the whole group.
+
+PX Notes uses its existing editor, task-bundle updates, statuses and strike
+history for these tasks. Editing the task from the recording editor also keeps
+the source note and sibling task titles aligned, including `[[done]]` markup.
+The proposed-task table uses the shared `MarkedTaskBlock` renderer to display
+strike/addition markup and offers **Hap në PX Notes** for linked tasks.
+
+`tmp/link-recording-tasks-to-px-notes.py` previews existing confirmed tasks
+without a note; `--apply` creates and links their notes atomically, preserving
+task IDs, title/description markup, statuses, dates and assignees. It skips
+already-linked tasks and does not create additional tasks. Three existing
+recording tasks (including both TAK NOLTE tasks) were linked and verified in the
+public PX Notes API on 2026-10-23. New automatic creation/editor changes require
+deployment; no push was performed for this change.
 
 New recording tasks leave the description empty; task details belong to the
 second line of the reviewed title. No source footer is appended to the description.
@@ -164,7 +186,7 @@ Tasks behavior. Existing task descriptions are preserved when editing.
   queued/running/ready; resumes FAILED jobs.
 - `POST /api/meeting-recordings/{id}/actions/{action_id}/task`: owner only;
   confirmed title, description, department, optional active assignee and aware
-  ISO date. Returns `task_id` and `duplicate`.
+  ISO date. Returns `task_id`, `duplicate` and, for a new confirmation, `ga_note_id`.
 
 No public static transcript endpoint. Do not log provider bodies or audio,
 transcripts, keys, tokens or user storage paths. Backups must include the new
