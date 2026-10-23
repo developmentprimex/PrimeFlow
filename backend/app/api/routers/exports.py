@@ -67,6 +67,7 @@ from app.services.daily_report_logic import (
 from app.services.ga_time_table import get_ga_time_table_rows
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.task_marker import one_h_marker_label
+from app.services.note_markup import parse_marked_note_content
 
 
 router = APIRouter()
@@ -200,6 +201,23 @@ def _strip_html_keep_breaks(value: str | None) -> str:
     text = re.sub(r"\[\[/?(?:added|done)\]\]", "", text, flags=re.IGNORECASE)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text.strip()
+
+
+def _open_task_title_rich_text(value: str | None) -> CellRichText | str:
+    """Keep title completion marks as native Excel strikethrough runs."""
+    parsed = parse_marked_note_content(re.sub(r"<[^>]+>", "", value or "").strip())
+    if not parsed.done_ranges:
+        return parsed.text
+    parts = []
+    cursor = 0
+    for start, end in parsed.done_ranges:
+        if start > cursor:
+            parts.append(TextBlock(InlineFont(), parsed.text[cursor:start]))
+        parts.append(TextBlock(InlineFont(strike=True), parsed.text[start:end]))
+        cursor = end
+    if cursor < len(parsed.text):
+        parts.append(TextBlock(InlineFont(), parsed.text[cursor:]))
+    return CellRichText(parts)
 
 
 def _priority_label(value: str | None) -> str:
@@ -3082,7 +3100,7 @@ async def export_open_tasks_xlsx(
             (task.priority or "").upper(),
             _open_task_type_label(task),
             bz_me_label(task),
-            _strip_html(task.title) or "",
+            _open_task_title_rich_text(task.title),
             project.title if project else "",
             baseline.when_value if baseline else "",
             baseline.status_value if baseline else "",

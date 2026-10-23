@@ -1,8 +1,27 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { reportTaskUsers, reportSummaryUser, reportUserOptions, isReportSummaryTask, collapseEmptyReportTaskRows } from "../src/lib/one-h-report-users.ts"
+import { reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "../src/lib/one-h-report-users.ts"
 
 const cell = (dataset, text = "") => ({ dataset, querySelector: () => ({ textContent: text }) })
+
+test("all report owners follow department and saved planner order, even outside the GA summary", () => {
+  const departments = [
+    { id: "dev", code: "DEV", name: "Development" },
+    { id: "design", code: "GD", name: "Graphic Design" },
+    { id: "pcm", code: "PCM", name: "Product Content" },
+  ]
+  const users = [
+    ["D M", "pcm", 1], ["E S", "design", 0], ["E F", "dev", 0],
+    ["R A", "dev", 1], ["L H", "dev", 2], ["O H", "pcm", 0],
+    ["Absent User", "dev", 3], ["Z Z", "dev", null],
+  ].map(([full_name, department_id, weekly_planner_sort_order]) => ({ full_name, department_id, weekly_planner_sort_order, email: "" }))
+  const order = reportPlannerUserOrder(users, departments)
+  assert.deepEqual(order, ["EF", "RA", "LH", "AU", "ZZ", "ES", "OH", "DM"])
+  const document = { querySelectorAll: (selector) => selector.includes("data-task-card-row")
+    ? [cell({ taskUsers: "RA|ES|DM|EF" }), cell({ taskUsers: "LH" })]
+    : [cell({ gaSummaryUser: "EF" }), cell({ gaSummaryUser: "LH" }), cell({ gaSummaryUser: "OH" })] }
+  assert.deepEqual(reportUserOptions(document, order), ["EF", "RA", "LH", "ES", "OH", "DM"])
+})
 
 test("report owners include every assignee and support older saved titles", () => {
   assert.deepEqual(reportTaskUsers(cell({ taskUsers: "EF|RA" })), ["EF", "RA"])

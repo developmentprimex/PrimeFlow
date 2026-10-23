@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
 import { useMarkerComments } from "@/components/marker-comments-context"
-import { reportTaskUsers, reportSummaryUser, reportUserOptions, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
+import { reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
 import { applyTaskStrikeBadges, taskHasStrikes, reportStrikeTotal, type OneHStrikeSummary } from "@/lib/one-h-strikes"
 
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
@@ -208,6 +208,23 @@ export function PrintReportPage({
   const [userFilter, setUserFilter] = React.useState("")
   const [summaryOnly, setSummaryOnly] = React.useState(false)
   const [reportUsers, setReportUsers] = React.useState<string[]>([])
+  const [plannerUserOrder, setPlannerUserOrder] = React.useState<string[]>([])
+
+  React.useEffect(() => {
+    if (authLoading || !user?.id) return
+    let cancelled = false
+    void Promise.all([apiFetch("/users/lookup"), apiFetch("/departments")]).then(async ([users, departments]) => {
+      if (!users.ok || !departments.ok) throw new Error("User order unavailable")
+      const [people, teams] = await Promise.all([users.json(), departments.json()])
+      if (!cancelled) setPlannerUserOrder(reportPlannerUserOrder(people, teams))
+    }).catch(() => { if (!cancelled) toast.error("Could not load Weekly Planner user order") })
+    return () => { cancelled = true }
+  }, [apiFetch, authLoading, user?.id])
+
+  const orderedReportUsers = React.useMemo(() => {
+    const ranks = new Map(plannerUserOrder.map((person, index) => [person, index]))
+    return [...reportUsers].sort((a, b) => (ranks.get(a) ?? Infinity) - (ranks.get(b) ?? Infinity))
+  }, [reportUsers, plannerUserOrder])
   const [history, setHistory] = React.useState<Delivery[]>([])
   const [loading, setLoading] = React.useState(true)
   const [snapshotLoading, setSnapshotLoading] = React.useState(true)
@@ -906,7 +923,7 @@ export function PrintReportPage({
   const setupPreviewFilters = () => {
     const document = previewFrameRef.current?.contentDocument
     if (!document) return
-    const users = reportUserOptions(document)
+    const users = reportUserOptions(document, plannerUserOrder)
     setReportUsers(users)
     if (userFilter && !users.includes(userFilter)) setUserFilter("")
     document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"] td').forEach((cell) => {
@@ -991,7 +1008,7 @@ export function PrintReportPage({
       <select aria-label="Filter report by user" value={userFilter} onChange={(event) => { setUserFilter(event.target.value); setSummaryOnly(false) }}
         className="h-8 bg-transparent text-sm font-bold outline-none" style={{ height: 32, border: 0, background: "transparent", fontWeight: 700 }}>
         <option value="">All</option>
-        {reportUsers.map((initials) => <option key={initials} value={initials}>{initials}</option>)}
+        {orderedReportUsers.map((initials) => <option key={initials} value={initials}>{initials}</option>)}
       </select>
     </label>
     {summaryOnly ? <button type="button" onClick={() => { setSummaryOnly(false); setUserFilter(""); setMarkerFilters(new Set()); setDueDateFilter("all"); setStrikesOnly(false) }}
