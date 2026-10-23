@@ -762,42 +762,6 @@ def render_plain_text(document: ReportDocument) -> str:
     return "\n\n".join(blocks)
 
 
-def add_preview_strike_filter(report_html: str) -> str:
-    """Add a local view filter to the preview, keeping delivery/exports static."""
-    controls = '''<div style="margin:0 0 12px;font-family:Arial,sans-serif;">
-<button type="button" id="one-h-strikes-filter" aria-pressed="false"
-style="padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#0f172a;font:700 13px Arial,sans-serif;cursor:pointer;">
-Vetëm me strikes &gt; 0</button>
-<span id="one-h-strikes-filter-status" role="status" style="margin-left:10px;font-size:12px;color:#475569;"></span>
-<p id="one-h-strikes-filter-empty" hidden style="padding:12px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;">
-Nuk ka detyra me strikes &gt; 0 në këtë interval.</p>
-</div>
-<script>
-(function () {
-  const button = document.getElementById('one-h-strikes-filter');
-  button.addEventListener('click', function () {
-    const selected = button.getAttribute('aria-pressed') !== 'true';
-    button.setAttribute('aria-pressed', String(selected));
-    button.style.background = selected ? '#dbeafe' : '#f8fafc';
-    button.style.borderColor = selected ? '#2563eb' : '#cbd5e1';
-    button.style.color = selected ? '#1e40af' : '#0f172a';
-    let visible = 0;
-    document.querySelectorAll('[data-report-task="true"]').forEach(function (task) {
-      task.hidden = selected && !(Number(task.dataset.strikeCount) > 0);
-      if (!task.hidden) visible += 1;
-    });
-    document.querySelectorAll('[data-report-task-employee], [data-report-task-section]').forEach(function (group) {
-      group.hidden = selected && !group.querySelector('[data-report-task="true"]:not([hidden])');
-    });
-    document.querySelectorAll('[data-report-supplement]').forEach(function (group) { group.hidden = selected; });
-    document.getElementById('one-h-strikes-filter-status').textContent = 'Shfaqen ' + visible + ' detyra';
-    document.getElementById('one-h-strikes-filter-empty').hidden = !selected || visible > 0;
-  });
-})();
-</script>'''
-    return report_html.replace("<!-- report-strike-filter -->", controls, 1)
-
-
 def render_html(
     document: ReportDocument,
     *,
@@ -842,10 +806,10 @@ def render_html(
             return ""
         active = task.strike_count > 0
         return (
-            '<div data-task-strike-count="true" style="display:table;margin-top:5px;padding:2px 5px;'
+            '<div data-task-strike-count="true" style="display:table;margin-top:8px;padding:4px 8px;'
             f'border:1px solid {"#2563eb" if active else "#94a3b8"};border-radius:4px;'
             f'background-color:{"#dbeafe" if active else "#f8fafc"};color:{"#1e40af" if active else "#475569"};'
-            'font:700 10px/1.4 Arial,sans-serif;">'
+            'font:700 14px/1.5 Arial,sans-serif;">'
             f'{html.escape(strike_count_label(task.strike_count, document))}</div>'
         )
 
@@ -1153,7 +1117,7 @@ def render_html(
     )
     strike_total_html = (
         '<div data-report-strike-total="true" style="font-family:Arial,sans-serif;'
-        'font-size:14px;font-weight:700;color:#ffffff;margin-top:8px;">'
+        'font-size:16px;font-weight:700;color:#ffffff;margin-top:8px;">'
         f'{html.escape(strike_count_label(document.strike_total, document, total=True))}</div>'
         if document.strike_total is not None else ""
     )
@@ -1178,7 +1142,6 @@ table, td {{ font-family: Arial, sans-serif !important; }}
 {strike_total_html}
 </td></tr>
 <tr><td style="padding:14px 16px;font-family:Arial,sans-serif;background:#ffffff;">
-<!-- report-strike-filter -->
 {''.join(body_chunks)}
 </td></tr>
 </table>
