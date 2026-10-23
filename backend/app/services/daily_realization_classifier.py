@@ -30,7 +30,8 @@ def classify_daily_task(value: DailyClassificationInput) -> str:
 
     if value.in_baseline and value.reassigned_out:
         return "REASSIGNED_OUT"
-    if value.in_baseline and value.reopened:
+    # A reopening remains an exception only until the task is completed again.
+    if value.in_baseline and value.reopened and not completed_today:
         return "REOPENED"
     if value.in_baseline and value.postponed:
         return "POSTPONED_APPROVED" if value.postponement_approved else "POSTPONED_UNAPPROVED"

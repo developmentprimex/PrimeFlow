@@ -148,6 +148,77 @@ def case(**overrides):
     return DailyClassificationInput(**values)
 
 
+@pytest.mark.parametrize("statuses, expected, completed", [
+    (["DONE", "IN_PROGRESS", "DONE"], "REALIZED_AS_PLANNED", True),
+    (["DONE", "IN_PROGRESS"], "REOPENED", False),
+    (["DONE", "IN_PROGRESS", "DONE", "TODO"], "REOPENED", False),
+])
+def test_reopened_task_uses_final_daily_completion(monkeypatch, statuses, expected, completed):
+    import asyncio
+    from sqlalchemy.dialects import postgresql
+    from app.models.audit_log import AuditLog
+    from app.models.task import Task
+    from app.models.user import User
+    from app.services import daily_realization_live as live_service
+
+    person_id, task_id, department_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    person = SimpleNamespace(id=person_id, full_name="Recompleted task")
+    events = []
+    old_status = "IN_PROGRESS"
+    last_done_at = None
+    for index, status in enumerate(statuses):
+        at = datetime(2026, 8, 26, 10, index, tzinfo=timezone.utc)
+        if status == "DONE":
+            last_done_at = at
+        events.append(SimpleNamespace(
+            id=uuid.uuid4(), entity_id=task_id, actor_user_id=person_id,
+            action="task.reopened" if old_status == "DONE" else "task.status_changed",
+            before={"value": old_status}, after={"value": status}, created_at=at,
+        ))
+        old_status = status
+    task = Task(
+        id=task_id, title="Recompleted plan task", assigned_to=person_id,
+        status=statuses[-1], created_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        updated_at=events[-1].created_at,
+        completed_at=last_done_at if completed else None,
+    )
+    baseline = SimpleNamespace(
+        id=uuid.uuid4(), captured_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        payload={"people": [{"user_id": str(person_id), "tasks": [{"task_id": str(task_id)}]}]},
+    )
+    async def load_people(*args, **kwargs):
+        return [person], {}
+    monkeypatch.setattr(live_service, "load_active_users_and_common_leave", load_people)
+
+    class Result:
+        def __init__(self, rows=(), scalar=None):
+            self.rows, self.scalar = rows, scalar
+        def scalar_one_or_none(self): return self.scalar
+        def scalars(self): return self
+        def all(self): return self.rows
+
+    class Session:
+        async def execute(self, statement):
+            column = statement.column_descriptions[0]
+            entity = column["entity"]
+            if entity is DailyPlannerSnapshot: return Result(scalar=baseline)
+            if entity is User: return Result([person])
+            if entity is Task: return Result([task_id] if column["name"] == "id" else [task])
+            if entity is AuditLog and "audit_logs.created_at <= " in str(statement.compile(dialect=postgresql.dialect())):
+                return Result(events)
+            return Result()
+
+    report = asyncio.run(live_service.build_live_daily_realization(
+        Session(), department_id=department_id, day=DAY,
+    ))
+    row = report["people"][0]["tasks"][0]
+    assert row["classification"] == expected
+    assert row["completion_credited"] is completed
+    assert report["metrics"]["planned_completed_today_count"] == int(completed)
+    assert report["metrics"]["raw_plan_realization"] == (100 if completed else 0)
+    assert any(item["type"] == "REOPENED" for item in row["timeline"])
+
+
 @pytest.mark.parametrize(("value", "expected"), [
     (case(completed_date=DAY, status="DONE"), "REALIZED_AS_PLANNED"),
     (case(), "NO_PROGRESS"),

@@ -512,6 +512,11 @@ async def build_live_daily_realization(
                 if event.action == "task.status_changed" and str((event.after or {}).get("value")).upper() == "DONE":
                     completed_day = local_day(event.created_at)
                     completion_at = event.created_at
+                elif event.action == "task.reopened":
+                    # An earlier completion stops counting while the task is
+                    # open. A later DONE event restores its completion credit.
+                    completed_day = None
+                    completion_at = None
             credited_completed_day = credited_completion_day(
                 person_id=person_id,
                 day=day,

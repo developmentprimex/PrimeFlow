@@ -28,6 +28,7 @@ import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/pro
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
+import { taskDateKey } from "@/lib/task-calendar-date"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
@@ -227,14 +228,6 @@ const formatISODateDMY = (value?: string | null) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
   if (!match) return value
   return `${match[3]}/${match[2]}/${match[1]}`
-}
-
-function taskDateKey(value?: string | null) {
-  if (!value) return null
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10)
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return toISODate(date)
 }
 
 function oneHReportSlotsForPeriod(period?: TaskFinishPeriod | null) {

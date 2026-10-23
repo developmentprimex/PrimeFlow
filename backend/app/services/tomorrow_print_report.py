@@ -27,7 +27,7 @@ from app.services.compact_report_questions import question_parts, layout_questio
 from app.config import settings
 from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
-from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL, report_timezone
+from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL, report_timezone, task_calendar_day
 from app.services.personal_task_owner import personal_task_owner
 from app.services.one_h_ga_summary import build_ga_summary, ga_task_categories, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
@@ -735,14 +735,7 @@ def _task_due_day(item: dict[str, Any]) -> date | None:
         or item.get("deadline_date")
         or item.get("deadlineDate")
     )
-    if isinstance(raw, datetime):
-        return raw.date()
-    if isinstance(raw, date):
-        return raw
-    try:
-        return date.fromisoformat(str(raw or "")[:10])
-    except ValueError:
-        return None
+    return task_calendar_day(raw)
 
 
 def _task_start_day(item: dict[str, Any]) -> date | None:
@@ -751,14 +744,7 @@ def _task_start_day(item: dict[str, Any]) -> date | None:
         or item.get("startDate")
         or item.get("date")
     )
-    if isinstance(raw, datetime):
-        return raw.date()
-    if isinstance(raw, date):
-        return raw
-    try:
-        return date.fromisoformat(str(raw or "")[:10])
-    except ValueError:
-        return None
+    return task_calendar_day(raw)
 
 
 def _task_created_day(item: dict[str, Any]) -> date | None:

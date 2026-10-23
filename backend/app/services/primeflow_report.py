@@ -332,14 +332,29 @@ def done_ranges(value: str, marked_source: str) -> list[tuple[int, int, str]]:
     return ranges
 
 
+def task_calendar_day(raw: Any) -> date | None:
+    """Read timestamp deadlines in the report timezone, preserving date-only values."""
+    if isinstance(raw, datetime):
+        parsed = raw
+    elif isinstance(raw, date):
+        return raw
+    else:
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(report_timezone())
+    return parsed.date()
+
+
 def _task_date(item: dict[str, Any]) -> date | None:
     raw = item.get("report_date") or item.get("date") or item.get("day")
     if not raw:
         raw = item.get("planned_for") or item.get("due_date") or item.get("start_date")
-    try:
-        return date.fromisoformat(str(raw)[:10]) if raw else None
-    except ValueError:
-        return None
+    return task_calendar_day(raw)
 
 
 def _slot(item: dict[str, Any]) -> str | None:
