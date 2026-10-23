@@ -2423,7 +2423,7 @@ async def prepare_daily_realization(
     if not is_closable_day(day):
         raise HTTPException(status_code=409, detail={
             "code": "DAILY_RLZ_CLOSE_WINDOW_NOT_OPEN",
-            "message": "Dita mund të mbyllet nga ora 15:30 deri në 17:00.",
+            "message": "Dita mund të mbyllet nga ora 15:30 e ditës përkatëse.",
             "closable_from": closable_from(day).isoformat(),
         })
     department = (
@@ -2516,7 +2516,7 @@ async def close_realization_day(
     if result.user_id == user.id and not is_closable_day(period.start_date):
         raise HTTPException(status_code=409, detail={
             "code": "DAILY_RLZ_CLOSE_WINDOW_CLOSED",
-            "message": "Dita mund të mbyllet nga ora 15:30 deri në 17:00.",
+            "message": "Dita mund të mbyllet nga ora 15:30 e ditës përkatëse.",
         })
     require_unlocked(period)
     planned, _ = await _pinned_snapshots(db, period)

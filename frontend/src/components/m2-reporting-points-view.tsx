@@ -19,7 +19,7 @@ export type UnfinishedPriorityRow = {
 }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
-  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; postponed_am?: TaskRow[]; ga_progress?: TaskRow[]; delivery?: TaskRow[] }
+  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; postponed_am?: TaskRow[]; ga_progress?: TaskRow[]; delivery?: TaskRow[]; pm_due_today?: TaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -40,6 +40,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
   const deliveryRows = report.data.delivery || []
   const unfinishedRows = report.data.unfinished_priority || []
   const progressRows = report.data.ga_progress || []
+  const pmDueRows = [...(report.data.pm_due_today || [])].sort((left, right) => Number(left.status === "DONE") - Number(right.status === "DONE"))
   const unfinishedColumns: [keyof UnfinishedPriorityRow, string][] = [
     ["assignees", "KUSH"], ["department", "DEP"], ["am_pm", "AM/PM"], ["priority", "LLOJI"],
     ["task_type", "TIPI"], ["title", "TITULLI"], ["due_label", "DUE DATE"],
@@ -131,7 +132,23 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
         {!progressRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
       </div>
     </section>
-    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">5. SA PER DOREZIM M2?</h2>
+    <section className="space-y-3" aria-labelledby="m2-pm-due-today"><h2 id="m2-pm-due-today" className="text-lg font-bold">5. DET PM ME DUE DATE SOT</h2>
+      <p className="text-sm text-muted-foreground">Të gjitha detyrat PM dhe AM/PM me Due Date në datën e raportit.</p>
+      <div className="overflow-x-auto border">
+        <table className="w-full min-w-[900px] border-collapse text-xs">
+          <thead className="bg-slate-100"><tr>{["NR", ...common.map(([, title]) => title), "SIMBOLI", "TITULLI", "DUE DATE"].map((title) => <th key={title} className="border px-2 py-2 text-left whitespace-nowrap">{title}</th>)}</tr></thead>
+          <tbody>{pmDueRows.map((row, index) => <tr key={row.task_id} style={{ background: row.deadline_important ? "#dc2626" : TASK_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }}>
+            <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
+            {common.map(([field]) => <td key={field} className="w-px whitespace-nowrap border p-2 align-top">{text(row, field)}</td>)}
+            <td className="w-px whitespace-nowrap border p-2 align-top font-bold">{row.marker || "—"}</td>
+            <td className="min-w-[280px] border p-2 align-top">{row.title}</td>
+            <td className="w-px whitespace-nowrap border p-2 align-top">{reportDate(row.due_date)}</td>
+          </tr>)}</tbody>
+        </table>
+        {!pmDueRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
+      </div>
+    </section>
+    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">6. SA PER DOREZIM M2?</h2>
       <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">SA/TOTALI: <span className="text-2xl font-extrabold tabular-nums">{deliveredCount}/{deliveryRows.length}</span></span></div>
       <p className="text-sm text-muted-foreground">Detyrat me simbolet M2 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
       {renderTable(deliveryRows, true)}

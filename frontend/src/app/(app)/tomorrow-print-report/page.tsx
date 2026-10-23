@@ -247,6 +247,7 @@ export function PrintReportPage({
   const [previewFilterContainer, setPreviewFilterContainer] = React.useState<HTMLElement | null>(null)
   const markerModalCleanupRef = React.useRef<(() => void) | null>(null)
   const observedTodayDateRef = React.useRef("")
+  const reportLoadRef = React.useRef<{ key: string; promise: Promise<Preview | null> } | null>(null)
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   React.useEffect(() => {
@@ -363,24 +364,38 @@ export function PrintReportPage({
     if (authLoading || !user?.id) return
     setSnapshotLoading(true)
     setSnapshotError("")
+    const key = `${user.id}:${API}:${selectedReportDate}`
+    let request = reportLoadRef.current
+    if (!request || request.key !== key) {
+      const promise = (async (): Promise<Preview | null> => {
+        // Opening a current report always rebuilds it. Today's endpoint returns
+        // the frozen copy after 16:00; historical dates are read without writes.
+        const response = selectedReportDate && today
+          ? await apiFetch(`${API}/snapshot?report_date=${selectedReportDate}`, { cache: "no-store" })
+          : await apiFetch(`${API}/generate`, { method: "POST" })
+        if (response.status === 404) return null
+        if (!response.ok) {
+          const error = await response.json().catch(() => null)
+          throw new Error(error?.detail || "Report could not be loaded")
+        }
+        return await response.json()
+      })()
+      request = { key, promise }
+      reportLoadRef.current = request
+    }
     try {
-      const response = selectedReportDate && today
-        ? await apiFetch(`${API}/snapshot?report_date=${selectedReportDate}`, { cache: "no-store" })
-        : await apiFetch(`${API}/snapshot`, { cache: "no-store" })
-      if (response.status === 404) {
-        setPreview(null)
-        return
-      }
-      if (!response.ok) {
-        const error = await response.json().catch(() => null)
-        throw new Error(error?.detail || "Saved report could not be loaded")
-      }
-      setPreview(await response.json())
+      const result = await request.promise
+      if (reportLoadRef.current === request) setPreview(result)
     } catch (error) {
-      setPreview(null)
-      setSnapshotError(error instanceof Error ? error.message : String(error))
+      if (reportLoadRef.current === request) {
+        setPreview(null)
+        setSnapshotError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setSnapshotLoading(false)
+      if (reportLoadRef.current === request) {
+        reportLoadRef.current = null
+        setSnapshotLoading(false)
+      }
     }
   }, [API, apiFetch, authLoading, selectedReportDate, today, user?.id])
 
@@ -1161,6 +1176,12 @@ export function PrintReportPage({
           {frozenHistory.map((row) => <option key={row.report_date} value={row.report_date}>{row.report_date} — 16:00</option>)}
         </select>
       </div> : null}
+
+      {snapshotLoading && !preview ? (
+        <p role="status" className="rounded-lg border bg-white p-8 text-center text-sm text-muted-foreground">
+          {selectedReportDate ? "Loading saved report..." : "Generating report with the latest data..."}
+        </p>
+      ) : null}
 
       {!snapshotLoading && !preview ? (
         <div className="rounded-lg border bg-white p-8 text-center text-sm text-muted-foreground">

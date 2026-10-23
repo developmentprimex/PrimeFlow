@@ -11,7 +11,7 @@ export const MANUAL_POINTS = {
   reorganization: "3. RIORGANIZIM NESER?",
 } as const
 
-export type ManualKey = keyof typeof MANUAL_POINTS | `meeting_plan:${string}` | `untouched_comment:${string}`
+export type ManualKey = keyof typeof MANUAL_POINTS | `meeting_plan:${string}` | `untouched_comment:${string}` | `delivery:${string}` | `delivery_choice:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 export type TaskRow = {
   task_id: string
@@ -57,7 +57,7 @@ export type ReportingPointsReport = {
   subject: string
   status: string
   manual_answers: ManualAnswers
-  data: Partial<Record<"postponed" | "postponed_today" | "untouched" | "same_day" | "ga_postponed", TaskRow[]>> & { unheld_meetings?: UnheldMeetingRow[] }
+  data: Partial<Record<"postponed" | "postponed_today" | "untouched" | "same_day" | "ga_postponed" | "delivery", TaskRow[]>> & { unheld_meetings?: UnheldMeetingRow[] }
   realization: {
     percent: number | null
     employees: number
@@ -236,6 +236,36 @@ function UnheldMeetings({ rows, reportDay, answers, disabled, onAnswerChange }: 
   </section>
 }
 
+function DeliveryPoint({ rows, answers, disabled, onAnswerChange }: TaskManualComments & { rows: TaskRow[] }) {
+  const deliveredCount = rows.filter((row) => answers[`delivery_choice:${row.task_id}`] === "PO").length
+  const columns: [keyof TaskRow, string][] = [["assignees", "KUSH"], ["department", "DEP"], ["project", "PRJK"], ["am_pm", "AM/PM"], ["task_type", "LLOJI"], ["marker", "SIMBOLI"]]
+  return <section className="space-y-3 rounded-xl border bg-card p-5" aria-labelledby="m3-delivery">
+    <div className="flex flex-wrap items-center gap-3"><h3 id="m3-delivery" className="font-semibold">5. SA PER DOREZIM M3?</h3>
+      <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">SA/TOTALI: <span className="text-2xl font-extrabold tabular-nums">{deliveredCount}/{rows.length}</span></span>
+    </div>
+    <p className="text-sm text-muted-foreground">Detyrat me simbolet M3 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
+    <div className="overflow-x-auto border"><table className="w-full min-w-[1150px] border-collapse text-xs">
+      <thead className="bg-slate-100"><tr>{["NR", ...columns.map(([, label]) => label), "TITULLI", "PO/JO", "PËRGJIGJJA MANUALE"].map((label) => <th key={label} className="border px-2 py-2 text-left whitespace-nowrap">{label}</th>)}</tr></thead>
+      <tbody>{rows.map((row, index) => {
+        const choiceKey: ManualKey = `delivery_choice:${row.task_id}`
+        const answerKey: ManualKey = `delivery:${row.task_id}`
+        const choice = answers[choiceKey] || ""
+        return <tr key={row.task_id} style={{ background: row.deadline_important ? "#dc2626" : STATUS_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }}>
+          <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
+          {columns.map(([field]) => <td key={field} className={`w-px whitespace-nowrap border p-2 align-top${field === "marker" ? " font-bold" : ""}`}>{String(row[field] || "—")}</td>)}
+          <td className="min-w-[280px] border p-2 align-top">{row.title}</td>
+          <td className="w-px whitespace-nowrap border px-1 py-2 align-top"><select aria-label={`PO/JO për ${row.title}`} value={choice} disabled={disabled}
+            className={`w-14 rounded border px-1 py-2 ${choice === "PO" ? "border-green-700 bg-green-600 font-bold text-white" : choice === "JO" ? "border-red-800 bg-red-600 font-bold text-white" : "bg-white text-black"}`} onChange={(event) => onAnswerChange(choiceKey, event.target.value)}>
+            <option value="">—</option><option value="PO">PO</option><option value="JO">JO</option>
+          </select></td>
+          <td className="min-w-[240px] border p-2 align-top"><Textarea aria-label={`Përgjigjja manuale për ${row.title}`} value={answers[answerKey] || ""} disabled={disabled} maxLength={10000}
+            className="min-h-20 bg-white text-black" placeholder="A është dorëzuar? Shëno përgjigjjen." onChange={(event) => onAnswerChange(answerKey, event.target.value)} /></td>
+        </tr>
+      })}</tbody>
+    </table>{!rows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}</div>
+  </section>
+}
+
 export function M3ReportingPointsView({ report, answers, onAnswerChange, disabled = false, meetingCommentsDisabled = disabled }: {
   report: ReportingPointsReport
   answers: ManualAnswers
@@ -262,8 +292,9 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
       <Point title="2. PSE PA PREK TËRË DITËN?" note="Detyrat TODO ku data e raportit është brenda intervalit Start–Due, pavarësisht progresit të mëparshëm." rows={data.untouched || []} kind="untouched" manualComments={{ answers, disabled, onAnswerChange }} />
       <Point title="3. SOT PËR SOT/DEADLINE - PROGRESI?" note="Vetëm detyrat që nuk janë DONE dhe kanë Creation Date, Start Date dhe Due Date në datën e këtij raporti." rows={(data.same_day || []).filter((row) => row.status !== "DONE")} kind="same_day" />
       <UnheldMeetings rows={data.unheld_meetings || []} reportDay={report.report_date} answers={answers} disabled={meetingCommentsDisabled} onAnswerChange={onAnswerChange} />
+      <DeliveryPoint rows={data.delivery || []} answers={answers} disabled={disabled} onAnswerChange={onAnswerChange} />
       <section className="rounded-xl border bg-card p-5" aria-labelledby="m3-realization-title">
-        <h3 id="m3-realization-title" className="font-semibold">5. REALIZIMI — A MBËRRIHET?</h3>
+        <h3 id="m3-realization-title" className="font-semibold">6. REALIZIMI — A MBËRRIHET?</h3>
         <p className="mt-1 text-xs text-muted-foreground">PLAN RLZ total dhe ndarja sipas departamenteve, si te Realization. Ruhet në 16:15 dhe sa herë gjenerohet raporti pas 16:15.</p>
         {realization ? <div className="mt-5 flex flex-wrap items-center gap-5">
           <div className={`rounded-xl px-5 py-3 text-3xl font-bold ${realization.percent == null ? "bg-muted" : realization.percent < 50 ? "bg-red-100 text-red-900" : "bg-green-100 text-green-900"}`}>

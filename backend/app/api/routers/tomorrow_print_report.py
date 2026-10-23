@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_manager_or_admin
@@ -148,6 +148,10 @@ async def generate_snapshot(
     user: User = Depends(get_current_user),
 ) -> dict:
     delivery_date = report_date or datetime.now(report_timezone()).date()
+    # Opening the view can generate concurrently for several users. Serialize
+    # the build and save so the first snapshot is only inserted once.
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                     {"key": f"tomorrow_print_generate|{delivery_date.isoformat()}"})
     report = await build_tomorrow_print_report(delivery_date, db=db)
     row = await save_one_h_print_snapshot(
         db,

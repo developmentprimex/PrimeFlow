@@ -35,7 +35,7 @@ function load(name) {
 
 const { DailyRlzReasonCell, DailyRlzCommentField } = load("@/components/daily-rlz-panel")
 const state = {
-  is_editable: true, editable_until: "2026-10-01T17:00:00+02:00",
+  is_editable: true, editable_until: null,
   reason_required: true, comment_required: true,
   reason_missing: false, comment_missing: false,
 }
@@ -55,7 +55,7 @@ test("TODO system tasks show reason and comment controls", () => {
   assert.doesNotMatch(comment, /disabled=""/)
 })
 
-test("system task controls show saved evidence and respect the closed edit window", () => {
+test("system task controls show saved evidence and respect server editing permissions", () => {
   assert.match(render(DailyRlzReasonCell, { is_editable: false }), /disabled=""/)
   const comment = render(DailyRlzCommentField, { is_editable: false, comment: "Kontrolli u krye" })
   assert.match(comment, /value="Kontrolli u krye"/)

@@ -52,7 +52,8 @@ AUTO_TITLES = {
     "postponed_today": "DET QE JANE SHTYER SOT AM DHE PM",
     "untouched": "2. PSE PA PREK TERE DITEN?",
     "same_day": "3. SOT PËR SOT/DEADLINE - PROGRESI?",
-    "realization": "5. REALIZIMI - A MBERRIHET?",
+    "delivery": "5. SA PER DOREZIM M3?",
+    "realization": "6. REALIZIMI - A MBERRIHET?",
     "ga_postponed": "2. A KA DET QE SHTYHET (SOT/SOT) OSE DEADLINE?",
 }
 DATE_ACTIONS = {"task.due_date_changed": "due_date", "task.start_date_changed": "start_date"}
@@ -116,7 +117,7 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, post
         tasks = window_tasks
         events_by_task = {task_id: [event for event in changes if period(event) == postponement_period]
                           for task_id, changes in events_by_task.items()}
-    sections: dict[str, list[dict]] = {key: [] for key in ("postponed", "untouched", "same_day", "ga_postponed")}
+    sections: dict[str, list[dict]] = {key: [] for key in ("postponed", "untouched", "same_day", "ga_postponed", "delivery")}
     for task in tasks:
         task_events = sorted(events_by_task.get(task.id, []), key=lambda event: (event.created_at, str(event.id)))
         current = {field: semantic_local_day(getattr(task, field, None)) for field in ("start_date", "due_date")}
@@ -151,6 +152,11 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, post
                 "marker": one_h_marker_label(active_one_h_marker(task, day), active_one_h_marker_by_ga(task, day)),
                 "eight_am": title_has_eight_am_indicator(task.title, is_system_task=is_system)
                     or (isinstance(task.due_date, datetime) and _local_time(task.due_date) == "08:00")}
+        if (active_one_h_marker(task, day) in {"M3", "M2_M3"}
+                and (not task.created_at or semantic_local_day(task.created_at) <= day)
+                and current["start_date"] and current["due_date"]
+                and current["start_date"] <= day <= current["due_date"]):
+            sections["delivery"].append(dict(base))
         if (status == "TODO" and current["start_date"] and current["due_date"]
                 and current["start_date"] <= day <= current["due_date"]):
             sections["untouched"].append(dict(base))
@@ -459,6 +465,11 @@ def task_row_appearance(row: dict) -> tuple[str, str, bool]:
 
 
 def report_table_columns(key: str, movement: str = "") -> list[tuple[str, str, int]]:
+    if key == "delivery":
+        return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
+                ("project", "PRJK", 96), ("am_pm", "AM/PM", 48), ("task_type", "LLOJI", 48),
+                ("marker", "SIMBOLI", 60), ("title", "TITULLI", 360),
+                ("choice", "PO/JO", 50), ("answer", "PERGJIGJJA MANUALE", 300)]
     if key == "postponed_today":
         key = "postponed"
     columns = [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
@@ -482,6 +493,13 @@ def effective_task_comment(row: dict, report: dict, prefix: str) -> str:
 
 
 def report_table_value(row: dict, column: str, index: int, kind: str, report: dict | None = None, section: str = "") -> Any:
+    if section == "delivery":
+        if column == "choice":
+            return (report or {}).get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") or "-"
+        if column == "answer":
+            return (report or {}).get("manual_answers", {}).get(f"delivery:{row['task_id']}") or "Pa pergjigje"
+        if column == "title":
+            return _clean_task_title(row.get("title"), is_system_task=True)
     if column == "comment" and section == "untouched":
         return effective_task_comment(row, report or {}, "untouched_comment")
     def formatted(value):
@@ -503,6 +521,12 @@ def report_table_value(row: dict, column: str, index: int, kind: str, report: di
     return row.get(column) or "-"
 
 
+def delivery_summary(report: dict) -> str:
+    rows = report.get("data", {}).get("delivery", [])
+    delivered = sum(report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") == "PO" for row in rows)
+    return f"SA/TOTALI: {delivered}/{len(rows)}"
+
+
 def render_html(report: dict) -> str:
     cell_style = "border:1px solid #000;padding:6px 4px;vertical-align:top;text-align:left;overflow-wrap:anywhere"
     def manual(keys):
@@ -510,6 +534,8 @@ def render_html(report: dict) -> str:
 
     def table(key):
         parts = [f"<h3>{_cell(AUTO_TITLES[key])}</h3>"]
+        if key == "delivery":
+            parts.append(f"<p><strong>{delivery_summary(report)}</strong></p>")
         if key == "postponed":
             parts.append(
                 "<p style='font-size:14px;font-weight:700;line-height:1.5'>Shtyrjet e bëra gjatë ditës. "
@@ -534,8 +560,14 @@ def render_html(report: dict) -> str:
                 row_fill, row_color, eight_am = task_row_appearance(row)
                 for column_index, (column, _, width) in enumerate(columns):
                     color = ("#fee2e2" if row.get("risk") == "RREZIK" else "#dcfce7") if column == "risk" else row_fill
+                    text_color = row_color
+                    if key == "delivery" and column in {"choice", "answer"}:
+                        color, text_color = "#ffffff", "#000000"
+                        choice = report_table_value(row, column, index, kind, report, key)
+                        if column == "choice" and choice in {"PO", "JO"}:
+                            color, text_color = ("#16a34a" if choice == "PO" else "#dc2626"), "#ffffff"
                     style = f"{cell_style};background:{color};white-space:normal;word-break:break-word"
-                    style += f";color:{row_color}"
+                    style += f";color:{text_color}"
                     if eight_am:
                         style += ";border-top:3px solid #dc2626;border-bottom:3px solid #dc2626"
                         if column_index == 0:
@@ -548,7 +580,9 @@ def render_html(report: dict) -> str:
                         style += ";font-weight:700;color:" + ("#7f1d1d" if row.get("risk") == "RREZIK" else "#14532d")
                     value = _cell(report_table_value(row, column, index, kind, report, key))
                     if column == "title":
-                        if row.get("marker"):
+                        if key == "delivery":
+                            value = _cell(report_table_value(row, column, index, kind, report, key))
+                        elif row.get("marker"):
                             value = (f"<strong data-task-symbol='true' style='display:inline-block;margin-right:4px;color:{'#ffffff' if row_color == '#ffffff' else '#DC2626'};font-size:1.18em;font-weight:900'>"
                                      f"{_cell(row['marker'])}</strong>{_cell(_clean_task_title(row.get('title'), is_system_task=True))}")
                         else:
@@ -635,6 +669,7 @@ def render_html(report: dict) -> str:
             + manual(("underload", "overload", "reorganization"))
             + "".join(table(key) for key in ("postponed", "postponed_today", "untouched", "same_day"))
             + meeting_html
+            + table("delivery")
             + f"<h3>{AUTO_TITLES['realization']}</h3>{realization_html}" + "</body></html>")
 
 
@@ -642,7 +677,7 @@ def render_plain_text(report: dict) -> str:
     lines = [M3_TITLE, report["report_date"]]
     for key in ("underload", "overload", "reorganization"):
         lines += [MANUAL_POINTS[key], report["manual_answers"].get(key) or "Pa pergjigje"]
-    for key in ("postponed", "postponed_today", "untouched", "same_day", "unheld_meetings", "realization"):
+    for key in ("postponed", "postponed_today", "untouched", "same_day", "unheld_meetings", "delivery", "realization"):
         if key == "unheld_meetings":
             lines.append(MEETING_TITLE)
             for label, meetings in meeting_groups(report):
@@ -653,6 +688,8 @@ def render_plain_text(report: dict) -> str:
                     lines.append("Asnjë takim i anuluar për këtë datë.")
             continue
         lines.append(AUTO_TITLES[key])
+        if key == "delivery":
+            lines.append(delivery_summary(report))
         if key == "postponed":
             lines.append("Shtyrjet e bëra gjatë ditës. Brenda javës: OK. Për të premten ose javën tjetër: RREZIK.")
         if key == "realization":

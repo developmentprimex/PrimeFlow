@@ -31,7 +31,8 @@ AUTO_TITLES = {
     "postponed": "3. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
     "postponed_am": "DET QE JANE SHTYER SOT AM - PARA PAUZES",
     "ga_progress": "4. PROGRESI I DET ME GA (AM)",
-    "delivery": "5. SA PER DOREZIM M2?",
+    "pm_due_today": "5. DET PM ME DUE DATE SOT",
+    "delivery": "6. SA PER DOREZIM M2?",
 }
 DELIVERY_MARKERS = {"M2", "M2_M3"}
 
@@ -46,7 +47,7 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
                               if row["status"] != "DONE"],
                 "postponed_am": [row for row in m3.select_task_sections(tasks, events, day, postponement_period="AM")["postponed"]
                                  if row["status"] != "DONE" and planned_for_report_day(row, day)],
-                "ga_progress": [], "delivery": []}
+                "ga_progress": [], "delivery": [], "pm_due_today": []}
     for task in tasks:
         marker = active_one_h_marker(task, day)
         system = bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))
@@ -57,19 +58,21 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
         ).text.strip()
         personal_ga = bool(getattr(task, "is_personal", False) and personal_task_owner(personal_title) == "GA")
         am_pm = _m3_am_pm_label(task)
-        ga_progress = am_pm in {"AM", "AM/PM"} and (marker in {"F", "FLAG"} or personal_ga)
-        if marker not in DELIVERY_MARKERS and not ga_progress:
-            continue
         start, due, created, completed = (semantic_local_day(getattr(task, field, None))
                                          for field in ("start_date", "due_date", "created_at", "completed_at"))
+        planned = bool(start and due and start <= day <= due)
+        pm_due_today = due == day and am_pm in {"PM", "AM/PM"}
+        ga_progress = planned and am_pm in {"AM", "AM/PM"} and (marker in {"F", "FLAG"} or personal_ga)
+        if not pm_due_today and not ga_progress and not (planned and marker in DELIVERY_MARKERS):
+            continue
         status = str(getattr(task.status, "value", task.status)).upper()
-        # Membership uses the inclusive planning interval, including completed tasks.
-        if (created and created > day) or start is None or due is None or not start <= day <= due:
+        # PM due-date membership does not require a start date or an open status.
+        if created and created > day:
             continue
         row = {
             "task_id": str(task.id), "title": title,
             "status": status, "progress": task.progress_percentage or 0,
-            "start_date": start.isoformat(), "due_date": due.isoformat(),
+            "start_date": start.isoformat() if start else None, "due_date": due.isoformat(),
             "created_date": created.isoformat() if created else None, "completed_date": completed.isoformat() if completed else None,
             "am_pm": am_pm, "task_type": _m3_task_type_label(task),
             "deadline_important": bool(task.is_deadline_important), "is_system_task": system,
@@ -77,8 +80,10 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
         }
         if ga_progress:
             sections["ga_progress"].append(dict(row, title=personal_title if personal_ga else parse_marked_note_content(title).text))
-        if marker in DELIVERY_MARKERS:
+        if planned and marker in DELIVERY_MARKERS:
             sections["delivery"].append(row)
+        if pm_due_today:
+            sections["pm_due_today"].append(dict(row))
     return sections
 
 
@@ -138,6 +143,8 @@ async def refresh_report(db: AsyncSession, row: M2ReportingPointsReport, now: da
 
 def report_payload(row: M2ReportingPointsReport) -> dict:
     data = dict(row.data or {})
+    if "pm_due_today" in data:
+        data["pm_due_today"] = sorted(data["pm_due_today"], key=lambda item: item.get("status") == "DONE")
     if "postponed_am" in data:
         data["postponed_am"] = [item for item in data["postponed_am"]
                                 if planned_for_report_day(item, row.report_date)]
@@ -153,7 +160,10 @@ async def current_report_payload(db: AsyncSession, row: M2ReportingPointsReport)
 
 
 def table_groups(report, key):
-    return m3.task_table_groups(report.get("data", {}).get(key, []), "ga_postponed" if key in {"postponed", "postponed_am"} else key)
+    rows = report.get("data", {}).get(key, [])
+    if key == "pm_due_today":
+        rows = sorted(rows, key=lambda item: item.get("status") == "DONE")
+    return m3.task_table_groups(rows, "ga_postponed" if key in {"postponed", "postponed_am"} else key)
 
 
 def table_columns(key, movement=""):
@@ -162,10 +172,11 @@ def table_columns(key, movement=""):
                 ("am_pm", "AM/PM", 60), ("priority", "LLOJI", 120), ("task_type", "TIPI", 48),
                 ("title", "TITULLI", 450), ("due_label", "DUE DATE", 80),
                 ("reason", "ARSYEJA", 124), ("comment", "KOMENTI", 180)]
-    if key == "ga_progress":
-        return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
+    if key in {"ga_progress", "pm_due_today"}:
+        columns = [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
                 ("project", "PRJK", 96), ("am_pm", "AM/PM", 60), ("task_type", "LLOJI", 48),
                 ("marker", "SIMBOLI", 60), ("title", "TITULLI", 450)]
+        return columns + ([("due_date", "DUE DATE", 88)] if key == "pm_due_today" else [])
     if key in {"postponed", "postponed_am"}:
         return [(field, label, 60 if field == "am_pm" else width) for field, label, width in m3.report_table_columns("ga_postponed", movement)
                 if field != "category"] + [("manual_comment", "KOMENT MANUAL", 220)]

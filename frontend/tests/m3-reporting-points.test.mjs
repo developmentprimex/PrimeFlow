@@ -62,6 +62,25 @@ function render(overrides = {}, answers = {}, disabled = false) {
   }))
 }
 
+test("M3 delivery shows symbols, PO/JO, manual answers and a live total before realization", () => {
+  const id = "11111111-1111-4111-8111-111111111111"
+  const answers = { [`delivery_choice:${id}`]: "PO", [`delivery:${id}`]: "Dorezuar" }
+  const data = { delivery: [{ ...row, task_id: id, marker: "M3" }, { ...row, task_id: "second", marker: "M2/3" }] }
+  const html = render({ data }, answers)
+  assert.match(html, /5\. SA PER DOREZIM M3\?/)
+  assert.match(html, /SA\/TOTALI:.*1\/2/)
+  assert.match(html, /M2\/3/)
+  assert.match(html, /<option value="PO" selected="">PO<\/option>/)
+  assert.match(html, /<textarea[^>]*>Dorezuar<\/textarea>/)
+  assert.ok(html.indexOf("5. SA PER DOREZIM M3?") < html.indexOf("6. REALIZIMI"))
+  assert.match(render({ data }, answers, true), /<select[^>]*disabled=""/)
+  const { readManualDraft, writeManualDraft } = load("@/lib/m3-reporting-points-draft")
+  const values = new Map()
+  const storage = { getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value) }
+  writeManualDraft(storage, "user", "2026-10-05", answers)
+  assert.deepEqual(JSON.parse(JSON.stringify(readManualDraft(storage, "user", "2026-10-05"))), answers)
+})
+
 test("point two edits the existing My View comment column per task including SYS", () => {
   const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"]
   const answers = { [`untouched_comment:${ids[0]}`]: "Manual FT", [`untouched_comment:${ids[1]}`]: "Manual SYS" }
@@ -400,6 +419,35 @@ test("sent reports remain editable, regenerate, autosave and send repeatedly", a
   }
   assert.equal(sends, 3)
   page.unmount()
+})
+
+test("M3 delivery choices and answers survive reload and autosave", async () => {
+  const id = "11111111-1111-4111-8111-111111111111"
+  const values = new Map()
+  const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) }
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  let server = { ...report, report_date: day, data: { delivery: [{ ...row, task_id: id, marker: "M3" }] } }
+  const api = async (url, options) => {
+    if (options?.method === "PUT") server = { ...server, manual_answers: JSON.parse(options.body).manual_answers }
+    return { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: [], cc: [], bcc: [] } } : { ...server } }
+  }
+  const first = mountPage(storage, api)
+  await first.flush()
+  first.edit(`delivery_choice:${id}`, "PO")
+  await first.flush()
+  first.edit(`delivery:${id}`, "Dorezuar M3")
+  await first.flush()
+  first.unmount()
+  const reloaded = mountPage(storage, api)
+  await reloaded.flush()
+  assert.equal(reloaded.answers()[`delivery_choice:${id}`], "PO")
+  assert.equal(reloaded.answers()[`delivery:${id}`], "Dorezuar M3")
+  await reloaded.fireSave()
+  await reloaded.flush()
+  assert.equal(server.manual_answers[`delivery_choice:${id}`], "PO")
+  assert.equal(server.manual_answers[`delivery:${id}`], "Dorezuar M3")
+  assert.equal(values.size, 0)
+  reloaded.unmount()
 })
 
 test("send waits for realization capture while answers remain editable", async () => {

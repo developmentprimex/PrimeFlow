@@ -32,7 +32,7 @@ def test_todo_system_task_daily_reason_and_comment_can_be_saved():
         day=DAY, reason_code="TECHNICAL_PROBLEM", comment="  U kontrollua sistemi  ",
     )
 
-    with patch("app.api.routers.reports.is_editable_day", return_value=True):
+    with patch("app.api.routers.reports.is_explanation_editable_day", return_value=True):
         response = asyncio.run(upsert_daily_rlz_state(task.id, payload, db=db, user=user))
         saved = db.add.call_args.args[0]
         reloaded = _daily_rlz_state_out(saved, DAY, system_task=task)
@@ -77,10 +77,10 @@ def test_completed_system_task_keeps_saved_evidence_without_editable_fields():
     assert state.reason_code == "OTHER" and state.comment == "Koment i ruajtur"
 
 
-def test_system_explanation_respects_edit_window():
+def test_system_explanation_rejects_future_day():
     db = SimpleNamespace(get=AsyncMock())
     task = Task(status=TaskStatus.TODO, system_template_origin_id=uuid.uuid4())
-    with patch("app.api.routers.reports.is_editable_day", return_value=False):
+    with patch("app.api.routers.reports.is_explanation_editable_day", return_value=False):
         state = _daily_rlz_state_out(None, DAY, system_task=task)
         with pytest.raises(HTTPException) as error:
             asyncio.run(upsert_daily_rlz_state(
@@ -90,6 +90,7 @@ def test_system_explanation_respects_edit_window():
 
     assert state.reason_required and state.comment_required and not state.is_editable
     assert error.value.status_code == 409
+    assert error.value.detail["code"] == "DAILY_RLZ_FUTURE_DAY"
     db.get.assert_not_awaited()
 
 
@@ -102,7 +103,7 @@ def test_staff_cannot_comment_another_employees_system_task():
     )
     db = SimpleNamespace(get=AsyncMock(return_value=task), scalar=AsyncMock(return_value=None))
 
-    with patch("app.api.routers.reports.is_editable_day", return_value=True):
+    with patch("app.api.routers.reports.is_explanation_editable_day", return_value=True):
         with pytest.raises(HTTPException) as error:
             asyncio.run(upsert_daily_rlz_state(
                 task.id, DailyRlzStateUpsert(day=DAY, comment="Koment"), db=db, user=user,

@@ -441,7 +441,7 @@ export interface DailyReportTaskItem {
     comment?: string | null
     updated_at?: string | null
     is_editable: boolean
-    editable_until: string
+    editable_until: string | null
     requires_explanation?: boolean
     reason_required?: boolean
     comment_required?: boolean
@@ -472,7 +472,7 @@ export interface DailyReportSystemOccurrence {
     comment?: string | null
     updated_at?: string | null
     is_editable: boolean
-    editable_until: string
+    editable_until: string | null
     requires_explanation?: boolean
     reason_required?: boolean
     comment_required?: boolean
