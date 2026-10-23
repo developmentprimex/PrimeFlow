@@ -239,6 +239,12 @@ jobs:
           & "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" backend/scripts/configure_discord.py
           if ($LASTEXITCODE -ne 0) { throw "Discord configuration failed. Check the required Actions secrets." }
 
+      - name: Release Mira Voice Dependencies
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          & backend/scripts/stop_discord_voice_workers.ps1
+
       - name: Prepare Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd

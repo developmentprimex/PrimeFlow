@@ -18,6 +18,58 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_recording_deletion_recognizes_the_deployed_stamp_without_reapplying_it(self) -> None:
+        scripts = migration_scripts()
+        revision = scripts.get_revision("0161_recording_deletion")
+        self.assertEqual(revision.down_revision, "0160_mira_host_px_notes")
+        self.assertEqual(scripts._upgrade_revs(revision.revision, revision.revision), [])
+        self.assertNotIn(revision.revision, [
+            step.revision.revision for step in scripts._upgrade_revs("heads", revision.revision)
+        ])
+        self.assertEqual(
+            [step.revision.revision for step in scripts._upgrade_revs(revision.revision, revision.down_revision)],
+            [revision.revision],
+        )
+
+    def test_recording_deletion_upgrade_and_downgrade_preserve_existing_recordings(self) -> None:
+        migration = migration_scripts().get_revision("0161_recording_deletion").module
+        engine = sa.create_engine("sqlite://")
+        try:
+            with engine.begin() as connection:
+                connection.execute(sa.text("CREATE TABLE meeting_recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL)"))
+                connection.execute(sa.text("INSERT INTO meeting_recordings VALUES ('existing', 'Keep this recording')"))
+                operations = Operations(MigrationContext.configure(connection))
+                with patch.object(migration, "op", operations):
+                    migration.upgrade()
+                    columns = {column["name"]: column for column in sa.inspect(connection).get_columns("meeting_recordings")}
+                    self.assertTrue(columns["deleted_at"]["nullable"])
+                    self.assertTrue(columns["files_purged_at"]["nullable"])
+                    indexes = sa.inspect(connection).get_indexes("meeting_recordings")
+                    self.assertEqual([(index["name"], index["column_names"], index["unique"]) for index in indexes],
+                                     [("ix_deleted_at", ["deleted_at"], 0)])
+                    self.assertEqual(connection.execute(sa.text("SELECT id, title, deleted_at, files_purged_at FROM meeting_recordings")).one(),
+                                     ("existing", "Keep this recording", None, None))
+                    migration.downgrade()
+                self.assertEqual(connection.execute(sa.text("SELECT id, title FROM meeting_recordings")).one(),
+                                 ("existing", "Keep this recording"))
+                self.assertNotIn("deleted_at", {column["name"] for column in sa.inspect(connection).get_columns("meeting_recordings")})
+        finally:
+            engine.dispose()
+
+    def test_recording_deletion_migration_emits_the_observed_postgresql_schema(self) -> None:
+        migration = migration_scripts().get_revision("0161_recording_deletion").module
+        output = StringIO()
+        operations = Operations(MigrationContext.configure(
+            dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output},
+        ))
+        with patch.object(migration, "op", operations):
+            migration.upgrade()
+        sql = output.getvalue()
+        self.assertIn("ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE", sql)
+        self.assertIn("ADD COLUMN files_purged_at TIMESTAMP WITH TIME ZONE", sql)
+        self.assertNotIn("deleted_at TIMESTAMP WITH TIME ZONE NOT NULL", sql)
+        self.assertIn("CREATE INDEX ix_deleted_at ON meeting_recordings (deleted_at)", sql)
+
     def test_revisions_are_unique_and_have_one_head(self) -> None:
         # Alembic only warns about duplicate IDs, so a zero exit code alone
         # does not establish that the migration graph is valid.
