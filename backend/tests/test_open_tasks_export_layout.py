@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.rich_text import CellRichText
 from starlette.datastructures import UploadFile
 
 from app.api.routers.exports import (
@@ -22,6 +23,7 @@ from app.api.routers.exports import (
     _open_task_should_compare_status,
     _open_task_values_match,
     _open_task_wrapped_line_count,
+    _open_task_title_rich_text,
     export_open_tasks_xlsx,
     import_open_tasks_baseline,
     reset_open_tasks_baseline,
@@ -30,6 +32,20 @@ from app.models.enums import UserRole
 
 
 class TestOpenTasksExportLayout(unittest.TestCase):
+    def test_title_strikes_preserve_only_completed_segments(self) -> None:
+        value = _open_task_title_rich_text(
+            "Open\n[[done]]Done [[added]]also done[[/added]][[/done]]\nStill open"
+        )
+        self.assertIsInstance(value, CellRichText)
+        self.assertEqual(str(value), "Open\nDone also done\nStill open")
+        self.assertEqual([part.text for part in value if part.font.strike], ["Done also done"])
+        self.assertEqual(_open_task_wrapped_line_count(value, 44), 3)
+
+    def test_title_without_strikes_remains_plain_text(self) -> None:
+        for source, expected in [(None, ""), ("<b>Title</b>", "Title"),
+                                 ("[[added]]New[[/added]]", "New")]:
+            self.assertEqual(_open_task_title_rich_text(source), expected)
+
     def test_wrapped_line_count_accounts_for_column_width(self) -> None:
         title = "AT/OH:EF/RA: ASC: DEF KO1/KO2/KOF PER KUZHINA (CLAIMS)"
 
@@ -306,7 +322,7 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         task_id = uuid.uuid4()
         task = SimpleNamespace(
             id=task_id,
-            title="Plan customer report",
+            title="Plan [[done]]customer[[/done]] report",
             description=None,
             project_id=None,
             department_id=None,
@@ -361,12 +377,16 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
             user=user,
         )
         content = b"".join([chunk async for chunk in response.body_iterator])
-        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        workbook = load_workbook(io.BytesIO(content), data_only=False, rich_text=True)
         ws = workbook["OPEN TASKS"]
 
         self.assertEqual([ws.cell(4, column).value for column in range(17, 22)], OPEN_TASK_EXPORT_HEADERS[16:21])
         self.assertEqual(ws.cell(4, 2).value, "TASK ID")
         self.assertEqual(ws.cell(5, 2).value, str(task_id))
+        title_value = ws.cell(5, 15).value
+        self.assertIsInstance(title_value, CellRichText)
+        self.assertEqual(str(title_value), "Plan customer report")
+        self.assertEqual([part.text for part in title_value if part.font.strike], ["customer"])
         self.assertEqual(ws.max_row, 6)
         self.assertNotEqual(ws.cell(5, 4).value, "SYSTEM")
         self.assertEqual(ws.cell(6, 2).value, str(system_task_id))

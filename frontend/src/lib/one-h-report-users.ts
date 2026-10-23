@@ -22,9 +22,25 @@ export function isReportSummaryTask(cell: HTMLElement): boolean {
   return people.includes("GA") && !people.some((person) => ["GENT", "GENTI", "GT", "KA"].includes(person))
 }
 
-export function reportUserOptions(document: Document): string[] {
+type PlannerUser = { full_name?: string | null; username?: string | null; email: string; department_id?: string | null; weekly_planner_sort_order?: number | null }
+type PlannerDepartment = { id: string; code: string; name: string }
+
+export function reportPlannerUserOrder(users: PlannerUser[], departments: PlannerDepartment[]): string[] {
+  const ranks: Record<string, number> = { DEV: 0, DEVELOPMENT: 0, ZHV: 0, ZHVILLIM: 0, GD: 1, GDS: 1, DSG: 1, "GRAPHIC DESIGN": 1, DIZAJN: 1, PCM: 2, "PRODUCT CONTENT": 2, "PROJECT CONTENT MANAGER": 2 }
+  const departmentRanks = new Map(departments.map((department) => [department.id,
+    ranks[department.code.trim().toUpperCase()] ?? ranks[department.name.trim().toUpperCase()] ?? 99]))
+  const name = (person: PlannerUser) => person.full_name || person.username || person.email
+  return [...users].sort((a, b) =>
+    (departmentRanks.get(a.department_id || "") ?? 99) - (departmentRanks.get(b.department_id || "") ?? 99)
+    || Number(a.weekly_planner_sort_order == null) - Number(b.weekly_planner_sort_order == null)
+    || (a.weekly_planner_sort_order ?? 0) - (b.weekly_planner_sort_order ?? 0)
+    || name(a).localeCompare(name(b))
+  ).map((person) => name(person).trim().split(/\s+/).map((part) => part[0]).join("").toUpperCase())
+}
+
+export function reportUserOptions(document: Document, plannerOrder: string[] = []): string[] {
   const users = new Set<string>()
-  // Keep the report's person order, then append owners absent from the summary.
+  // Collect all owners, including those absent from the GA summary.
   document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"] td').forEach((cell) => {
     const user = reportSummaryUser(cell)
     if (user) users.add(user)
@@ -32,7 +48,9 @@ export function reportUserOptions(document: Document): string[] {
   document.querySelectorAll<HTMLElement>('tr[data-task-card-row="content"] > td').forEach((cell) => {
     reportTaskUsers(cell).forEach((user) => users.add(user))
   })
-  return [...users]
+  const ordered = [...new Set(plannerOrder)].filter((person) => users.has(person))
+  const ranked = new Set(ordered)
+  return [...ordered, ...[...users].filter((person) => !ranked.has(person))]
 }
 
 export function collapseEmptyReportTaskRows(document: Document, filtering: boolean): void {
