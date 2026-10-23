@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from pydantic import AwareDatetime
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +26,12 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_RECYCLE: int = 1800
     MEETING_RECORDINGS_ROOT: str = "uploads/meeting-recordings"
+    MEETING_RECORDINGS_FILES_ENABLED: bool = True
+    # Fixed activation boundary; restarts must not move it or backfill old media.
+    MEETING_RECORDINGS_FILES_FROM: AwareDatetime = datetime(2026, 10, 23, 9, 55, 36, tzinfo=timezone.utc)
+    MEETING_RECORDINGS_FILES_SUBDIR: str = (
+        "10_ZHVILLIM/04_PROJECTS/26_PRIMEFLOW/08_TAKIMET"
+    )
     MEETING_RECORDINGS_MAX_CHUNK_BYTES: int = 32 * 1024 * 1024
     MEETING_RECORDINGS_MAX_SESSION_BYTES: int = 20 * 1024 * 1024 * 1024
     MEETING_RECORDINGS_MAX_DURATION_SECONDS: int = 12 * 60 * 60
@@ -113,7 +121,7 @@ class Settings(BaseSettings):
     FILE_ACCESS_API_BASE_URL: str = "http://192.168.10.8:5080"
     FILE_ACCESS_API_KEY: str | None = "XeiMrYgncS2EkpQZ4tTqs73RfIU8Cub91oAwB5zPxyjOJDVd"
     FILES_SERVER_STORAGE_ROOT: str = r"F:\FILES"
-    FILES_SERVER_PATH_ALIASES: str = r"Y:;F:\FILES;\\192.168.10.8\FILES"
+    FILES_SERVER_PATH_ALIASES: str = r"Y:;Z:;F:\FILES;\\192.168.10.8\FILES"
 
     GA_NOTES_UPLOAD_DIR: str = "uploads/ga-notes"
     PLAN_NOTES_UPLOAD_DIR: str = "uploads/plan_notes"

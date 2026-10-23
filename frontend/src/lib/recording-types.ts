@@ -6,6 +6,7 @@ export type MeetingRecording = {
   has_microphone_audio: boolean; has_system_audio: boolean; is_partial: boolean; size_bytes: number; chunks_received: number
   upload_completed_at: string | null; created_at: string; updated_at: string; error_message: string | null
   recorded_by_name: string | null; meeting_title: string | null
+  media_available?: boolean | null
 }
 export const RECORDING_STATUS: Record<string, string> = {
   CREATED: "I krijuar", RECORDING: "Duke regjistruar", UPLOADING: "Duke ngarkuar", FINALIZING: "Duke përpunuar", READY: "I ruajtur", FAILED: "I dështuar",

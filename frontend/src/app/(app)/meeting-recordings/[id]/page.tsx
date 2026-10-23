@@ -24,6 +24,10 @@ export default function RecordingDetailPage() {
         const recording: MeetingRecording = await recordingJson(await apiFetch(`/meeting-recordings/${id}`, { cache: "no-store" }))
         if (!active) return
         setRow(recording)
+        if (recording.media_available === false) {
+          setAuthorized(false)
+          throw new Error("Skedari i videos nuk është i arritshëm. Kontaktoni administratorin për rikthimin e tij.")
+        }
         if (recording.status !== "READY") return
         const grant = await recordingJson(await apiFetch(`/meeting-recordings/${id}/playback`, { method: "POST" }))
         const response = await fetch(`/api/meeting-recordings/${id}/playback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(grant) })
@@ -44,7 +48,7 @@ export default function RecordingDetailPage() {
       {row.meeting_title && <p className="text-sm">Takimi: {row.meeting_title}</p>}
       {row.is_partial && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Pjesë e rikuperuar nga një regjistrim i ndërprerë. Fundi i takimit mund të mungojë.</p>}
       <p className="text-sm">{recordingTime(row.duration_seconds)} · {recordingSize(row.size_bytes)} · {row.mime_type} · {row.video_width} × {row.video_height}</p>
-      {authorized && row.status === "READY" && <>
+      {authorized && row.status === "READY" && row.media_available !== false && <>
         <video ref={videoRef} key={id} className="aspect-video w-full rounded-md bg-black" src={`/api/meeting-recordings/${id}/stream`} controls preload="metadata" playsInline onError={() => setError("Videoja nuk mund të hapet. Rifreskoni faqen për të rinovuar autorizimin.")} />
         <Button asChild><a href={`/api/meeting-recordings/${id}/download`} download>Shkarko regjistrimin</a></Button>
       </>}

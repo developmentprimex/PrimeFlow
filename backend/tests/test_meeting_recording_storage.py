@@ -45,6 +45,20 @@ class RecordingStorageTests(unittest.IsolatedAsyncioTestCase):
         restarted = LocalMeetingStorage(self.tmp.name)
         self.assertEqual(restarted.path("2026/10/session/recording.webm").read_bytes(), b"persisted")
 
+    def test_media_availability_checks_actual_file_and_size_across_roots(self):
+        key = "2026/10/session"
+        self.assertIsNone(self.storage.available_media(key, "video/webm", 9))
+        file = self.storage.path(f"{key}/recording.webm")
+        file.parent.mkdir(parents=True)
+        file.write_bytes(b"persisted")
+        self.assertEqual(self.storage.available_media(key, "video/webm", 9), file)
+        self.assertIsNone(self.storage.available_media(key, "video/webm", 10))
+        # A DB row alone cannot make the file available under another checkout.
+        other = LocalMeetingStorage(str(Path(self.tmp.name) / "other-checkout"))
+        self.assertIsNone(other.available_media(key, "video/webm", 9))
+        persistent = LocalMeetingStorage(str(self.storage.root))
+        self.assertEqual(persistent.available_media(key, "video/webm", 9), file)
+
     def test_concurrent_finalizers_are_excluded_even_without_a_database_lock(self):
         folder = self.storage.path("2026/10/session")
         folder.mkdir(parents=True)

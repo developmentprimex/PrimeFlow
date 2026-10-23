@@ -17,6 +17,19 @@ export default function MeetingRecordingsPage() {
   const [error, setError] = React.useState("")
   const [offset, setOffset] = React.useState(0)
   const [loading, setLoading] = React.useState(true)
+  const [deletingId, setDeletingId] = React.useState<string | null>(null)
+  const canDelete = user?.role === "ADMIN" || user?.role === "MANAGER"
+  async function removeRecording(row: MeetingRecording) {
+    if (!window.confirm(`Fshi përgjithmonë regjistrimin “${row.title}”, përfshirë videon në FILES? Fshirja nuk mund të zhbëhet.`)) return
+    setDeletingId(row.id)
+    try {
+      const response = await apiFetch(`/meeting-recordings/${row.id}`, { method: "DELETE" })
+      if (!response.ok) await recordingJson(response)
+      setRows(current => current.filter(item => item.id !== row.id))
+      await load()
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setDeletingId(null) }
+  }
   const load = React.useCallback(async () => {
     setLoading(true)
     try { setRows(await recordingJson(await apiFetch(`/meeting-recordings?offset=${offset}&limit=50`, { cache: "no-store" }))); setError("") }
@@ -25,7 +38,7 @@ export default function MeetingRecordingsPage() {
   }, [apiFetch, offset])
   React.useEffect(() => { void load() }, [load, savedId, saving])
   return <div className="mx-auto max-w-6xl space-y-6">
-    <div><h1 className="text-2xl font-semibold">Regjistrimet e takimeve</h1><p className="text-sm text-muted-foreground">Regjistroni ekranin dhe audion, pastaj hapni bibliotekën tuaj private.</p></div>
+    <div><h1 className="text-2xl font-semibold">Regjistrimet e takimeve</h1><p className="text-sm text-muted-foreground">Regjistroni ekranin dhe audion, pastaj hapni regjistrimet e të gjithë ekipit.</p></div>
     <RecorderPanel />
     <Card><CardHeader className="flex flex-row items-center justify-between"><CardTitle>Historiku i regjistrimeve</CardTitle><Button variant="outline" disabled={loading} onClick={() => void load()}>Rifresko</Button></CardHeader>
       <CardContent className="space-y-4">
@@ -35,8 +48,9 @@ export default function MeetingRecordingsPage() {
             <td className="p-2"><Link className="font-medium underline" href={`/meeting-recordings/${row.id}`}>{row.title}</Link>{row.meeting_title && <p className="text-muted-foreground">{row.meeting_title}</p>}</td>
             <td className="p-2">{new Date(row.created_at).toLocaleString("sq-AL")}<p className="text-muted-foreground">{row.recorded_by_name}</p></td>
             <td className="p-2 tabular-nums">{row.duration_seconds == null ? "—" : recordingTime(row.duration_seconds)}</td><td className="p-2">{recordingSize(row.size_bytes)}</td>
-            <td className="p-2">{RECORDING_STATUS[row.status]}{row.is_partial && <p className="text-amber-700">Pjesë e rikuperuar</p>}{row.error_message && <p className="max-w-64 text-destructive">{row.error_message}</p>}</td>
-            <td className="space-y-2 p-2"><Link className="underline" href={`/meeting-recordings/${row.id}`}>{row.status === "READY" ? "Luaj / shkarko" : "Detajet"}</Link>
+            <td className="p-2">{row.media_available === false ? <span className="text-destructive">Skedari nuk është i arritshëm</span> : RECORDING_STATUS[row.status]}{row.is_partial && <p className="text-amber-700">Pjesë e rikuperuar</p>}{row.error_message && <p className="max-w-64 text-destructive">{row.error_message}</p>}</td>
+            <td className="space-y-2 p-2"><Link className="underline" href={`/meeting-recordings/${row.id}`}>{row.status === "READY" && row.media_available !== false ? "Luaj / shkarko" : "Detajet"}</Link>
+              {canDelete && ["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="destructive" className="ml-2" disabled={deletingId !== null || row.id === manifest?.id} onClick={() => void removeRecording(row)}>{deletingId === row.id ? "Duke fshirë…" : "Fshi"}</Button>}
               {row.created_by === user?.id && row.id !== manifest?.id && !["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="ghost" disabled={saving} onClick={async () => {
                 if (!window.confirm("Braktis këtë sesion të papërfunduar? Mos e përdorni për një regjistrim aktiv në një pajisje tjetër.")) return
                 await discard(row.id)

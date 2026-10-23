@@ -105,31 +105,51 @@ class RecordingApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}/download", headers=self.auth()).status_code, 200)
         self.assertEqual(self.client.post(f"/api/meeting-recordings/{id}/complete", headers=self.auth(), json={"chunks": 2}).json()["status"], "READY")
 
-    def test_cross_user_access_and_meeting_permissions_on_every_operation(self):
+    def test_all_users_can_read_but_only_owner_can_write(self):
         id = self.ready(meeting=True)
         for operation, path, kwargs in [
-            ("get", "", {}), ("get", "/stream", {}), ("get", "/download", {}),
-            ("post", "/complete", {"json": {"chunks": 2}}), ("post", "/fail", {}), ("post", "/playback", {}),
+            ("post", "/complete", {"json": {"chunks": 2}}), ("post", "/fail", {}),
         ]:
             with self.subTest(operation=operation, path=path):
                 self.assertEqual(getattr(self.client, operation)(f"/api/meeting-recordings/{id}{path}", headers=self.auth("other"), **kwargs).status_code, 404)
         self.assertEqual(self.upload(id, 0, b"injection", person="other").status_code, 404)
-        for person in ["participant", "manager"]:
+        for person in ["other", "participant", "manager"]:
             self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}", headers=self.auth(person)).status_code, 200)
             self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}/stream", headers=self.auth(person)).status_code, 200)
+            self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}/download", headers=self.auth(person)).status_code, 200)
+            self.assertEqual(self.client.post(f"/api/meeting-recordings/{id}/playback", headers=self.auth(person)).status_code, 200)
             self.assertEqual(self.client.post(f"/api/meeting-recordings/{id}/fail", headers=self.auth(person)).status_code, 404)
         other_list = self.client.get("/api/meeting-recordings", headers=self.auth("other")).json()
-        self.assertNotIn(id, [r["id"] for r in other_list])
+        self.assertIn(id, [r["id"] for r in other_list])
         grant = self.client.post(f"/api/meeting-recordings/{id}/playback", headers=self.auth()).json()["token"]
         self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}/stream", headers={"Authorization": "Bearer " + grant}).status_code, 200)
         self.assertEqual(self.client.get(f"/api/meeting-recordings/{uuid.uuid4()}/stream", headers={"Authorization": "Bearer " + grant}).status_code, 401)
         self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}", headers={"Authorization": "Bearer " + grant}).status_code, 401)
 
-    def test_unlinked_recording_is_private_and_anonymous_denied(self):
+    def test_unlinked_recording_is_shared_but_anonymous_denied(self):
         id = self.ready()
-        self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}", headers=self.auth("participant")).status_code, 404)
+        self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}", headers=self.auth("participant")).status_code, 200)
         for path in ["", f"/{id}", f"/{id}/stream", f"/{id}/download"]:
             self.assertEqual(self.client.get("/api/meeting-recordings" + path).status_code, 401)
+
+    def test_saved_history_reports_missing_file_and_recovers_after_restore(self):
+        id = self.ready()
+        detail_url = f"/api/meeting-recordings/{id}"
+        self.assertTrue(self.client.get(detail_url, headers=self.auth()).json()['media_available'])
+        files = list(Path(self.tmp.name).glob(f"*/*/{id}/recording.webm"))
+        self.assertEqual(len(files), 1)
+        original = files[0]
+        backup = original.with_suffix('.backup')
+        original.rename(backup)
+        try:
+            self.assertFalse(self.client.get(detail_url, headers=self.auth()).json()['media_available'])
+            rows = self.client.get('/api/meeting-recordings', headers=self.auth()).json()
+            self.assertFalse(next(r for r in rows if r['id'] == id)['media_available'])
+            self.assertEqual(self.client.get(detail_url + '/stream', headers=self.auth()).status_code, 503)
+        finally:
+            backup.rename(original)
+        self.assertTrue(self.client.get(detail_url, headers=self.auth()).json()['media_available'])
+        self.assertEqual(self.client.get(detail_url + '/stream', headers=self.auth()).status_code, 200)
 
     def test_upload_limit_and_session_survives_new_client(self):
         id = self.create()

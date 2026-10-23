@@ -145,7 +145,7 @@ class AnalysisApiTests(unittest.TestCase):
 
     def test_authorization_consent_and_provider_configuration(self):
         sid = self.saved()
-        self.assertEqual(self.get(sid, 'other').status_code, 404)
+        self.assertEqual(self.get(sid, 'other').status_code, 200)
         self.assertEqual(self.get(sid, 'participant').status_code, 200)
         for who in ['other', 'participant', 'manager']:
             response = self.client.post(f'/api/meeting-recordings/{sid}/analysis', headers=self.auth(who), json={'consent_acknowledged': True})

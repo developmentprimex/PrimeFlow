@@ -58,6 +58,20 @@ def prepare_database(*, full_schema=False):
         command.upgrade(config, '0156_recording_timing')
         command.downgrade(config, '0153_meeting_recordings')
         command.upgrade(config, '0156_recording_timing')
+    # Exercise the additive recording-deletion migration independently of the
+    # unrelated Mira tables absent from this isolated fixture.
+    import importlib.util
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    deletion_path = Path(__file__).resolve().parents[1] / 'alembic/versions/0161_recording_deletion.py'
+    spec = importlib.util.spec_from_file_location('recording_deletion_migration', deletion_path)
+    deletion = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(deletion)
+    with engine.begin() as connection:
+        with Operations.context(MigrationContext.configure(connection)):
+            deletion.upgrade()
+            deletion.downgrade()
+            deletion.upgrade()
     with Session(engine) as db:
         department = Department(name="Recorder test", code="REC")
         db.add(department); db.flush()

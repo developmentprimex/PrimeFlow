@@ -78,6 +78,16 @@ class LocalMeetingStorage:
             raise StorageError("Invalid storage key")
         return result
 
+    def available_media(self, key: str, mime: str, size_bytes: int) -> Path | None:
+        extension = "webm" if mime == "video/webm" else "mp4"
+        file = self.path(f"{key}/recording.{extension}")
+        try:
+            if file.is_file() and file.stat().st_size == size_bytes:
+                return file
+        except OSError:
+            pass
+        return None
+
     async def receive(self, key: str, body, limit: int) -> tuple[Path, int, str]:
         folder = self.path(key)
         await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)

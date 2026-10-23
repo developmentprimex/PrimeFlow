@@ -3,7 +3,8 @@
 Phase A implements browser capture, bounded durable uploads, PostgreSQL history,
 private server storage, validated media finalization, playback and download.
 Phase B preparation is in `docs/px-desktop-recorder.md`; there is no desktop binary.
-No meeting-platform APIs, FILES server or AI/transcription uploads are involved.
+No meeting-platform APIs are involved. Validated recordings are also copied to
+the configured FILES meetings folder by a restart-safe background archiver.
 
 ## User flow and permissions
 
@@ -22,13 +23,12 @@ dimensions and size come from the server's validated output. Source-specific
 audio flags are browser declarations: encoded mixed audio cannot prove which
 speaker/input contributed sound.
 
-Only the creator may upload, complete or abandon a recording. Read access belongs
-to its creator, manually assigned linked-meeting participants, the meeting's
-creator, and ADMIN/MANAGER under the existing cross-department meeting RBAC.
-Unlinked recordings are available to their creator and management. Knowledge of a
-UUID grants no access. Calendar-only legacy attendees receive no recording grant.
-Meeting deletion detaches the recording and removes meeting-derived read access.
-User deactivation and current meeting permissions are checked on media requests.
+Every authenticated active user may list, view, play and download all undeleted
+recordings, including recordings without a linked meeting, and read their analysis.
+Only the creator may upload, complete, abandon or start analysis for a recording.
+Only ADMIN/MANAGER may delete it. Anonymous and deactivated users have no access;
+authentication is checked on media requests. Deleted recordings remain inaccessible
+to every role. Meeting creation/linking permissions are unchanged.
 
 Client-side PrimeFlow navigation preserves capture in the authenticated layout,
 with a persistent red indicator and stop control. Refresh/closing warns while
@@ -42,6 +42,9 @@ nullable and existing meetings/calendar/task workflows remain unchanged.
 | Backend variable | Default | Meaning |
 | --- | --- | --- |
 | `MEETING_RECORDINGS_ROOT` | `uploads/meeting-recordings` | Private local persistent root, relative to `backend/` unless absolute |
+| `MEETING_RECORDINGS_FILES_ENABLED` | `true` | Copy READY videos to FILES automatically; disable on isolated development/test servers |
+| `MEETING_RECORDINGS_FILES_FROM` | `2026-10-23T09:55:36+00:00` | Fixed activation boundary: export only recordings started at or after this instant; old recordings are excluded |
+| `MEETING_RECORDINGS_FILES_SUBDIR` | `10_ZHVILLIM/04_PROJECTS/26_PRIMEFLOW/08_TAKIMET` | Meetings destination relative to `FILES_SERVER_STORAGE_ROOT` |
 | `MEETING_RECORDINGS_FFMPEG` | `ffmpeg` | Executable name or absolute binary path |
 | `MEETING_RECORDINGS_FFPROBE` | `ffprobe` | Executable name or absolute binary path |
 | `MEETING_RECORDINGS_MAX_CHUNK_BYTES` | `33554432` | 32 MiB streamed request limit |
@@ -68,11 +71,88 @@ hash-verifying assembly, remux, probe and atomic publication. A future network
 provider must preserve that interface's integrity, durability and lock guarantees;
 it is deliberately not implemented now.
 
+### FILES meetings copy
+
+The API starts a background archive/deletion sweep on startup and every 60
+seconds after each sweep. It copies READY recordings started at or after the
+fixed `MEETING_RECORDINGS_FILES_FROM` activation timestamp to
+`<FILES_SERVER_STORAGE_ROOT>/<MEETING_RECORDINGS_FILES_SUBDIR>/REGJISTRIM <title>_DD.MM.YYYY.webm`
+(or `.mp4`), directly without subfolders. An ID suffix is added only when another
+recording already uses the same filename. Metadata and SHA-256 receipts stay in
+private local storage. This corresponds to the user's
+`Z:\10_ZHVILLIM\04_PROJECTS\26_PRIMEFLOW\08_TAKIMET`
+share; the API uses the same server-side `FILES_SERVER_STORAGE_ROOT` as prompts
+(default `F:\FILES`), without depending on a user's mapped Z: drive.
+On workstations without `F:\FILES`, set `FILES_SERVER_STORAGE_ROOT=\\192.168.10.8\files`
+in `backend/.env` and restart the API (or let the development reloader reload it).
+
+The database can contain recordings created by a different API host. Export
+requires the actual finalized video under `MEETING_RECORDINGS_ROOT`; a shared
+database alone does not provide its bytes. Missing sources are left pending,
+without creating empty session folders or repeatedly logging tracebacks. A
+summary warning is emitted only when the missing set changes. Run the archiver
+on the host holding the originals or configure the same accessible media root.
+Likewise, a host without the session folder never marks its deletion as purged.
+Historical recordings before activation are excluded from archive sweeps entirely,
+including after restarts or deployments. Their files and DB rows are unchanged.
+
+The service account needs write access to this folder. An unavailable root is
+never created as a replacement share. Copies use bounded reads, fsync, SHA-256
+read-back validation and atomic rename. A local `files-archive.json` receipt is
+published last; failed or interrupted copies retry on later sweeps, including
+after API restart. A local OS lock prevents concurrent workers copying the same
+recording. Local playback files and chunks remain intact. FILES availability does
+not affect READY status or playback, and this receipt is not currently exposed
+in the UI. The share's own permissions govern access to its exported videos.
+
+Admins and managers can delete READY/FAILED recordings using the history's
+**Fshi** button and confirmation dialog. `DELETE /api/meeting-recordings/{id}`
+checks the role on the server, audits the action and marks `deleted_at`. Deleted
+rows disappear from history and all metadata, media and analysis routes return
+404, including previously issued playback grants. Active sessions must be stopped
+or abandoned first. New analysis/timing jobs exclude deleted recordings.
+
+The same background loop removes the archived video and local media/chunks,
+then records `files_purged_at`. A FILES outage retains the durable deletion queue
+for retry while the recording stays inaccessible in PrimeFlow. The cleanup
+checks receipt ownership, destination containment and the archived SHA-256 before
+removing a file; modified external files require investigation and are not
+silently deleted. DB row locks serialize export and deletion. The loop processes
+deletions even when new exports are disabled. Audit records and the deleted DB
+row remain. Apply migration `0161_recording_deletion` before running this code.
+
+After deploying this code, restart the API to start the archiver. Verify the
+configured FILES root is accessible to its service account and check the meetings
+folder and API logs after completing a recording. Disable the archive setting
+on isolated browser/API test servers to prevent exporting test media.
+
 The PM2 account needs read/write/create/rename permissions on the root and execute
 permission for FFmpeg/ffprobe. Restrict the root to that service account and backup
 operators. Do not serve it through a public static directory, IIS virtual folder,
 Next `public/` directory, CDN bucket or unauthenticated file service. All API
 workers must use the same PostgreSQL database and same persistent local root.
+
+The production root is `C:\PrimeFlowData\MeetingRecordings`, outside the Actions
+checkout. Deployment writes that absolute `MEETING_RECORDINGS_ROOT` explicitly.
+The active `PrimeFlow` checkout's original `backend/uploads/meeting-recordings`
+path is also a server-side junction to that persistent root, so already-running
+API processes using the former relative default keep working. Local development
+against the shared production DB must use the same media root through an
+authorized share, or an isolated DB/storage pair.
+
+On 2026-10-23 the `TAK NOLTE` 503 was traced to recordings left in the previous
+`Primex-TaskManager` checkout after the active checkout changed to `PrimeFlow`.
+419 finalized files/metadata/chunks were copied to the persistent root and
+SHA-256 verified without removing the originals. The active path was repaired
+without a process restart. Only the requested `TAK NOLTE` historical video was
+also exported to FILES as `REGJISTRIM TAK NOLTE_22.10.2026.webm`; the automatic
+archive activation cutoff remains unchanged.
+
+Metadata/list responses include `media_available` for READY recordings, based on
+the actual file and expected size under the API's root. The UI labels an
+unavailable file explicitly instead of presenting it as playable. This check
+does not rewrite READY history or destroy a recording during a transient storage
+outage; restoring access makes it available again. Playback uses the same check.
 
 Use a persistent server-local data directory outside disposable checkouts for
 release-directory deployments, e.g. `D:\PrimeFlowData\MeetingRecordings`. The

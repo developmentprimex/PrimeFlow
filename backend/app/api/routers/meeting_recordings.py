@@ -5,7 +5,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt
@@ -46,13 +46,13 @@ def meeting_scope(user):
 
 
 def read_scope(user):
-    if management(user):
-        return True
-    return or_(Recording.created_by == user.id, Recording.meeting_id.in_(select(Meeting.id).where(meeting_scope(user))))
+    # The recording library is shared with every authenticated active account.
+    # Authentication still runs on metadata, playback, downloads and analysis.
+    return True
 
 
 async def load_recording(db, recording_id, user, *, write=False):
-    stmt = select(Recording).where(Recording.id == recording_id)
+    stmt = select(Recording).where(Recording.id == recording_id, Recording.deleted_at.is_(None))
     stmt = stmt.where(Recording.created_by == user.id if write else read_scope(user))
     if write:
         stmt = stmt.with_for_update()
@@ -64,6 +64,14 @@ async def load_recording(db, recording_id, user, *, write=False):
 
 def audit(db, user, row, action, **details):
     add_audit_log(db=db, actor_user_id=user.id, entity_type="meeting_recording", entity_id=row.id, action=action, after=details or None)
+
+
+async def recording_output(row):
+    result = RecordingOut.model_validate(row)
+    if row.status == "READY":
+        media = await asyncio.to_thread(storage().available_media, row.storage_key, row.mime_type, row.size_bytes)
+        result.media_available = media is not None
+    return result
 
 
 @router.post("", response_model=RecordingOut, status_code=201)
@@ -100,17 +108,35 @@ async def list_recordings(offset: int = Query(0, ge=0), limit: int = Query(50, g
     rows = (await db.execute(select(Recording, User.full_name, Meeting.title)
                             .join(User, Recording.created_by == User.id)
                             .outerjoin(Meeting, Recording.meeting_id == Meeting.id)
-                            .where(read_scope(user)).order_by(Recording.created_at.desc()).offset(offset).limit(limit))).all()
-    return [RecordingOut.model_validate(row).model_copy(update={"recorded_by_name": name, "meeting_title": title}) for row, name, title in rows]
+                            .where(read_scope(user), Recording.deleted_at.is_(None)).order_by(Recording.created_at.desc()).offset(offset).limit(limit))).all()
+    return [(await recording_output(row)).model_copy(update={"recorded_by_name": name, "meeting_title": title}) for row, name, title in rows]
 
 
 @router.get("/{recording_id}", response_model=RecordingOut)
 async def get_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     row = await load_recording(db, recording_id, user)
-    result = RecordingOut.model_validate(row)
+    result = await recording_output(row)
     result.recorded_by_name = await db.scalar(select(User.full_name).where(User.id == row.created_by))
     result.meeting_title = await db.scalar(select(Meeting.title).where(Meeting.id == row.meeting_id)) if row.meeting_id else None
     return result
+
+
+@router.delete("/{recording_id}", status_code=204)
+async def delete_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    if not management(user):
+        raise HTTPException(403, "Only admins and managers can delete recordings")
+    row = (await db.execute(select(Recording).where(Recording.id == recording_id)
+                            .with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Recording not found")
+    if row.deleted_at is not None:
+        return Response(status_code=204)
+    if row.status not in {"READY", "FAILED"}:
+        raise HTTPException(409, "Stop or abandon an active recording before deleting it")
+    row.deleted_at = datetime.now(timezone.utc)
+    audit(db, user, row, "recording_deleted", title=row.title)
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.put("/{recording_id}/chunks/{index}")
@@ -257,8 +283,8 @@ async def serve_media(recording_id, db, user, request: Request, *, download=Fals
     if row.status != "READY":
         raise HTTPException(409, "Recording is not ready")
     extension = "webm" if row.mime_type == "video/webm" else "mp4"
-    file = storage().path(f"{row.storage_key}/recording.{extension}")
-    if not await asyncio.to_thread(file.is_file):
+    file = await asyncio.to_thread(storage().available_media, row.storage_key, row.mime_type, row.size_bytes)
+    if file is None:
         raise HTTPException(503, "Recording storage is unavailable")
     audit(db, user, row, "recording_downloaded" if download else "recording_streamed")
     await db.commit()

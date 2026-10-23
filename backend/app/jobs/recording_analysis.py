@@ -44,7 +44,8 @@ async def process_recording_analyses():
         return 0
     from app.services import recording_analysis_provider as provider
     async with SessionLocal() as db:
-        job = (await db.execute(select(Analysis).where(Analysis.status.in_(['QUEUED', 'TRANSCRIBING', 'SUMMARIZING']),
+        job = (await db.execute(select(Analysis).join(MeetingRecording, MeetingRecording.id == Analysis.recording_id)
+            .where(MeetingRecording.deleted_at.is_(None), Analysis.status.in_(['QUEUED', 'TRANSCRIBING', 'SUMMARIZING']),
             or_(Analysis.lease_until.is_(None), Analysis.lease_until < now())).order_by(Analysis.updated_at)
             .with_for_update(skip_locked=True).limit(1))).scalar_one_or_none()
         if not job:

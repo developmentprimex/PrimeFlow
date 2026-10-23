@@ -41,6 +41,8 @@ class MeetingRecording(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     error_message: Mapped[str | None] = mapped_column(String(500))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    files_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class MeetingRecordingChunk(Base):

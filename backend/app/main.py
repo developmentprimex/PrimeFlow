@@ -13,6 +13,7 @@ from app.auth.security import ACCESS_TOKEN_TYPE, decode_token, require_token_typ
 from app.api.routers import api_router
 from app.api.routers.ga_caldav import router as ga_caldav_router
 from app.config import settings
+from app.jobs.recording_files_archive import run_recording_files_archive_forever
 from app.services.meetings_report_scheduler import run_meetings_report_scheduler_forever
 from app.services.m3_reporting_points_scheduler import run_m3_reporting_points_scheduler_forever
 from app.services.reporting_points_auto_scheduler import run_reporting_points_auto_scheduler_forever
@@ -52,6 +53,7 @@ app.include_router(api_router, prefix="/api")
 app.include_router(ga_caldav_router)
 
 listener_task: asyncio.Task | None = None
+recording_files_archive_task: asyncio.Task | None = None
 scheduler_task: asyncio.Task | None = None
 system_task_daily_reconciliation_task: asyncio.Task | None = None
 meetings_report_scheduler_task: asyncio.Task | None = None
@@ -74,6 +76,8 @@ async def health() -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
+    global recording_files_archive_task
+    recording_files_archive_task = asyncio.create_task(run_recording_files_archive_forever())
     global m3_reporting_points_scheduler_task
     global reporting_points_auto_scheduler_task
     global today_print_report_freeze_scheduler_task
@@ -107,6 +111,14 @@ async def _startup() -> None:
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
+    global recording_files_archive_task
+    if recording_files_archive_task is not None:
+        recording_files_archive_task.cancel()
+        try:
+            await recording_files_archive_task
+        except asyncio.CancelledError:
+            pass
+        recording_files_archive_task = None
     global m3_reporting_points_scheduler_task
     global reporting_points_auto_scheduler_task
     global today_print_report_freeze_scheduler_task

@@ -2613,7 +2613,7 @@ export default function CommonViewPage() {
 
   const loadMeetingOccurrenceStatuses = React.useCallback(async () => {
     try {
-      const dates = new Set([meetingStatusDate])
+      const dates = new Set([meetingStatusDate, ...(selectedDates.size ? selectedDates : weekISOs)])
       if (internalMeetingsOpen && internalMeetingDateFilter) dates.add(internalMeetingDateFilter)
       if (internalMeetingsOpen && !internalMeetingDateFilter && (internalMeetingListFilter === "this_week" || internalMeetingListFilter === "next_week")) {
         for (const meeting of internalMeetingsVisible) {
@@ -2631,7 +2631,7 @@ export default function CommonViewPage() {
     } catch {
       setMeetingOccurrenceStatuses(new Map())
     }
-  }, [apiFetch, meetingStatusDate, occurrenceStatusKey, internalMeetingsOpen, internalMeetingListFilter, internalMeetingsVisible, internalMeetingDateFilter])
+  }, [apiFetch, meetingStatusDate, selectedDates, weekISOs, occurrenceStatusKey, internalMeetingsOpen, internalMeetingListFilter, internalMeetingsVisible, internalMeetingDateFilter])
 
   React.useEffect(() => {
     void loadMeetingOccurrenceStatuses()
@@ -2706,6 +2706,18 @@ export default function CommonViewPage() {
     },
     [getMeetingOccurrenceStatus, meetingOccurrenceDateIso, occurrenceStatusKey, savingMeetingStatusKey, updateMeetingOccurrenceStatus]
   )
+
+  const renderWeekMeetingStatus = (entry: ExternalItem | InternalItem, occurrenceDate: string) => {
+    const meetingId = entry.id?.startsWith("meeting:") ? entry.id.split(":")[1] : undefined
+    if (!meetingId) return null
+    const status = meetingOccurrenceStatuses.get(occurrenceStatusKey(meetingId, occurrenceDate))?.status
+    if (status !== "held" && status !== "canceled") return null
+    return (
+      <span className={`meeting-status-badge ${status}`}>
+        {status === "held" ? "Mbajtur" : "Anuluar"}
+      </span>
+    )
+  }
 
   const renderSwimlaneMeetingStatusControl = React.useCallback(
     (cell: SwimlaneCell) => {
@@ -11822,6 +11834,27 @@ export default function CommonViewPage() {
           font-weight: 700;
           padding: 1px 4px;
         }
+        .meeting-status-badge {
+          display: inline-flex;
+          align-items: center;
+          min-height: 20px;
+          padding: 1px 6px;
+          border: 1px solid;
+          border-radius: 6px;
+          font-size: 10px;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .meeting-status-badge.held {
+          color: #166534;
+          background: #dcfce7;
+          border-color: #86efac;
+        }
+        .meeting-status-badge.canceled {
+          color: #991b1b;
+          background: #fee2e2;
+          border-color: #fca5a5;
+        }
         .meeting-time-chip {
           display: inline-flex;
           align-items: center;
@@ -16573,6 +16606,7 @@ export default function CommonViewPage() {
                                 {e.calendarImported ? (
                                   <span className="calendar-meeting-badge">CAL</span>
                                 ) : null}
+                                {renderWeekMeetingStatus(e, iso)}
                               </span>
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
@@ -16615,6 +16649,7 @@ export default function CommonViewPage() {
                                 {isCalendarLinkedInternalMeeting(e) ? (
                                   <span className="calendar-meeting-badge">CAL</span>
                                 ) : null}
+                                {renderWeekMeetingStatus(e, iso)}
                               </span>
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}

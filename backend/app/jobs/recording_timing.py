@@ -63,8 +63,8 @@ def measure_segment(source, segment, actions):
 
 async def process_locked():
     async with SessionLocal() as db:
-        job = (await db.execute(select(Analysis).where(
-            Analysis.timing['status'].astext.in_(['QUEUED', 'RUNNING']))
+        job = (await db.execute(select(Analysis).join(MeetingRecording, MeetingRecording.id == Analysis.recording_id).where(
+            MeetingRecording.deleted_at.is_(None), Analysis.timing['status'].astext.in_(['QUEUED', 'RUNNING']))
             .order_by(Analysis.created_at).with_for_update(skip_locked=True).limit(1))).scalar_one_or_none()
         if not job:
             return 0

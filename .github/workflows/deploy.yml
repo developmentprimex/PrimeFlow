@@ -166,6 +166,7 @@ jobs:
           echo DB_MAX_OVERFLOW=20 >> backend\.env
           echo DB_POOL_TIMEOUT=30 >> backend\.env
           echo DB_POOL_RECYCLE=1800 >> backend\.env
+          echo MEETING_RECORDINGS_ROOT=C:/PrimeFlowData/MeetingRecordings >> backend\.env
           echo RECORDING_TIMING_ENABLED=true >> backend\.env
           echo RECORDING_TIMING_PYTHON=D:/PrimeFlow-alignment-pilot/venv/Scripts/python.exe >> backend\.env
           echo RECORDING_TIMING_MODEL_CACHE=D:/PrimeFlow-alignment-pilot/model-cache >> backend\.env
