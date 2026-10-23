@@ -66,7 +66,7 @@ from app.services.meeting_system_tasks import (
 )
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events
-from app.services.task_postponement import require_postponement_explanation, save_postponement_daily_explanation
+from app.services.task_postponement import check_task_postponement_explanation, save_postponement_daily_explanation
 
 
 router = APIRouter()
@@ -1307,8 +1307,9 @@ async def override_system_task_occurrence_date(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task does not have a date to move")
     day_shift = (payload.target_occurrence_date - payload.source_occurrence_date).days
     new_due_date = old_due_date + timedelta(days=day_shift)
-    postponement = require_postponement_explanation(
-        task=SimpleNamespace(id=task.id, title=task.title, start_date=task.start_date, due_date=old_due_date),
+    postponement = await check_task_postponement_explanation(
+        db,
+        task=SimpleNamespace(id=task.id, title=task.title, project_id=task.project_id, start_date=task.start_date, due_date=old_due_date),
         updates={"due_date": new_due_date}, reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
     )
     await ensure_daily_baselines_for_departments(
@@ -1323,8 +1324,9 @@ async def override_system_task_occurrence_date(
     if old_due_date is None:
         raise HTTPException(status_code=400, detail="Task does not have a date to move")
     new_due_date = old_due_date + timedelta(days=day_shift)
-    postponement = require_postponement_explanation(
-        task=SimpleNamespace(id=task.id, title=task.title, start_date=task.start_date, due_date=old_due_date),
+    postponement = await check_task_postponement_explanation(
+        db,
+        task=SimpleNamespace(id=task.id, title=task.title, project_id=task.project_id, start_date=task.start_date, due_date=old_due_date),
         updates={"due_date": new_due_date}, reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
     )
     status_before = _enum_value(task.status)
