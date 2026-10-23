@@ -762,6 +762,42 @@ def render_plain_text(document: ReportDocument) -> str:
     return "\n\n".join(blocks)
 
 
+def add_preview_strike_filter(report_html: str) -> str:
+    """Add a local view filter to the preview, keeping delivery/exports static."""
+    controls = '''<div style="margin:0 0 12px;font-family:Arial,sans-serif;">
+<button type="button" id="one-h-strikes-filter" aria-pressed="false"
+style="padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#0f172a;font:700 13px Arial,sans-serif;cursor:pointer;">
+Vetëm me strikes &gt; 0</button>
+<span id="one-h-strikes-filter-status" role="status" style="margin-left:10px;font-size:12px;color:#475569;"></span>
+<p id="one-h-strikes-filter-empty" hidden style="padding:12px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;">
+Nuk ka detyra me strikes &gt; 0 në këtë interval.</p>
+</div>
+<script>
+(function () {
+  const button = document.getElementById('one-h-strikes-filter');
+  button.addEventListener('click', function () {
+    const selected = button.getAttribute('aria-pressed') !== 'true';
+    button.setAttribute('aria-pressed', String(selected));
+    button.style.background = selected ? '#dbeafe' : '#f8fafc';
+    button.style.borderColor = selected ? '#2563eb' : '#cbd5e1';
+    button.style.color = selected ? '#1e40af' : '#0f172a';
+    let visible = 0;
+    document.querySelectorAll('[data-report-task="true"]').forEach(function (task) {
+      task.hidden = selected && !(Number(task.dataset.strikeCount) > 0);
+      if (!task.hidden) visible += 1;
+    });
+    document.querySelectorAll('[data-report-task-employee], [data-report-task-section]').forEach(function (group) {
+      group.hidden = selected && !group.querySelector('[data-report-task="true"]:not([hidden])');
+    });
+    document.querySelectorAll('[data-report-supplement]').forEach(function (group) { group.hidden = selected; });
+    document.getElementById('one-h-strikes-filter-status').textContent = 'Shfaqen ' + visible + ' detyra';
+    document.getElementById('one-h-strikes-filter-empty').hidden = !selected || visible > 0;
+  });
+})();
+</script>'''
+    return report_html.replace("<!-- report-strike-filter -->", controls, 1)
+
+
 def render_html(
     document: ReportDocument,
     *,
@@ -813,10 +849,11 @@ def render_html(
             f'{html.escape(strike_count_label(task.strike_count, document))}</div>'
         )
 
-    def task_card(background: str, accent: str, title_html: str, body_html: str) -> str:
+    def task_card(background: str, accent: str, title_html: str, body_html: str, strike_count: int | None) -> str:
         # Left accent as its own cell — Outlook ignores CSS border-left reliably.
         return (
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+            f'data-report-task="true" data-strike-count="{strike_count if strike_count is not None else "unknown"}" '
             "style=\"width:100%;border-collapse:collapse;margin:8px 0;\">"
             "<tr>"
             f"<td width=\"6\" bgcolor=\"{accent}\" style=\"width:6px;background-color:{accent};"
@@ -869,7 +906,7 @@ def render_html(
                     details += detail_row(marked_html(task.description, task.marked_description))
                 details += strike_badge(task)
                 rows.append(
-                    "<tr>"
+                    f'<tr data-report-task="true" data-strike-count="{task.strike_count if task.strike_count is not None else "unknown"}">'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;text-align:center;font-family:Arial,sans-serif;">{number}</td>'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-weight:700;">{html.escape(employee.name)}</td>'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;">{html.escape(task.department)}</td>'
@@ -1032,7 +1069,7 @@ def render_html(
 
     body_chunks: list[str] = [report_legend_html(), symbol_legend_html()]
     if pre_sections_html:
-        body_chunks.append(pre_sections_html)
+        body_chunks.append(f'<div data-report-supplement="true">{pre_sections_html}</div>')
 
     reminder_groups = (
         (REMINDER_SECTION_TITLE, document.reminders),
@@ -1070,17 +1107,20 @@ def render_html(
         body_chunks.append(undiscussed_notes_table(document.undiscussed_notes))
 
     for section_index, section in enumerate(document.sections):
+        body_chunks.append('<div data-report-task-section="true">')
         if section_index or document.undiscussed_notes:
             body_chunks.append(section_separator())
         body_chunks.append(section_title_block(section.title))
         if section.title.startswith(BLOCKED_SECTION_TITLE_PREFIX):
             body_chunks.append(bll_task_table(section))
+            body_chunks.append('</div>')
             continue
         if not section.employees:
             body_chunks.append(
                 "<div style=\"font-family:Arial,sans-serif;color:#64748b;padding:8px 0;\">(Asnjë detyrë)</div>"
             )
         for employee in section.employees:
+            body_chunks.append('<div data-report-task-employee="true">')
             body_chunks.append(
                 f"<div style=\"font-family:Arial,sans-serif;font-size:15px;font-weight:800;"
                 f"color:#0f172a;margin:12px 0 6px;\">{html.escape(employee.name)}</div>"
@@ -1102,8 +1142,11 @@ def render_html(
                         accent,
                         marker_badge(task.one_h_marker) + marked_html(heading or task.title, task.marked_title),
                         detail_html,
+                        task.strike_count,
                     )
                 )
+            body_chunks.append('</div>')
+        body_chunks.append('</div>')
 
     meta = (
         f"Generated {html.escape(document.generated_at.isoformat())} · {document.task_count} tasks"
@@ -1135,6 +1178,7 @@ table, td {{ font-family: Arial, sans-serif !important; }}
 {strike_total_html}
 </td></tr>
 <tr><td style="padding:14px 16px;font-family:Arial,sans-serif;background:#ffffff;">
+<!-- report-strike-filter -->
 {''.join(body_chunks)}
 </td></tr>
 </table>
