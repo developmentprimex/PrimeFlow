@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.primeflow_report import (
-    ReportDocument, SLOTS, add_preview_strike_filter, build_report_document, render_docx, render_html, render_plain_text, render_png,
+    ReportDocument, SLOTS, build_report_document, render_docx, render_html, render_plain_text, render_png,
 )
 from app.services.primeflow_report_delivery import generate_fresh, strike_interval_start, strike_interval_end
 from app.services.task_strike_events import count_struck_points_for_interval, point_key
@@ -145,7 +145,7 @@ def test_empty_new_report_displays_zero_total():
     assert "Total strikes: 0 · 10:00–11:00" in render_html(document)
 
 
-def test_view_filter_is_added_only_to_the_json_preview():
+def test_preview_provides_filterable_cards_without_embedded_controls():
     from app.api.routers import primeflow_1h_reports as router
     document, _, _ = fresh_document()
     email_html = render_html(document)
@@ -155,10 +155,10 @@ def test_view_filter_is_added_only_to_the_json_preview():
          patch.object(router, "render_ga_recipient_email_html", new=AsyncMock(return_value=email_html)):
         result = asyncio.run(router.preview(router.PreviewRequest(report_date=DAY, report_slot="11:00"), None, None))
         export = asyncio.run(router.preview(router.PreviewRequest(report_date=DAY, report_slot="11:00", format="html"), None, None))
-    assert 'id="one-h-strikes-filter"' in result["html"]
-    assert result["html"].count('id="one-h-strikes-filter"') == 1
+    assert 'id="one-h-strikes-filter"' not in result["html"]
     assert 'id="one-h-strikes-filter"' not in export.body.decode()
     assert 'id="one-h-strikes-filter"' not in render_html(document)
     assert result["task_count"] == document.task_count
     assert 'data-strike-count="2"' in result["html"]
     assert 'data-strike-count="0"' in result["html"]
+    assert 'font:700 14px/1.5 Arial,sans-serif' in result["html"]

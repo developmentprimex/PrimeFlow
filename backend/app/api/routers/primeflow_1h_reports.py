@@ -22,7 +22,7 @@ from app.models.user import User
 from app.models.enums import UserRole
 from app.services.audit import add_audit_log
 from app.services.primeflow_report_access import can_manage_reports
-from app.services.primeflow_report import ReportDocument, SLOTS, add_preview_strike_filter, render_docx, render_plain_text, render_png
+from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, render_plain_text, render_png
 from app.services.primeflow_report_delivery import (
     configured_recipients,
     deliver_report,
@@ -298,7 +298,7 @@ async def preview(
     if payload.format == "html":
         return HTMLResponse(email_html)
     return {
-        "document": document.model_dump(mode="json"), "html": add_preview_strike_filter(email_html),
+        "document": document.model_dump(mode="json"), "html": email_html,
         "plain_text": render_plain_text(document), "task_count": document.task_count,
         "warning": "No tasks found" if document.task_count == 0 else None,
     }
