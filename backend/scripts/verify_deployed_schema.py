@@ -1,4 +1,4 @@
-"""Check columns required by the restored 0135 marker and its successor."""
+"""Check columns required by the application and restored deployed revisions."""
 
 import asyncio
 
@@ -8,6 +8,8 @@ from app.db import engine
 
 
 EXPECTED_COLUMNS = {
+    ("meeting_recordings", "deleted_at"),
+    ("meeting_recordings", "files_purged_at"),
     *(("reporting_points_settings", column) for column in (
         "report_type", "is_active", "send_time", "weekdays", "recipients", "manual_recipients", "updated_by", "updated_at",
     )),
