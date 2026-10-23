@@ -426,6 +426,11 @@ async def render_ga_recipient_email_html(
         except Exception:
             logger.exception("primeflow_report_ga_preview_today_print_failed")
             today_print_html = ""
+    from app.services.today_print_strikes import render_embedded_print_strikes
+
+    today_print_html = await render_embedded_print_strikes(
+        db, today_print_html, day, document.report_slot,
+    )
     return render_html(
         document,
         pre_sections_html=await render_ga_tables_html(

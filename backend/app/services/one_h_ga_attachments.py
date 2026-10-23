@@ -584,8 +584,10 @@ async def render_ga_tables_html(
 ) -> str:
     return (
         '<div data-ga-inline-tables="true">'
+        + '<div data-report-non-task-supplement="true">'
         + await render_ga_time_table_html(db, report_day)
         + await render_ga_hv_tasks_html(db, report_day)
+        + '</div>'
         + today_print_html
         + '</div>'
     )

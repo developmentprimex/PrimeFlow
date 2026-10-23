@@ -7,7 +7,9 @@ import pytest
 
 from app.services.primeflow_report import report_timezone
 from app.services.task_strike_events import count_struck_points_for_interval, point_key
-from app.services.today_print_strikes import payload_task_ids, task_strike_summary, with_report_strikes
+from app.services.today_print_strikes import (
+    payload_task_ids, task_strike_summary, with_report_strikes, render_embedded_print_strikes,
+)
 
 
 DAY = date(2026, 10, 19)
@@ -144,3 +146,58 @@ def test_freeze_selects_the_1600_report_using_only_precutoff_evidence():
     assert summary["active_slot"] == "16:00"
     assert summary["active_interval"] == {"start": "14:20", "end": "16:00"}
     assert captured in db.execute.await_args.args[0].compile().params.values()
+
+
+@pytest.mark.parametrize("slot,start,end", [
+    ("10:00", clock(8), clock(10)),
+    ("11:00", clock(10), clock(11)),
+    ("11:50", clock(11), clock(11, 50)),
+    ("14:10", clock(11, 50), clock(14, 20)),
+    ("14:20", clock(11, 50), clock(14, 20)),
+    ("16:00", clock(14, 20), clock(16)),
+])
+def test_embedded_table_uses_selected_report_slot_instead_of_latest_finished(slot, start, end):
+    from datetime import timedelta
+    task_id = uuid.uuid4()
+    text = "[[done]]1. At start[[/done]]\n[[done]]2. This interval[[/done]]\n[[done]]3. At end[[/done]]\n[[done]]4. Later[[/done]]"
+    strikes = [event("1. At start", start.hour, start.minute),
+               event("2. This interval", start.hour, start.minute + 1),
+               event("3. At end", end.hour, end.minute),
+               event("4. Later", (end + timedelta(minutes=1)).hour, (end + timedelta(minutes=1)).minute)]
+    db = AsyncMock()
+    db.execute.return_value = MagicMock(all=lambda: [(task_id, "Task", text, None, None, strike) for strike in strikes])
+    summary = asyncio.run(task_strike_summary(db, DAY, {task_id}, now=clock(17), report_slot=slot))
+    assert summary["active_slot"] == slot
+    assert summary["tasks"][str(task_id)] == {slot: 2}
+    assert end in db.execute.await_args.args[0].compile().params.values()
+
+
+def test_embedded_badges_include_zero_and_deduplicate_total_across_repeated_cards():
+    from bs4 import BeautifulSoup
+    positive, empty = uuid.uuid4(), uuid.uuid4()
+    source = f'<table><tr><td data-task-id="{positive}">Work &amp; details</td><td data-task-id="{empty}">Open</td></tr><tr><td data-task-id="{positive}">Repeated</td></tr></table>'
+    summary = {"active_interval": {"start": "10:00", "end": "11:00"},
+               "tasks": {str(positive): {"11:00": 2}, str(empty): {"11:00": 0}}}
+    with patch("app.services.today_print_strikes.task_strike_summary", new=AsyncMock(return_value=summary)) as calculate:
+        output = asyncio.run(render_embedded_print_strikes(AsyncMock(), source, DAY, "11:00"))
+    assert calculate.await_args.kwargs == {"report_slot": "11:00"}
+    assert calculate.await_args.args[2] == {positive, empty}
+    soup = BeautifulSoup(output, "html.parser")
+    assert len(soup.select('[data-report-task="true"]')) == 3
+    assert [cell["data-strike-count"] for cell in soup.select("td[data-task-id]")] == ["2", "0", "2"]
+    assert soup.select_one("[data-print-strike-total]").text == "1H SHTYPI · Total strikes: 2 · 10:00–11:00"
+    assert all("14px" in badge["style"] for badge in soup.select("[data-task-strike-count]"))
+    assert "Work &amp; details" in output
+
+
+def test_ga_preview_and_email_use_enriched_shtypi_html():
+    from app.services.primeflow_report_delivery import render_ga_recipient_email_html
+    from app.services.primeflow_report import build_report_document
+    document = build_report_document({"items": {}}, DAY, "14:20")
+    source = '<table><tr><td data-task-id="11111111-1111-4111-8111-111111111111">Task</td></tr></table>'
+    with patch("app.services.today_print_strikes.render_embedded_print_strikes", new=AsyncMock(return_value="Enriched SHTYPI")) as enrich, \
+         patch("app.services.primeflow_report_delivery.render_ga_tables_html", new=AsyncMock(return_value="GA tables")) as tables:
+        output = asyncio.run(render_ga_recipient_email_html(AsyncMock(), document, DAY, today_print_html=source))
+    assert enrich.await_args.args[1:] == (source, DAY, "14:20")
+    assert tables.await_args.kwargs["today_print_html"] == "Enriched SHTYPI"
+    assert "GA tables" in output
