@@ -129,6 +129,9 @@ def test_explanation_dialog_identifies_the_person_for_each_note_task():
     result.scalars.return_value.all.return_value = [SimpleNamespace(id=item.assigned_to, full_name="Elsa Ferati", username=None, email=None)]
     db.execute.side_effect = None
     db.execute.return_value = result
+    exempt_result = MagicMock()
+    exempt_result.scalars.return_value.all.return_value = []
+    db.execute.side_effect = [exempt_result, result]
     with pytest.raises(HTTPException) as error:
         asyncio.run(check_note_postponement_explanations(db, tasks=[item], updates_by_assignee={
             item.assigned_to: {"due_date": datetime(2026, 10, 26, tzinfo=timezone.utc)}}, explanations={}))

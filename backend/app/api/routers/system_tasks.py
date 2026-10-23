@@ -1309,7 +1309,7 @@ async def override_system_task_occurrence_date(
     new_due_date = old_due_date + timedelta(days=day_shift)
     postponement = await check_task_postponement_explanation(
         db,
-        task=SimpleNamespace(id=task.id, title=task.title, project_id=task.project_id, start_date=task.start_date, due_date=old_due_date),
+        task=SimpleNamespace(id=task.id, title=task.title, project_id=task.project_id, assigned_to=task.assigned_to, start_date=task.start_date, due_date=old_due_date),
         updates={"due_date": new_due_date}, reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
     )
     await ensure_daily_baselines_for_departments(
@@ -1326,7 +1326,7 @@ async def override_system_task_occurrence_date(
     new_due_date = old_due_date + timedelta(days=day_shift)
     postponement = await check_task_postponement_explanation(
         db,
-        task=SimpleNamespace(id=task.id, title=task.title, project_id=task.project_id, start_date=task.start_date, due_date=old_due_date),
+        task=SimpleNamespace(id=task.id, title=task.title, project_id=task.project_id, assigned_to=task.assigned_to, start_date=task.start_date, due_date=old_due_date),
         updates={"due_date": new_due_date}, reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
     )
     status_before = _enum_value(task.status)

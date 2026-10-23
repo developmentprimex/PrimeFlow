@@ -119,7 +119,7 @@ def test_system_occurrence_postponement_requires_explanation_before_baseline_or_
     template_result = MagicMock(scalar_one_or_none=lambda: template)
     task_result = MagicMock()
     task_result.scalars.return_value.first.return_value = item
-    db.execute.side_effect = [template_result, task_result]
+    db.execute.side_effect = [template_result, task_result, MagicMock()]
     payload = system_tasks.SystemTaskOccurrenceDateOverrideIn(template_id=template.id,
         source_occurrence_date=date(2026, 10, 20), target_occurrence_date=date(2026, 10, 21))
     with patch.object(system_tasks, "ensure_daily_baselines_for_departments", new=AsyncMock(

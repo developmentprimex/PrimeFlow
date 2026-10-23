@@ -64,7 +64,7 @@ from app.services.task_classification import is_fast_task as is_fast_task_model,
 from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
-from app.services.task_postponement import check_task_postponement_explanation, require_postponement_explanation, save_postponement_daily_explanation
+from app.services.task_postponement import check_task_postponement_explanation, save_postponement_daily_explanation
 from app.services.project_classification import (
     is_mst_or_tt_project as _is_mst_or_tt_project,
     is_mst_project,
@@ -3100,7 +3100,8 @@ async def update_task(
             for group_task in fast_group_semantic_tasks
         }
         for group_task in fast_group_semantic_tasks:
-            fast_group_postponements[group_task.id] = require_postponement_explanation(
+            fast_group_postponements[group_task.id] = await check_task_postponement_explanation(
+                db,
                 task=group_task,
                 updates={field: getattr(payload, field) for field in ("start_date", "due_date") if _payload_has_field(payload, field)},
                 reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,

@@ -1,4 +1,4 @@
-"""Require and preserve explanations, except for tasks in PCM projects."""
+"""Require explanations except for Gane's tasks and tasks in PCM projects."""
 from __future__ import annotations
 
 import uuid
@@ -6,7 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.config import settings
@@ -29,16 +29,32 @@ async def _pcm_project_ids(db, tasks) -> set[uuid.UUID]:
     )).scalars().all())
 
 
+async def _gane_assignee_ids(db, tasks) -> set[uuid.UUID]:
+    assignee_ids = {task.assigned_to for task in tasks if getattr(task, "assigned_to", None) is not None}
+    if not assignee_ids:
+        return set()
+    return set((await db.execute(
+        select(User.id).where(User.id.in_(assignee_ids), or_(
+            func.lower(func.trim(User.email)) == "ga@primexeu.com",
+            func.lower(func.trim(User.username)).in_(["gane.arifaj", "gane_arifaj", "gane"]),
+            func.lower(func.trim(User.full_name)) == "gane arifaj",
+        ))
+    )).scalars().all())
+
+
 async def check_task_postponement_explanation(db, *, task, updates: dict, reason_code: str | None, comment: str | None) -> dict:
     exempt_project_ids = await _pcm_project_ids(db, [task]) if updates else set()
+    exempt_assignee_ids = await _gane_assignee_ids(db, [task]) if updates else set()
     return require_postponement_explanation(
         task=task, updates=updates, reason_code=reason_code, comment=comment,
         exempt_project_ids=exempt_project_ids,
+        exempt_assignee_ids=exempt_assignee_ids,
     )
 
 
 def require_postponement_explanation(*, task, updates: dict, reason_code: str | None, comment: str | None,
-                                    exempt_project_ids: set[uuid.UUID] | None = None) -> dict:
+                                    exempt_project_ids: set[uuid.UUID] | None = None,
+                                    exempt_assignee_ids: set[uuid.UUID] | None = None) -> dict:
     changes = []
     for field in ("start_date", "due_date"):
         old, new = semantic_local_day(getattr(task, field, None)), semantic_local_day(updates.get(field))
@@ -50,6 +66,8 @@ def require_postponement_explanation(*, task, updates: dict, reason_code: str | 
     if reason_code not in REASON_LABELS or not comment:
         if getattr(task, "project_id", None) in (exempt_project_ids or set()):
             return {}
+        if getattr(task, "assigned_to", None) in (exempt_assignee_ids or set()):
+            return {}
         raise HTTPException(status_code=409, detail={
             "code": "TASK_POSTPONEMENT_EXPLANATION_REQUIRED",
             "message": "Për ta shtyrë detyrën, zgjidh arsyen dhe plotëso komentin.",
@@ -59,7 +77,8 @@ def require_postponement_explanation(*, task, updates: dict, reason_code: str | 
 
 
 def require_note_postponement_explanations(*, tasks, updates_by_assignee: dict, explanations: dict,
-                                         exempt_project_ids: set[uuid.UUID] | None = None) -> dict:
+                                         exempt_project_ids: set[uuid.UUID] | None = None,
+                                         exempt_assignee_ids: set[uuid.UUID] | None = None) -> dict:
     """Validate the entire bundle before applying any note or execution-state edits."""
     saved, missing = {}, []
     for task in tasks:
@@ -72,6 +91,7 @@ def require_note_postponement_explanations(*, tasks, updates_by_assignee: dict, 
                 reason_code=explanation.postponement_reason_code if explanation else None,
                 comment=explanation.postponement_comment if explanation else None,
                 exempt_project_ids=exempt_project_ids,
+                exempt_assignee_ids=exempt_assignee_ids,
             )
         except HTTPException as error:
             missing.append({**error.detail, "assignee_id": str(task.assigned_to)})
@@ -88,8 +108,11 @@ async def check_note_postponement_explanations(db, **kwargs) -> dict:
     eligible_tasks = [task for task in kwargs["tasks"]
                       if task.is_active and task.assigned_to in kwargs["updates_by_assignee"]]
     exempt_project_ids = await _pcm_project_ids(db, eligible_tasks)
+    exempt_assignee_ids = await _gane_assignee_ids(db, eligible_tasks)
     try:
-        return require_note_postponement_explanations(**kwargs, exempt_project_ids=exempt_project_ids)
+        return require_note_postponement_explanations(
+            **kwargs, exempt_project_ids=exempt_project_ids, exempt_assignee_ids=exempt_assignee_ids,
+        )
     except HTTPException as error:
         rows = error.detail["postponements"]
         owner_ids = {uuid.UUID(row["assignee_id"]) for row in rows if row.get("assignee_id") not in (None, "None")}
