@@ -50,6 +50,7 @@ function captureHarness({ system = true, micDenied = false, displayDenied = fals
     createMediaStreamDestination() { const n = new Node(); n.stream = new Stream([new Track("audio")]); return n }
     createMediaStreamSource() { return new Node() }
     createGain() { return new Node() }
+    createConstantSource() { const node = new Node(); node.offset = { value: 1 }; node.start = () => {}; node.stop = () => {}; return node }
     close() { this.closed = true; return Promise.resolve() }
   }
   class Recorder {
@@ -61,12 +62,18 @@ function captureHarness({ system = true, micDenied = false, displayDenied = fals
     stop() { this.state = "inactive"; queueMicrotask(() => { this.ondataavailable?.({ data: new Blob(["last fragment"]) }); this.onstop?.() }) }
   }
   let stopped = 0
-  const { RecordingCapture } = load("recording-capture", { MediaStream: Stream, MediaRecorder: Recorder, AudioContext: Context, navigator: { mediaDevices: {
-    async getDisplayMedia() { if (displayDenied) throw new Error("Screen denied"); return display },
+  let nextDisplay = display
+  const document = { createElement: type => type === "canvas" ? {
+    getContext: () => ({ fillRect() {}, fillText() {}, drawImage() {} }),
+    captureStream: () => new Stream([new Track("video")]),
+  } : { play: async () => {}, pause() {}, readyState: 2, videoWidth: 320, videoHeight: 180 } }
+  const { RecordingCapture } = load("recording-capture", { document, DOMException, setInterval, clearInterval, MediaStream: Stream, MediaRecorder: Recorder, AudioContext: Context, navigator: { mediaDevices: {
+    async getDisplayMedia() { if (displayDenied) throw new Error("Screen denied"); return await nextDisplay },
     async getUserMedia() { if (micDenied) throw new Error("Microphone denied"); if (delayedMic) await delayedMic; return microphone },
   } } })
   const capture = new RecordingCapture({ change() {}, chunk: blob => chunks.push(blob), stopped: () => stopped++, error: error => errors.push(error.message) })
-  return { capture, video, sys, mic, contexts, connections, chunks, errors, Recorder, stopped: () => stopped }
+  return { capture, video, sys, mic, contexts, connections, chunks, errors, Recorder, Track, Stream,
+    setDisplay: value => { nextDisplay = value }, stopped: () => stopped }
 }
 
 test("capture mixes actual microphone/system tracks without speaker playback and cleans up after stop", async () => {
@@ -108,13 +115,63 @@ test("screen permission denial creates no recorder", async () => {
   assert.equal(h.capture.state, "error")
   assert.equal(h.Recorder.last, undefined)
 })
-test("native sharing stop finalizes exactly once, including overlapping stop calls", async () => {
+test("native sharing stop keeps microphone and recorder running until explicit stop", async () => {
   const h = captureHarness()
   await h.capture.prepare("", "browser"); await h.capture.start()
   h.video.end()
+  assert.equal(h.capture.state, "recording")
+  assert.equal(h.capture.screenSharing, false)
+  assert.equal(h.mic.readyState, "live")
+  assert.equal(h.capture.inputStatus.system, "unavailable")
+  assert.equal(h.Recorder.last.stream.getVideoTracks()[0].readyState, "live")
+  assert.equal(h.stopped(), 0)
   await Promise.all([h.capture.stop(), h.capture.stop()])
   assert.equal(h.stopped(), 1)
   assert.equal(h.capture.state, "stopped")
+})
+
+test("screen can be shared again without changing recorder tracks or losing pause state", async () => {
+  const h = captureHarness()
+  await h.capture.prepare("", "browser"); await h.capture.start()
+  const recorder = h.Recorder.last, tracks = [...recorder.stream.getTracks()]
+  h.capture.pause(); h.video.end()
+  assert.equal(h.capture.state, "paused")
+  const video = new h.Track("video"), audio = new h.Track("audio")
+  h.setDisplay(new h.Stream([video, audio]))
+  await h.capture.shareScreen()
+  assert.equal(h.capture.screenSharing, true)
+  assert.equal(h.capture.inputStatus.system, "on")
+  assert.equal(h.capture.state, "paused")
+  assert.equal(h.Recorder.last, recorder)
+  assert.deepEqual(recorder.stream.getTracks(), tracks)
+  h.capture.resume()
+  await h.capture.stop()
+  assert.equal(video.readyState, "ended")
+  assert.equal(audio.readyState, "ended")
+})
+
+test("late screen selection after manual stop is released", async () => {
+  const h = captureHarness()
+  await h.capture.prepare(false, "browser"); await h.capture.start(); h.video.end()
+  let resolve
+  h.setDisplay(new Promise(done => { resolve = done }))
+  const pending = h.capture.shareScreen()
+  await h.capture.stop()
+  const video = new h.Track("video")
+  resolve(new h.Stream([video])); await pending
+  assert.equal(video.readyState, "ended")
+  assert.equal(h.capture.state, "stopped")
+})
+
+test("cancelling screen reselection leaves the recording running", async () => {
+  const h = captureHarness()
+  await h.capture.prepare(false, "browser"); await h.capture.start(); h.video.end()
+  h.setDisplay({ then: (_, reject) => reject(new DOMException("Cancelled", "NotAllowedError")) })
+  await h.capture.shareScreen()
+  assert.equal(h.capture.state, "recording")
+  assert.equal(h.capture.selectingScreen, false)
+  assert.equal(h.capture.inputStatus.microphone, "unavailable")
+  await h.capture.stop()
 })
 test("native stop during microphone setup cancels and stops the late microphone", async () => {
   let release

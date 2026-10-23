@@ -76,6 +76,7 @@ export function RecorderPanel() {
         <span><Monitor className="mr-1 inline size-4" /> Audio sistemi: {recorder.inputs.system === "on" ? "aktive" : recorder.inputs.system === "muted" ? "e heshtur" : "e padisponueshme"}</span>
       </div>}
       <div className="flex flex-wrap gap-2">
+        {["recording", "paused"].includes(recorder.state) && !recorder.screenSharing && <Button variant="outline" disabled={recorder.selectingScreen} onClick={() => void recorder.shareScreen(source)}><Monitor className="mr-2 size-4" />Ndaj ekranin përsëri</Button>}
         {!active && recorder.state !== "prepared" && <Button disabled={!consent || !title.trim() || locked || !recorder.available} onClick={prepare}><Monitor className="mr-2 size-4" /> Zgjidh ekranin</Button>}
         {recorder.state === "prepared" && <>
           <Button disabled={!consent || !title.trim() || recorder.busy} onClick={() => void recorder.start(title.trim(), meetingId, description)}><Play className="mr-2 size-4" />{recorder.info.system ? "Fillo regjistrimin" : "Vazhdo pa audio sistemi"}</Button>

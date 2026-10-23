@@ -9,11 +9,13 @@ import { recordingTime } from "@/lib/recording-types"
 import { Button } from "@/components/ui/button"
 
 type View = {
+  screenSharing: boolean; selectingScreen: boolean; sharingError?: string | null
   state: CaptureState; info: CaptureInfo; inputs: { microphone: string; system: string }; seconds: number
   manifest: RecordingManifest | null; recoveries: RecordingManifest[]; error: string | null
   busy: boolean; saving: boolean; savedId: string | null; backpressure: boolean; available: boolean
 }
 type RecorderContextValue = View & {
+  shareScreen: (source?: string) => Promise<void>
   prepare: (device: string | false, source: string) => Promise<void>
   start: (title: string, meetingId: string, description: string) => Promise<void>
   cancel: () => void; stop: () => void; pause: () => void; resume: () => void
@@ -21,7 +23,7 @@ type RecorderContextValue = View & {
   retry: (id?: string, partial?: boolean) => Promise<void>; discard: (id: string) => Promise<void>
 }
 const RecorderContext = React.createContext<RecorderContextValue | null>(null)
-const initial: View = { state: "idle", info: { source: "unknown", microphone: false, system: false, mime: "" }, inputs: { microphone: "unavailable", system: "unavailable" }, seconds: 0, manifest: null, recoveries: [], error: null, busy: false, saving: false, savedId: null, backpressure: false, available: false }
+const initial: View = { screenSharing: false, selectingScreen: false, state: "idle", info: { source: "unknown", microphone: false, system: false, mime: "" }, inputs: { microphone: "unavailable", system: "unavailable" }, seconds: 0, manifest: null, recoveries: [], error: null, busy: false, saving: false, savedId: null, backpressure: false, available: false }
 
 export function RecorderProvider({ children }: { children: React.ReactNode }) {
   const { user, apiFetch } = useAuth()
@@ -75,7 +77,7 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
         change: () => {
           if (disposed) return
           if (r.capture.state === "idle" && !r.id) { r.lockRelease?.(); r.lockRelease = undefined }
-          setView(v => ({ ...v, state: r.capture.state, info: { ...r.capture.info }, inputs: r.capture.inputStatus, seconds: r.capture.seconds }))
+          setView(v => ({ ...v, state: r.capture.state, screenSharing: r.capture.screenSharing, selectingScreen: r.capture.selectingScreen, info: { ...r.capture.info }, inputs: r.capture.inputStatus, seconds: r.capture.seconds }))
         },
         error: error => {
           if (r.id) r.fatal = error.message
@@ -242,6 +244,11 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     } catch (error) { setView(v => ({ ...v, error: String(error) })) }
   }
   const value: RecorderContextValue = { ...view, prepare, start, cancel, retry, discard,
+    shareScreen: async source => {
+      setView(v => ({ ...v, sharingError: null }))
+      try { await runtime.current?.capture.shareScreen(source) }
+      catch (error) { setView(v => ({ ...v, sharingError: error instanceof Error ? error.message : String(error) })) }
+    },
     stop: () => { void runtime.current?.capture.stop() }, pause: () => runtime.current?.capture.pause(),
     resume: () => { if (!view.error && !view.saving && runtime.current && runtime.current.stagingBytes < 16 * 1024 * 1024 && (!view.manifest || view.manifest.bytes - view.manifest.uploadedBytes < PAUSE_PENDING_BYTES)) { runtime.current.capture.resume(); setView(v => ({ ...v, backpressure: false })) } },
     toggle: input => runtime.current?.capture.toggle(input),
@@ -252,6 +259,12 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
       <span className="h-3 w-3 rounded-full bg-red-600 motion-safe:animate-pulse" />
       <Link href="/meeting-recordings" className="font-semibold underline">{view.state === "recording" ? "Duke regjistruar" : view.state === "paused" ? "Regjistrimi në pauzë" : view.saving ? "Duke ruajtur regjistrimin" : "Ndarja e ekranit"}</Link>
       <span className="tabular-nums">{recordingTime(view.seconds)}</span>
+      {view.sharingError && <span role="alert">Ndarja e ekranit dështoi: {view.sharingError}</span>}
+      {["recording", "paused"].includes(view.state) && !view.screenSharing && <>
+        <span>{view.state === "paused" ? "Ekrani nuk po ndahet. Regjistrimi është në pauzë." : "Regjistrimi vazhdon — ekrani nuk po ndahet."}</span>
+        {view.inputs.microphone !== "on" && <span role="alert">Mikrofoni nuk është aktiv; biseda nuk po regjistrohet.</span>}
+        <Button size="sm" variant="outline" disabled={view.selectingScreen} onClick={() => void value.shareScreen()}>Ndaj ekranin përsëri</Button>
+      </>}
       {["recording", "paused"].includes(view.state) && <Button size="sm" variant="destructive" onClick={value.stop}>Ndalo regjistrimin</Button>}
     </div>}
     {children}
