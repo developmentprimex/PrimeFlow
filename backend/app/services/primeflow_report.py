@@ -106,6 +106,7 @@ class GmailVerificationError(RuntimeError):
 
 
 class ReportTask(BaseModel):
+    task_id: str = ""
     title: str
     description: str
     marked_title: str = ""
@@ -114,6 +115,7 @@ class ReportTask(BaseModel):
     status: str
     marker: str
     one_h_marker: str = ""
+    strike_count: int | None = None
 
 
 def one_h_marker_symbol(value: Any) -> str:
@@ -255,10 +257,28 @@ class ReportDocument(BaseModel):
     undiscussed_notes: list[ReportUndiscussedNote] = Field(default_factory=list)
     ga_task_summary: list[GaTaskCounts] = Field(default_factory=list)
     truncated: bool = False
+    strike_interval: str | None = None
 
     @property
     def task_count(self) -> int:
         return sum(len(employee.tasks) for section in self.sections for employee in section.employees)
+
+    @property
+    def strike_total(self) -> int | None:
+        counts: dict[str, int] = {}
+        for section in self.sections:
+            for employee in section.employees:
+                for task in employee.tasks:
+                    if task.strike_count is not None:
+                        # Shared tasks can appear under several people or slots.
+                        key = task.task_id or str(id(task))
+                        counts[key] = max(counts.get(key, 0), task.strike_count)
+        return sum(counts.values()) if counts or self.strike_interval else None
+
+
+def strike_count_label(count: int, document: ReportDocument, *, total: bool = False) -> str:
+    label = f"{'Total strikes' if total else 'Strikes'}: {count}"
+    return f"{label} · {document.strike_interval}" if document.strike_interval else label
 
 
 def report_timezone() -> ZoneInfo:
@@ -510,9 +530,17 @@ def _document_section(
             # one-line task label, so it must not hide the numbered points.
             raw_title = str(task.get("title") or task.get("task_title") or task.get("task"))
             raw_description = task.get("description") if "description" in task else task.get("note")
-            task_id = str(task.get("task_id") or task.get("id"))
+            task_id = str(task.get("task_id") or task.get("id") or "")
             title_override = (title_overrides or {}).get(task_id)
             description_override = (description_overrides or {}).get(task_id)
+            marked_title = title_override[1] if title_override else preserve_done_marks(raw_title)
+            marked_description = description_override[1] if description_override else preserve_done_marks(raw_description)
+            # Same blue point markers counted by count_struck_points_for_interval.
+            # Count both source fields, even when duplicate display text is hidden.
+            strike_count = sum(
+                (match.group(1) or "").lower() == "blue"
+                for marked in (marked_title, marked_description) for match in DONE_BLOCK.finditer(marked)
+            )
             description_duplicates_title = bool(raw_description) and (
                 clean_description(raw_description) == clean_title(raw_title)
             )
@@ -524,18 +552,18 @@ def _document_section(
                 or "-"
             )
             report_tasks.append(ReportTask(
+                task_id=task_id,
                 title=clean_title(title_override[0]) if title_override else clean_title(raw_title),
                 description="" if description_duplicates_title else (
                     clean_description(description_override[0]) if description_override else clean_description(raw_description)
                 ),
-                marked_title=title_override[1] if title_override else preserve_done_marks(raw_title),
-                marked_description="" if description_duplicates_title else (
-                    description_override[1] if description_override else preserve_done_marks(raw_description)
-                ),
+                marked_title=marked_title,
+                marked_description="" if description_duplicates_title else marked_description,
                 department=str(department).strip() or "-",
                 status=str(task.get("status")).upper(),
                 marker=STATUS_MARKERS[str(task.get("status")).upper()],
                 one_h_marker=one_h_marker_symbol(task.get("one_h_marker") or task.get("oneHMarker")),
+                strike_count=strike_count,
             ))
         employees.append(ReportEmployee(
             name=employee_initials(employee),
@@ -661,6 +689,8 @@ def build_report_document(
         generated_at=datetime.now(report_timezone()),
         source_generated_at=source_generated,
         recipients=recipients or {"to": [], "cc": [], "bcc": []},
+        strike_interval=(f"{completion_window_start:%H:%M}–{completion_window_end:%H:%M}"
+                         if completion_window_start and completion_window_end else None),
         sections=[
             _document_section(
                 title,
@@ -685,6 +715,8 @@ def build_report_document(
 def render_plain_text(document: ReportDocument) -> str:
     symbol_legend = one_h_marker_legend_text()
     blocks = [document.subject, f"Generated: {document.generated_at.isoformat()}", symbol_legend, ""]
+    if document.strike_total is not None:
+        blocks.insert(2, strike_count_label(document.strike_total, document, total=True))
     reminder_groups = (
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
         (REMINDER_SECTION_TITLE, document.reminders),
@@ -724,6 +756,8 @@ def render_plain_text(document: ReportDocument) -> str:
                 lines.extend(detail_lines)
                 if task.description:
                     lines.append(task.description)
+                if task.strike_count is not None:
+                    lines.append(strike_count_label(task.strike_count, document))
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -765,6 +799,18 @@ def render_html(
             'margin-right:7px;padding:2px 6px;border:1px solid #93c5fd;border-radius:5px;'
             'background-color:#eff6ff;color:#dc2626;font-size:16px;font-weight:900;'
             f'line-height:1;text-align:center;">{html.escape(symbol)}</span>'
+        )
+
+    def strike_badge(task: ReportTask) -> str:
+        if task.strike_count is None:
+            return ""
+        active = task.strike_count > 0
+        return (
+            '<div data-task-strike-count="true" style="display:table;margin-top:5px;padding:2px 5px;'
+            f'border:1px solid {"#2563eb" if active else "#94a3b8"};border-radius:4px;'
+            f'background-color:{"#dbeafe" if active else "#f8fafc"};color:{"#1e40af" if active else "#475569"};'
+            'font:700 10px/1.4 Arial,sans-serif;">'
+            f'{html.escape(strike_count_label(task.strike_count, document))}</div>'
         )
 
     def task_card(background: str, accent: str, title_html: str, body_html: str) -> str:
@@ -821,6 +867,7 @@ def render_html(
                 )
                 if task.description:
                     details += detail_row(marked_html(task.description, task.marked_description))
+                details += strike_badge(task)
                 rows.append(
                     "<tr>"
                     f'<td style="padding:9px;border:1px solid #cbd5e1;text-align:center;font-family:Arial,sans-serif;">{number}</td>'
@@ -1048,6 +1095,7 @@ def render_html(
                     detail_html += detail_row(
                         marked_html(task.description, task.marked_description)
                     )
+                detail_html += strike_badge(task)
                 body_chunks.append(
                     task_card(
                         background,
@@ -1059,6 +1107,12 @@ def render_html(
 
     meta = (
         f"Generated {html.escape(document.generated_at.isoformat())} · {document.task_count} tasks"
+    )
+    strike_total_html = (
+        '<div data-report-strike-total="true" style="font-family:Arial,sans-serif;'
+        'font-size:14px;font-weight:700;color:#ffffff;margin-top:8px;">'
+        f'{html.escape(strike_count_label(document.strike_total, document, total=True))}</div>'
+        if document.strike_total is not None else ""
     )
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -1078,6 +1132,7 @@ table, td {{ font-family: Arial, sans-serif !important; }}
 <tr><td bgcolor="#8799b2" style="background-color:#8799b2;padding:18px 20px;font-family:Arial,sans-serif;">
 <div style="font-family:Arial,sans-serif;font-size:22px;line-height:1.25;font-weight:700;color:#ffffff;margin:0 0 4px;">{html.escape(document.subject)}</div>
 <div style="font-family:Arial,sans-serif;font-size:13px;line-height:1.35;color:#ffffff;">{meta}</div>
+{strike_total_html}
 </td></tr>
 <tr><td style="padding:14px 16px;font-family:Arial,sans-serif;background:#ffffff;">
 {''.join(body_chunks)}
@@ -1135,6 +1190,11 @@ def render_docx(document: ReportDocument) -> bytes:
     meta = title_cell.add_paragraph(f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks")
     meta.runs[0].font.size = Pt(9)
     meta.runs[0].font.color.rgb = RGBColor(255, 255, 255)
+    if document.strike_total is not None:
+        total_run = title_cell.add_paragraph(strike_count_label(document.strike_total, document, total=True)).runs[0]
+        total_run.bold = True
+        total_run.font.size = Pt(10)
+        total_run.font.color.rgb = RGBColor(255, 255, 255)
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
     legend_header = doc.add_table(rows=1, cols=1).cell(0, 0)
     shade(legend_header, "#f1f5f9")
@@ -1291,6 +1351,11 @@ def render_docx(document: ReportDocument) -> bytes:
                     add_marked_runs(
                         description, task.description, task.marked_description, bold=False, color="#64748b"
                     )
+                if task.strike_count is not None:
+                    count_run = card_cell.add_paragraph(strike_count_label(task.strike_count, document)).runs[0]
+                    count_run.bold = True
+                    count_run.font.size = Pt(8)
+                    count_run.font.color.rgb = RGBColor.from_string("1E40AF" if task.strike_count else "475569")
                 doc.add_paragraph().paragraph_format.space_after = Pt(0)
     doc.save(output)
     return output.getvalue()
@@ -1309,6 +1374,11 @@ def render_png(document: ReportDocument) -> bytes:
     except OSError:
         font = bold = heading = legend_font = ImageFont.load_default()
     import textwrap
+
+    def wrap_description(value: str, width: int) -> list[str]:
+        # Keep checklist points separate so the exported strike colour and
+        # the visible point count agree, including adjacent open points.
+        return [wrapped for line in value.splitlines() for wrapped in (textwrap.wrap(line, width) or [""])]
 
     def draw_line_with_marks(x: int, line_y: int, line: str, marked_source: str, line_font: Any, color: str) -> None:
         marked_values = [
@@ -1336,7 +1406,7 @@ def render_png(document: ReportDocument) -> bytes:
         )
         + sum(
             3 + sum(
-                4 + len(textwrap.wrap(task.title, 85)) + len(textwrap.wrap(task.description, 90))
+                5 + len(textwrap.wrap(task.title, 85)) + len(wrap_description(task.description, 90))
                 for task in employee.tasks
             )
             for section in document.sections
@@ -1347,10 +1417,13 @@ def render_png(document: ReportDocument) -> bytes:
     height = max(650, 140 + estimated_lines * 30)
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((margin, 35, width - margin, 135), radius=12, fill="#8799b2")
+    has_total = document.strike_total is not None
+    draw.rounded_rectangle((margin, 35, width - margin, 165 if has_total else 135), radius=12, fill="#8799b2")
     draw.text((margin + 24, 55), document.subject, fill="white", font=heading)
     draw.text((margin + 24, 99), f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks", fill="white", font=font)
-    y = 160
+    if has_total:
+        draw.text((margin + 24, 129), strike_count_label(document.strike_total, document, total=True), fill="white", font=bold)
+    y = 190 if has_total else 160
     legend_height = 76
     draw.rounded_rectangle(
         (margin, y, width - margin, y + legend_height),
@@ -1529,8 +1602,9 @@ def render_png(document: ReportDocument) -> bytes:
                     line for item in detail_items
                     for line in (textwrap.wrap(item, 105, subsequent_indent="   ") or [""])
                 ]
-                description_lines = textwrap.wrap(task.description, 105) if task.description else []
-                card_height = 25 + 28 * (len(title_lines) + len(detail_lines) + len(description_lines))
+                description_lines = wrap_description(task.description, 105)
+                count_lines = [strike_count_label(task.strike_count, document)] if task.strike_count is not None else []
+                card_height = 25 + 28 * (len(title_lines) + len(detail_lines) + len(description_lines) + len(count_lines))
                 draw.rounded_rectangle((margin + 5, y, width - margin, y + card_height), radius=8, fill=background, outline=accent, width=2)
                 draw.rectangle((margin + 5, y + 4, margin + 11, y + card_height - 4), fill=accent)
                 line_y = y + 12
@@ -1547,6 +1621,9 @@ def render_png(document: ReportDocument) -> bytes:
                     line_y += 28
                 for line in description_lines:
                     draw_line_with_marks(margin + 25, line_y, line, task.marked_description, font, "#64748b")
+                    line_y += 28
+                for line in count_lines:
+                    draw.text((margin + 25, line_y), line, fill="#1e40af" if task.strike_count else "#475569", font=bold)
                     line_y += 28
                 y += card_height + 12
         y += 14
