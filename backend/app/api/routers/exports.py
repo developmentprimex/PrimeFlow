@@ -4930,7 +4930,7 @@ async def export_system_task_templates_xlsx(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    ensure_manager_or_admin(user)
+    ensure_reports_access(user)
 
     normalized_mode = (mode or "all").strip().lower()
     if normalized_mode not in {"all", "active", "inactive"}:

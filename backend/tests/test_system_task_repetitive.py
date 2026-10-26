@@ -5,12 +5,16 @@ from datetime import datetime, time, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
+from app.db import get_db
 from app.api.routers.exports import (
     export_system_task_templates_xlsx,
     export_system_tasks_xlsx,
     preview_system_tasks,
+    router as exports_router,
 )
 from app.api.routers.system_tasks import create_system_task_template, update_system_task_template
 from app.models.enums import CommonApprovalStatus, FrequencyType, SystemTaskScope, UserRole
@@ -138,6 +142,29 @@ class TestSystemTaskRepetitive(unittest.IsolatedAsyncioTestCase):
         )
         column = result.headers.index("Detyrë e përsëritur")
         self.assertEqual(result.rows[0][column], "Po")
+
+    async def test_template_excel_export_allows_staff_manager_and_admin(self):
+        for role in UserRole:
+            with self.subTest(role=role):
+                user = SimpleNamespace(id=uuid.uuid4(), role=role, full_name="Test User", username="test")
+                template = _template(title="Export accessible task", is_repetitive=True)
+                response = await export_system_task_templates_xlsx(
+                    mode="all", db=_db([template], []), user=user,
+                )
+                self.assertEqual(response.status_code, 200)
+                content = b"".join([chunk async for chunk in response.body_iterator])
+                workbook = load_workbook(io.BytesIO(content))
+                self.assertEqual(workbook.active.cell(6, 7).value, template.title)
+
+    def test_template_excel_export_still_requires_authentication(self):
+        app = FastAPI()
+        app.include_router(exports_router, prefix="/exports")
+        db = _db()
+        app.dependency_overrides[get_db] = lambda: db
+        with TestClient(app) as client:
+            response = client.get("/exports/system-task-templates.xlsx?mode=all")
+        self.assertEqual(response.status_code, 401)
+        db.execute.assert_not_awaited()
 
 
 if __name__ == "__main__":
