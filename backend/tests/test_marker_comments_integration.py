@@ -55,11 +55,14 @@ async def _exercise_inbox():
                     db.add_all([actor, first, second, outsider])
                     await db.flush()
                     group = uuid.uuid4()
-                    tasks = [Task(
-                        id=uuid.uuid4(), title="Shared test task", assigned_to=person.id, created_by=actor.id,
+                    shared_task = Task(
+                        id=uuid.uuid4(), title="Shared test task", assigned_to=first.id, created_by=actor.id,
                         fast_task_group_id=group, is_active=True, one_h_marker="QUESTION", one_h_marker_comment="Existing comment",
-                    ) for person in (first, second)]
-                    db.add_all(tasks)
+                    )
+                    # A genuine single task can have several responsible readers.
+                    # Independent assignee copies are exercised separately below.
+                    tasks = [shared_task, shared_task]
+                    db.add(shared_task)
                     await db.flush()
                     db.add_all([TaskAssignee(task_id=tasks[0].id, user_id=person.id) for person in (first, second)])
                     await db.flush()
@@ -307,6 +310,13 @@ async def _exercise_inbox():
                                        **{origin: note.id}) for person in (first, second)]
                         db.add_all(copies)
                         await db.flush()
+                        # Old shared receipts remain readable but must not label
+                        # another owner's copy in the frontend's by-task index.
+                        for copy, person in zip(copies, (first, second)):
+                            db.add(Inbox(id=uuid.uuid4(), source_key=f"legacy:{note.id}", user_id=person.id,
+                                         task_id=copy.id, task_ids=[str(item.id) for item in copies],
+                                         revision=uuid.uuid4(), marker="QUESTION", comment="Legacy comment"))
+                        await db.flush()
                         await sync_task_marker(db, copies[0], "M2", marker_comment="Legacy comment", actor_email=actor.email)
                         await db.flush()
                         assert all(copy.title == original for copy in copies)
@@ -316,17 +326,31 @@ async def _exercise_inbox():
                         await db.flush()
                         await db.refresh(note, ["content"])
                         expected = original.replace("\n", "\nCOM: New inline comment\n", 1)
-                        assert note.content == expected
-                        assert all(copy.title == expected for copy in copies)
+                        assert note.content == original
+                        assert copies[0].title == expected
+                        assert copies[1].title == original
+                        assert copies[0].one_h_marker == "M2"
+                        assert copies[1].one_h_marker == "QUESTION"
+                        assert note.one_h_marker == "QUESTION"
+                        assert copies[1].one_h_marker_comment == "Legacy comment"
+                        own_items = (await list_marker_comments(db, first))["items"]
+                        other_items = (await list_marker_comments(db, second))["items"]
+                        assert any(item["task_id"] == str(copies[0].id) for item in own_items)
+                        other_receipt = next(item for item in other_items if item["task_id"] == str(copies[1].id))
+                        assert other_receipt["comment"] == "Legacy comment"
+                        assert other_receipt["task_ids"] == [str(copies[1].id)]
+                        assert not any(str(copies[0].id) in item["task_ids"] for item in other_items)
                         await sync_note_task_marker(db, note, "M2", marker_comment="Edited in note", actor_email=actor.email)
                         await db.flush()
                         assert note.content.count("COM:") == 1
                         assert "COM: Edited in note" in note.content
-                        assert all(copy.title == note.content for copy in copies)
+                        assert copies[0].title == expected
+                        assert copies[1].title == original
                         await sync_note_task_marker(db, note, "M2", marker_comment=None, actor_email=actor.email)
                         await db.flush()
                         assert note.content == original
-                        assert all(copy.title == original for copy in copies)
+                        assert copies[0].title == expected
+                        assert copies[1].title == original
                     # Only To do/In progress contribute personal/team inboxes,
                     # delivery, and notification counters. Other alert types stay.
                     baseline_notifications = (await unread_notification_count(db, outsider))["count"]
@@ -383,7 +407,9 @@ async def _exercise_inbox():
                     done_copy.status = "IN_PROGRESS"
                     await db.flush()
                     mixed = next(item for item in (await list_marker_comments(db, actor, scope="all"))["items"] if item["source_key"] == mixed["source_key"])
-                    assert mixed["recipient_count"] == 2
+                    assert mixed["recipient_count"] == 1
+                    second_items = (await list_marker_comments(db, second))["items"]
+                    assert any(item["task_id"] == str(done_copy.id) and item["source_key"] != mixed["source_key"] for item in second_items)
             finally:
                 await transaction.rollback()
     finally:

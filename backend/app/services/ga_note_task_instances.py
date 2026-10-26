@@ -82,8 +82,10 @@ def _copy_for_new_assignee(
     assignee: User,
     actor_user_id: uuid.UUID,
 ) -> Task:
+    from app.services.task_marker_comment_title import update_comment_in_title
+
     return Task(
-        title=template.title,
+        title=update_comment_in_title(template.title, template.one_h_marker_comment, getattr(note, "one_h_marker_comment", None)),
         description=template.description,
         internal_notes=None,
         project_id=template.project_id,
@@ -110,10 +112,10 @@ def _copy_for_new_assignee(
         is_bllok=template.is_bllok,
         is_1h_report=template.is_1h_report,
         one_h_report_slot=None,
-        one_h_marker=template.one_h_marker,
-        one_h_marker_date=template.one_h_marker_date,
-        one_h_marker_by_ga=template.one_h_marker_by_ga,
-        one_h_marker_comment=template.one_h_marker_comment,
+        one_h_marker=getattr(note, "one_h_marker", None),
+        one_h_marker_date=getattr(note, "one_h_marker_date", None),
+        one_h_marker_by_ga=bool(getattr(note, "one_h_marker_by_ga", False)),
+        one_h_marker_comment=getattr(note, "one_h_marker_comment", None),
         is_r1=template.is_r1,
         is_personal=template.is_personal,
         fast_task_order=None,
@@ -128,8 +130,10 @@ def _copy_for_new_plan_assignee(
     assignee: User,
     actor_user_id: uuid.UUID,
 ) -> Task:
+    from app.services.task_marker_comment_title import update_comment_in_title
+
     return Task(
-        title=template.title,
+        title=update_comment_in_title(template.title, template.one_h_marker_comment, getattr(note, "one_h_marker_comment", None)),
         description=template.description,
         internal_notes=None,
         project_id=template.project_id,
@@ -156,10 +160,10 @@ def _copy_for_new_plan_assignee(
         is_bllok=template.is_bllok,
         is_1h_report=template.is_1h_report,
         one_h_report_slot=None,
-        one_h_marker=template.one_h_marker,
-        one_h_marker_date=template.one_h_marker_date,
-        one_h_marker_by_ga=template.one_h_marker_by_ga,
-        one_h_marker_comment=template.one_h_marker_comment,
+        one_h_marker=getattr(note, "one_h_marker", None),
+        one_h_marker_date=getattr(note, "one_h_marker_date", None),
+        one_h_marker_by_ga=bool(getattr(note, "one_h_marker_by_ga", False)),
+        one_h_marker_comment=getattr(note, "one_h_marker_comment", None),
         is_r1=template.is_r1,
         is_personal=template.is_personal,
         fast_task_order=None,

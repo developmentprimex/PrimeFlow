@@ -50,11 +50,13 @@ def update_comment_in_title(content: str, previous_comment: str | None, comment:
     return newline.join(lines)
 
 
-async def sync_comment_title(db, tasks, previous_comment, comment, *, source_note=None):
+async def sync_comment_title(db, tasks, previous_comment, comment, *, source_note=None, update_notes=True):
     if comment_title_line(previous_comment) == comment_title_line(comment):
         return
     for task in tasks:
         task.title = update_comment_in_title(task.title, previous_comment, comment)
+    if not update_notes:
+        return
     for model, origin in ((GaNote, "ga_note_origin_id"), (PlanNote, "plan_note_origin_id")):
         ids = {getattr(task, origin, None) for task in tasks} - {None}
         if source_note is not None and isinstance(source_note, model):

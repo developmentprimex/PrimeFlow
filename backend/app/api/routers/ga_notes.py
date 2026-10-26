@@ -41,7 +41,7 @@ from app.services.daily_realization_baseline import ensure_daily_baselines_for_d
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
 from app.services.task_postponement import check_note_postponement_explanations, save_postponement_daily_explanation
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
-from app.services.task_marker import active_one_h_marker, current_effective_marker_date, marker_is_by_ga, normalize_marker_comment, note_bundle_marker_update, sync_note_task_marker
+from app.services.task_marker import active_one_h_marker, current_effective_marker_date, marker_is_by_ga, normalize_marker_comment, note_bundle_marker_update, sync_note_task_marker, sync_note_assignee_markers
 from app.services.marker_comments import record_initial_marker_comments
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.task_daily_progress import sync_task_daily_finish_period, upsert_explicit_task_daily_status
@@ -617,7 +617,7 @@ async def update_ga_note_task_bundle(
                         one_h_report_slot=item.one_h_report_slot,
                         one_h_report_slot_is_set="one_h_report_slot" in item.model_fields_set,
                         one_h_marker=item.one_h_marker,
-                        one_h_marker_is_set="one_h_marker" in item.model_fields_set,
+                        one_h_marker_is_set=False,
                         is_deadline_important=item.is_deadline_important,
                         priority=item.priority,
                         is_bllok=item.is_bllok,
@@ -713,13 +713,12 @@ async def update_ga_note_task_bundle(
                 user_ids=[task.assigned_to],
             )
 
+    await sync_note_assignee_markers(db, active_tasks, payload.assignee_states, actor_email=user.email)
     if marker_changed:
         await sync_note_task_marker(
             db, note, shared_marker, actor_email=user.email,
             marker_comment=payload.one_h_marker_comment,
         )
-        for task in active_tasks:
-            task.one_h_marker = shared_marker
 
     semantic_tasks = {task.id: task for task in existing_tasks}
     semantic_tasks.update({task.id: task for task in active_tasks})

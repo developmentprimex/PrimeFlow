@@ -235,9 +235,10 @@ def test_weekly_planner_uses_saved_daily_symbols_in_live_snapshot_and_print_view
     migration = (ROOT / "backend/alembic/versions/0123_persistent_task_symbols.py").read_text(encoding="utf-8")
     assert "TaskOneHMarkerHistory.marker_date" in planner
     assert "historical_marker_for_day" in planner
-    assert '("ga_note", task.ga_note_origin_id)' in planner
-    assert '("plan_note", task.plan_note_origin_id)' in planner
-    assert '("fast_group", task.fast_task_group_id)' in planner
+    assert 'return [("task", task.id)]' in planner
+    assert '("ga_note", task.ga_note_origin_id)' not in planner
+    assert '("plan_note", task.plan_note_origin_id)' not in planner
+    assert '("fast_group", task.fast_task_group_id)' not in planner
     assert "ON CONFLICT (task_id, marker_date) DO UPDATE" in migration
     assert "trg_sync_task_one_h_marker_history" in migration
     assert "one_h_marker IS NULL" in migration

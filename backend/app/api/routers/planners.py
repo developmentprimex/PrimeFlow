@@ -2138,15 +2138,7 @@ async def weekly_table_planner(
     all_tasks_by_id = {task.id: task for task in all_tasks}
 
     def _marker_identity_keys(task: Task) -> list[tuple[str, uuid.UUID]]:
-        keys = [("task", task.id)]
-        for key, value in (
-            ("ga_note", task.ga_note_origin_id),
-            ("plan_note", task.plan_note_origin_id),
-            ("fast_group", task.fast_task_group_id),
-        ):
-            if value is not None:
-                keys.append((key, value))
-        return keys
+        return [("task", task.id)]
 
     marker_history_by_identity: dict[tuple[str, uuid.UUID], list[TaskOneHMarkerHistory]] = {}
     current_tasks_by_identity: dict[tuple[str, uuid.UUID], list[Task]] = {}
@@ -2165,7 +2157,7 @@ async def weekly_table_planner(
     def _marker_for_task_day(task: Task, day_date: date) -> tuple[str | None, bool, str | None]:
         identities = _marker_identity_keys(task)
         # A history row remains effective until the next manual change. Prefer
-        # this exact task, then linked copies representing the same work.
+        # this exact task without borrowing another assignee's symbol.
         saved = historical_marker_for_day(
             [row for identity in identities for row in marker_history_by_identity.get(identity, [])],
             day_date,

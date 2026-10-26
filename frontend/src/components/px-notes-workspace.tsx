@@ -142,7 +142,7 @@ function shouldPreferCloudDictation(): boolean {
 }
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
-type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
+type TaskStatusFilter = "all" | "notes" | "mira" | "tasks" | "open" | "closed" | NormalizedTaskStatus
 type ContentFilter = "all" | "emails"
 type TextMarkRange = { start: number; end: number }
 type DoneMarkRange = TextMarkRange
@@ -164,6 +164,7 @@ type GaAssigneeTaskState = {
   finishPeriod: TaskFinishPeriod | null
   oneHReportSlot: OneHReportSlot | null
   oneHMarker: OneHMarker | null
+  oneHMarkerComment: string
   isDeadlineImportant: boolean
 }
 type NoteTaskInfo = {
@@ -249,6 +250,7 @@ function createEmptyGaAssigneeTaskState(): GaAssigneeTaskState {
     finishPeriod: null,
     oneHReportSlot: null,
     oneHMarker: null,
+    oneHMarkerComment: "",
     isDeadlineImportant: false,
   }
 }
@@ -273,6 +275,7 @@ function sameGaAssigneeTaskState(
     left.finishPeriod === right.finishPeriod &&
     left.oneHReportSlot === right.oneHReportSlot &&
     left.oneHMarker === right.oneHMarker &&
+    left.oneHMarkerComment === right.oneHMarkerComment &&
     left.isDeadlineImportant === right.isDeadlineImportant
   )
 }
@@ -295,6 +298,7 @@ function serializeGaAssigneeTaskState(
     finish_period: state.finishPeriod,
     one_h_report_slot: state.oneHReportSlot,
     one_h_marker: state.oneHMarker,
+    one_h_marker_comment: state.oneHMarkerComment.trim() || null,
     is_deadline_important: state.isDeadlineImportant,
   }
 }
@@ -1259,8 +1263,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   }, [])
   const isGaUser = user?.email?.trim().toLowerCase() === GA_NOTE_TEMPLATE_EMAIL
   const defaultNoteContent = isGaUser ? GA_NOTE_TEMPLATE : ""
-  const [noteOneHMarker, setNoteOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
-  const [noteOneHMarkerComment, setNoteOneHMarkerComment] = React.useState("")
   const [noteType] = React.useState<NoteType>("GA")
   const [priority] = React.useState<NotePriority>("NONE")
   const [loading, setLoading] = React.useState(false)
@@ -1294,8 +1296,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const [taskOneHReportSlot, setTaskOneHReportSlot] = React.useState<OneHReportSlot | typeof ONE_H_REPORT_SLOT_NONE_VALUE>(
     ONE_H_REPORT_SLOT_NONE_VALUE
   )
-  const [taskOneHMarker, setTaskOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
-  const [taskOneHMarkerComment, setTaskOneHMarkerComment] = React.useState("")
   const [taskDueDate, setTaskDueDate] = React.useState("")
   const [taskStartDate, setTaskStartDate] = React.useState("")
   const [taskDeadlineImportant, setTaskDeadlineImportant] = React.useState(false)
@@ -1317,8 +1317,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const editorStartedRef = React.useRef(false)
   const editorOpenedRef = React.useRef(false)
   const [editContent, setEditContent] = React.useState("")
-  const [editNoteOneHMarker, setEditNoteOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
-  const [editNoteOneHMarkerComment, setEditNoteOneHMarkerComment] = React.useState("")
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
   const [editAddedRanges, setEditAddedRanges] = React.useState<TextMarkRange[]>([])
   const [editDescription, setEditDescription] = React.useState("")
@@ -1759,6 +1757,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 ? t.one_h_report_slot as OneHReportSlot
                 : null,
               oneHMarker: (t.one_h_marker as OneHMarker | null) || null,
+              oneHMarkerComment: t.one_h_marker_comment || "",
               isDeadlineImportant: Boolean(t.is_deadline_important),
             },
           }
@@ -2127,8 +2126,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           priority: priority === "NONE" ? null : priority,
           department_id: finalDepartmentId,
           project_id: finalProjectId,
-          one_h_marker: noteOneHMarker === ONE_H_MARKER_NONE ? null : noteOneHMarker,
-          one_h_marker_comment: noteOneHMarker === ONE_H_MARKER_NONE ? null : noteOneHMarkerComment.trim() || null,
         }),
       })
       if (!res?.ok) {
@@ -2150,8 +2147,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       if (contentTextareaRef.current?.value === defaultNoteContent) {
         contentTextareaRef.current.setSelectionRange(0, 0)
       }
-      setNoteOneHMarker(ONE_H_MARKER_NONE)
-      setNoteOneHMarkerComment("")
       if (selectedFiles.length > 0) {
         try {
           const attachments = await uploadNoteAttachments(created.id, selectedFiles)
@@ -2168,21 +2163,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     }
   }
 
-  const updateEditNoteMarker = (value: OneHMarker | typeof ONE_H_MARKER_NONE) => {
-    if (value !== ONE_H_MARKER_NONE) {
-      const nextComment = window.prompt("Optional symbol comment:", value === editNoteOneHMarker ? editNoteOneHMarkerComment : "")
-      if (nextComment === null) return
-      setEditNoteOneHMarkerComment(nextComment)
-    } else {
-      setEditNoteOneHMarkerComment("")
-    }
-    setEditNoteOneHMarker(value)
-    const marker = value === ONE_H_MARKER_NONE ? null : value
-    setEditTaskAssigneeStates((current) => Object.fromEntries(
-      Object.entries(current).map(([id, state]) => [id, { ...state, oneHMarker: marker }])
-    ))
-  }
-
   const updateEditTaskAssigneeState = (
     assigneeId: string,
     patch: Partial<GaAssigneeTaskState>
@@ -2194,6 +2174,14 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         ...patch,
       },
     }))
+  }
+
+  const updateEditAssigneeMarker = (assigneeId: string, value: OneHMarker | typeof ONE_H_MARKER_NONE) => {
+    const state = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
+    const marker = value === ONE_H_MARKER_NONE ? null : value
+    const comment = marker ? window.prompt("Optional symbol comment:", marker === state.oneHMarker ? state.oneHMarkerComment : "") : ""
+    if (comment === null) return
+    updateEditTaskAssigneeState(assigneeId, { oneHMarker: marker, oneHMarkerComment: comment })
   }
 
   const openEditNote = React.useCallback(async (note: GaNote) => {
@@ -2217,8 +2205,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         end: normalizedText.length,
       }
       setEditContent(normalizedText)
-      setEditNoteOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
-      setEditNoteOneHMarkerComment(note.one_h_marker_comment || "")
       setEditDoneRanges(doneRanges)
       setEditAddedRanges(addedRanges)
       const taskInfo = freshTaskInfo.get(note.id)
@@ -2508,8 +2494,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         ? `/${noteBasePath}/${editNoteId}/task-bundle`
         : `/${noteBasePath}/${editNoteId}`
       const body: Record<string, unknown> = { content: serializedContent }
-      body.one_h_marker = editNoteOneHMarker === ONE_H_MARKER_NONE ? null : editNoteOneHMarker
-      body.one_h_marker_comment = editNoteOneHMarker === ONE_H_MARKER_NONE ? null : editNoteOneHMarkerComment.trim() || null
       if (taskInfo?.taskId) {
         const originalAssigneeIds = Array.from(
           new Set(taskInfo.assignees.map((assignee) => assignee.id).filter(Boolean))
@@ -2656,8 +2640,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
-    setTaskOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
-    setTaskOneHMarkerComment(note.one_h_marker_comment || "")
     setTaskDueDate("")
     setTaskStartDate("")
     setTaskDeadlineImportant(false)
@@ -2862,8 +2844,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
             is1hReport && taskOneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE
               ? taskOneHReportSlot
               : null,
-          one_h_marker: taskOneHMarker === ONE_H_MARKER_NONE ? null : taskOneHMarker,
-          one_h_marker_comment: taskOneHMarker === ONE_H_MARKER_NONE ? null : taskOneHMarkerComment.trim() || null,
+          // Assign symbols per person after creation, without inheriting a legacy note symbol.
+          one_h_marker: null,
+          one_h_marker_comment: null,
           is_r1: isR1,
           is_personal: isPersonal,
           skill_category: taskSkillCategory,
@@ -3183,6 +3166,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       if (taskStatusFilter === "open") return note.status !== "CLOSED"
       if (taskStatusFilter === "closed") return note.status === "CLOSED"
       const hasTask = note.is_converted_to_task === true || noteTaskInfo.has(note.id)
+      if (taskStatusFilter === "mira") return Boolean(note.from_mira) && !hasTask && note.status !== "CLOSED"
       if (taskStatusFilter === "notes") return !hasTask && note.status !== "CLOSED"
       if (taskStatusFilter === "tasks") return hasTask
       const taskInfo = noteTaskInfo.get(note.id)
@@ -3323,8 +3307,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           editDescription.trim() !== (taskInfo?.description || "").trim()
           || editTaskProjectId !== (taskInfo?.taskProjectId ?? note?.project_id ?? "NONE")
           || !sameStringSet(editTaskAssigneeIds, taskInfo?.assignees.map(assignee => assignee.id) || [])
-          || editNoteOneHMarker !== (note?.one_h_marker ?? ONE_H_MARKER_NONE)
-          || editNoteOneHMarkerComment !== (note?.one_h_marker_comment || "")
           || editTaskAssigneeIds.some(id => !sameGaAssigneeTaskState(editTaskAssigneeStates[id] ?? createEmptyGaAssigneeTaskState(), taskInfo?.assigneeStates[id] ?? createEmptyGaAssigneeTaskState()))
         )
         return {
@@ -3533,22 +3515,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
               <p className="text-xs text-muted-foreground">
                 Select text and click mark done to toggle it, or place the cursor on a line to toggle the whole line.
               </p>
-              <div className="max-w-[220px] space-y-1">
-                <Label>Note symbol</Label>
-                <Select
-                  value={editNoteOneHMarker}
-                  onValueChange={(value) => updateEditNoteMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}
-                  disabled={savingEdit}
-                >
-                  <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${editNoteOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
-                  <SelectContent className="font-black text-[#0F2A5F]">
-                    <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
-                    {ONE_H_MARKER_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
               <div className={isGaUser ? "hidden space-y-1 sm:block" : "space-y-1"}>
                 <Label className="text-xs text-muted-foreground">Preview</Label>
                 <div className="min-h-[120px] max-h-[32vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-normal">
@@ -3667,7 +3633,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                       const person = taskAssigneeOptions.find((item) => item.id === assigneeId)
                       const state = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
                       return (
-                        <div key={assigneeId} className="space-y-3 rounded-md border border-slate-200 bg-slate-50/60 p-3">
+                        <div key={assigneeId} role="group" aria-label={`Task for ${person?.full_name || person?.username || assigneeId}`} className="space-y-3 rounded-md border border-slate-200 bg-slate-50/60 p-3">
                           <div className="text-sm font-semibold text-slate-800">
                             {person?.full_name || person?.username || assigneeId}
                           </div>
@@ -3810,10 +3776,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                               <Label className="text-xs text-muted-foreground">Symbol</Label>
                               <Select
                                 value={state.oneHMarker ?? ONE_H_MARKER_NONE}
-                                onValueChange={(value) => updateEditNoteMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}
+                                onValueChange={(value) => updateEditAssigneeMarker(assigneeId, value as OneHMarker | typeof ONE_H_MARKER_NONE)}
                                 disabled={savingEdit}
                               >
-                                <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${state.oneHMarker ? "text-red-600" : "text-[#0F2A5F]"}`}><SelectValue /></SelectTrigger>
+                                <SelectTrigger aria-label={`Symbol for ${person?.full_name || person?.username || assigneeId}`} className={`border-blue-300 bg-blue-50 font-black ${state.oneHMarker ? "text-red-600" : "text-[#0F2A5F]"}`}><SelectValue /></SelectTrigger>
                                 <SelectContent className="font-black text-[#0F2A5F]">
                                   <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                                   {ONE_H_MARKER_OPTIONS.map((option) => (
@@ -4004,23 +3970,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 <span className="font-medium text-slate-700">Transcribing...</span>
               </div>
             ) : null}
-          </div>
-          <div className="max-w-[220px] space-y-2">
-            <Label>Symbol (optional)</Label>
-            <Select value={noteOneHMarker} onValueChange={(rawValue) => {
-              const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
-              if (value === ONE_H_MARKER_NONE) { setNoteOneHMarker(value); setNoteOneHMarkerComment(""); return }
-              const nextComment = window.prompt("Optional symbol comment:", value === noteOneHMarker ? noteOneHMarkerComment : "")
-              if (nextComment !== null) { setNoteOneHMarker(value); setNoteOneHMarkerComment(nextComment) }
-            }}>
-              <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${noteOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
-              <SelectContent className="font-black text-[#0F2A5F]">
-                <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
-                {ONE_H_MARKER_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
           <div className="space-y-2">
             <Label>Attachments</Label>
@@ -4268,6 +4217,12 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     className="bg-sky-100 text-sky-900 focus:bg-sky-200 focus:text-sky-900"
                   >
                     Notes
+                  </SelectItem>
+                  <SelectItem
+                    value="mira"
+                    className="bg-violet-100 text-violet-900 focus:bg-violet-200 focus:text-violet-900"
+                  >
+                    Mira notes
                   </SelectItem>
                   <SelectItem
                     value="closed"
@@ -5575,23 +5530,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                         <SelectItem key={value} value={value}>
                           {value}
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Symbol (optional)</Label>
-                  <Select value={taskOneHMarker} onValueChange={(rawValue) => {
-                    const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
-                    if (value === ONE_H_MARKER_NONE) { setTaskOneHMarker(value); setTaskOneHMarkerComment(""); return }
-                    const nextComment = window.prompt("Optional symbol comment:", value === taskOneHMarker ? taskOneHMarkerComment : "")
-                    if (nextComment !== null) { setTaskOneHMarker(value); setTaskOneHMarkerComment(nextComment) }
-                  }}>
-                    <SelectTrigger className={`w-full border-blue-300 bg-blue-50 font-black ${taskOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
-                    <SelectContent className="font-black text-[#0F2A5F]">
-                      <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
-                      {ONE_H_MARKER_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

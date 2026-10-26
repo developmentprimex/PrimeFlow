@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,10 +17,6 @@ from app.services.task_marker_visibility import marker_alert_enabled
 
 
 def marker_comment_source_key(task: Task) -> str:
-    for prefix, field in (("plan", "plan_note_origin_id"), ("ga", "ga_note_origin_id"), ("group", "fast_task_group_id")):
-        value = getattr(task, field, None)
-        if value is not None:
-            return f"{prefix}:{value}"
     return f"task:{task.id}"
 
 
@@ -33,21 +29,19 @@ async def record_initial_marker_comments(db: AsyncSession, tasks: list[Task], *,
         if key in seen:
             continue
         seen.add(key)
-        related = [Task.id == task.id]
-        for field in ("plan_note_origin_id", "ga_note_origin_id", "fast_task_group_id"):
-            value = getattr(task, field, None)
-            if value:
-                related.append(getattr(Task, field) == value)
-        shared = list((await db.execute(select(Task).where(or_(*related), Task.is_active.is_(True)))).scalars())
-        await record_marker_change(db, shared, marker=task.one_h_marker, comment=task.one_h_marker_comment, actor_email=actor_email)
+        await record_marker_change(db, [task], marker=task.one_h_marker, comment=task.one_h_marker_comment, actor_email=actor_email)
 
 
 async def record_marker_change(
     db: AsyncSession, tasks: list[Task], *, marker: str | None, comment: str | None,
     actor_email: str | None,
 ) -> None:
-    """Called within the marker write transaction, once for the shared change."""
+    """Record each assignee task's change within the marker write transaction."""
     if not tasks:
+        return
+    if len(tasks) > 1:
+        for task in {task.id: task for task in tasks}.values():
+            await record_marker_change(db, [task], marker=marker, comment=comment, actor_email=actor_email)
         return
     from app.services.task_marker import one_h_marker_label
 
@@ -71,6 +65,11 @@ async def record_marker_change(
             choose_recipient(task.assigned_to, task)
     active_ids = set((await db.execute(select(User.id).where(User.id.in_(recipients), User.is_active.is_(True)))).scalars())
     source_key = marker_comment_source_key(tasks[0])
+    # Replace legacy shared receipts for this task only, preserving siblings.
+    await db.execute(delete(TaskMarkerCommentInbox).where(
+        TaskMarkerCommentInbox.task_id == tasks[0].id,
+        TaskMarkerCommentInbox.source_key != source_key,
+    ))
     existing = {item.user_id: item for item in (await db.execute(
         select(TaskMarkerCommentInbox).where(TaskMarkerCommentInbox.source_key == source_key)
     )).scalars()}
