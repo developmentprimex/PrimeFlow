@@ -691,14 +691,14 @@ def test_single_day_task_in_progress_earns_nothing():
 
 @pytest.mark.parametrize(("row", "expected"), [
     ({"classification": "POSTPONED_UNAPPROVED"}, 68.8),
-    ({"classification": "POSTPONED_UNAPPROVED", "deadline_was_today": True}, 65.0),
+    ({"classification": "POSTPONED_UNAPPROVED", "deadline_was_today": True}, 70.0),
     ({"classification": "POSTPONED_UNAPPROVED", "deadline_was_today": True, "deadline_critical": True}, 60.0),
     ({"classification": "NO_PROGRESS"}, 68.8),
-    ({"classification": "NO_PROGRESS", "deadline_was_today": True}, 62.5),
+    ({"classification": "NO_PROGRESS", "deadline_was_today": True}, 67.5),
     ({"classification": "IN_PROGRESS", "deadline_was_today": True, "deadline_critical": True}, 57.5),
 ])
 def test_deadlines_raise_the_penalty(row, expected):
-    # Base 3 / 4 = 75; penalty points / 4: 25 postponed or untouched, 40/60 postponed with deadline, 50/70 missed deadline.
+    # Base 3 / 4 = 75; penalties / 4: 25 without deadline, 20/60 postponed, 30/70 missed.
     rows = [{"classification": "REALIZED_AS_PLANNED", "in_original_plan": True}] * 3 + [
         {"in_original_plan": True, "task_id": "x", "title": "Detyra", **row},
     ]
@@ -715,10 +715,10 @@ def test_realization_items_explain_the_percent():
     items = {item["task_id"]: item for item in metrics["realization_items"]}
     assert set(items) == {"a", "b", "c"}
     assert items["a"]["kind"] == "COMPLETED" and items["a"]["credit"] == 1
-    assert items["b"]["kind"] == "POSTPONED" and items["b"]["penalty"] == 40 and items["b"]["approved"]
+    assert items["b"]["kind"] == "POSTPONED" and items["b"]["penalty"] == 20 and items["b"]["approved"]
     assert items["c"]["kind"] == "EXTRA_COMPLETED"
-    # Base 2 / 2 = 100, penalty 40 / 2 = 20; adjusted drops the approved postponement.
-    assert metrics["raw_plan_realization"] == 80.0
+    # Base 2 / 2 = 100, penalty 20 / 2 = 10; adjusted drops the approved postponement.
+    assert metrics["raw_plan_realization"] == 90.0
     assert metrics["adjusted_plan_realization"] == 100.0
 
 

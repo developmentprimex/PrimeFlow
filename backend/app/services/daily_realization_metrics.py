@@ -81,9 +81,9 @@ def multi_day_share(start: date | None, due: date | None, day: date) -> tuple[fl
 
 
 POSTPONED_PENALTY = 25.0
-POSTPONED_DEADLINE_PENALTY = 40.0
+POSTPONED_DEADLINE_PENALTY = 20.0
 POSTPONED_CRITICAL_DEADLINE_PENALTY = 60.0
-MISSED_DEADLINE_PENALTY = 50.0
+MISSED_DEADLINE_PENALTY = 30.0
 MISSED_CRITICAL_DEADLINE_PENALTY = 70.0
 # Leaving a plan task untouched must not cost less than postponing it honestly.
 NO_PROGRESS_PENALTY = POSTPONED_PENALTY

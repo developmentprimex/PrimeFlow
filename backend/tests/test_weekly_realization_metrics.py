@@ -411,16 +411,16 @@ def test_weekly_question_scope_uses_week_totals_even_when_daily_date_is_present(
 
 
 @pytest.mark.parametrize("classification,critical,expected", [
-    ("postponed_unapproved", False, 90),
+    ("postponed_unapproved", False, 95),
     ("postponed_unapproved", True, 85),
-    ("no_progress", False, 87.5),
+    ("no_progress", False, 92.5),
     ("no_progress", True, 82.5),
 ])
 def test_unfinished_plan_deadlines_cost_more(classification, critical, expected):
     tasks = [task(f"P{i}", "planned_owner", "completed") for i in range(3)] + [task("D", "planned_owner", classification)]
     day = {"date": "2026-10-07", "tasks": [{**task("D", "planned_today", classification), "deadline_was_today": True, "deadline_critical": critical}]}
     metrics = build_weekly_task_metrics(tasks, [day])
-    # Base 3 / 4 = 75 is below the cap, so only the penalty changes: 40/60 postponed, 50/70 missed.
+    # Base 3 / 4 = 75; penalties are 20/60 postponed and 30/70 missed.
     assert metrics["weekly_progress_percent"] == expected - 25
 
 
