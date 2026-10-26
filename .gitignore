@@ -43,3 +43,18 @@ frontend/.env.local
 
 
 .superpowers/
+
+# Mira Windows build/runtime artifacts
+desktop/.venv/
+tmp/mira-desktop-deps/
+tmp/mira-desktop-pg/
+tmp/mira-build/
+tmp/mira-ui-smoke/
+tmp/Mira.spec
+output/mira-windows/
+output/Mira-Windows.zip
+tmp/mira-activate-server.xml
+tmp/mira-diagnose-server.xml
+tmp/mira-primary-approved.xml
+tmp/mira-server-activation.json
+tmp/mira-installed-check.json
