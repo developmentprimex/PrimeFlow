@@ -25,7 +25,7 @@ class M2RulesTests(unittest.TestCase):
         from tests.test_migration_graph import migration_scripts
         from app.models.discord_m2_question import DiscordM2Question
         scripts = migration_scripts()
-        self.assertEqual(scripts.get_heads(), ['0162_discord_m2_questions'])
+        self.assertEqual(scripts.get_heads(), ['0163_discord_m2_approvals'])
         migration = scripts.get_revision('0162_discord_m2_questions').module
         output = StringIO()
         operations = Operations(MigrationContext.configure(dialect_name='postgresql', opts={'as_sql': True, 'output_buffer': output}))

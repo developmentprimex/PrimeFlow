@@ -644,7 +644,7 @@ def test_removed_ga_reply_is_ignored_when_saving_and_exporting_old_reports():
         assert "Pergjigje e vjeter" not in html
         assert "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET" in html
         titles = [block["text"] for block in service.export_blocks(result) if block["kind"] == "text" and block["level"] == 2]
-        assert [title.split(". ")[0] for title in titles if ". " in title] == ["1", "2", "3", "4", "5", "6"]
+        assert [title.split(". ")[0] for title in titles if ". " in title] == ["1", "2", "3", "4", "5", "6", "7"]
         assert service.AUTO_TITLES["postponed_am"] in titles
         plain = service.render_plain_text(result)
         assert "A KA REPLY NGA GA" not in plain and "Pergjigje e vjeter" not in plain

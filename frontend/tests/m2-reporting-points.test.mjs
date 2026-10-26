@@ -62,7 +62,7 @@ test("postponements display their source explanation alongside the manual report
   assert.match(html, /Manager comment/)
 })
 
-test("M2 presents six points with a per-task delivery answer", () => {
+test("M2 presents delivery and PM continuation as separate questions", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: { reorganization: "Riorganizo", [answerKey]: "Dorezuar", [`delivery_choice:${taskId}`]: "PO" }, disabled: false, onAnswerChange: () => {},
   }))
@@ -73,13 +73,14 @@ test("M2 presents six points with a per-task delivery answer", () => {
   assert.match(html, /4\. PROGRESI I DET ME GA \(AM\)/)
   assert.match(html, /5\. DET PM ME DUE DATE SOT/)
   assert.match(html, /6\. SA PER DOREZIM M2\?/)
+  assert.match(html, /7\. A VAZHDOJNË DETYRAT NË PM\?/)
   assert.ok(html.indexOf('id="m2-pm-due-today"') < html.indexOf('id="m2-delivery"'))
   assert.equal((html.match(/<textarea/g) || []).length, 2)
   assert.match(html, /Dorezuar/)
   assert.match(html, /M2\/3/)
   assert.match(html, />SIMBOLI<\/th><th[^>]*>TITULLI<\/th>/)
   assert.match(html, /font-bold">M2\/3<\/td><td[^>]*>Detyra &lt;script&gt;<\/td>/)
-  const deliveryTable = html.slice(html.indexOf('id="m2-delivery"'))
+  const deliveryTable = html.slice(html.indexOf('id="m2-delivery"'), html.indexOf('aria-labelledby="m2-pm-continuation"'))
   assert.doesNotMatch(deliveryTable, />STATUSI<|>ARSYEJA<|>KOMENTI</)
   assert.equal((deliveryTable.match(/<th /g) || []).length, 10)
   assert.match(deliveryTable, /<option value="PO" selected="">PO<\/option>/)

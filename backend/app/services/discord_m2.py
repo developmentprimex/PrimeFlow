@@ -9,7 +9,7 @@ from app.services.primeflow_report import report_timezone
 
 KINDS = {"unfinished": "Detyrë AM / 08:00 / Deadline e pakryer",
          "postponed": "Pse u shty detyra?", "progress": "Progresi me GA / F / personalisht",
-         "delivery": "A e ke dorëzuar për M2?"}
+         "delivery": "A e ke dorëzuar për M2?", "continuation": "A vazhdon në PM?"}
 MOVEMENTS = {"start_due": "Shtyrë Start dhe Due Date", "start": "Shtyrë vetëm Start Date", "due": "Shtyrë vetëm Due Date"}
 
 
@@ -27,7 +27,8 @@ def context_key(kind: str, row: dict) -> str:
 def question_rows(data: dict) -> list[tuple[str, dict]]:
     seen, result = set(), []
     for section, kind in (("unfinished_priority", "unfinished"), ("postponed", "postponed"),
-                          ("postponed_am", "postponed"), ("ga_progress", "progress"), ("delivery", "delivery")):
+                          ("postponed_am", "postponed"), ("ga_progress", "progress"), ("delivery", "delivery"),
+                          ("pm_continuation", "continuation")):
         for row in data.get(section, []):
             if not row.get("task_id") or (kind != "delivery" and row.get("status") == "DONE"):
                 continue
@@ -45,11 +46,11 @@ def question_rows(data: dict) -> list[tuple[str, dict]]:
 
 def validate_answer(kind: str, reason: str | None, comment: str | None, choice: str | None):
     reason, comment = (reason or "").strip(), (comment or "").strip()
-    if kind == "delivery":
+    if kind in {"delivery", "continuation"}:
         if choice not in {"PO", "JO"}:
             raise ValueError("Zgjidh PO ose JO.")
         if choice == "JO" and not comment:
-            raise ValueError("Shëno pse nuk është dorëzuar detyra.")
+            raise ValueError("Shëno pse nuk vazhdon në PM." if kind == 'continuation' else "Shëno pse nuk është dorëzuar detyra.")
     elif reason not in REASON_LABELS or not comment:
         raise ValueError("Zgjidh arsyen nga lista dhe plotëso komentin.")
-    return reason or None, comment, choice if kind == "delivery" else None
+    return (None if kind in {'delivery', 'continuation'} else reason or None), comment, choice if kind in {"delivery", "continuation"} else None

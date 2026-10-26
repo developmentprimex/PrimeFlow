@@ -54,14 +54,14 @@ class ManualAnswersPayload(BaseModel):
             if key in MANUAL_POINTS:
                 continue
             prefix, _, task_id = key.partition(":")
-            if prefix not in {"delivery", "delivery_choice", "postponed_comment", "unfinished_comment", "progress_reason", "progress_comment", "postponed_reason", "unfinished_reason"}:
+            if prefix not in {"delivery", "delivery_choice", "postponed_comment", "unfinished_comment", "progress_reason", "progress_comment", "postponed_reason", "unfinished_reason", "pm_choice", "pm_comment"}:
                 raise ValueError("Pike manuale e panjohur.")
             try:
                 if str(uuid.UUID(task_id)) != task_id:
                     raise ValueError()
             except ValueError as exc:
                 raise ValueError("Detyre e pavlefshme per pergjigjen manuale.") from exc
-            if prefix == "delivery_choice" and value[key] not in {"", "PO", "JO"}:
+            if prefix in {"delivery_choice", "pm_choice"} and value[key] not in {"", "PO", "JO"}:
                 raise ValueError("Zgjedhja duhet te jete PO ose JO.")
             if prefix.endswith("_reason") and value[key] and value[key] not in REASON_LABELS:
                 raise ValueError("Arsye e panjohur.")
@@ -141,6 +141,7 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
                       for item in (row.data or {}).get(section, []))
     valid_keys.update(f"unfinished_comment:{item['task_id']}"
                       for item in (row.data or {}).get("unfinished_priority", []) if item.get("task_id"))
+    valid_keys.update(f'{prefix}:{item["task_id"]}' for item in (row.data or {}).get('pm_continuation', []) for prefix in ('pm_choice', 'pm_comment'))
     valid_keys.update(f"{prefix}:{item['task_id']}" for item in (row.data or {}).get("ga_progress", [])
                       for prefix in ("progress_reason", "progress_comment"))
     if any(key not in MANUAL_POINTS and key not in valid_keys and key not in before for key in payload.manual_answers):

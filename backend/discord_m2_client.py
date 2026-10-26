@@ -15,12 +15,18 @@ def actor(interaction):
 
 def prompt(job):
     row = job['snapshot']
-    if job['kind'] == 'delivery':
-        text = f"<@{job['discord_user_id']}> **M2 · Dorëzimi**\n**{row['title']}**"
+    if job['kind'] in {'delivery', 'continuation'}:
+        pm = job['kind'] == 'continuation'
+        text = f"<@{job['discord_user_id']}> **M2 · {'PM' if pm else 'Dorëzimi'}**\n**{row['title']}**"
+        if pm and job.get('postponement', {}).get('status') == 'APPROVED':
+            return text + '\n\n✅ **Shtyrja u konfirmua nga Diellza.**'
         if job.get('answered'):
-            text += '\n\n✅ **E dorëzuar**' if job.get('choice') == 'PO' else '\n\n⏳ **Ende pa dorëzuar**'
+            text += ('\n\n✅ **Vazhdon në PM**' if pm else '\n\n✅ **E dorëzuar**') if job.get('choice') == 'PO' else ('\n\n⏸ **Nuk vazhdon në PM**' if pm else '\n\n⏳ **Ende pa dorëzuar**')
         else:
-            text += '\n\nA e ke dorëzuar detyrën?\n**Po** ruhet menjëherë. Te **Jo**, shëno pse.'
+            text += '\n\nA vazhdon në PM?' if pm else '\n\nA e ke dorëzuar detyrën?'
+        if job.get('postponement'):
+            from app.services.discord_m2_postponements import STATUS_LABELS
+            text += '\n' + STATUS_LABELS[job['postponement']['status']]
         return text[:1900]
     text = f"<@{job['discord_user_id']}> **M2 · {KINDS[job['kind']]}**\n{row['title']}"
     if job['kind'] == 'postponed':
@@ -41,14 +47,21 @@ def prompt(job):
 
 def controls(job):
     view = discord.ui.View(timeout=None)
-    if job['kind'] == 'delivery':
-        view.add_item(discord.ui.Button(label='Po, e dorëzova', style=discord.ButtonStyle.success,
+    if job['kind'] == 'continuation' and job.get('postponement', {}).get('status') == 'APPROVED':
+        view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}"))
+        return view
+    if job['kind'] in {'delivery', 'continuation'}:
+        view.add_item(discord.ui.Button(label='Po, vazhdon' if job['kind'] == 'continuation' else 'Po, e dorëzova', style=discord.ButtonStyle.success,
             custom_id=f"pf:m2:reply:{job['id']}:PO"))
         if job.get('choice') == 'PO':
             view.add_item(discord.ui.Button(label='Ndrysho komentin' if job.get('comment') else 'Shto koment (opsional)',
                 style=discord.ButtonStyle.secondary, custom_id=f"pf:m2:comment:{job['id']}"))
         view.add_item(discord.ui.Button(label='Jo — shëno pse', style=discord.ButtonStyle.secondary,
             custom_id=f"pf:m2:reply:{job['id']}:JO"))
+        if job['kind'] == 'continuation':
+            pending = job.get('postponement', {}).get('status') == 'PENDING'
+            view.add_item(discord.ui.Button(label='Në pritje të konfirmimit' if pending else 'Kërko shtyrje',
+                style=discord.ButtonStyle.secondary, custom_id=f"pf:m2a:request:{job['id']}", disabled=pending))
     else:
         view.add_item(discord.ui.Select(placeholder='Zgjidh arsyen dhe shto komentin',
             custom_id=f"pf:m2:reason:{job['id']}",
@@ -81,11 +94,11 @@ async def save_reply(bot, interaction, job, *, reason=None, comment='', choice=N
 
 class ReplyModal(discord.ui.Modal):
     def __init__(self, bot, job, *, reason=None, choice=None, source_message=None):
-        super().__init__(title='Komenti për dorëzimin' if choice == 'PO' else 'Përgjigjja për M2', timeout=900)
+        super().__init__(title='Komenti për PM' if job['kind'] == 'continuation' else 'Komenti për dorëzimin' if choice == 'PO' else 'Përgjigjja për M2', timeout=900)
         self.bot, self.job, self.reason, self.choice = bot, job, reason, choice
         self.source_message = source_message
         self.initial_save = None
-        self.comment = discord.ui.TextInput(label='Pse nuk u dorëzua?' if choice == 'JO' else 'Komenti (opsional)' if choice == 'PO' else 'Komenti / progresi',
+        self.comment = discord.ui.TextInput(label=('Pse nuk vazhdon në PM?' if job['kind'] == 'continuation' else 'Pse nuk u dorëzua?') if choice == 'JO' else 'Komenti (opsional)' if choice == 'PO' else 'Komenti / progresi',
             style=discord.TextStyle.paragraph, required=choice != 'PO', max_length=4000,
             default=(job.get('comment') or None) if choice == job.get('choice') else None)
         self.add_item(self.comment)
@@ -133,20 +146,27 @@ async def handle(bot, interaction):
 
 async def deliver(bot):
     jobs = (await bot.bridge('/bot/m2/claim', {}))['jobs']
-    for job in jobs:
-        try:
-            channel = await bot.private_channel(job['guild_id'], job['channel_id'], job['discord_user_id'])
-            # Recheck the link and assignment immediately before delivery.
-            job = await bot.bridge(f"/bot/m2/{job['id']}/open", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')})
-            if job['answered']:
-                continue
-            nonce = hashlib.sha256(f"m2:{job['id']}".encode()).hexdigest()[:24]
-            message = await bot.http.request(discord.http.Route('POST', '/channels/{channel_id}/messages', channel_id=channel.id),
-                json={'content': prompt(job), 'components': controls(job).to_components(),
-                      'allowed_mentions': {'parse': [], 'users': [job['discord_user_id']]},
-                      'nonce': nonce, 'enforce_nonce': True})
-            await bot.bridge(f"/bot/m2/{job['id']}/ack", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')} | {'message_id': str(message['id'])})
-        except Exception as exc:
-            # Do not log task text, replies, or credentials.
-            import logging
-            logging.getLogger(__name__).warning('M2 delivery %s failed: %s', job['id'], type(exc).__name__)
+    semaphore = asyncio.Semaphore(3)
+    async def send(job):
+        async with semaphore:
+            await send_one(bot, job)
+    await asyncio.gather(*(send(job) for job in jobs))
+
+
+async def send_one(bot, job):
+    try:
+        channel = await bot.private_channel(job['guild_id'], job['channel_id'], job['discord_user_id'])
+        # Recheck the link and assignment immediately before delivery.
+        job = await bot.bridge(f"/bot/m2/{job['id']}/open", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')})
+        if job['answered']:
+            return
+        nonce = hashlib.sha256(f"m2:{job['id']}".encode()).hexdigest()[:24]
+        message = await bot.http.request(discord.http.Route('POST', '/channels/{channel_id}/messages', channel_id=channel.id),
+            json={'content': prompt(job), 'components': controls(job).to_components(),
+                  'allowed_mentions': {'parse': [], 'users': [job['discord_user_id']]},
+                  'nonce': nonce, 'enforce_nonce': True})
+        await bot.bridge(f"/bot/m2/{job['id']}/ack", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')} | {'message_id': str(message['id'])})
+    except Exception as exc:
+        # Do not log task text, replies, or credentials.
+        import logging
+        logging.getLogger(__name__).warning('M2 delivery %s failed: %s', job['id'], type(exc).__name__)

@@ -484,6 +484,30 @@ hyrja me botin dhe rrjedha reale duhen verifikuar pas konfigurimit të Discord-i
 
 ## Referenca teknike
 
+### M2: vazhdimi në PM dhe kërkesat për shtyrje
+
+Në ditët e punës, nga 11:45 deri në 12:00, pyetja **A vazhdon në PM?**
+dërgohet për çdo detyrë të hapur të planifikuar për PM (përfshirë AM/PM)
+brenda intervalit Start–Due të ditës. Detyrat vetëm AM nuk përfshihen në këtë pyetje.
+Përgjigjet PO/JO dhe komentet ruhen veçmas nga dorëzimi M2, në seksionin 7 të raportit.
+PO hap një koment opsional; JO kërkon shpjegim. Mesazhi ekzistues përditësohet pa
+publikuar komentet e punonjësit në kanal.
+
+**Kërko shtyrje** lejon vetëm Start, vetëm Due, ose të dyja, me arsyet standarde
+të platformës dhe koment të detyrueshëm. Propozimi ruhet në pritje; detyra ende
+nuk ndryshon. Diellza Veliu (`diellza.veliu`), në kanalin e saj personal Discord,
+merr datat aktuale, datat e propozuara, arsyen dhe komentin, me butonat e konfirmimit/refuzimit.
+Vetëm konfirmimi i saj e zbaton ndryshimin përmes rrjedhës normale të detyrave,
+me auditimin dhe arsyen/komentin e shtyrjes. Refuzimi i lë datat të pandryshuara.
+Nëse datat, përgjegjësit ose grupi ndryshojnë ndërkohë, kërkesa vjetrohet dhe nuk
+mbishkruan ndryshimet e reja. Konfirmimi dhe datat ruhen në të njëjtin transaksion.
+
+Kërkohet migrimi `0163_discord_m2_approvals`. Njoftimet e konfirmimit vazhdojnë
+edhe jashtë intervalit të mbledhjes së pyetjeve. Tabela `discord_m2_postponements`
+ruan propozimin, vendimin dhe marrjen e njoftimeve, që rinisja e botit të mos
+humbasë kërkesat në pritje. Komenti i shtyrjes shfaqet në kolonën **Komenti**;
+**Koment manual** mbetet i pavarur.
+
 - [Discord interactions](https://github.com/discord/discord-api-docs/blob/main/developers/interactions/receiving-and-responding.mdx)
 - [Discord permissions](https://github.com/discord/discord-api-docs/blob/main/developers/topics/permissions.mdx)
 - [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)

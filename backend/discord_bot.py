@@ -21,6 +21,7 @@ from app.config import settings
 import discord_ui as ui
 import discord_agent_client as agent_client
 import discord_m2_client as m2_client
+import discord_m2_approvals as m2_approvals
 import discord_voice_meetings as voice_meetings
 import mira_host
 
@@ -675,7 +676,9 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
-            if custom_id.startswith("pf:m2:"):
+            if custom_id.startswith("pf:m2a:"):
+                await m2_approvals.handle(self, interaction)
+            elif custom_id.startswith("pf:m2:"):
                 await m2_client.handle(self, interaction)
             elif custom_id.startswith("pf:vm:"):
                 await voice_meetings.handle_meeting_interaction(self, interaction)
@@ -821,10 +824,10 @@ class PrimeFlowBot(discord.Client):
 
     @tasks.loop(seconds=30)
     async def m2_questions(self):
-        try:
-            await m2_client.deliver(self)
-        except Exception as exc:
-            log.warning("M2 polling failed: %s", type(exc).__name__)
+        results = await asyncio.gather(m2_client.deliver(self), m2_approvals.deliver(self), return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                log.warning('M2 polling failed: %s', type(result).__name__)
 
     @m2_questions.before_loop
     async def before_m2_questions(self):
