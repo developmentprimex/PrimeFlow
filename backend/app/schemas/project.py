@@ -23,6 +23,7 @@ class ProjectOut(BaseModel):
     progress_percentage: int
     total_products: int | None = None
     is_template: bool = False
+    is_active: bool = True
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
@@ -56,6 +57,7 @@ class ProjectUpdate(BaseModel):
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
     total_products: int | None = Field(default=None, ge=0)
     is_template: bool | None = None
+    is_active: bool | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None

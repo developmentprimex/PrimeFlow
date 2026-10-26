@@ -104,6 +104,7 @@ def _project_to_out(project: Project, display_title: str | None = None) -> Proje
         progress_percentage=project.progress_percentage,
         total_products=project.total_products,
         is_template=project.is_template,
+        is_active=project.is_active,
         start_date=project.start_date,
         due_date=project.due_date,
         completed_at=project.completed_at,
@@ -612,6 +613,8 @@ async def update_project(
     user=Depends(get_current_user),
 ) -> ProjectOut:
     ensure_project_creator(user)
+    if payload.is_active is not None:
+        ensure_manager_or_admin(user)
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -657,6 +660,8 @@ async def update_project(
         project.total_products = payload.total_products
     if payload.is_template is not None:
         project.is_template = payload.is_template
+    if payload.is_active is not None:
+        project.is_active = payload.is_active
     if payload.start_date is not None:
         project.start_date = payload.start_date
     if payload.due_date is not None:

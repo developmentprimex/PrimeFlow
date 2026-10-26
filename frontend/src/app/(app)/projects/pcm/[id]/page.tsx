@@ -1,5 +1,7 @@
 "use client"
 
+import { ProjectActivityControl } from "@/components/project-activity"
+
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
@@ -3718,6 +3720,7 @@ export default function PcmProjectPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 {renderProjectTitle()}
+                <ProjectActivityControl project={project} onChange={setProject} />
                 {canEditDueDate && (
                   <button
                     type="button"
@@ -6170,6 +6173,7 @@ export default function PcmProjectPage() {
               </button>
               <div className="flex items-center gap-3">
                 {renderProjectTitle()}
+                <ProjectActivityControl project={project} onChange={setProject} />
                 {canEditDueDate && (
                   <button
                     type="button"
@@ -8191,6 +8195,7 @@ export default function PcmProjectPage() {
           <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">&larr; Back to Projects</button>
           <div className="mt-3 flex items-center gap-3">
             {renderProjectTitle()}
+            <ProjectActivityControl project={project} onChange={setProject} />
             {isAdmin && (
               <>
                 {canEditDueDate && (

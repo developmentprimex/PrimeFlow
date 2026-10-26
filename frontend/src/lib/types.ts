@@ -280,6 +280,7 @@ export interface Project {
   progress_percentage?: number
   total_products?: number | null
   is_template?: boolean
+  is_active?: boolean
   start_date?: string | null
   due_date?: string | null
   completed_at?: string | null

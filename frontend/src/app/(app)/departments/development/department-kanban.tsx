@@ -2,6 +2,7 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { ProjectActivityControl, ProjectActivityFilterControl, ProjectListEmptyState, matchesProjectActivity, type ProjectActivityFilter } from "@/components/project-activity"
 import { useBrowserTabTitle } from "@/components/browser-tab-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
@@ -1302,6 +1303,7 @@ export default function DepartmentKanban() {
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [projectActivityFilter, setProjectActivityFilter] = React.useState<ProjectActivityFilter>("active")
   const [projectTitleLookup, setProjectTitleLookup] = React.useState<Map<string, string>>(new Map())
   const [projectMetaLookup, setProjectMetaLookup] = React.useState<
     Map<string, { title: string; department_id?: string | null }>
@@ -7318,7 +7320,7 @@ export default function DepartmentKanban() {
         {activeTab === "projects" ? (
           <div className="mb-4 sm:mb-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="text-lg sm:text-xl font-semibold text-slate-800">Active Projects</div>
+              <div className="text-lg sm:text-xl font-semibold text-slate-800">Projects</div>
               {canManage ? (
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
@@ -7446,8 +7448,15 @@ export default function DepartmentKanban() {
 
         {activeTab === "projects" ? (
           <div className="space-y-4 sm:space-y-6">
+            <ProjectActivityFilterControl value={projectActivityFilter} onChange={setProjectActivityFilter} projects={filteredProjects} />
+            <ProjectListEmptyState
+              projects={filteredProjects}
+              visibleCount={filteredProjects.filter((project) => matchesProjectActivity(project, projectActivityFilter)).length}
+              mine={viewMode === "mine"}
+              membersLoaded={projects.every((project) => projectMembers[project.id] !== undefined)}
+            />
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
-              {filteredProjects.map((project) => {
+              {filteredProjects.filter((project) => matchesProjectActivity(project, projectActivityFilter)).map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
                 const creator = project.created_by ? userMap.get(project.created_by) : null
                 const badgeUser = creator || manager
@@ -7476,8 +7485,8 @@ export default function DepartmentKanban() {
                 }
 
                 return (
-                  <Link key={project.id} href={`/projects/${project.id}`} className="group block">
-                    <Card className={`bg-white border rounded-lg p-2.5 transition-all ${isClosed ? "border-slate-300 opacity-60 hover:opacity-80" : "border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-1"}`}>
+                  <div key={project.id} className="group block">
+                    <Card className={`relative bg-white border rounded-lg p-2.5 transition-all ${isClosed ? "border-slate-300 opacity-60 hover:opacity-80" : "border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-1"}`}>
                       {/* Header: Title and Delete button */}
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="flex-1 min-w-0">
@@ -7504,24 +7513,27 @@ export default function DepartmentKanban() {
                               variant="outline"
                               size="sm"
                               disabled={deletingProjectId === project.id}
+                              aria-label={`Delete project ${resolveProjectTitle(project)}`}
+                              title="Delete project"
                               onClick={(event) => {
                                 event.preventDefault()
                                 event.stopPropagation()
                                 void deleteProject(project.id)
                               }}
-                              className="h-5 w-5 rounded-full border-red-200 p-0 text-xs text-red-600 hover:bg-red-50 flex-shrink-0 flex items-center justify-center"
+                              className="relative z-10 h-5 w-5 rounded-full border-red-200 p-0 text-xs text-red-600 hover:bg-red-50 flex-shrink-0 flex items-center justify-center"
                             >
-                              {deletingProjectId === project.id ? "..." : "×"}
+                              <Trash2 className="h-3 w-3" aria-hidden="true" />
                             </Button>
                           ) : null}
                         </div>
                       </div>
 
                       {/* Current Phase */}
-                      <div className="mb-2">
+                      <div className="mb-2 flex items-center justify-between gap-2">
                         <Badge className={`text-xs whitespace-nowrap px-2 py-0.5 ${isClosed ? "bg-slate-200 text-slate-500 border border-slate-300" : "bg-blue-100 text-blue-700 border border-blue-200"}`}>
                           {PHASE_LABELS[phase] || "Meetings"}
                         </Badge>
+                        <ProjectActivityControl project={project} onChange={(updated) => setProjects((previous) => previous.map((item) => item.id === updated.id ? updated : item))} />
                       </div>
 
                       {/* Stats Grid: Tasks, Deadline */}
@@ -7565,12 +7577,12 @@ export default function DepartmentKanban() {
 
                       {/* View Details Link */}
                       <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
-                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300 group-hover:underline">
+                        <Link href={`/projects/${project.id}`} className="text-xs font-semibold text-blue-600 dark:text-blue-400 transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300 group-hover:underline after:absolute after:inset-0 after:rounded-lg after:content-['']">
                           View details →
-                        </span>
+                        </Link>
                       </div>
                     </Card>
-                  </Link>
+                  </div>
                 )
               })}
             </div>

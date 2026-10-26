@@ -1,5 +1,7 @@
 "use client"
 
+import { ProjectActivityControl } from "@/components/project-activity"
+
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
@@ -3632,6 +3634,7 @@ export default function DesignProjectPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             {renderProjectTitle()}
+            <ProjectActivityControl project={project} onChange={setProject} />
             {canEditDueDate && (
               <button
                 type="button"
