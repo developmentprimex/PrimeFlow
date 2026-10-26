@@ -432,6 +432,7 @@ def _task_row_to_out(
         requires_alignment=bool(getattr(template, "requires_alignment", False)),
         alignment_time=getattr(template, "alignment_time", None),
         show_in_weekly_planner=bool(getattr(template, "show_in_weekly_planner", False)),
+        is_repetitive=bool(getattr(template, "is_repetitive", False)),
         alignment_roles=alignment_roles,
         alignment_user_ids=alignment_user_ids,
         created_by=task.created_by,
@@ -500,6 +501,7 @@ async def _template_to_out(
         requires_alignment=getattr(template, "requires_alignment", False),
         alignment_time=getattr(template, "alignment_time", None),
         show_in_weekly_planner=bool(getattr(template, "show_in_weekly_planner", False)),
+        is_repetitive=bool(getattr(template, "is_repetitive", False)),
         alignment_roles=alignment_roles,
         alignment_user_ids=alignment_user_ids,
         created_by=template.created_by_user_id or user_id,
@@ -568,6 +570,7 @@ async def _template_definition_to_out(
         requires_alignment=bool(getattr(template, "requires_alignment", False)),
         alignment_time=getattr(template, "alignment_time", None),
         show_in_weekly_planner=bool(getattr(template, "show_in_weekly_planner", False)),
+        is_repetitive=bool(getattr(template, "is_repetitive", False)),
         alignment_roles=role_map.get(template.id),
         alignment_user_ids=alignment_user_map.get(template.id),
         is_active=template.is_active,
@@ -1094,6 +1097,7 @@ async def list_system_task_templates(
             requires_alignment=bool(getattr(t, "requires_alignment", False)),
             alignment_time=getattr(t, "alignment_time", None),
             show_in_weekly_planner=bool(getattr(t, "show_in_weekly_planner", False)),
+            is_repetitive=bool(getattr(t, "is_repetitive", False)),
             alignment_roles=roles_map.get(t.id),
             alignment_user_ids=alignment_users_map.get(t.id),
             assignee_slots=slots_map.get(t.id, []),
@@ -1521,6 +1525,7 @@ async def create_system_task_template(
         show_in_weekly_planner=(
             payload.show_in_weekly_planner if payload.show_in_weekly_planner is not None else False
         ),
+        is_repetitive=payload.is_repetitive if payload.is_repetitive is not None else False,
         is_active=payload.is_active if payload.is_active is not None else True,
         created_by_user_id=user.id,
         approval_status=CommonApprovalStatus.pending,
@@ -1891,6 +1896,8 @@ async def update_system_task_template(
         template.alignment_time = payload.alignment_time
     if payload.show_in_weekly_planner is not None:
         template.show_in_weekly_planner = payload.show_in_weekly_planner
+    if payload.is_repetitive is not None:
+        template.is_repetitive = payload.is_repetitive
     if payload.is_active is not None:
         template.is_active = payload.is_active
 

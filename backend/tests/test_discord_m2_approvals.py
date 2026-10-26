@@ -2,7 +2,7 @@ import asyncio
 import os
 import unittest
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 os.environ.setdefault('DATABASE_URL', 'postgresql+asyncpg://test:test@127.0.0.1/test')
@@ -51,9 +51,14 @@ class ProposalRulesTests(unittest.TestCase):
                 rules.assert_snapshot_unchanged([row], [changed])
 
     def test_pm_continuation_uses_pm_tasks_in_today_range(self):
-        from tests.test_m2_reporting_points import task, DAY
-        items = [task(finish_period='AM'), task(finish_period='PM'), task(finish_period='PM', status='DONE')]
-        rows = reports.select_task_sections(items, [], DAY)['pm_continuation']
+        day = date(2026, 10, 6)
+        # Keep unittest deployment checks independent of pytest test modules.
+        items = [SimpleNamespace(
+            id=uuid.uuid4(), title='EF: Detyre', status=status, progress_percentage=0,
+            created_at=day, start_date=day, due_date=day, completed_at=None,
+            is_deadline_important=False, one_h_marker=None, finish_period=period,
+        ) for period, status in [('AM', 'TODO'), ('PM', 'TODO'), ('PM', 'DONE')]]
+        rows = reports.select_task_sections(items, [], day)['pm_continuation']
         self.assertEqual([row['task_id'] for row in rows], [str(items[1].id)])
 
     def test_date_form_preserves_time_and_only_asks_selected_fields(self):

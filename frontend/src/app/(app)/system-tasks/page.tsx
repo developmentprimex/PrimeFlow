@@ -598,6 +598,7 @@ export function SystemTasksView({
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
   const [isActive, setIsActive] = React.useState(true)
   const [showInWeeklyPlanner, setShowInWeeklyPlanner] = React.useState(false)
+  const [isRepetitive, setIsRepetitive] = React.useState(false)
   const [requiresAlignment, setRequiresAlignment] = React.useState(false)
   const [alignmentTime, setAlignmentTime] = React.useState("")
   const [alignmentManagerIds, setAlignmentManagerIds] = React.useState<string[]>([])
@@ -623,6 +624,7 @@ export function SystemTasksView({
   const [editMonthOfYear, setEditMonthOfYear] = React.useState(EMPTY_VALUE)
   const [editIsActive, setEditIsActive] = React.useState(true)
   const [editShowInWeeklyPlanner, setEditShowInWeeklyPlanner] = React.useState(false)
+  const [editIsRepetitive, setEditIsRepetitive] = React.useState(false)
   const [editRequiresAlignment, setEditRequiresAlignment] = React.useState(false)
   const [editAlignmentTime, setEditAlignmentTime] = React.useState("")
   const [editAlignmentManagerIds, setEditAlignmentManagerIds] = React.useState<string[]>([])
@@ -806,6 +808,7 @@ export function SystemTasksView({
     )
     setEditIsActive(editTemplate.is_active)
     setEditShowInWeeklyPlanner(Boolean(editTemplate.show_in_weekly_planner))
+    setEditIsRepetitive(Boolean(editTemplate.is_repetitive))
     setEditRequiresAlignment(Boolean(editTemplate.requires_alignment))
     setEditAlignmentTime(timeInputValue(editTemplate.alignment_time))
     setEditAlignmentManagerIds(editTemplate.alignment_user_ids ?? [])
@@ -1230,6 +1233,7 @@ export function SystemTasksView({
         internal_notes: buildInternalNotes(internalNotes),
         requires_alignment: requiresAlignment,
         show_in_weekly_planner: showInWeeklyPlanner,
+        is_repetitive: isRepetitive,
         alignment_time: requiresAlignment ? alignmentTime : null,
         alignment_roles: requiresAlignment ? ["MANAGER"] : [],
         alignment_user_ids: requiresAlignment ? alignmentManagerIds : [],
@@ -1274,6 +1278,7 @@ export function SystemTasksView({
       setInternalNotes({})
       setIsActive(true)
       setShowInWeeklyPlanner(false)
+      setIsRepetitive(false)
       setRequiresAlignment(false)
       setAlignmentTime("")
       setAlignmentManagerIds([])
@@ -1377,6 +1382,7 @@ export function SystemTasksView({
         internal_notes: buildInternalNotes(editInternalNotes),
         requires_alignment: editRequiresAlignment,
         show_in_weekly_planner: editShowInWeeklyPlanner,
+        is_repetitive: editIsRepetitive,
         alignment_time: editRequiresAlignment ? editAlignmentTime : null,
         alignment_roles: editRequiresAlignment ? ["MANAGER"] : [],
         alignment_user_ids: editRequiresAlignment ? editAlignmentManagerIds : [],
@@ -1732,6 +1738,7 @@ export function SystemTasksView({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium text-slate-900">{template.title}</div>
+                      {template.is_repetitive && <Badge variant="outline">Detyrë e përsëritur</Badge>}
                       <Badge
                         variant="outline"
                         className={cn("border text-[11px]", PRIORITY_BADGE_STYLES[priorityValue])}
@@ -3254,6 +3261,17 @@ export function SystemTasksView({
                       <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(Boolean(value))} />
                       <span className="text-base">Active</span>
                     </div>
+                    <div className="space-y-2">
+                      <Button
+                        type="button"
+                        variant={isRepetitive ? "default" : "outline"}
+                        aria-pressed={isRepetitive}
+                        onClick={() => setIsRepetitive((value) => !value)}
+                      >
+                        Detyrë e përsëritur: {isRepetitive ? "Po" : "Jo"}
+                      </Button>
+                      <p className="text-xs text-slate-500">Vetëm si informacion.</p>
+                    </div>
                     <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4">
                       <Checkbox
                         checked={showInWeeklyPlanner}
@@ -3730,6 +3748,17 @@ export function SystemTasksView({
                       <Checkbox checked={editIsActive} onCheckedChange={(value) => setEditIsActive(Boolean(value))} />
                       <span className="text-base">Active</span>
                     </div>
+                    <div className="space-y-2">
+                      <Button
+                        type="button"
+                        variant={editIsRepetitive ? "default" : "outline"}
+                        aria-pressed={editIsRepetitive}
+                        onClick={() => setEditIsRepetitive((value) => !value)}
+                      >
+                        Detyrë e përsëritur: {editIsRepetitive ? "Po" : "Jo"}
+                      </Button>
+                      <p className="text-xs text-slate-500">Vetëm si informacion.</p>
+                    </div>
                     <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4">
                       <Checkbox
                         checked={editShowInWeeklyPlanner}
@@ -4079,6 +4108,9 @@ export function SystemTasksView({
                                 <div className="text-[13px] sm:text-[14px] md:text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
                                   {template.title}
                                 </div>
+                                {template.is_repetitive && (
+                                  <Badge variant="outline" className="mt-1 text-[11px]">Detyrë e përsëritur</Badge>
+                                )}
                               </div>
 
                               <div className="truncate text-xs sm:text-sm text-slate-700 font-normal" title={departmentLabel}>

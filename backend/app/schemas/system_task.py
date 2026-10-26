@@ -38,6 +38,7 @@ class SystemTaskOut(BaseModel):
     requires_alignment: bool | None = None
     alignment_time: time | None = None
     show_in_weekly_planner: bool = False
+    is_repetitive: bool = False
     alignment_roles: list[str] | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
     created_by: uuid.UUID | None = None
