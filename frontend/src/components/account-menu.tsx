@@ -91,7 +91,7 @@ export function AccountMenu({ initials }: { initials: string }) {
       ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="h-10 w-10 rounded-full p-0" aria-label="Account menu">
+          <Button variant="ghost" className="h-10 w-10 p-0" data-button-shape="circle" aria-label="Account menu">
             <Avatar className="h-8 w-8">
               {photoUrl ? <AvatarImage src={photoUrl} alt="Your private profile photo" className="object-cover" /> : null}
               <AvatarFallback>{initials}</AvatarFallback>

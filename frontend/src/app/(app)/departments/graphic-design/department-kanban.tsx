@@ -5945,7 +5945,7 @@ export default function DepartmentKanban() {
                 <div className="text-xl font-semibold tracking-tight">{departmentName}</div>
                 <div className="text-xs text-muted-foreground">Manage projects and daily tasks.</div>
               </div>
-              <div className="inline-flex rounded-full bg-card/70 p-1 backdrop-blur">
+              <div data-slot="button-group" className="inline-flex rounded-full bg-card/70 p-1 backdrop-blur">
                 <button
                   type="button"
                   onClick={() => setViewMode("department")}
@@ -5973,7 +5973,7 @@ export default function DepartmentKanban() {
               </div>
             </div>
 
-            <div className="rounded-2xl bg-card/70 p-1 backdrop-blur">
+            <div data-slot="button-group" className="rounded-2xl bg-card/70 p-1 backdrop-blur">
               <div className="flex flex-wrap gap-2">
                 {TABS.map((tab) => {
                   const isActive = tab.id === activeTab
@@ -6002,7 +6002,7 @@ export default function DepartmentKanban() {
                   )
                 })}
                 {activeTab === "all" ? (
-                  <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap rounded-2xl border border-fuchsia-200/80 bg-fuchsia-50/70 px-2 py-1 pr-1">
+                  <div data-slot="button-group" className="flex items-center gap-2 overflow-x-auto whitespace-nowrap rounded-2xl border border-fuchsia-200/80 bg-fuchsia-50/70 px-2 py-1 pr-1">
                     <button
                       type="button"
                       onClick={() => setAllRange("past-7-days")}

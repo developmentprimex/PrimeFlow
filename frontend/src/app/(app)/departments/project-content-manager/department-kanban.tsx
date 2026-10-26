@@ -6543,7 +6543,7 @@ export default function DepartmentKanban() {
                 </div>
                 <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
               </div>
-              <div className="inline-flex rounded-full border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+              <div data-slot="button-group" className="inline-flex rounded-full border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
                 <button
                   type="button"
                   onClick={() => setViewMode("department")}
@@ -6571,7 +6571,7 @@ export default function DepartmentKanban() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+            <div data-slot="button-group" className="rounded-2xl border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
               <div className="flex flex-wrap gap-2">
                 {TABS.map((tab) => {
                   const isActive = tab.id === activeTab
@@ -6602,7 +6602,7 @@ export default function DepartmentKanban() {
                   )
                 })}
                 {activeTab === "all" ? (
-                  <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap rounded-2xl border border-emerald-200/80 bg-emerald-50/70 px-2 py-1 pr-1">
+                  <div data-slot="button-group" className="flex items-center gap-2 overflow-x-auto whitespace-nowrap rounded-2xl border border-emerald-200/80 bg-emerald-50/70 px-2 py-1 pr-1">
                     <button
                       type="button"
                       onClick={() => setAllRange("past-7-days")}
@@ -6703,8 +6703,9 @@ export default function DepartmentKanban() {
           <div className="space-y-4">
             <div className="sticky top-0 z-[90] -mx-6 rounded-b-2xl border-b border-stone-200/70 bg-white px-6 pb-3 pt-3 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <div className="text-lg font-semibold">Projects</div>
+                  <ProjectActivityFilterControl value={projectActivityFilter} onChange={setProjectActivityFilter} projects={filteredProjects} />
                   {(user?.role === "ADMIN" || user?.role === "MANAGER") && (
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox
@@ -6862,7 +6863,6 @@ export default function DepartmentKanban() {
                 ) : null}
               </div>
             </div>
-            <ProjectActivityFilterControl value={projectActivityFilter} onChange={setProjectActivityFilter} projects={filteredProjects} />
             <ProjectListEmptyState
               projects={filteredProjects}
               visibleCount={filteredProjects.filter((project) => matchesProjectActivity(project, projectActivityFilter)).length}
@@ -8222,7 +8222,7 @@ export default function DepartmentKanban() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <div className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
+              <div data-slot="button-group" className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
                 {[
                   { label: "Today", offset: 0 },
                   { label: "Yesterday", offset: -1 },
@@ -8253,7 +8253,7 @@ export default function DepartmentKanban() {
                 <Checkbox checked={multiSelect} onCheckedChange={(v) => setMultiSelect(Boolean(v))} />
                 <span>Multi-select</span>
               </div>
-              <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-1.5">
+              <div data-slot="button-group" className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-1.5">
                 <Input
                   type="date"
                   className="h-9 w-40 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
