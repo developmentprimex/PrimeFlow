@@ -18,6 +18,42 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_mira_desktop_deployed_stamp_upgrades_without_recreating_its_tables(self) -> None:
+        scripts = migration_scripts()
+        desktop = scripts.get_revision("0165_mira_desktop")
+        repetitive = scripts.get_revision("0165_system_task_is_repetitive")
+        merge = scripts.get_revision("0166_merge_mira_repetitive")
+        self.assertEqual(desktop.down_revision, "0164_project_is_active")
+        self.assertEqual(set(merge.down_revision), {desktop.revision, repetitive.revision})
+        for deployed, required, already_applied in (
+            (desktop.revision, repetitive.revision, {desktop.revision}),
+            (repetitive.revision, desktop.revision, {repetitive.revision}),
+            ((desktop.revision, repetitive.revision), merge.revision, {desktop.revision, repetitive.revision}),
+            ("0164_project_is_active", desktop.revision, set()),
+        ):
+            with self.subTest(deployed=deployed):
+                revisions = [step.revision.revision for step in scripts._upgrade_revs("heads", deployed)]
+                self.assertIn(required, revisions)
+                self.assertTrue(already_applied.isdisjoint(revisions))
+                self.assertEqual(revisions[-1], merge.revision)
+        self.assertEqual(scripts._upgrade_revs("heads", merge.revision), [])
+
+    def test_restored_mira_desktop_migration_creates_capture_tables(self) -> None:
+        migration = migration_scripts().get_revision("0165_mira_desktop").module
+        output = StringIO()
+        operations = Operations(MigrationContext.configure(
+            dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output},
+        ))
+        with patch.object(migration, "op", operations):
+            migration.upgrade()
+        sql = output.getvalue()
+        self.assertIn("CREATE TABLE mira_desktop_sessions", sql)
+        self.assertIn("CREATE TABLE mira_desktop_segments", sql)
+        self.assertIn("CONSTRAINT uq_mira_desktop_segment_sequence UNIQUE (session_id, sequence)", sql)
+        self.assertIn("FOREIGN KEY(session_id) REFERENCES mira_desktop_sessions (id) ON DELETE CASCADE", sql)
+        self.assertIn("CREATE INDEX ix_mira_desktop_sessions_user_id", sql)
+        self.assertIn("CREATE INDEX ix_mira_desktop_segments_session_id", sql)
+
     def test_recording_deletion_recognizes_the_deployed_stamp_without_reapplying_it(self) -> None:
         scripts = migration_scripts()
         revision = scripts.get_revision("0161_recording_deletion")
