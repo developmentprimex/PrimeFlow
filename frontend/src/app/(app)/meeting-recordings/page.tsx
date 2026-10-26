@@ -37,19 +37,20 @@ export default function MeetingRecordingsPage() {
     finally { setLoading(false) }
   }, [apiFetch, offset])
   React.useEffect(() => { void load() }, [load, savedId, saving])
-  return <div className="mx-auto max-w-6xl space-y-6">
-    <div><h1 className="text-2xl font-semibold">Regjistrimet e takimeve</h1><p className="text-sm text-muted-foreground">Regjistroni ekranin dhe audion, pastaj hapni regjistrimet e të gjithë ekipit.</p></div>
+  return <div className="w-full space-y-6">
+    <h1 className="text-2xl font-semibold">Regjistrimet e takimeve</h1>
     <RecorderPanel />
     <Card><CardHeader className="flex flex-row items-center justify-between"><CardTitle>Historiku i regjistrimeve</CardTitle><Button variant="outline" disabled={loading} onClick={() => void load()}>Rifresko</Button></CardHeader>
       <CardContent className="space-y-4">
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Titulli / takimi</th><th className="p-2">Data / autori</th><th className="p-2">Kohëzgjatja</th><th className="p-2">Madhësia</th><th className="p-2">Statusi</th><th className="p-2">Veprimet</th></tr></thead>
-          <tbody>{rows.map(row => <tr key={row.id} className="border-b align-top">
+        <div className="overflow-x-auto rounded-md border"><table aria-label="Historiku i regjistrimeve" className="w-full border-collapse text-left text-sm [&_th]:border-r [&_th]:px-3 [&_th]:py-3 [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:px-3 [&_td]:py-2 [&_td:last-child]:border-r-0"><thead className="bg-muted/70"><tr className="border-b"><th scope="col" className="w-14 text-center">Nr.</th><th scope="col">Titulli / takimi</th><th scope="col">Data / autori</th><th scope="col">Kohëzgjatja</th><th scope="col">Madhësia</th><th scope="col">Statusi</th><th scope="col">Veprimet</th></tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={row.id} className="border-b align-top last:border-b-0 even:bg-muted/20 hover:bg-muted/40">
+            <td className="text-center tabular-nums text-muted-foreground">{offset + index + 1}</td>
             <td className="p-2"><Link className="font-medium underline" href={`/meeting-recordings/${row.id}`}>{row.title}</Link>{row.meeting_title && <p className="text-muted-foreground">{row.meeting_title}</p>}</td>
             <td className="p-2">{new Date(row.created_at).toLocaleString("sq-AL")}<p className="text-muted-foreground">{row.recorded_by_name}</p></td>
             <td className="p-2 tabular-nums">{row.duration_seconds == null ? "—" : recordingTime(row.duration_seconds)}</td><td className="p-2">{recordingSize(row.size_bytes)}</td>
             <td className="p-2">{row.media_available === false ? <span className="text-destructive">Skedari nuk është i arritshëm</span> : RECORDING_STATUS[row.status]}{row.is_partial && <p className="text-amber-700">Pjesë e rikuperuar</p>}{row.error_message && <p className="max-w-64 text-destructive">{row.error_message}</p>}</td>
-            <td className="space-y-2 p-2"><Link className="underline" href={`/meeting-recordings/${row.id}`}>{row.status === "READY" && row.media_available !== false ? "Luaj / shkarko" : "Detajet"}</Link>
+            <td className="space-y-2 p-2"><Link className="underline" href={`/meeting-recordings/${row.id}`}>Open</Link>
               {canDelete && ["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="destructive" className="ml-2" disabled={deletingId !== null || row.id === manifest?.id} onClick={() => void removeRecording(row)}>{deletingId === row.id ? "Duke fshirë…" : "Fshi"}</Button>}
               {row.created_by === user?.id && row.id !== manifest?.id && !["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="ghost" disabled={saving} onClick={async () => {
                 if (!window.confirm("Braktis këtë sesion të papërfunduar? Mos e përdorni për një regjistrim aktiv në një pajisje tjetër.")) return

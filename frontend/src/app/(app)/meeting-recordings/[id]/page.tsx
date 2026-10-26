@@ -3,6 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth"
@@ -40,7 +41,11 @@ export default function RecordingDetailPage() {
     return () => { active = false; clearInterval(timer) }
   }, [id, apiFetch])
   return <div className="w-full min-w-0 space-y-4">
-    <Link className="text-sm underline" href="/meeting-recordings">← Regjistrimet e takimeve</Link>
+    <div className="flex items-center">
+      <Button asChild variant="outline" size="sm" className="gap-2">
+        <Link href="/meeting-recordings"><ArrowLeft className="size-4" aria-hidden="true" />Regjistrimet e takimeve</Link>
+      </Button>
+    </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {!row && !error && <p role="status">Duke ngarkuar…</p>}
     {row && <Card><CardHeader><CardTitle>{row.title}</CardTitle></CardHeader><CardContent className="space-y-4">

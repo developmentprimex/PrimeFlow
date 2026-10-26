@@ -46,24 +46,26 @@ export function RecorderPanel() {
   const percent = recorder.manifest?.bytes ? Math.floor(recorder.manifest.uploadedBytes / recorder.manifest.bytes * 100) : 0
   const prepare = () => { void recorder.prepare(device === "none" ? false : device === "default" ? "" : device, source) }
   return <Card>
-    <CardHeader><CardTitle className="flex items-center gap-2"><Video className="size-5" /> PrimeFlow Screen & Audio Recorder</CardTitle></CardHeader>
-    <CardContent className="space-y-5">
-      <p className="text-sm text-muted-foreground">Regjistrimi bëhet në kompjuterin tuaj. Ekrani, mikrofoni dhe audio e sistemit që ofron shfletuesi ngarkohen në serverin PrimeFlow.</p>
+    <CardHeader><CardTitle className="flex items-center gap-2"><Video className="size-5" /> Regjistrim i ri</CardTitle></CardHeader>
+    <CardContent className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2"><Label htmlFor="recording-title">Titulli</Label><Input id="recording-title" maxLength={200} value={title} disabled={locked} onChange={e => setTitle(e.target.value)} /></div>
         <div className="space-y-2"><Label htmlFor="recording-meeting">Takimi (opsional)</Label><select id="recording-meeting" className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={meetingId} disabled={locked} onChange={e => setMeetingId(e.target.value)}>
           <option value="">Pa takim të lidhur</option>{meetings.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
         </select></div>
-        <div className="space-y-2"><Label htmlFor="recording-source">Burimi i preferuar</Label><select id="recording-source" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={source} onChange={e => setSource(e.target.value)}>
-          <option value="monitor">Entire Screen — Ekrani i plotë</option><option value="window">Application Window — Dritare</option><option value="browser">Browser Tab — Skedë</option>
-        </select><p className="text-xs text-muted-foreground">Zgjedhjen përfundimtare e bëni në dialogun e shfletuesit.</p></div>
+        <div className="space-y-2"><Label htmlFor="recording-source">Burimi</Label><select id="recording-source" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={source} onChange={e => setSource(e.target.value)}>
+          <option value="monitor">Ekrani i plotë</option><option value="window">Dritare</option><option value="browser">Skedë e shfletuesit</option>
+        </select></div>
         <div className="space-y-2"><Label htmlFor="recording-microphone">Mikrofoni</Label><select id="recording-microphone" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={device} onChange={e => setDevice(e.target.value)}>
           <option value="default">Mikrofoni i parazgjedhur</option><option value="none">Pa mikrofon</option>{devices.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Mikrofoni ${i + 1}`}</option>)}
         </select></div>
       </div>
-      <div className="space-y-2"><Label htmlFor="recording-description">Përshkrimi (opsional)</Label><Input id="recording-description" maxLength={2000} value={description} disabled={locked} onChange={e => setDescription(e.target.value)} /></div>
-      <label className="flex items-start gap-3 rounded-md border p-3 text-sm"><input type="checkbox" className="mt-1" checked={consent} disabled={locked} onChange={e => setConsent(e.target.checked)} />
-        <span>Konfirmoj se kam njoftuar pjesëmarrësit dhe kam autorizimin e nevojshëm sipas politikës së kompanisë. Regjistrimi mund të përmbajë ekranin, zërin tim dhe zërat e pjesëmarrësve.</span>
+      <details className="text-sm">
+        <summary className="w-fit cursor-pointer text-muted-foreground">Përshkrimi (opsional)</summary>
+        <div className="mt-2"><Label htmlFor="recording-description" className="sr-only">Përshkrimi (opsional)</Label><Input id="recording-description" maxLength={2000} value={description} disabled={locked} onChange={e => setDescription(e.target.value)} /></div>
+      </details>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={consent} disabled={locked} onChange={e => setConsent(e.target.checked)} />
+        <span>Konfirmoj se kam njoftuar pjesëmarrësit dhe kam autorizim për regjistrimin.</span>
       </label>
       {recorder.state === "prepared" && !recorder.info.system && <div role="alert" className="rounded-md border border-amber-400 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950 dark:text-amber-100">
         <p className="font-semibold">Audio e sistemit nuk është e disponueshme për këtë burim. Zërat e pjesëmarrësve të tjerë mund të mos regjistrohen.</p>
@@ -110,7 +112,7 @@ export function RecorderPanel() {
         }}>{m.stopped ? "Riprovo ngarkimin" : "Rikupero pjesën e disponueshme"}</Button>
         <Button size="sm" variant="ghost" disabled={recorder.saving || active} onClick={() => { if (window.confirm("Hiq fragmentet lokale dhe braktis sesionin?")) void recorder.discard(m.id) }}>Braktis</Button>
       </div>)}
-      <p className="text-xs text-muted-foreground">Përdorni kufje për të ulur jehonën. Mbajeni këtë shfletues hapur deri në konfirmimin e ruajtjes. Lundrimi brenda PrimeFlow e mban regjistrimin aktiv; rifreskimi e ndërpret kapjen.</p>
+      {(active || recorder.state === "prepared" || recorder.manifest) && <p className="text-xs text-muted-foreground">Mos e rifreskoni ose mbyllni këtë skedë deri në ruajtjen e regjistrimit.</p>}
     </CardContent>
   </Card>
 }
