@@ -26,10 +26,11 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(os.environ['VOICE_TEST_DATABASE_URL'], execution_options={'schema_translate_map':{None:self.schema}})
         from app.models.ga_note_attachment import GaNoteAttachment
         from app.models.mira_host import Mira1HEvent
+        from app.models.mira_desktop import MiraDesktopSession
         # GaNote always loads its attachments and asks whether Mira wrote it (mira_1h_events),
         # which no foreign key from these tables reaches.
         tables = {Segment.__table__, Meeting.__table__, GaNote.__table__, DiscordLink.__table__, GaNoteAttachment.__table__,
-            Mira1HEvent.__table__}
+            Mira1HEvent.__table__, MiraDesktopSession.__table__}
         while True:
             expanded = tables | {fk.column.table for t in tables for fk in t.foreign_keys}
             if expanded == tables: break

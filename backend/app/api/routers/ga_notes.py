@@ -117,7 +117,7 @@ def _note_out(note: GaNote) -> GaNoteOut:
         updated_at=note.updated_at,
         attachments=[_attachment_out(a) for a in (note.attachments or [])],
         # Read without triggering an async lazy load on a note created in this request.
-        from_mira=bool(note.__dict__.get("from_mira", False)),
+        from_mira=bool(note.__dict__.get("from_mira", False) or note.__dict__.get("from_mira_desktop", False)),
     )
 
 

@@ -31,7 +31,12 @@ class GaNoteFromMiraTests(unittest.TestCase):
 
     def test_api_marks_mira_notes_and_never_lazy_loads_new_notes(self):
         self.assertTrue(_note_out(self.note(from_mira=True)).from_mira)
+        self.assertTrue(_note_out(self.note(from_mira_desktop=True)).from_mira)
         self.assertFalse(_note_out(self.note()).from_mira)
+
+    def test_desktop_note_marker_is_loaded_with_the_existing_note_query(self):
+        sql = str(select(GaNote).compile(dialect=postgresql.dialect()))
+        self.assertIn('mira_desktop_sessions.note_id = ga_notes.id', sql)
 
 
 if __name__ == '__main__':

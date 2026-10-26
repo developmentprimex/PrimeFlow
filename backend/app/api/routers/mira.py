@@ -84,7 +84,10 @@ async def notes(limit: int = 50, db: AsyncSession = Depends(get_db), user=Depend
 
 @router.get('/notes/{note_id}/transcript')
 async def note_transcript(note_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    # Like the notes themselves, every PrimeFlow user may read a Mira note's transcript.
+    from app.services import mira_desktop
+    desktop=await mira_desktop.note_transcript_for_note(db,user,note_id)
+    if desktop is not None:return desktop
+    # Existing Discord transcript visibility stays unchanged.
     return await host.note_transcript(db, note_id)
 
 

@@ -1,0 +1,5 @@
+httpx==0.27.2
+numpy==2.2.6
+scipy==1.15.3
+PyAudioWPatch==0.2.12.9
+pyinstaller==6.16.0
