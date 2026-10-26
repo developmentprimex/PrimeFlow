@@ -1,0 +1,152 @@
+"""Discord controls for M2; every reply is bound to a durable question ID."""
+from __future__ import annotations
+
+import hashlib
+import asyncio
+import discord
+from app.config import settings
+from app.services.discord_m2 import KINDS, MOVEMENTS
+
+
+def actor(interaction):
+    return {'discord_user_id': str(interaction.user.id), 'guild_id': str(interaction.guild_id),
+            'channel_id': str(interaction.channel_id)}
+
+
+def prompt(job):
+    row = job['snapshot']
+    if job['kind'] == 'delivery':
+        text = f"<@{job['discord_user_id']}> **M2 · Dorëzimi**\n**{row['title']}**"
+        if job.get('answered'):
+            text += '\n\n✅ **E dorëzuar**' if job.get('choice') == 'PO' else '\n\n⏳ **Ende pa dorëzuar**'
+        else:
+            text += '\n\nA e ke dorëzuar detyrën?\n**Po** ruhet menjëherë. Te **Jo**, shëno pse.'
+        return text[:1900]
+    text = f"<@{job['discord_user_id']}> **M2 · {KINDS[job['kind']]}**\n{row['title']}"
+    if job['kind'] == 'postponed':
+        text += f"\n**{MOVEMENTS.get(row.get('postponement_kind'), 'Shtyrje')}**"
+        for field, label in (('start', 'Start'), ('due', 'Due')):
+            if row.get(f'old_{field}_date') != row.get(f'{field}_date'):
+                text += f"\n{label}: {row.get(f'old_{field}_date') or '—'} → {row.get(f'{field}_date') or '—'}"
+        text += '\nZgjidh arsyen dhe shpjego pse u shty.'
+    elif job['kind'] == 'progress':
+        text += f"\nStatusi: {row.get('status', '—')} · Progresi: {row.get('progress', 0)}%\nShëno progresin, arsyen dhe çfarë ka mbetur."
+    else:
+        text += '\nPse nuk është kryer? Shëno arsyen dhe komentin.'
+    if job.get('answered'):
+        value = job.get('choice') or next((reason['label'] for reason in job['reasons'] if reason['value'] == job.get('reason_code')), '')
+        text += f"\n\n**Përgjigjja e fundit: {value}**"
+    return text[:1900]
+
+
+def controls(job):
+    view = discord.ui.View(timeout=None)
+    if job['kind'] == 'delivery':
+        view.add_item(discord.ui.Button(label='Po, e dorëzova', style=discord.ButtonStyle.success,
+            custom_id=f"pf:m2:reply:{job['id']}:PO"))
+        if job.get('choice') == 'PO':
+            view.add_item(discord.ui.Button(label='Ndrysho komentin' if job.get('comment') else 'Shto koment (opsional)',
+                style=discord.ButtonStyle.secondary, custom_id=f"pf:m2:comment:{job['id']}"))
+        view.add_item(discord.ui.Button(label='Jo — shëno pse', style=discord.ButtonStyle.secondary,
+            custom_id=f"pf:m2:reply:{job['id']}:JO"))
+    else:
+        view.add_item(discord.ui.Select(placeholder='Zgjidh arsyen dhe shto komentin',
+            custom_id=f"pf:m2:reason:{job['id']}",
+            options=[discord.SelectOption(label=reason['label'][:100], value=reason['value']) for reason in job['reasons']]))
+    view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}"))
+    return view
+
+
+async def save_reply(bot, interaction, job, *, reason=None, comment='', choice=None, source_message=None):
+    """Save and update the original question; only failures create a notice."""
+    await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+    await bot.bridge(f"/bot/m2/{job['id']}/answer", {**actor(interaction),
+        'reason_code': reason, 'comment': comment, 'choice': choice,
+        'expected_answered_at': job.get('answered_at')})
+    latest = None
+    try:
+        latest = await bot.bridge(f"/bot/m2/{job['id']}/open", actor(interaction))
+        message = source_message or getattr(interaction, 'message', None)
+        prefix = '**PROVË M2 — sikur ora 11:45**\n' if message and message.content.startswith('**PROVË M2') else ''
+        if message:
+            await message.edit(content=prefix + prompt(latest), view=controls(latest), allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await interaction.edit_original_response(content=prompt(latest), view=controls(latest), allowed_mentions=discord.AllowedMentions.none())
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning('M2 answer saved, message refresh failed: %s', job['id'])
+        await interaction.followup.send('U ruajt në PrimeFlow, por pyetja nuk u rifreskua. Provo përsëri.', ephemeral=True)
+    return latest
+
+
+class ReplyModal(discord.ui.Modal):
+    def __init__(self, bot, job, *, reason=None, choice=None, source_message=None):
+        super().__init__(title='Komenti për dorëzimin' if choice == 'PO' else 'Përgjigjja për M2', timeout=900)
+        self.bot, self.job, self.reason, self.choice = bot, job, reason, choice
+        self.source_message = source_message
+        self.initial_save = None
+        self.comment = discord.ui.TextInput(label='Pse nuk u dorëzua?' if choice == 'JO' else 'Komenti (opsional)' if choice == 'PO' else 'Komenti / progresi',
+            style=discord.TextStyle.paragraph, required=choice != 'PO', max_length=4000,
+            default=(job.get('comment') or None) if choice == job.get('choice') else None)
+        self.add_item(self.comment)
+
+    async def on_submit(self, interaction):
+        await interaction.response.defer()
+        try:
+            if self.initial_save is not None:
+                latest = await asyncio.shield(self.initial_save)
+                if isinstance(latest, Exception):
+                    raise latest
+                self.job = latest or await self.bot.bridge(f"/bot/m2/{self.job['id']}/open", actor(interaction))
+            await save_reply(self.bot, interaction, self.job, reason=self.reason, comment=str(self.comment),
+                             choice=self.choice, source_message=self.source_message)
+        except Exception as exc:
+            await interaction.followup.send(self.bot.error_message(exc), ephemeral=True)
+
+
+async def handle(bot, interaction):
+    parts = interaction.data['custom_id'].split(':')
+    direct_yes = parts[2] == 'reply' and parts[4] == 'PO'
+    await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+    job = await bot.bridge(f'/bot/m2/{parts[3]}/open', actor(interaction))
+    if direct_yes:
+        modal = ReplyModal(bot, job, choice='PO', source_message=getattr(interaction, 'message', None))
+        modal.initial_save = asyncio.get_running_loop().create_future()
+        # Open the optional comment immediately. The yes answer is saved even
+        # when the person closes the form; an early submit waits for its version.
+        await interaction.response.send_modal(modal)
+        try:
+            latest = await save_reply(bot, interaction, job, choice='PO',
+                comment=(job.get('comment') or '') if job.get('choice') == 'PO' else '')
+            modal.initial_save.set_result(latest)
+        except Exception as exc:
+            modal.initial_save.set_result(exc)
+            raise
+        return
+    if parts[2] == 'comment' and job.get('choice') != 'PO':
+        await interaction.response.send_message('Përgjigjja ka ndryshuar. Zgjidh Po ose Jo përsëri.', ephemeral=True)
+        return
+    reason = interaction.data['values'][0] if parts[2] == 'reason' else None
+    choice = parts[4] if parts[2] == 'reply' else 'PO' if parts[2] == 'comment' else None
+    await interaction.response.send_modal(ReplyModal(bot, job, reason=reason, choice=choice, source_message=getattr(interaction, 'message', None)))
+
+
+async def deliver(bot):
+    jobs = (await bot.bridge('/bot/m2/claim', {}))['jobs']
+    for job in jobs:
+        try:
+            channel = await bot.private_channel(job['guild_id'], job['channel_id'], job['discord_user_id'])
+            # Recheck the link and assignment immediately before delivery.
+            job = await bot.bridge(f"/bot/m2/{job['id']}/open", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')})
+            if job['answered']:
+                continue
+            nonce = hashlib.sha256(f"m2:{job['id']}".encode()).hexdigest()[:24]
+            message = await bot.http.request(discord.http.Route('POST', '/channels/{channel_id}/messages', channel_id=channel.id),
+                json={'content': prompt(job), 'components': controls(job).to_components(),
+                      'allowed_mentions': {'parse': [], 'users': [job['discord_user_id']]},
+                      'nonce': nonce, 'enforce_nonce': True})
+            await bot.bridge(f"/bot/m2/{job['id']}/ack", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')} | {'message_id': str(message['id'])})
+        except Exception as exc:
+            # Do not log task text, replies, or credentials.
+            import logging
+            logging.getLogger(__name__).warning('M2 delivery %s failed: %s', job['id'], type(exc).__name__)

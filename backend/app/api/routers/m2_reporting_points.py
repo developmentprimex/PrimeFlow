@@ -16,6 +16,7 @@ from app.db import get_db
 from app.models.m2_reporting_points import M2ReportingPointsReport
 from app.models.user import User
 from app.services.audit import add_audit_log
+from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
@@ -53,7 +54,7 @@ class ManualAnswersPayload(BaseModel):
             if key in MANUAL_POINTS:
                 continue
             prefix, _, task_id = key.partition(":")
-            if prefix not in {"delivery", "delivery_choice", "postponed_comment", "unfinished_comment"}:
+            if prefix not in {"delivery", "delivery_choice", "postponed_comment", "unfinished_comment", "progress_reason", "progress_comment", "postponed_reason", "unfinished_reason"}:
                 raise ValueError("Pike manuale e panjohur.")
             try:
                 if str(uuid.UUID(task_id)) != task_id:
@@ -62,6 +63,8 @@ class ManualAnswersPayload(BaseModel):
                 raise ValueError("Detyre e pavlefshme per pergjigjen manuale.") from exc
             if prefix == "delivery_choice" and value[key] not in {"", "PO", "JO"}:
                 raise ValueError("Zgjedhja duhet te jete PO ose JO.")
+            if prefix.endswith("_reason") and value[key] and value[key] not in REASON_LABELS:
+                raise ValueError("Arsye e panjohur.")
         if any(len(answer) > 10000 for answer in value.values()):
             raise ValueError("Pergjigjja nuk mund te kete mbi 10000 karaktere.")
         return value
@@ -138,6 +141,8 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
                       for item in (row.data or {}).get(section, []))
     valid_keys.update(f"unfinished_comment:{item['task_id']}"
                       for item in (row.data or {}).get("unfinished_priority", []) if item.get("task_id"))
+    valid_keys.update(f"{prefix}:{item['task_id']}" for item in (row.data or {}).get("ga_progress", [])
+                      for prefix in ("progress_reason", "progress_comment"))
     if any(key not in MANUAL_POINTS and key not in valid_keys and key not in before for key in payload.manual_answers):
         raise HTTPException(422, "Detyra nuk gjendet ne kete raport.")
     row.manual_answers = {**before, **payload.manual_answers}

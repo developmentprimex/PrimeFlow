@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { clearSavedManualDraft, readManualDraft, writeManualDraft } from "@/lib/m2-reporting-points-draft"
+import { changedManualAnswers, clearSavedManualDraft, readManualDraft, writeManualDraft } from "@/lib/m2-reporting-points-draft"
 import { reportResponseJson as responseJson } from "@/lib/report-response"
 import { ReportingPointsManagement } from "@/components/reporting-points-management"
 import { M2ReportingPointsView, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m2-reporting-points-view"
@@ -31,6 +31,8 @@ export default function M2ReportingPointsPage() {
   const { user, loading: authLoading, apiFetch } = useAuth()
   const [day, setDay] = React.useState(today)
   const [report, setReport] = React.useState<ReportingPointsReport | null>(null)
+  const activeReportId = React.useRef<string | undefined>(undefined)
+  React.useEffect(() => { activeReportId.current = report?.id }, [report?.id])
   const [answers, setAnswers] = React.useState<ManualAnswers>({})
   const [recipients, setRecipients] = React.useState<Recipients | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
@@ -43,25 +45,30 @@ export default function M2ReportingPointsPage() {
   const [savingAnswers, setSavingAnswers] = React.useState(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
   const canAccess = !!user
+  const currentUserId = user?.id
   const canManage = !!user && (["ADMIN", "MANAGER"].includes(user.role) || (user.full_name || "").trim().toLowerCase() === "laurent hoxha")
   const dirty = !!report && (Array.from(new Set([...Object.keys(answers), ...Object.keys(report.manual_answers)])) as ManualKey[]).some((key) => (answers[key] || "") !== (report.manual_answers[key] || ""))
 
   const acceptReport = React.useCallback((value: ReportingPointsReport) => {
     setReport(value)
-    const local = canManage && user?.id ? readManualDraft(draftStorage(), user.id, value.report_date) : null
+    const local = canManage && currentUserId ? readManualDraft(draftStorage(), currentUserId, value.report_date) : null
     setAnswers({ ...value.manual_answers, ...local })
     setError(null)
     setSaveError(null)
-  }, [user?.id, canManage])
+  }, [currentUserId, canManage])
 
   React.useEffect(() => {
     if (!canAccess) return
     let active = true
-    setLoading(true)
-    setReport(null)
-    setAnswers({})
-    setError(null)
-    apiFetch(`${API}?report_date=${day}`).then(async (response) => {
+    Promise.resolve().then(() => {
+      if (!active) return null
+      setLoading(true)
+      setReport(null)
+      setAnswers({})
+      setError(null)
+      return apiFetch(`${API}?report_date=${day}`)
+    }).then(async (response) => {
+      if (!response) return
       if (response.status === 404) return
       const value = await responseJson<ReportingPointsReport>(response)
       if (active) acceptReport(value)
@@ -98,15 +105,19 @@ export default function M2ReportingPointsPage() {
     if (!report || !dirty || !canManage || savingAnswers || busy || saveError) return
     const reportId = report.id
     const savedAnswers = { ...answers }
+    const changedAnswers = changedManualAnswers(savedAnswers, report.manual_answers)
     const savedDay = report.report_date
     const timer = window.setTimeout(async () => {
       setSavingAnswers(true)
       try {
         const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${reportId}/answers`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: savedAnswers }),
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: changedAnswers }),
         }))
         // Preserve newer edits; the next save starts after this one finishes.
         setReport((previous) => previous?.id === reportId ? value : previous)
+        if (activeReportId.current === reportId) {
+          setAnswers((current) => ({ ...value.manual_answers, ...changedManualAnswers(current, savedAnswers) }))
+        }
         if (user?.id) clearSavedManualDraft(draftStorage(), user.id, savedDay, savedAnswers)
       } catch (error) {
         setSaveError(error instanceof Error ? error.message : "Përgjigjet nuk u ruajtën.")
@@ -137,7 +148,7 @@ export default function M2ReportingPointsPage() {
   const save = () => action("save", async () => {
     if (!report) return
     const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${report.id}/answers`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: answers }),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: changedManualAnswers(answers, report.manual_answers) }),
     }))
     if (user?.id) clearSavedManualDraft(draftStorage(), user.id, day, answers)
     acceptReport(value)
@@ -166,7 +177,7 @@ export default function M2ReportingPointsPage() {
 
   const changeAnswer = (key: ManualKey, value: string) => {
     const next = { ...answers, [key]: value }
-    if (user?.id) writeManualDraft(draftStorage(), user.id, day, next)
+    if (user?.id) writeManualDraft(draftStorage(), user.id, day, changedManualAnswers(next, report?.manual_answers || {}))
     setSaveError(null)
     setAnswers(next)
   }

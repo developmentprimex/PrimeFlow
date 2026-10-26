@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>One-time activation of the requested M2 Discord test.</Description></RegistrationInfo>
+  <Principals><Principal id="Author"><UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><Hidden>true</Hidden><ExecutionTimeLimit>PT5M</ExecutionTimeLimit><AllowStartOnDemand>true</AllowStartOnDemand></Settings>
+  <Actions Context="Author"><Exec><Command>C:\PrimeFlowOps\M2-20261026\activate.cmd</Command></Exec></Actions>
+</Task>

@@ -4,12 +4,13 @@ import * as React from "react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { reportDate, type TaskRow } from "@/components/m3-reporting-points-view"
+import { DAILY_RLZ_REASONS, dailyRlzReasonLabel } from "@/lib/daily-rlz-ui"
 
 export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
 export const MANUAL_POINTS = {
   reorganization: "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
 } as const
-export type ManualKey = keyof typeof MANUAL_POINTS | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}` | `unfinished_comment:${string}`
+export type ManualKey = keyof typeof MANUAL_POINTS | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}` | `unfinished_comment:${string}` | `progress_reason:${string}` | `progress_comment:${string}` | `postponed_reason:${string}` | `unfinished_reason:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 export type UnfinishedPriorityRow = {
   task_id?: string; reason?: string; comment?: string
@@ -71,7 +72,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
           </td><td className="min-w-[240px] border p-2 align-top">
             <Textarea aria-label={`Përgjigjja manuale për ${row.title}`} value={answers[key] || ""} disabled={disabled} maxLength={10000}
               className="min-h-20 bg-white text-black" placeholder="A është dorëzuar? Shëno përgjigjjen." onChange={(event) => onAnswerChange(key, event.target.value)} />
-          </td></> : <><td className="min-w-[150px] whitespace-pre-wrap border p-2 align-top">{row.reason || "—"}</td><td className="min-w-[220px] whitespace-pre-wrap border p-2 align-top">{row.comment || "—"}</td><td className="border p-2 align-top font-bold" style={{ background: row.risk === "RREZIK" ? "#fee2e2" : "#dcfce7", color: row.risk === "RREZIK" ? "#7f1d1d" : "#14532d" }}>{row.risk}</td><td className="min-w-[240px] border p-2 align-top">
+          </td></> : <><td className="min-w-[150px] whitespace-pre-wrap border p-2 align-top">{dailyRlzReasonLabel(answers[`postponed_reason:${row.task_id}`]) || row.reason || "—"}</td><td className="min-w-[220px] whitespace-pre-wrap border p-2 align-top">{row.comment || "—"}</td><td className="border p-2 align-top font-bold" style={{ background: row.risk === "RREZIK" ? "#fee2e2" : "#dcfce7", color: row.risk === "RREZIK" ? "#7f1d1d" : "#14532d" }}>{row.risk}</td><td className="min-w-[240px] border p-2 align-top">
             <Textarea aria-label={`Koment manual për ${row.title}`} value={answers[commentKey] || ""} disabled={disabled} maxLength={10000}
               className="min-h-20 bg-white text-black" placeholder="Shëno komentin." onChange={(event) => onAnswerChange(commentKey, event.target.value)} />
           </td></>}
@@ -96,7 +97,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
                 value={answers[commentKey] ?? (row.comment && !["-", "—"].includes(row.comment) ? row.comment : "")}
                 disabled={disabled} maxLength={10000} rows={1} autoResize
                 className="min-h-9 min-w-[180px] bg-white text-black" placeholder="Shëno komentin." onChange={(event) => onAnswerChange(commentKey, event.target.value)} />
-                : String(row[field] || "—"))]
+                : field === "reason" ? dailyRlzReasonLabel(answers[`unfinished_reason:${row.task_id}`]) || row.reason || "—" : String(row[field] || "—"))]
             return <tr key={row.task_id || index} style={{ background: row.deadline_important ? "#dc2626" : row.status === "IN_PROGRESS" ? "#FFFF00" : "#FFC4ED", color: row.deadline_important ? "white" : "black" }}>
               {cells.map((value, columnIndex) => <td key={columnIndex} className={`border p-2 align-top ${columnIndex === 6 ? "min-w-[280px]" : columnIndex >= 8 ? "min-w-[160px] whitespace-pre-wrap break-words" : "w-px whitespace-nowrap"}`} style={row.eight_am ? {
                 borderTop: "3px solid #dc2626", borderBottom: "3px solid #dc2626",
@@ -121,12 +122,28 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
       <p className="text-sm text-muted-foreground">Detyrat AM dhe AM/PM me simbolin F ose GA dhe detyrat personale me GA, brenda intervalit start–due të datës së raportit.</p>
       <div className="overflow-x-auto border">
         <table className="w-full min-w-[900px] border-collapse text-xs">
-          <thead className="bg-slate-100"><tr>{["NR", ...common.map(([, title]) => title), "SIMBOLI", "TITULLI"].map((title) => <th key={title} className="border px-2 py-2 text-left whitespace-nowrap">{title}</th>)}</tr></thead>
+          <thead className="bg-slate-100"><tr>{["NR", ...common.map(([, title]) => title), "SIMBOLI", "TITULLI", "ARSYEJA", "KOMENTI / PROGRESI"].map((title) => <th key={title} className="border px-2 py-2 text-left whitespace-nowrap">{title}</th>)}</tr></thead>
           <tbody>{progressRows.map((row, index) => <tr key={row.task_id} style={{ background: row.deadline_important ? "#dc2626" : TASK_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }}>
             <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
             {common.map(([field]) => <td key={field} className="w-px whitespace-nowrap border p-2 align-top">{text(row, field)}</td>)}
             <td className="w-px whitespace-nowrap border p-2 align-top font-bold">{row.marker || "—"}</td>
             <td className="min-w-[280px] border p-2 align-top">{row.title}</td>
+            <td className="min-w-[180px] border p-2 align-top">
+              <select aria-label={`Arsyeja për ${row.title}`} disabled={disabled}
+                value={answers[`progress_reason:${row.task_id}`] || ""}
+                className="w-full rounded border bg-white p-2 text-black"
+                onChange={(event) => onAnswerChange(`progress_reason:${row.task_id}`, event.target.value)}>
+                <option value="">Zgjidh arsyen</option>
+                {DAILY_RLZ_REASONS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+              </select>
+              {row.reason && row.reason !== "-" ? <p className="mt-2 whitespace-pre-wrap">{row.reason}</p> : null}
+            </td>
+            <td className="min-w-[240px] border p-2 align-top">
+              <Textarea aria-label={`Progresi për ${row.title}`} disabled={disabled} maxLength={10000}
+                value={answers[`progress_comment:${row.task_id}`] ?? (row.comment && row.comment !== "-" ? row.comment : "")}
+                className="min-h-20 bg-white text-black" placeholder="Shëno progresin dhe komentin."
+                onChange={(event) => onAnswerChange(`progress_comment:${row.task_id}`, event.target.value)} />
+            </td>
           </tr>)}</tbody>
         </table>
         {!progressRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}

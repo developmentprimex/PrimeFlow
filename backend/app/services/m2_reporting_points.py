@@ -21,6 +21,7 @@ from app.services.personal_task_owner import personal_task_owner
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga, one_h_marker_label
+from app.services.daily_rlz_compliance import REASON_LABELS
 
 TITLE = "PIKAT PER RAPORTIM M2"
 MANUAL_POINTS = {
@@ -156,7 +157,8 @@ def report_payload(row: M2ReportingPointsReport) -> dict:
 
 
 async def current_report_payload(db: AsyncSession, row: M2ReportingPointsReport) -> dict:
-    return await m3.with_current_task_explanations(db, report_payload(row), "unfinished_priority")
+    payload = await m3.with_current_task_explanations(db, report_payload(row), "unfinished_priority")
+    return await m3.with_current_task_explanations(db, payload, "ga_progress")
 
 
 def table_groups(report, key):
@@ -176,7 +178,8 @@ def table_columns(key, movement=""):
         columns = [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
                 ("project", "PRJK", 96), ("am_pm", "AM/PM", 60), ("task_type", "LLOJI", 48),
                 ("marker", "SIMBOLI", 60), ("title", "TITULLI", 450)]
-        return columns + ([("due_date", "DUE DATE", 88)] if key == "pm_due_today" else [])
+        return columns + ([("due_date", "DUE DATE", 88)] if key == "pm_due_today" else
+                          [("reason", "ARSYEJA", 124), ("comment", "KOMENTI / PROGRESI", 220)])
     if key in {"postponed", "postponed_am"}:
         return [(field, label, 60 if field == "am_pm" else width) for field, label, width in m3.report_table_columns("ga_postponed", movement)
                 if field != "category"] + [("manual_comment", "KOMENT MANUAL", 220)]
@@ -186,6 +189,15 @@ def table_columns(key, movement=""):
 
 
 def table_value(report, row, column, index, movement, section=""):
+    if column == "reason" and section in {"unfinished_priority", "postponed", "postponed_am"}:
+        prefix = "unfinished_reason" if section == "unfinished_priority" else "postponed_reason"
+        reason = report.get("manual_answers", {}).get(f"{prefix}:{row['task_id']}")
+        return REASON_LABELS.get(reason, reason) if reason else row.get("reason") or "-"
+    if section == "ga_progress" and column == "reason":
+        reason = report.get("manual_answers", {}).get(f"progress_reason:{row['task_id']}")
+        return REASON_LABELS.get(reason, reason) if reason else row.get("reason") or "-"
+    if section == "ga_progress" and column == "comment":
+        return report.get("manual_answers", {}).get(f"progress_comment:{row['task_id']}") or row.get("comment") or "-"
     if column == "comment" and section == "unfinished_priority":
         return m3.effective_task_comment(row, report, "unfinished_comment")
     if column == "manual_comment":

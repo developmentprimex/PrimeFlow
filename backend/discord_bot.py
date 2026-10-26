@@ -20,6 +20,7 @@ from discord.ext import tasks
 from app.config import settings
 import discord_ui as ui
 import discord_agent_client as agent_client
+import discord_m2_client as m2_client
 import discord_voice_meetings as voice_meetings
 import mira_host
 
@@ -339,6 +340,7 @@ class PrimeFlowBot(discord.Client):
         if settings.MIRA_HOST_ENABLED and settings.MIRA_HOST_BOT_TOKEN:
             self.mira_host_schedule.start()
         self.reminders.start()
+        self.m2_questions.start()
         self.meeting_alerts.start()
         self.agent_results.start()
 
@@ -673,7 +675,9 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
-            if custom_id.startswith("pf:vm:"):
+            if custom_id.startswith("pf:m2:"):
+                await m2_client.handle(self, interaction)
+            elif custom_id.startswith("pf:vm:"):
                 await voice_meetings.handle_meeting_interaction(self, interaction)
             elif custom_id.startswith("pf:agent:"):
                 await agent_client.handle_agent_interaction(self, interaction)
@@ -814,6 +818,17 @@ class PrimeFlowBot(discord.Client):
             log.warning("Message %s failed: %s", message.id, type(exc).__name__)
             if isinstance(exc, ValueError) and "channel" in locals():
                 await channel.send(self.error_message(exc))
+
+    @tasks.loop(seconds=30)
+    async def m2_questions(self):
+        try:
+            await m2_client.deliver(self)
+        except Exception as exc:
+            log.warning("M2 polling failed: %s", type(exc).__name__)
+
+    @m2_questions.before_loop
+    async def before_m2_questions(self):
+        await self.wait_until_ready()
 
     @tasks.loop(seconds=30)
     async def agent_results(self):
@@ -973,6 +988,7 @@ class PrimeFlowBot(discord.Client):
         await self.meeting_capture.close()
         self.clear_ready_status()
         self.reminders.cancel()
+        self.m2_questions.cancel()
         self.meeting_alerts.cancel()
         self.agent_results.cancel()
         await self.http_bridge.aclose()

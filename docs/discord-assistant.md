@@ -1,5 +1,51 @@
 # Asistenti personal PrimeFlow në Discord
 
+## Pyetjet M2 në 11:45
+
+Boti ekzistues kontrollon çdo 30 sekonda nga 11:45 deri para 12:00, të hënën–të
+premten, sipas zonës kohore të raporteve. Në kanalin personal të secilit përdorues
+të lidhur me `/lidh`, dërgon pyetje me përmendje për detyrat e caktuara atij:
+
+- Detyrat AM/AM-PM të pakryera me Due Date sot, përfshirë 08:00 dhe Deadline,
+  duke përdorur pikërisht përzgjedhjen e raportit M2.
+- Shtyrjet SOT/SOT ose Deadline dhe shtyrjet e sotme para pauzës. Pyetja dallon
+  Start + Due, vetëm Start dhe vetëm Due, dhe tregon datat para/pas ndryshimit.
+  Një shtyrje që ka tashmë arsyen dhe komentin për ndryshimin nuk pyetet përsëri.
+  Nëse e njëjta shtyrje është në të dyja tabelat, dërgohet vetëm një pyetje.
+- Progresi për detyrat e hapura AM/AM-PM me F, GA ose personale me GA.
+- Dorëzimi për secilën detyrë M2 ose M2/3: PO/JO; JO kërkon koment.
+  PO ruhet me një klikim dhe hap direkt formularin e komentit opsional.
+  Mbyllja pa koment nuk e anulon PO; komenti mund të ndryshohet edhe më vonë.
+  Ruajtja përditëson të njëjtën pyetje në Discord pa mesazhe të reja konfirmimi.
+  Teksti i komentit ruhet në PrimeFlow dhe nuk afishohet poshtë pyetjes në Discord.
+
+Për arsyet përdoret lista e njëjtë si te shtyrjet/My View në PrimeFlow. Zgjedhja
+hap formularin e komentit; ruajtja bëhet me dërgimin e formularit. Komenti ruhet
+si përgjigje M2 me autor, shtohet te komenti personal i detyrës pa fshirë tekstin
+e mëparshëm, dhe arsyeja/komenti operacional ruhen te gjendja ditore e detyrës.
+Për shtyrjet, përgjigjja e Discord-it shfaqet vetëm te kolona **Komenti**;
+**Koment manual** mbetet fushë e pavarur për shënimet nga faqja e raportit.
+Dorëzimi ruhet në raport dhe te komenti i detyrës; PO nuk e mbyll detyrën.
+Raporti përditëson kolonat e përgjigjeve dhe numëruesin SA/TOTALI. Për detyrat me
+disa përgjegjës, secili përgjigjet veçmas: një JO e bën rezultatin JO; PO shfaqet
+kur të gjithë marrësit e pyetjes janë përgjigjur PO.
+
+Pyetjet/përgjigjet ruhen në `discord_m2_questions` dhe i mbijetojnë rinisjes.
+Klikimi i përsëritur nuk shton dy komente.
+Përgjigjja mund të ndryshohet gjatë së njëjtës ditë: p.sh. JO me koment, pastaj
+PO kur dorëzohet. Raporti tregon përgjigjen e fundit; komentet e mëparshme dhe
+auditimi mbeten si historik. Një formular i vjetër nuk mbishkruan një përgjigje
+të ndryshuar ndërkohë. Revokimi i lidhjes, heqja e caktimit,
+dita e kaluar ose një shtyrje e re refuzojnë përgjigjen e vjetër. Nuk kërkohet AI
+ose Message Content Intent për këta formularë. Nuk dërgohen pyetje për personat
+që ende nuk e kanë lidhur Discord-in.
+
+Aktivizimi kërkon migrimin `0162_discord_m2_questions`, deploy të API-së dhe
+frontend-it, dhe rinisjen e procesit `primeflow-discord`. Nuk ka dërgim provë
+automatik gjatë testeve. Testet e PostgreSQL mund të ekzekutohen me
+`M2_TEST_DATABASE_URL` dhe `python -m pytest tests/test_discord_m2_database.py`;
+krijojnë dhe fshijnë vetëm një skemë të përkohshme me emër unik.
+
 Shënimet e takimeve përdorin `DISCORD_MEETING_TRANSCRIBE_MODEL=gpt-transcribe`
 për audion. Përmbledhjet përdorin `DISCORD_AI_MODEL`; në server është vendosur
 `gpt-6-luna`.

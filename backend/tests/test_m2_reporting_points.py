@@ -282,14 +282,14 @@ def test_ga_progress_exports_task_columns_before_delivery():
     table = next(block for block in blocks if block["kind"] == "table")
     headers = [column[0] for column in table["columns"]]
     cells = dict(zip(headers, table["rows"][0]))
-    assert headers == ["nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title"]
+    assert headers == ["nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title", "reason", "comment"]
     assert cells["marker"]["text"] == "GA"
     html = service.render_html(value)
     assert html.index("4. PROGRESI I DET ME GA (AM)") < html.index("5. DET PM ME DUE DATE SOT") < html.index("6. SA PER DOREZIM M2?")
     attachments = service.report_attachments(value)
     word = Document(io.BytesIO(attachments[0][1]))
-    assert word.tables[0].rows[0].cells[-1].text == "TITULLI"
-    assert len(word.tables[0].columns) == 8
+    assert word.tables[0].rows[0].cells[-1].text == "KOMENTI / PROGRESI"
+    assert len(word.tables[0].columns) == 10
     sheet = load_workbook(io.BytesIO(next(content for name, content, _ in attachments if name.endswith(".xlsx")))).active
     assert "SIMBOLI" in [cell.value for row in sheet for cell in row]
     assert not {"START DATE", "DUE DATE", "PROGRESI"}.intersection(cell.value for row in sheet for cell in row)

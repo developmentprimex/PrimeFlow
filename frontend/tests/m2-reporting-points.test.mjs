@@ -33,7 +33,7 @@ function load(name) {
 }
 
 const { M2ReportingPointsView } = load("@/components/m2-reporting-points-view")
-const { readManualDraft, writeManualDraft, clearSavedManualDraft } = load("@/lib/m2-reporting-points-draft")
+const { changedManualAnswers, readManualDraft, writeManualDraft, clearSavedManualDraft } = load("@/lib/m2-reporting-points-draft")
 const Page = load("@/app/(app)/m2-reporting-points/page").default
 const { reportResponseJson } = load("@/lib/report-response")
 
@@ -220,6 +220,24 @@ test("M2 drafts are scoped to date and user and retain newer per-task edits", ()
   assert.equal(readManualDraft(storage, "u1", "2026-10-06"), null)
 })
 
+test("saving a local change leaves other Discord answers intact", () => {
+  const saved = { reorganization: "Plan", [answerKey]: "Existing answer" }
+  const changes = changedManualAnswers({ ...saved, reorganization: "New plan" }, saved)
+  assert.deepEqual(JSON.parse(JSON.stringify(changes)), { reorganization: "New plan" })
+  const server = { ...saved, [answerKey]: "New Discord reply" }
+  assert.equal({ ...server, ...changes }[answerKey], "New Discord reply")
+})
+
+test("progress reasons and comments survive reloading a draft", () => {
+  const map = new Map()
+  const storage = { getItem: key => map.get(key) || null, setItem: (key, value) => map.set(key, value), removeItem: key => map.delete(key) }
+  const taskId = "11111111-1111-4111-8111-111111111111"
+  writeManualDraft(storage, "u1", "2026-10-26", { [`progress_reason:${taskId}`]: "MISSING_INFORMATION", [`progress_comment:${taskId}`]: "Presim matjet" })
+  const value = readManualDraft(storage, "u1", "2026-10-26")
+  assert.equal(value[`progress_reason:${taskId}`], "MISSING_INFORMATION")
+  assert.equal(value[`progress_comment:${taskId}`], "Presim matjet")
+})
+
 function mountPage(storage, apiFetch) {
   const state = [], callbacks = [], effects = [], pending = [], timers = new Map()
   let cursor = 0, effectCursor = 0, callbackCursor = 0, timerId = 0, changed = true, tree
@@ -232,6 +250,11 @@ function mountPage(storage, apiFetch) {
         const next = typeof value === "function" ? value(state[index]) : value
         if (!Object.is(next, state[index])) { state[index] = next; changed = true }
       }]
+    },
+    useRef(initial) {
+      const index = cursor++
+      if (!(index in state)) state[index] = { current: initial }
+      return state[index]
     },
     useCallback(callback, deps) {
       const index = callbackCursor++
@@ -447,7 +470,7 @@ test("a failed automatic save preserves the entered answers and the reload draft
 })
 
 
-test("GA morning tasks appear after postponements with matching colors and eight columns", () => {
+test("GA morning tasks include platform reasons and progress comments", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report: { ...report, data: { ...report.data, ga_progress: [
       { ...row, marker: "GA", progress: 37.5, start_date: "2026-10-01", due_date: "2026-10-09", status: "IN_PROGRESS" },
@@ -457,12 +480,14 @@ test("GA morning tasks appear after postponements with matching colors and eight
   assert.ok(html.indexOf('id="m2-postponed"') < html.indexOf('id="m2-ga-progress"'))
   assert.ok(html.indexOf('id="m2-ga-progress"') < html.indexOf('id="m2-delivery"'))
   const section = html.slice(html.indexOf('id="m2-ga-progress"'), html.indexOf('aria-labelledby="m2-pm-due-today"'))
-  assert.equal((section.match(/<th /g) || []).length, 8)
-  assert.doesNotMatch(section, /START DATE|DUE DATE|PROGRESI<\/th>|37.5%|100%/)
+  assert.equal((section.match(/<th /g) || []).length, 10)
+  assert.doesNotMatch(section, /START DATE|DUE DATE|37.5%|100%/)
   assert.match(section, /background:#FFFF00/)
   assert.match(section, /background:#C4FDC4/)
   assert.match(section, />GA<\/td>/)
-  assert.doesNotMatch(section, /<textarea|<select/)
+  assert.match(section, /<textarea/)
+  assert.match(section, /<select/)
+  assert.match(section, /value="MISSING_INFORMATION"/)
 })
 
 
