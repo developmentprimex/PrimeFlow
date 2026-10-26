@@ -813,11 +813,12 @@ def render_html(
             f'{html.escape(strike_count_label(task.strike_count, document))}</div>'
         )
 
-    def task_card(background: str, accent: str, title_html: str, body_html: str, strike_count: int | None) -> str:
+    def task_card(background: str, accent: str, title_html: str, body_html: str, strike_count: int | None, task_id: str) -> str:
         # Left accent as its own cell — Outlook ignores CSS border-left reliably.
         return (
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
             f'data-report-task="true" data-strike-count="{strike_count if strike_count is not None else "unknown"}" '
+            f'data-task-id="{html.escape(task_id, quote=True)}" '
             "style=\"width:100%;border-collapse:collapse;margin:8px 0;\">"
             "<tr>"
             f"<td width=\"6\" bgcolor=\"{accent}\" style=\"width:6px;background-color:{accent};"
@@ -870,7 +871,8 @@ def render_html(
                     details += detail_row(marked_html(task.description, task.marked_description))
                 details += strike_badge(task)
                 rows.append(
-                    f'<tr data-report-task="true" data-strike-count="{task.strike_count if task.strike_count is not None else "unknown"}">'
+                    f'<tr data-report-task="true" data-strike-count="{task.strike_count if task.strike_count is not None else "unknown"}" '
+                    f'data-task-id="{html.escape(task.task_id, quote=True)}">'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;text-align:center;font-family:Arial,sans-serif;">{number}</td>'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-weight:700;">{html.escape(employee.name)}</td>'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;">{html.escape(task.department)}</td>'
@@ -1107,6 +1109,7 @@ def render_html(
                         marker_badge(task.one_h_marker) + marked_html(heading or task.title, task.marked_title),
                         detail_html,
                         task.strike_count,
+                        task.task_id,
                     )
                 )
             body_chunks.append('</div>')

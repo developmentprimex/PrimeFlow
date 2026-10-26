@@ -8,9 +8,9 @@ from app.db import get_db
 from app.services.marker_comments import marker_comment_source_key
 
 
-def test_logical_comment_identity_prefers_the_note_over_per_user_task_copies():
-    assert marker_comment_source_key(SimpleNamespace(id="first", ga_note_origin_id="shared")) == marker_comment_source_key(SimpleNamespace(id="second", ga_note_origin_id="shared"))
-    assert marker_comment_source_key(SimpleNamespace(id="first", fast_task_group_id="shared")) == "group:shared"
+def test_comment_identity_keeps_each_assignee_task_independent():
+    assert marker_comment_source_key(SimpleNamespace(id="first", ga_note_origin_id="shared")) != marker_comment_source_key(SimpleNamespace(id="second", ga_note_origin_id="shared"))
+    assert marker_comment_source_key(SimpleNamespace(id="first", fast_task_group_id="shared")) == "task:first"
     assert marker_comment_source_key(SimpleNamespace(id="plain")) == "task:plain"
 
 

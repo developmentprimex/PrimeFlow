@@ -1,10 +1,9 @@
-"""Keep the symbol shared by a note and its linked task representations."""
+"""Save symbols independently on notes and on each assignee's task copy."""
 from __future__ import annotations
 
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ga_note import GaNote
@@ -92,20 +91,10 @@ async def sync_note_task_marker(
     note.one_h_marker_date = marker_date
     note.one_h_marker_by_ga = marker_by_ga
     note.one_h_marker_comment = marker_comment
-    origin = Task.plan_note_origin_id if isinstance(note, PlanNote) else Task.ga_note_origin_id
-    await db.execute(
-        update(Task).where(origin == note.id, Task.is_active.is_(True)).values(
-            one_h_marker=marker, one_h_marker_date=marker_date, one_h_marker_by_ga=marker_by_ga,
-            one_h_marker_comment=marker_comment,
-        )
-    )
     if changed:
-        from app.services.marker_comments import record_marker_change
-        tasks = (await db.execute(select(Task).where(origin == note.id, Task.is_active.is_(True)))).scalars().all()
         from app.services.task_marker_comment_title import sync_comment_title
 
-        await sync_comment_title(db, tasks, previous_comment, marker_comment, source_note=note)
-        await record_marker_change(db, list(tasks), marker=marker, comment=marker_comment, actor_email=actor_email)
+        await sync_comment_title(db, [], previous_comment, marker_comment, source_note=note)
 
 
 async def sync_task_marker(
@@ -121,52 +110,34 @@ async def sync_task_marker(
     task.one_h_marker_date = marker_date
     task.one_h_marker_by_ga = marker_by_ga
     task.one_h_marker_comment = marker_comment
-    related = []
-    if task.fast_task_group_id is not None:
-        related.append(Task.fast_task_group_id == task.fast_task_group_id)
-    for model, origin in ((GaNote, "ga_note_origin_id"), (PlanNote, "plan_note_origin_id")):
-        note_id = getattr(task, origin, None)
-        if note_id is not None:
-            await db.execute(
-                update(model).where(model.id == note_id).values(
-                    one_h_marker=marker, one_h_marker_date=marker_date, one_h_marker_by_ga=marker_by_ga,
-                    one_h_marker_comment=marker_comment,
-                )
-            )
-            related.append(getattr(Task, origin) == note_id)
-    if related:
-        await db.execute(
-            update(Task).where(or_(*related), Task.is_active.is_(True)).values(
-                one_h_marker=marker, one_h_marker_date=marker_date, one_h_marker_by_ga=marker_by_ga,
-                one_h_marker_comment=marker_comment,
-            )
-        )
     if changed:
         from app.services.marker_comments import record_marker_change
-        tasks = (await db.execute(select(Task).where(
-            or_(Task.id == task.id, *related), Task.is_active.is_(True),
-        ))).scalars().all()
         from app.services.task_marker_comment_title import sync_comment_title
 
-        await sync_comment_title(db, tasks, previous_comment, marker_comment)
-        await record_marker_change(db, list(tasks), marker=marker, comment=marker_comment, actor_email=actor_email)
+        await sync_comment_title(db, [task], previous_comment, marker_comment, update_notes=False)
+        await record_marker_change(db, [task], marker=marker, comment=marker_comment, actor_email=actor_email)
+
+
+async def sync_note_assignee_markers(db, tasks, states, *, actor_email=None):
+    """Apply only explicitly edited per-assignee markers, with normal side effects."""
+    by_assignee = {task.assigned_to: task for task in tasks if task.is_active}
+    for state in states or []:
+        task = by_assignee.get(state.assignee_id)
+        if task is None:
+            continue
+        fields = state.model_fields_set
+        marker = state.one_h_marker if "one_h_marker" in fields else task.one_h_marker
+        comment = state.one_h_marker_comment if "one_h_marker_comment" in fields else task.one_h_marker_comment
+        if (marker, normalize_marker_comment(marker, comment)) != (task.one_h_marker, task.one_h_marker_comment):
+            await sync_task_marker(db, task, marker, marker_comment=comment, actor_email=actor_email)
 
 
 def note_bundle_marker_update(note, payload, tasks) -> tuple[bool, str | None]:
-    """Ignore unchanged editor fields; accept a symbol edit from either control."""
+    """Top-level fields edit the note; assignee fields edit their own tasks."""
     if "one_h_marker" in payload.model_fields_set and payload.one_h_marker != active_one_h_marker(note):
         return True, payload.one_h_marker
     if "one_h_marker_comment" in payload.model_fields_set:
         shared_marker = payload.one_h_marker if "one_h_marker" in payload.model_fields_set else active_one_h_marker(note)
         if normalize_marker_comment(shared_marker, payload.one_h_marker_comment) != getattr(note, "one_h_marker_comment", None):
             return True, shared_marker
-    by_assignee = {task.assigned_to: active_one_h_marker(task) for task in tasks if task.is_active}
-    changed = {
-        state.one_h_marker
-        for state in payload.assignee_states or []
-        if "one_h_marker" in state.model_fields_set
-        and state.one_h_marker != by_assignee.get(state.assignee_id, active_one_h_marker(note))
-    }
-    if len(changed) > 1:
-        raise ValueError("Choose one symbol for the linked note and tasks")
-    return (True, changed.pop()) if changed else (False, None)
+    return False, None

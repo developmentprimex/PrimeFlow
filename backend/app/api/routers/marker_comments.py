@@ -23,18 +23,15 @@ router = APIRouter()
 
 
 def source_key(task):
-    return case(*[
-        (getattr(task, field).is_not(None), prefix + cast(getattr(task, field), String))
-        for prefix, field in (("plan:", "plan_note_origin_id"), ("ga:", "ga_note_origin_id"), ("group:", "fast_task_group_id"))
-    ], else_="task:" + cast(task.id, String))
+    return "task:" + cast(task.id, String)
 
 
 def task_membership(user_id):
-    # Responsibility belongs to the logical task, including its active copies.
+    # Responsibility belongs to this task, including legacy shared receipts.
     # Being its creator or having an old observer receipt does not qualify.
     related = aliased(Task)
     return exists().where(
-        marker_alert_task(related), source_key(related) == Inbox.source_key,
+        marker_alert_task(related), related.id == Inbox.task_id,
         or_(related.assigned_to == user_id, exists().where(
             TaskAssignee.task_id == related.id, TaskAssignee.user_id == user_id,
         )),
@@ -52,13 +49,13 @@ def visible_comments(user_id):
 async def recipient_progress(db, items):
     if not items:
         return {}
-    current = {item.source_key: item for item in items}
-    key = source_key(Task)
+    current = {item.task_id: item for item in items}
+    key = Task.id
     rows = (await db.execute(
         select(key, User.id, User.full_name, User.username, Inbox.marker, Inbox.comment, Inbox.read_at)
         .select_from(Task).outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id)
         .join(User, or_(User.id == Task.assigned_to, User.id == TaskAssignee.user_id))
-        .outerjoin(Inbox, and_(Inbox.source_key == key, Inbox.user_id == User.id))
+        .outerjoin(Inbox, and_(Inbox.task_id == key, Inbox.user_id == User.id))
         .where(marker_alert_task(Task), User.is_active.is_(True), key.in_(current))
     )).all()
     recipients = {key: {} for key in current}
@@ -97,20 +94,20 @@ async def list_marker_comments(
     stmt = stmt.outerjoin(User, User.id == Inbox.author_id)
     if scope == "all":
         # Prefer the current viewer's receipt, otherwise pick one representation.
-        stmt = stmt.distinct(Inbox.source_key).order_by(Inbox.source_key, case((mine, 0), else_=1), Inbox.updated_at.desc(), Inbox.id)
+        stmt = stmt.distinct(Inbox.task_id).order_by(Inbox.task_id, case((mine, 0), else_=1), Inbox.updated_at.desc(), Inbox.id)
     else:
         stmt = stmt.order_by(Inbox.updated_at.desc(), Inbox.id)
     rows = (await db.execute(stmt)).all()
     rows = sorted(rows, key=lambda row: row[0].updated_at, reverse=True)
     progress = await recipient_progress(db, [row[0] for row in rows])
     return {"items": [{
-        "id": str(item.id), "source_key": item.source_key, "task_id": str(item.task_id), "task_ids": item.task_ids,
+        "id": str(item.id), "source_key": item.source_key, "task_id": str(item.task_id), "task_ids": [str(item.task_id)],
         "revision": str(item.revision), "title": title,
         "marker": item.marker, "marker_by_ga": bool(marker_by_ga), "symbol": one_h_marker_label(item.marker, bool(marker_by_ga)),
         "comment": item.comment, "author_name": author_name,
         "updated_at": item.updated_at, "read_at": item.read_at if is_mine else None,
         "is_mine": bool(is_mine), "can_mark_read": bool(is_mine),
-        **progress[item.source_key],
+        **progress[item.task_id],
     } for item, title, author_name, marker_by_ga, is_mine in rows]}
 
 

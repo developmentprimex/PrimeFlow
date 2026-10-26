@@ -18,7 +18,7 @@ type Recipient = { id:string; email:string; recipient_type:"TO"|"CC"|"BCC"; is_a
 type Schedule = { id:string; name:string; report_slot:string; execution_time:string; timezone:string; weekdays:number[]; is_active:boolean; backfill_enabled:boolean; grace_period_minutes:number; retry_count:number; retry_delays_seconds:number[]; version:number; updated_at:string; next_runs:string[] }
 type Run = { id:string; report_date:string; report_slot:string; trigger_type:string; status:string; subject:string; recipients:string; attempt_count:number; gmail_message_id?:string|null; error_message?:string|null; created_at:string }
 type Audit = { id:string; action:string; entity_type:string; actor_user_id?:string|null; created_at:string; before?:unknown; after?:unknown }
-type Preview = { document:{subject:string;generated_at:string;source_generated_at:string;recipients:Record<string,string[]>}; html:string; plain_text:string; task_count:number; warning?:string|null }
+type Preview = { document:{subject:string;generated_at:string;source_generated_at:string;recipients:Record<string,string[]>;strike_interval?:string|null}; html:string; plain_text:string; task_count:number; warning?:string|null }
 
 const API = "/admin/primeflow-1h-reports"
 const slots = ["10:00","11:00","11:50","14:10","14:20","16:00"]
@@ -36,6 +36,8 @@ export default function ReportManagementPage() {
   const [preview,setPreview] = React.useState<Preview|null>(null)
   const [strikesOnly,setStrikesOnly] = React.useState(false)
   const [visibleTaskCount,setVisibleTaskCount] = React.useState<number|null>(null)
+  const [totalPreviewTaskCount,setTotalPreviewTaskCount] = React.useState<number|null>(null)
+  const [previewStrikeTotal,setPreviewStrikeTotal] = React.useState<number|null>(null)
   const previewFrame = React.useRef<HTMLIFrameElement>(null)
   const [previewing,setPreviewing] = React.useState(false)
   const [sendOpen,setSendOpen] = React.useState(false)
@@ -60,8 +62,11 @@ export default function ReportManagementPage() {
 
   const applyPreviewFilter = React.useCallback(() => {
     const document = previewFrame.current?.contentDocument
-    if (!document?.querySelector("[data-report-task-section]")) return
-    setVisibleTaskCount(applyOneHReportFilter(document, strikesOnly))
+    if (!document?.querySelector("[data-report-task-section], [data-report-print-section]")) return
+    const counts = applyOneHReportFilter(document, strikesOnly)
+    setVisibleTaskCount(counts.visible)
+    setTotalPreviewTaskCount(counts.total)
+    setPreviewStrikeTotal(counts.strikeTotal)
   }, [strikesOnly])
   React.useEffect(() => { applyPreviewFilter() }, [applyPreviewFilter, preview])
 
@@ -71,7 +76,7 @@ export default function ReportManagementPage() {
       const res=await apiFetch(`${API}/preview`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({report_date:date,report_slot:slot,format,use_default_recipients:true})})
       if(!res.ok) throw new Error(await res.text())
       if(format!=="json"){const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${date}_${slot.replace(":","-")}.${format}`;a.click();URL.revokeObjectURL(url)}
-      else { setVisibleTaskCount(null); setPreview(await res.json()) }
+      else { setVisibleTaskCount(null); setTotalPreviewTaskCount(null); setPreviewStrikeTotal(null); setPreview(await res.json()) }
     } catch(e){toast.error("Preview failed",{description:String(e)})} finally{setPreviewing(false)}
   }
   const sendNow=async()=>{
@@ -111,12 +116,13 @@ export default function ReportManagementPage() {
     if(!res.ok){toast.error("Download unavailable",{description:await res.text()});return}
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${run.report_date}_${run.report_slot.replace(":","-")}.${format}`;a.click();URL.revokeObjectURL(url)
   }
-  const strikeFilterControl = <div data-testid="one-h-strikes-toolbar" className="flex flex-wrap items-center gap-2">
+  const strikeFilterControl = <div data-testid="one-h-strikes-toolbar" className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-2">
     <Button type="button" variant="outline" aria-pressed={strikesOnly} onClick={()=>setStrikesOnly(value=>!value)}
-      className={strikesOnly ? "border-blue-600 bg-blue-100 text-blue-800 hover:bg-blue-200" : ""}>
+      className={strikesOnly ? "border-blue-600 bg-blue-200 font-semibold text-blue-900 hover:bg-blue-200" : "border-blue-400 bg-white font-semibold text-blue-800 hover:bg-blue-100"}>
       Vetëm me strikes &gt; 0
     </Button>
-    <span role="status" className="text-sm text-muted-foreground">Shfaqen {visibleTaskCount ?? preview?.task_count ?? 0} nga {preview?.task_count ?? 0} detyra</span>
+    <span data-testid="one-h-toolbar-strike-total" className="text-base font-bold text-blue-900">Total strikes: {previewStrikeTotal ?? "—"}{preview?.document.strike_interval ? ` · ${preview.document.strike_interval}` : ""}</span>
+    <span role="status" className="text-sm text-muted-foreground">Shfaqen {visibleTaskCount ?? preview?.task_count ?? 0} nga {totalPreviewTaskCount ?? preview?.task_count ?? 0} detyra</span>
   </div>
   const emptyStrikeMessage = strikesOnly && visibleTaskCount === 0
     ? <p className="rounded-md border bg-muted/30 p-3 text-sm">Nuk ka detyra me strikes &gt; 0 në këtë interval.</p> : null

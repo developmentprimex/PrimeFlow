@@ -6,6 +6,7 @@ import uuid
 from collections import defaultdict
 from datetime import date, datetime, time
 
+from bs4 import BeautifulSoup
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,14 +36,19 @@ def payload_task_ids(payload: dict) -> set[uuid.UUID]:
 async def task_strike_summary(
     db: AsyncSession, day: date, task_ids: set[uuid.UUID], *, now: datetime | None = None,
     completed_through: datetime | None = None,
+    report_slot: str | None = None,
 ) -> dict:
     # Import at call time: delivery also imports the SHTYPI renderer.
     from app.services.primeflow_report_delivery import strike_interval_start, strike_interval_end
 
     now = now or datetime.now(report_timezone())
-    slots = ("10:00", "11:00", "11:50", "14:20", "16:00")
+    slots = (report_slot,) if report_slot else ("10:00", "11:00", "11:50", "14:20", "16:00")
     windows = {slot: (strike_interval_start(day, slot), strike_interval_end(day, slot)) for slot in slots}
-    completed = {slot: window for slot, window in windows.items() if window[1] <= (completed_through or now)}
+    # An embedded SHTYPI table belongs to the selected report, even when an
+    # older slot is previewed later in the day. The standalone view still uses
+    # the last finished interval.
+    completed = {slot: window for slot, window in windows.items()
+                 if report_slot or window[1] <= (completed_through or now)}
     active_slot = next(reversed(completed), None)
     active_interval = ({"start": completed[active_slot][0].strftime("%H:%M"),
                         "end": completed[active_slot][1].strftime("%H:%M")} if active_slot else None)
@@ -93,3 +99,42 @@ def report_task_ids(report: dict) -> set[uuid.UUID]:
 async def with_report_strikes(db: AsyncSession, report: dict, day: date) -> dict:
     ids = report_task_ids(report)
     return {**report, "one_h_strikes": await task_strike_summary(db, day, ids)}
+
+
+async def render_embedded_print_strikes(
+    db: AsyncSession, content_html: str, day: date, slot: str,
+) -> str:
+    """Add interval badges to the SHTYPI table in GA previews and email bodies."""
+    ids = report_task_ids({"html": content_html})
+    if not ids:
+        return content_html
+    summary = await task_strike_summary(db, day, ids, report_slot=slot)
+    interval = summary["active_interval"]
+    label = f'{interval["start"]}–{interval["end"]}'
+    counts = {task_id: values[slot] for task_id, values in summary["tasks"].items()}
+    valid_ids = {str(value) for value in ids}
+    soup = BeautifulSoup(content_html, "html.parser")
+    for cell in soup.select("td[data-task-id]"):
+        task_id = cell["data-task-id"]
+        if task_id not in valid_ids:
+            continue
+        count = counts.get(task_id, 0)
+        cell["data-report-task"] = "true"
+        cell["data-strike-count"] = str(count)
+        for previous in cell.select("[data-task-strike-count]"):
+            previous.decompose()
+        badge = soup.new_tag("div")
+        badge["data-task-strike-count"] = "true"
+        badge["style"] = (
+            "clear:both;display:table;margin-top:8px;padding:4px 8px;"
+            f'border:1px solid {"#2563eb" if count else "#94a3b8"};border-radius:4px;'
+            f'background-color:{"#dbeafe" if count else "#f8fafc"};color:{"#1e40af" if count else "#475569"};'
+            "font:700 14px/1.5 Arial,sans-serif;white-space:normal;print-color-adjust:exact;"
+        )
+        badge.string = f"Strikes: {count} · {label}"
+        cell.append(badge)
+    total = soup.new_tag("div")
+    total["data-print-strike-total"] = "true"
+    total["style"] = "margin:12px 0;padding:10px;background:#eff6ff;color:#1e40af;font:700 16px/1.5 Arial,sans-serif;"
+    total.string = f"1H SHTYPI · Total strikes: {sum(counts.values())} · {label}"
+    return f'<div data-report-print-section="true">{total}{soup}</div>'

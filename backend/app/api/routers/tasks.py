@@ -1738,6 +1738,7 @@ async def list_task_summaries_by_ga_notes(
             Task.one_h_report_slot,
             Task.one_h_marker,
             Task.one_h_marker_date,
+            Task.one_h_marker_comment,
             Task.is_r1,
             Task.is_personal,
             Task.created_at,
@@ -1767,6 +1768,7 @@ async def list_task_summaries_by_ga_notes(
             is_1h_report=task.is_1h_report,
             one_h_report_slot=task.one_h_report_slot,
             one_h_marker=active_one_h_marker(task),
+            one_h_marker_comment=task.one_h_marker_comment,
             is_r1=task.is_r1,
             is_personal=task.is_personal,
             created_at=task.created_at,
@@ -3672,9 +3674,6 @@ async def update_task(
             shared_values["is_1h_report"] = task.is_1h_report
         if _payload_has_field(payload, "one_h_report_slot") or payload.is_1h_report is not None:
             shared_values["one_h_report_slot"] = task.one_h_report_slot
-        if one_h_marker_set or payload.is_1h_report is not None:
-            shared_values["one_h_marker"] = task.one_h_marker
-            shared_values["one_h_marker_date"] = task.one_h_marker_date
         if payload.is_personal is not None:
             shared_values["is_personal"] = task.is_personal
         if fast_task_order_set:
