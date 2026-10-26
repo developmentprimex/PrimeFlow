@@ -2,6 +2,7 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { ProjectActivityControl, ProjectActivityFilterControl, ProjectListEmptyState, matchesProjectActivity, type ProjectActivityFilter } from "@/components/project-activity"
 import { useBrowserTabTitle } from "@/components/browser-tab-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
@@ -1130,6 +1131,7 @@ export default function DepartmentKanban() {
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [projectActivityFilter, setProjectActivityFilter] = React.useState<ProjectActivityFilter>("active")
   const [projectTitleLookup, setProjectTitleLookup] = React.useState<Map<string, string>>(new Map())
   const [projectMetaLookup, setProjectMetaLookup] = React.useState<
     Map<string, { title: string; department_id?: string | null }>
@@ -5943,7 +5945,7 @@ export default function DepartmentKanban() {
                 <div className="text-xl font-semibold tracking-tight">{departmentName}</div>
                 <div className="text-xs text-muted-foreground">Manage projects and daily tasks.</div>
               </div>
-              <div className="inline-flex rounded-full bg-card/70 p-1 backdrop-blur">
+              <div data-slot="button-group" className="inline-flex rounded-full bg-card/70 p-1 backdrop-blur">
                 <button
                   type="button"
                   onClick={() => setViewMode("department")}
@@ -5971,7 +5973,7 @@ export default function DepartmentKanban() {
               </div>
             </div>
 
-            <div className="rounded-2xl bg-card/70 p-1 backdrop-blur">
+            <div data-slot="button-group" className="rounded-2xl bg-card/70 p-1 backdrop-blur">
               <div className="flex flex-wrap gap-2">
                 {TABS.map((tab) => {
                   const isActive = tab.id === activeTab
@@ -6000,7 +6002,7 @@ export default function DepartmentKanban() {
                   )
                 })}
                 {activeTab === "all" ? (
-                  <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap rounded-2xl border border-fuchsia-200/80 bg-fuchsia-50/70 px-2 py-1 pr-1">
+                  <div data-slot="button-group" className="flex items-center gap-2 overflow-x-auto whitespace-nowrap rounded-2xl border border-fuchsia-200/80 bg-fuchsia-50/70 px-2 py-1 pr-1">
                     <button
                       type="button"
                       onClick={() => setAllRange("past-7-days")}
@@ -6102,7 +6104,7 @@ export default function DepartmentKanban() {
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
+                    <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Projects</h2>
                     {(user?.role === "ADMIN" || user?.role === "MANAGER") && (
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <Checkbox
@@ -6265,8 +6267,15 @@ export default function DepartmentKanban() {
                     </Dialog>
                   )}
                 </div>
+                <ProjectActivityFilterControl value={projectActivityFilter} onChange={setProjectActivityFilter} projects={filteredProjects} />
+            <ProjectListEmptyState
+              projects={filteredProjects}
+              visibleCount={filteredProjects.filter((project) => matchesProjectActivity(project, projectActivityFilter)).length}
+              mine={viewMode === "mine"}
+              membersLoaded={projects.every((project) => projectMembers[project.id] !== undefined)}
+            />
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                  {filteredProjects.map((project) => {
+                  {filteredProjects.filter((project) => matchesProjectActivity(project, projectActivityFilter)).map((project) => {
                     // Derived Data Calculation
                     const tasks = departmentTasks.filter(t => t.project_id === project.id);
                     const phase = project.current_phase || "MEETINGS";
@@ -6297,9 +6306,12 @@ export default function DepartmentKanban() {
                             <div className="space-y-1.5 flex-1 min-w-0">
                               <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{formatProjectTitleWithProducts(project)}</h3>
                               {/* Single Phase Badge */}
-                              <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 text-xs">
-                                {PHASE_LABELS[phase]}
-                              </Badge>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 text-xs">
+                                  {PHASE_LABELS[phase]}
+                                </Badge>
+                                <ProjectActivityControl project={project} onChange={(updated) => setProjects((previous) => previous.map((item) => item.id === updated.id ? updated : item))} />
+                              </div>
                             </div>
                             <div className="text-right flex-shrink-0">
                               {canDeleteProjects ? (

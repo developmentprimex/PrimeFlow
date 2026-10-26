@@ -1,0 +1,58 @@
+/* Shared action controls, including older pages that still use local classes. */
+:root {
+  --button-radius: 0.5rem;
+  --button-group-radius: calc(var(--button-radius) + 0.25rem);
+  --button-height-sm: 2rem;
+  --button-height: 2.25rem;
+  --button-height-lg: 2.5rem;
+  --button-focus-color: #2563eb;
+  --button-transition-duration: 150ms;
+}
+
+@media screen {
+  @layer base {
+    /* A 4px inset around 8px buttons needs a 12px outer corner, never a capsule. */
+    :where([data-slot="button-group"], [data-slot="tabs-list"]) {
+      border-radius: var(--button-group-radius) !important;
+    }
+
+    :where(
+      button:not([role="checkbox"]):not([role="radio"]):not([role="switch"]),
+      a[data-slot="button"],
+      a[role="button"],
+      a[class*="btn-"],
+      a.inline-flex[class*="border"],
+      a.inline-flex[class*="bg-"]
+    ) {
+      /* One shape takes priority over per-page rounded-* and legacy .btn rules. */
+      border-radius: var(--button-radius) !important;
+      font-family: inherit;
+      transition-property: color, background-color, border-color, box-shadow, opacity;
+      transition-duration: var(--button-transition-duration) !important;
+      transition-timing-function: ease-out;
+      -webkit-tap-highlight-color: transparent;
+
+      &:not(:disabled):not([aria-disabled="true"]) {
+        cursor: pointer;
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--button-focus-color) !important;
+        outline-offset: 2px !important;
+        --tw-ring-shadow: 0 0 #0000 !important;
+        --tw-ring-offset-shadow: 0 0 #0000 !important;
+      }
+    }
+
+    /* Avatars are explicitly round; ordinary icon actions use the same 8px shape. */
+    :where([data-button-shape="circle"]) {
+      border-radius: 50% !important;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --button-transition-duration: 0ms;
+  }
+}

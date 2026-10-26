@@ -2888,6 +2888,12 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
+    return await update_task_in_session(task_id, payload, db, user)
+
+
+async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: AsyncSession, user,
+                                 *, before_update=None, before_commit=None, return_dto=True) -> TaskOut | Task:
+    """Internal hooks allow a reviewed proposal and the normal task edit to commit together."""
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
@@ -2934,6 +2940,9 @@ async def update_task(
             updates={field: getattr(payload, field) for field in ("start_date", "due_date") if _payload_has_field(payload, field)},
             reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
         )
+
+    if before_update is not None:
+        await before_update(task)
 
     question_status_requested = payload.status if task.question_origin_id is not None else None
     question_status_override: TaskStatus | None = None
@@ -3900,6 +3909,11 @@ async def update_task(
                     after_description=task.description,
                 )
 
+    if before_commit is not None:
+        from inspect import isawaitable
+        result = before_commit(task)
+        if isawaitable(result):
+            await result
     await db.commit()
 
     for n in created_notifications:
@@ -3908,6 +3922,8 @@ async def update_task(
         except Exception:
             pass
 
+    if not return_dto:
+        return task
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     dto_assignees = assignee_map.get(task.id, [])

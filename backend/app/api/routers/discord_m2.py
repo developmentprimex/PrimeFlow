@@ -19,6 +19,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
+from app.models.discord_m2_postponement import DiscordM2Postponement
 from app.services import discord_m2 as service, m2_reporting_points as reports
 from app.services.audit import add_audit_log
 from app.services.daily_rlz_compliance import REASON_LABELS
@@ -58,6 +59,7 @@ def question_payload(question, link):
             'discord_user_id': link.discord_user_id, 'guild_id': link.guild_id, 'channel_id': link.channel_id,
             'answered': bool(question.answered_at), 'reason_code': question.reason_code,
             'answered_at': question.answered_at.isoformat() if question.answered_at else None,
+            'message_id': question.message_id,
             'comment': question.comment, 'choice': question.choice,
             'reasons': [{'value': code, 'label': label} for code, label in REASON_LABELS.items()]}
 
@@ -122,7 +124,7 @@ async def collect_questions(db: AsyncSession, *, now: datetime, only_user_id: uu
                                     context_key=key, snapshot=snapshot, lease_until=now)
                 db.add(question)
                 await db.flush()
-            if len(jobs) < 20:
+            if len(jobs) < 50:
                 question.lease_until = now + timedelta(minutes=2)
                 jobs.append(question_payload(question, link))
     await db.commit()
@@ -143,7 +145,15 @@ async def own_question(db, question_id, actor):
 @router.post('/{question_id}/open')
 async def open_question(question_id: uuid.UUID, actor: Actor, db: AsyncSession = Depends(get_db)):
     question, link, _ = await own_question(db, question_id, actor)
-    return question_payload(question, link)
+    result = question_payload(question, link)
+    task = await db.get(Task, question.task_id)
+    result['live_dates'] = {field: getattr(task, field).isoformat() if getattr(task, field) else None for field in ('start_date', 'due_date')}
+    if question.kind == 'continuation':
+        request = (await db.execute(select(DiscordM2Postponement).where(
+            DiscordM2Postponement.question_id == question.id).order_by(DiscordM2Postponement.created_at.desc()).limit(1))).scalar_one_or_none()
+        if request:
+            result['postponement'] = {'id': str(request.id), 'status': request.status}
+    return result
 
 
 class Receipt(Actor):
@@ -174,8 +184,10 @@ async def update_report_answers(db, report, question):
     answers = dict(report.manual_answers or {})
     comment = '\n'.join(f'{user.full_name or user.username}: {q.comment or "Dorëzuar"}' for q, user in pairs)
     if question.kind != 'postponed':
-        prefix = {'unfinished': 'unfinished_comment', 'progress': 'progress_comment', 'delivery': 'delivery'}[question.kind]
+        prefix = {'unfinished': 'unfinished_comment', 'progress': 'progress_comment', 'delivery': 'delivery', 'continuation': 'pm_comment'}[question.kind]
         answers[f'{prefix}:{question.task_id}'] = comment
+    if question.kind == 'continuation':
+        answers[f'pm_choice:{question.task_id}'] = 'JO' if any(q.choice == 'JO' for q, _ in pairs) else 'PO'
     if question.kind == 'delivery':
         # For shared tasks, keep each person's answer visible; any JO wins.
         pending = (await db.execute(select(Question.id).join(DiscordLink, DiscordLink.id == Question.link_id).where(
@@ -206,11 +218,12 @@ async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Dep
     if 'expected_answered_at' in payload.model_fields_set and payload.expected_answered_at != question.answered_at:
         raise HTTPException(409, 'Përgjigjja ka ndryshuar ndërkohë. Hape përsëri formularin.')
     report = await reports.locked_report(db, question.day)
-    if question.kind == 'delivery':
-        # Delivery changes only the person's answer, not the task's dates or
+    if question.kind in {'delivery', 'continuation'}:
+        # These choices change only the person's answer, not the task's dates or
         # progress. Validate the actual task with the report's selector without
         # rebuilding every section for the entire company twice per click.
-        current = next(iter(reports.select_task_sections([task], [], question.day)['delivery']), None)
+        section = 'delivery' if question.kind == 'delivery' else 'pm_continuation'
+        current = next(iter(reports.select_task_sections([task], [], question.day)[section]), None)
         data = dict(report.data or {})
     else:
         data = await data_with_moves(db, question.day)
@@ -222,7 +235,7 @@ async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Dep
                 'answered_at': question.answered_at.isoformat() if question.answered_at else None}
     question.reason_code, question.comment, question.choice = reason, comment, choice
     question.answered_at = datetime.now(timezone.utc)
-    if question.kind != 'delivery':
+    if question.kind not in {'delivery', 'continuation'}:
         state = insert(TaskDailyRlzState).values(task_id=question.task_id, user_id=user.id,
             day_date=question.day, reason_code=reason, comment=comment)
         await db.execute(state.on_conflict_do_update(constraint='uq_task_daily_rlz_state_task_user_day',
@@ -230,7 +243,8 @@ async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Dep
     # Keep the existing personal task comment and append the M2 response.
     label = service.KINDS[question.kind]
     body = f'M2 {question.day:%d.%m.%Y} — {label}\n' + (f'{REASON_LABELS[reason]}\n' if reason else '')
-    body += (f'Dorëzuar: {choice}\n' if choice else '') + comment
+    choice_label = 'Vazhdon në PM' if question.kind == 'continuation' else 'Dorëzuar'
+    body += (f'{choice_label}: {choice}\n' if choice else '') + comment
     existing = (await db.execute(select(TaskUserComment).where(TaskUserComment.task_id == question.task_id,
         TaskUserComment.user_id == user.id).with_for_update())).scalar_one_or_none()
     if existing:
@@ -238,7 +252,7 @@ async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Dep
     else:
         db.add(TaskUserComment(task_id=question.task_id, user_id=user.id, comment=body))
     await db.flush()
-    if question.kind != 'delivery':
+    if question.kind not in {'delivery', 'continuation'}:
         data = await data_with_moves(db, question.day)
         report.data, report.generated_at = data, datetime.now(timezone.utc)
     report.updated_by = user.id

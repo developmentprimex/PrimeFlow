@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./button-system.css";
 
 @theme inline {
   --color-background: var(--background);

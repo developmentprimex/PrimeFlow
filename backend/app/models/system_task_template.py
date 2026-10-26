@@ -61,6 +61,8 @@ class SystemTaskTemplate(Base):
     requires_alignment: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     alignment_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     show_in_weekly_planner: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Informational only; independent of recurrence and instance generation.
+    is_repetitive: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True

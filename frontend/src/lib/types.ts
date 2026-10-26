@@ -116,6 +116,7 @@ export interface SystemTaskTemplateDefinition {
   requires_alignment?: boolean | null
   alignment_time?: string | null
   show_in_weekly_planner?: boolean | null
+  is_repetitive?: boolean | null
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
   status?: string | null
@@ -160,6 +161,7 @@ export interface SystemTaskTemplate {
   requires_alignment?: boolean | null
   alignment_time?: string | null
   show_in_weekly_planner?: boolean | null
+  is_repetitive?: boolean | null
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
   status?: string | null
@@ -199,6 +201,7 @@ export interface SystemTaskOut {
   requires_alignment?: boolean | null
   alignment_time?: string | null
   show_in_weekly_planner?: boolean | null
+  is_repetitive?: boolean | null
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
   created_by?: string | null
@@ -280,6 +283,7 @@ export interface Project {
   progress_percentage?: number
   total_products?: number | null
   is_template?: boolean
+  is_active?: boolean
   start_date?: string | null
   due_date?: string | null
   completed_at?: string | null

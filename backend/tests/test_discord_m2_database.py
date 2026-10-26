@@ -27,6 +27,7 @@ from app.models.m2_reporting_points import M2ReportingPointsReport
 from app.models.user import User
 from app.models.department import Department
 from app.models.audit_log import AuditLog
+from app.models.discord_m2_postponement import DiscordM2Postponement
 from app.services.primeflow_report import report_timezone
 
 
@@ -37,7 +38,10 @@ class M2DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(os.environ['M2_TEST_DATABASE_URL'], connect_args={
             'server_settings': {'search_path': self.schema}})
         tables = {Question.__table__, M2ReportingPointsReport.__table__, TaskDailyRlzState.__table__,
-                  TaskUserComment.__table__, TaskAssignee.__table__, AuditLog.__table__}
+                  TaskUserComment.__table__, TaskAssignee.__table__, AuditLog.__table__, DiscordM2Postponement.__table__}
+        tables.update(getattr(self, 'extra_tables', set()))
+        if getattr(self, 'full_schema', False):
+            tables = set(Base.metadata.tables.values())
         while True:
             expanded = tables | {fk.column.table for table in tables for fk in table.foreign_keys}
             if expanded == tables:
@@ -69,8 +73,15 @@ class M2DatabaseTests(unittest.IsolatedAsyncioTestCase):
             db.add(TaskUserComment(task_id=self.task_id, user_id=self.uid, comment='Existing task comment'))
             await db.commit()
         self.data = {'unfinished_priority': [{'task_id': str(self.task_id), 'title': 'Test M2', 'status': 'TODO'}]}
+        original_lock = api.reports.locked_report
+        async def isolated_test_lock(db, day, *, wait=True):
+            # Advisory locks are database-wide even with an isolated search_path.
+            # Wait for an unrelated schema's short report transaction instead of
+            # treating that contention as an empty test collector result.
+            return await original_lock(db, day, wait=True)
         self.patchers = [patch.object(settings, 'DISCORD_GUILD_ID', '22'),
                          patch.object(api.service, 'collection_open', return_value=True),
+                         patch.object(api.reports, 'locked_report', new=isolated_test_lock),
                          patch.object(api, 'data_with_moves', new=self.fresh_data)]
         for patcher in self.patchers:
             patcher.start()

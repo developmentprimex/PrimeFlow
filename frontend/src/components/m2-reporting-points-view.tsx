@@ -10,7 +10,7 @@ export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
 export const MANUAL_POINTS = {
   reorganization: "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
 } as const
-export type ManualKey = keyof typeof MANUAL_POINTS | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}` | `unfinished_comment:${string}` | `progress_reason:${string}` | `progress_comment:${string}` | `postponed_reason:${string}` | `unfinished_reason:${string}`
+export type ManualKey = keyof typeof MANUAL_POINTS | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}` | `unfinished_comment:${string}` | `progress_reason:${string}` | `progress_comment:${string}` | `postponed_reason:${string}` | `unfinished_reason:${string}` | `pm_choice:${string}` | `pm_comment:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 export type UnfinishedPriorityRow = {
   task_id?: string; reason?: string; comment?: string
@@ -20,7 +20,7 @@ export type UnfinishedPriorityRow = {
 }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
-  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; postponed_am?: TaskRow[]; ga_progress?: TaskRow[]; delivery?: TaskRow[]; pm_due_today?: TaskRow[] }
+  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; postponed_am?: TaskRow[]; ga_progress?: TaskRow[]; delivery?: TaskRow[]; pm_due_today?: TaskRow[]; pm_continuation?: TaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -49,14 +49,14 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
   ]
   const deliveredCount = deliveryRows.filter((row) => answers[`delivery_choice:${row.task_id}`] === "PO").length
   const common: [keyof TaskRow, string][] = [["assignees", "KUSH"], ["department", "DEP"], ["project", "PRJK"], ["am_pm", "AM/PM"], ["task_type", "LLOJI"]]
-  const renderTable = (rows: TaskRow[], delivery: boolean) => <div className="overflow-x-auto border">
+  const renderTable = (rows: TaskRow[], delivery: boolean, pm = false) => <div className="overflow-x-auto border">
     <table className="w-full min-w-[1150px] border-collapse text-xs">
       <thead className="bg-slate-100"><tr>
         {["NR", ...common.map(([, title]) => title), ...(delivery ? ["SIMBOLI", "TITULLI", "PO/JO", "PËRGJIGJJA MANUALE"] : ["NGA", "NË", "TITULLI / SIMBOLI", "ARSYEJA", "KOMENTI", "VLERËSIMI", "KOMENT MANUAL"])].map((title, columnIndex) => <th key={title} className={`border py-2 text-left ${delivery && (columnIndex === 6 || columnIndex === 8) ? "px-1" : "px-2"}${(delivery ? columnIndex < 7 || columnIndex === 8 : columnIndex < 8) ? " w-px whitespace-nowrap" : ""}`}>{title}</th>)}
       </tr></thead>
       <tbody>{rows.map((row, index) => {
-        const key: ManualKey = `delivery:${row.task_id}`
-        const choiceKey: ManualKey = `delivery_choice:${row.task_id}`
+        const key: ManualKey = pm ? `pm_comment:${row.task_id}` : `delivery:${row.task_id}`
+        const choiceKey: ManualKey = pm ? `pm_choice:${row.task_id}` : `delivery_choice:${row.task_id}`
         const commentKey: ManualKey = `postponed_comment:${row.task_id}`
         return <tr key={row.task_id} style={{ background: row.deadline_important ? "#dc2626" : TASK_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }}>
           <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
@@ -71,7 +71,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
             </select>
           </td><td className="min-w-[240px] border p-2 align-top">
             <Textarea aria-label={`Përgjigjja manuale për ${row.title}`} value={answers[key] || ""} disabled={disabled} maxLength={10000}
-              className="min-h-20 bg-white text-black" placeholder="A është dorëzuar? Shëno përgjigjjen." onChange={(event) => onAnswerChange(key, event.target.value)} />
+              className="min-h-20 bg-white text-black" placeholder={pm ? "A vazhdon në PM? Shëno komentin." : "A është dorëzuar? Shëno përgjigjjen."} onChange={(event) => onAnswerChange(key, event.target.value)} />
           </td></> : <><td className="min-w-[150px] whitespace-pre-wrap border p-2 align-top">{dailyRlzReasonLabel(answers[`postponed_reason:${row.task_id}`]) || row.reason || "—"}</td><td className="min-w-[220px] whitespace-pre-wrap border p-2 align-top">{row.comment || "—"}</td><td className="border p-2 align-top font-bold" style={{ background: row.risk === "RREZIK" ? "#fee2e2" : "#dcfce7", color: row.risk === "RREZIK" ? "#7f1d1d" : "#14532d" }}>{row.risk}</td><td className="min-w-[240px] border p-2 align-top">
             <Textarea aria-label={`Koment manual për ${row.title}`} value={answers[commentKey] || ""} disabled={disabled} maxLength={10000}
               className="min-h-20 bg-white text-black" placeholder="Shëno komentin." onChange={(event) => onAnswerChange(commentKey, event.target.value)} />
@@ -169,6 +169,11 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
       <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">SA/TOTALI: <span className="text-2xl font-extrabold tabular-nums">{deliveredCount}/{deliveryRows.length}</span></span></div>
       <p className="text-sm text-muted-foreground">Detyrat me simbolet M2 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
       {renderTable(deliveryRows, true)}
+    </section>
+    <section className="space-y-3" aria-labelledby="m2-pm-continuation">
+      <h2 id="m2-pm-continuation" className="text-lg font-bold">7. A VAZHDOJNË DETYRAT NË PM?</h2>
+      <p className="text-sm text-muted-foreground">Përgjigjet për detyrat e planifikuara në PM sot. Kërkesat për shtyrje në Discord ndryshojnë datat vetëm pas konfirmimit të Diellza Veliut.</p>
+      {renderTable(report.data.pm_continuation || [], true, true)}
     </section>
   </div>
 }

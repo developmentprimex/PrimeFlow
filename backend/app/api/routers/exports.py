@@ -5030,6 +5030,7 @@ async def export_system_task_templates_xlsx(
         "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
         "BZ ME",
         "KOHA BZ",
+        "Detyrë e përsëritur",
     ]
     last_col = len(headers)
 
@@ -5108,6 +5109,7 @@ async def export_system_task_templates_xlsx(
             details_value,
             bz_me_value,
             bz_time_value,
+            "Po" if getattr(template, "is_repetitive", False) else "Jo",
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
@@ -5366,6 +5368,7 @@ async def export_system_tasks_xlsx(
         "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
         "BZ ME",
         "KOHA BZ",
+        "Detyrë e përsëritur",
     ]
     last_col = len(headers)
 
@@ -5448,6 +5451,7 @@ async def export_system_tasks_xlsx(
             details_value,
             bz_me_value,
             bz_time_value,
+            "Po" if getattr(template, "is_repetitive", False) else "Jo",
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
@@ -5570,6 +5574,7 @@ async def preview_system_tasks(
             "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
             "BZ ME",
             "KOHA BZ",
+            "Detyrë e përsëritur",
         ]
         return ExportPreviewOut(headers=headers, rows=[], total=0, truncated=False)
 
@@ -5714,6 +5719,7 @@ async def preview_system_tasks(
         "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
         "BZ ME",
         "KOHA BZ",
+        "Detyrë e përsëritur",
     ]
 
     rows: list[list[str]] = []
@@ -5775,6 +5781,7 @@ async def preview_system_tasks(
             _normalize_preview_value(details_value),
             _normalize_preview_value(bz_me_value),
             _normalize_preview_value(bz_time_value),
+            "Po" if getattr(template, "is_repetitive", False) else "Jo",
         ]
         rows.append(values)
 

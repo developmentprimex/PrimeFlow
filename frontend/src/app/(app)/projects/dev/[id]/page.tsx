@@ -1,5 +1,7 @@
 "use client"
 
+import { ProjectActivityControl } from "@/components/project-activity"
+
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
@@ -1522,6 +1524,7 @@ export default function DevelopmentProjectPage() {
                   "text-3xl font-bold text-slate-800 tracking-tight",
                   "h-10 text-3xl font-bold text-slate-800 tracking-tight"
                 )}
+                <ProjectActivityControl project={project} onChange={setProject} />
                 <Badge className="bg-slate-100 text-slate-700 border-slate-200 px-3 py-1.5 text-sm font-medium rounded-lg">
                   Closed
                 </Badge>
@@ -1589,6 +1592,7 @@ export default function DevelopmentProjectPage() {
                       "text-4xl font-bold text-slate-800 tracking-tight",
                       "h-11 text-4xl font-bold text-slate-800 tracking-tight"
                     )}
+                    <ProjectActivityControl project={project} onChange={setProject} />
                     {canEditDueDate && (
                       <button
                         type="button"

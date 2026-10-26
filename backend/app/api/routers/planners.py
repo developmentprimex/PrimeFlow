@@ -439,6 +439,7 @@ def _project_to_out(p: Project) -> ProjectOut:
         progress_percentage=p.progress_percentage,
         total_products=p.total_products,
         is_template=p.is_template,
+        is_active=p.is_active,
         start_date=p.start_date,
         due_date=p.due_date,
         completed_at=p.completed_at,

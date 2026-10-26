@@ -34,6 +34,7 @@ AUTO_TITLES = {
     "ga_progress": "4. PROGRESI I DET ME GA (AM)",
     "pm_due_today": "5. DET PM ME DUE DATE SOT",
     "delivery": "6. SA PER DOREZIM M2?",
+    "pm_continuation": "7. A VAZHDOJNË DETYRAT NË PM?",
 }
 DELIVERY_MARKERS = {"M2", "M2_M3"}
 
@@ -48,7 +49,7 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
                               if row["status"] != "DONE"],
                 "postponed_am": [row for row in m3.select_task_sections(tasks, events, day, postponement_period="AM")["postponed"]
                                  if row["status"] != "DONE" and planned_for_report_day(row, day)],
-                "ga_progress": [], "delivery": [], "pm_due_today": []}
+                "ga_progress": [], "delivery": [], "pm_due_today": [], "pm_continuation": []}
     for task in tasks:
         marker = active_one_h_marker(task, day)
         system = bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))
@@ -62,9 +63,11 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
         start, due, created, completed = (semantic_local_day(getattr(task, field, None))
                                          for field in ("start_date", "due_date", "created_at", "completed_at"))
         planned = bool(start and due and start <= day <= due)
+        status = str(getattr(task.status, "value", task.status)).upper()
+        pm_continuation = status != 'DONE' and am_pm in {'PM', 'AM/PM'} and bool(due and (start or due) <= day <= due)
         pm_due_today = due == day and am_pm in {"PM", "AM/PM"}
         ga_progress = planned and am_pm in {"AM", "AM/PM"} and (marker in {"F", "FLAG"} or personal_ga)
-        if not pm_due_today and not ga_progress and not (planned and marker in DELIVERY_MARKERS):
+        if not pm_due_today and not ga_progress and not (planned and marker in DELIVERY_MARKERS) and not pm_continuation:
             continue
         status = str(getattr(task.status, "value", task.status)).upper()
         # PM due-date membership does not require a start date or an open status.
@@ -85,6 +88,8 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
             sections["delivery"].append(row)
         if pm_due_today:
             sections["pm_due_today"].append(dict(row))
+        if pm_continuation:
+            sections['pm_continuation'].append(dict(row))
     return sections
 
 
@@ -203,9 +208,11 @@ def table_value(report, row, column, index, movement, section=""):
     if column == "manual_comment":
         return report.get("manual_answers", {}).get(f"postponed_comment:{row['task_id']}") or "-"
     if column == "choice":
-        return report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") or "-"
+        prefix = 'pm_choice' if section == 'pm_continuation' else 'delivery_choice'
+        return report.get("manual_answers", {}).get(f"{prefix}:{row['task_id']}") or "-"
     if column == "answer":
-        return report.get("manual_answers", {}).get(f"delivery:{row['task_id']}") or "Pa pergjigje"
+        prefix = 'pm_comment' if section == 'pm_continuation' else 'delivery'
+        return report.get("manual_answers", {}).get(f"{prefix}:{row['task_id']}") or "Pa pergjigje"
     if not movement and column == "title":
         return row.get("title") or "-"
     if column == "marker":

@@ -2646,7 +2646,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     setTaskAssigneeIds([])
     setTaskPromptTesterId(note.knowledge_tester_id ?? "")
     setTaskDepartmentIds([])
-    setTaskProjectId(note.project_id ?? "NONE")
+    setTaskProjectId(note.project_id && projects.some((project) => project.id === note.project_id && project.is_active !== false) ? note.project_id : "NONE")
     const inferredCategory = inferSkillCategory(defaultTitle, note.content)
     setTaskSkillCategory(inferredCategory)
     setTaskSkillAutoSuggested(Boolean(inferredCategory))
@@ -2756,6 +2756,13 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       return
     }
     const primaryDepartmentId = effectiveDepartments[0]
+    if (taskProjectId !== "NONE") {
+      const selectedProject = projects.find((project) => project.id === taskProjectId)
+      if (!selectedProject || selectedProject.is_active === false) {
+        toast.error("Select an active project or choose no project")
+        return
+      }
+    }
     creatingTaskRef.current = true
     setCreatingTask(true)
     try {
@@ -3105,6 +3112,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const taskProjectOptions = React.useMemo(() => {
     const isGraphicDesign = isGraphicDesignDepartment(primaryDepartment)
     const filtered = projects.filter((project) => {
+      if (project.is_active === false) return false
       if (primaryDepartmentId && project.department_id !== primaryDepartmentId) return false
       if (project.is_template) return false
       if ((project.current_phase || "").toUpperCase() === "CLOSED") return false

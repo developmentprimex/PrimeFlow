@@ -8,6 +8,16 @@ from app.db import engine
 
 
 EXPECTED_COLUMNS = {
+    ("projects", "is_active"),
+    ("system_task_templates", "is_repetitive"),
+    *(("mira_desktop_sessions", column) for column in (
+        "id", "user_id", "department_id", "title", "status", "partial", "error",
+        "expected_segments", "notes", "note_id", "summary_progress", "lease_token", "lease_until", "created_at",
+    )),
+    *(("mira_desktop_segments", column) for column in (
+        "id", "session_id", "sequence", "start_ms", "end_ms", "content_hash",
+        "status", "transcript", "error", "lease_token", "lease_until",
+    )),
     ("meeting_recordings", "deleted_at"),
     ("meeting_recordings", "files_purged_at"),
     *(("reporting_points_settings", column) for column in (
