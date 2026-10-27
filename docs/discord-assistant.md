@@ -402,28 +402,43 @@ Nga e hëna në të premte, në `APP_TIMEZONE`:
 
 | Ora e pyetjes | Detyrat |
 |---|---|
-| 09:50 | Sloti 10:00 |
-| 10:50 | Sloti 11:00 |
-| 11:40 | Sloti 11:50 |
+| 10:00 | Sloti 10:00 |
+| 11:00 | Sloti 11:00 |
+| 11:50 | Sloti 11:50 |
 | 11:50 | AM |
-| 14:10 | Sloti 14:20 |
-| 15:50 | Sloti 16:00 |
+| 14:20 | Sloti 14:20 |
+| 16:00 | Sloti 16:00 |
 | 16:05 | PM |
 
-Kujtesa e përmend personin (@) dhe liston detyrat e slotit. Te slotet 1H (jo AM/PM)
-shton "Takimi 1H fillon në …" dhe butonin **🎧 Kyçu në takimin 1H**, që hap kanalin zanor
-`DISCORD_1H_VOICE_CHANNEL_ID` (parazgjedhje: kanali 1H i serverit). Vetëm personat që kanë
-detyra në atë slot e marrin. **📝 Fillo raportimin**
-kalon detyrë pas detyre në të njëjtin mesazh me **✅ U krye / 🔵 Vazhdon / ⏸ WFE /
-⏭ Kalo** dhe në fund lë përmbledhjen. **✅ Shëno të kryerat** mbyll disa detyra
-njëherësh. Validimet e PrimeFlow mbeten: nëse mbyllja kërkon koment ose konfirmim,
-boti e thotë privatisht dhe **📂 Hap detyrën** hap kartën e plotë. Kur personi
-nuk ka detyra për slotin, nuk dërgohet asnjë mesazh. Kur vjen kujtesa tjetër,
-një raportim i mëparshëm i papërfunduar kthehet në "pa raportuar", pa butona.
-Butonat e raportimit punojnë vetëm brenda ditës së kujtesës.
+Në fillim të secilit slot 1H, çdo staf aktiv me Discord të lidhur dhe kanal personal
+merr pyetjet që vlejnë për detyrat e atij sloti, pavarësisht pranisë në kanalin zanor
+dhe nga aktivizimi i Mira Host. Mesazhi ruan @personin, orën, ngjyrën, titullin dhe
+butonin **🎧 Kyçu në takimin 1H** (`DISCORD_1H_VOICE_CHANNEL_ID`). Plani i slotit ruhet
+kur përgatitet dërgimi: detyrat e një sloti tjetër nuk shtohen automatikisht.
+
+Ka vetëm tri pyetje automatike:
+- IN_PROGRESS: “A ke me vazhdu me [detyrën]? Kur pritet me u kry?”
+- TODO: “Pse s’ke vazhdu me [detyrën]? Kur vazhdon?”
+- Kur të gjitha detyrat e planifikuara janë DONE: “Me çka ke me vazhdu në slotin tjetër?”
+
+Pa detyra ose pa pyetje të nevojshme, nuk dërgohet mesazh. **Përgjigju** hap formularin
+për përgjigjen dhe kohën e vazhdimit/përfundimit. Edhe Reply te karta ruan përgjigjen
+si raportim; shkrimi i një date në përgjigje nuk ndryshon afatin e detyrës.
+**Progres / strike**, **Koment**, **U krye** dhe **Shtyje** përdorin veprimet ekzistuese.
+Shtyrjet ndjekin formularin dhe konfirmimin ekzistues të Diellzës. Mesazhi **Rifresko**
+lexon gjendjen e fundit; **Rishiko / ndrysho përgjigjen** ruan edhe historikun origjinal.
+**Kalo** e lë pyetjen pa përgjigje. Kartat 1H mbeten të përdorshme gjatë ditës.
+
+Te **Mira → Takimet 1H**, përgjigjet shfaqen sipas datës, slotit, personit dhe detyrës:
+gjendja në fillim/aktuale, përgjigjja, koha e pritshme, historiku i veprimeve dhe shtyrjet
+në pritje/konfirmuara/refuzuara. Slotet shfaqen edhe kur nuk ka takim të udhëhequr me zë.
+Migrimi `0170_discord_one_h_reports` shton arkivin JSONB në `discord_reminders`.
+
+AM/PM vazhdon me **Fillo raportimin**, **U krye / Vazhdon / WFE / Kalo** dhe mbylljen
+e disa detyrave njëherësh. Validimet e statusit, komentit dhe konfirmimit mbeten në API.
 
 Përzgjedhja përdor dritaren ditore të API-së `/api/tasks`, assignee-n aktual dhe
-vetëm detyrat aktive e të hapura. Sloti specifik i datës ka përparësi ndaj slotit
+detyrat aktive (edhe të kryerat për pyetjen e slotit tjetër). Sloti specifik i datës ka përparësi ndaj slotit
 bazë. AM/PM përdor `finish_period`. Në 16:05 lexohet ende dita aktuale; ndryshimi
 i slotit vazhdon të ndjekë rollover-in ekzistues në 16:00.
 

@@ -8,6 +8,7 @@ from app.db import engine
 
 
 EXPECTED_COLUMNS = {
+    ("discord_reminders", "one_h_report"),
     ("projects", "is_active"),
     ("system_task_templates", "is_repetitive"),
     *(("mira_desktop_sessions", column) for column in (

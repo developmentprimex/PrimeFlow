@@ -1273,14 +1273,32 @@ def meeting_row(meeting: Mira1HMeeting, turns: list[dict] | None = None) -> dict
 
 
 async def list_meetings(db: AsyncSession, limit: int, offset: int) -> dict:
+    from app.services import discord_one_h
     rows = (await db.execute(select(Mira1HMeeting).order_by(Mira1HMeeting.meeting_date.desc(), Mira1HMeeting.slot.desc())
-        .limit(limit).offset(offset))).scalars().all()
+        .limit(limit + offset))).scalars().all()
     total = (await db.execute(select(func.count()).select_from(Mira1HMeeting))).scalar_one()
-    return {"total": total, "items": [meeting_row(m, await turns_view(db, m)) for m in rows]}
+    items = {(m.meeting_date, m.slot): meeting_row(m, await turns_view(db, m)) for m in rows}
+    host_slots = set((await db.execute(select(Mira1HMeeting.meeting_date, Mira1HMeeting.slot))).all())
+    for day, slot in await discord_one_h.slot_groups(db):
+        if (day, slot) not in items:
+            if (day, slot) in host_slots:
+                continue
+            items[(day, slot)] = discord_one_h.virtual_meeting(day, slot)
+            total += 1
+    ordered = [items[key] for key in sorted(items, reverse=True)]
+    return {"total": total, "items": ordered[offset:offset + limit]}
 
 
 async def meeting_detail(db: AsyncSession, meeting_id: uuid.UUID) -> dict:
-    meeting = await meeting_for(db, meeting_id)
+    from app.services import discord_one_h
+    meeting = await db.get(Mira1HMeeting, meeting_id)
+    if meeting is None:
+        for day, slot in await discord_one_h.slot_groups(db):
+            if discord_one_h.slot_id(day, slot) == meeting_id:
+                return {**discord_one_h.virtual_meeting(day, slot), 'turns': [], 'summary': None,
+                        'transcript': [], 'events': [], 'mentions': [], 'recorder': None,
+                        'discord_reports': await discord_one_h.reports_for(db, day, slot)}
+        raise HTTPException(404, 'Takimi 1H nuk u gjet.')
     turns = await turns_view(db, meeting)
     for turn in turns:
         turn.pop("discord", None)
@@ -1298,7 +1316,8 @@ async def meeting_detail(db: AsyncSession, meeting_id: uuid.UUID) -> dict:
     return {**meeting_row(meeting, turns), "turns": turns, "summary": meeting.summary,
             "transcript": meeting.host_transcript or [], "events": await meeting_events(db, meeting),
             "mentions": [{"kind": m.kind, "text": m.text, "task_id": str(m.task_id)} for m in mentions],
-            "recorder": recorder}
+            "recorder": recorder,
+            "discord_reports": await discord_one_h.reports_for(db, meeting.meeting_date, meeting.slot)}
 
 
 async def note_transcript(db: AsyncSession, note_id: uuid.UUID) -> dict:

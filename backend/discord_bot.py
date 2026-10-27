@@ -22,6 +22,7 @@ import discord_ui as ui
 import discord_agent_client as agent_client
 import discord_m2_client as m2_client
 import discord_m3_client as m3_client
+import discord_one_h_client as one_h_client
 import discord_m2_approvals as m2_approvals
 import discord_answer_sync as answer_sync
 import discord_voice_meetings as voice_meetings
@@ -92,6 +93,8 @@ def task_ids_in(message) -> list[str]:
                 for option in item.options:
                     add(option.value)
             elif custom_id.startswith("pf:rep:") and len(parts) > 3:
+                add(parts[3])
+            elif custom_id.startswith("pf:1h:") and len(parts) > 3:
                 add(parts[3])
             elif parts[:2] in (["pf", "open"], ["pf", "quick"], ["pf", "more"], ["pf", "nav"], ["pf", "back"],
                                ["pf", "pointset"], ["pf", "points"], ["pf", "schedule"], ["pf", "confirm"]) and len(parts) > 2:
@@ -678,7 +681,9 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
-            if custom_id.startswith("pf:m3:"):
+            if custom_id.startswith("pf:1h:"):
+                await one_h_client.handle(self, interaction)
+            elif custom_id.startswith("pf:m3:"):
                 await m3_client.handle(self, interaction)
             elif custom_id.startswith("pf:m2a:"):
                 await m2_approvals.handle(self, interaction)
@@ -799,6 +804,8 @@ class PrimeFlowBot(discord.Client):
             return
         try:
             channel = await self.private_channel(message.guild.id, message.channel.id, message.author.id)
+            if await one_h_client.reply(self, message):
+                return
             async with channel.typing():
                 result = await self.bridge("/bot/command", {**actor(message.author.id, message.guild.id, channel.id),
                     "request_id": str(message.id), "instruction": message.content[:4000],
@@ -862,9 +869,13 @@ class PrimeFlowBot(discord.Client):
                         message_ids = []
                         if job.get("previous"):
                             await self.retire_reminder(channel, job["previous"])
-                        if data["tasks"]:
-                            text, view = ui.report_intro(job["bucket"], data["tasks"], job["id"], job["discord_user_id"],
-                                join_url=self.one_h_url(job["bucket"], job["guild_id"]))
+                        if data["tasks"] and (not data.get('one_h') or data['one_h']['questions']):
+                            if data.get('one_h'):
+                                text, view = one_h_client.card(data['one_h'], user_id=job['discord_user_id'],
+                                    join_url=self.one_h_url(job['bucket'], job['guild_id']))
+                            else:
+                                text, view = ui.report_intro(job["bucket"], data["tasks"], job["id"], job["discord_user_id"],
+                                    join_url=self.one_h_url(job["bucket"], job["guild_id"]))
                             # Discord deduplicates the same nonce on a retried
                             # send. The key survives worker/API restarts.
                             nonce = hashlib.sha256(f"{job['id']}:0".encode()).hexdigest()[:24]
@@ -921,6 +932,8 @@ class PrimeFlowBot(discord.Client):
 
     async def retire_reminder(self, channel, previous):
         """An unanswered earlier report stops offering buttons once the next one arrives."""
+        if previous['bucket'] not in {'AM', 'PM'}:
+            return  # Keep slot answers/corrections available throughout the reporting day.
         for message_id in previous.get("message_ids") or []:
             try:
                 message = await channel.fetch_message(int(message_id))

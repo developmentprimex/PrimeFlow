@@ -6,7 +6,7 @@ export type MeetingRow = {
   id: string
   date: string
   slot: string
-  status: "PREP" | "GA_PHASE" | "STAFF_PHASE" | "DONE" | "ABORTED"
+  status: "PREP" | "GA_PHASE" | "STAFF_PHASE" | "DONE" | "ABORTED" | "DISCORD_REPORT"
   started_at: string | null
   staff_started_at: string | null
   ended_at: string | null
@@ -41,6 +41,7 @@ export type MeetingEvent = {
 }
 
 export type MeetingDetail = MeetingRow & {
+  discord_reports?: DiscordSlotReport[]
   turns: Turn[]
   summary: string | null
   transcript: TranscriptLine[]
@@ -52,6 +53,42 @@ export type MeetingDetail = MeetingRow & {
     notes: string | null
     segments: { speaker: string; start_ms: number; text: string }[]
   } | null
+}
+
+export type DiscordReportHistory = {
+  kind: "ANSWER" | "SKIP" | "ACTION"
+  at: string
+  question?: string
+  answer?: string
+  expected_at?: string | null
+  instruction?: string
+  status?: string
+  message?: string
+}
+
+export type DiscordSlotReport = {
+  id: string
+  user_id: string
+  name: string
+  state: "WAITING" | "PARTIAL" | "DONE"
+  created_at: string
+  sent_at: string | null
+  tasks: {
+    id: string
+    title: string
+    planned_status: string
+    question?: string | null
+    comment?: string | null
+    progress_percentage?: number | null
+    status: string
+    available: boolean
+    answer: string | null
+    expected_at: string | null
+    skipped: boolean
+    history: DiscordReportHistory[]
+    postponements?: { id: string; status: string; label: string; comment: string; proposed_dates: Record<string, string>; at: string }[]
+  }[]
+  next: { answer: string | null; expected_at: string | null; history: DiscordReportHistory[] }
 }
 
 export type MiraNote = {
@@ -108,6 +145,7 @@ export const STATUS_LABELS: Record<MeetingRow["status"], string> = {
   STAFF_PHASE: "Radha e stafit",
   DONE: "Përfundoi",
   ABORTED: "U ndërpre",
+  DISCORD_REPORT: "Raportimi në Discord",
 }
 
 export async function json<T>(response: Response): Promise<T> {

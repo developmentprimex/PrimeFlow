@@ -45,6 +45,8 @@ class DiscordReminder(Base):
     lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     message_ids: Mapped[list | None] = mapped_column(JSONB)
+    # Frozen slot plan, original answers and task-operation history for Mira.
+    one_h_report: Mapped[dict | None] = mapped_column(JSONB)
     __table_args__ = (UniqueConstraint("link_id", "day", "bucket", name="uq_discord_reminder_bucket"),)
 
 
