@@ -16,7 +16,7 @@ type View = {
 }
 type RecorderContextValue = View & {
   shareScreen: (source?: string) => Promise<void>
-  prepare: (device: string | false, source: string) => Promise<void>
+  prepare: (device: string | false, source: string, recording: { title: string; meetingId: string; description: string }) => Promise<void>
   start: (title: string, meetingId: string, description: string) => Promise<void>
   cancel: () => void; stop: () => void; pause: () => void; resume: () => void
   toggle: (input: "microphone" | "system") => void
@@ -143,7 +143,7 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
 
-  const prepare = async (device: string | false, source: string) => {
+  const prepare = async (device: string | false, source: string, recording: { title: string; meetingId: string; description: string }) => {
     const r = runtime.current
     if (!r || r.starting || r.id || r.finishing) return
     setView(v => ({ ...v, error: null, savedId: null, backpressure: false }))
@@ -161,6 +161,9 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
       })
     } catch (error) { setView(v => ({ ...v, error: error instanceof Error ? error.message : String(error) })) }
     finally { r.starting = false }
+    if (runtime.current === r && r.capture.state === "prepared" && r.capture.info.system) {
+      await start(recording.title, recording.meetingId, recording.description)
+    }
   }
   const start = async (title: string, meetingId: string, description: string) => {
     const r = runtime.current
