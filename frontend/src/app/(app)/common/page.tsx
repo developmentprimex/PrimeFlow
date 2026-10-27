@@ -8604,12 +8604,20 @@ export default function CommonViewPage() {
       return usersWithSlot
     }
     const usersWithBlockedTask = new Set<string>()
+    const usersWithAmBlockedTask = new Set<string>()
     for (const item of commonData.blocked) {
       if (item.date !== selectedOneHDate || isWaitingClientTask(item)) continue
-      if (item.userId) usersWithBlockedTask.add(item.userId)
+      const coversAm = !item.finishPeriod || item.finishPeriod === "AM"
+      if (item.userId) {
+        usersWithBlockedTask.add(item.userId)
+        if (coversAm) usersWithAmBlockedTask.add(item.userId)
+      }
       for (const assignee of entryAssignees(item)) {
         const assigneeId = oneHUserIdByName.get(assignee.trim().toLowerCase())
-        if (assigneeId) usersWithBlockedTask.add(assigneeId)
+        if (assigneeId) {
+          usersWithBlockedTask.add(assigneeId)
+          if (coversAm) usersWithAmBlockedTask.add(assigneeId)
+        }
       }
     }
     const buildMissingOneHUsers = (slot: OneHReportSlot | null) => {
@@ -8623,7 +8631,8 @@ export default function CommonViewPage() {
           const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
           const hasProjectTask = projectUsers.has(userEntry.id)
           const hasPersonalTask = personalUsers.has(userEntry.id)
-          const hasBlockedTask = slot === "16:00" && usersWithBlockedTask.has(userEntry.id)
+          const hasBlockedTask = (["10:00", "11:00", "11:50"].includes(slot) && usersWithAmBlockedTask.has(userEntry.id))
+            || (slot === "16:00" && usersWithBlockedTask.has(userEntry.id))
           const period = slot === "10:00" || slot === "11:00" || slot === "11:50" ? "AM" : "PM"
           return { id: userEntry.id, label, initials: initials(label), isCovered: hasProjectTask || hasPersonalTask || hasBlockedTask, coverageReason: hasProjectTask ? `Detyrë projekti ${period}` : hasPersonalTask ? `Detyrë personale ${period}` : hasBlockedTask ? "BLL" : "" }
         })
