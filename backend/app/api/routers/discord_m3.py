@@ -135,10 +135,9 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
         rows, owners, names = await tomorrow_data(db, target)
         for link in links:
             personal = [row for row in rows if link.user_id in owners.get(row['task_id'], set())]
-            candidates.append((link.user_id, 'tomorrow', {'title': 'Të gjitha detyrat për nesër', 'tasks': personal}, target))
             for row in personal:
-                if row['due_tomorrow']:
-                    candidates.append((link.user_id, 'tomorrow_task', row, target))
+                candidates.append((link.user_id, 'tomorrow_task', row, target))
+            candidates.append((link.user_id, 'tomorrow', {'title': 'Konfirmimi përfundimtar', 'tasks': personal}, target))
         for row in rules.slot_questions(rows, owners, names):
             for uid in owners.get(row['task_id'], set()):
                 candidates.append((uid, 'slot', row, target))
@@ -153,6 +152,10 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
         if not link:
             continue
         key = rules.context_key(kind, {} if kind == 'tomorrow' else row)
+        if kind == 'tomorrow':
+            children = [existing.get((link.id, 'tomorrow_task', rules.context_key('tomorrow_task', task))) for task in row['tasks']]
+            if any(child is None or (not child.sent_at and not child.answered_at) for child in children):
+                continue
         if kind in {'untouched', 'delivery'} and (kind, row['task_id']) not in asked:
             manual = report.manual_answers or {}
             answer_key = f"{'delivery_choice' if kind == 'delivery' else 'untouched_comment'}:{row['task_id']}"
@@ -290,7 +293,7 @@ class Answer(Actor):
 def validate_answer(q, value):
     allowed = {'untouched': {'comment', 'progress', 'done', 'postpone'}, 'delivery': {'PO', 'JO'},
         'meeting': {'held', 'canceled'}, 'tomorrow': {'PO', 'JO'},
-        'tomorrow_task': {'PO', 'JO', 'postpone'}, 'slot': {'slot'}}
+        'tomorrow_task': {'PO', 'JO', 'comment', 'postpone'}, 'slot': {'slot'}}
     if value.action not in allowed[q.kind]:
         raise HTTPException(422, 'Ky veprim nuk lejohet për këtë pyetje.')
     if value.action in {'comment', 'progress', 'done', 'postpone', 'JO', 'canceled'} and not value.comment.strip():
@@ -333,7 +336,7 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
         if key in {'action', 'progress', 'slot', 'start_date', 'due_date'}}
     if q.kind == 'tomorrow':
         recorded['plan_key'] = value.plan_key
-    if q.answered_at and q.answer == recorded and q.comment == value.comment.strip():
+    if q.kind != 'tomorrow' and q.answered_at and q.answer == recorded and q.comment == value.comment.strip():
         return {'ok': True}
     if value.expected_answered_at != q.answered_at:
         raise HTTPException(409, 'Përgjigjja ndryshoi ndërkohë. Hape përsëri pyetjen.')
@@ -353,7 +356,11 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
     message_updates = []
 
     async def persist(_task=None):
+        previous_answer, previous_stamp = q.answer, q.answered_at
         q.answer, q.comment, q.answered_at = recorded, value.comment.strip(), datetime.now(timezone.utc)
+        if q.kind == 'tomorrow_task' and value.action == 'comment':
+            q.answer = previous_answer if previous_stamp else recorded
+            q.answered_at = previous_stamp
         if q.task_id:
             body = f'M3 {q.day:%d.%m.%Y} · {rules.KINDS[q.kind]} · {value.action}\n{q.comment}'
             existing = (await db.execute(select(TaskUserComment).where(TaskUserComment.task_id == q.task_id,
@@ -383,12 +390,15 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
             report.status, report.last_error, report.updated_by = 'DRAFT', None, user.id
         if q.kind == 'tomorrow' and value.action == 'PO':
             # "Po, të gjitha" explicitly includes work and completion at Due.
-            due_ids = [uuid.UUID(row['task_id']) for row in live['snapshot']['tasks'] if row['due_tomorrow']]
+            due_ids = [uuid.UUID(row['task_id']) for row in live['snapshot']['tasks']]
             children = (await db.execute(select(Question).where(Question.link_id == q.link_id,
-                Question.day == q.day, Question.kind == 'tomorrow_task', Question.task_id.in_(due_ids)))).scalars().all()
+                Question.day == q.day, Question.kind == 'tomorrow_task', Question.task_id.in_(due_ids),
+                Question.answered_at.is_(None)).with_for_update())).scalars().all()
             for child in children:
                 child.answer = {'action': 'PO', 'summary_id': str(q.id)}
-                child.comment, child.answered_at = q.comment, q.answered_at
+                child.answered_at = q.answered_at
+                add_audit_log(db=db, actor_user_id=user.id, entity_type='task', entity_id=child.task_id,
+                    action='discord.m3_answer', after={'question_id': str(child.id), 'action': 'PO', 'summary_id': str(q.id)})
                 if child.message_id:
                     message_updates.append(question_payload(child, link))
 

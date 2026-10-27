@@ -95,19 +95,60 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
                 'slot': '11:00', 'peers': [{'slot': '10:00', 'people': 'DV'}], 'due_tomorrow': True},
             'live_dates': {'start_date': '2026-10-27T08:00:25+01:00', 'due_date': '2026-10-28T16:00:00+01:00'}, **values}
 
-    async def test_summary_pages_include_every_task_and_bounded_controls(self):
+    async def test_footer_has_only_bulk_yes_and_task_cards_have_four_actions(self):
         import discord_m3_client as client
         rows = rules.tomorrow_rows([task(title='x' * 500) for _ in range(63)], date(2026, 10, 28), {})
         job = self.job('tomorrow', snapshot={'title': 'Plani', 'tasks': rows}, task_id=None)
-        found = []
-        for page in range(7):
-            text, view = client.prompt(job, page), client.controls(job, page)
-            self.assertLessEqual(len(text), 2000)
-            select = next(item for item in view.children if item.custom_id.startswith('pf:m3:task:'))
-            found.extend(item.value for item in select.options)
-            self.assertTrue(all(len(item.custom_id or '') <= 100 for item in view.children))
-            self.assertTrue(view.is_persistent())
-        self.assertEqual(found, [row['task_id'] for row in rows])
+        self.assertLessEqual(len(client.prompt(job)), 2000)
+        view = client.controls(job)
+        self.assertEqual([item.label for item in view.children], ['Po për të gjitha'])
+        self.assertTrue(view.is_persistent())
+        for due in (False, True):
+            item = self.job('tomorrow_task')
+            item['snapshot']['due_tomorrow'] = due
+            text = client.prompt(item)
+            self.assertNotIn('\n', text)
+            self.assertIn('RA: Detyrë', text)
+            self.assertEqual([button.label for button in client.controls(item).children],
+                ['Po, kryhet' if due else 'Po, punohet', 'Jo — shtyje', 'Koment', 'Hap detyrën'])
+
+    async def test_compact_task_shows_only_clean_first_line_and_link(self):
+        import discord_m3_client as client
+        job = self.job('tomorrow_task', comment='Long comment\n' * 100, answered=True, answer={'action': 'PO'})
+        job['snapshot']['title'] = 'EH:[[added]]LH:[[/added]] 8/6 VS DIGITALIZIM\n[[done]]\nVery long task body'
+        content = client.prompt(job)
+        self.assertNotIn('\n', content)
+        self.assertNotIn('[[added]]', content)
+        self.assertNotIn('Very long', content)
+        self.assertNotIn('Long comment', content)
+        self.assertIn('8/6 VS DIGITALIZIM', content)
+        self.assertIn('/tasks/' + job['task_id'], content)
+        self.assertIn('](<', content)
+        self.assertIn('>)', content)
+        self.assertTrue(all(item.row == 0 for item in client.controls(job).children))
+
+    async def test_open_task_displays_full_text_privately_without_expanding_report_card(self):
+        import discord_m3_client as client
+        job = self.job('tomorrow_task')
+        detail = {'task': {'title': 'Title\n' + ('Full text\n' * 400)}, 'title_points': [], 'description_points': []}
+        interaction = Mock()
+        interaction.guild_id, interaction.channel_id, interaction.user.id = 22, 33, 11
+        interaction.data = {'custom_id': f"pf:m3:open:{job['id']}"}
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        interaction.message.edit = AsyncMock()
+        bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job),
+            current_detail=AsyncMock(return_value=detail))
+        with patch.object(client.task_ui, 'full_text', return_value='Title\n' + ('Full text\n' * 400)):
+            await client.handle(bot, interaction)
+        bot.current_detail.assert_awaited_once_with(interaction, job['task_id'])
+        self.assertGreater(interaction.followup.send.await_count, 1)
+        self.assertEqual(sum(call.args[0].count('Full text') for call in interaction.followup.send.call_args_list), 400)
+        for call in interaction.followup.send.call_args_list:
+            self.assertTrue(call.kwargs['ephemeral'])
+            self.assertTrue(call.kwargs['suppress_embeds'])
+            self.assertLessEqual(len(call.args[0]), 1900)
+        interaction.message.edit.assert_not_awaited()
 
     async def test_date_form_autofills_both_and_preserves_untouched_instant(self):
         import discord_m3_client as client
@@ -143,6 +184,20 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
         bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job))
         await client.handle(bot, interaction)
         self.assertEqual(set(interaction.response.send_modal.call_args.args[0].dates), {'start_date', 'due_date'})
+
+    async def test_old_no_button_also_opens_postponement_form(self):
+        import discord_m3_client as client
+        job = self.job('tomorrow_task')
+        interaction = Mock()
+        interaction.guild_id, interaction.channel_id, interaction.user.id = 22, 33, 11
+        interaction.data = {'custom_id': f"pf:m3:JO:{job['id']}"}
+        interaction.response.send_modal = AsyncMock()
+        bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job))
+        await client.handle(bot, interaction)
+        modal = interaction.response.send_modal.call_args.args[0]
+        self.assertEqual(modal.action, 'postpone')
+        self.assertEqual(set(modal.dates), {'start_date', 'due_date'})
+        self.assertTrue(modal.comment.required)
 
     async def test_yes_is_saved_even_if_optional_comment_modal_is_closed(self):
         import discord_m3_client as client

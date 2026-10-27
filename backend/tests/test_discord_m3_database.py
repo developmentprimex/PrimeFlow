@@ -53,7 +53,40 @@ class M3DatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def claim(self, phase='m3'):
         now = datetime.combine(self.day, time(15, 50) if phase == 'm3' else time(16, 10), report_timezone())
         async with self.sessions() as db:
-            return (await api.collect_questions(db, now=now, phase=phase))['jobs']
+            jobs = (await api.collect_questions(db, now=now, phase=phase))['jobs']
+            if phase == 'tomorrow':
+                self.assertFalse(any(job['kind'] == 'tomorrow' and job['snapshot']['tasks'] for job in jobs))
+                for job in jobs:
+                    question = await db.get(Question, uuid.UUID(job['id']))
+                    question.sent_at = now
+                    question.message_id = str(1000 + len(job['id']))
+                await db.commit()
+                jobs += (await api.collect_questions(db, now=now, phase=phase))['jobs']
+            return jobs
+
+    async def test_all_tasks_get_cards_and_bulk_preserves_individual_no_and_comment(self):
+        target = await self.setup_tomorrow()
+        extra_id = uuid.uuid4()
+        async with self.sessions() as db:
+            db.add(Task(id=extra_id, title='Continues beyond tomorrow', assigned_to=self.uid,
+                status='TODO', start_date=datetime.combine(target, time(8), report_timezone()),
+                due_date=datetime.combine(target + timedelta(days=3), time(16), report_timezone())))
+            await db.commit()
+        jobs = [job for job in await self.claim('tomorrow') if job['discord_user_id'] == '11']
+        cards = [job for job in jobs if job['kind'] == 'tomorrow_task']
+        self.assertEqual(len(cards), 2)
+        self.assertEqual(jobs[-1]['kind'], 'tomorrow')
+        first = next(job for job in cards if job['task_id'] == str(self.task_id))
+        second = next(job for job in cards if job['task_id'] == str(extra_id))
+        await self.reply(first, 'JO', comment='Not ready')
+        await self.reply(second, 'comment', comment='Will work in the afternoon')
+        self.assertFalse((await self.opened(second))['answered'])
+        footer = jobs[-1]
+        live = await self.opened(footer)
+        await self.reply(footer, 'PO', plan_key=live['plan_key'])
+        one, two = await self.opened(first), await self.opened(second)
+        self.assertEqual((one['answer']['action'], one['comment']), ('JO', 'Not ready'))
+        self.assertEqual((two['answer']['action'], two['comment']), ('PO', 'Will work in the afternoon'))
 
     async def opened(self, job, actor=None):
         async with self.sessions() as db:

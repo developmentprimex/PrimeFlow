@@ -64,7 +64,10 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
                                          for field in ("start_date", "due_date", "created_at", "completed_at"))
         planned = bool(start and due and start <= day <= due)
         status = str(getattr(task.status, "value", task.status)).upper()
-        pm_continuation = status != 'DONE' and am_pm in {'PM', 'AM/PM'} and bool(due and (start or due) <= day <= due)
+        # The task editor stores "None (all day)" as a null finish_period.
+        # All-day work also needs an explicit confirmation about the afternoon.
+        all_day = not str(getattr(task, 'finish_period', None) or '').strip()
+        pm_continuation = status != 'DONE' and (am_pm in {'PM', 'AM/PM'} or all_day) and bool(due and (start or due) <= day <= due)
         pm_due_today = due == day and am_pm in {"PM", "AM/PM"}
         ga_progress = planned and am_pm in {"AM", "AM/PM"} and (marker in {"F", "FLAG"} or personal_ga)
         if not pm_due_today and not ga_progress and not (planned and marker in DELIVERY_MARKERS) and not pm_continuation:

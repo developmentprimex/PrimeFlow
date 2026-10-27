@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import logging
 import discord
+import discord_ui as task_ui
 from app.config import settings
 from app.services.discord_m3 import KINDS, SLOTS, context_key
 from app.services.primeflow_report import report_timezone
@@ -13,7 +14,6 @@ from discord_m2_client import actor
 from discord_m2_approvals import parse_date
 
 log = logging.getLogger(__name__)
-PAGE_SIZE = 10
 
 
 def date_default(value):
@@ -27,19 +27,21 @@ def form_date(value, current):
 
 def prompt(job, page=0):
     row, kind = job['snapshot'], job['kind']
+    if kind == 'tomorrow_task':
+        title = discord.utils.escape_markdown(task_ui.heading(row))
+        text = f"**[{title}](<{task_ui.task_url(job['task_id'])}>)**"
+        if job.get('resolved'):
+            text += ' · ✅ ' + job['resolved'][:80]
+        elif job.get('answered'):
+            label = {'PO': 'Po', 'JO': 'Jo', 'postpone': 'U shty'}.get(job.get('answer', {}).get('action'), '')
+            text += ' · ✅ ' + label
+        if job.get('comment'):
+            text += ' · 💬'
+        return text
     text = f"<@{job['discord_user_id']}> **{'M3' if kind in {'untouched', 'delivery', 'meeting'} else 'NESËR'} · {KINDS[kind]}**\n"
     if kind == 'tomorrow':
-        rows = row['tasks']
-        pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
-        page = max(0, min(page, pages - 1))
-        text += f"**{job['target_date']} · {len(rows)} detyra · Faqja {page + 1}/{pages}**\n"
-        for i, task in enumerate(rows[page * PAGE_SIZE:(page + 1) * PAGE_SIZE], page * PAGE_SIZE + 1):
-            flags = (' 🔴 Deadline Important' if task['deadline_important'] else '') + (' ⏰ Due nesër' if task['due_tomorrow'] else '')
-            slot = f" · 1H: {task['slot'] or 'PA SLOT'}" if task['is_1h'] else ''
-            text += f"{i}. {discord.utils.escape_markdown(task['title'][:85])}{flags}{slot}\n"
-        if not rows:
-            text += 'Nuk ke detyra të planifikuara.\n'
-        text += '\nA punohet në të gjitha nesër? A kryhen ato me Due / Deadline Important nesër?\nZgjidh një detyrë për ta komentuar ose shtyrë.'
+        text += f"**{job['target_date']} · {len(row['tasks'])} detyra**\n"
+        text += 'Po për të gjitha plotëson vetëm detyrat ende pa përgjigje. Përgjigjet dhe komentet individuale ruhen.'
     else:
         text += '**' + discord.utils.escape_markdown(row['title'][:500]) + '**\n'
         if kind == 'untouched':
@@ -51,10 +53,13 @@ def prompt(job, page=0):
                 text += 'Ora: ' + datetime.fromisoformat(row['time']).astimezone(report_timezone()).strftime('%H:%M') + '\n'
             text += 'A është mbajtur takimi apo është anuluar?'
         elif kind == 'tomorrow_task':
-            text += f"Start: {row.get('start_date') or '—'} · Due: {row.get('due_date') or '—'}\n"
+            if row.get('due_tomorrow'):
+                text += '\n⏰ **Due nesër**\n'
             if row.get('deadline_important'):
                 text += '🔴 **Deadline Important**\n'
-            text += 'A punohet dhe a kryhet nesër deri në Due?' if row.get('due_tomorrow') else 'A punohet në këtë detyrë nesër?'
+            text += '\n'
+            text += f"Start: {row.get('start_date') or '—'} · Due: {row.get('due_date') or '—'}\n"
+            text += 'A kryhet nesër?' if row.get('due_tomorrow') else 'A punohet nesër?'
             text += '\nNëse jo, komento ose shtyje menjëherë.'
         elif kind == 'slot':
             text += f"Data: {job['target_date']} · Sloti yt: **{row.get('slot') or 'PA SLOT'}**\n"
@@ -73,6 +78,8 @@ def prompt(job, page=0):
         text += '\n\n✅ **Përgjigjja: ' + label + '**'
         if job.get('comment'):
             text += '\n' + discord.utils.escape_markdown(job['comment'][:250])
+    elif job.get('comment'):
+        text += '\n\n💬 ' + discord.utils.escape_markdown(job['comment'][:250])
     return text[:1950]
 
 
@@ -87,12 +94,16 @@ def controls(job, page=0):
         if kind == 'untouched':
             for label, action in [('Komento', 'comment'), ('Në progres', 'progress'), ('Mbylle', 'done'), ('Shtyje', 'postpone')]:
                 button(label, action)
-        elif kind in {'delivery', 'tomorrow_task', 'tomorrow'}:
-            button('Po, të gjitha' if kind == 'tomorrow' else 'Po, e dorëzova' if kind == 'delivery' else 'Po, kryhet' if row.get('due_tomorrow') else 'Po, punohet', 'PO', discord.ButtonStyle.success)
+        elif kind == 'tomorrow':
+            button('Po për të gjitha', 'PO', discord.ButtonStyle.success)
+        elif kind == 'tomorrow_task':
+            button('Po, kryhet' if row.get('due_tomorrow') else 'Po, punohet', 'PO', discord.ButtonStyle.success)
+            button('Jo — shtyje', 'postpone')
+            button('Koment', 'comment')
+        elif kind == 'delivery':
+            button('Po, e dorëzova', 'PO', discord.ButtonStyle.success)
             button('Jo — komento', 'JO')
-            if kind == 'tomorrow_task':
-                button('Shtyje', 'postpone')
-            if kind == 'delivery' and job.get('answer', {}).get('action') == 'PO':
+            if job.get('answer', {}).get('action') == 'PO':
                 button('Ndrysho / shto koment', 'yescomment')
         elif kind == 'meeting':
             button('Po, u mbajt', 'held', discord.ButtonStyle.success)
@@ -106,19 +117,9 @@ def controls(job, page=0):
                 button(f'Si kolegu: {alternate}', f'slot:{alternate}')
             view.add_item(discord.ui.Select(placeholder='Vendos / ndrysho slotin', custom_id=f'pf:m3:pickslot:{qid}', row=1,
                 options=[discord.SelectOption(label=value, value=value) for value in SLOTS]))
-    if kind == 'tomorrow':
-        tasks = row['tasks']
-        pages = max(1, (len(tasks) + PAGE_SIZE - 1) // PAGE_SIZE)
-        page = max(0, min(page, pages - 1))
-        current = tasks[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
-        if current:
-            view.add_item(discord.ui.Select(placeholder='Zgjidh detyrën: koment / shtyrje', custom_id=f'pf:m3:task:{qid}', row=1,
-                options=[discord.SelectOption(label=f"{page * PAGE_SIZE + i + 1}. {task['title']}"[:100], value=task['task_id']) for i, task in enumerate(current)]))
-        if page > 0:
-            button('← Mbrapa', f'page:{page - 1}', row=2)
-        if page + 1 < pages:
-            button('Tjetra →', f'page:{page + 1}', row=2)
-    if job.get('task_id'):
+    if job.get('task_id') and kind == 'tomorrow_task':
+        button('Hap detyrën', 'open')
+    elif job.get('task_id'):
         view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}", row=3))
     return view
 
@@ -129,14 +130,15 @@ async def save(bot, interaction, job, action, comment='', *, source_message=None
     latest = await bot.bridge(f"/bot/m3/{job['id']}/open", actor(interaction))
     message = source_message or getattr(interaction, 'message', None)
     if message:
-        await message.edit(content=prompt(latest), view=controls(latest), allowed_mentions=discord.AllowedMentions.none())
+        await message.edit(content=prompt(latest), view=controls(latest), suppress=True, allowed_mentions=discord.AllowedMentions.none())
     else:
-        await interaction.edit_original_response(content=prompt(latest), view=controls(latest), allowed_mentions=discord.AllowedMentions.none())
+        original = await interaction.edit_original_response(content=prompt(latest), view=controls(latest), embeds=[], allowed_mentions=discord.AllowedMentions.none())
+        await original.edit(suppress=True)
     for child in result.get('updates', []):
         try:
             channel = await bot.private_channel(child['guild_id'], child['channel_id'], child['discord_user_id'])
             related = await channel.fetch_message(int(child['message_id']))
-            await related.edit(content=prompt(child), view=controls(child), allowed_mentions=discord.AllowedMentions.none())
+            await related.edit(content=prompt(child), view=controls(child), suppress=True, allowed_mentions=discord.AllowedMentions.none())
         except Exception as exc:
             log.warning('Tomorrow confirmation refresh %s failed: %s', child['id'], type(exc).__name__)
     return latest
@@ -189,15 +191,31 @@ async def handle(bot, interaction):
         qid, extra = extra[-1], [':'.join([qid, *extra[:-1]])]
     await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
     job = await bot.bridge(f'/bot/m3/{qid}/open', actor(interaction))
+    # Older task cards used a separate No button. It now opens the same date
+    # form, so existing messages follow the combined flow as well.
+    if job['kind'] == 'tomorrow_task' and action == 'JO':
+        action = 'postpone'
+    if action == 'open' and job.get('task_id'):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        detail = await bot.current_detail(interaction, job['task_id'])
+        full = task_ui.full_text(detail['task'], detail)
+        while full:
+            split = full.rfind('\n', 0, 1900) if len(full) > 1900 else len(full)
+            if split <= 0:
+                split = min(len(full), 1900)
+            await interaction.followup.send(full[:split], ephemeral=True, suppress_embeds=True,
+                allowed_mentions=discord.AllowedMentions.none())
+            full = full[split:].lstrip('\n')
+        return
     if job.get('resolved'):
-        await interaction.response.edit_message(content=prompt(job), view=controls(job))
+        await interaction.response.edit_message(content=prompt(job), view=controls(job), suppress_embeds=True)
         return
     if action == 'page':
-        await interaction.response.edit_message(content=prompt(job, int(extra[0])), view=controls(job, int(extra[0])))
+        await interaction.response.edit_message(content=prompt(job, int(extra[0])), view=controls(job, int(extra[0])), suppress_embeds=True)
     elif action == 'task':
         task_id = interaction.data['values'][0]
         selected = await bot.bridge(f'/bot/m3/{qid}/tasks/{task_id}', actor(interaction))
-        await interaction.response.send_message(content=prompt(selected), view=controls(selected), ephemeral=True)
+        await interaction.response.send_message(content=prompt(selected), view=controls(selected), ephemeral=True, suppress_embeds=True)
     elif action in {'slot', 'pickslot'}:
         await interaction.response.defer()
         slot = extra[0] if action == 'slot' else interaction.data['values'][0]
@@ -205,6 +223,9 @@ async def handle(bot, interaction):
     elif action == 'held':
         await interaction.response.defer()
         await save(bot, interaction, job, 'held')
+    elif action == 'PO' and job['kind'] in {'tomorrow', 'tomorrow_task'}:
+        await interaction.response.defer()
+        await save(bot, interaction, job, 'PO', job.get('comment', ''))
     elif action == 'PO':
         # As in M2, yes is saved immediately; the comment form is optional.
         modal = AnswerModal(bot, job, 'PO', getattr(interaction, 'message', None))
@@ -233,9 +254,11 @@ async def deliver(bot):
                     return
                 nonce = hashlib.sha256(f"m3:{job['id']}".encode()).hexdigest()[:24]
                 message = await bot.http.request(discord.http.Route('POST', '/channels/{channel_id}/messages', channel_id=channel.id),
-                    json={'content': prompt(job), 'components': controls(job).to_components(),
+                    json={'content': prompt(job), 'components': controls(job).to_components(), 'flags': 4,
                         'allowed_mentions': {'parse': [], 'users': [job['discord_user_id']]}, 'nonce': nonce, 'enforce_nonce': True})
                 await bot.bridge(f"/bot/m3/{job['id']}/ack", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')} | {'message_id': str(message['id'])})
             except Exception as exc:
                 log.warning('M3 delivery %s failed: %s', job['id'], type(exc).__name__)
-    await asyncio.gather(*(send(job) for job in jobs))
+    # Preserve task order and send the final confirmation after task cards.
+    for job in jobs:
+        await send(job)

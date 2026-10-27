@@ -111,9 +111,14 @@ class ProposalRulesTests(unittest.TestCase):
             id=uuid.uuid4(), title='EF: Detyre', status=status, progress_percentage=0,
             created_at=day, start_date=day, due_date=day, completed_at=None,
             is_deadline_important=False, one_h_marker=None, finish_period=period,
-        ) for period, status in [('AM', 'TODO'), ('PM', 'TODO'), ('PM', 'DONE')]]
+        ) for period, status in [('AM', 'TODO'), ('PM', 'TODO'), ('PM', 'DONE'),
+                                (None, 'IN_PROGRESS'), (None, 'TODO'), (None, 'DONE'), ('AM/PM', 'IN_PROGRESS')]]
         rows = reports.select_task_sections(items, [], day)['pm_continuation']
-        self.assertEqual([row['task_id'] for row in rows], [str(items[1].id)])
+        self.assertEqual([row['task_id'] for row in rows], [str(items[index].id) for index in (1, 3, 4, 6)])
+        items[3].start_date = day + timedelta(days=1)
+        items[4].due_date = day - timedelta(days=1)
+        rows = reports.select_task_sections(items, [], day)['pm_continuation']
+        self.assertEqual([row['task_id'] for row in rows], [str(items[index].id) for index in (1, 6)])
 
     def test_date_form_preserves_time_and_only_asks_selected_fields(self):
         import discord_m2_approvals as client

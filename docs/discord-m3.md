@@ -22,12 +22,22 @@ Mbledhja e M3 vazhdon deri në 16:10 për të përfshirë takimet që përfundoj
 
 Secili person i lidhur merr listën e plotë të detyrave për ditën e ardhshme të
 punës. Të premten, plani është për të hënën. Përzgjedhja e datave ndjek Common View.
-Lista ka faqe me nga 10 detyra; çdo detyrë mund të hapet nga përzgjedhësi.
+Çdo detyrë ka një kartë kompakte me vetëm rreshtin e parë të titullit, pa markup
+teknik, përshkrim ose data. Titulli klikohet për të hapur detyrën. Butonat janë
+menjëherë poshtë në një rresht: **Po, kryhet** për Due nesër ose **Po, punohet**
+për detyrat e tjera, pastaj **Jo — shtyje · Koment · Hap detyrën**. Ky buton hap
+tekstin e plotë në një përgjigje private në Discord, pa zgjeruar kartën e raportimit.
+Tekstet e gjata ndahen në mesazhe që respektojnë kufirin e Discord-it. Preview-t
+automatike të linkut janë të çaktivizuara edhe gjatë rifreskimit të kartave.
+Discord nuk mbështet tre
+butona në të njëjtin rresht me tekstin e titullit. Përgjigjja dhe prania e komentit
+shfaqen si shenja të shkurtra pranë titullit; teksti i gjatë i komentit ruhet në platformë.
+**Jo — shtyje** hap menjëherë Start, Due dhe arsyen; shtyrja ruhet pasi dërgohet formulari.
 
-**Po, të gjitha** konfirmon se punohet në të gjitha dhe se kryhen detyrat me Due
-atë ditë. Konfirmon edhe pyetjet individuale për këto afate. **Jo** kërkon koment.
-Detyrat me Due nesër kanë edhe kartë individuale; Deadline Important shënohet veçmas.
-Nga çdo detyrë e listës mund të hapet shtyrja drejtpërdrejt.
+Pas dërgimit të kartave të detyrave, vjen **Po për të gjitha**, që plotëson vetëm
+detyrat ende pa përgjigje. Përgjigjet individuale, përfshirë JO dhe shtyrjet, ruhen.
+**Koment** ruan komentin pa vendosur automatikisht PO/JO; nëse kishte përgjigje,
+ajo ruhet. Konfirmimi i përgjithshëm ruan komentet ekzistuese.
 
 Detyrat 1H/R1 pa slot marrin përzgjedhësin e slotit. Kopjet e një detyre me
 `fast_task_group_id` të njëjtë, ose instancat e të njëjtit template sistemi për atë

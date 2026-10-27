@@ -525,7 +525,8 @@ gjatë procesit; komenti i dërguar nuk publikohet në mesazhin e kërkuesit.
 
 Në ditët e punës, nga 11:45 deri në 12:00, pyetja **A vazhdon në PM?**
 dërgohet për çdo detyrë të hapur të planifikuar për PM (përfshirë AM/PM)
-brenda intervalit Start–Due të ditës. Detyrat vetëm AM nuk përfshihen në këtë pyetje.
+brenda intervalit Start–Due të ditës. Përfshihen edhe detyrat **None (all day)**,
+që ruhen me AM/PM bosh, si TODO ashtu edhe në progres. Detyrat vetëm AM nuk përfshihen në këtë pyetje.
 Përgjigjet PO/JO dhe komentet ruhen veçmas nga dorëzimi M2, në seksionin 7 të raportit.
 PO hap një koment opsional; JO kërkon shpjegim. Mesazhi ekzistues përditësohet pa
 publikuar komentet e punonjësit në kanal.
