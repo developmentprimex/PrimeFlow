@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,13 +58,35 @@ def _local_session_date(now_utc: datetime) -> date:
 async def reset_internal_meeting_checklist(
     db: AsyncSession, *, checklist_id: uuid.UUID
 ) -> None:
+    # This checklist's dropdown stores O/X in comment markers rather than
+    # is_checked. Clear those markers in the same update as the checkmark,
+    # keeping written comments and other checklists' reset behavior intact.
+    reset_all_statuses = select(Checklist.id).where(
+        Checklist.id == checklist_id,
+        Checklist.group_key == "board",
+        Checklist.title == "PLNF JAV SHORT- E ENJTE",
+    )
     await db.execute(
         update(ChecklistItem)
         .where(
             ChecklistItem.checklist_id == checklist_id,
             ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
         )
-        .values(is_checked=False)
+        .values(
+            is_checked=False,
+            comment=case(
+                (
+                    ChecklistItem.checklist_id.in_(reset_all_statuses),
+                    func.regexp_replace(
+                        ChecklistItem.comment,
+                        r"\[MEETING_CHECK_STATUS:(CHECK|X|O)\]",
+                        "",
+                        "gi",
+                    ),
+                ),
+                else_=ChecklistItem.comment,
+            ),
+        )
     )
 
 
