@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# Deletions are allowed so previously tracked generated files can be removed.
+blocked=$(git diff --cached --name-only --diff-filter=ACMR -- |
+  LC_ALL=C grep -E '^(tmp|outputs|artifacts)/|(^|/)~\$' || true)
+
+if [ -n "$blocked" ]; then
+  printf '%s\n' 'Commit blocked: temporary files and generated exports must stay local.' >&2
+  printf '%s\n' "$blocked" >&2
+  printf '%s\n' 'Remove these paths from staging; keep them on disk. Do not use git add -f for these folders.' >&2
+  exit 1
+fi

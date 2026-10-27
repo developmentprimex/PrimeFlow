@@ -1,9 +1,0 @@
-{
-  "extends": "../frontend/tsconfig.json",
-  "compilerOptions": {
-    "incremental": false,
-    "typeRoots": ["../frontend/node_modules/@types"]
-  },
-  "include": ["../frontend/src/app/(app)/tomorrow-print-report/page.tsx", "../frontend/src/app/(app)/today-print-report/page.tsx"],
-  "exclude": ["../frontend/node_modules"]
-}
