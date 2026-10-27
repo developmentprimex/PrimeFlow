@@ -25,6 +25,7 @@ from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.services import discord_meetings
+from app.services import discord_one_h as one_h
 from app.services import discord_task_tools as tools
 
 router = APIRouter()
@@ -217,7 +218,7 @@ async def daily_tasks(db: AsyncSession, user: User, bucket: str | None = None, *
         .where(TaskOneHReportSlot.report_date == now.date()))).all())
     overrides = {str(key): value for key, value in overrides.items()}
     if bucket:
-        tasks = [task for task in tasks if tools.in_bucket(task, bucket, overrides)]
+        tasks = [task for task in tasks if tools.in_bucket(task, bucket, overrides, include_done=include_done)]
     for task in tasks:
         task["one_h_report_slot"] = overrides.get(str(task["id"]), task.get("one_h_report_slot"))
     return tasks
@@ -419,6 +420,7 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
                 "description_points": tools.text_points(tools.point_text(after, "description"), "description") if after else [],
                 "url": f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{task_id}"}
         action.result, action.status = {"reply": result, "before": before, "operations": applied}, result["status"]
+        await one_h.capture_action(db, link, action, datetime.now(ZoneInfo(settings.APP_TIMEZONE)))
         await db.commit()
         return result
     except Exception as exc:
@@ -445,6 +447,7 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
                 "title_points": tools.text_points(tools.point_text(before, "title"), "title"),
                 "description_points": tools.text_points(tools.point_text(before, "description"), "description")})
         action.result, action.status = {"reply": result, "before": before, "operations": applied}, result["status"]
+        await one_h.capture_action(db, link, action, datetime.now(ZoneInfo(settings.APP_TIMEZONE)))
         await db.commit()
         return result
 
@@ -478,11 +481,47 @@ async def claim_reminders(db: AsyncSession = Depends(get_db)):
 
 @router.post("/bot/reminders/{reminder_id}/tasks", dependencies=[Depends(require_bot)])
 async def reminder_tasks(reminder_id: uuid.UUID, payload: Actor, db: AsyncSession = Depends(get_db)):
-    link, user = await identity(db, payload)
-    reminder = await db.get(DiscordReminder, reminder_id)
+    link, user = await identity(db, payload, lock=True)
+    reminder = await db.get(DiscordReminder, reminder_id, with_for_update=True)
     if not reminder or reminder.link_id != link.id or reminder.day != datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date():
         raise HTTPException(404, "Ky raportim ka skaduar. Përdor /detyrat.")
+    if reminder.bucket in one_h.SLOTS:
+        tasks = await daily_tasks(db, user, include_done=True)
+        if reminder.one_h_report is None:
+            planned = [t for t in tasks if t.get('one_h_report_slot') == reminder.bucket]
+            if not planned:
+                return {'tasks': [], 'bucket': reminder.bucket, 'one_h': None}
+            reminder.one_h_report = one_h.snapshot(planned, datetime.now(ZoneInfo(settings.APP_TIMEZONE)))
+        else:
+            reminder.one_h_report = one_h.refresh(reminder.one_h_report, tasks)
+        result = one_h.presentation(reminder)
+        await db.commit()
+        return {'tasks': result['tasks'], 'bucket': reminder.bucket, 'one_h': result}
     return {"tasks": await daily_tasks(db, user, reminder.bucket), "bucket": reminder.bucket}
+
+
+class OneHAnswer(Actor):
+    item_id: str = Field(max_length=36)
+    request_id: str = Field(pattern=r'^\d{1,32}$')
+    answer: str = Field(default='', max_length=4000)
+    expected_at: str = Field(default='', max_length=200)
+    skip: bool = False
+    question_status: str | None = Field(default=None, max_length=24)
+
+
+@router.post('/bot/reminders/{reminder_id}/one-h-answer', dependencies=[Depends(require_bot)])
+async def answer_one_h(reminder_id: uuid.UUID, payload: OneHAnswer, db: AsyncSession = Depends(get_db)):
+    link, user = await identity(db, payload, lock=True)
+    at = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
+    reminder = await one_h.reminder_for(db, reminder_id, link, at, lock=True)
+    if reminder.one_h_report is None:
+        raise HTTPException(409, 'Rifresko raportimin para se të përgjigjesh.')
+    reminder.one_h_report = one_h.refresh(reminder.one_h_report, await daily_tasks(db, user, include_done=True))
+    reminder.one_h_report = one_h.save_answer(reminder.one_h_report, payload.item_id, payload.answer,
+        payload.expected_at, payload.request_id, at, skip=payload.skip, question_status=payload.question_status)
+    result = one_h.presentation(reminder)
+    await db.commit()
+    return result
 
 
 class Receipt(Actor):

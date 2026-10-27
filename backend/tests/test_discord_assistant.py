@@ -25,16 +25,16 @@ def plan(*actions):
 
 class ScheduleTests(unittest.TestCase):
     def test_exact_agreed_times(self):
-        expected = {"09:50": "10:00", "10:50": "11:00", "11:40": "11:50", "11:50": "AM",
-                    "14:10": "14:20", "15:50": "16:00", "16:05": "PM"}
-        for at, bucket in expected.items():
+        expected = {"10:00": ["10:00"], "11:00": ["11:00"], "11:50": ["11:50", "AM"],
+                    "14:20": ["14:20"], "16:00": ["16:00"], "16:05": ["PM"]}
+        for at, buckets in expected.items():
             hour, minute = map(int, at.split(":"))
-            self.assertEqual(tools.due_buckets(NOW.replace(hour=hour, minute=minute)), [bucket])
+            self.assertEqual(tools.due_buckets(NOW.replace(hour=hour, minute=minute)), buckets)
 
     def test_no_early_or_stale_or_weekend_reminders(self):
-        for now in (NOW.replace(minute=49), NOW.replace(minute=55), NOW.replace(day=17)):
+        for now in (NOW, NOW.replace(hour=10, minute=5), NOW.replace(day=17, hour=10, minute=0)):
             self.assertEqual(tools.due_buckets(now), [])
-        self.assertEqual(tools.due_buckets(NOW.replace(minute=54, second=59)), ["10:00"])
+        self.assertEqual(tools.due_buckets(NOW.replace(hour=10, minute=4, second=59)), ["10:00"])
 
     def test_explicit_date_slot_overrides_base_slot(self):
         task = {"id": TASK_ID, "status": "IN_PROGRESS", "one_h_report_slot": "10:00", "finish_period": "PM"}
@@ -44,7 +44,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(tools.in_bucket({**task, "status": "DONE"}, "PM", {}))
 
     def test_dst_uses_local_wall_clock(self):
-        winter = datetime(2026, 10, 26, 9, 50, tzinfo=NOW.tzinfo)
+        winter = datetime(2026, 10, 26, 10, 0, tzinfo=NOW.tzinfo)
         self.assertNotEqual(winter.utcoffset(), NOW.utcoffset())
         self.assertEqual(tools.due_buckets(winter), ["10:00"])
 
@@ -264,6 +264,7 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
             self.action = action
         query_result = Mock()
         query_result.scalar_one_or_none.return_value = None
+        query_result.scalars.return_value.all.return_value = []
         db = SimpleNamespace(get=AsyncMock(return_value=None), add=add, commit=AsyncMock(), execute=AsyncMock(return_value=query_result))
         task = {"id": TASK_ID, "title": "Test task", "description": "1. A\n2. B", "status": "TODO", "user_comment": None}
         if displayed_changed:

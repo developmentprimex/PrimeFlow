@@ -251,7 +251,7 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("U mbyllën 2", content)
         self.assertIn("1 detyra", content)
 
-    async def test_empty_reminder_sends_nothing_and_old_report_is_retired(self):
+    async def test_empty_reminder_sends_nothing_and_slot_report_stays_available(self):
         client = self.client()
         client._connection = SimpleNamespace(user=SimpleNamespace(id=99))
         old = SimpleNamespace(author=SimpleNamespace(id=99), components=[object()], edit=AsyncMock())
@@ -272,8 +272,10 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
         await bot.PrimeFlowBot.reminders.coro(client)
         client.http.request.assert_not_called()
         self.assertEqual(acks, [[]])
-        self.assertIn("Sloti 16:00", old.edit.call_args.kwargs["content"])
-        self.assertIsNone(old.edit.call_args.kwargs["view"])
+        old.edit.assert_not_awaited()
+        await client.retire_reminder(channel, {'bucket': 'AM', 'message_ids': ['77']})
+        self.assertIn('Raportimi AM', old.edit.call_args.kwargs['content'])
+        self.assertIsNone(old.edit.call_args.kwargs['view'])
 
 
 if __name__ == "__main__":

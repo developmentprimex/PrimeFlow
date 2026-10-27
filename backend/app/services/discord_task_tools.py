@@ -13,9 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.services.task_strike_events import _point_entries, _struck_points_by_identity, split_strike_timestamp
 
 REMINDERS = (
-    ("10:00", time(9, 50)), ("11:00", time(10, 50)),
-    ("11:50", time(11, 40)), ("AM", time(11, 50)),
-    ("14:20", time(14, 10)), ("16:00", time(15, 50)), ("PM", time(16, 5)),
+    ("10:00", time(10, 0)), ("11:00", time(11, 0)),
+    ("11:50", time(11, 50)), ("AM", time(11, 50)),
+    ("14:20", time(14, 20)), ("16:00", time(16, 0)), ("PM", time(16, 5)),
 )
 
 
@@ -26,8 +26,8 @@ def due_buckets(now: datetime) -> list[str]:
             if timedelta(0) <= now - datetime.combine(now.date(), at, now.tzinfo) < timedelta(minutes=5)]
 
 
-def in_bucket(task: dict, bucket: str, overrides: dict[str, str]) -> bool:
-    if task.get("status") == "DONE" or task.get("completed_at") or task.get("is_active") is False:
+def in_bucket(task: dict, bucket: str, overrides: dict[str, str], *, include_done: bool = False) -> bool:
+    if task.get("is_active") is False or (not include_done and (task.get("status") == "DONE" or task.get("completed_at"))):
         return False
     if bucket in {"AM", "PM"}:
         return task.get("finish_period") == bucket

@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import {
   STATUS_LABELS, clock, dayLabel, eventText, json, minutesBetween,
   type MeetingDetail, type MeetingRow, type Turn,
+  type DiscordSlotReport, type DiscordReportHistory,
 } from "@/lib/mira"
 
 const ACCENT = "#2f5d8a"
@@ -57,6 +58,77 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+const REPORT_STATES = { WAITING: "Pa përgjigje", PARTIAL: "Pjesërisht i raportuar", DONE: "I raportuar" }
+const TASK_STATES: Record<string, string> = {
+  TODO: "🩷 Pa progres", IN_PROGRESS: "🟡 Në proces", DONE: "✅ E kryer",
+  WAITING_CLIENT: "⏸ WFE", WAITING_CONFIRMATION: "Në pritje konfirmimi",
+}
+
+function ReportHistory({ history }: { history: DiscordReportHistory[] }) {
+  if (!history.length) return null
+  return <details className="mt-2 text-xs text-muted-foreground">
+    <summary className="cursor-pointer">Historiku · {history.length}</summary>
+    <ol className="mt-2 space-y-2 border-l pl-3">
+      {history.map((event, i) => <li key={i}>
+        <span className="tabular-nums">{clock(event.at)}</span>{" · "}
+        {event.kind === "ANSWER" ? <>
+          <span className="block">{event.question}</span>
+          <span className="whitespace-pre-wrap text-foreground">{event.answer}</span>
+          {event.expected_at && <span className="block">Vazhdimi / përfundimi: {event.expected_at}</span>}
+        </> : event.kind === "SKIP" ? "Pyetja u kalua pa përgjigje" : <>
+          <span className="whitespace-pre-wrap">{event.instruction}</span>
+          <span className="block">{event.status === "DONE" ? "✓ " : "⚠ "}{event.message}</span>
+        </>}
+      </li>)}
+    </ol>
+  </details>
+}
+
+function DiscordReports({ reports }: { reports: DiscordSlotReport[] }) {
+  return <Section title="Raportimet nga Discord">
+    <div className="space-y-4">
+      {reports.map(report => <article key={report.id} className="rounded-lg border">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-4 py-3">
+          <h4 className="text-sm font-semibold">{report.name}</h4>
+          <span className={cn("rounded-full px-2 py-1 text-xs", report.state === "DONE" ? "bg-green-50 text-green-800" : "bg-muted text-muted-foreground")}>
+            {REPORT_STATES[report.state]}
+          </span>
+          <p className="w-full text-xs text-muted-foreground">{report.sent_at ? `Dërguar në ${clock(report.sent_at)}` : "Në pritje të dërgimit"}</p>
+        </header>
+        <ul className="divide-y px-4">
+          {report.tasks.map(task => <li key={task.id} className="py-3 text-sm">
+            <a href={`/tasks/${task.id}`} className="whitespace-pre-wrap break-words font-medium underline-offset-4 hover:underline">{task.title}</a>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {TASK_STATES[task.status] ?? task.status}
+              {task.planned_status !== task.status && ` · në fillim: ${TASK_STATES[task.planned_status] ?? task.planned_status}`}
+              {!task.available && " · jashtë listës aktuale"}
+            </p>
+            {task.question && !task.history.some(event => event.kind === "ANSWER") && <p className="mt-2 text-xs text-muted-foreground">Pyetja e dërguar: {task.question}</p>}
+            {task.answer ? <p className="mt-2 whitespace-pre-wrap">{task.answer}</p> :
+              ["TODO", "IN_PROGRESS"].includes(task.status) && task.available ? <p className="mt-2 text-xs text-muted-foreground">{task.skipped ? "E kaluar pa përgjigje" : "Pa përgjigje"}</p> : null}
+            {task.expected_at && <p className="mt-1 text-xs"><span className="font-medium">Vazhdimi / përfundimi:</span> {task.expected_at}</p>}
+            {task.progress_percentage != null && <p className="mt-1 text-xs">Progresi: {task.progress_percentage}%</p>}
+            {task.comment && <p className="mt-1 whitespace-pre-wrap break-words text-xs"><span className="font-medium">Komenti:</span> {task.comment}</p>}
+            {task.postponements?.map(request => <div key={request.id} className="mt-2 rounded bg-muted/40 p-2 text-xs">
+              <p className="font-medium">Shtyrje · {request.label}</p>
+              <p className="mt-1 whitespace-pre-wrap">{request.comment}</p>
+              {Object.entries(request.proposed_dates).map(([field, date]) => <p key={field}>
+                {field === "start_date" ? "Fillimi i propozuar" : "Afati i propozuar"}: {dayLabel(date.slice(0, 10))}
+              </p>)}
+            </div>)}
+            <ReportHistory history={task.history} />
+          </li>)}
+        </ul>
+        {(report.next.answer || report.tasks.every(task => task.status === "DONE")) && <div className="border-t px-4 py-3 text-sm">
+          <p className="font-medium">Me çka ke me vazhdu në slotin tjetër?</p>
+          <p className="mt-1 whitespace-pre-wrap">{report.next.answer ?? "Pa përgjigje"}</p>
+          <ReportHistory history={report.next.history} />
+        </div>}
+      </article>)}
+    </div>
+  </Section>
+}
+
 function Detail({ detail, onBack, onResummarize, canManage }: {
   detail: MeetingDetail; onBack: () => void; onResummarize: () => void; canManage: boolean
 }) {
@@ -72,11 +144,14 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
       </button>
       <h2 className="text-lg font-semibold">1H {detail.slot} · {dayLabel(detail.date)}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {STATUS_LABELS[detail.status]} · filloi {clock(detail.started_at)}, stafi {clock(detail.staff_started_at)}, mbaroi {clock(detail.ended_at)}
+        {STATUS_LABELS[detail.status]}{detail.status !== "DISCORD_REPORT" && <> · filloi {clock(detail.started_at)}, stafi {clock(detail.staff_started_at)}, mbaroi {clock(detail.ended_at)}</>}
         {detail.duration_minutes !== null && ` · ${detail.duration_minutes} min`}
       </p>
       {detail.error && <p className="mt-1 text-xs text-muted-foreground">Arsyeja: {detail.error}</p>}
 
+      {!!detail.discord_reports?.length && <DiscordReports reports={detail.discord_reports} />}
+
+      {detail.status !== "DISCORD_REPORT" && <>
       <Section title="Përmbledhja">
         {detail.summary ? <Summary text={detail.summary} /> : (
           <p className="text-sm text-muted-foreground">
@@ -141,6 +216,7 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
           </ul>
         </Section>
       )}
+      </>}
     </article>
   )
 }
@@ -167,13 +243,18 @@ export function MeetingsTab({ canManage }: { canManage: boolean }) {
     }
   }, [apiFetch])
 
-  React.useEffect(() => { void load() }, [load])
+  React.useEffect(() => {
+    void load()
+    const timer = window.setInterval(() => void load(), 30000)
+    return () => window.clearInterval(timer)
+  }, [load])
   React.useEffect(() => { if (selected) void loadDetail(selected) }, [selected, loadDetail])
   // A detail still loading for a newly selected meeting is never shown for the previous one.
   const shown = detail && detail.id === selected ? detail : null
 
   // A live meeting refreshes itself so the turns can be followed from PrimeFlow.
-  const live = shown && (shown.status === "GA_PHASE" || shown.status === "STAFF_PHASE" || shown.summary_status === "PENDING")
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Budapest" })
+  const live = shown && (shown.status === "GA_PHASE" || shown.status === "STAFF_PHASE" || shown.summary_status === "PENDING" || shown.date === today)
   React.useEffect(() => {
     if (!live || !selected) return
     const timer = window.setInterval(() => { void loadDetail(selected); void load() }, 10000)
@@ -193,9 +274,7 @@ export function MeetingsTab({ canManage }: { canManage: boolean }) {
 
   if (rows && rows.length === 0) {
     return (
-      <p className="py-16 text-center text-sm text-muted-foreground">
-        Mira nuk ka mbajtur ende asnjë takim 1H. Nise në Discord me <code className="rounded bg-muted px-1">/mira mbaj-takimet</code>.
-      </p>
+      <p className="py-16 text-center text-sm text-muted-foreground">Takimet dhe raportimet nga Discord do të shfaqen këtu në fillim të sloteve 1H.</p>
     )
   }
 
@@ -215,7 +294,7 @@ export function MeetingsTab({ canManage }: { canManage: boolean }) {
                     selected === row.id ? "bg-muted" : "hover:bg-muted/60")}>
                   <span className="w-12 shrink-0 font-semibold tabular-nums">{row.slot}</span>
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    {row.people.length ? row.people.map((p) => p.initials).join(" → ") : "pa staf"}
+                    {row.status === "DISCORD_REPORT" ? "Raportimet e stafit" : row.people.length ? row.people.map((p) => p.initials).join(" → ") : "pa staf"}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {(row.status === "GA_PHASE" || row.status === "STAFF_PHASE")
