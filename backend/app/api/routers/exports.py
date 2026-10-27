@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 
-from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_reports_access
+from app.api.access import ensure_department_access, ensure_reports_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
@@ -1551,17 +1551,15 @@ def _ga_time_plain_text(value: str | None) -> str:
 @router.get("/ga-time.xlsx")
 async def export_ga_time_xlsx(
     week_start: date,
+    selected_date: date | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    ensure_manager_or_admin(user)
-
     ga_user = await _resolve_ga_user(db)
     if ga_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
 
-    week_dates = [week_start + timedelta(days=i) for i in range(5)]
-    week_isos = [d.isoformat() for d in week_dates]
+    week_dates = [selected_date] if selected_date else [week_start + timedelta(days=i) for i in range(5)]
 
     entries = (
         await db.execute(
@@ -1621,9 +1619,10 @@ async def export_ga_time_xlsx(
     ws = wb.active
     ws.title = "GA Time Table"[:31]
 
-    last_col = 4 + len(week_dates)
+    last_col = 3 + len(week_dates) + (0 if selected_date else 1)
 
-    title_text = f"GA TIME TABLE ({_format_date_dot(week_dates[0])} - {_format_date_dot(week_dates[-1])})"
+    title_range = _format_date_dot(selected_date) if selected_date else f"{_format_date_dot(week_dates[0])} - {_format_date_dot(week_dates[-1])}"
+    title_text = f"GA TIME TABLE ({title_range})"
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     title_cell = ws.cell(row=1, column=1, value=title_text)
     title_cell.font = Font(bold=True, size=16)
@@ -1662,15 +1661,16 @@ async def export_ga_time_xlsx(
     ws.column_dimensions["A"].width = 5
     ws.column_dimensions["B"].width = 16
     ws.column_dimensions["C"].width = 22
-    for idx in range(4, last_col):
+    for idx in range(4, 4 + len(week_dates)):
         ws.column_dimensions[get_column_letter(idx)].width = 40
-    ws.column_dimensions[get_column_letter(last_col)].width = 22
+    if not selected_date:
+        ws.column_dimensions[get_column_letter(last_col)].width = 22
 
     header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
     headers = (
         ["NR", "TIME", "KOMENT"]
         + [f"{_day_code(d)} = {_format_date_dot(d)}" for d in week_dates]
-        + ["KOMENT"]
+        + ([] if selected_date else ["KOMENT"])
     )
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=header)
@@ -1698,34 +1698,35 @@ async def export_ga_time_xlsx(
             bold=bool(getattr(row, "comment_is_bold", False)),
             italic=bool(getattr(row, "comment_is_italic", False)),
         )
-        for day_offset, _iso in enumerate(week_isos):
-            day_value = day_offset
+        for day_offset, day_date in enumerate(week_dates):
+            day_value = day_date.weekday()
             cell_values = entry_map.get((day_value, start_label), [])
             value = "\n".join(v for v in cell_values if v)
             cell = ws.cell(row=row_idx, column=4 + day_offset, value=value)
             cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
-        end_comments = [
-            comment
-            for comment in (getattr(row, "comments", None) or [])
-            if isinstance(comment, dict) and comment.get("column") == "end"
-        ]
-        end_value = "\n".join(
-            _ga_time_plain_text(str(comment.get("content", "")))
-            for comment in end_comments
-            if isinstance(comment, dict) and _ga_time_plain_text(str(comment.get("content", "")))
-        )
-        end_comment_cell = ws.cell(row=row_idx, column=last_col, value=end_value or None)
-        end_comment_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
-        if end_comments and isinstance(end_comments[0], dict):
-            first_end_comment = end_comments[0]
-            end_bg = str(first_end_comment.get("comment_background_color", "#FFFFFF")).lstrip("#").upper()
-            end_fg = str(first_end_comment.get("comment_text_color", "#0F172A")).lstrip("#").upper()
-            end_comment_cell.fill = PatternFill(start_color=f"FF{end_bg}", end_color=f"FF{end_bg}", fill_type="solid")
-            end_comment_cell.font = Font(
-                color=f"FF{end_fg}",
-                bold=bool(first_end_comment.get("comment_is_bold", False)),
-                italic=bool(first_end_comment.get("comment_is_italic", False)),
+        if not selected_date:
+            end_comments = [
+                comment
+                for comment in (getattr(row, "comments", None) or [])
+                if isinstance(comment, dict) and comment.get("column") == "end"
+            ]
+            end_value = "\n".join(
+                _ga_time_plain_text(str(comment.get("content", "")))
+                for comment in end_comments
+                if isinstance(comment, dict) and _ga_time_plain_text(str(comment.get("content", "")))
             )
+            end_comment_cell = ws.cell(row=row_idx, column=last_col, value=end_value or None)
+            end_comment_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            if end_comments and isinstance(end_comments[0], dict):
+                first_end_comment = end_comments[0]
+                end_bg = str(first_end_comment.get("comment_background_color", "#FFFFFF")).lstrip("#").upper()
+                end_fg = str(first_end_comment.get("comment_text_color", "#0F172A")).lstrip("#").upper()
+                end_comment_cell.fill = PatternFill(start_color=f"FF{end_bg}", end_color=f"FF{end_bg}", fill_type="solid")
+                end_comment_cell.font = Font(
+                    color=f"FF{end_fg}",
+                    bold=bool(first_end_comment.get("comment_is_bold", False)),
+                    italic=bool(first_end_comment.get("comment_is_italic", False)),
+                )
         row_idx += 1
 
     last_row = row_idx - 1
@@ -1766,7 +1767,8 @@ async def export_ga_time_xlsx(
     wb.save(bio)
     bio.seek(0)
 
-    filename_date = f"{week_start.day:02d}_{week_start.month:02d}_{str(week_start.year)[-2:]}"
+    filename_day = selected_date or week_start
+    filename_date = f"{filename_day.day:02d}_{filename_day.month:02d}_{str(filename_day.year)[-2:]}"
     initials_value = (user_initials or "USER").upper()
     filename = f"GA TIME TABLE {filename_date}_EF ({initials_value}).xlsx"
 

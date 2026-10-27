@@ -1738,7 +1738,7 @@ export function SystemTasksView({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium text-slate-900">{template.title}</div>
-                      {template.is_repetitive && <Badge variant="outline">Detyrë e përsëritur</Badge>}
+                      {template.is_repetitive && <Badge variant="outline">Detyrë e përsëritur / Mund të automatizohet</Badge>}
                       <Badge
                         variant="outline"
                         className={cn("border text-[11px]", PRIORITY_BADGE_STYLES[priorityValue])}
@@ -3268,7 +3268,7 @@ export function SystemTasksView({
                         aria-pressed={isRepetitive}
                         onClick={() => setIsRepetitive((value) => !value)}
                       >
-                        Detyrë e përsëritur: {isRepetitive ? "Po" : "Jo"}
+                        Detyrë e përsëritur / Mund të automatizohet: {isRepetitive ? "Po" : "Jo"}
                       </Button>
                       <p className="text-xs text-slate-500">Vetëm si informacion.</p>
                     </div>
@@ -3755,7 +3755,7 @@ export function SystemTasksView({
                         aria-pressed={editIsRepetitive}
                         onClick={() => setEditIsRepetitive((value) => !value)}
                       >
-                        Detyrë e përsëritur: {editIsRepetitive ? "Po" : "Jo"}
+                        Detyrë e përsëritur / Mund të automatizohet: {editIsRepetitive ? "Po" : "Jo"}
                       </Button>
                       <p className="text-xs text-slate-500">Vetëm si informacion.</p>
                     </div>
@@ -4109,7 +4109,7 @@ export function SystemTasksView({
                                   {template.title}
                                 </div>
                                 {template.is_repetitive && (
-                                  <Badge variant="outline" className="mt-1 text-[11px]">Detyrë e përsëritur</Badge>
+                                  <Badge variant="outline" className="mt-1 text-[11px]">Detyrë e përsëritur / Mund të automatizohet</Badge>
                                 )}
                               </div>
 

@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { DateInput } from "@/components/ui/date-input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -2215,6 +2216,12 @@ export default function AdminTasksPage() {
 
   const [commonWeekStart, setCommonWeekStart] = React.useState<Date>(() => getMonday(new Date()))
   const commonWeekISOs = React.useMemo(() => getWeekdays(commonWeekStart).map(toISODate), [commonWeekStart])
+  const [gaTimeSelectedDate, setGaTimeSelectedDate] = React.useState("")
+  const gaTimeVisibleDates = gaTimeSelectedDate ? [gaTimeSelectedDate] : commonWeekISOs
+  const selectGaTimeDate = (iso: string) => {
+    setGaTimeSelectedDate(iso)
+    if (iso) setCommonWeekStart(getMonday(fromISODate(iso)))
+  }
   const thisCommonWeekIso = React.useMemo(() => toISODate(getMonday(new Date())), [])
   const nextCommonWeekIso = React.useMemo(() => toISODate(addDays(getMonday(new Date()), 7)), [])
   const setAllTasksQuickRange = (from: string, to: string) => {
@@ -4817,7 +4824,8 @@ export default function AdminTasksPage() {
     setExportingGaTime(true)
     try {
       const weekStartIso = toISODate(commonWeekStart)
-      const res = await apiFetch(`/exports/ga-time.xlsx?week_start=${encodeURIComponent(weekStartIso)}`)
+      const dayQuery = gaTimeSelectedDate ? `&selected_date=${encodeURIComponent(gaTimeSelectedDate)}` : ""
+      const res = await apiFetch(`/exports/ga-time.xlsx?week_start=${encodeURIComponent(weekStartIso)}${dayQuery}`)
       if (!res?.ok) {
         const detail = await res.text()
         toast.error(detail || "Failed to export GA time.")
@@ -7550,24 +7558,24 @@ export default function AdminTasksPage() {
             <div className="print-page">
               <div className="print-header">
                 <div />
-                <div className="print-title">GA TIME TABLE{weekTitleRange ? ` (${weekTitleRange})` : ""}</div>
+                <div className="print-title">GA TIME TABLE{gaTimeSelectedDate ? ` (${formatDateHuman(gaTimeSelectedDate)})` : weekTitleRange ? ` (${weekTitleRange})` : ""}</div>
                 <div className="print-datetime">{formatDateTimeDMY(printedAt)}</div>
               </div>
               <div className="ga-time-table">
-                <table className="ga-time-table-table">
+                <table className={cn("ga-time-table-table", gaTimeSelectedDate && "ga-time-single-day")}>
                   <colgroup>
                     <col className="ga-time-nr-column" />
                     <col className="ga-time-time-column" />
                     <col className="ga-time-comment-column" />
-                    {commonWeekISOs.map((iso) => <col key={`ga-print-col-${iso}`} className="ga-time-day-column" />)}
-                    <col className="ga-time-comment-column" />
+                    {gaTimeVisibleDates.map((iso) => <col key={`ga-print-col-${iso}`} className="ga-time-day-column" />)}
+                    {!gaTimeSelectedDate ? <col className="ga-time-comment-column" /> : null}
                   </colgroup>
                   <thead>
                     <tr>
                       <th className="ga-time-header ga-time-nr">NR</th>
                       <th className="ga-time-header ga-time-time">TIME</th>
                       <th className="ga-time-header ga-time-comment">KOMENT</th>
-                      {commonWeekISOs.map((iso) => {
+                      {gaTimeVisibleDates.map((iso) => {
                         const d = fromISODate(iso)
                         const dayCode = getDayCode(d)
                         return (
@@ -7576,7 +7584,7 @@ export default function AdminTasksPage() {
                           </th>
                         )
                       })}
-                      <th className="ga-time-header ga-time-comment">KOMENT</th>
+                      {!gaTimeSelectedDate ? <th className="ga-time-header ga-time-comment">KOMENT</th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -7625,7 +7633,7 @@ export default function AdminTasksPage() {
                             ))}
                           </div>
                         </td>
-                        {commonWeekISOs.map((iso) => {
+                        {gaTimeVisibleDates.map((iso) => {
                           const dayOfWeek = toDayOfWeek(iso)
                           const cellKey = `${dayOfWeek}|${slot.start}`
                           const entries = gaTimeEntriesByCell.get(cellKey) || []
@@ -7671,6 +7679,7 @@ export default function AdminTasksPage() {
                             </td>
                           )
                         })}
+                        {!gaTimeSelectedDate ? (
                         <td className="ga-time-cell ga-time-comment">
                           <div className="ga-time-comment-list">
                             {gaTimeCommentsForRow(slot, "end").map((comment) => (
@@ -7689,6 +7698,7 @@ export default function AdminTasksPage() {
                             ))}
                           </div>
                         </td>
+                        ) : null}
                       </tr>
                     ))}
                   </tbody>
@@ -7701,21 +7711,42 @@ export default function AdminTasksPage() {
             sectionId="ga-time"
             isCollapsed={collapsedAdminSections["ga-time"]}
             onToggle={toggleAdminSection}
-            title={`GA TIME TABLE${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
+            title={`GA TIME TABLE${gaTimeSelectedDate ? ` (${formatDateHuman(gaTimeSelectedDate)})` : weekTitleRange ? ` (${weekTitleRange})` : ""}`}
             description=""
             actions={
               <div className="flex flex-wrap items-center gap-2 print:hidden">
                 <Button
-                  variant={toISODate(commonWeekStart) === thisCommonWeekIso ? "default" : "outline"}
+                  variant={gaTimeSelectedDate === toISODate(new Date()) ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setAllTasksQuickRange(allTasksThisWeekFrom, allTasksThisWeekTo)}
+                  onClick={() => selectGaTimeDate(toISODate(new Date()))}
+                >
+                  Today
+                </Button>
+                <div className="w-36">
+                  <DateInput
+                    aria-label="GA timetable day"
+                    className="h-8 border-slate-200 bg-white text-xs text-slate-900 md:text-xs"
+                    value={gaTimeSelectedDate}
+                    onChange={(event) => selectGaTimeDate(event.target.value)}
+                  />
+                </div>
+                <Button
+                  variant={!gaTimeSelectedDate && toISODate(commonWeekStart) === thisCommonWeekIso ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setGaTimeSelectedDate("")
+                    setAllTasksQuickRange(allTasksThisWeekFrom, allTasksThisWeekTo)
+                  }}
                 >
                   This Week
                 </Button>
                 <Button
-                  variant={toISODate(commonWeekStart) === nextCommonWeekIso ? "default" : "outline"}
+                  variant={!gaTimeSelectedDate && toISODate(commonWeekStart) === nextCommonWeekIso ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setAllTasksQuickRange(allTasksNextWeekFrom, allTasksNextWeekTo)}
+                  onClick={() => {
+                    setGaTimeSelectedDate("")
+                    setAllTasksQuickRange(allTasksNextWeekFrom, allTasksNextWeekTo)
+                  }}
                 >
                   Next Week
                 </Button>
@@ -7779,29 +7810,42 @@ export default function AdminTasksPage() {
             ) : null
           })() : null}
           <div className="mt-3 ga-time-table ga-time-table-scroll">
-            <table className="ga-time-table-table ga-time-table-live">
+            <table className={cn("ga-time-table-table ga-time-table-live", gaTimeSelectedDate && "ga-time-single-day")}>
               <colgroup>
                 <col className="ga-time-nr-column" />
                 <col className="ga-time-time-column" />
                 <col className="ga-time-comment-column" />
-                {commonWeekISOs.map((iso) => <col key={`ga-col-${iso}`} className="ga-time-day-column" />)}
-                <col className="ga-time-comment-column" />
+                {gaTimeVisibleDates.map((iso) => <col key={`ga-col-${iso}`} className="ga-time-day-column" />)}
+                {!gaTimeSelectedDate ? <col className="ga-time-comment-column" /> : null}
               </colgroup>
               <thead>
                 <tr>
                   <th className="ga-time-header ga-time-nr">NR</th>
                   <th className="ga-time-header ga-time-time">TIME</th>
                   <th className="ga-time-header ga-time-comment">KOMENT</th>
-                  {commonWeekISOs.map((iso) => {
+                  {gaTimeVisibleDates.map((iso) => {
                     const d = fromISODate(iso)
                     const dayCode = getDayCode(d)
                     return (
                       <th key={`ga-${iso}`} className="ga-time-header">
-                        <div>{dayCode} = {formatDateHuman(iso)}</div>
+                        <button
+                          type="button"
+                          className={cn(
+                            "cursor-pointer whitespace-nowrap rounded border px-2 py-1 text-left font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+                            gaTimeSelectedDate === iso
+                              ? "border-blue-300 bg-blue-100 text-blue-900"
+                              : "border-slate-300 bg-white hover:border-blue-300 hover:bg-blue-50",
+                          )}
+                          onClick={() => selectGaTimeDate(gaTimeSelectedDate === iso ? "" : iso)}
+                          aria-pressed={gaTimeSelectedDate === iso}
+                          aria-label={`Show GA timetable for ${formatDateHuman(iso)}`}
+                        >
+                          {dayCode} = {formatDateHuman(iso)}
+                        </button>
                       </th>
                     )
                   })}
-                  <th className="ga-time-header ga-time-comment">KOMENT</th>
+                  {!gaTimeSelectedDate ? <th className="ga-time-header ga-time-comment">KOMENT</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -7817,7 +7861,7 @@ export default function AdminTasksPage() {
                       ) : "\u00A0"}
                     </td>
                     {renderGaTimeCommentCell(slot, "start", Boolean(slot.isSpecial))}
-                    {commonWeekISOs.map((iso) => {
+                    {gaTimeVisibleDates.map((iso) => {
                       const dayOfWeek = toDayOfWeek(iso)
                       const cellKey = `${dayOfWeek}|${slot.start}`
                       const entries = gaTimeEntriesByCell.get(cellKey) || []
@@ -8141,7 +8185,7 @@ export default function AdminTasksPage() {
                         </td>
                       )
                     })}
-                    {renderGaTimeCommentCell(slot, "end")}
+                    {!gaTimeSelectedDate ? renderGaTimeCommentCell(slot, "end") : null}
                   </tr>
                 ))}
               </tbody>
@@ -9418,6 +9462,13 @@ export default function AdminTasksPage() {
         .admin-week-table .ga-time-day-column {
           width: calc((100% - 376px) / 5);
         }
+        .admin-week-table .ga-time-table-live.ga-time-single-day {
+          width: calc(226px + (100% - 376px) / 5);
+          min-width: 367px;
+        }
+        .admin-week-table .ga-time-single-day .ga-time-day-column {
+          width: auto;
+        }
         .admin-week-table .ga-time-header {
           border: 1px solid #111827;
           border-top: 2px solid #020617;
@@ -9973,6 +10024,27 @@ export default function AdminTasksPage() {
           }
           .admin-week-table .ga-time-time {
             width: 4% !important;
+          }
+          .admin-week-table .ga-time-table-table.ga-time-single-day {
+            width: 33.6% !important;
+          }
+          .admin-week-table .ga-time-single-day .ga-time-nr,
+          .admin-week-table .ga-time-single-day .ga-time-nr-column {
+            width: 7.44% !important;
+          }
+          .admin-week-table .ga-time-single-day .ga-time-time,
+          .admin-week-table .ga-time-single-day .ga-time-time-column {
+            width: 11.9% !important;
+          }
+          .admin-week-table .ga-time-single-day .ga-time-comment,
+          .admin-week-table .ga-time-single-day .ga-time-comment-column {
+            width: 41.67% !important;
+          }
+          .admin-week-table .ga-time-single-day .ga-time-special-comment {
+            width: auto !important;
+          }
+          .admin-week-table .ga-time-single-day .ga-time-day-column {
+            width: 38.99% !important;
           }
           .admin-week-table .ga-time-slot-label {
             background: #f3f4f6 !important;
