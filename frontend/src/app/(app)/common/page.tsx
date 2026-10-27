@@ -2691,7 +2691,7 @@ export default function CommonViewPage() {
       const key = occurrenceStatusKey(meeting.id, occurrenceDate)
       return (
         <select
-          className="input"
+          className={`input meeting-status-select ${getMeetingOccurrenceStatus(meeting)}`}
           value={getMeetingOccurrenceStatus(meeting)}
           onChange={(event) => void updateMeetingOccurrenceStatus(meeting, event.target.value as "" | "held" | "canceled")}
           disabled={savingMeetingStatusKey === key}
@@ -2726,7 +2726,7 @@ export default function CommonViewPage() {
       const status = meetingOccurrenceStatuses.get(key)?.status || ""
       return (
         <select
-          className="meeting-status-select"
+          className={`meeting-status-select ${status}`}
           value={status}
           onChange={(event) => {
             event.stopPropagation()
@@ -11847,11 +11847,13 @@ export default function CommonViewPage() {
           font-weight: 700;
           white-space: nowrap;
         }
+        .meeting-status-select.held,
         .meeting-status-badge.held {
           color: #166534;
           background: #dcfce7;
           border-color: #86efac;
         }
+        .meeting-status-select.canceled,
         .meeting-status-badge.canceled {
           color: #991b1b;
           background: #fee2e2;
@@ -12244,8 +12246,32 @@ export default function CommonViewPage() {
         .common-task-status-indicator.status-waiting-client { color: #854d0e !important; }
         .week-table-entry.calendar-internal-muted .week-table-meeting-title,
         .swimlane-cell.calendar-internal-muted .swimlane-title {
-          color: #64748b;
-          font-weight: 400;
+          color: #0f172a;
+          font-weight: 700;
+        }
+        .week-table-entry.internal-meeting-canceled .week-table-meeting-title,
+        .swimlane-cell.internal-meeting-canceled .swimlane-title,
+        .swimlane-cell.internal-meeting-canceled .swimlane-meta {
+          opacity: 0.45;
+        }
+        .week-table-entry.meeting-occurrence-canceled {
+          position: relative;
+        }
+        .week-table-entry.meeting-occurrence-canceled::after,
+        .swimlane-cell.meeting-occurrence-canceled::after {
+          content: "";
+          position: absolute;
+          inset: 38px 16px 14px;
+          background:
+            linear-gradient(to top right, transparent calc(50% - 1.5px), #be185d calc(50% - 1.5px), #be185d calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+            linear-gradient(to bottom right, transparent calc(50% - 1.5px), #be185d calc(50% - 1.5px), #be185d calc(50% + 1.5px), transparent calc(50% + 1.5px));
+          opacity: 0.25;
+          pointer-events: none;
+          z-index: 1;
+        }
+        .week-table-entry.meeting-occurrence-canceled::after {
+          top: 28px;
+          bottom: 4px;
         }
         .form-error {
           color: #b91c1c;
@@ -16608,6 +16634,7 @@ export default function CommonViewPage() {
                                 meetingType: "external",
                                 calendarImported: e.calendarImported,
                               }),
+                              e.id?.startsWith("meeting:") && meetingOccurrenceStatuses.get(occurrenceStatusKey(e.id.split(":")[1], iso))?.status === "canceled" ? "meeting-occurrence-canceled" : "",
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
                               .filter(Boolean)
@@ -16647,6 +16674,7 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               internalMeetingLegendTone(e),
                               isCalendarLinkedInternalMeeting(e) ? "calendar-internal-muted" : "",
+                              e.id?.startsWith("meeting:") && meetingOccurrenceStatuses.get(occurrenceStatusKey(e.id.split(":")[1], iso))?.status === "canceled" ? "internal-meeting-canceled meeting-occurrence-canceled" : "",
                               isManualInternalMeeting(e) ? "manual-internal-meeting" : "",
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
@@ -17142,6 +17170,8 @@ export default function CommonViewPage() {
                                   "swimlane-cell",
                                   cell.accentClass || "",
                                   row.id === "internal" && cell.isCalendarMeeting ? "calendar-internal-muted" : "",
+                                  row.id === "internal" && cell.meetingId && cell.entryDate && meetingOccurrenceStatuses.get(occurrenceStatusKey(cell.meetingId, cell.entryDate))?.status === "canceled" ? "internal-meeting-canceled" : "",
+                                  cell.meetingId && cell.entryDate && meetingOccurrenceStatuses.get(occurrenceStatusKey(cell.meetingId, cell.entryDate))?.status === "canceled" ? "meeting-occurrence-canceled" : "",
                                   getSwimlaneDividerClass(row.id, cells, index),
                                   cell.placeholder ? "placeholder" : "",
                                   commonTaskHighlightClassName(cell),
