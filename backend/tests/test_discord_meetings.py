@@ -138,8 +138,10 @@ class MeetingMessageTests(unittest.IsolatedAsyncioTestCase):
         from app.models.discord_assistant import DiscordMeetingAlert
         from pathlib import Path
         source = (Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0151_discord_meeting_alerts.py").read_text(encoding="utf-8")
+        sync_columns = {'sync_hash', 'sync_pending_hash', 'sync_lease_until'}
         for column in DiscordMeetingAlert.__table__.c:
-            self.assertIn(f'"{column.name}"', source)
+            if column.name not in sync_columns:
+                self.assertIn(f'"{column.name}"', source)
         self.assertIn("uq_discord_meeting_alert", source)
 
 

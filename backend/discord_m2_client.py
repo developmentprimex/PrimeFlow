@@ -15,6 +15,11 @@ def actor(interaction):
 
 def prompt(job):
     row = job['snapshot']
+    if job.get('platform_status'):
+        choice = ''
+        if job.get('platform_answered') and job.get('choice'):
+            choice = ('Vazhdon në PM: ' if job['kind'] == 'continuation' else 'Dorëzuar: ') + job['choice'] + '\n'
+        return f"**M2 · {KINDS[job['kind']]}**\n**{row['title']}**\n\n{choice}✅ {job['platform_status']}"[:1900]
     if job['kind'] in {'delivery', 'continuation'}:
         pm = job['kind'] == 'continuation'
         text = f"<@{job['discord_user_id']}> **M2 · {'PM' if pm else 'Dorëzimi'}**\n**{row['title']}**"
@@ -47,6 +52,9 @@ def prompt(job):
 
 def controls(job):
     view = discord.ui.View(timeout=None)
+    if job.get('platform_status'):
+        view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}"))
+        return view
     if job['kind'] == 'continuation' and job.get('postponement', {}).get('status') == 'APPROVED':
         view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}"))
         return view

@@ -22,6 +22,7 @@ import discord_ui as ui
 import discord_agent_client as agent_client
 import discord_m2_client as m2_client
 import discord_m2_approvals as m2_approvals
+import discord_answer_sync as answer_sync
 import discord_voice_meetings as voice_meetings
 import mira_host
 
@@ -824,7 +825,7 @@ class PrimeFlowBot(discord.Client):
 
     @tasks.loop(seconds=30)
     async def m2_questions(self):
-        results = await asyncio.gather(m2_client.deliver(self), m2_approvals.deliver(self), return_exceptions=True)
+        results = await asyncio.gather(m2_client.deliver(self), m2_approvals.deliver(self), answer_sync.deliver(self), return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
                 log.warning('M2 polling failed: %s', type(result).__name__)

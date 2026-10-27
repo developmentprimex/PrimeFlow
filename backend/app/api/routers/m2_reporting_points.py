@@ -147,6 +147,8 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     if any(key not in MANUAL_POINTS and key not in valid_keys and key not in before for key in payload.manual_answers):
         raise HTTPException(422, "Detyra nuk gjendet ne kete raport.")
     row.manual_answers = {**before, **payload.manual_answers}
+    from app.services.discord_answer_sync import capture_report_changes
+    await capture_report_changes(db, row, before, payload.manual_answers)
     row.status, row.last_error = "DRAFT", None
     row.updated_by = user.id
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m2_reporting_points", entity_id=row.id,

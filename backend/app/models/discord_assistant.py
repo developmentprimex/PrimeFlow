@@ -73,4 +73,7 @@ class DiscordMeetingAlert(Base):
     lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     message_id: Mapped[str | None] = mapped_column(String(32))
+    sync_hash: Mapped[str | None] = mapped_column(String(64))
+    sync_pending_hash: Mapped[str | None] = mapped_column(String(64))
+    sync_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (UniqueConstraint("link_id", "meeting_id", "occurrence_starts_at", "kind", name="uq_discord_meeting_alert"),)

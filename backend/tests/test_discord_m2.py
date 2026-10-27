@@ -34,6 +34,9 @@ class M2RulesTests(unittest.TestCase):
         operations = Operations(MigrationContext.configure(dialect_name='postgresql', opts={'as_sql': True, 'output_buffer': output}))
         with patch.object(migration, 'op', operations):
             migration.upgrade()
+        sync_migration = scripts.get_revision('0168_discord_answer_sync').module
+        with patch.object(sync_migration, 'op', operations):
+            sync_migration.upgrade()
         for column in DiscordM2Question.__table__.c:
             self.assertIn(column.name, output.getvalue())
         self.assertIn('uq_discord_m2_question', output.getvalue())
@@ -73,7 +76,7 @@ class M2RulesTests(unittest.TestCase):
 
     def test_duplicate_submission_does_not_append_comment_again(self):
         question = SimpleNamespace(answered_at=datetime.now(), task_id=uuid.uuid4(), kind='delivery',
-                                   reason_code=None, comment='', choice='PO')
+                                   reason_code=None, comment='', choice='PO', platform_answered_at=None)
         db = SimpleNamespace(commit=AsyncMock(), execute=AsyncMock())
         with patch.object(api, 'own_question', AsyncMock(return_value=(question, None, SimpleNamespace(id=uuid.uuid4())))), \
              patch.object(api, 'task_owned', AsyncMock(return_value=SimpleNamespace(status='TODO'))):

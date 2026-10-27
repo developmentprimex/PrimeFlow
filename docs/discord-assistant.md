@@ -2,6 +2,23 @@
 
 ## Pyetjet M2 në 11:45
 
+### Përgjigjet e plotësuara në PrimeFlow
+
+Punëtori kontrollon edhe jashtë orarit M2 nëse pyetjet e dërguara kanë marrë
+përgjigje në platformë. Statusi Mbajtur/Anuluar i takimit, Po/Jo dhe komentet
+e përgjigjeve M2, arsyet/komentet e realizimit dhe përfundimi i detyrës përditësojnë
+mesazhin ekzistues Discord pa dërguar mesazh të ri. Butonat e përgjigjes hiqen
+kur pyetja është plotësuar; komentet nuk publikohen në kanalin e kërkuesit.
+Ndryshimi i statusit përditëson përsëri mesazhin, ndërsa pastrimi i një përgjigjeje
+manuale M2 ose statusi takimi rikthen pyetjen. **Koment manual** i shtyrjeve
+mbetet shënim i pavarur dhe nuk llogaritet si përgjigjja e punonjësit.
+
+Kërkohet `0168_discord_answer_sync`. Gjurmët e përditësimit dhe marrjes së
+konfirmimit ruhen në databazë dhe riprovohen pas dështimit të përkohshëm të Discord-it.
+Mesazhet që përdoruesi i ka fshirë nuk krijohen përsëri. Lidhjet e revokuara
+ndalen dhe identiteti rishikohet para çdo përditësimi. Sinkronizimi bëhet
+zakonisht brenda ciklit 30 sekonda, sipas radhës së mesazheve.
+
 Takimet interne dhe externe të AM që kanë përfunduar dhe nuk kanë ende status
 Mbajtur/Anuluar marrin pyetjen **M2 · A u mbajt takimi?** gjatë mbledhjes 11:45–12:00.
 Pyetja shkon te personat e caktuar manualisht në takim me lidhje aktive Discord.

@@ -27,3 +27,8 @@ class DiscordM2Question(Base):
     comment: Mapped[str | None] = mapped_column(Text)
     choice: Mapped[str | None] = mapped_column(String(2))
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    platform_answer: Mapped[dict | None] = mapped_column(JSONB)
+    platform_answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sync_hash: Mapped[str | None] = mapped_column(String(64))
+    sync_pending_hash: Mapped[str | None] = mapped_column(String(64))
+    sync_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

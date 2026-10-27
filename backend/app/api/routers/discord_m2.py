@@ -54,7 +54,7 @@ async def data_with_moves(db, day):
 
 
 def question_payload(question, link):
-    return {'id': str(question.id), 'task_id': str(question.task_id), 'kind': question.kind,
+    result = {'id': str(question.id), 'task_id': str(question.task_id), 'kind': question.kind,
             'day': question.day.isoformat(), 'snapshot': question.snapshot,
             'discord_user_id': link.discord_user_id, 'guild_id': link.guild_id, 'channel_id': link.channel_id,
             'answered': bool(question.answered_at), 'reason_code': question.reason_code,
@@ -62,6 +62,14 @@ def question_payload(question, link):
             'message_id': question.message_id,
             'comment': question.comment, 'choice': question.choice,
             'reasons': [{'value': code, 'label': label} for code, label in REASON_LABELS.items()]}
+    if question.platform_answered_at and (not question.answered_at or question.platform_answered_at > question.answered_at):
+        values = question.platform_answer or {}
+        result.update(choice=values.get('choice'), reason_code=values.get('reason_code'), comment=values.get('comment', ''),
+            answered=bool(values.get('choice') or values.get('comment')), answered_at=question.platform_answered_at.isoformat())
+        if result['answered']:
+            result['platform_status'] = 'Përgjigjja u plotësua në PrimeFlow.'
+            result['platform_answered'] = True
+    return result
 
 
 @router.post('/claim')
@@ -213,10 +221,20 @@ async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Dep
         reason, comment, choice = service.validate_answer(question.kind, payload.reason_code, payload.comment, payload.choice)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if question.answered_at and (question.reason_code, question.comment, question.choice) == (reason, comment, choice):
+    platform_newer = question.platform_answered_at and (not question.answered_at or question.platform_answered_at > question.answered_at)
+    if platform_newer and any((question.platform_answer or {}).get(key) for key in ('choice', 'comment')):
+        raise HTTPException(409, 'Pyetja është plotësuar në PrimeFlow. Rifresko mesazhin.')
+    if not platform_newer and question.answered_at and (question.reason_code, question.comment, question.choice) == (reason, comment, choice):
         return {'ok': True, 'message': 'Përgjigjja është ruajtur tashmë.'}
-    if 'expected_answered_at' in payload.model_fields_set and payload.expected_answered_at != question.answered_at:
+    effective_stamp = question.platform_answered_at if platform_newer else question.answered_at
+    if 'expected_answered_at' in payload.model_fields_set and payload.expected_answered_at != effective_stamp:
         raise HTTPException(409, 'Përgjigjja ka ndryshuar ndërkohë. Hape përsëri formularin.')
+    if question.kind in {'unfinished', 'progress', 'postponed'}:
+        state = (await db.execute(select(TaskDailyRlzState).where(TaskDailyRlzState.task_id == question.task_id,
+            TaskDailyRlzState.user_id == user.id, TaskDailyRlzState.day_date == question.day))).scalar_one_or_none()
+        latest_question_stamp = max(value for value in (question.sent_at, question.answered_at) if value) if (question.sent_at or question.answered_at) else None
+        if state and state.reason_code and (state.comment or '').strip() and (not latest_question_stamp or state.updated_at > latest_question_stamp):
+            raise HTTPException(409, 'Arsyeja dhe komenti janë plotësuar në PrimeFlow. Rifresko mesazhin.')
     report = await reports.locked_report(db, question.day)
     if question.kind in {'delivery', 'continuation'}:
         # These choices change only the person's answer, not the task's dates or
