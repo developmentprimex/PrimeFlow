@@ -212,7 +212,12 @@ async def update_meeting_occurrence_status(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> MeetingOccurrenceStatusOut:
-    meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
+    return await update_meeting_occurrence_status_in_session(meeting_id, payload, db, user)
+
+
+async def update_meeting_occurrence_status_in_session(meeting_id, payload, db, user, *, before_commit=None, before_update=None):
+    meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id).with_for_update()
+        .execution_options(populate_existing=True))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     row = (
@@ -223,6 +228,8 @@ async def update_meeting_occurrence_status(
             )
         )
     ).scalar_one_or_none()
+    if before_update is not None:
+        await before_update(meeting, row)
     if row is None:
         row = MeetingOccurrenceStatus(
             meeting_id=meeting_id,
@@ -237,6 +244,8 @@ async def update_meeting_occurrence_status(
         await delete_external_meeting_dependents(db, meeting)
     elif meeting.meeting_type == "internal" and payload.status == "canceled":
         await delete_internal_meeting_tasks(db, meeting, payload.occurrence_date)
+    if before_commit is not None:
+        await before_commit(meeting)
     await db.commit()
     await db.refresh(row)
     return _occurrence_status_out(row)

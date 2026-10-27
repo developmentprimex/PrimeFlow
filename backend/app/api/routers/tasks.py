@@ -3994,7 +3994,12 @@ async def update_task_one_h_report_slot(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
-    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    return await update_task_one_h_report_slot_in_session(task_id, payload, db, user)
+
+
+async def update_task_one_h_report_slot_in_session(task_id, payload, db, user, *, before_commit=None, before_update=None, return_dto=True):
+    task = (await db.execute(select(Task).where(Task.id == task_id).with_for_update()
+        .execution_options(populate_existing=True))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     is_assigned = (
@@ -4008,6 +4013,9 @@ async def update_task_one_h_report_slot(
     )
     if not is_assigned:
         ensure_task_editor(user, task)
+
+    if before_update is not None:
+        await before_update(task)
 
     next_slot = _normalize_one_h_report_slot(payload.one_h_report_slot)
     if payload.one_h_report_slot is not None and next_slot is None:
@@ -4048,7 +4056,11 @@ async def update_task_one_h_report_slot(
     else:
         existing.one_h_report_slot = next_slot
 
+    if before_commit is not None:
+        await before_commit(task)
     await db.commit()
+    if not return_dto:
+        return task
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     comment_map = await _user_comments_for_tasks(db, [task.id], user.id)

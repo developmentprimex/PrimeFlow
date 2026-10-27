@@ -40,7 +40,7 @@ class ProposalRulesTests(unittest.TestCase):
             self.assertEqual(result['view'].children[0].custom_id, f'pf:back:{task_id}')
         asyncio.run(check())
 
-    def test_general_task_wizard_routes_every_step_to_owned_task(self):
+    def test_general_task_asks_reason_directly_then_opens_both_current_dates(self):
         import discord_m2_approvals as client
         from unittest.mock import Mock
         async def check():
@@ -56,21 +56,15 @@ class ProposalRulesTests(unittest.TestCase):
             await client.handle(bot, interaction)
             interaction.response.send_message.assert_not_called()
             view = interaction.response.edit_message.call_args.kwargs['view']
-            self.assertIn(job['title'], interaction.response.edit_message.call_args.kwargs['content'])
-            self.assertIn('27.10.2026', interaction.response.edit_message.call_args.kwargs['content'])
-            self.assertTrue(all(item.custom_id.startswith('pf:m2a:taskdates:') for item in view.children if item.row == 0))
-            self.assertEqual(view.children[-1].custom_id, f'pf:back:{task_id}')
-            self.assertIsNone(interaction.response.edit_message.call_args.kwargs['embed'])
-            interaction.data = {'custom_id': view.children[0].custom_id}
-            await client.handle(bot, interaction)
-            view = interaction.response.edit_message.call_args.kwargs['view']
-            self.assertIn(job['title'], interaction.response.edit_message.call_args.kwargs['content'])
-            self.assertIn('Vetëm Start', interaction.response.edit_message.call_args.kwargs['content'])
+            self.assertEqual([type(item).__name__ for item in view.children], ['Select', 'Button'])
+            self.assertIn('Zgjidh arsyen', interaction.response.edit_message.call_args.kwargs['content'])
             interaction.data = {'custom_id': view.children[0].custom_id, 'values': ['OTHER']}
             await client.handle(bot, interaction)
             modal = interaction.response.send_modal.call_args.args[0]
             self.assertEqual(modal.job['source'], 'task')
-            self.assertEqual(set(modal.dates), {'start_date'})
+            self.assertEqual(set(modal.dates), {'start_date', 'due_date'})
+            self.assertEqual(modal.dates['start_date'].default, '27.10.2026')
+            self.assertEqual(modal.dates['due_date'].default, '28.10.2026')
             self.assertIn(job['title'], modal.title)
             self.assertTrue(all(call.args[0] == f'/bot/m2/postponements/tasks/{task_id}/open' for call in bot.bridge.call_args_list))
         asyncio.run(check())
@@ -124,7 +118,7 @@ class ProposalRulesTests(unittest.TestCase):
     def test_date_form_preserves_time_and_only_asks_selected_fields(self):
         import discord_m2_approvals as client
         async def check():
-            job = {'id': str(uuid.uuid4()), 'live_dates': {}}
+            job = {'id': str(uuid.uuid4()), 'live_dates': {'start_date': '2026-10-26T08:00:00+01:00', 'due_date': '2026-10-27T16:00:00+01:00'}}
             for kind, count in [('start', 1), ('due', 1), ('start_due', 2)]:
                 modal = client.ProposalModal(None, job, kind, 'OTHER')
                 self.assertEqual(len(modal.dates), count)
@@ -133,13 +127,21 @@ class ProposalRulesTests(unittest.TestCase):
             self.assertEqual(datetime.fromisoformat(client.parse_date('27.10.2026', '2026-10-26T14:20:00+01:00')).hour, 14)
         asyncio.run(check())
 
-    def test_suggested_dates_keep_duration_and_move_past_tasks_into_the_future(self):
+    def test_unchanged_dates_are_ignored_and_only_actual_changes_are_submitted(self):
         import discord_m2_approvals as client
         job = {'live_dates': {'start_date': '2026-10-26T08:00:00+01:00', 'due_date': '2026-10-30T16:00:00+01:00'}}
-        today = date(2026, 10, 27)
-        self.assertEqual(client.suggested_dates(job, 'start_due', today),
-            {'start_date': '28.10.2026', 'due_date': '01.11.2026'})
-        self.assertEqual(client.suggested_dates(job, 'due', today), {'due_date': '31.10.2026'})
+        original = {'start_date': '26.10.2026', 'due_date': '30.10.2026'}
+        for kind, updates, fields in [('start', {'start_date': '27.10.2026'}, {'start_date'}),
+            ('due', {'due_date': '31.10.2026'}, {'due_date'}),
+            ('start_due', {'start_date': '27.10.2026', 'due_date': '31.10.2026'}, {'start_date', 'due_date'})]:
+            result, dates = client.changed_dates(job, {**original, **updates})
+            self.assertEqual(result, kind)
+            self.assertEqual(set(dates), fields)
+        # An unchanged Start typed without the time is still not a Start change.
+        kind, dates = client.changed_dates(job, {'start_date': '26.10.2026', 'due_date': '31.10.2026'})
+        self.assertEqual(kind, 'due')
+        with self.assertRaises(ValueError):
+            client.changed_dates(job, original)
 
 
 from tests import test_discord_m2_database as fixtures
@@ -216,6 +218,23 @@ class ApprovalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.decide(request['id'], 'REJECTED'))['status'], 'REJECTED')
         async with self.sessions() as db:
             self.assertEqual((await db.get(Task, self.task_id)).due_date, original)
+
+    async def test_start_only_approval_keeps_due_and_records_only_start_movement(self):
+        async with self.sessions() as db:
+            task = await db.get(Task, self.task_id)
+            task.due_date += timedelta(days=4)
+            await db.commit()
+            due = task.due_date
+            request = await api.propose_task(self.task_id, api.Proposal(**self.actor.model_dump(), request_id='300',
+                change_kind='start', start_date=task.start_date + timedelta(days=1), reason_code='OTHER', comment='Only Start changed'), db)
+        self.assertEqual(request['change_kind'], 'start')
+        self.assertEqual(set(request['proposed_dates']), {'start_date'})
+        self.assertEqual((await self.decide(request['id']))['status'], 'APPROVED')
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Task, self.task_id)).due_date, due)
+            events = (await db.execute(select(AuditLog.action).where(AuditLog.entity_id == self.task_id,
+                AuditLog.action.in_(['task.start_date_changed', 'task.due_date_changed'])))).scalars().all()
+            self.assertEqual(events, ['task.start_date_changed'])
 
     async def test_general_open_rechecks_owner_and_rejects_completed_tasks(self):
         async with self.sessions() as db:

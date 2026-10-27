@@ -1,11 +1,11 @@
 """Postponement form and Diellza's approval controls; no task edit before approval."""
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import discord
 from app.config import settings
 from app.services.primeflow_report import report_timezone
-from app.services.discord_m2_postponements import FIELDS, STATUS_LABELS
+from app.services.discord_m2_postponements import FIELDS, STATUS_LABELS, iso
 import discord_m2_client as questions
 import discord_ui as task_ui
 
@@ -69,18 +69,29 @@ def parse_date(value, current):
         raise ValueError('Shkruaj datën si DD.MM.YYYY ose YYYY-MM-DD.')
     if ':' not in value and current:
         old = datetime.fromisoformat(current).astimezone(report_timezone())
-        parsed = parsed.replace(hour=old.hour, minute=old.minute)
+        parsed = parsed.replace(hour=old.hour, minute=old.minute, second=old.second, microsecond=old.microsecond)
     return parsed.replace(tzinfo=report_timezone()).isoformat()
 
 
-def suggested_dates(job, change_kind, today=None):
-    today = today or datetime.now(report_timezone()).date()
-    current = {field: datetime.fromisoformat(value).astimezone(report_timezone()).date()
-        for field in FIELDS[change_kind] if (value := job.get('live_dates', {}).get(field))}
-    # Move both dates by the same number of days to keep the task's duration.
-    days = max(1, (today - min(current.values())).days + 1) if current else 1
-    return {field: (current.get(field, today) + timedelta(days=days)).strftime('%d.%m.%Y')
-        for field in FIELDS[change_kind]}
+def current_date_text(value):
+    return datetime.fromisoformat(value).astimezone(report_timezone()).strftime('%d.%m.%Y') if value else ''
+
+
+def changed_dates(job, values):
+    changed = {}
+    for field, value in values.items():
+        current = job.get('live_dates', {}).get(field)
+        if value.strip() == current_date_text(current):
+            continue
+        parsed = parse_date(value, current)
+        # Reformatting an unchanged date must not turn a Due-only request into
+        # Start+Due. Compare actual timestamps, not the user's text format.
+        if iso(parsed) != iso(current):
+            changed[field] = parsed
+    if not changed:
+        raise ValueError('Ndrysho të paktën Start ose Due për ta shtyrë detyrën.')
+    kind = 'start_due' if len(changed) == 2 else 'start' if 'start_date' in changed else 'due'
+    return kind, changed
 
 
 class ProposalModal(discord.ui.Modal):
@@ -88,11 +99,10 @@ class ProposalModal(discord.ui.Modal):
         super().__init__(title=('Shtyrje: ' + task_name(job))[:45], timeout=900)
         self.bot, self.job, self.change_kind, self.reason = bot, job, change_kind, reason
         self.dates = {}
-        defaults = suggested_dates(job, change_kind)
         for field in FIELDS[change_kind]:
             name = 'Fillimi i ri' if field == 'start_date' else 'Përfundimi i ri'
             current = date_text(job.get('live_dates', {}).get(field))
-            item = discord.ui.TextInput(label=f'{name} · aktual: {current}', default=defaults[field],
+            item = discord.ui.TextInput(label=f'{name} · aktual: {current}', default=current_date_text(job.get('live_dates', {}).get(field)),
                 placeholder='Ndrysho datën nëse dëshiron · DD.MM.YYYY', required=True, max_length=32)
             self.dates[field] = item
             self.add_item(item)
@@ -106,10 +116,10 @@ class ProposalModal(discord.ui.Modal):
         # its update instead of creating a separate response below it.
         await interaction.response.defer()
         try:
-            dates = {field: parse_date(str(item), self.job.get('live_dates', {}).get(field)) for field, item in self.dates.items()}
+            change_kind, dates = changed_dates(self.job, {field: str(item) for field, item in self.dates.items()})
             source = 'tasks' if self.job.get('source') == 'task' else 'questions'
             result = await self.bot.bridge(f"/bot/m2/postponements/{source}/{self.job['id']}", {
-                **questions.actor(interaction), **dates, 'request_id': str(interaction.id), 'change_kind': self.change_kind,
+                **questions.actor(interaction), **dates, 'request_id': str(interaction.id), 'change_kind': change_kind,
                 'reason_code': self.reason, 'comment': str(self.comment)})
             await interaction.edit_original_response(content=task_context(self.job) + '\n\n⏳ Kërkesa është në pritje të Diellza Veliut. Datat ndryshojnë vetëm pas konfirmimit.', embed=None, view=back_view(self.job))
             if source == 'tasks':
@@ -146,21 +156,14 @@ async def handle(bot, interaction):
     if action == 'cancel':
         await interaction.response.edit_message(content=questions.prompt(job), embed=None, view=questions.controls(job))
         return
-    if action == 'request':
+    if action in {'request', 'dates'}:
         view = discord.ui.View(timeout=None)
-        for kind, label in (('start', 'Vetëm Start'), ('due', 'Vetëm Due'), ('start_due', 'Start dhe Due')):
-            view.add_item(discord.ui.Button(label=label, custom_id=f'pf:m2a:{prefix}dates:{object_id}:{kind}', row=0))
-        view.add_item(back_button(job))
-        await interaction.response.edit_message(content=task_context(job) + '\n\nÇfarë dëshiron të shtysh?', embed=None, view=view)
-    elif action == 'dates':
-        view = discord.ui.View(timeout=None)
-        view.add_item(discord.ui.Select(placeholder='Zgjidh arsyen e shtyrjes', custom_id=f'pf:m2a:{prefix}reason:{object_id}:{extra[0]}',
+        view.add_item(discord.ui.Select(placeholder='Zgjidh arsyen e shtyrjes', custom_id=f'pf:m2a:{prefix}reason:{object_id}:start_due',
             options=[discord.SelectOption(label=item['label'], value=item['value']) for item in job['reasons']], row=0))
         view.add_item(back_button(job))
-        selected = {'start': 'Vetëm Start', 'due': 'Vetëm Due', 'start_due': 'Start dhe Due'}[extra[0]]
-        await interaction.response.edit_message(content=task_context(job) + '\n\n**Shtyrja: ' + selected + '**\nZgjidh arsyen; pastaj cakto datën dhe komentin.', embed=None, view=view)
+        await interaction.response.edit_message(content=task_context(job) + '\n\nZgjidh arsyen e shtyrjes. Në formular ndrysho vetëm datën që dëshiron të shtysh; tjetrën lëre siç është.', embed=None, view=view)
     elif action == 'reason':
-        await interaction.response.send_modal(ProposalModal(bot, job, extra[0], interaction.data['values'][0]))
+        await interaction.response.send_modal(ProposalModal(bot, job, 'start_due', interaction.data['values'][0]))
 
 
 async def deliver(bot):

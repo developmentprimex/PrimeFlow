@@ -517,8 +517,9 @@ nga `/detyrat`, në çdo orar dhe për AM/PM. Këto kërkesa nuk varen nga pyetj
 zgjedhja e datave, arsyeja dhe komenti kalojnë te e njëjta Diellza Veliu për
 konfirmim. Vendimi njoftohet një herë në kanalin personal, pa publikuar komentin.
 Kërkohet edhe migrimi `0167_discord_task_postponements`. Historiku i kërkesave M2 ruhet.
-Zgjedhja Start/Due, arsyeja dhe gjendja në pritje përditësojnë të njëjtin mesazh
-të detyrës. Datat dhe komenti hapen në formularin e Discord-it. **Kthehu te detyra**
+Pas zgjedhjes së arsyes, formulari hap Start dhe Due me datat aktuale dhe komentin
+e detyrueshëm, pa pyetje për llojin e datës. Gjendja në pritje përditëson të njëjtin mesazh
+të detyrës. **Kthehu te detyra**
 rikthen kartën pa krijuar mesazh tjetër. Emri dhe datat aktuale mbeten të dukshme
 gjatë procesit; komenti i dërguar nuk publikohet në mesazhin e kërkuesit.
 
@@ -529,8 +530,9 @@ Përgjigjet PO/JO dhe komentet ruhen veçmas nga dorëzimi M2, në seksionin 7 t
 PO hap një koment opsional; JO kërkon shpjegim. Mesazhi ekzistues përditësohet pa
 publikuar komentet e punonjësit në kanal.
 
-**Kërko shtyrje** lejon vetëm Start, vetëm Due, ose të dyja, me arsyet standarde
-të platformës dhe koment të detyrueshëm. Propozimi ruhet në pritje; detyra ende
+**Kërko shtyrje** lejon ndryshimin e Start, Due, ose të dyjave në të njëjtin formular;
+fushat e pandryshuara ruhen siç janë. Komenti është i detyrueshëm dhe arsyeja
+zgjidhet nga kodet standarde të platformës. Propozimi ruhet në pritje; detyra ende
 nuk ndryshon. Diellza Veliu (`diellza.veliu`), në kanalin e saj personal Discord,
 merr datat aktuale, datat e propozuara, arsyen dhe komentin, me butonat e konfirmimit/refuzimit.
 Vetëm konfirmimi i saj e zbaton ndryshimin përmes rrjedhës normale të detyrave,

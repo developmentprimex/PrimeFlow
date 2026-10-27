@@ -4,6 +4,7 @@ from app.api.routers.discord_assistant import router as discord_assistant_router
 from app.api.routers.discord_m2 import router as discord_m2_router
 from app.api.routers.discord_answer_sync import router as discord_answer_sync_router
 from app.api.routers.discord_m2_postponements import router as discord_m2_postponements_router
+from app.api.routers.discord_m3 import router as discord_m3_router
 from app.api.routers.mira_memory import router as mira_memory_router
 
 from app.api.routers.auth import router as auth_router
@@ -80,6 +81,7 @@ api_router.include_router(discord_assistant_router, prefix="/discord", tags=["di
 api_router.include_router(discord_m2_router, prefix="/discord/bot/m2", tags=["discord"])
 api_router.include_router(discord_answer_sync_router, prefix="/discord/bot/answer-sync", tags=["discord"])
 api_router.include_router(discord_m2_postponements_router, prefix="/discord/bot/m2/postponements", tags=["discord"])
+api_router.include_router(discord_m3_router, prefix="/discord/bot/m3", tags=["discord"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(checklist_items_router, prefix="/checklist-items", tags=["checklist-items"])
 api_router.include_router(checklists_router, prefix="/checklists", tags=["checklists"])

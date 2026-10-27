@@ -226,6 +226,7 @@ __all__ = [
 from app.services import knowledge_task_guard as _knowledge_task_guard  # noqa: E402,F401
 from app.models.discord_assistant import DiscordLink, DiscordLinkCode, DiscordReminder, DiscordAction, DiscordMeetingAlert
 from app.models.discord_m2_question import DiscordM2Question
+from app.models.discord_m3_question import DiscordM3Question
 from app.models.discord_m2_postponement import DiscordM2Postponement
 from app.models.discord_agent_run import DiscordAgentRun
 from app.models.meeting_recording import MeetingRecording, MeetingRecordingChunk
