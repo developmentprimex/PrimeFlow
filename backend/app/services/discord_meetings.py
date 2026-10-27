@@ -16,11 +16,67 @@ from app.config import settings
 from app.jobs.reminders import _next_occurrence, _reminder_is_due
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
+from app.models.user import User
+from app.services.discord_m2 import collection_open
 from app.services.meeting_occurrence import meeting_occurs_on_date
 
 # After the meeting, participants are asked whether it was held or canceled.
 AFTER_DEFAULT_MINUTES = 30
 AFTER_WINDOW = timedelta(hours=2)
+HELD_KINDS = ('after', 'm2_after')
+
+
+def m2_recipients(assigned_ids, linked_ids, fallback_id):
+    # An assigned person without Discord is not an unassigned meeting.
+    targets = set(assigned_ids) if assigned_ids else {fallback_id} if fallback_id else set()
+    return sorted(targets & set(linked_ids), key=str)
+
+
+def m2_occurrence(meeting, current, local_timezone):
+    if not collection_open(current) or meeting.meeting_type not in {'internal', 'external'}:
+        return None
+    held = held_question_at(meeting, current, local_timezone)
+    if not held:
+        return None
+    occurrence, ends = held
+    original_start = meeting.starts_at if meeting.starts_at.tzinfo else meeting.starts_at.replace(tzinfo=local_timezone)
+    if original_start.astimezone(local_timezone).date() > current.astimezone(local_timezone).date():
+        return None
+    if meeting.ends_at is not None:
+        original_end = meeting.ends_at if meeting.ends_at.tzinfo else meeting.ends_at.replace(tzinfo=local_timezone)
+        if original_end > original_start:
+            ends = occurrence + (original_end - original_start)
+    # Do not ask about a meeting that has not finished yet, including an AM
+    # meeting still in progress at the first collection tick.
+    if occurrence.astimezone(local_timezone).hour >= 12 or ends > current:
+        return None
+    return occurrence.astimezone(timezone.utc)
+
+
+async def m2_due_alerts(db, current, user_ids):
+    if not user_ids or not collection_open(current):
+        return []
+    local_timezone = ZoneInfo(settings.APP_TIMEZONE)
+    meetings = (await db.execute(select(Meeting).where(Meeting.starts_at.is_not(None),
+        Meeting.meeting_type.in_(('internal', 'external')),
+        or_(Meeting.calendar_sync_status.is_(None),
+            Meeting.calendar_sync_status.notin_(('cancelled', 'excluded', 'out_of_window')))))).scalars().all()
+    candidates = [(meeting, occurrence) for meeting in meetings
+        if (occurrence := m2_occurrence(meeting, current, local_timezone)) is not None]
+    if not candidates:
+        return []
+    ids = [meeting.id for meeting, _ in candidates]
+    assigned = {}
+    for meeting_id, user_id in (await db.execute(select(MeetingParticipant.meeting_id, MeetingParticipant.user_id).where(
+        MeetingParticipant.meeting_id.in_(ids), MeetingParticipant.assignment_source == 'manual'))).all():
+        assigned.setdefault(meeting_id, set()).add(user_id)
+    fallback = (await db.execute(select(User.id).where(User.username == 'diellza.veliu', User.is_active.is_(True)))).scalar_one_or_none()
+    statuses = dict((await db.execute(select(MeetingOccurrenceStatus.meeting_id, MeetingOccurrenceStatus.status).where(
+        MeetingOccurrenceStatus.meeting_id.in_(ids),
+        MeetingOccurrenceStatus.occurrence_date == current.astimezone(local_timezone).date()))).all())
+    return [(meeting, user_id, occurrence, 'm2_after') for meeting, occurrence in candidates
+        if not statuses.get(meeting.id)
+        for user_id in m2_recipients(assigned.get(meeting.id, set()), user_ids, fallback)]
 
 
 def held_question_at(meeting: Meeting, current: datetime, local_timezone: ZoneInfo) -> tuple[datetime, datetime] | None:

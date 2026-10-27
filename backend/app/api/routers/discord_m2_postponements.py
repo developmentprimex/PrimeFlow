@@ -53,7 +53,7 @@ async def task_snapshots(db, task):
 
 
 def payload(request, requester, approver=None):
-    return {'id': str(request.id), 'question_id': str(request.question_id), 'task_id': str(request.task_id),
+    return {'id': str(request.id), 'question_id': str(request.question_id) if request.question_id else None, 'task_id': str(request.task_id),
             'status': request.status, 'status_label': rules.STATUS_LABELS[request.status], 'change_kind': request.change_kind,
             'original_tasks': request.original_tasks, 'proposed_dates': request.proposed_dates,
             'reason': REASON_LABELS[request.reason_code], 'comment': request.comment,
@@ -75,19 +75,43 @@ async def propose(question_id: uuid.UUID, value: Proposal, db: AsyncSession = De
     question, link, user = await own_question(db, question_id, value)
     if question.kind != 'continuation':
         raise HTTPException(422, 'Kërkesa duhet të bëhet nga pyetja e detyrës PM.')
+    return await create_proposal(db, value, link, user, question.task_id, question)
+
+
+@router.post('/tasks/{task_id}/open')
+async def open_task(task_id: uuid.UUID, value: Actor, db: AsyncSession = Depends(get_db)):
+    link, user = await identity(db, value)
+    task = await task_owned(db, user.id, task_id)
+    snapshots = await task_snapshots(db, task)
+    rules.assert_snapshot_unchanged(snapshots, snapshots)
+    pending = (await db.execute(select(Request.id).where(Request.task_id == task_id, Request.status == 'PENDING'))).first()
+    if pending:
+        raise HTTPException(409, 'Kjo detyrë ka tashmë një kërkesë në pritje të Diellzës.')
+    return {'id': str(task_id), 'source': 'task', 'title': task.title,
+        'live_dates': {'start_date': rules.iso(task.start_date), 'due_date': rules.iso(task.due_date)},
+        'reasons': [{'value': key, 'label': label} for key, label in REASON_LABELS.items()]}
+
+
+@router.post('/tasks/{task_id}')
+async def propose_task(task_id: uuid.UUID, value: Proposal, db: AsyncSession = Depends(get_db)):
+    link, user = await identity(db, value)
+    return await create_proposal(db, value, link, user, task_id)
+
+
+async def create_proposal(db, value, link, user, task_id, question=None):
     duplicate = (await db.execute(select(Request).where(Request.request_id == value.request_id))).scalar_one_or_none()
     if duplicate:
-        if duplicate.requester_link_id != link.id:
+        if duplicate.requester_link_id != link.id or duplicate.task_id != task_id:
             raise HTTPException(403, 'Kërkesë e një përdoruesi tjetër.')
         return payload(duplicate, user)
     # Serializes submissions from different owners of one shared task.
-    await db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': int.from_bytes(hashlib.sha256(b'm2-proposal:' + question.task_id.bytes).digest()[:8], 'big', signed=True)})
-    pending = (await db.execute(select(Request.id).where(Request.task_id == question.task_id, Request.status == 'PENDING'))).first()
+    await db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': int.from_bytes(hashlib.sha256(b'm2-proposal:' + task_id.bytes).digest()[:8], 'big', signed=True)})
+    pending = (await db.execute(select(Request.id).where(Request.task_id == task_id, Request.status == 'PENDING'))).first()
     if pending:
         raise HTTPException(409, 'Kjo detyrë ka tashmë një kërkesë në pritje të Diellzës.')
-    task = await task_owned(db, user.id, question.task_id)
+    task = await task_owned(db, user.id, task_id)
     from app.services.m2_reporting_points import select_task_sections
-    if not select_task_sections([task], [], question.day)['pm_continuation']:
+    if question and not select_task_sections([task], [], question.day)['pm_continuation']:
         raise HTTPException(409, 'Detyra nuk është më në planin PM të sotëm.')
     approver, _ = await reviewer(db, link.guild_id)
     dates = {field: getattr(value, field) for field in ('start_date', 'due_date') if field in value.model_fields_set}
@@ -95,7 +119,8 @@ async def propose(question_id: uuid.UUID, value: Proposal, db: AsyncSession = De
     snapshots = await task_snapshots(db, task)
     rules.assert_snapshot_unchanged(snapshots, snapshots)
     now = datetime.now(timezone.utc)
-    request = Request(question_id=question.id, requester_link_id=link.id, task_id=task.id, day=question.day,
+    request = Request(question_id=question.id if question else None, requester_link_id=link.id, task_id=task.id,
+        day=question.day if question else datetime.now(report_timezone()).date(),
         approver_user_id=approver.id, request_id=value.request_id, change_kind=value.change_kind,
         proposed_dates=proposed, original_tasks=snapshots, reason_code=value.reason_code,
         comment=value.comment.strip(), status='PENDING', lease_until=now)
@@ -137,7 +162,7 @@ async def decide(request_id: uuid.UUID, value: Decision, db: AsyncSession = Depe
         finish('REJECTED')
         await db.commit()
         return payload(request, requester, approver)
-    if request.day != datetime.now(report_timezone()).date() or not requester_link.enabled or not requester.is_active:
+    if (request.question_id and request.day != datetime.now(report_timezone()).date()) or not requester_link.enabled or not requester.is_active:
         finish('STALE', 'Dita ose lidhja e kërkuesit ka ndryshuar.')
         await db.commit()
         return payload(request, requester, approver)
@@ -179,7 +204,7 @@ async def decide(request_id: uuid.UUID, value: Decision, db: AsyncSession = Depe
     if request.status == 'APPROVED':
         try:
             from app.services import m2_reporting_points as reports
-            report = await reports.locked_report(db, request.day)
+            report = await reports.locked_report(db, datetime.now(report_timezone()).date())
             await reports.refresh_report(db, report)
             await db.commit()
         except Exception:
@@ -234,12 +259,12 @@ async def claim_notifications(db: AsyncSession = Depends(get_db)):
             except HTTPException:
                 request.requester_notified_at = now
                 continue
-            question = await db.get(DiscordM2Question, request.question_id)
-            message_id = question.message_id
+            question = await db.get(DiscordM2Question, request.question_id) if request.question_id else None
+            message_id = question.message_id if question else None
         job = payload(request, requester, approver)
         job.update(role=role, discord_user_id=target.discord_user_id, guild_id=target.guild_id,
                    channel_id=target.channel_id, message_id=message_id)
-        if role == 'requester':
+        if role == 'requester' and question:
             job['question'] = question_payload(question, requester_link)
             job['question']['postponement'] = {'id': str(request.id), 'status': request.status}
         request.lease_until = now + timedelta(minutes=2)

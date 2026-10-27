@@ -235,6 +235,8 @@ def controls(task_id: str, fingerprint: str, status: str | None = None) -> disco
                  for text, value in MORE if value not in hidden]))
     for text, direction in (("◀", "prev"), ("↩ Lista", "list"), ("▶", "next")):
         view.add_item(discord.ui.Button(label=text, custom_id=f"pf:nav:{task_id}:{direction}", row=2))
+    if status != 'DONE':
+        view.add_item(discord.ui.Button(label='Kërko shtyrje', custom_id=f'pf:m2a:taskrequest:{task_id}', row=3))
     return view
 
 
@@ -474,13 +476,13 @@ def meeting_alert(job: dict, voice_url: str | None = None):
     internal = meeting.get("type") == "internal"
     if job["kind"] == "start":
         headline = "🔴 **Takimi po fillon tani**"
-    elif job["kind"] == "after":
-        headline = "❓ **A u mbajt takimi?**"
+    elif job["kind"] in {'after', 'm2_after'}:
+        headline = "❓ **M2 · A u mbajt takimi?**" if job['kind'] == 'm2_after' else "❓ **A u mbajt takimi?**"
     else:
         headline = f"🔔 **Takim pas {meeting.get('minutes_before') or 0} min**"
     content = f"<@{job['discord_user_id']}> {headline} · {discord.utils.escape_markdown(label(meeting['title'], 150))}"
     embed = discord.Embed(title=label(meeting["title"], 250),
-                          color={"start": 0xEF4444, "after": 0x3B82F6}.get(job["kind"], 0xF59E0B))
+                          color={"start": 0xEF4444, "after": 0x3B82F6, 'm2_after': 0x3B82F6}.get(job["kind"], 0xF59E0B))
     details = [f"🕘 {starts.strftime('%H:%M')} · " + ("Takim i brendshëm" if internal else "Takim i jashtëm")]
     if meeting.get("platform"):
         details.append("📍 " + label(meeting["platform"], 100))
@@ -489,7 +491,7 @@ def meeting_alert(job: dict, voice_url: str | None = None):
         details.append("👥 Me: " + ", ".join(label(person["name"], 40) for person in others[:15]) + (" …" if len(others) > 15 else ""))
     embed.description = "\n".join(details)
     view = discord.ui.View(timeout=None)
-    if job["kind"] == "after":
+    if job["kind"] in {'after', 'm2_after'}:
         # Same choice as the Mbajtur / Anuluar column in Common View.
         view.add_item(discord.ui.Button(label="✅ Mbajtur", style=discord.ButtonStyle.success, custom_id=f"pf:mheld:{job['id']}:held"))
         view.add_item(discord.ui.Button(label="✖ Anuluar", style=discord.ButtonStyle.danger, custom_id=f"pf:mheld:{job['id']}:canceled"))

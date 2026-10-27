@@ -15,6 +15,66 @@ from app.api.routers import discord_m2_postponements as api
 
 
 class ProposalRulesTests(unittest.TestCase):
+    def test_postponement_submit_updates_source_message_without_a_new_response(self):
+        import discord_m2_approvals as client
+        from unittest.mock import Mock
+        async def check():
+            task_id = str(uuid.uuid4())
+            job = {'id': task_id, 'source': 'task', 'title': 'Task to postpone',
+                'live_dates': {'due_date': '2026-10-27T16:00:00+01:00'}}
+            bot = SimpleNamespace(bridge=AsyncMock(return_value={'id': 'saved'}))
+            modal = client.ProposalModal(bot, job, 'due', 'OTHER')
+            modal.dates['due_date']._value = '28.10.2026'
+            modal.comment._value = 'Waiting for information'
+            interaction = Mock()
+            interaction.id, interaction.guild_id, interaction.channel_id, interaction.user.id = 100, 22, 33, 11
+            interaction.response = SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock())
+            interaction.edit_original_response = AsyncMock()
+            interaction.followup.send = AsyncMock()
+            await modal.on_submit(interaction)
+            interaction.response.defer.assert_awaited_once_with()
+            interaction.response.send_message.assert_not_called()
+            interaction.followup.send.assert_not_called()
+            result = interaction.edit_original_response.call_args.kwargs
+            self.assertIn('në pritje', result['content'])
+            self.assertEqual(result['view'].children[0].custom_id, f'pf:back:{task_id}')
+        asyncio.run(check())
+
+    def test_general_task_wizard_routes_every_step_to_owned_task(self):
+        import discord_m2_approvals as client
+        from unittest.mock import Mock
+        async def check():
+            task_id = str(uuid.uuid4())
+            job = {'id': task_id, 'source': 'task', 'title': 'RA: Asistenti M1/M2/M3',
+                'live_dates': {'start_date': '2026-10-27T08:00:00+01:00', 'due_date': '2026-10-28T16:00:00+01:00'},
+                'reasons': [{'value': 'OTHER', 'label': 'Other'}]}
+            bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job))
+            interaction = Mock()
+            interaction.guild_id, interaction.channel_id, interaction.user.id = 22, 33, 11
+            interaction.response = SimpleNamespace(send_message=AsyncMock(), edit_message=AsyncMock(), send_modal=AsyncMock())
+            interaction.data = {'custom_id': f'pf:m2a:taskrequest:{task_id}'}
+            await client.handle(bot, interaction)
+            interaction.response.send_message.assert_not_called()
+            view = interaction.response.edit_message.call_args.kwargs['view']
+            self.assertIn(job['title'], interaction.response.edit_message.call_args.kwargs['content'])
+            self.assertIn('27.10.2026', interaction.response.edit_message.call_args.kwargs['content'])
+            self.assertTrue(all(item.custom_id.startswith('pf:m2a:taskdates:') for item in view.children if item.row == 0))
+            self.assertEqual(view.children[-1].custom_id, f'pf:back:{task_id}')
+            self.assertIsNone(interaction.response.edit_message.call_args.kwargs['embed'])
+            interaction.data = {'custom_id': view.children[0].custom_id}
+            await client.handle(bot, interaction)
+            view = interaction.response.edit_message.call_args.kwargs['view']
+            self.assertIn(job['title'], interaction.response.edit_message.call_args.kwargs['content'])
+            self.assertIn('Vetëm Start', interaction.response.edit_message.call_args.kwargs['content'])
+            interaction.data = {'custom_id': view.children[0].custom_id, 'values': ['OTHER']}
+            await client.handle(bot, interaction)
+            modal = interaction.response.send_modal.call_args.args[0]
+            self.assertEqual(modal.job['source'], 'task')
+            self.assertEqual(set(modal.dates), {'start_date'})
+            self.assertIn(job['title'], modal.title)
+            self.assertTrue(all(call.args[0] == f'/bot/m2/postponements/tasks/{task_id}/open' for call in bot.bridge.call_args_list))
+        asyncio.run(check())
+
     def test_frozen_migration_contains_every_model_column(self):
         from io import StringIO
         from alembic.operations import Operations
@@ -69,8 +129,17 @@ class ProposalRulesTests(unittest.TestCase):
                 modal = client.ProposalModal(None, job, kind, 'OTHER')
                 self.assertEqual(len(modal.dates), count)
                 self.assertTrue(modal.comment.required)
+                self.assertTrue(all(item.default for item in modal.dates.values()))
             self.assertEqual(datetime.fromisoformat(client.parse_date('27.10.2026', '2026-10-26T14:20:00+01:00')).hour, 14)
         asyncio.run(check())
+
+    def test_suggested_dates_keep_duration_and_move_past_tasks_into_the_future(self):
+        import discord_m2_approvals as client
+        job = {'live_dates': {'start_date': '2026-10-26T08:00:00+01:00', 'due_date': '2026-10-30T16:00:00+01:00'}}
+        today = date(2026, 10, 27)
+        self.assertEqual(client.suggested_dates(job, 'start_due', today),
+            {'start_date': '28.10.2026', 'due_date': '01.11.2026'})
+        self.assertEqual(client.suggested_dates(job, 'due', today), {'due_date': '31.10.2026'})
 
 
 from tests import test_discord_m2_database as fixtures
@@ -110,6 +179,57 @@ class ApprovalDatabaseTests(unittest.IsolatedAsyncioTestCase):
             return await api.propose(uuid.UUID(self.qid), api.Proposal(**self.actor.model_dump(), request_id=request_id,
                 change_kind='start_due', start_date=task.start_date + timedelta(days=1), due_date=task.due_date + timedelta(days=1),
                 reason_code='MISSING_INFORMATION', comment='Waiting for information'), db)
+
+    async def general_request(self, request_id='200'):
+        async with self.sessions() as db:
+            task = await db.get(Task, self.task_id)
+            task.finish_period = 'AM'
+            await db.commit()
+            return await api.propose_task(self.task_id, api.Proposal(**self.actor.model_dump(), request_id=request_id,
+                change_kind='due', due_date=task.due_date + timedelta(days=1),
+                reason_code='OTHER', comment='General task postponement'), db)
+
+    async def test_general_am_task_approval_has_no_question_or_collection_time_dependency(self):
+        request = await self.general_request()
+        self.assertIsNone(request['question_id'])
+        async with self.sessions() as db:
+            stored = await db.get(Request, uuid.UUID(request['id']))
+            stored.day -= timedelta(days=1)
+            await db.commit()
+        result = await self.decide(request['id'])
+        self.assertEqual(result['status'], 'APPROVED')
+        async with self.sessions() as db:
+            task = await db.get(Task, self.task_id)
+            self.assertEqual(rules.iso(task.due_date), request['proposed_dates']['due_date'])
+            self.assertEqual(task.finish_period, 'AM')
+            jobs = (await api.claim_notifications(db))['jobs']
+            self.assertEqual(jobs[0]['role'], 'requester')
+            self.assertNotIn('question', jobs[0])
+
+    async def test_general_rejection_preserves_dates_and_duplicate_pending_is_blocked(self):
+        async with self.sessions() as db:
+            original = (await db.get(Task, self.task_id)).due_date
+        request = await self.general_request()
+        with self.assertRaises(HTTPException) as caught:
+            await self.general_request('201')
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual((await self.decide(request['id'], 'REJECTED'))['status'], 'REJECTED')
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Task, self.task_id)).due_date, original)
+
+    async def test_general_open_rechecks_owner_and_rejects_completed_tasks(self):
+        async with self.sessions() as db:
+            result = await api.open_task(self.task_id, self.actor, db)
+            self.assertEqual(result['source'], 'task')
+            self.assertTrue(result['reasons'])
+            with self.assertRaises(HTTPException):
+                await api.open_task(self.task_id, api.Actor(**self.reviewer), db)
+            from sqlalchemy import update
+            # Fixture-only status setup: avoid unrelated knowledge completion hooks.
+            await db.execute(update(Task).where(Task.id == self.task_id).values(status='DONE'))
+            await db.commit()
+            with self.assertRaises(HTTPException):
+                await api.open_task(self.task_id, self.actor, db)
 
     async def decide(self, rid, decision='APPROVED', actor=None):
         async with self.sessions() as db:

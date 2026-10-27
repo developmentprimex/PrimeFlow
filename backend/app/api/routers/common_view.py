@@ -72,7 +72,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "20"
+COMMON_VIEW_CACHE_VERSION = "21"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -389,6 +389,8 @@ async def _compute_etag(
             common_view_task_date_window_filter(week_start, week_end),
         ]
         active_task_ids = select(Task.id).where(*task_filters)
+        task_project_ids = select(Task.project_id).where(*task_filters)
+        project_filters = [Project.id.in_(task_project_ids)]
         active_task_assignee_count = (
             select(func.count())
             .select_from(TaskAssignee)
@@ -404,6 +406,8 @@ async def _compute_etag(
             [
                 ("tasks_updated", _max_timestamp_scalar(Task.updated_at, task_filters), False),
                 ("tasks_count", _count_rows_scalar(Task, task_filters), True),
+                ("projects_updated", _max_timestamp_scalar(Project.updated_at, project_filters), False),
+                ("active_projects_count", _count_rows_scalar(Project, [*project_filters, Project.is_active.is_(True)]), True),
                 ("task_assignees_count", active_task_assignee_count, True),
                 ("task_assignees_updated", active_task_assignee_updated, False),
                 (
@@ -1070,7 +1074,8 @@ async def get_common_view(
 
             if t.project_id:
                 project = projects.get(t.project_id)
-                if not project:
+                # Project activity only controls PRJK visibility; retain task history in 1H/BLL/etc.
+                if not project or not project.is_active:
                     continue
                 base_title = (project.title or "").strip()
                 if not base_title:

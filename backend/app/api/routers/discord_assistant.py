@@ -17,7 +17,8 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
 from app.models.discord_assistant import DiscordAction, DiscordLink, DiscordLinkCode, DiscordMeetingAlert, DiscordReminder
-from app.models.meeting import MeetingParticipant
+from app.models.meeting import Meeting, MeetingParticipant
+from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
@@ -507,6 +508,11 @@ async def claim_meeting_alerts(db: AsyncSession = Depends(get_db)):
         DiscordLink.enabled.is_(True), DiscordLink.channel_id.is_not(None),
         DiscordLink.guild_id == settings.DISCORD_GUILD_ID, User.is_active.is_(True)))).scalars().all()}
     due = await discord_meetings.due_alerts(db, now, list(links))
+    m2_due = await discord_meetings.m2_due_alerts(db, now, list(links))
+    # During M2 send one question per person/occurrence, even when the normal
+    # end-of-meeting question would also become due at this tick.
+    m2_keys = {(meeting.id, user_id, occurrence) for meeting, user_id, occurrence, _ in m2_due}
+    due = [item for item in due if not (item[3] == 'after' and (item[0].id, item[1], item[2]) in m2_keys)] + m2_due
     if not due:
         return {"jobs": []}
     # Everyone invited is listed by name, so each person sees who else is called.
@@ -561,18 +567,41 @@ async def mark_meeting_held(alert_id: uuid.UUID, payload: MeetingHeld, db: Async
     """Mbajtur / Anuluar from Discord saves the same occurrence status as Common View."""
     link, user = await identity(db, payload)
     alert = await db.get(DiscordMeetingAlert, alert_id)
-    if not alert or alert.link_id != link.id or alert.kind != "after":
+    if not alert or alert.link_id != link.id or alert.kind not in discord_meetings.HELD_KINDS:
         raise HTTPException(404, "Pyetja për takimin nuk u gjet.")
     day = alert.occurrence_starts_at.astimezone(ZoneInfo(settings.APP_TIMEZONE)).date()
-    await tools.user_api(user, "PATCH", f"/api/meetings/{alert.meeting_id}/occurrence-status",
-                         body={"occurrence_date": day.isoformat(), "status": payload.status})
+    meeting = (await db.execute(select(Meeting).where(Meeting.id == alert.meeting_id).with_for_update())).scalar_one_or_none()
+    if not meeting:
+        raise HTTPException(404, 'Takimi nuk u gjet.')
+    if alert.kind == 'm2_after':
+        assigned = (await db.execute(select(MeetingParticipant.user_id).where(
+            MeetingParticipant.meeting_id == meeting.id, MeetingParticipant.assignment_source == 'manual'))).scalars().all()
+        fallback = (await db.execute(select(User.id).where(User.username == 'diellza.veliu', User.is_active.is_(True)))).scalar_one_or_none()
+        if user.id not in discord_meetings.m2_recipients(assigned, [user.id], fallback):
+            raise HTTPException(403, 'Përgjegjësit e takimit kanë ndryshuar. Rifresko PrimeFlow.')
+    existing = (await db.execute(select(MeetingOccurrenceStatus).where(
+        MeetingOccurrenceStatus.meeting_id == meeting.id, MeetingOccurrenceStatus.occurrence_date == day))).scalar_one_or_none()
+    answered_by = user.full_name or user.username
+    status_value = payload.status
+    if existing and existing.status:
+        status_value = existing.status
+        checked_by = await db.get(User, existing.checked_by_user_id) if existing.checked_by_user_id else None
+        answered_by = (checked_by.full_name or checked_by.username) if checked_by else 'PrimeFlow'
+    else:
+        # Use the normal meeting handler and its cancellation side effects in
+        # this same locked transaction; a second Discord reply sees the first.
+        from app.api.routers.meetings import update_meeting_occurrence_status
+        from app.schemas.meeting import MeetingOccurrenceStatusUpdate
+        await update_meeting_occurrence_status(meeting.id,
+            MeetingOccurrenceStatusUpdate(occurrence_date=day, status=payload.status), db, user)
     # The other participants' questions are answered too; the bot updates them.
     others = (await db.execute(select(DiscordLink.channel_id, DiscordMeetingAlert.message_id)
         .join(DiscordLink, DiscordLink.id == DiscordMeetingAlert.link_id).where(
-            DiscordMeetingAlert.meeting_id == alert.meeting_id, DiscordMeetingAlert.kind == "after",
+            DiscordMeetingAlert.meeting_id == alert.meeting_id, DiscordMeetingAlert.kind.in_(discord_meetings.HELD_KINDS),
             DiscordMeetingAlert.occurrence_starts_at == alert.occurrence_starts_at, DiscordMeetingAlert.id != alert.id,
             DiscordMeetingAlert.message_id.is_not(None), DiscordLink.channel_id.is_not(None)))).all()
-    return {"status": payload.status, "by": user.full_name or user.username,
+    await db.commit()
+    return {"status": status_value, "by": answered_by,
             "others": [{"channel_id": channel_id, "message_id": message_id} for channel_id, message_id in others]}
 
 

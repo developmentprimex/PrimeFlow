@@ -4149,7 +4149,7 @@ export default function CommonViewPage() {
           const isInWeek = (dateStr: string) => dateStr >= weekStartIso && dateStr <= weekEndIso
           for (const [projectKey, entry] of priorityMap.entries()) {
             const project = projectInfoById.get(projectKey)
-            if (!project) continue // Skip if project info not available
+            if (!project || project.is_active === false) continue
             
             // Check if this is MST or VS/VL project in Product Content Manager
             const isMstByType = project.project_type === "MST"

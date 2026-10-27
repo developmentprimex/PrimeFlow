@@ -2,6 +2,15 @@
 
 ## Pyetjet M2 në 11:45
 
+Takimet interne dhe externe të AM që kanë përfunduar dhe nuk kanë ende status
+Mbajtur/Anuluar marrin pyetjen **M2 · A u mbajt takimi?** gjatë mbledhjes 11:45–12:00.
+Pyetja shkon te personat e caktuar manualisht në takim me lidhje aktive Discord.
+Kur takimi nuk ka persona të caktuar, i shkon Diellza Veliut (`diellza.veliu`).
+Një person i caktuar pa Discord nuk e kthen takimin në rast pa përgjegjës.
+Kjo pyetje nuk varet nga aktivizimi i kujtesës para takimit dhe nuk pyet për
+takime ende në zhvillim. Përgjigjja ruan statusin e të njëjtës datë në Common View,
+përditëson pyetjet e pjesëmarrësve dhe nuk mbishkruan një status tashmë të plotësuar.
+
 Boti ekzistues kontrollon çdo 30 sekonda nga 11:45 deri para 12:00, të hënën–të
 premten, sipas zonës kohore të raporteve. Në kanalin personal të secilit përdorues
 të lidhur me `/lidh`, dërgon pyetje me përmendje për detyrat e caktuara atij:
@@ -485,6 +494,16 @@ hyrja me botin dhe rrjedha reale duhen verifikuar pas konfigurimit të Discord-i
 ## Referenca teknike
 
 ### M2: vazhdimi në PM dhe kërkesat për shtyrje
+
+Butoni **Kërko shtyrje** gjendet edhe te kartat e zakonshme të detyrave të hapura
+nga `/detyrat`, në çdo orar dhe për AM/PM. Këto kërkesa nuk varen nga pyetja M2:
+zgjedhja e datave, arsyeja dhe komenti kalojnë te e njëjta Diellza Veliu për
+konfirmim. Vendimi njoftohet një herë në kanalin personal, pa publikuar komentin.
+Kërkohet edhe migrimi `0167_discord_task_postponements`. Historiku i kërkesave M2 ruhet.
+Zgjedhja Start/Due, arsyeja dhe gjendja në pritje përditësojnë të njëjtin mesazh
+të detyrës. Datat dhe komenti hapen në formularin e Discord-it. **Kthehu te detyra**
+rikthen kartën pa krijuar mesazh tjetër. Emri dhe datat aktuale mbeten të dukshme
+gjatë procesit; komenti i dërguar nuk publikohet në mesazhin e kërkuesit.
 
 Në ditët e punës, nga 11:45 deri në 12:00, pyetja **A vazhdon në PM?**
 dërgohet për çdo detyrë të hapur të planifikuar për PM (përfshirë AM/PM)

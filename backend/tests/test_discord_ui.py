@@ -73,6 +73,9 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
             self.assertLessEqual(len(ui.controls(detail["task"]["id"], detail["fingerprint"], status).children), 25)
         view = ui.controls(detail["task"]["id"], detail["fingerprint"], "IN_PROGRESS")
         self.assertTrue(view.is_persistent())
+        self.assertTrue(any(getattr(item, 'label', None) == 'Kërko shtyrje' for item in view.children))
+        done = ui.controls(detail['task']['id'], detail['fingerprint'], 'DONE')
+        self.assertFalse(any(getattr(item, 'label', None) == 'Kërko shtyrje' for item in done.children))
         self.assertTrue(all(len(item.custom_id) <= 100 for item in view.children if item.custom_id))
         for row in range(5):
             items = [item for item in view.children if item.row == row]

@@ -55,6 +55,7 @@ class ProjectTitleLookupOut(BaseModel):
     total_products: int | None = None
     department_id: uuid.UUID | None = None
     due_date: datetime | None = None
+    is_active: bool = True
 
 
 @router.get("/lookup", response_model=list[ProjectTitleLookupOut])
@@ -83,6 +84,7 @@ async def lookup_project_titles(
             total_products=project.total_products,
             department_id=project.department_id,
             due_date=project.due_date,
+            is_active=project.is_active,
         )
         for project in projects
         if project.title

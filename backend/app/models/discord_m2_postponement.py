@@ -12,7 +12,7 @@ class DiscordM2Postponement(Base):
     __tablename__ = 'discord_m2_postponements'
     __table_args__ = (Index('uq_discord_m2_pending_task', 'task_id', unique=True, postgresql_where=text("status = 'PENDING'")),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    question_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('discord_m2_questions.id', ondelete='CASCADE'))
+    question_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('discord_m2_questions.id', ondelete='CASCADE'))
     requester_link_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('discord_links.id', ondelete='CASCADE'))
     approver_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('users.id', ondelete='RESTRICT'))
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('tasks.id', ondelete='CASCADE'), index=True)

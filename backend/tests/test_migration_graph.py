@@ -32,11 +32,11 @@ class MigrationGraphTests(unittest.TestCase):
             ("0164_project_is_active", desktop.revision, set()),
         ):
             with self.subTest(deployed=deployed):
-                revisions = [step.revision.revision for step in scripts._upgrade_revs("heads", deployed)]
+                revisions = [step.revision.revision for step in scripts._upgrade_revs(merge.revision, deployed)]
                 self.assertIn(required, revisions)
                 self.assertTrue(already_applied.isdisjoint(revisions))
                 self.assertEqual(revisions[-1], merge.revision)
-        self.assertEqual(scripts._upgrade_revs("heads", merge.revision), [])
+        self.assertEqual(scripts._upgrade_revs(merge.revision, merge.revision), [])
 
     def test_restored_mira_desktop_migration_creates_capture_tables(self) -> None:
         migration = migration_scripts().get_revision("0165_mira_desktop").module
