@@ -191,18 +191,74 @@ class M2DiscordTests(unittest.TestCase):
     def test_question_controls_preserve_task_identity_and_platform_reasons(self):
         import discord_m2_client as client
         async def check():
-            for kind in ('unfinished', 'postponed', 'progress', 'delivery'):
+            for kind in ('unfinished', 'postponed', 'progress', 'delivery', 'continuation'):
                 job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': kind, 'discord_user_id': '12',
                        'snapshot': {'title': 'Task', 'postponement_kind': 'start_due', 'old_start_date': '2026-10-26',
                                     'start_date': '2026-10-27', 'old_due_date': '2026-10-26', 'due_date': '2026-10-28'},
                        'reasons': [{'value': code, 'label': label} for code, label in service.REASON_LABELS.items()]}
                 view = client.controls(job)
-                self.assertIn(job['task_id'], view.children[-1].url)
-                if kind == 'delivery':
-                    self.assertEqual(len(view.children), 3)
+                self.assertEqual(view.children[-1].custom_id, f"pf:m2:open:{job['id']}")
+                self.assertIsNone(view.children[-1].url)
+                self.assertTrue(view.is_persistent())
+                if kind in {'delivery', 'continuation'}:
+                    self.assertEqual(len(view.children), 4 if kind == 'continuation' else 3)
                 else:
                     self.assertEqual({option.value for option in view.children[0].options}, set(service.REASON_LABELS))
                 if kind == 'postponed':
                     self.assertIn('Start dhe Due', client.prompt(job))
                     self.assertIn('2026-10-28', client.prompt(job))
+        asyncio.run(check())
+
+    def test_answered_and_approved_questions_still_open_in_discord(self):
+        import discord_m2_client as client
+        async def check():
+            job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': 'continuation'}
+            for state in ({'platform_status': 'Saved'}, {'postponement': {'status': 'APPROVED'}}):
+                view = client.controls(job | state)
+                self.assertEqual(len(view.children), 1)
+                self.assertEqual(view.children[0].custom_id, f"pf:m2:open:{job['id']}")
+                self.assertIsNone(view.children[0].url)
+        asyncio.run(check())
+
+    def test_open_and_page_full_task_in_same_message_then_return_to_latest_m2_answer(self):
+        import discord_m2_client as client
+        import discord_ui as ui
+        from unittest.mock import Mock
+        async def check():
+            job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': 'delivery',
+                'discord_user_id': '3', 'snapshot': {'title': 'Task'}, 'answered': False}
+            detail = {'task': {'id': job['task_id'], 'title': 'Task', 'status': 'TODO'}, 'fingerprint': 'a' * 16,
+                'title_points': [{'number': index, 'text': f'Line {index}', 'done': False} for index in range(1, 401)],
+                'description_points': []}
+            message = SimpleNamespace(content='**TEST M2 · sot, sikur ora 11:50**\nQuestion', edit=AsyncMock())
+            interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3), message=message,
+                data={'custom_id': f"pf:m2:open:{job['id']}"},
+                response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
+            bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job),
+                current_detail=AsyncMock(return_value=detail), remember_task=Mock(), task_cards={})
+            await client.handle(bot, interaction)
+            interaction.response.defer.assert_awaited_once_with()
+            first = message.edit.call_args.kwargs
+            self.assertFalse(first['suppress'])
+            self.assertTrue(first['content'].startswith('**TEST M2'))
+            self.assertTrue(any(button.custom_id == f"pf:m2:return:{job['id']}" for button in first['view'].children))
+            self.assertTrue(any(button.label == 'Kërko shtyrje' for button in first['view'].children if hasattr(button, 'label')))
+            pages = ui.full_cards(detail['task'], detail)
+            self.assertGreater(len(pages), 1)
+            rendered = [first['embeds'][0].description]
+            for page in range(1, len(pages)):
+                interaction.data = {'custom_id': f"pf:m2:detail:{job['id']}:{page}"}
+                await client.handle(bot, interaction)
+                rendered.append(message.edit.call_args.kwargs['embeds'][0].description)
+            self.assertEqual(''.join(rendered).count('⬜ Line '), 400)
+            bot.bridge.return_value = job | {'answered': True, 'choice': 'PO', 'comment': 'Saved'}
+            interaction.data = {'custom_id': f"pf:m2:return:{job['id']}"}
+            await client.handle(bot, interaction)
+            restored = message.edit.call_args.kwargs
+            self.assertEqual(restored['embeds'], [])
+            self.assertIn('E dorëzuar', restored['content'])
+            self.assertTrue(restored['content'].startswith('**TEST M2'))
+            self.assertTrue(restored['suppress'])
+            interaction.followup.send.assert_not_awaited()
+            self.assertTrue(all(call.args[0] == f"/bot/m2/{job['id']}/open" for call in bot.bridge.call_args_list))
         asyncio.run(check())

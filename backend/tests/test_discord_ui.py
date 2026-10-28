@@ -84,6 +84,33 @@ class DiscordUiTests(unittest.IsolatedAsyncioTestCase):
             else:
                 self.assertLessEqual(len(items), 5)
 
+    async def test_full_task_cards_keep_all_points_comments_and_actions_privately(self):
+        detail = self.detail(90)
+        detail['title_points'][0]['text'] = '1. ' + 'Long point ' * 100
+        detail['task']['user_comment'] = 'Comment line\n' * 120 + 'LAST COMMENT'
+        client = object.__new__(bot.PrimeFlowBot)
+        client.task_details, client.task_cards = {}, {}
+        original = SimpleNamespace(edit=AsyncMock())
+        interaction = SimpleNamespace(guild_id=123, channel_id=456, user=SimpleNamespace(id=789),
+            message=original, followup=SimpleNamespace(send=AsyncMock()), edit_original_response=AsyncMock())
+        await client.show_task(interaction, detail, full=True)
+        calls = interaction.followup.send.call_args_list
+        self.assertGreater(len(calls), 1)
+        text = ''.join(call.kwargs['embed'].description for call in calls)
+        self.assertIn(('Long point ' * 100).strip(), text)
+        self.assertIn('90. ⬜ Point 90', text)
+        self.assertIn('LAST COMMENT', text)
+        self.assertIn('✅ ~~', text)
+        first_view = calls[0].kwargs['view']
+        self.assertTrue(any(getattr(item, 'label', None) == '☑ Pikat' for item in first_view.children))
+        self.assertTrue(any(getattr(item, 'label', None) == 'Kërko shtyrje' for item in first_view.children))
+        for call in calls:
+            self.assertTrue(call.kwargs['ephemeral'])
+            self.assertLessEqual(len(call.kwargs['embed']), 6000)
+            self.assertLessEqual(len(call.kwargs['embed'].description), 4096)
+        interaction.edit_original_response.assert_not_awaited()
+        original.edit.assert_not_awaited()
+
     def test_edit_preserves_annotations_around_unchanged_text(self):
         original = "Task\n1. [[done]][[added]]Point A[[/added]][[/done]]\n2. Point B"
         changed = ui.preserve_markers(original, "Task renamed\n1. Point A\n2. Point B edited")

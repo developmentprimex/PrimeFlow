@@ -4,7 +4,8 @@ from __future__ import annotations
 import hashlib
 import asyncio
 import discord
-from app.config import settings
+import discord_ui as task_ui
+from discord_interactions import prepare_modal, open_modal
 from app.services.discord_m2 import KINDS, MOVEMENTS
 
 
@@ -52,11 +53,12 @@ def prompt(job):
 
 def controls(job):
     view = discord.ui.View(timeout=None)
+    open_task = discord.ui.Button(label='Hap detyrën', custom_id=f"pf:m2:open:{job['id']}")
     if job.get('platform_status'):
-        view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}"))
+        view.add_item(open_task)
         return view
     if job['kind'] == 'continuation' and job.get('postponement', {}).get('status') == 'APPROVED':
-        view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}"))
+        view.add_item(open_task)
         return view
     if job['kind'] in {'delivery', 'continuation'}:
         view.add_item(discord.ui.Button(label='Po, vazhdon' if job['kind'] == 'continuation' else 'Po, e dorëzova', style=discord.ButtonStyle.success,
@@ -74,8 +76,16 @@ def controls(job):
         view.add_item(discord.ui.Select(placeholder='Zgjidh arsyen dhe shto komentin',
             custom_id=f"pf:m2:reason:{job['id']}",
             options=[discord.SelectOption(label=reason['label'][:100], value=reason['value']) for reason in job['reasons']]))
-    view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}"))
+    view.add_item(open_task)
     return view
+
+
+def report_content(job, message):
+    return task_ui.report_card_content(job, message, report_kind='m2', prompt=prompt)
+
+
+async def show_detail(bot, interaction, job, detail, page=0, *, notice=None):
+    await task_ui.show_report_card(bot, interaction, job, detail, page, report_kind='m2', prompt=prompt, notice=notice)
 
 
 async def save_reply(bot, interaction, job, *, reason=None, comment='', choice=None, source_message=None):
@@ -88,11 +98,11 @@ async def save_reply(bot, interaction, job, *, reason=None, comment='', choice=N
     try:
         latest = await bot.bridge(f"/bot/m2/{job['id']}/open", actor(interaction))
         message = source_message or getattr(interaction, 'message', None)
-        prefix = '**PROVË M2 — sikur ora 11:45**\n' if message and message.content.startswith('**PROVË M2') else ''
         if message:
-            await message.edit(content=prefix + prompt(latest), view=controls(latest), allowed_mentions=discord.AllowedMentions.none())
+            await message.edit(content=report_content(latest, message), embeds=[], view=controls(latest),
+                suppress=True, allowed_mentions=discord.AllowedMentions.none())
         else:
-            await interaction.edit_original_response(content=prompt(latest), view=controls(latest), allowed_mentions=discord.AllowedMentions.none())
+            await interaction.edit_original_response(content=prompt(latest), embeds=[], view=controls(latest), allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         import logging
         logging.getLogger(__name__).warning('M2 answer saved, message refresh failed: %s', job['id'])
@@ -128,14 +138,30 @@ class ReplyModal(discord.ui.Modal):
 async def handle(bot, interaction):
     parts = interaction.data['custom_id'].split(':')
     direct_yes = parts[2] == 'reply' and parts[4] == 'PO'
-    await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
-    job = await bot.bridge(f'/bot/m2/{parts[3]}/open', actor(interaction))
+    async def load():
+        await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+        return await bot.bridge(f'/bot/m2/{parts[3]}/open', actor(interaction))
+
+    deferred = False
+    if parts[2] in {'open', 'detail', 'return'}:
+        await interaction.response.defer()
+        job = await load()
+    else:
+        job, deferred = await prepare_modal(interaction, load)
+    if parts[2] in {'open', 'detail'}:
+        detail = await bot.current_detail(interaction, job['task_id'])
+        await show_detail(bot, interaction, job, detail, int(parts[4]) if parts[2] == 'detail' else 0)
+        return
+    if parts[2] == 'return':
+        await interaction.message.edit(content=report_content(job, interaction.message), embeds=[],
+            view=controls(job), suppress=True, allowed_mentions=discord.AllowedMentions.none())
+        return
     if direct_yes:
         modal = ReplyModal(bot, job, choice='PO', source_message=getattr(interaction, 'message', None))
         modal.initial_save = asyncio.get_running_loop().create_future()
         # Open the optional comment immediately. The yes answer is saved even
         # when the person closes the form; an early submit waits for its version.
-        await interaction.response.send_modal(modal)
+        await open_modal(interaction, modal, deferred=deferred)
         try:
             latest = await save_reply(bot, interaction, job, choice='PO',
                 comment=(job.get('comment') or '') if job.get('choice') == 'PO' else '')
@@ -145,11 +171,13 @@ async def handle(bot, interaction):
             raise
         return
     if parts[2] == 'comment' and job.get('choice') != 'PO':
-        await interaction.response.send_message('Përgjigjja ka ndryshuar. Zgjidh Po ose Jo përsëri.', ephemeral=True)
+        send = interaction.followup.send if deferred else interaction.response.send_message
+        await send('Përgjigjja ka ndryshuar. Zgjidh Po ose Jo përsëri.', ephemeral=True)
         return
     reason = interaction.data['values'][0] if parts[2] == 'reason' else None
     choice = parts[4] if parts[2] == 'reply' else 'PO' if parts[2] == 'comment' else None
-    await interaction.response.send_modal(ReplyModal(bot, job, reason=reason, choice=choice, source_message=getattr(interaction, 'message', None)))
+    await open_modal(interaction, ReplyModal(bot, job, reason=reason, choice=choice,
+        source_message=getattr(interaction, 'message', None)), deferred=deferred)
 
 
 async def deliver(bot):

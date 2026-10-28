@@ -6,11 +6,11 @@ import hashlib
 import logging
 import discord
 import discord_ui as task_ui
-from app.config import settings
 from app.services.discord_m3 import KINDS, SLOTS, context_key
 from app.services.primeflow_report import report_timezone
 from datetime import datetime
 from discord_m2_client import actor
+from discord_interactions import prepare_modal, open_modal
 from discord_m2_approvals import parse_date
 
 log = logging.getLogger(__name__)
@@ -99,6 +99,8 @@ def controls(job, page=0):
         elif kind == 'tomorrow_task':
             button('Po, kryhet' if row.get('due_tomorrow') else 'Po, punohet', 'PO', discord.ButtonStyle.success)
             button('Jo — shtyje', 'postpone')
+            if job.get('task_id'):
+                button('Hap detyrën', 'open')
             button('Koment', 'comment')
         elif kind == 'delivery':
             button('Po, e dorëzova', 'PO', discord.ButtonStyle.success)
@@ -117,11 +119,26 @@ def controls(job, page=0):
                 button(f'Si kolegu: {alternate}', f'slot:{alternate}')
             view.add_item(discord.ui.Select(placeholder='Vendos / ndrysho slotin', custom_id=f'pf:m3:pickslot:{qid}', row=1,
                 options=[discord.SelectOption(label=value, value=value) for value in SLOTS]))
-    if job.get('task_id') and kind == 'tomorrow_task':
-        button('Hap detyrën', 'open')
-    elif job.get('task_id'):
-        view.add_item(discord.ui.Button(label='Hap detyrën', url=f"{settings.FRONTEND_URL.rstrip('/')}/tasks/{job['task_id']}", row=3))
+    if job.get('task_id') and (kind != 'tomorrow_task' or job.get('resolved')):
+        button('Hap detyrën', 'open', row=2 if kind == 'slot' else 0)
     return view
+
+
+def card_origin(message):
+    origin = task_ui.report_card_origin(message)
+    return origin[1] if origin and origin[0] == 'm3' else None
+
+
+def with_return(view, message=None, *, question_id=None):
+    return task_ui.report_return(view, message, report_kind='m3', question_id=question_id)
+
+
+def report_content(job, message):
+    return task_ui.report_card_content(job, message, report_kind='m3', prompt=prompt)
+
+
+async def show_detail(bot, interaction, job, detail, page=0, *, notice=None):
+    await task_ui.show_report_card(bot, interaction, job, detail, page, report_kind='m3', prompt=prompt, notice=notice)
 
 
 async def save(bot, interaction, job, action, comment='', *, source_message=None, **fields):
@@ -130,7 +147,7 @@ async def save(bot, interaction, job, action, comment='', *, source_message=None
     latest = await bot.bridge(f"/bot/m3/{job['id']}/open", actor(interaction))
     message = source_message or getattr(interaction, 'message', None)
     if message:
-        await message.edit(content=prompt(latest), view=controls(latest), suppress=True, allowed_mentions=discord.AllowedMentions.none())
+        await message.edit(content=prompt(latest), embeds=[], view=controls(latest), suppress=True, allowed_mentions=discord.AllowedMentions.none())
     else:
         original = await interaction.edit_original_response(content=prompt(latest), view=controls(latest), embeds=[], allowed_mentions=discord.AllowedMentions.none())
         await original.edit(suppress=True)
@@ -138,7 +155,7 @@ async def save(bot, interaction, job, action, comment='', *, source_message=None
         try:
             channel = await bot.private_channel(child['guild_id'], child['channel_id'], child['discord_user_id'])
             related = await channel.fetch_message(int(child['message_id']))
-            await related.edit(content=prompt(child), view=controls(child), suppress=True, allowed_mentions=discord.AllowedMentions.none())
+            await related.edit(content=prompt(child), embeds=[], view=controls(child), suppress=True, allowed_mentions=discord.AllowedMentions.none())
         except Exception as exc:
             log.warning('Tomorrow confirmation refresh %s failed: %s', child['id'], type(exc).__name__)
     return latest
@@ -189,56 +206,71 @@ async def handle(bot, interaction):
     # Slots include colons in their value; the question id is last in those IDs.
     if action in {'slot', 'page'}:
         qid, extra = extra[-1], [':'.join([qid, *extra[:-1]])]
-    await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
-    job = await bot.bridge(f'/bot/m3/{qid}/open', actor(interaction))
+    async def load():
+        await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+        return await bot.bridge(f'/bot/m3/{qid}/open', actor(interaction))
+
+    deferred = False
+    acknowledged = action in {'open', 'detail', 'return', 'page', 'task', 'slot', 'pickslot', 'held'}
+    if acknowledged:
+        if action == 'task':
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        else:
+            await interaction.response.defer()
+        job = await load()
+    else:
+        job, deferred = await prepare_modal(interaction, load)
     # Older task cards used a separate No button. It now opens the same date
     # form, so existing messages follow the combined flow as well.
     if job['kind'] == 'tomorrow_task' and action == 'JO':
         action = 'postpone'
-    if action == 'open' and job.get('task_id'):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+    if action in {'open', 'detail'} and job.get('task_id'):
         detail = await bot.current_detail(interaction, job['task_id'])
-        full = task_ui.full_text(detail['task'], detail)
-        while full:
-            split = full.rfind('\n', 0, 1900) if len(full) > 1900 else len(full)
-            if split <= 0:
-                split = min(len(full), 1900)
-            await interaction.followup.send(full[:split], ephemeral=True, suppress_embeds=True,
-                allowed_mentions=discord.AllowedMentions.none())
-            full = full[split:].lstrip('\n')
+        await show_detail(bot, interaction, job, detail, int(extra[0]) if action == 'detail' else 0)
+        return
+    if action == 'return':
+        await interaction.message.edit(content=report_content(job, interaction.message),
+            embeds=[], view=controls(job), suppress=True, allowed_mentions=discord.AllowedMentions.none())
         return
     if job.get('resolved'):
-        await interaction.response.edit_message(content=prompt(job), view=controls(job), suppress_embeds=True)
+        if acknowledged or deferred:
+            await interaction.message.edit(content=prompt(job), view=controls(job), suppress=True)
+            if deferred or action == 'task':
+                await interaction.edit_original_response(content='Gjendja u rifreskua.', view=None)
+        else:
+            await interaction.response.edit_message(content=prompt(job), view=controls(job), suppress_embeds=True)
         return
     if action == 'page':
-        await interaction.response.edit_message(content=prompt(job, int(extra[0])), view=controls(job, int(extra[0])), suppress_embeds=True)
+        await interaction.message.edit(content=prompt(job, int(extra[0])), view=controls(job, int(extra[0])), suppress=True)
     elif action == 'task':
         task_id = interaction.data['values'][0]
         selected = await bot.bridge(f'/bot/m3/{qid}/tasks/{task_id}', actor(interaction))
-        await interaction.response.send_message(content=prompt(selected), view=controls(selected), ephemeral=True, suppress_embeds=True)
+        message = await interaction.edit_original_response(content=prompt(selected), view=controls(selected))
+        await message.edit(suppress=True)
     elif action in {'slot', 'pickslot'}:
-        await interaction.response.defer()
         slot = extra[0] if action == 'slot' else interaction.data['values'][0]
         await save(bot, interaction, job, 'slot', slot=slot, expected_slot_key=context_key('slot', job['snapshot']))
     elif action == 'held':
-        await interaction.response.defer()
         await save(bot, interaction, job, 'held')
     elif action == 'PO' and job['kind'] in {'tomorrow', 'tomorrow_task'}:
-        await interaction.response.defer()
+        if not deferred:
+            await interaction.response.defer()
         await save(bot, interaction, job, 'PO', job.get('comment', ''))
+        if deferred:
+            await interaction.edit_original_response(content='Përgjigjja u ruajt.', view=None)
     elif action == 'PO':
         # As in M2, yes is saved immediately; the comment form is optional.
         modal = AnswerModal(bot, job, 'PO', getattr(interaction, 'message', None))
         modal.initial_save = asyncio.get_running_loop().create_future()
-        await interaction.response.send_modal(modal)
+        await open_modal(interaction, modal, deferred=deferred)
         try:
             modal.initial_save.set_result(await save(bot, interaction, job, 'PO', job.get('comment', '') if job.get('answer', {}).get('action') == 'PO' else ''))
         except Exception as exc:
             modal.initial_save.set_result(exc)
             raise
     else:
-        await interaction.response.send_modal(AnswerModal(bot, job, 'PO' if action == 'yescomment' else action,
-            getattr(interaction, 'message', None)))
+        await open_modal(interaction, AnswerModal(bot, job, 'PO' if action == 'yescomment' else action,
+            getattr(interaction, 'message', None)), deferred=deferred)
 
 
 async def deliver(bot):

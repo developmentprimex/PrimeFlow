@@ -2,6 +2,12 @@
 
 ## Pyetjet M2 në 11:45
 
+**Hap detyrën** shfaq kartën e plotë në të njëjtin mesazh M2: statusin, slotin,
+afatin, të gjitha pikat, komentet dhe veprimet e detyrës. Teksti i gjatë shfletohet
+me faqe pa mesazhe shtesë. **Kthehu te M2** rikthen pyetjen me përgjigjen aktuale.
+Butoni mbetet i përdorshëm edhe kur përgjigjja është plotësuar në PrimeFlow ose
+shtyrja është konfirmuar.
+
 ### Përgjigjet e plotësuara në PrimeFlow
 
 Punëtori kontrollon edhe jashtë orarit M2 nëse pyetjet e dërguara kanë marrë

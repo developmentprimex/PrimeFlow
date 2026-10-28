@@ -114,6 +114,62 @@ class SimpleFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["embed"].title, "Second")
         interaction.followup.send.assert_not_called()
 
+    async def test_m3_task_status_change_keeps_expanded_card_and_report_return_button(self):
+        item = task('M3 task', 'TODO')
+        question_id = str(uuid.uuid4())
+        job = {'id': question_id, 'task_id': item['id'], 'kind': 'untouched',
+            'discord_user_id': '3', 'snapshot': {'title': item['title']}}
+        client = self.client()
+        client.bridge = AsyncMock(side_effect=lambda path, payload: {
+            '/bot/select': detail_of(item),
+            '/bot/command': {'status': 'DONE', 'message': 'ok', 'task': {**item, 'status': 'IN_PROGRESS'}, 'fingerprint': 'e' * 16},
+            f'/bot/m3/{question_id}/open': job,
+        }[path])
+        interaction = self.click()
+        interaction.message.components = [SimpleNamespace(children=[SimpleNamespace(custom_id=f'pf:m3:return:{question_id}')])]
+        interaction.message.content = ''
+        interaction.message.edit = AsyncMock()
+        await client.quick(interaction, item['id'], 'f' * 16, 'progress')
+        result = interaction.message.edit.call_args.kwargs
+        self.assertIn('🟡', result['embeds'][0].description)
+        self.assertTrue(any(button.custom_id == f'pf:m3:return:{question_id}' for button in result['view'].children))
+        interaction.followup.send.assert_not_awaited()
+
+    async def test_m3_return_button_fits_points_picker_and_survives_reopening(self):
+        import discord_m3_client as m3
+        item = task('Heading')
+        question_id = str(uuid.uuid4())
+        detail = {**detail_of(item), 'title_points': [
+            {'number': n, 'text': f'Point {n}', 'done': n % 2 == 0} for n in range(1, 91)]}
+        message = SimpleNamespace(components=[SimpleNamespace(children=[SimpleNamespace(custom_id=f'pf:m3:return:{question_id}')])])
+        view = m3.with_return(ui.points_view(detail), message)
+        self.assertLessEqual(sum(button.row == 4 for button in view.children), 5)
+        self.assertEqual(m3.card_origin(message), question_id)
+        self.assertTrue(view.is_persistent())
+
+    async def test_m2_closing_keeps_task_and_return_in_original_report_message(self):
+        item = task('M2 task', 'IN_PROGRESS')
+        question_id = str(uuid.uuid4())
+        job = {'id': question_id, 'task_id': item['id'], 'kind': 'delivery',
+            'discord_user_id': '3', 'snapshot': {'title': item['title']}, 'answered': False}
+        client = self.client()
+        client.bridge = AsyncMock(side_effect=lambda path, payload: {
+            '/bot/select': detail_of(item),
+            '/bot/command': {'status': 'DONE', 'message': 'ok', 'task': {**item, 'status': 'DONE'}, 'fingerprint': 'e' * 16},
+            f'/bot/m2/{question_id}/open': job,
+        }[path])
+        interaction = self.click()
+        interaction.message.components = [SimpleNamespace(children=[SimpleNamespace(custom_id=f'pf:m2:return:{question_id}')])]
+        interaction.message.content = ''
+        interaction.message.edit = AsyncMock()
+        await client.quick(interaction, item['id'], 'f' * 16, 'done')
+        rendered = interaction.message.edit.call_args.kwargs
+        self.assertEqual(rendered['embeds'][0].title, 'M2 task')
+        self.assertIn('🟢', rendered['embeds'][0].description)
+        self.assertTrue(any(button.custom_id == f'pf:m2:return:{question_id}' for button in rendered['view'].children))
+        interaction.followup.send.assert_not_awaited()
+        self.assertFalse(any(call.args[0] in {'/bot/tasks', '/bot/m3/' + question_id + '/open'} for call in client.bridge.call_args_list))
+
     async def test_out_of_date_card_still_changes_status_with_fresh_version(self):
         item = task("A", "TODO")
         client = self.client()
