@@ -27,6 +27,7 @@ from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
 from app.models.meeting import Meeting, MeetingParticipant
+from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.project import Project
 from app.services.project_classification import has_mst_identity, is_vs_or_vl_project
 from app.services.common_leave import parse_common_view_annual_leave
@@ -72,7 +73,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "21"
+COMMON_VIEW_CACHE_VERSION = "22"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -377,6 +378,14 @@ async def _compute_etag(
             [
                 ("meetings_updated", _max_timestamp_scalar(Meeting.updated_at, meeting_filters), False),
                 ("meetings_count", _count_rows_scalar(Meeting, meeting_filters), True),
+                ("meeting_statuses_updated", _max_timestamp_scalar(
+                    MeetingOccurrenceStatus.updated_at,
+                    [MeetingOccurrenceStatus.occurrence_date.between(week_start, week_end)],
+                ), False),
+                ("meeting_statuses_count", _count_rows_scalar(
+                    MeetingOccurrenceStatus,
+                    [MeetingOccurrenceStatus.occurrence_date.between(week_start, week_end)],
+                ), True),
             ]
         )
     if "system_tasks" in requested:
@@ -1212,6 +1221,14 @@ async def get_common_view(
             meeting_stmt = meeting_stmt.where(Meeting.department_id == department_id)
         meetings = (await db.execute(meeting_stmt.order_by(Meeting.starts_at, Meeting.created_at.desc()))).scalars().all()
         meetings_by_id = {meeting.id: meeting for meeting in meetings}
+        occurrence_statuses = (
+            await db.execute(select(MeetingOccurrenceStatus).where(
+                MeetingOccurrenceStatus.occurrence_date.between(week_start_date, week_end),
+            ))
+        ).scalars().all()
+        status_by_occurrence = {
+            (row.meeting_id, row.occurrence_date): row.status for row in occurrence_statuses
+        }
         participant_users_by_meeting: dict[uuid.UUID, list[tuple[str, str]]] = {}
         if meetings_by_id:
             participant_rows = (
@@ -1299,6 +1316,7 @@ async def get_common_view(
                                 "recurrence_type": meeting.recurrence_type or "none",
                                 "calendarImported": is_calendar_meeting,
                                 "calendarCategories": meeting.calendar_categories or [],
+                                "occurrenceStatus": status_by_occurrence.get((meeting.id, day), ""),
                                 **link_payload,
                             }
                         )
@@ -1325,6 +1343,7 @@ async def get_common_view(
                             "recurrence_type": meeting.recurrence_type or "none",
                             "calendarImported": is_calendar_meeting,
                             "calendarCategories": meeting.calendar_categories or [],
+                            "occurrenceStatus": status_by_occurrence.get((meeting.id, day), ""),
                             **link_payload,
                         }
                     )

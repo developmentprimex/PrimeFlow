@@ -1029,17 +1029,36 @@ def _task_rows(
     return rows
 
 
-def _meeting_time_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
+def _meeting_status(item: dict[str, Any]) -> str:
+    status = item.get("occurrenceStatus") or ""
+    return status if status in ("held", "canceled") else ""
+
+
+def _meeting_status_label(item: dict[str, Any]) -> str:
+    return {"held": "Mbajtur", "canceled": "Anuluar"}.get(_meeting_status(item), "")
+
+
+def _meeting_export_title(item: dict[str, Any]) -> str:
+    label = _meeting_status_label(item)
+    marker = " X" if _meeting_status(item) == "canceled" else ""
+    return f"[{label}{marker}] {_meeting_title(item)}" if label else _meeting_title(item)
+
+
+def _meeting_time_sort_key(item: dict[str, Any]) -> tuple[int, int, int, int, str]:
+    # Match Common View: canceled occurrences follow active/held meetings in
+    # each type and date, retaining chronological order within both groups.
+    canceled = int(_meeting_status(item) == "canceled")
     raw_time = str(item.get("time") or "").strip()
     match = re.search(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)", raw_time)
     if match:
         return (
+            canceled,
             0,
             int(match.group(1)),
             int(match.group(2)),
             _first_line(item.get("title")).casefold(),
         )
-    return (1, 24, 60, f"{raw_time.casefold()}|{_first_line(item.get('title')).casefold()}")
+    return (canceled, 1, 24, 60, f"{raw_time.casefold()}|{_first_line(item.get('title')).casefold()}")
 
 
 def _is_calendar_meeting(item: dict[str, Any], *, meeting_type: str) -> bool:
@@ -1666,6 +1685,27 @@ def _dated_meetings_html(
             else ""
         )
         background = f' bgcolor="{color}"'
+        status = _meeting_status(item)
+        status_label = _meeting_status_label(item)
+        status_badge = ""
+        canceled_background = ""
+        if status_label:
+            status_color, status_fill = (
+                ("#991B1B", "#FEE2E2") if status == "canceled" else ("#166534", "#DCFCE7")
+            )
+            status_badge = (
+                f'<br><span data-meeting-status="{status}" style="display:inline-block;margin-top:3px;'
+                f'padding:1px 4px;border-radius:3px;background:{status_fill};color:{status_color};'
+                f'font-size:10px;font-weight:700">{status_label}{" X" if status == "canceled" else ""}</span>'
+            )
+        if status == "canceled":
+            text_color = ";color:#64748B"
+            canceled_background = (
+                ";background-image:linear-gradient(to top right,transparent calc(50% - 1px),"
+                "rgba(190,24,93,.3) calc(50% - 1px),rgba(190,24,93,.3) calc(50% + 1px),transparent calc(50% + 1px)),"
+                "linear-gradient(to bottom right,transparent calc(50% - 1px),"
+                "rgba(190,24,93,.3) calc(50% - 1px),rgba(190,24,93,.3) calc(50% + 1px),transparent calc(50% + 1px))"
+            )
         highlight = (
             f";border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR}"
             if _is_non_routine_meeting(item)
@@ -1674,13 +1714,13 @@ def _dated_meetings_html(
         )
         return (
             f'<td data-meeting-time="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};white-space:nowrap{text_color}">'
-            f'{html.escape(meeting_time)}{calendar_badge}{manual_badge}</td>'
+            f'{html.escape(meeting_time)}{calendar_badge}{manual_badge}{status_badge}</td>'
             f'<td data-meeting-users="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
             f'white-space:nowrap;font-weight:700{text_color}">{meeting_users_html}</td>'
             f'<td data-meeting-relation="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
             f'white-space:nowrap;text-align:center;font-weight:800;">{_meeting_relation(item) if meeting_type == "internal" else ""}</td>'
             f'<td data-meeting-cell="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};{MEETING_TITLE_TEXT_STYLE};'
-            f'{"font-weight:800" if meeting_type == "external" or manual_badge else ""}{text_color}">'
+            f'{"font-weight:800" if meeting_type == "external" or manual_badge else ""}{text_color}{canceled_background}">'
             f"{index}. {html.escape(value)}</td>"
         )
 
@@ -2328,7 +2368,7 @@ def _excel_table_attachment(
             sheet.cell(
                 row_number,
                 6,
-                f"{index}. {_meeting_title(item)}" if item else "-",
+                f"{index}. {_meeting_export_title(item)}" if item else "-",
             )
             highlighted = item is not None and (
                 _is_non_routine_meeting(item)
@@ -2363,6 +2403,8 @@ def _excel_table_attachment(
                         bold=column == 4,
                         color=CALENDAR_INTERNAL_TEXT_COLOR.removeprefix("#"),
                     )
+            if item is not None and _meeting_status(item) == "canceled":
+                sheet.cell(row_number, 6).font = Font(color="64748B", strike=True)
             row_number += 1
         return row_number
 
@@ -2727,10 +2769,13 @@ def _docx_table_attachment(
             set_cell(row.cells[3], _meeting_relation(item) if meeting_type == "internal" else "", bold=True, center=True)
             set_cell(
                 row.cells[4],
-                f"{index}. {_meeting_title(item)}",
+                f"{index}. {_meeting_export_title(item)}",
                 bold=meeting_type == "external" or _is_manual_internal_meeting(item, meeting_type=meeting_type),
                 color=text_color,
             )
+            if _meeting_status(item) == "canceled":
+                for run in row.cells[4].paragraphs[0].runs:
+                    run.font.strike = True
             previous_label = flattened_meetings[index - 2][0] if index > 1 else ""
             if "INT" in label.upper() and "INT" not in previous_label.upper():
                 for cell in row.cells:
@@ -2855,7 +2900,10 @@ def _core_png_table_attachment(
                 if entry is None:
                     return 44
                 value = f"{index + 1}. {_report_text(_first_line(entry[1].get('title')))}"
-                return max(44, len(wrap(value, regular, meeting_content_width - 18)) * 20 + 12)
+                return max(
+                    58 if _meeting_status_label(entry[1]) else 44,
+                    len(wrap(value, regular, meeting_content_width - 18)) * 20 + 12,
+                )
 
             meeting_layout.append((left_entry, right_entry, max(entry_height(left_entry), entry_height(right_entry))))
     meeting_block_height = (
@@ -3186,6 +3234,15 @@ def _core_png_table_attachment(
                         fill=text_color,
                         font=regular,
                     )
+                    status = _meeting_status(item)
+                    status_label = _meeting_status_label(item)
+                    if status_label:
+                        draw.text(
+                            (label_right + 6, y + 31),
+                            f'{status_label}{" X" if status == "canceled" else ""}',
+                            fill="#991B1B" if status == "canceled" else "#166534",
+                            font=small_bold,
+                        )
                     user_x = time_right + 6
                     unavailable_users = {
                         str(value) for value in item.get("_unavailableUserInitials") or []
@@ -3210,6 +3267,9 @@ def _core_png_table_attachment(
                             fill=text_color,
                             font=(bold if meeting_type == "external" or _is_manual_internal_meeting(item, meeting_type=meeting_type) else regular),
                         )
+                    if status == "canceled":
+                        draw.line((relation_right + 7, y + 5, content_right - 7, row_bottom - 5), fill="#DB8BA6", width=2)
+                        draw.line((relation_right + 7, row_bottom - 5, content_right - 7, y + 5), fill="#DB8BA6", width=2)
                 x = content_right
             draw.line((center, y, center, row_bottom), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
             if starts_internal_group(left_entry, previous_left):
@@ -3543,7 +3603,7 @@ async def _build_print_report(
                     f"{label}: " + "; ".join(
                         f"[{_meeting_user_initials(item)}] "
                         + (f"[{_meeting_relation(item)}] " if "INT" in label.upper() and _meeting_relation(item) else "")
-                        + f"{_meeting_title(item)} {item.get('time') or ''}".strip()
+                        + f"{_meeting_export_title(item)} {item.get('time') or ''}".strip()
                         for item in values
                     )
                 )
