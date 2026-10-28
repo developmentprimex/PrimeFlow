@@ -1,7 +1,10 @@
 import os
+import asyncio
 import unittest
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 os.environ.setdefault('DATABASE_URL', 'postgresql+asyncpg://test:test@127.0.0.1/primeflow_test')
 os.environ.setdefault('JWT_SECRET', 'voice-tests-not-a-production-secret')
@@ -10,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
 import app.models  # noqa: F401  registers every mapper, including the Mira property
-from app.api.routers.ga_notes import _note_out
+from app.api.routers.ga_notes import _note_out, list_ga_notes
 from app.models.enums import GaNoteStatus, GaNoteType
 from app.models.ga_note import GaNote
 
@@ -37,6 +40,21 @@ class GaNoteFromMiraTests(unittest.TestCase):
     def test_desktop_note_marker_is_loaded_with_the_existing_note_query(self):
         sql = str(select(GaNote).compile(dialect=postgresql.dialect()))
         self.assertIn('mira_desktop_sessions.note_id = ga_notes.id', sql)
+
+    def test_explicit_px_visibility_is_returned_without_losing_mira_origin(self):
+        result = _note_out(self.note(from_mira=True, mira_shared_to_px=True))
+        self.assertTrue(result.from_mira)
+        self.assertTrue(result.mira_shared_to_px)
+        self.assertFalse(_note_out(self.note(from_mira=True)).mira_shared_to_px)
+
+    def test_explicit_share_survives_the_old_closed_note_cutoff_in_the_px_api(self):
+        note = self.note(from_mira=True, mira_shared_to_px=True, status=GaNoteStatus.CLOSED,
+                         completed_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[note]))))))
+        result = asyncio.run(list_ga_notes(db=db, user=SimpleNamespace()))
+        sql = str(db.execute.call_args.args[0].compile(dialect=postgresql.dialect()))
+        self.assertIn("ga_notes.mira_shared_to_px IS true", sql)
+        self.assertTrue(result[0].mira_shared_to_px)
 
 
 if __name__ == '__main__':

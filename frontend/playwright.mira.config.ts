@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test"
 
 export default defineConfig({
   testDir: "./tests/browser",
-  testMatch: /mira-(memory|discord-reports)\.spec\.ts/,
+  testMatch: /mira-(memory|discord-reports|notes)\.spec\.ts/,
   workers: 1,
   timeout: 90_000,
   expect: { timeout: 30_000 },

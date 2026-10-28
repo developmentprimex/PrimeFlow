@@ -100,6 +100,9 @@ export type MiraNote = {
   created_at: string | null
   url: string
   meeting_id: string | null
+  note_id: string | null
+  source: "1H" | "DISCORD" | "DESKTOP"
+  shared_to_px: boolean
 }
 
 export type KnowledgeCategory = "STRUKTURA" | "RREGULLORE" | "DEFINIME" | "PROCESE" | "TJETER"

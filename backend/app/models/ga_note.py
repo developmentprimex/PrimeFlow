@@ -31,6 +31,7 @@ class GaNote(Base):
 
     is_converted_to_task: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_discussed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    mira_shared_to_px: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     one_h_marker: Mapped[str | None] = mapped_column(String(16), nullable=True)
     one_h_marker_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     one_h_marker_by_ga: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

@@ -615,8 +615,9 @@ export interface GaNote {
   created_at: string
   updated_at: string
   attachments?: GaNoteAttachment[]
-  /** Saved from a Mira Discord meeting. */
+  /** Saved by Mira from a meeting or desktop recording. */
   from_mira?: boolean
+  mira_shared_to_px?: boolean
 }
 
 export interface PlanNote {
