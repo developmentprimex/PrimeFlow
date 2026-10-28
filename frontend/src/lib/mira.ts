@@ -64,7 +64,10 @@ export type DiscordReportHistory = {
   instruction?: string
   status?: string
   message?: string
+  selected_tasks?: DiscordContinuationTask[]
 }
+
+export type DiscordContinuationTask = { id: string; title: string; slot: string; status: string; group: string }
 
 export type DiscordSlotReport = {
   id: string
@@ -88,7 +91,8 @@ export type DiscordSlotReport = {
     history: DiscordReportHistory[]
     postponements?: { id: string; status: string; label: string; comment: string; proposed_dates: Record<string, string>; at: string }[]
   }[]
-  next: { answer: string | null; expected_at: string | null; history: DiscordReportHistory[] }
+  next: { answer: string | null; expected_at: string | null; history: DiscordReportHistory[];
+    selected_tasks?: DiscordContinuationTask[]; selection_kind?: "TASKS" | "OTHER" | "NONE" | null }
 }
 
 export type MiraNote = {

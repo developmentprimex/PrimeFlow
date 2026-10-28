@@ -8,6 +8,7 @@ import {
   STATUS_LABELS, clock, dayLabel, eventText, json, minutesBetween,
   type MeetingDetail, type MeetingRow, type Turn,
   type DiscordSlotReport, type DiscordReportHistory,
+  type DiscordContinuationTask,
 } from "@/lib/mira"
 
 const ACCENT = "#2f5d8a"
@@ -64,6 +65,15 @@ const TASK_STATES: Record<string, string> = {
   WAITING_CLIENT: "⏸ WFE", WAITING_CONFIRMATION: "Në pritje konfirmimi",
 }
 
+function ContinuationTasks({ tasks }: { tasks: DiscordContinuationTask[] }) {
+  return <ul className="mt-1 space-y-1">
+    {tasks.map(task => <li key={task.id}>
+      <a href={`/tasks/${task.id}`} className="break-words underline-offset-4 hover:underline">{task.title}</a>
+      <span className="ml-2 text-xs text-muted-foreground">{TASK_STATES[task.status] ?? task.status} · {task.slot}</span>
+    </li>)}
+  </ul>
+}
+
 function ReportHistory({ history }: { history: DiscordReportHistory[] }) {
   if (!history.length) return null
   return <details className="mt-2 text-xs text-muted-foreground">
@@ -73,7 +83,7 @@ function ReportHistory({ history }: { history: DiscordReportHistory[] }) {
         <span className="tabular-nums">{clock(event.at)}</span>{" · "}
         {event.kind === "ANSWER" ? <>
           <span className="block">{event.question}</span>
-          <span className="whitespace-pre-wrap text-foreground">{event.answer}</span>
+          {event.selected_tasks?.length ? <ContinuationTasks tasks={event.selected_tasks} /> : <span className="whitespace-pre-wrap text-foreground">{event.answer}</span>}
           {event.expected_at && <span className="block">Vazhdimi / përfundimi: {event.expected_at}</span>}
         </> : event.kind === "SKIP" ? "Pyetja u kalua pa përgjigje" : <>
           <span className="whitespace-pre-wrap">{event.instruction}</span>
@@ -95,6 +105,12 @@ function DiscordReports({ reports }: { reports: DiscordSlotReport[] }) {
           </span>
           <p className="w-full text-xs text-muted-foreground">{report.sent_at ? `Dërguar në ${clock(report.sent_at)}` : "Në pritje të dërgimit"}</p>
         </header>
+        <div className="border-b px-4 py-3 text-sm">
+          <p className="font-medium">Me çka ke me vazhdu në slotin tjetër?</p>
+          {report.next.selected_tasks?.length ? <ContinuationTasks tasks={report.next.selected_tasks} /> :
+            <p className="mt-1 whitespace-pre-wrap">{report.next.answer ?? "Pa përgjigje"}</p>}
+          <ReportHistory history={report.next.history} />
+        </div>
         <ul className="divide-y px-4">
           {report.tasks.map(task => <li key={task.id} className="py-3 text-sm">
             <a href={`/tasks/${task.id}`} className="whitespace-pre-wrap break-words font-medium underline-offset-4 hover:underline">{task.title}</a>
@@ -119,11 +135,6 @@ function DiscordReports({ reports }: { reports: DiscordSlotReport[] }) {
             <ReportHistory history={task.history} />
           </li>)}
         </ul>
-        {(report.next.answer || report.tasks.every(task => task.status === "DONE")) && <div className="border-t px-4 py-3 text-sm">
-          <p className="font-medium">Me çka ke me vazhdu në slotin tjetër?</p>
-          <p className="mt-1 whitespace-pre-wrap">{report.next.answer ?? "Pa përgjigje"}</p>
-          <ReportHistory history={report.next.history} />
-        </div>}
       </article>)}
     </div>
   </Section>

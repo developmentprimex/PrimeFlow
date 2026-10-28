@@ -26,6 +26,7 @@ from app.services.tomorrow_print_report_scheduler import run_tomorrow_print_repo
 from app.services.today_print_report_scheduler import run_today_print_report_scheduler_forever
 from app.services.today_print_report_freeze import run_today_print_report_freeze_scheduler_forever
 from app.services.std_feedback_tickets import run_std_feedback_ticket_sync_forever
+from app.services.ga_personal_scheduler import run_ga_personal_generation_forever
 from app.services.system_task_scheduler import (
     run_system_task_daily_reconciliation_forever,
     run_system_task_scheduler_forever,
@@ -68,6 +69,7 @@ today_print_report_freeze_scheduler_task: asyncio.Task | None = None
 std_feedback_sync_task: asyncio.Task | None = None
 microsoft_calendar_sync_task: asyncio.Task | None = None
 meeting_reminder_scheduler_task: asyncio.Task | None = None
+ga_personal_generation_task: asyncio.Task | None = None
 
 @app.get("/health")
 async def health() -> dict:
@@ -76,6 +78,9 @@ async def health() -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
+    global ga_personal_generation_task
+    if settings.GA_PERSONAL_ENABLED:
+        ga_personal_generation_task = asyncio.create_task(run_ga_personal_generation_forever())
     global recording_files_archive_task
     recording_files_archive_task = asyncio.create_task(run_recording_files_archive_forever())
     global m3_reporting_points_scheduler_task
@@ -111,6 +116,14 @@ async def _startup() -> None:
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
+    global ga_personal_generation_task
+    if ga_personal_generation_task is not None:
+        ga_personal_generation_task.cancel()
+        try:
+            await ga_personal_generation_task
+        except asyncio.CancelledError:
+            pass
+        ga_personal_generation_task = None
     global recording_files_archive_task
     if recording_files_archive_task is not None:
         recording_files_archive_task.cancel()

@@ -274,6 +274,16 @@ export function Sidebar({ role }: { role: UserRole }) {
   const isGaUser = [user?.username, user?.email?.split("@")[0]]
     .some((value) => value?.trim().toLowerCase() === "gane.arifaj")
   const currentUserId = user?.id
+  const [gaPersonalAvailable, setGaPersonalAvailable] = React.useState(false)
+  React.useEffect(() => {
+    let cancelled = false
+    setGaPersonalAvailable(false)
+    if (currentUserId) void apiFetch("/ga-personal/access", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((access) => { if (!cancelled) setGaPersonalAvailable(access?.available === true) })
+      .catch(() => { if (!cancelled) setGaPersonalAvailable(false) })
+    return () => { cancelled = true }
+  }, [apiFetch, currentUserId])
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
   const excelStandardsActive = pathname === "/standards/excel" || pathname.startsWith("/standards/excel/")
@@ -526,6 +536,7 @@ export function Sidebar({ role }: { role: UserRole }) {
 
       {/* Navigation Links */}
       <nav className="w-64 flex-1 overflow-y-auto py-4 px-3 space-y-1">
+        {gaPersonalAvailable && renderNavItem({ href: "/ga-personal", label: "GA PERSONAL", icon: FolderLock })}
         {primaryItems
           .flatMap((item) => isGaUser && item.href === "/admin-tasks" ? [item, ...gaReportItems] : [item])
           .filter(canViewItem)

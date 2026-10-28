@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import (
@@ -54,8 +54,8 @@ async def login(payload: LoginRequest, response: Response, db: AsyncSession = De
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
 
-    access_token = create_access_token(user_id=user.id, role=user.role.value, department_id=user.department_id)
     jti = uuid.uuid4().hex
+    access_token = create_access_token(user_id=user.id, role=user.role.value, department_id=user.department_id, session_id=jti)
     refresh_token, expires_at = create_refresh_token(user_id=user.id, jti=jti)
 
     db.add(RefreshToken(user_id=user.id, jti=jti, expires_at=expires_at))
@@ -113,7 +113,7 @@ async def refresh(
     # dropped response from ending the session.
     if token_row.expires_at - now < timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS / 2):
         new_jti = uuid.uuid4().hex
-        new_refresh_token, new_expires_at = create_refresh_token(user_id=user.id, jti=new_jti)
+        new_refresh_token, new_expires_at = create_refresh_token(user_id=user.id, jti=new_jti, session_id=str(payload.get("sid") or jti))
         db.add(RefreshToken(user_id=user.id, jti=new_jti, expires_at=new_expires_at))
         await db.commit()
         response.set_cookie(
@@ -122,7 +122,7 @@ async def refresh(
             **_refresh_cookie_options(max_age=int((new_expires_at - now).total_seconds())),
         )
 
-    access_token = create_access_token(user_id=user.id, role=user.role.value, department_id=user.department_id)
+    access_token = create_access_token(user_id=user.id, role=user.role.value, department_id=user.department_id, session_id=str(payload.get("sid") or jti))
     return TokenResponse(access_token=access_token)
 
 
@@ -144,6 +144,14 @@ async def logout(
             ).scalar_one_or_none()
             if token_row and token_row.revoked_at is None:
                 token_row.revoked_at = now
+                if settings.GA_PERSONAL_ENABLED:
+                    from app.models.ga_personal import GaPersonalUnlock
+                    await db.execute(update(GaPersonalUnlock).where(GaPersonalUnlock.user_id == user_id).values(revoked=True))
+                    # Invalidate the original session identity even after a refresh renewal.
+                    await db.execute(update(RefreshToken).where(
+                        RefreshToken.user_id == user_id,
+                        RefreshToken.jti == str(payload.get("sid") or jti),
+                    ).values(revoked_at=now))
                 await db.commit()
         except Exception:
             pass

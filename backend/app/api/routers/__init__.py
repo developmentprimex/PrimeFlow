@@ -66,6 +66,8 @@ from app.api.routers.knowledge import router as knowledge_router
 
 from app.api.routers.discord_voice_meetings import router as discord_voice_meetings_router
 api_router = APIRouter()
+from app.api.routers.ga_personal import router as ga_personal_router
+api_router.include_router(ga_personal_router, prefix="/ga-personal", tags=["ga-personal"])
 from app.api.routers.mira_desktop import router as mira_desktop_router
 api_router.include_router(mira_desktop_router, prefix="/mira-desktop", tags=["mira-desktop"])
 api_router.include_router(discord_voice_meetings_router, prefix="/discord/bot/voice-meetings", tags=["discord"])

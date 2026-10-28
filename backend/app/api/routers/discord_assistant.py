@@ -4,7 +4,7 @@ import hashlib
 import secrets
 import uuid
 from datetime import datetime, time, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -489,11 +489,8 @@ async def reminder_tasks(reminder_id: uuid.UUID, payload: Actor, db: AsyncSessio
         tasks = await daily_tasks(db, user, include_done=True)
         if reminder.one_h_report is None:
             planned = [t for t in tasks if t.get('one_h_report_slot') == reminder.bucket]
-            if not planned:
-                return {'tasks': [], 'bucket': reminder.bucket, 'one_h': None}
-            reminder.one_h_report = one_h.snapshot(planned, datetime.now(ZoneInfo(settings.APP_TIMEZONE)))
-        else:
-            reminder.one_h_report = one_h.refresh(reminder.one_h_report, tasks)
+            reminder.one_h_report = one_h.snapshot(planned, datetime.now(ZoneInfo(settings.APP_TIMEZONE)), slot=reminder.bucket)
+        reminder.one_h_report = one_h.refresh(reminder.one_h_report, tasks, slot=reminder.bucket)
         result = one_h.presentation(reminder)
         await db.commit()
         return {'tasks': result['tasks'], 'bucket': reminder.bucket, 'one_h': result}
@@ -507,6 +504,11 @@ class OneHAnswer(Actor):
     expected_at: str = Field(default='', max_length=200)
     skip: bool = False
     question_status: str | None = Field(default=None, max_length=24)
+    asks_completion: bool | None = None
+    next_task_ids: list[uuid.UUID] = Field(default_factory=list, max_length=25)
+    next_page: int = Field(default=0, ge=0, le=1000)
+    selection_mode: Literal['TASKS', 'NONE'] | None = None
+    next_options_key: str | None = Field(default=None, pattern=r'^[0-9a-f]{16}$')
 
 
 @router.post('/bot/reminders/{reminder_id}/one-h-answer', dependencies=[Depends(require_bot)])
@@ -516,9 +518,18 @@ async def answer_one_h(reminder_id: uuid.UUID, payload: OneHAnswer, db: AsyncSes
     reminder = await one_h.reminder_for(db, reminder_id, link, at, lock=True)
     if reminder.one_h_report is None:
         raise HTTPException(409, 'Rifresko raportimin para se të përgjigjesh.')
-    reminder.one_h_report = one_h.refresh(reminder.one_h_report, await daily_tasks(db, user, include_done=True))
-    reminder.one_h_report = one_h.save_answer(reminder.one_h_report, payload.item_id, payload.answer,
-        payload.expected_at, payload.request_id, at, skip=payload.skip, question_status=payload.question_status)
+    reminder.one_h_report = one_h.refresh(reminder.one_h_report, await daily_tasks(db, user, include_done=True), slot=reminder.bucket)
+    if payload.selection_mode is not None:
+        if payload.item_id != 'next' or payload.skip or (payload.selection_mode == 'NONE' and payload.next_task_ids):
+            raise HTTPException(422, 'Përzgjedhja vlen vetëm për vazhdimin në slotin tjetër.')
+        reminder.one_h_report = one_h.save_next_choices(reminder.one_h_report, list(map(str, payload.next_task_ids)),
+            payload.request_id, at, page=payload.next_page, none=payload.selection_mode == 'NONE', options_key=payload.next_options_key)
+    else:
+        if payload.next_task_ids:
+            raise HTTPException(422, 'Përcakto llojin e përzgjedhjes.')
+        reminder.one_h_report = one_h.save_answer(reminder.one_h_report, payload.item_id, payload.answer,
+            payload.expected_at, payload.request_id, at, skip=payload.skip, question_status=payload.question_status,
+            asks_completion=payload.asks_completion)
     result = one_h.presentation(reminder)
     await db.commit()
     return result

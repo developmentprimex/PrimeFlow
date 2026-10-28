@@ -869,7 +869,7 @@ class PrimeFlowBot(discord.Client):
                         message_ids = []
                         if job.get("previous"):
                             await self.retire_reminder(channel, job["previous"])
-                        if data["tasks"] and (not data.get('one_h') or data['one_h']['questions']):
+                        if data.get('one_h') or data['tasks']:
                             if data.get('one_h'):
                                 text, view = one_h_client.card(data['one_h'], user_id=job['discord_user_id'],
                                     join_url=self.one_h_url(job['bucket'], job['guild_id']))

@@ -44,6 +44,7 @@ DEPARTMENTS = [
     ("Human Resource", "HR"),
     ("Finance", "FIN"),
     ("GA", "GA"),
+    ("GA PERSONAL", "GAP"),
 ]
 
 PCM_PROJECTS = [
@@ -582,13 +583,16 @@ async def seed() -> None:
         by_name = {d.name: d for d in existing}
         for name, code in DEPARTMENTS:
             if name not in by_name:
-                dept = Department(name=name, code=code)
+                dept = Department(name=name, code=code, realization_mode="MANUAL" if code == "GAP" else "AUTO")
                 db.add(dept)
         await db.commit()
 
         # --- Seed Projects ---
         departments = (await db.execute(select(Department))).scalars().all()
         for dept in departments:
+            # Household tasks live in the private module, not a work project.
+            if dept.code == "GAP":
+                continue
             # Create General Project
             project = (
                 (await db.execute(select(Project).where(Project.department_id == dept.id))).scalars().first()
