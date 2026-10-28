@@ -44,7 +44,7 @@ export function RecorderPanel() {
   const active = ["recording", "paused", "stopping"].includes(recorder.state)
   const locked = active || recorder.busy || recorder.saving || recorder.state === "selecting" || !!recorder.manifest
   const percent = recorder.manifest?.bytes ? Math.floor(recorder.manifest.uploadedBytes / recorder.manifest.bytes * 100) : 0
-  const prepare = () => { void recorder.prepare(device === "none" ? false : device === "default" ? "" : device, source) }
+  const prepare = () => { void recorder.prepare(device === "none" ? false : device === "default" ? "" : device, source, { title: title.trim(), meetingId, description }) }
   return <Card>
     <CardHeader><CardTitle className="flex items-center gap-2"><Video className="size-5" /> Regjistrim i ri</CardTitle></CardHeader>
     <CardContent className="space-y-4">

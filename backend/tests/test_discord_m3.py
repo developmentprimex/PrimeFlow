@@ -110,7 +110,22 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('\n', text)
             self.assertIn('RA: Detyrë', text)
             self.assertEqual([button.label for button in client.controls(item).children],
-                ['Po, kryhet' if due else 'Po, punohet', 'Jo — shtyje', 'Koment', 'Hap detyrën'])
+                ['Po, kryhet' if due else 'Po, punohet', 'Jo — shtyje', 'Hap detyrën', 'Koment'])
+
+    async def test_m3_open_button_follows_postpone_in_same_row_and_stays_in_discord(self):
+        import discord_m3_client as client
+        for kind in ('untouched', 'delivery', 'tomorrow_task', 'slot'):
+            for resolved in (None, 'Detyra është përfunduar.'):
+                with self.subTest(kind=kind, resolved=resolved):
+                    job = self.job(kind, resolved=resolved)
+                    buttons = client.controls(job).children
+                    opened = next(button for button in buttons if getattr(button, 'label', None) == 'Hap detyrën')
+                    self.assertEqual(opened.custom_id, f"pf:m3:open:{job['id']}")
+                    self.assertIsNone(opened.url)
+                    self.assertEqual(opened.row, 2 if kind == 'slot' else 0)
+                    postpone = next((button for button in buttons if getattr(button, 'custom_id', '') == f"pf:m3:postpone:{job['id']}"), None)
+                    if postpone:
+                        self.assertIs(buttons[buttons.index(postpone) + 1], opened)
 
     async def test_compact_task_shows_only_clean_first_line_and_link(self):
         import discord_m3_client as client
@@ -127,28 +142,67 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('>)', content)
         self.assertTrue(all(item.row == 0 for item in client.controls(job).children))
 
-    async def test_open_task_displays_full_text_privately_without_expanding_report_card(self):
+    async def test_open_task_pages_all_text_in_original_message_without_new_replies(self):
         import discord_m3_client as client
-        job = self.job('tomorrow_task')
-        detail = {'task': {'title': 'Title\n' + ('Full text\n' * 400)}, 'title_points': [], 'description_points': []}
+        job = self.job('untouched')
+        from app.services.discord_task_tools import text_points
+        title = 'Title\n' + '\n'.join(f'{index}. Full text {index}' for index in range(1, 401))
+        description = 'Description first line\nDescription last line'
+        detail = {'task': {'id': job['task_id'], 'title': title, 'description': description}, 'fingerprint': 'a' * 16,
+            'title_points': text_points(title, 'title'), 'description_points': text_points(description, 'description')}
         interaction = Mock()
         interaction.guild_id, interaction.channel_id, interaction.user.id = 22, 33, 11
         interaction.data = {'custom_id': f"pf:m3:open:{job['id']}"}
         interaction.response.defer = AsyncMock()
         interaction.followup.send = AsyncMock()
         interaction.message.edit = AsyncMock()
+        interaction.message.content = '**TEST M3 · Rinesa Ahmedi · sikur ora 15:50**\nReport'
         bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job),
-            current_detail=AsyncMock(return_value=detail))
-        with patch.object(client.task_ui, 'full_text', return_value='Title\n' + ('Full text\n' * 400)):
-            await client.handle(bot, interaction)
+            current_detail=AsyncMock(return_value=detail), remember_task=Mock(), task_cards={})
+        await client.handle(bot, interaction)
         bot.current_detail.assert_awaited_once_with(interaction, job['task_id'])
-        self.assertGreater(interaction.followup.send.await_count, 1)
-        self.assertEqual(sum(call.args[0].count('Full text') for call in interaction.followup.send.call_args_list), 400)
-        for call in interaction.followup.send.call_args_list:
-            self.assertTrue(call.kwargs['ephemeral'])
-            self.assertTrue(call.kwargs['suppress_embeds'])
-            self.assertLessEqual(len(call.args[0]), 1900)
-        interaction.message.edit.assert_not_awaited()
+        interaction.response.defer.assert_awaited_once_with()
+        cards = client.task_ui.full_cards(detail['task'] | {'id': job['task_id']}, detail)
+        self.assertGreater(len(cards), 1)
+        first = interaction.message.edit.call_args.kwargs
+        self.assertFalse(first['suppress'])
+        self.assertTrue(first['content'].startswith('**TEST M3'))
+        self.assertTrue(any(button.custom_id == f"pf:m3:return:{job['id']}" for button in first['view'].children))
+        rendered = [first['embeds'][0].description]
+        for page in range(1, len(cards)):
+            interaction.data = {'custom_id': f"pf:m3:detail:{job['id']}:{page}"}
+            await client.handle(bot, interaction)
+            rendered.append(interaction.message.edit.call_args.kwargs['embeds'][0].description)
+        combined = ''.join(rendered)
+        self.assertEqual(combined.count('Full text'), 400)
+        self.assertIn('Description first line', combined)
+        self.assertIn('Description last line', combined)
+        for card in cards:
+            self.assertLessEqual(len(card.description), 4000)
+            self.assertLessEqual(len(card), 6000)
+        interaction.followup.send.assert_not_awaited()
+        self.assertEqual(interaction.message.edit.await_count, len(cards))
+
+    async def test_return_to_m3_restores_latest_answer_and_removes_expanded_card(self):
+        import discord_m3_client as client
+        job = self.job('tomorrow_task', answered=True, answer={'action': 'PO'}, comment='Saved')
+        interaction = Mock()
+        interaction.guild_id, interaction.channel_id, interaction.user.id = 22, 33, 11
+        interaction.data = {'custom_id': f"pf:m3:return:{job['id']}"}
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        interaction.message.edit = AsyncMock()
+        interaction.message.content = ''
+        bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job))
+        await client.handle(bot, interaction)
+        restored = interaction.message.edit.call_args.kwargs
+        self.assertEqual(restored['content'], client.prompt(job))
+        self.assertEqual(restored['embeds'], [])
+        self.assertTrue(restored['suppress'])
+        self.assertIn('✅ Po', restored['content'])
+        self.assertTrue(any(button.custom_id == f"pf:m3:open:{job['id']}" for button in restored['view'].children))
+        interaction.followup.send.assert_not_awaited()
+        bot.bridge.assert_awaited_once_with(f"/bot/m3/{job['id']}/open", {'discord_user_id': '11', 'guild_id': '22', 'channel_id': '33'})
 
     async def test_date_form_autofills_both_and_preserves_untouched_instant(self):
         import discord_m3_client as client

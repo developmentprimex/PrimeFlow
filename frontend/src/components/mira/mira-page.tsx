@@ -2,14 +2,14 @@
 
 import * as React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 import { MiraMemoryPage } from "@/components/mira-memory/mira-memory-page"
 import { KnowledgeTab } from "@/components/mira/knowledge-tab"
-import { MeetingsTab, Summary } from "@/components/mira/meetings-tab"
+import { MeetingsTab } from "@/components/mira/meetings-tab"
+import { NotesTab } from "@/components/mira/notes-tab"
 import { SettingsTab } from "@/components/mira/settings-tab"
-import { clock, json, type HostStatus, type MiraNote, type MiraTab } from "@/lib/mira"
+import { clock, json, type HostStatus, type MiraTab } from "@/lib/mira"
 
 const ACCENT = "#2f5d8a"
 const TABS: { id: MiraTab; label: string }[] = [
@@ -19,43 +19,6 @@ const TABS: { id: MiraTab; label: string }[] = [
   { id: "kujtesa", label: "Kujtesa" },
   { id: "cilesimet", label: "Cilësimet" },
 ]
-
-function NotesTab() {
-  const { apiFetch } = useAuth()
-  const [notes, setNotes] = React.useState<MiraNote[] | null>(null)
-  const [open, setOpen] = React.useState<string | null>(null)
-  React.useEffect(() => {
-    void (async () => {
-      try {
-        setNotes(await json<MiraNote[]>(await apiFetch("/mira/notes?limit=100")))
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : String(e))
-      }
-    })()
-  }, [apiFetch])
-  if (notes && notes.length === 0) return <p className="py-16 text-center text-sm text-muted-foreground">Mira nuk ka mbajtur ende shënime. Ato shfaqen pas takimit të parë 1H.</p>
-  return (
-    <ul className="divide-y py-3">
-      {notes?.map((note) => (
-        <li key={note.id} className="py-3">
-          <button type="button" onClick={() => setOpen(open === note.id ? null : note.id)}
-            className="flex w-full items-baseline gap-3 text-left text-sm hover:underline">
-            <span className="min-w-0 flex-1 truncate font-medium">{note.title}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {note.kind === "1H" ? "takimi 1H" : note.status === "OPEN" ? "PX Notes · e hapur" : "PX Notes · e mbyllur"}
-            </span>
-          </button>
-          {open === note.id && (
-            <div className="mt-2">
-              <div className="max-h-[520px] overflow-y-auto"><Summary text={note.content} /></div>
-              {note.kind === "PX_NOTE" && <a href={note.url} className="mt-2 inline-block text-xs underline underline-offset-4">Hap te PX Notes</a>}
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
-  )
-}
 
 export function MiraPage() {
   const { apiFetch, user } = useAuth()
@@ -80,7 +43,7 @@ export function MiraPage() {
   }, [loadStatus])
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
+    <div className={cn("mx-auto w-full px-4 py-8 md:px-8", tab !== "shenimet" && "max-w-6xl")}>
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight">Mira</h1>

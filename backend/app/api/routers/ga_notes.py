@@ -118,6 +118,7 @@ def _note_out(note: GaNote) -> GaNoteOut:
         attachments=[_attachment_out(a) for a in (note.attachments or [])],
         # Read without triggering an async lazy load on a note created in this request.
         from_mira=bool(note.__dict__.get("from_mira", False) or note.__dict__.get("from_mira_desktop", False)),
+        mira_shared_to_px=bool(note.mira_shared_to_px),
     )
 
 
@@ -315,7 +316,7 @@ async def list_ga_notes(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[GaNoteOut]:
-    # Filter out closed notes that were closed more than 30 days ago
+    # Keep recent closed notes and any Mira note explicitly shared to PX Notes.
     closed_cutoff = datetime.utcnow() - timedelta(days=30)
 
     stmt = select(GaNote).options(selectinload(GaNote.attachments)).order_by(
@@ -323,12 +324,13 @@ async def list_ga_notes(
         GaNote.created_at.desc(),
     )
 
-    # Include all open notes; include closed notes only if recently closed
+    # An explicit share must also work for an older closed Mira note.
     stmt = stmt.where(
         or_(
             GaNote.status != GaNoteStatus.CLOSED,
             GaNote.completed_at.is_(None),
             GaNote.completed_at >= closed_cutoff,
+            GaNote.mira_shared_to_px.is_(True),
         )
     )
     

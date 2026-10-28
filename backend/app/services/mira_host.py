@@ -16,15 +16,17 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, exists, func, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.config import settings
 from app.models.discord_assistant import DiscordLink
 from app.models.discord_voice_meeting import DiscordVoiceMeeting, DiscordVoiceSegment
-from app.models.enums import GaNoteStatus, UserRole
+from app.models.enums import GaNoteStatus, GaNoteType, UserRole
 from app.models.ga_note import GaNote
+from app.models.mira_desktop import MiraDesktopSession
 from app.models.mira_host import (Mira1HEvent, Mira1HMeeting, Mira1HMention, Mira1HTurn, MiraHostSettings,
     MiraKnowledgeItem)
 from app.models.task import Task
@@ -1346,28 +1348,81 @@ async def note_transcript(db: AsyncSession, note_id: uuid.UUID) -> dict:
             "passages": [{"speaker": p["speaker"], "time": p["time"], "text": p["text"]} for p in passages]}
 
 
-async def mira_notes(db: AsyncSession, limit: int) -> list[dict]:
-    """Mira's notes: what she wrote after each 1H she held, plus meeting notes saved to PX Notes."""
+async def _meeting_note_content(db: AsyncSession, meeting: Mira1HMeeting) -> str:
+    people = [turn for turn in await turns_view(db, meeting) if turn["notes"]]
+    return (meeting.summary or "") + (
+        "\n\n**Për secilin:**\n" + "\n".join(f"- {turn['initials']}: {turn['notes']}" for turn in people)
+        if people else ""
+    )
+
+
+async def mira_notes(db: AsyncSession, limit: int, offset: int = 0) -> list[dict]:
+    """All Mira sources, with one row per note even after a summary is shared to PX."""
     notes = []
-    meetings = (await db.execute(select(Mira1HMeeting).where(Mira1HMeeting.summary.is_not(None))
-        .order_by(Mira1HMeeting.ended_at.desc().nullslast()).limit(limit))).scalars().all()
-    for meeting in meetings:
-        people = [t for t in await turns_view(db, meeting) if t["notes"]]
-        content = meeting.summary + ("\n\n**Për secilin:**\n" + "\n".join(f"- {t['initials']}: {t['notes']}" for t in people)
-                                     if people else "")
+    fetch_limit = offset + limit
+    summary_event = aliased(Mira1HEvent)
+    meetings = (await db.execute(select(Mira1HMeeting, GaNote)
+        .outerjoin(summary_event, and_(summary_event.meeting_id == Mira1HMeeting.id,
+                                      summary_event.kind == "SUMMARY_NOTE"))
+        .outerjoin(GaNote, GaNote.id == summary_event.note_id)
+        .where(Mira1HMeeting.summary.is_not(None))
+        .order_by(func.coalesce(Mira1HMeeting.ended_at, Mira1HMeeting.created_at).desc(), Mira1HMeeting.id.desc())
+        .limit(fetch_limit))).all()
+    for meeting, shared_note in meetings:
+        content = shared_note.content if shared_note else await _meeting_note_content(db, meeting)
         notes.append({"id": str(meeting.id), "kind": "1H", "title": f"1H {meeting.slot} · {meeting.meeting_date:%d.%m.%Y}",
                       "content": content, "status": meeting.status,
                       "created_at": (meeting.ended_at or meeting.created_at).isoformat() if (meeting.ended_at or meeting.created_at) else None,
-                      "url": f"{settings.FRONTEND_URL.rstrip('/')}/mira", "meeting_id": str(meeting.id)})
-    rows = (await db.execute(select(GaNote, DiscordVoiceMeeting.title).join(
-        DiscordVoiceMeeting, DiscordVoiceMeeting.saved_note_id == GaNote.id)
-        .order_by(GaNote.created_at.desc()).limit(limit))).all()
-    notes += [{"id": str(n.id), "kind": "PX_NOTE", "title": title, "content": n.content,
-               "status": n.status.value if hasattr(n.status, "value") else str(n.status),
+                      "url": "/ga-ka-notes", "meeting_id": str(meeting.id), "source": "1H",
+                      "note_id": str(shared_note.id) if shared_note else None,
+                      "shared_to_px": bool(shared_note and shared_note.mira_shared_to_px)})
+    voice_title = select(DiscordVoiceMeeting.title).where(DiscordVoiceMeeting.saved_note_id == GaNote.id).limit(1).scalar_subquery()
+    desktop_title = select(MiraDesktopSession.title).where(MiraDesktopSession.note_id == GaNote.id).limit(1).scalar_subquery()
+    rows = (await db.execute(select(GaNote, func.coalesce(voice_title, desktop_title))
+        .where(or_(GaNote.from_mira, GaNote.from_mira_desktop),
+               ~exists().where(Mira1HEvent.note_id == GaNote.id, Mira1HEvent.kind == "SUMMARY_NOTE"))
+        .order_by(GaNote.created_at.desc(), GaNote.id.desc()).limit(fetch_limit))).all()
+    notes += [{"id": str(n.id), "kind": "PX_NOTE", "title": title or n.content.split("\n\n", 1)[0] or "Shënim nga Mira",
+               "content": n.content, "status": n.status.value if hasattr(n.status, "value") else str(n.status),
                "created_at": n.created_at.isoformat() if n.created_at else None,
-               "url": f"{settings.FRONTEND_URL.rstrip('/')}/ga-ka-notes", "meeting_id": None} for n, title in rows]
-    notes.sort(key=lambda n: n["created_at"] or "", reverse=True)
-    return notes[:limit]
+               "url": "/ga-ka-notes", "meeting_id": None, "note_id": str(n.id),
+               "source": "DESKTOP" if n.from_mira_desktop else "DISCORD" if title else "1H",
+               "shared_to_px": bool(n.mira_shared_to_px)} for n, title in rows]
+    notes.sort(key=lambda n: (datetime.fromisoformat(n["created_at"]).timestamp() if n["created_at"] else 0,
+                              n["id"]), reverse=True)
+    return notes[offset:offset + limit]
+
+
+async def show_mira_note_in_px(db: AsyncSession, kind: str, note_id: uuid.UUID, user: User) -> dict:
+    if kind == "1H":
+        # Serialize repeated clicks so a meeting summary gets exactly one PX Note.
+        meeting = await meeting_for(db, note_id, lock=True)
+        if not meeting.summary:
+            raise HTTPException(409, "Takimi nuk ka ende shënime.")
+        event = (await db.execute(select(Mira1HEvent).where(
+            Mira1HEvent.meeting_id == meeting.id, Mira1HEvent.kind == "SUMMARY_NOTE"))).scalar_one_or_none()
+        note = await db.get(GaNote, event.note_id) if event and event.note_id else None
+        if note is None:
+            note = GaNote(content=f"1H {meeting.slot} · {meeting.meeting_date:%d.%m.%Y}\n\n"
+                          + await _meeting_note_content(db, meeting),
+                          created_by=user.id, note_type=GaNoteType.GA, status=GaNoteStatus.OPEN,
+                          is_converted_to_task=False, is_discussed=False, mira_shared_to_px=True)
+            db.add(note)
+            await db.flush()
+            if event:
+                event.note_id = note.id
+            else:
+                db.add(Mira1HEvent(key=f"summary-note:{meeting.id}", meeting_date=meeting.meeting_date,
+                    slot=meeting.slot, meeting_id=meeting.id, kind="SUMMARY_NOTE", user_id=user.id,
+                    note_id=note.id, data={}))
+    else:
+        note = (await db.execute(select(GaNote).where(GaNote.id == note_id,
+            or_(GaNote.from_mira, GaNote.from_mira_desktop)).with_for_update())).scalar_one_or_none()
+        if note is None:
+            raise HTTPException(404, "Nuk u gjet shënimi i Mirës.")
+    note.mira_shared_to_px = True
+    await db.commit()
+    return {"note_id": str(note.id), "shared_to_px": True, "url": "/ga-ka-notes"}
 
 
 async def live_status(db: AsyncSession) -> dict:

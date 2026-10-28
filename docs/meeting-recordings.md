@@ -11,7 +11,8 @@ the configured FILES meetings folder by a restart-safe background archiver.
 Open **Regjistrimet**, enter a title and optionally select a PrimeFlow meeting.
 Acknowledging the company recording notice enables the native browser picker.
 The source dropdown expresses a preference; the browser makes the actual choice.
-The page checks the returned audio tracks. When system audio is absent, it offers
+The page checks the returned audio tracks and starts recording automatically when
+system audio is available after sharing is confirmed. When system audio is absent, it offers
 cancel, source change, or explicit continuation without system audio. Denied
 microphone permission releases the screen; retry with permission or “Pa mikrofon”.
 

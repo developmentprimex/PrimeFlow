@@ -222,12 +222,99 @@ def card(task: dict, *, number: int | None = None, detail: dict | None = None) -
     return embed
 
 
+def full_cards(task: dict, detail: dict) -> list[discord.Embed]:
+    """The normal task card appearance with every point and comment retained."""
+    lines = [summary(task)]
+    if points_count(task, detail):
+        lines[0] += " · " + points_count(task, detail)
+    sections = point_sections(task, detail)
+    for name, points in sections:
+        lines.append("\n**" + name + "**" if len(sections) > 1 else "")
+        lines.extend(point_line(point) for point in points)
+    if not sections:
+        title_body = readable(task.get("title")).split("\n", 1)
+        if len(title_body) > 1:
+            lines.extend(("", formatted(title_body[1])))
+        if task.get("description") and readable(task["description"]) != readable(task.get("title")):
+            lines.extend(("", formatted(task["description"])))
+    if task.get("user_comment"):
+        lines.extend(("", "💬 " + formatted(task["user_comment"])))
+    text, cards = "\n".join(lines), []
+    while text:
+        end = len(text) if len(text) <= 4000 else text.rfind("\n", 0, 4000) + 1
+        if end <= 0:
+            end = 4000
+        embed = card(task)
+        embed.description = text[:end]
+        cards.append(embed)
+        text = text[end:]
+    return cards
+
+
+def report_card_origin(message):
+    """Recover the reporting question from its persistent return button."""
+    rows = getattr(message, 'components', None)
+    if not isinstance(rows, (list, tuple)):
+        return None
+    for row in rows:
+        for item in row.children:
+            parts = (getattr(item, 'custom_id', None) or '').split(':')
+            if len(parts) == 4 and parts[0] == 'pf' and parts[1] in {'m2', 'm3'} and parts[2] == 'return':
+                return parts[1], parts[3]
+    return None
+
+
+def report_return(view, message=None, *, report_kind=None, question_id=None):
+    if question_id is None:
+        origin = report_card_origin(message)
+        if origin is None or (report_kind and origin[0] != report_kind):
+            return view
+        report_kind, question_id = origin
+    if report_kind not in {'m2', 'm3'}:
+        raise ValueError('Unknown report kind')
+    view.add_item(discord.ui.Button(label=f'← Kthehu te {report_kind.upper()}', row=4,
+        custom_id=f'pf:{report_kind}:return:{question_id}'))
+    return view
+
+
+def report_card_content(job, message, *, report_kind, prompt):
+    current = getattr(message, 'content', '')
+    first = current.split('\n', 1)[0] if isinstance(current, str) else ''
+    prefix = first + '\n' if first.startswith((f'**TEST {report_kind.upper()}',
+        f'**PROVË {report_kind.upper()}', '🧪 TEST')) else ''
+    return prefix + prompt(job)
+
+
+async def show_report_card(bot, interaction, job, detail, page=0, *, report_kind, prompt, notice=None):
+    """Render complete task pages in the original M2/M3 message."""
+    cards = full_cards(detail['task'], detail)
+    page = min(max(page, 0), len(cards) - 1)
+    task = detail['task']
+    view = report_return(controls(task['id'], detail['fingerprint'], task.get('status')),
+        report_kind=report_kind, question_id=job['id'])
+    if len(cards) > 1:
+        for text, target, disabled in [('◀ Teksti', page - 1, page == 0),
+                (f'{page + 1}/{len(cards)}', page, True), ('Teksti ▶', page + 1, page + 1 == len(cards))]:
+            view.add_item(discord.ui.Button(label=text, row=3, disabled=disabled,
+                custom_id=f'pf:{report_kind}:detail:{job["id"]}:{max(0, target)}'))
+    bot.remember_task(interaction, detail)
+    content = report_card_content(job, interaction.message, report_kind=report_kind, prompt=prompt)
+    if notice:
+        content = content[:1500] + '\n\n' + readable(notice)[:450]
+    message = await interaction.message.edit(content=content, embeds=[cards[page]], view=view,
+        suppress=False, allowed_mentions=discord.AllowedMentions.none())
+    key = (interaction.guild_id, interaction.channel_id, interaction.user.id, task['id'])
+    bot.task_cards[key] = message
+
+
 def controls(task_id: str, fingerprint: str, status: str | None = None) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
     primary = PRIMARY.get(status, PRIMARY["IN_PROGRESS"])
     for text, action, style in primary:
         view.add_item(discord.ui.Button(label=text, custom_id=f"pf:quick:{task_id}:{fingerprint}:{action}", style=style, row=0))
     view.add_item(discord.ui.Button(label="☑ Pikat", custom_id=f"pf:quick:{task_id}:{fingerprint}:points", row=0))
+    if status != 'DONE':
+        view.add_item(discord.ui.Button(label='Kërko shtyrje', custom_id=f'pf:m2a:taskrequest:{task_id}', row=0))
     view.add_item(discord.ui.Button(label="Hap PrimeFlow", url=task_url(task_id), row=0))
     hidden = {action for _, action, _ in primary} | {action for action, value in STATUS_ACTIONS.items() if value == status}
     view.add_item(discord.ui.Select(custom_id=f"pf:more:{task_id}:{fingerprint}", row=1, placeholder="Më shumë…",
@@ -235,8 +322,6 @@ def controls(task_id: str, fingerprint: str, status: str | None = None) -> disco
                  for text, value in MORE if value not in hidden]))
     for text, direction in (("◀", "prev"), ("↩ Lista", "list"), ("▶", "next")):
         view.add_item(discord.ui.Button(label=text, custom_id=f"pf:nav:{task_id}:{direction}", row=2))
-    if status != 'DONE':
-        view.add_item(discord.ui.Button(label='Kërko shtyrje', custom_id=f'pf:m2a:taskrequest:{task_id}', row=3))
     return view
 
 

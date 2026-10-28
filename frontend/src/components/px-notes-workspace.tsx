@@ -3158,6 +3158,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase()
 
     const withinRange = (note: GaNote) => {
+      if (note.from_mira && note.mira_shared_to_px && rangeFilter === "all") return true
       const isClosed = note.status === "CLOSED"
       if (isClosed) {
         if (!note.completed_at) return true
@@ -3170,6 +3171,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       return created >= weekAgo
     }
     const matchesTaskStatusFilter = (note: GaNote) => {
+      if (note.from_mira && !note.mira_shared_to_px && taskStatusFilter !== "mira") return false
       if (taskStatusFilter === "all") return true
       if (taskStatusFilter === "open") return note.status !== "CLOSED"
       if (taskStatusFilter === "closed") return note.status === "CLOSED"

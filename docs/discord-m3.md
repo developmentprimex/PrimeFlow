@@ -18,6 +18,12 @@ Pyetjet, përgjigjet, marrësi dhe dërgimi ruhen në databazë. Polling-u ësht
 
 Mbledhja e M3 vazhdon deri në 16:10 për të përfshirë takimet që përfundojnë më vonë.
 
+**Hap detyrën** shfaq kartën e plotë të detyrës në të njëjtin mesazh të kanalit personal, me
+statusin, slotin, afatin, të gjitha pikat, komentet dhe butonat normalë të veprimit.
+Te detyrat TODO, butoni vjen menjëherë pas **Shtyje**, në të njëjtin rresht.
+Teksti i gjatë shfletohet me faqe brenda të njëjtit mesazh pa u shkurtuar.
+**Kthehu te M3** rikthen pyetjen e raportimit me përgjigjen dhe komentin aktual.
+
 ## Ora 16:10
 
 Secili person i lidhur merr listën e plotë të detyrave për ditën e ardhshme të
@@ -25,9 +31,9 @@ punës. Të premten, plani është për të hënën. Përzgjedhja e datave ndjek
 Çdo detyrë ka një kartë kompakte me vetëm rreshtin e parë të titullit, pa markup
 teknik, përshkrim ose data. Titulli klikohet për të hapur detyrën. Butonat janë
 menjëherë poshtë në një rresht: **Po, kryhet** për Due nesër ose **Po, punohet**
-për detyrat e tjera, pastaj **Jo — shtyje · Koment · Hap detyrën**. Ky buton hap
-tekstin e plotë në një përgjigje private në Discord, pa zgjeruar kartën e raportimit.
-Tekstet e gjata ndahen në mesazhe që respektojnë kufirin e Discord-it. Preview-t
+për detyrat e tjera, pastaj **Jo — shtyje · Hap detyrën · Koment**. **Hap detyrën** hap
+kartën e plotë me veprimet e detyrës brenda të njëjtit mesazh të raportimit.
+Tekstet e gjata shfletohen me faqe që respektojnë kufirin e Discord-it. Preview-t
 automatike të linkut janë të çaktivizuara edhe gjatë rifreskimit të kartave.
 Discord nuk mbështet tre
 butona në të njëjtin rresht me tekstin e titullit. Përgjigjja dhe prania e komentit

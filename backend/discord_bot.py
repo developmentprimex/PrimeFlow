@@ -372,13 +372,29 @@ class PrimeFlowBot(discord.Client):
             del self.task_details[oldest]
             self.task_cards.pop(oldest, None)
 
-    async def show_task(self, interaction, detail, *, notice=None, update=False, new=False):
+    async def show_task(self, interaction, detail, *, notice=None, update=False, new=False, full=False):
+        origin = ui.report_card_origin(getattr(interaction, 'message', None))
+        if origin and not new:
+            report_kind, question_id = origin
+            job = await self.bridge(f'/bot/{report_kind}/{question_id}/open', actor(interaction.user.id, interaction.guild_id, interaction.channel_id))
+            if job.get('task_id') == detail['task']['id']:
+                report_client = m2_client if report_kind == 'm2' else m3_client
+                await report_client.show_detail(self, interaction, job, detail, notice=notice)
+                return
         self.remember_task(interaction, detail)
         task = detail["task"]
         embed = ui.card(task, detail=detail)
         view = task_view(task["id"], detail["fingerprint"], task.get("status"))
         content = display_text(notice)[:1800] if notice else None
         key = (interaction.guild_id, interaction.channel_id, interaction.user.id, task["id"])
+        if full:
+            for index, complete in enumerate(ui.full_cards(task, detail)):
+                message = await interaction.followup.send(embed=complete,
+                    view=view if index == 0 else discord.utils.MISSING,
+                    ephemeral=True, allowed_mentions=discord.AllowedMentions.none(), wait=True)
+                if index == 0:
+                    self.task_cards[key] = message
+            return
         if in_place(interaction) and not new:
             # The clicked message (list, card or picker) becomes the card.
             self.task_cards[key] = await interaction.edit_original_response(content=content, embed=embed, view=view)
@@ -423,7 +439,7 @@ class PrimeFlowBot(discord.Client):
         try:
             closing = any(item["tool"] == "update_task" and json.loads(item["arguments_json"]).get("status") == "DONE" for item in actions)
             # Remember the order first: a closed task leaves the list.
-            order = [task["id"] for task in await self.today(interaction)] if closing and in_place(interaction) else None
+            order = [task["id"] for task in await self.today(interaction)] if closing and in_place(interaction) and not ui.report_card_origin(getattr(interaction, 'message', None)) else None
             result = await self.apply(interaction, task_id, fingerprint, actions, instruction)
             if order is not None:
                 if result.get("status") == "DONE":
@@ -434,7 +450,7 @@ class PrimeFlowBot(discord.Client):
                         + "\nPërdor **Më shumë → 📝 Mbylle me koment** ose **👤 Dërgo për konfirmim**.")
                 return
             if result.get("status") == "DONE" and result.get("task") and (getattr(interaction, "data", None) or {}).get("custom_id", "").startswith("pf:pointset:"):
-                picker = ui.points_view(result)
+                picker = ui.report_return(ui.points_view(result), getattr(interaction, 'message', None))
                 if in_place(interaction):
                     self.remember_task(interaction, result)
                     await interaction.edit_original_response(content="✓ " + result["message"][:300] + "\nZgjidh pika të tjera ose kliko **← Kthehu**.",
@@ -477,7 +493,7 @@ class PrimeFlowBot(discord.Client):
         # The picker carries the fresh version, so an older card never blocks it.
         fingerprint = (await self.current_detail(interaction, task_id))["fingerprint"]
         result = await self.bridge("/bot/people", {**actor(interaction.user.id, interaction.guild_id, interaction.channel_id), "task_id": task_id})
-        view = ui.people_view(result["people"], task_id, fingerprint, page)
+        view = ui.report_return(ui.people_view(result["people"], task_id, fingerprint, page), getattr(interaction, 'message', None))
         if in_place(interaction):
             await interaction.edit_original_response(content="Zgjidh personin e konfirmimit:", view=view)
         else:
@@ -541,6 +557,7 @@ class PrimeFlowBot(discord.Client):
                     if len(view.children) == 1:
                         await interaction.followup.send("Kjo detyrë nuk ka pika për shënim.", ephemeral=True)
                     elif in_place(interaction):
+                        view = ui.report_return(view, getattr(interaction, 'message', None))
                         await interaction.edit_original_response(content="Zgjidh një ose disa pika për strike / heqje strike:",
                             embed=ui.card(detail["task"], detail=detail), view=view)
                     else:
@@ -548,7 +565,7 @@ class PrimeFlowBot(discord.Client):
                 else:
                     text = "Ndrysho slotin ose AM/PM. Slotet ndjekin datën efektive të PrimeFlow."
                     if in_place(interaction):
-                        await interaction.edit_original_response(content=text, view=ui.schedule_view(task_id, detail["fingerprint"]))
+                        await interaction.edit_original_response(content=text, view=ui.report_return(ui.schedule_view(task_id, detail["fingerprint"]), getattr(interaction, 'message', None)))
                     else:
                         await interaction.followup.send(text, view=ui.schedule_view(task_id, detail["fingerprint"]))
             else:
@@ -742,7 +759,7 @@ class PrimeFlowBot(discord.Client):
                 _, _, task_id, fingerprint, page = custom_id.split(":")
                 await self.ack(interaction)
                 detail = await self.current_detail(interaction, task_id)
-                view = ui.points_view(detail, max(0, int(page)))
+                view = ui.report_return(ui.points_view(detail, max(0, int(page))), getattr(interaction, 'message', None))
                 if in_place(interaction):
                     await interaction.edit_original_response(embed=ui.card(detail["task"], detail=detail), view=view)
                 else:

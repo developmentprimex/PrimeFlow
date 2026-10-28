@@ -36,7 +36,8 @@ class SyncClientTests(unittest.IsolatedAsyncioTestCase):
         result = message.edit.call_args.kwargs
         self.assertIn('Dorëzuar: PO', result['content'])
         self.assertNotIn('private comment', result['content'])
-        self.assertTrue(all(getattr(item, 'url', None) for item in result['view'].children))
+        self.assertEqual([item.custom_id for item in result['view'].children], [f"pf:m2:open:{job['payload']['id']}"])
+        self.assertTrue(all(getattr(item, 'url', None) is None for item in result['view'].children))
         bot.http.request.assert_not_called()
         self.assertEqual(bot.bridge.call_args.args[0].split('/')[-1], 'ack')
 

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "test:ga-personal": "playwright test --config playwright.ga-personal.config.ts",
-    "test:recordings": "node --test tests/recording.test.mjs",
+    "test:recordings": "node --test tests/recording.test.mjs tests/recorder-provider.test.mjs",
     "test:recordings:capture": "node --test tests/recording-capture.browser.test.mjs",
     "test:recordings:browser": "playwright test --config playwright.recordings.config.ts",
     "test:recordings:analysis": "playwright test --config playwright.analysis.config.ts",

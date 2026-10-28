@@ -33,6 +33,7 @@ import type {
   DailyReportResponse,
   DailyReportSystemOccurrence,
   Department,
+  MeetingOccurrenceStatus,
   SystemTaskOut,
   SystemTaskScope,
   Task,
@@ -710,6 +711,7 @@ type ExternalItem = {
   calendarImported?: boolean
   calendar_imported?: boolean
   microsoft_event_id?: string | null
+  occurrenceStatus?: MeetingOccurrenceStatus["status"] | "" | null
 }
 type InternalItem = {
   id?: string
@@ -732,7 +734,11 @@ type InternalItem = {
   linked_external_calendar_imported?: boolean
   linkedExternalRecurrenceType?: string | null
   linked_external_recurrence_type?: string | null
+  occurrenceStatus?: MeetingOccurrenceStatus["status"] | "" | null
 }
+type TimeTableMeeting =
+  | { kind: "internal"; meeting: InternalItem }
+  | { kind: "external"; meeting: ExternalItem }
 type R1Item = {
   title: string
   date: string
@@ -2102,6 +2108,47 @@ const formatTimeLabel = (value?: string): string => {
 const getDayCode = (d: Date) => {
   const codes = ["H", "M", "MR", "E", "P", "S", "D"]
   return codes[d.getDay() === 0 ? 6 : d.getDay() - 1] || ""
+}
+
+function GaTimeMeetingCard({ kind, meeting }: TimeTableMeeting) {
+  const status = meeting.occurrenceStatus === "held" || meeting.occurrenceStatus === "canceled"
+    ? meeting.occurrenceStatus : ""
+  const statusLabel = status === "held" ? "Mbajtur" : status === "canceled" ? "Anuluar" : ""
+  const tone = kind === "internal"
+    ? internalMeetingLegendTone(meeting)
+    : meetingLegendTone({
+        categories: meeting.calendarCategories ?? meeting.calendar_categories,
+        recurrenceType: meeting.recurrenceType ?? meeting.recurrence_type,
+        meetingType: "external",
+        calendarImported: Boolean(meeting.calendarImported ?? meeting.calendar_imported ?? meeting.microsoft_event_id),
+      })
+  return (
+    <div
+      className={cn("ga-time-entry", tone, status === "canceled" && "ga-time-meeting-canceled")}
+      title={[formatTimeLabel(meeting.time), meeting.title, statusLabel].filter(Boolean).join(" · ")}
+    >
+      <span className="ga-time-meeting-meta">
+        <span className="ga-time-meeting-time">{formatTimeLabel(meeting.time)}</span>
+        {statusLabel ? <span className={`ga-time-meeting-status ${status}`} data-meeting-status={status}>{statusLabel}</span> : null}
+      </span>
+      <span className="ga-time-meeting-title">
+        <span className="ga-time-meeting-title-text"><strong>{kind === "internal" ? "TAK INT:" : "TAK EXT:"}</strong> {meeting.title}</span>
+      </span>
+    </div>
+  )
+}
+
+function meetingOccurrenceStatusLabel(meeting: Pick<ExternalItem, "occurrenceStatus">) {
+  return meeting.occurrenceStatus === "held" ? "Mbajtur" : meeting.occurrenceStatus === "canceled" ? "Anuluar" : ""
+}
+
+function MeetingOccurrenceStatusBadge({ meeting }: { meeting: Pick<ExternalItem, "occurrenceStatus"> }) {
+  const label = meetingOccurrenceStatusLabel(meeting)
+  return label ? <span className={`meeting-occurrence-status ${meeting.occurrenceStatus}`} data-meeting-status={meeting.occurrenceStatus}>{label}</span> : null
+}
+
+function canceledMeetingsLast(a: Pick<ExternalItem, "occurrenceStatus">, b: Pick<ExternalItem, "occurrenceStatus">) {
+  return Number(a.occurrenceStatus === "canceled") - Number(b.occurrenceStatus === "canceled")
 }
 
 export default function AdminTasksPage() {
@@ -5177,8 +5224,8 @@ export default function AdminTasksPage() {
         blocked: commonFiltered.blocked.filter((x) => x.date === iso),
         oneH: sortTasksByOrder(commonFiltered.oneH.filter((x) => x.date === iso)),
         personal: commonFiltered.personal.filter((x) => x.date === iso),
-        external: sortByTime(commonFiltered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
-        internal: sortByTime(commonFiltered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        external: sortByTime(commonFiltered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title).sort(canceledMeetingsLast),
+        internal: sortByTime(commonFiltered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title).sort(canceledMeetingsLast),
         bz: bzSystemTasksByDay[iso] || [],
         r1: sortTasksByOrder(commonFiltered.r1.filter((x) => x.date === iso)),
         problems: [
@@ -6013,9 +6060,6 @@ export default function AdminTasksPage() {
   }, [gaTimeEntries, gaTimeRows])
 
   const gaMeetingsByCell = React.useMemo(() => {
-    type TimeTableMeeting =
-      | { kind: "internal"; meeting: InternalItem }
-      | { kind: "external"; meeting: ExternalItem }
     const map = new Map<string, TimeTableMeeting[]>()
     const addMeeting = (item: TimeTableMeeting) => {
       const { meeting } = item
@@ -6036,6 +6080,8 @@ export default function AdminTasksPage() {
     for (const meeting of commonFiltered.external) addMeeting({ kind: "external", meeting })
     for (const meetings of map.values()) {
       meetings.sort((a, b) => {
+        const canceledDifference = Number(a.meeting.occurrenceStatus === "canceled") - Number(b.meeting.occurrenceStatus === "canceled")
+        if (canceledDifference) return canceledDifference
         const timeDifference =
           (parseTimeToMinutes(a.meeting.time) ?? Number.MAX_SAFE_INTEGER) -
           (parseTimeToMinutes(b.meeting.time) ?? Number.MAX_SAFE_INTEGER)
@@ -6576,15 +6622,12 @@ export default function AdminTasksPage() {
             `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
           )
         }
-        if (rowId === "external") {
-          return dayData.external.map((e: ExternalItem, idx: number) =>
-            `${idx + 1}. ${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
-          )
-        }
-        if (rowId === "internal") {
-          return dayData.internal.map((e: InternalItem, idx: number) =>
-            `${idx + 1}. ${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
-          )
+        if (rowId === "external" || rowId === "internal") {
+          return dayData[rowId].map((e: ExternalItem | InternalItem, idx: number) => {
+            const status = meetingOccurrenceStatusLabel(e)
+            const prefix = status ? `[${status}${e.occurrenceStatus === "canceled" ? " X" : ""}] ` : ""
+            return `${idx + 1}. ${prefix}${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
+          })
         }
         if (rowId === "priority") {
           return dayData.priority.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
@@ -6848,11 +6891,15 @@ export default function AdminTasksPage() {
             className={[
               "week-table-entry",
               isNonDailyWeeklyRecurrence(e.recurrenceType ?? e.recurrence_type) ? "external-non-daily-weekly" : "",
+              e.occurrenceStatus === "canceled" ? "meeting-occurrence-canceled" : "",
             ]
               .filter(Boolean)
               .join(" ")}
           >
-            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
+            <span className="week-table-meeting-content">
+              <MeetingOccurrenceStatusBadge meeting={e} />
+              <span className="week-table-meeting-title"><span className="week-table-meeting-title-text">{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span></span>
+            </span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -6865,8 +6912,11 @@ export default function AdminTasksPage() {
       }
       if (rowId === "internal") {
         return dayData.internal.map((e: InternalItem, idx: number) => (
-          <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
+          <div key={idx} className={cn("week-table-entry", e.occurrenceStatus === "canceled" && "meeting-occurrence-canceled")}>
+            <span className="week-table-meeting-content">
+              <MeetingOccurrenceStatusBadge meeting={e} />
+              <span className="week-table-meeting-title"><span className="week-table-meeting-title-text">{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span></span>
+            </span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -7641,27 +7691,11 @@ export default function AdminTasksPage() {
                           return (
                             <td key={`ga-print-${cellKey}`} className="ga-time-cell">
                               <div className="ga-time-cell-content">
-                                {meetings.map(({ kind, meeting }, index) => (
-                                  <div
-                                    key={`ga-print-meeting-${kind}-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
-                                    className={`ga-time-entry ${
-                                      kind === "internal"
-                                        ? internalMeetingLegendTone(meeting)
-                                        : meetingLegendTone({
-                                            categories: meeting.calendarCategories ?? meeting.calendar_categories,
-                                            recurrenceType: meeting.recurrenceType ?? meeting.recurrence_type,
-                                            meetingType: "external",
-                                            calendarImported: Boolean(
-                                              meeting.calendarImported ??
-                                                meeting.calendar_imported ??
-                                                meeting.microsoft_event_id
-                                            ),
-                                          })
-                                    }`}
-                                  >
-                                    <span className="ga-time-meeting-time">{formatTimeLabel(meeting.time)}</span>
-                                    <span><strong>{kind === "internal" ? "TAK INT:" : "TAK EXT:"}</strong> {meeting.title}</span>
-                                  </div>
+                                {meetings.map((item, index) => (
+                                  <GaTimeMeetingCard
+                                    key={`ga-print-meeting-${item.kind}-${item.meeting.id || `${item.meeting.date}-${item.meeting.time}-${index}`}`}
+                                    {...item}
+                                  />
                                 ))}
                                 {entries.map((entry) => (
                                     <div
@@ -7937,28 +7971,11 @@ export default function AdminTasksPage() {
                                 : ""
                             }`}
                           >
-                            {meetings.map(({ kind, meeting }, index) => (
-                              <div
-                                key={`ga-meeting-${kind}-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
-                                className={`ga-time-entry ${
-                                  kind === "internal"
-                                    ? internalMeetingLegendTone(meeting)
-                                    : meetingLegendTone({
-                                        categories: meeting.calendarCategories ?? meeting.calendar_categories,
-                                        recurrenceType: meeting.recurrenceType ?? meeting.recurrence_type,
-                                        meetingType: "external",
-                                        calendarImported: Boolean(
-                                          meeting.calendarImported ??
-                                            meeting.calendar_imported ??
-                                            meeting.microsoft_event_id
-                                        ),
-                                      })
-                                }`}
-                                title={`${formatTimeLabel(meeting.time)} · ${meeting.title}`}
-                              >
-                                <span className="ga-time-meeting-time">{formatTimeLabel(meeting.time)}</span>
-                                <span><strong>{kind === "internal" ? "TAK INT:" : "TAK EXT:"}</strong> {meeting.title}</span>
-                              </div>
+                            {meetings.map((item, index) => (
+                              <GaTimeMeetingCard
+                                key={`ga-meeting-${item.kind}-${item.meeting.id || `${item.meeting.date}-${item.meeting.time}-${index}`}`}
+                                {...item}
+                              />
                             ))}
                             {entries.map((entry, entryIndex) => {
                               const isImported = Boolean(entry.source_type)
@@ -9373,6 +9390,37 @@ export default function AdminTasksPage() {
         .admin-week-table .week-table-entry span {
           flex: 1;
         }
+        .admin-week-table .week-table-meeting-content {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 3px;
+          min-width: 0;
+        }
+        .admin-week-table .week-table-meeting-title {
+          position: relative;
+          align-self: stretch;
+        }
+        .admin-week-table .week-table-entry .meeting-occurrence-status {
+          flex: 0 0 auto;
+          border-radius: 3px;
+          padding: 1px 4px;
+          font-size: 9px;
+          font-weight: 700;
+          line-height: 1.2;
+          white-space: nowrap;
+        }
+        .admin-week-table .meeting-occurrence-status.held {
+          background: #dcfce7;
+          color: #166534;
+        }
+        .admin-week-table .meeting-occurrence-status.canceled {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+        .admin-week-table .meeting-occurrence-canceled .week-table-meeting-title-text {
+          opacity: 0.5;
+        }
         .admin-week-table .week-table-avatars {
           display: flex;
           flex-wrap: wrap;
@@ -9673,6 +9721,48 @@ export default function AdminTasksPage() {
           line-height: 1;
           white-space: nowrap;
           opacity: 0.72;
+        }
+        .admin-week-table .ga-time-meeting-meta {
+          display: flex;
+          flex: 0 0 auto;
+          flex-direction: column;
+          align-self: flex-start;
+          gap: 4px;
+        }
+        .admin-week-table .ga-time-meeting-status {
+          align-self: flex-start;
+          border-radius: 3px;
+          padding: 1px 4px;
+          font-size: 9px;
+          font-weight: 700;
+          line-height: 1.2;
+          white-space: nowrap;
+        }
+        .admin-week-table .ga-time-meeting-status.held {
+          background: #dcfce7;
+          color: #166534;
+        }
+        .admin-week-table .ga-time-meeting-status.canceled {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+        .admin-week-table .ga-time-meeting-title {
+          position: relative;
+          flex: 1;
+        }
+        .admin-week-table .ga-time-meeting-canceled .ga-time-meeting-title-text {
+          opacity: 0.5;
+        }
+        .admin-week-table .ga-time-meeting-canceled .ga-time-meeting-title::after,
+        .admin-week-table .meeting-occurrence-canceled .week-table-meeting-title::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background:
+            linear-gradient(to top right, transparent calc(50% - 1px), #be185d calc(50% - 1px), #be185d calc(50% + 1px), transparent calc(50% + 1px)),
+            linear-gradient(to bottom right, transparent calc(50% - 1px), #be185d calc(50% - 1px), #be185d calc(50% + 1px), transparent calc(50% + 1px));
+          opacity: 0.35;
+          pointer-events: none;
         }
         .admin-week-table .ga-time-draggable {
           cursor: grab;

@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from typing import Literal
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,8 +78,15 @@ async def resummarize(meeting_id: uuid.UUID, background: BackgroundTasks, db: As
 
 
 @router.get('/notes')
-async def notes(limit: int = 50, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    return await host.mira_notes(db, min(max(limit, 1), 200))
+async def notes(limit: int = Query(default=100, ge=1, le=200), offset: int = Query(default=0, ge=0),
+                db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return await host.mira_notes(db, limit, offset)
+
+
+@router.post('/notes/{kind}/{note_id}/show-in-px-notes')
+async def show_note_in_px_notes(kind: Literal["1H", "PX_NOTE"], note_id: uuid.UUID,
+                               db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return await host.show_mira_note_in_px(db, kind, note_id, user)
 
 
 @router.get('/notes/{note_id}/transcript')
