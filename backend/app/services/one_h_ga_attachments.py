@@ -15,6 +15,7 @@ from app.models.department import Department
 from app.models.ga_time_slot_entry import GaTimeSlotEntry
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.meeting import Meeting
+from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.task import Task
 from app.models.user import User
 from app.services.ga_time_table import get_ga_time_table_rows
@@ -99,6 +100,58 @@ def _is_manual_internal_meeting(meeting: Meeting) -> bool:
     )
 
 
+def _timetable_status_label(status: str | None) -> str:
+    return {"held": "Mbajtur", "canceled": "Anuluar X"}.get(status or "", "")
+
+
+async def _add_timetable_meetings(
+    db: AsyncSession,
+    cell_items: dict[tuple[int, time], list[dict[str, Any]]],
+    rows: list[Any],
+    week_dates: list[date],
+) -> None:
+    meetings = (
+        await db.execute(select(Meeting).execution_options(populate_existing=True))
+    ).scalars().all()
+    meetings = [
+        meeting for meeting in meetings
+        if is_common_view_visible_meeting(meeting)
+        and ((meeting.meeting_type or "").lower() != "internal" or _is_manual_internal_meeting(meeting))
+        and _meeting_time(meeting) is not None
+    ]
+    if not meetings:
+        return
+    statuses = (
+        await db.execute(select(MeetingOccurrenceStatus).where(
+            MeetingOccurrenceStatus.meeting_id.in_([meeting.id for meeting in meetings]),
+            MeetingOccurrenceStatus.occurrence_date.between(week_dates[0], week_dates[-1]),
+        ).execution_options(populate_existing=True))
+    ).scalars().all()
+    status_by_occurrence = {
+        (str(row.meeting_id), row.occurrence_date): row.status for row in statuses
+    }
+    meeting_cells: dict[tuple[int, time], list[dict[str, Any]]] = {}
+    for meeting in meetings:
+        meeting_time = _meeting_time(meeting)
+        for day_index, day in enumerate(week_dates):
+            if not _meeting_occurs_on_date(meeting, day):
+                continue
+            label = "TAK EXT" if (meeting.meeting_type or "").lower() == "external" else "TAK INT"
+            status = status_by_occurrence.get((str(meeting.id), day), "")
+            meeting_cells.setdefault((day_index, _row_start(rows, meeting_time)), []).append({
+                "text": f"{label}: {meeting.title or '-'}",
+                "fill": meeting_report_color(meeting),
+                "color": "#64748B" if status == "canceled" else "#0F3B8F",
+                "bold": False,
+                "italic": False,
+                "meeting_time": meeting_time,
+                "status": status,
+            })
+    for key, items in meeting_cells.items():
+        items.sort(key=lambda item: (item["status"] == "canceled", item["meeting_time"], item["text"].casefold()))
+        cell_items.setdefault(key, []).extend(items)
+
+
 async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
     """Render the Admin Tasks GA timetable for the report day's work week."""
     week_start = _week_start(report_day)
@@ -152,30 +205,7 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
             "bold": False,
         })
 
-    meetings = (
-        await db.execute(select(Meeting).execution_options(populate_existing=True))
-    ).scalars().all()
-    for meeting in meetings:
-        # Keep the emailed timetable aligned with Common View/Admin Tasks.
-        # In particular, Outlook PV events and cancelled/excluded sync rows
-        # are stored as meetings but must not be rendered as TAK EXT/TAK INT.
-        if not is_common_view_visible_meeting(meeting):
-            continue
-        if (meeting.meeting_type or "").lower() == "internal" and not _is_manual_internal_meeting(meeting):
-            continue
-        meeting_time = _meeting_time(meeting)
-        if meeting_time is None:
-            continue
-        for day_index, day in enumerate(week_dates):
-            if not _meeting_occurs_on_date(meeting, day):
-                continue
-            label = "TAK EXT" if (meeting.meeting_type or "").lower() == "external" else "TAK INT"
-            cell_items.setdefault((day_index, _row_start(rows, meeting_time)), []).append({
-                "text": f"{label}: {meeting.title or '-'}",
-                "fill": meeting_report_color(meeting),
-                "color": "#0F3B8F",
-                "bold": False,
-            })
+    await _add_timetable_meetings(db, cell_items, rows, week_dates)
 
     margin = 30
     column_widths = [54, 140, 230, 260, 260, 260, 260, 260, 230]
@@ -216,25 +246,27 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
             }]
         return comments
 
+    def item_layout(item: dict[str, Any], width: int, *, comment: bool = False) -> tuple[Any, list[str], str, int]:
+        item_font = bold if item.get("bold") or item.get("comment_is_bold") else regular
+        text = item.get("text") if not comment else _plain_text(str(item.get("content") or ""))
+        lines = wrap(str(text or ""), item_font, width - 14)
+        status_label = _timetable_status_label(item.get("status")) if not comment else ""
+        return item_font, lines, status_label, max(23, len(lines) * 21 + 4 + (22 if status_label else 0))
+
     layout: list[tuple[Any, int]] = []
     for row in rows:
-        line_counts = [1]
+        cell_heights = [24]
         for column, index in (("start", 2), ("end", 8)):
-            line_counts.append(sum(
-                len(wrap(
-                    _plain_text(str(comment.get("content") or "")),
-                    bold if comment.get("comment_is_bold") else regular,
-                    column_widths[index] - 14,
-                ))
+            cell_heights.append(sum(
+                item_layout(comment, column_widths[index], comment=True)[3] + 5
                 for comment in comments_for(row, column)
-            ) or 1)
+            ))
         for day_index in range(5):
-            count = sum(
-                len(wrap(item["text"], bold if item["bold"] else regular, column_widths[3 + day_index] - 14))
+            cell_heights.append(sum(
+                item_layout(item, column_widths[3 + day_index])[3] + 5
                 for item in cell_items.get((day_index, row.start_time), [])
-            )
-            line_counts.append(count or 1)
-        layout.append((row, max(34, 12 + max(line_counts) * 21)))
+            ))
+        layout.append((row, max(34, 10 + max(cell_heights))))
 
     header_height = 48
     height = 112 + header_height + sum(row_height for _, row_height in layout) + margin
@@ -256,17 +288,26 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
         draw.rectangle((x, y, x + width, y + height), fill="#FFFFFF", outline="#CBD5E1")
         text_y = y + 5
         for item in items:
-            item_font = bold if item.get("bold") or item.get("comment_is_bold") else regular
-            text = item.get("text") if not comment else _plain_text(str(item.get("content") or ""))
+            item_font, lines, status_label, block_height = item_layout(item, width, comment=comment)
             fill = _color(item.get("fill") if not comment else item.get("comment_background_color"), "#FFFFFF")
             color = _color(item.get("color") if not comment else item.get("comment_text_color"), "#0F172A")
-            lines = wrap(str(text or ""), item_font, width - 14)
-            block_height = max(23, len(lines) * 21 + 4)
-            draw.rounded_rectangle((x + 3, text_y - 1, x + width - 3, min(y + height - 3, text_y + block_height)), radius=3, fill=fill)
-            for line in lines:
-                draw.text((x + 7, text_y + 2), line, fill=color, font=item_font)
-                text_y += 21
-            text_y += 5
+            draw.rounded_rectangle((x + 3, text_y - 1, x + width - 3, text_y + block_height), radius=3, fill=fill)
+            canceled = not comment and item.get("status") == "canceled"
+            if status_label:
+                status_width = measure.textlength(status_label, font=bold) + 8
+                draw.rounded_rectangle(
+                    (x + 6, text_y, x + 6 + status_width, text_y + 21), radius=3,
+                    fill="#FEE2E2" if canceled else "#DCFCE7",
+                )
+                draw.text((x + 10, text_y + 1), status_label, fill="#991B1B" if canceled else "#166534", font=bold)
+            title_y = text_y + (22 if status_label else 0)
+            for line_index, line in enumerate(lines):
+                draw.text((x + 7, title_y + 2 + line_index * 21), line, fill=color, font=item_font)
+            if canceled:
+                bottom = text_y + block_height - 2
+                draw.line((x + 6, title_y + 2, x + width - 6, bottom), fill="#DB8BA6", width=2)
+                draw.line((x + 6, bottom, x + width - 6, title_y + 2), fill="#DB8BA6", width=2)
+            text_y += block_height + 5
 
     for row, row_height in layout:
         x = margin
@@ -385,28 +426,7 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
             "bold": False,
             "italic": False,
         })
-    meetings = (
-        await db.execute(select(Meeting).execution_options(populate_existing=True))
-    ).scalars().all()
-    for meeting in meetings:
-        if not is_common_view_visible_meeting(meeting):
-            continue
-        if (meeting.meeting_type or "").lower() == "internal" and not _is_manual_internal_meeting(meeting):
-            continue
-        meeting_time = _meeting_time(meeting)
-        if meeting_time is None:
-            continue
-        for day_index, day in enumerate(week_dates):
-            if not _meeting_occurs_on_date(meeting, day):
-                continue
-            label = "TAK EXT" if (meeting.meeting_type or "").lower() == "external" else "TAK INT"
-            cell_items.setdefault((day_index, _row_start(rows, meeting_time)), []).append({
-                "text": f"{label}: {meeting.title or '-'}",
-                "fill": meeting_report_color(meeting),
-                "color": "#0F3B8F",
-                "bold": False,
-                "italic": False,
-            })
+    await _add_timetable_meetings(db, cell_items, rows, week_dates)
 
     def comments_for(row: Any, column: str) -> list[dict[str, Any]]:
         values = [
@@ -431,11 +451,34 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
             color = _color(item.get("comment_text_color") if comment else item.get("color"), "#0F172A")
             bold = bool(item.get("comment_is_bold") if comment else item.get("bold"))
             italic = bool(item.get("comment_is_italic") if comment else item.get("italic"))
+            text_html = html.escape(text).replace(chr(10), "<br>")
+            status = item.get("status") if not comment else ""
+            status_label = _timetable_status_label(status)
+            status_html = ""
+            if status_label:
+                status_color, status_fill = (
+                    ("#991B1B", "#FEE2E2") if status == "canceled" else ("#166534", "#DCFCE7")
+                )
+                status_html = (
+                    f'<div style="margin-bottom:3px;"><span data-meeting-status="{status}" '
+                    f'style="display:inline-block;border-radius:3px;padding:1px 4px;background-color:{status_fill};'
+                    f'color:{status_color};font-size:10px;font-weight:700;">{status_label}</span></div>'
+                )
+            if status == "canceled":
+                # The explicit X also survives email clients without gradients.
+                text_html = (
+                    '<span data-meeting-canceled="true" style="display:block;background-image:'
+                    'linear-gradient(to top right,transparent calc(50% - 1px),rgba(190,24,93,.3) calc(50% - 1px),'
+                    'rgba(190,24,93,.3) calc(50% + 1px),transparent calc(50% + 1px)),'
+                    'linear-gradient(to bottom right,transparent calc(50% - 1px),rgba(190,24,93,.3) calc(50% - 1px),'
+                    'rgba(190,24,93,.3) calc(50% + 1px),transparent calc(50% + 1px));">'
+                    f'{text_html}</span>'
+                )
             blocks.append(
                 f'<div bgcolor="{fill}" style="background-color:{fill};color:{color};border:1px solid #e2e8f0;'
                 f'border-radius:6px;padding:4px 6px;margin:0 0 4px;font-weight:{"700" if bold else "400"};'
                 f'font-style:{"italic" if italic else "normal"};">'
-                f'{html.escape(text).replace(chr(10), "<br>")}</div>'
+                f'{status_html}{text_html}</div>'
             )
         return "".join(blocks) or "&nbsp;"
 

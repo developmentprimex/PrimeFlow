@@ -277,6 +277,7 @@ LATE:
             _result([]),
             _result([]),
             _result(meetings),
+            _result([]),
         ]))
 
         rendered = await render_ga_time_table_html(db, date(2026, 8, 24))
