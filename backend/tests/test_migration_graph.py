@@ -18,6 +18,25 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_mira_notes_and_ga_personal_upgrade_from_either_deployed_branch(self) -> None:
+        scripts = migration_scripts()
+        head = "0173_merge_mira_ga_personal"
+        notes = "0171_mira_notes_px_visibility"
+        personal = "0172_ga_personal_department"
+        self.assertEqual(set(scripts.get_revision(head).down_revision), {notes, personal})
+        for deployed, required, already_applied in (
+            (notes, {"0171_ga_personal", personal}, {notes}),
+            (personal, {notes}, {"0171_ga_personal", personal}),
+            ((notes, personal), set(), {notes, "0171_ga_personal", personal}),
+            ("0170_discord_one_h_reports", {notes, "0171_ga_personal", personal}, set()),
+        ):
+            with self.subTest(deployed=deployed):
+                revisions = [step.revision.revision for step in scripts._upgrade_revs(head, deployed)]
+                self.assertTrue(required.issubset(revisions))
+                self.assertTrue(already_applied.isdisjoint(revisions))
+                self.assertEqual(revisions[-1], head)
+        self.assertEqual(scripts._upgrade_revs(head, head), [])
+
     def test_mira_desktop_deployed_stamp_upgrades_without_recreating_its_tables(self) -> None:
         scripts = migration_scripts()
         desktop = scripts.get_revision("0165_mira_desktop")
