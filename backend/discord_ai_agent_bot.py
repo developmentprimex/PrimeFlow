@@ -110,6 +110,8 @@ class AIAgentBot(discord.Client):
         try:
             await self.meeting_capture.check_presence(datetime.now(timezone.utc))
             self.publish_status()
+            await self.meeting_capture.panel.tick()
+            await voice.deliver_meeting_results(self)
         except Exception as exc:
             log.warning('AI Agent capture check failed: %s', type(exc).__name__)
 
@@ -126,10 +128,15 @@ class AIAgentBot(discord.Client):
             await self.meeting_capture.gateway(event)
 
     async def on_interaction(self, interaction):
-        if interaction.type != discord.InteractionType.component or not (interaction.data or {}).get('custom_id', '').startswith('pf:vm:'):
+        if interaction.type != discord.InteractionType.component:
             return
+        custom_id = (interaction.data or {}).get('custom_id', '')
+        if not custom_id.startswith(('pf:vm:', 'pf:mc:ai_agent:')):return
         try:
-            await voice.handle_meeting_interaction(self, interaction)
+            if custom_id.startswith('pf:mc:'):
+                await self.meeting_capture.panel.handle(interaction)
+            else:
+                await voice.handle_meeting_interaction(self, interaction)
         except Exception as exc:
             if interaction.response.is_done():
                 await interaction.followup.send(self.error_message(exc), ephemeral=True)
@@ -183,6 +190,9 @@ class AIAgentBot(discord.Client):
 
 class AIAgentCapture(voice.MeetingCaptureCoordinator):
     async def start(self, interaction, title, department_id):
+        from discord_meeting_control import in_control
+        if in_control(interaction):
+            return await super().start(interaction,title,department_id)
         channel = getattr(getattr(interaction.user, 'voice', None), 'channel', None)
         if str(getattr(channel, 'id', '')) != settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID:
             raise ValueError('Hyr në kanalin zanor AI Agent, pastaj përdor /ai-agent fillo.')

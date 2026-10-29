@@ -626,3 +626,35 @@ humbasë kërkesat në pritje. Komenti i shtyrjes shfaqet në kolonën **Komenti
 - [Discord interactions](https://github.com/discord/discord-api-docs/blob/main/developers/interactions/receiving-and-responding.mdx)
 - [Discord permissions](https://github.com/discord/discord-api-docs/blob/main/developers/topics/permissions.mdx)
 - [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+
+# Shared meeting controls
+
+`DISCORD_MEETING_CONTROL_CHANNEL_ID` identifies the `mira-kontrolli` text channel.
+The primary bot owns the 1H panel; Mira AI Agent owns the AI Agent panel. Each
+panel starts its fixed configured voice channel even when the person pressing
+Start is not in voice. Start/Stop/Save actions require an enabled Discord link
+and an active PrimeFlow account, and are recorded in `audit_logs` with the actor.
+Another linked colleague can stop or save the shared meeting. Concurrent saves
+use the existing session row lock and return the same note.
+Start, Stop, View and Save confirmations in this shared channel are public to
+everyone who can see the channel. Only the refresh receipt stays ephemeral.
+
+Panels refresh automatically and their stable component IDs survive restarts.
+The configured shared channel also accepts `/takimi fillo`, `/takimi mbaro`,
+`/ai-agent fillo`, and `/ai-agent mbaro`. The 1H scheduler posts its recordings
+to this channel when configured. Saved notes appear under Mira → Shënimet,
+in the existing 1H / AI Agent groups. Personal recordings keep their private
+notes; the common panel can stop an active recording in its fixed voice, but
+cannot read or save its personal notes. The speaking Mira Host is separate.
+
+AI Agent invitations run on weekdays at 08:05, 12:00 and 14:10 in the app timezone.
+The four configured development recipients (Rinesa, Elsa, Endi and Laurent) receive
+the invitation in their personal PrimeFlow text channels from Mira AI Agent,
+with a link to the AI Agent voice channel. The Windows tasks
+`PrimeFlow-AIAgent-0805`, `PrimeFlow-AIAgent-1200` and `PrimeFlow-AIAgent-1410`
+run `C:\PrimeFlowOps\AIAgentReminders\run.py` with the corresponding slot.
+That persistent directory holds the task settings and the installed reminder
+service. The script source is `backend/scripts/discord_ai_agent_reminders.py`.
+It uses the independent bot's existing private token file. The durable
+`AI_AGENT_HH:MM` reminder buckets prevent duplicate invitations after restarts;
+only a five-minute current-time window is eligible, with no past-slot backfill.

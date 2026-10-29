@@ -4,9 +4,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.api.routers.discord_assistant import require_bot
 from app.schemas.discord_voice_meeting import VoiceActor, VoiceStart, Worker, Finish, Interrupt, SegmentMeta, DeliveryAck
+from app.schemas.discord_voice_meeting import ControlScope, DeliveryClaim
+from typing import Literal
 from app.services import discord_voice_meetings as service
 
 router = APIRouter(dependencies=[Depends(require_bot)])
+
+@router.post('/control/{recorder}/status')
+async def control_status(recorder: Literal['primary', 'ai_agent'], payload: ControlScope, db: AsyncSession = Depends(get_db)):
+    from app.services.discord_meeting_control import panel_state
+    return await panel_state(db, payload, recorder)
 
 @router.post('/start')
 async def start(payload: VoiceStart, db: AsyncSession = Depends(get_db)):
@@ -63,8 +70,8 @@ async def segment(session_id: uuid.UUID, capture_token: str = Form(...), instanc
     except ValueError:raise HTTPException(422,'Audioja nuk është WAV i vlefshëm.') from None
 
 @router.post('/delivery/claim')
-async def claim(db: AsyncSession = Depends(get_db)):
-    return await service.claim_deliveries(db)
+async def claim(payload: DeliveryClaim, db: AsyncSession = Depends(get_db)):
+    return await service.claim_deliveries(db, recorder=payload.recorder)
 
 @router.post('/{session_id}/delivery/ack')
 async def ack(session_id: uuid.UUID, payload: DeliveryAck, db: AsyncSession = Depends(get_db)):

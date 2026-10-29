@@ -22,15 +22,19 @@ from app.config import settings
 @unittest.skipUnless(os.environ.get('VOICE_TEST_DATABASE_URL'), 'Set VOICE_TEST_DATABASE_URL to disposable PostgreSQL')
 class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        notes_key = patch.object(settings, 'MIRA_NOTES_OPENAI_API_KEY', 'voice-test-key')
+        notes_key.start()
+        self.addCleanup(notes_key.stop)
         self.schema = 'mira_test_' + uuid.uuid4().hex
         self.engine = create_async_engine(os.environ['VOICE_TEST_DATABASE_URL'], execution_options={'schema_translate_map':{None:self.schema}})
         from app.models.ga_note_attachment import GaNoteAttachment
         from app.models.mira_host import Mira1HEvent
         from app.models.mira_desktop import MiraDesktopSession
+        from app.models.audit_log import AuditLog
         # GaNote always loads its attachments and asks whether Mira wrote it (mira_1h_events),
         # which no foreign key from these tables reaches.
         tables = {Segment.__table__, Meeting.__table__, GaNote.__table__, DiscordLink.__table__, GaNoteAttachment.__table__,
-            Mira1HEvent.__table__, MiraDesktopSession.__table__}
+            Mira1HEvent.__table__, MiraDesktopSession.__table__, AuditLog.__table__}
         while True:
             expanded = tables | {fk.column.table for t in tables for fk in t.foreign_keys}
             if expanded == tables: break

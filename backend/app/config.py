@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     APP_TIMEZONE: str = "Europe/Budapest"
     GA_PERSONAL_ENABLED: bool = False
     GA_PERSONAL_UNLOCK_MINUTES: int = 60
+    GA_PERSONAL_DISCORD_BRIDGE_SECRET: str | None = None
     MEETING_REMINDER_SCHEDULER_ENABLED: bool = True
     MEETING_REMINDER_POLL_SECONDS: int = 30
     SYSTEM_TASK_SCHEDULER_ENABLED: bool = True
@@ -131,6 +132,10 @@ class Settings(BaseSettings):
     GA_NOTES_MAX_FILE_MB: int = 25
 
     OPENAI_API_KEY: str | None = None
+    # Dedicated roles fail closed; they never borrow the general AI credential.
+    MIRA_NOTES_OPENAI_API_KEY: str | None = None
+    MIRA_HOST_OPENAI_API_KEY: str | None = None
+    KUJTESA_OPENAI_API_KEY: str | None = None
     VOICE_ASSISTANT_MODEL: str = "gpt-realtime-2.1"
     VOICE_ASSISTANT_VOICE: str = "marin"
     # Opt-in Discord worker; never starts or sends messages from the API process.
@@ -143,6 +148,7 @@ class Settings(BaseSettings):
     DISCORD_AI_AGENT_BOT_TOKEN: str | None = None
     DISCORD_AI_AGENT_VOICE_CHANNEL_ID: str | None = None
     DISCORD_AI_AGENT_BOT_USER_ID: str | None = None
+    DISCORD_MEETING_CONTROL_CHANNEL_ID: str | None = None
     DISCORD_GUILD_ID: str | None = None
     DISCORD_CATEGORY_ID: str | None = None
     DISCORD_MEETING_VOICE_CHANNEL_ID: str | None = None
@@ -166,6 +172,12 @@ class Settings(BaseSettings):
     # Off by default; even when on it only runs after /mira mbaj-takimet.
     MIRA_HOST_ENABLED: bool = False
     MIRA_HOST_BOT_TOKEN: str | None = None
+    # Host-only model, independent of the other voice assistant features.
+    MIRA_HOST_MODEL: str = "gpt-realtime-2.1-mini"
+    # Private family bot; enabled separately and only started by manual command.
+    KUJTESA_HOST_ENABLED: bool = False
+    KUJTESA_HOST_MODEL: str = "gpt-realtime-2.1-mini"
+    KUJTESA_HOST_VOICE: str = "marin"
     MIRA_HOST_PRE_BRIEF_MINUTES: int = 5
     MIRA_HOST_GA_CALL_MINUTES: int = 2
     # Mira joins this early (silent), so a failed connection is retried before she must talk.

@@ -20,6 +20,10 @@ class VoiceStart(VoiceActor):
     title: str = Field(min_length=1, max_length=200)
     department_id: uuid.UUID | None = None
 
+class ControlScope(StrictModel):
+    guild_id: str = Field(pattern=r'^\d{1,32}$')
+    channel_id: str = Field(pattern=r'^\d{1,32}$')
+
 class Worker(StrictModel):
     capture_token: str = Field(min_length=32, max_length=128)
     instance_id: uuid.UUID
@@ -41,3 +45,6 @@ class Interrupt(Worker):
 class DeliveryAck(StrictModel):
     delivery_token: uuid.UUID
     message_ids: list[str] = Field(max_length=10)
+
+class DeliveryClaim(StrictModel):
+    recorder: Literal['primary', 'ai_agent'] = 'primary'

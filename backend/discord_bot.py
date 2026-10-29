@@ -726,7 +726,9 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
-            if custom_id.startswith("pf:reports:"):
+            if custom_id.startswith('pf:mc:primary:'):
+                await self.meeting_capture.panel.handle(interaction)
+            elif custom_id.startswith("pf:reports:"):
                 _, _, kind, page = custom_id.split(':')
                 await interaction.response.defer()
                 await discord_reports.show(self, interaction, kind, int(page), update=True)
@@ -1018,6 +1020,7 @@ class PrimeFlowBot(discord.Client):
     async def voice_meeting_results(self):
         try:
             await voice_meetings.deliver_meeting_results(self)
+            await self.meeting_capture.panel.tick()
         except Exception:
             log.warning("Mira meeting result delivery unavailable")
 
