@@ -238,6 +238,77 @@ class DeviceDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual((await self.state(code))["statuses"][0]["period"], "2026-11-07")
 
+    async def test_legacy_source_ids_and_v1_aliases_update_the_canonical_task_without_duplicates(self):
+        from app.models.ga_personal import GaPersonalTemplate as Template
+        template = await self.add_template()
+        async with self.sessions() as db:
+            row = await db.get(Template, uuid.UUID(template["id"]))
+            row.source_id = "mrika_room_daily"
+            await db.commit()
+        code = (await self.create())["code"]
+        identity = (await self.state(code))["tasks"][0]["id"]
+        for timestamp, source in enumerate(["mrika_room_daily", "mrika_room"], start=1):
+            op = self.op("status", timestamp * 1000, task_id=source, period="2026-11-07", status="done")
+            response = await self.send(code, [op])
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), {"accepted": [op["op_id"]]})
+            checkpoint = (await self.state(code))["cursor"]
+            self.assertEqual((await self.send(code, [op])).status_code, 200)
+            state = await self.state(code, checkpoint)
+            self.assertEqual([value["task_id"] for value in state["statuses"]], [identity])
+        async with self.sessions() as db:
+            self.assertEqual(len((await db.execute(select(Operation))).scalars().all()), 2)
+            self.assertEqual(len((await db.execute(select(Occurrence))).scalars().all()), 1)
+            self.assertEqual(len((await db.execute(select(Record).where(Record.kind == "status"))).scalars().all()), 1)
+
+            row = await db.get(Template, uuid.UUID(template["id"]))
+            row.archived = True
+            await db.commit()
+        self.assertEqual((await self.send(code, [op])).status_code, 200)
+
+    async def test_legacy_ids_do_not_guess_an_assignee_or_cross_family_spaces(self):
+        from app.models.ga_personal import GaPersonalTemplate as Template
+        template = await self.add_template(fixtures.definition())
+        async with self.sessions() as db:
+            row = await db.get(Template, uuid.UUID(template["id"]))
+            row.source_id = "ambiguous-task"
+            row.definition = {**row.definition, "assignees": ["mrika", "lirza"]}
+            other = fixtures.Space(key="other-family", password_hash="unused", config={})
+            db.add(other)
+            await db.flush()
+            db.add(Template(space_id=other.id, source_id="private-other-task", created_by=self.ids["gane"],
+                            definition=fixtures.definition()))
+            await db.commit()
+        code = (await self.create())["code"]
+        for identity in ["ambiguous-task", "private-other-task"]:
+            op = self.op("status", task_id=identity, period="2026-11-07", status="done")
+            response = await self.send(code, [op])
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertIn(identity, response.json()["detail"])
+        async with self.sessions() as db:
+            self.assertEqual(len((await db.execute(select(Operation))).scalars().all()), 0)
+            self.assertEqual(len((await db.execute(select(Occurrence))).scalars().all()), 0)
+
+    async def test_status_before_event_upsert_is_atomic_and_retryable(self):
+        code = (await self.create())["code"]
+        status = self.op("status", 2000, task_id="offline-event", period="2026-11-07", status="done")
+        upsert = self.op("event_upsert", 1000, event={"id": "offline-event", "title": "Activity", "steps": ["One", "Two"]})
+        ops = [status, upsert]
+        for _ in range(2):
+            response = await self.send(code, ops)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), {"accepted": [op["op_id"] for op in ops]})
+        state = await self.state(code)
+        self.assertEqual(state["statuses"][0]["task_id"], "offline-event")
+        self.assertEqual(state["statuses"][0]["step"], 2)
+        invalid = self.op("status", task_id="missing-task", period="2026-11-07", status="done")
+        later = self.op("event_upsert", event={"id": "rolled-back-event", "title": "Never committed"})
+        response = await self.send(code, [invalid, later])
+        self.assertEqual(response.status_code, 422)
+        self.assertIn(invalid["task_id"], response.json()["detail"])
+        self.assertIn(invalid["op_id"], response.json()["detail"])
+        self.assertEqual([event["id"] for event in (await self.state(code))["events"]], ["offline-event"])
+
     async def test_concurrent_retries_commit_one_operation_and_one_completion(self):
         await self.add_template()
         code = (await self.create())["code"]

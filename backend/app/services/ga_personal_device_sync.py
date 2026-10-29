@@ -231,7 +231,40 @@ async def status_occurrence(db, member, op):
     return row
 
 
+async def resolve_status_identity(db, member, op):
+    if CARD_ID.fullmatch(op.task_id) or await get_record(db, member.space_id, "event", op.task_id):
+        return op
+    # Older Kujtesa queues use the imported dataset ID instead of the downloaded
+    # card ID. Resolve only explicit source identities in this family's space.
+    sources = {op.task_id}
+    sources.update(new for new, old in tasks.V2_SOURCE_ALIASES.items() if old == op.task_id)
+    sources.update(old for new, old in tasks.V2_SOURCE_ALIASES.items() if new == op.task_id)
+    templates = (await db.execute(select(Template).where(
+        Template.space_id == member.space_id, Template.source_id.in_(sources),
+    ))).scalars().all()
+    template = next((row for row in templates if row.source_id == op.task_id), None)
+    if template is None:
+        if len(templates) != 1:
+            return op
+        template = templates[0]
+    space = await tasks.lock_space(db, member.space_id)
+    occurrences = (await db.execute(select(Occurrence).where(
+        Occurrence.space_id == member.space_id, Occurrence.template_id == template.id,
+    ))).scalars().all()
+    cards = exported_cards([template], occurrences, space, await active_people(db, member.space_id))
+    if concrete_template(template.definition, space):
+        cards = [card for card in cards if card["date"] == op.period.isoformat()]
+    elif template.definition["assignment"] == "rotation":
+        anchor = space.config.get("rotation_anchor")
+        owner = tasks.rotation_owner(op.period, anchor) if anchor else None
+        cards = [card for card in cards if card["person_id"] == owner]
+    if len(cards) != 1:
+        raise HTTPException(422, f"ID lokale '{op.task_id}' nuk ka një detyrë të vetme të konfirmuar për {op.period}. Përdor ID nga device/state.")
+    return op.model_copy(update={"task_id": cards[0]["id"]})
+
+
 async def apply_status(db, device, member, op):
+    op = await resolve_status_identity(db, member, op)
     old = await get_record(db, device.space_id, "status", op.period.isoformat(), op.task_id)
     if old and (old.client_at, old.op_id) >= (op.at, str(op.op_id)):
         # Echo the canonical value after an offline loser is acknowledged.
@@ -241,7 +274,7 @@ async def apply_status(db, device, member, op):
     if row is None:
         event = await get_record(db, device.space_id, "event", op.task_id)
         if event is None:
-            raise HTTPException(422, "Detyra ose eventi nuk u gjet.")
+            raise HTTPException(422, f"Detyra ose eventi nuk u gjet: task_id='{op.task_id}', op_id='{op.op_id}'. Shkarko detyrat nga device/state; për event lokal dërgo event_upsert para statusit.")
     else:
         latest = (await db.execute(select(Event).where(Event.space_id == device.space_id,
             Event.occurrence_id == row.id, Event.kind.in_(["status_changed", "device_status"]))
@@ -282,8 +315,9 @@ async def apply_ops(db, device, payload):
     if str(payload.device_id) != device.device_id:
         raise HTTPException(403, "device_id nuk përputhet me X-Device-Id.")
     space, member = await locked_device_space(db, device)
-    accepted = []
-    for op in payload.ops:
+    # Offline queues may contain a status before its event's upsert. Establish
+    # event identities first, keeping mutation order and the whole batch atomic.
+    for op in sorted(payload.ops, key=lambda item: item.type == "status"):
         data = op.model_dump(mode="json")
         previous = (await db.execute(select(Operation).where(Operation.space_id == space.id,
                                                              Operation.op_id == op.op_id))).scalar_one_or_none()
@@ -291,7 +325,19 @@ async def apply_ops(db, device, payload):
             if previous.payload != data:
                 raise HTTPException(409, "op_id është përdorur për një veprim tjetër.")
             if op.type == "status":
-                record = await get_record(db, space.id, "status", op.period.isoformat(), op.task_id)
+                try:
+                    status_op = await resolve_status_identity(db, member, op)
+                except HTTPException as exc:
+                    if exc.status_code != 422:
+                        raise
+                    # A committed retry stays acknowledged even if its legacy
+                    # identity is no longer exported (for example, archived).
+                    status_op = op
+                record = await get_record(db, space.id, "status", op.period.isoformat(), status_op.task_id)
+                if record is None:
+                    record = (await db.execute(select(Record).where(
+                        Record.space_id == space.id, Record.kind == "status", Record.op_id == str(op.op_id),
+                    ))).scalar_one_or_none()
             elif op.type == "arrival":
                 record = await get_record(db, space.id, "arrival", op.day.isoformat(), op.person_id)
             else:
@@ -300,7 +346,7 @@ async def apply_ops(db, device, payload):
                 # A tablet may have skipped a downloaded value while this op
                 # was pending. Acknowledge the retry and resend current state.
                 record.updated_at = tasks.utcnow()
-            accepted.append(str(op.op_id)); continue
+            continue
         if op.type == "status":
             await apply_status(db, device, member, op)
         elif op.type == "arrival":
@@ -319,6 +365,5 @@ async def apply_ops(db, device, payload):
             await write_record(db, space.id, "event", (op.id,), {"id": op.id, "deleted": True, "at": op.at}, op)
         db.add(Operation(space_id=space.id, device_id=device.id, op_id=op.op_id, payload=data))
         await db.flush()
-        accepted.append(str(op.op_id))
     await db.commit()
-    return {"accepted": accepted}
+    return {"accepted": [str(op.op_id) for op in payload.ops]}
