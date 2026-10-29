@@ -28,6 +28,7 @@ MAX_MEETING_MINUTES = 55
 CONNECT_ATTEMPTS = 3
 # GA goes first (GA tasks, notes, done/strike); the staff starts when GA is done, at most this long after the hour.
 GA_OVERRUN_MINUTES = 8
+SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
 log = logging.getLogger("primeflow.discord.mira_host")
 
 
@@ -54,8 +55,30 @@ def task_lines(tasks: list[dict]) -> str:
 def turn_brief(current: dict) -> dict:
     brief = current["brief"]
     progress = brief.get("new_progress") or {}
+    strikes = {t["task_id"]: [p["text"] for p in t["points"]]
+               for t in progress.get("strikes", []) if t.get("task_id")}
+    done = {t["task_id"] for t in progress.get("done", []) if t.get("task_id")}
+    percentages = brief.get("progress_percentages") or {}
+    discussion, seen = [], set()
+    for group, label in (("current", "AKTUAL"), ("previous_open", "PARAPRAK"), ("blocked", "BLLOK")):
+        for task in brief.get(group, []):
+            task_id = task.get("task_id")
+            key = task_id or task["title"]
+            if key in seen:
+                continue
+            seen.add(key)
+            percentage = percentages.get(task_id)
+            points = strikes.get(task_id, [])
+            discussion.append({
+                "task_id": task_id, "grupi": label, "detyra": task.get("spoken") or task["title"],
+                "status": task.get("status_label") or task["status"], "kryer": task["status"] == "DONE",
+                "progres_perqindje": percentage, "strike_ne_interval": points,
+                "ka_progres_te_regjistruar": bool(points or task_id in done or task["status"] == "DONE"
+                                                 or (percentage is not None and percentage > 0)),
+            })
     result = {
         "person": current["name"], "initials": current["initials"],
+        "plan_discutimi": discussion, "progres_nga": brief.get("progress_since"),
         "detyrat_e_slotit": task_lines(brief["current"]),
         "te_gjitha_kryer": bool(brief.get("all_done")),
         "slotet_paraprake": brief.get("previous_slot"),
@@ -122,6 +145,8 @@ class MiraHost:
         self.session: dict | None = None
         self.task: asyncio.Task | None = None
         self.ticking = False
+        self.starting = False
+        self.start_generation = 0
 
     # ------------------------------------------------------------ Discord helpers
 
@@ -143,6 +168,38 @@ class MiraHost:
         member = guild.get_member(int(discord_user_id))
         return bool(member and member.voice and voice and member.voice.channel and member.voice.channel.id == voice.id)
 
+    def running(self) -> bool:
+        return self.starting or self.session is not None or bool(self.task and not self.task.done())
+
+    async def join_now(self, guild, slot: str, discord_user_id: str):
+        """One explicit meeting; do not enable the daily automatic schedule."""
+        if self.running():
+            raise ValueError("Mira është duke u kyçur ose po e mban një takim. Përdor /mira ndalo fillimisht.")
+        if not guild or str(guild.id) != str(settings.DISCORD_GUILD_ID):
+            raise ValueError("Përdore komandën në serverin Discord të Primex.")
+        if slot not in SLOTS:
+            raise ValueError("Zgjidh një slot 1H nga lista.")
+        voice = self.voice_channel(guild)
+        if not voice:
+            raise ValueError("Kanali zanor 1H nuk u gjet në server.")
+        self.starting = True
+        generation = self.start_generation
+        try:
+            await self.preflight()
+            if generation != self.start_generation:
+                raise ValueError("Kyçja e Mira-s u anulua me /mira ndalo.")
+            # Authorize and prepare before confirming anything to the caller.
+            prepared = await self.bot.bridge(PREFIX + "/session/start", {"slot": slot, "discord_user_id": discord_user_id})
+            if generation != self.start_generation:
+                await self.bot.bridge(PREFIX + f"/meetings/{prepared['meeting']['id']}/finish", {"reason": "stopped_by_command"})
+                raise ValueError("Kyçja e Mira-s u anulua me /mira ndalo.")
+            ready = asyncio.get_running_loop().create_future()
+            self.task = asyncio.create_task(self.run(slot, guild, voice, manual_by=discord_user_id,
+                                                     prepared=prepared, ready=ready, start_generation=generation))
+        finally:
+            self.starting = False
+        await ready
+
     # ------------------------------------------------------------ scheduler
 
     async def tick(self, now: datetime):
@@ -163,7 +220,7 @@ class MiraHost:
                     elif job["kind"] == "ga_fallback":
                         if guild and not self.in_voice(guild, voice, job["primary_discord_user_id"]):
                             await self.notify(job, f"📞 **1H {job['slot']}** – mungon kolegia jote GA, të lutem kyçu në vend të saj. {link}")
-                    elif job["kind"] == "join" and self.session is None and guild and voice:
+                    elif job["kind"] == "join" and not self.running() and guild and voice:
                         talk_at = datetime.fromisoformat(job["talk_at"]) if job.get("talk_at") else None
                         self.task = asyncio.create_task(self.run(job["slot"], guild, voice, talk_at))
                 except Exception as exc:
@@ -173,11 +230,20 @@ class MiraHost:
 
     # ------------------------------------------------------------ one meeting
 
-    async def connect(self, session, slot: str, guild, voice) -> dict:
+    async def connect(self, session, slot: str, guild, voice, prepared: dict | None = None) -> dict:
         """Join silently, retrying a failed Discord/OpenAI connection; returns the started session."""
         for attempt in range(1, CONNECT_ATTEMPTS + 1):
-            started = await self.bot.bridge(PREFIX + "/session/start", {"slot": slot})
+            if session["closed"].is_set():
+                raise ValueError("stopped")
+            payload = {"slot": slot}
+            if session.get("manual_by"):
+                payload["discord_user_id"] = session["manual_by"]
+            started = prepared if prepared is not None and attempt == 1 else await self.bot.bridge(PREFIX + "/session/start", payload)
             session["meeting"] = started["meeting"]["id"]
+            # A stop may arrive while the API prepares the session. Preserve its ID
+            # for cleanup, but never start a voice worker after that cancellation.
+            if session["closed"].is_set():
+                raise ValueError("stopped")
             session["target"] = started.get("target_minutes") or 4
             session["attempt"], session["ready"], session["failed"] = attempt, asyncio.Event(), asyncio.Event()
             # Each attempt has its own process; events of an earlier one are ignored by on_worker.
@@ -201,22 +267,31 @@ class MiraHost:
             await asyncio.sleep(3)
         raise ValueError("connect_failed")
 
-    async def run(self, slot: str, guild, voice, talk_at: datetime | None = None):
+    async def run(self, slot: str, guild, voice, talk_at: datetime | None = None, *, manual_by: str | None = None,
+                  prepared: dict | None = None, ready: asyncio.Future | None = None, start_generation: int | None = None):
         session = {"slot": slot, "guild": guild, "voice": voice, "lines": [], "ready": asyncio.Event(),
                    "failed": asyncio.Event(), "closed": asyncio.Event(), "attempt": 0, "turn_started": None,
                    "turn_nudged": False, "upcoming": None, "finished": False, "ending": False, "meeting": None,
                    "process": None, "reason": "completed", "ga_done": asyncio.Event(), "staff_started": False,
-                   "starts_at": None, "pm_reviewed": False}
+                   "starts_at": None, "pm_reviewed": False, "manual_by": manual_by}
         self.session = session
         try:
+            if prepared:
+                session["meeting"] = prepared["meeting"]["id"]
+            if start_generation is not None and start_generation != self.start_generation:
+                session["reason"] = "stopped_by_command"
+                return
             # Mira joins a few minutes early and stays silent, so a failed connection is retried
             # before the GA team arrives; she starts talking exactly at talk_at.
-            started = await self.connect(session, slot, guild, voice)
+            started = await self.connect(session, slot, guild, voice, prepared=prepared)
+            starts_at = session["starts_at"] = datetime.fromisoformat(started["starts_at"])
+            if ready is not None and not ready.done():
+                ready.set_result(None)
             await self.wait_until(session, talk_at or datetime.now(tz()))
             if session["closed"].is_set():
                 raise ValueError("stopped")
-            await self.say(session, f"SISTEMI: Je në kanalin e 1H {slot}. Faza GA: përshëndet me një fjalë dhe fillo me list_ga_tasks.")
-            starts_at = session["starts_at"] = datetime.fromisoformat(started["starts_at"])
+            manual_instruction = "Takimi u nis me komandë tani; mos prit orën e slotit. " if manual_by else ""
+            await self.say(session, f"SISTEMI: {manual_instruction}Je në kanalin e 1H {slot}. Faza GA: përshëndet me një fjalë dhe fillo me list_ga_tasks.")
             deadline = datetime.now(tz()) + timedelta(minutes=MAX_MEETING_MINUTES)
             # The staff starts at the hour once GA is done (end_ga_phase); a long GA part is cut after the overrun.
             await self.wait_until(session, starts_at)
@@ -236,6 +311,8 @@ class MiraHost:
                 session["reason"] = f"error:{type(exc).__name__}"
             log.warning("MIRA_HOST meeting %s failed: %s (%s)", slot, exc, session["reason"])
         finally:
+            if ready is not None and not ready.done():
+                ready.set_exception(ValueError("Mira Host nuk u lidh në 1H. Kontrollo lidhjen dhe lejet e botit."))
             await self.finish(session)
 
     async def wait_until(self, session, at: datetime, *, until: asyncio.Event | None = None):
@@ -303,7 +380,9 @@ class MiraHost:
                     await self.notify(current["discord"], f"🎙️ **1H {session['slot']}** – radha jote tani. Kyçu: "
                                       f"{self.join_url(settings.DISCORD_GUILD_ID, session['voice'])}")
             output = {"RADHA": turn_brief(current),
-                      "udhezim": f"Thirre {current['name']} me emër dhe fillo me protokollin. Në fillim pyet për slotin paraprak."}
+                      "udhezim": f"{current['name']}: hyr direkt te detyra e parë AKTUAL në plan_discutimi. "
+                                 "Pyet shkurt vetëm çka mungon për progresin, vazhdimin ose përfundimin; "
+                                 "pastaj trajto PARAPRAK dhe BLLOK. Mos përsërit përgjigjet apo hyrjet."}
         if announce:
             opening = "Ora e slotit, fillo me stafin." if session.get("ga_done") and session["ga_done"].is_set() else \
                 "Koha e GA-së mbaroi: mbylle me një fjali dhe fillo me stafin."
@@ -313,7 +392,9 @@ class MiraHost:
     async def say(self, session, text: str):
         if session.get("process"):
             with suppress(Exception):
-                await session["process"].send({"type": "say", "text": text[:12000]})
+                # A handoff contains JSON; slicing it loses tasks and can cut a string
+                # in half. The worker already validates the complete IPC frame size.
+                await session["process"].send({"type": "say", "text": text})
 
     # ------------------------------------------------------------ worker events
 
@@ -398,6 +479,7 @@ class MiraHost:
             self.session = None
 
     async def stop(self, reason: str = "stopped"):
+        self.start_generation += 1
         session = self.session
         if session and not session["closed"].is_set():
             session["reason"] = reason
@@ -420,11 +502,14 @@ class MiraHost:
 
 
 def status_text(state: dict) -> str:
-    if not state.get("enabled"):
-        return "Mira **nuk** po i mban takimet 1H. Nise me `/mira mbaj-takimet`."
-    until = datetime.fromisoformat(state["enabled_until"]).astimezone(tz()).strftime("%H:%M")
-    text = f"✅ Mira i mban takimet 1H deri në **{until}** (slotet {', '.join(state['slots'])})."
     live = state.get("live")
+    if not state.get("enabled") and not live:
+        return "Mira **nuk** po i mban takimet 1H. Thirre tani me `/mira hyr` ose aktivizo orarin me `/mira mbaj-takimet`."
+    if state.get("enabled"):
+        until = datetime.fromisoformat(state["enabled_until"]).astimezone(tz()).strftime("%H:%M")
+        text = f"✅ Mira i mban takimet 1H deri në **{until}** (slotet {', '.join(state['slots'])})."
+    else:
+        text = "🎙️ Mira po e mban takimin aktual. Orari automatik është joaktiv."
     if live:
         people = " → ".join(f"{p['initials']}{'✓' if p['status'] == 'DONE' else ('🎙️' if p['status'] == 'ACTIVE' else '')}"
                             for p in live["people"])
@@ -436,6 +521,17 @@ def register_host_commands(bot, guild):
     if not (settings.MIRA_HOST_ENABLED and settings.MIRA_HOST_BOT_TOKEN):
         return
     group = app_commands.Group(name="mira", description="Mira mban takimet 1H (test)")
+
+    @group.command(name="hyr", description="Mira Host hyn tani në 1H dhe nis takimin e slotit të zgjedhur")
+    @app_commands.describe(sloti="Sloti 1H për të cilin do të mbahet takimi tani")
+    @app_commands.choices(sloti=[app_commands.Choice(name=slot, value=slot) for slot in SLOTS])
+    async def join(interaction: discord.Interaction, sloti: str):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            await bot.mira_host.join_now(interaction.guild, sloti, str(interaction.user.id))
+            await interaction.followup.send(f"🎙️ Mira Host u kyç në **1H** dhe po nis takimin për slotin **{sloti}**.", ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(bot.error_message(exc), ephemeral=True)
 
     @group.command(name="mbaj-takimet", description="Mira i mban vetë takimet 1H (test)")
     @app_commands.describe(deri_ne_ore="Deri në cilën orë sot, p.sh. 12:00 (bosh = deri në fund të ditës)")

@@ -13,6 +13,7 @@ async function shell(page: Page, options: { available?: boolean; initiallyUnlock
   let accessReads = 0
   let accessFailure = false
   let forbiddenAction = false
+  let discordSettings = { enabled: false, configured: true, connected: false, version: 0, guild_id: "", channel_id: "", user_ids: {} as Record<string, string>, delivery_counts: {} }
   const expiresAt = options.expiresInMs ? new Date(Date.now() + options.expiresInMs).toISOString() : undefined
   const writes: { path: string; body: Record<string, unknown> }[] = []
   const rows = [
@@ -46,6 +47,14 @@ async function shell(page: Page, options: { available?: boolean; initiallyUnlock
     }
     if (relative === "/lock") { unlocked = false; return route.fulfill({ json: { unlocked: false } }) }
     if (!unlocked) return route.fulfill({ status: 423, json: { detail: "Hape modulin." } })
+    if (relative === "/discord/settings") {
+      if (request.method() === "PUT") {
+        const body = request.postDataJSON()
+        writes.push({ path: relative, body })
+        discordSettings = { ...discordSettings, ...body, version: discordSettings.version + 1 }
+      }
+      return route.fulfill({ json: discordSettings })
+    }
     if (relative === "/automation") {
       if (forbiddenAction) return route.fulfill({ status: 403, json: { detail: "Nuk ke leje për këtë veprim." } })
       automatic = request.postDataJSON().enabled
@@ -72,7 +81,7 @@ async function shell(page: Page, options: { available?: boolean; initiallyUnlock
       writes.push({ path: relative, body: data })
       row.local_date = data.local_date
       row.due_at = data.due_time ? `${data.local_date}T${data.due_time}:00+01:00` : null
-      row.snapshot = { ...row.snapshot, assignees: data.assignees, due_time: data.due_time }
+      row.snapshot = { ...row.snapshot, assignees: data.assignees, due_time: data.due_time, discord_destination: data.discord_destination }
       row.version++
       if (data.apply_to_future) {
         const template = templates.find(t => t.id === row.template_id)!
@@ -214,6 +223,29 @@ test("the task card can explicitly apply a schedule change to future recurrences
   await page.getByRole("button", { name: "Ruaj ndryshimet", exact: true }).click()
   await expect(page.getByRole("dialog")).toHaveCount(0)
   expect(state.writes[0].body).toMatchObject({ due_time: "19:15", apply_to_future: true, expected_template_version: 1 })
+})
+
+test("module admin saves separate Kujtesa settings without requiring all personal IDs", async ({ page }) => {
+  const state = await shell(page, { initiallyUnlocked: true })
+  await page.getByRole("button", { name: "Cilësimet", exact: true }).click()
+  await page.getByLabel("Discord Server ID", { exact: true }).fill("111111111111111111")
+  await page.getByLabel("Kanali privat i familjes · Channel ID", { exact: true }).fill("222222222222222222")
+  await page.getByLabel("Rrita · Discord User ID", { exact: true }).fill("333333333333333333")
+  await page.getByRole("button", { name: "Ruaj lidhjen me Kujtesën", exact: true }).click()
+  await expect.poll(() => state.writes.length).toBe(1)
+  expect(state.writes[0].body).toMatchObject({ enabled: false, user_ids: { rrita: "333333333333333333" }, expected_version: 0 })
+  await expect(page.getByLabel("Mrika · Discord User ID", { exact: true })).toHaveValue("")
+  await page.screenshot({ path: "test-results/ga-personal-discord-settings.png", fullPage: true })
+})
+
+test("an existing task can route its reminders to the family channel", async ({ page }) => {
+  const state = await shell(page, { initiallyUnlocked: true })
+  const card = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
+  await card.getByRole("button", { name: "Ndrysho", exact: true }).click()
+  await page.getByRole("combobox", { name: "Kujtesat në Discord", exact: true }).selectOption("channel")
+  await page.getByRole("button", { name: "Ruaj ndryshimet", exact: true }).click()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  expect(state.writes[0].body).toMatchObject({ discord_destination: "channel", apply_to_future: false })
 })
 
 test("creating a task supports several people and individual completion", async ({ page }) => {

@@ -39,6 +39,7 @@ tmp/recorder-full-lint.json
 backend/private-data/
 backend/.discord-worker-status.json*
 backend/.discord-agent-recovery/
+.primeflow-receipts.*
 
 # Frontend
 frontend/.next/

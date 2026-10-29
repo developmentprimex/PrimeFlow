@@ -23,6 +23,8 @@ class Enable(Caller):
 
 class Start(BaseModel):
     slot: str = Field(pattern=r"^\d{2}:\d{2}$")
+    # Present only for an explicit slash command, never for a scheduled start.
+    discord_user_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
 
 
 class NextTurn(BaseModel):
@@ -86,8 +88,12 @@ async def tick(db: AsyncSession = Depends(get_db)):
 
 @router.post('/session/start')
 async def start(payload: Start, db: AsyncSession = Depends(get_db)):
+    if payload.discord_user_id:
+        await manager(db, Caller(discord_user_id=payload.discord_user_id))
+        if not (settings.MIRA_HOST_ENABLED and settings.MIRA_HOST_BOT_TOKEN):
+            raise HTTPException(503, "Mira Host nuk është konfiguruar në server.")
     row = await host.get_settings(db)
-    if not host.is_enabled(row):
+    if not payload.discord_user_id and not host.is_enabled(row):
         raise HTTPException(409, "Mira nuk është nisur si mbajtëse takimesh.")
     meeting = await host.start_meeting(db, payload.slot)
     await db.commit()
@@ -100,7 +106,8 @@ async def start(payload: Start, db: AsyncSession = Depends(get_db)):
         raise
     await db.commit()
     return {"meeting": host.meeting_row(meeting), **session,
-            "starts_at": host.slot_at(meeting.meeting_date, meeting.slot).isoformat(),
+            "starts_at": (host.now() if payload.discord_user_id else
+                          host.slot_at(meeting.meeting_date, meeting.slot)).isoformat(),
             "target_minutes": row.target_minutes_per_person}
 
 

@@ -39,6 +39,7 @@ class TemplateDefinition(BaseModel):
     steps: list[str] = Field(default_factory=list, max_length=100)
     estimated_minutes: int | None = Field(default=None, ge=1, le=1440)
     reminder_group: Group = "daily_upkeep"
+    discord_destination: Literal["dm", "channel", "off"] = "dm"
     enabled: bool = False
     readiness: Literal["ready_after_setup", "needs_confirmation"] = "ready_after_setup"
     rotation_id: Literal["nala"] | None = None
@@ -122,6 +123,7 @@ class OccurrenceUpdate(BaseModel):
     assignees: list[Person] = Field(min_length=1, max_length=4)
     apply_to_future: bool = False
     expected_template_version: int | None = Field(default=None, ge=1)
+    discord_destination: Literal["dm", "channel", "off"] | None = None
 
     @model_validator(mode="after")
     def valid(self):

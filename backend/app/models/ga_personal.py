@@ -122,6 +122,23 @@ class GaPersonalDelivery(Base):
     status: Mapped[str] = mapped_column(String(24), default="pending")
 
 
+class GaPersonalDiscordDelivery(Base):
+    __tablename__ = "discord_outbox"
+    __table_args__ = (UniqueConstraint("occurrence_id", "schedule_key", "phase", "recipient"), {"schema": SCHEMA})
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    occurrence_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{SCHEMA}.occurrences.id"), index=True)
+    schedule_key: Mapped[str] = mapped_column(String(64))
+    phase: Mapped[str] = mapped_column(String(12))
+    recipient: Mapped[str] = mapped_column(String(40))
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    lease: Mapped[str | None] = mapped_column(String(64))
+    leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    channel_id: Mapped[str | None] = mapped_column(String(24))
+    message_id: Mapped[str | None] = mapped_column(String(24))
+    details: Mapped[dict] = mapped_column(DOCUMENT, default=dict)
+
+
 class GaPersonalImport(Base):
     __tablename__ = "import_runs"
     __table_args__ = (UniqueConstraint("space_id", "dataset_hash"), {"schema": SCHEMA})

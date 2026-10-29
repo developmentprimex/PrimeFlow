@@ -26,6 +26,7 @@ from app.schemas.ga_personal import (
     ActionRequest, ArchiveRequest, AutomationRequest, GenerateRequest, ImportRequest, OccurrenceUpdate, PasswordRequest, TemplateWrite, UnlockRequest,
 )
 from app.services import ga_personal as service
+from app.services import ga_personal_discord as discord_service
 
 class PrivateRoute(APIRoute):
     def get_route_handler(self):
@@ -221,7 +222,8 @@ async def workspace(response: Response, member=Depends(unlocked), db=Depends(get
     ))).all()
     return {"person_key": member.person_key, "is_admin": member.is_admin, "timezone": "Europe/Belgrade",
         "members": [{"person_key": m.person_key, "name": name} for m, name in rows],
-        "config": space.config, "discord": {"connected": False, "messages_enabled": False}}
+        "config": {k: v for k, v in space.config.items() if k != "discord"},
+        "discord": {**discord_service.public_status(space), "messages_enabled": await discord_service.granted(db, space)}}
 
 
 @router.get("/templates")
@@ -336,3 +338,9 @@ async def automation(payload: AutomationRequest, response: Response, member=Depe
                  kind="automation_enabled" if payload.enabled else "automation_disabled", payload={}))
     await db.commit()
     return {"enabled": payload.enabled}
+
+
+# Registered after the shared dependencies above to keep browser and bridge
+# authorization separate while using the same private-response handling.
+from app.api.routers.ga_personal_discord import router as discord_router
+router.include_router(discord_router)

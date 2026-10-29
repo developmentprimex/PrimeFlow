@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     APP_TIMEZONE: str = "Europe/Budapest"
     GA_PERSONAL_ENABLED: bool = False
     GA_PERSONAL_UNLOCK_MINUTES: int = 60
+    GA_PERSONAL_DISCORD_BRIDGE_SECRET: str | None = None
     MEETING_REMINDER_SCHEDULER_ENABLED: bool = True
     MEETING_REMINDER_POLL_SECONDS: int = 30
     SYSTEM_TASK_SCHEDULER_ENABLED: bool = True
@@ -162,6 +163,8 @@ class Settings(BaseSettings):
     # Off by default; even when on it only runs after /mira mbaj-takimet.
     MIRA_HOST_ENABLED: bool = False
     MIRA_HOST_BOT_TOKEN: str | None = None
+    # Host-only model, independent of the other voice assistant features.
+    MIRA_HOST_MODEL: str = "gpt-realtime-2.1-mini"
     MIRA_HOST_PRE_BRIEF_MINUTES: int = 5
     MIRA_HOST_GA_CALL_MINUTES: int = 2
     # Mira joins this early (silent), so a failed connection is retried before she must talk.
