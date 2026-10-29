@@ -154,7 +154,7 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
         key = rules.context_key(kind, {} if kind == 'tomorrow' else row)
         if kind == 'tomorrow':
             children = [existing.get((link.id, 'tomorrow_task', rules.context_key('tomorrow_task', task))) for task in row['tasks']]
-            if any(child is None or (not child.sent_at and not child.answered_at) for child in children):
+            if any(child is None or (not child.answered_at and not rules.sent_in_regular_window(child, phase)) for child in children):
                 continue
         if kind in {'untouched', 'delivery'} and (kind, row['task_id']) not in asked:
             manual = report.manual_answers or {}
@@ -162,7 +162,7 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
             if manual.get(answer_key):
                 continue
         q = existing.get((link.id, kind, key))
-        if q and (q.answered_at or q.sent_at or q.lease_until > now):
+        if q and not rules.delivery_is_pending(q, now, phase):
             continue
         if q is None:
             q = Question(link_id=link.id, task_id=uuid.UUID(row['task_id']) if row.get('task_id') else None,
@@ -172,8 +172,18 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
             await db.flush()
             existing[(link.id, kind, key)] = q
         if len(jobs) < 50:
+            if q.sent_at and not rules.sent_in_regular_window(q, phase):
+                q.snapshot = {**q.snapshot, '_previous_test_message_id': q.message_id,
+                    '_test_sent_at': q.sent_at.isoformat()}
+                # The real attempt now has its own lease. Keep the earlier
+                # message ID for cleanup, but do not let parallel workers
+                # reclaim it until this attempt is acknowledged or expires.
+                q.sent_at = None
             q.lease_until = now + timedelta(minutes=2)
-            jobs.append(question_payload(q, link))
+            job = question_payload(q, link)
+            if q.snapshot.get('_previous_test_message_id'):
+                job['previous_test_message_id'] = q.snapshot['_previous_test_message_id']
+            jobs.append(job)
     await db.commit()
     return {'jobs': jobs}
 

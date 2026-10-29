@@ -4,6 +4,13 @@ Përdor lidhjet ekzistuese personale të Discord-it dhe orën e raporteve të pl
 Pyetjet, përgjigjet, marrësi dhe dërgimi ruhen në databazë. Polling-u është çdo
 30 sekonda; rinisja e botit nuk i ridërgon pyetjet e dërguara.
 
+Provat e dërguara para orarit nuk e konsumojnë njoftimin e rregullt: dërgimi
+normal llogaritet nga 15:50 për M3 dhe nga 16:10 për planin e nesërm. Pyetjet
+pa përgjigje të provës riemetohen sipas gjendjes aktuale, me një lease të veçantë
+për tentativën reale; pas dërgimit të ri hiqen butonat nga mesazhi i provës.
+Përgjigjet tashmë të ruajtura nuk pastrohen. Konfirmimi përfundimtar pret që
+kartat individuale të jenë dërguar në orarin e rregullt, jo thjesht gjatë provës.
+
 ## Ora 15:50
 
 - Detyrat TODO brenda Start–Due të ditës, përfshirë detyrat e sistemit: **Komento**,

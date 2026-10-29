@@ -20,6 +20,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
+from app.services.report_note_visibility import is_mira_note, mira_note_expression
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.personal_task_owner import personal_task_owner
 from app.services.meetings_report import (
@@ -904,6 +905,7 @@ async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
             .where(GaNote.is_converted_to_task.is_(False))
             .where(GaNote.status != GaNoteStatus.CLOSED)
             .where(GaNote.is_discussed.is_(False))
+            .where(~mira_note_expression())
         )
     ).scalars().all()
     if not notes:
@@ -923,6 +925,7 @@ async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
         note for note in notes
         if note.id not in linked_note_ids
         and not note.is_discussed
+        and not is_mira_note(note)
     ]
     if not open_notes:
         return []

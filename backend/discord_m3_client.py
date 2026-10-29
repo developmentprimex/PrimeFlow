@@ -280,6 +280,7 @@ async def deliver(bot):
     async def send(job):
         async with semaphore:
             try:
+                previous_test_message_id = job.get('previous_test_message_id')
                 channel = await bot.private_channel(job['guild_id'], job['channel_id'], job['discord_user_id'])
                 job = await bot.bridge(f"/bot/m3/{job['id']}/open", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')})
                 if job.get('answered') or job.get('resolved'):
@@ -289,6 +290,13 @@ async def deliver(bot):
                     json={'content': prompt(job), 'components': controls(job).to_components(), 'flags': 4,
                         'allowed_mentions': {'parse': [], 'users': [job['discord_user_id']]}, 'nonce': nonce, 'enforce_nonce': True})
                 await bot.bridge(f"/bot/m3/{job['id']}/ack", {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')} | {'message_id': str(message['id'])})
+                if previous_test_message_id and previous_test_message_id != str(message['id']):
+                    try:
+                        previous = await channel.fetch_message(int(previous_test_message_id))
+                        await previous.edit(content='Prova M3 u mbyll. Raportimi i rregullt u dërgua më poshtë.',
+                            embeds=[], view=None, allowed_mentions=discord.AllowedMentions.none())
+                    except (discord.HTTPException, ValueError):
+                        log.warning('Could not retire the earlier M3 trial message')
             except Exception as exc:
                 log.warning('M3 delivery %s failed: %s', job['id'], type(exc).__name__)
     # Preserve task order and send the final confirmation after task cards.

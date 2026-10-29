@@ -24,6 +24,19 @@ def task(**fields):
 
 
 class M3RulesTests(unittest.TestCase):
+    def test_early_test_does_not_consume_regular_delivery_or_its_future_lease(self):
+        now = datetime.fromisoformat('2026-10-28T15:50:00+01:00')
+        q = SimpleNamespace(day=now.date(), sent_at=now.replace(hour=11, minute=25),
+            lease_until=now + timedelta(minutes=2), answered_at=None)
+        self.assertTrue(rules.delivery_is_pending(q, now, 'm3'))
+        q.sent_at = now
+        self.assertFalse(rules.delivery_is_pending(q, now, 'm3'))
+        q.sent_at = now.replace(hour=11)
+        q.answered_at = now.replace(hour=12)
+        self.assertFalse(rules.delivery_is_pending(q, now, 'm3'))
+        q.answered_at, q.sent_at = None, now.replace(hour=16, minute=5)
+        self.assertTrue(rules.delivery_is_pending(q, now.replace(hour=16, minute=10), 'tomorrow'))
+
     def test_schedule_boundaries_weekends_and_dst(self):
         with patch.object(rules, 'report_timezone', return_value=ZoneInfo('Europe/Budapest')):
             for stamp, expected in [('2026-10-27T15:49:59+01:00', None), ('2026-10-27T15:50:00+01:00', 'm3'),
