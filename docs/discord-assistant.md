@@ -1,5 +1,23 @@
 # Asistenti personal PrimeFlow në Discord
 
+Kanalet personale përdorin emrin e personit të lidhur: `primeflow-rinesa`,
+`primeflow-elsa`, etj. Nëse emri është zënë, shtohet mbiemri ose një prapashtesë.
+Lidhja me llogarinë identifikohet nga ID-ja dhe topic-u i kanalit, pavarësisht emrit.
+
+## Raportet me komandë
+
+Në kanalin personal të krijuar nga `/lidh`, `/m2` dhe `/m3` hapin raportin
+personal të ditës, edhe jashtë orarit të njoftimeve automatike. Çdo pyetje vjen
+drejtpërdrejt në mesazhin e vet, me të njëjtin tekst dhe butona si dërgimi
+automatik M2/M3. Nuk kërkohet zgjedhja e detyrës nga një listë paraprake.
+**Raporti M2/M3** hap listën ndihmëse, ku **Rifresko** merr gjendjen aktuale.
+Përgjigjet ruhen në të njëjtat pyetje të ditës dhe
+hapja manuale nuk konsumon njoftimin automatik. `/m3` sjell bashkë pyetjet M3
+të orës 15:50 dhe planifikimin e nesërm të orës 16:10: detyrat, slotet dhe
+konfirmimin përfundimtar të planit. Orari automatik vazhdon të funksionojë.
+
+Kërkohet rinisja e API-ve dhe botit që regjistron komandat; nuk ka migrim të ri.
+
 ## Pyetjet M2 në 11:45
 
 **Hap detyrën** shfaq kartën e plotë në të njëjtin mesazh M2: statusin, slotin,

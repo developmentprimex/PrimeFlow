@@ -20,6 +20,15 @@ if AVAILABLE:
 
 @unittest.skipUnless(AVAILABLE, "Install requirements-discord.txt to test the Discord worker")
 class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_personal_channel_names_use_people_and_resolve_name_collisions(self):
+        self.assertEqual(bot.personal_channel_name('Rinesa Ahmedi'), 'primeflow-rinesa')
+        self.assertEqual(bot.personal_channel_name('Elsa Ferati'), 'primeflow-elsa')
+        self.assertEqual(bot.personal_channel_name('Ëndrra Çela'), 'primeflow-endrra')
+        self.assertEqual(bot.personal_channel_name('Elsa Ferati', existing_names=['primeflow-elsa']),
+            'primeflow-elsa-ferati')
+        self.assertEqual(bot.personal_channel_name('', fallback_name='Rinesa Ahmedi'), 'primeflow-rinesa')
+        self.assertLessEqual(len(bot.personal_channel_name('A' * 150)), 100)
+
     async def test_list_pages_have_one_button_per_task_and_keep_every_task(self):
         tasks = [{"id": str(uuid.uuid4()), "title": "x" * 500, "status": "IN_PROGRESS"} for _ in range(63)]
         ids = []
@@ -71,7 +80,7 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
             try:
                 await instance.setup_hook()
                 commands = instance.tree.get_commands(guild=discord.Object(id=123))
-                self.assertEqual({command.name for command in commands}, {"lidh", "detyrat", "pyet", "push"})
+                self.assertEqual({command.name for command in commands}, {"lidh", "detyrat", "m2", "m3", "pyet", "push"})
                 self.assertEqual(str(instance.http_bridge.base_url), "http://primeflow.test/api/discord/")
                 request = instance.http_bridge.build_request("POST", "/bot/tasks", json={})
                 self.assertEqual(str(request.url), "http://primeflow.test/api/discord/bot/tasks")

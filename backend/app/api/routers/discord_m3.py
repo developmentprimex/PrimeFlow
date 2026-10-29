@@ -108,16 +108,22 @@ async def claim(db: AsyncSession = Depends(get_db)):
     return await collect_questions(db, now=now, phase=phase)
 
 
-async def collect_questions(db, *, now, phase, only_user_id=None):
+@router.post('/report')
+async def personal_report(actor: Actor, db: AsyncSession = Depends(get_db)):
+    _, user = await identity(db, actor, lock=True)
+    return await collect_questions(db, now=datetime.now(timezone.utc), phase='all', only_user_id=user.id, manual=True)
+
+
+async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
     day = now.astimezone(report_timezone()).date()
-    report = await reports.locked_report(db, day, wait=False)
+    report = await reports.locked_report(db, day, wait=manual)
     if report is None:
         return {'jobs': []}
     links = (await db.execute(select(DiscordLink).join(User, User.id == DiscordLink.user_id).where(
         DiscordLink.enabled.is_(True), DiscordLink.guild_id == settings.DISCORD_GUILD_ID,
         DiscordLink.channel_id.is_not(None), User.is_active.is_(True)))).scalars().all()
     candidates = []
-    if phase == 'm3':
+    if phase in {'m3', 'all'}:
         data = await reports.build_task_data(db, day)
         report.data = {**(report.data or {}), **data}
         report.generated_at = now
@@ -130,7 +136,7 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
                     candidates.append((uid, kind, row, day))
         for uid, row in await meeting_candidates(db, now, {link.user_id for link in links}):
             candidates.append((uid, 'meeting', row, day))
-    else:
+    if phase in {'tomorrow', 'all'}:
         target = rules.target_day(day)
         rows, owners, names = await tomorrow_data(db, target)
         for link in links:
@@ -152,17 +158,17 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
         if not link:
             continue
         key = rules.context_key(kind, {} if kind == 'tomorrow' else row)
-        if kind == 'tomorrow':
+        if kind == 'tomorrow' and not manual:
             children = [existing.get((link.id, 'tomorrow_task', rules.context_key('tomorrow_task', task))) for task in row['tasks']]
             if any(child is None or (not child.answered_at and not rules.sent_in_regular_window(child, phase)) for child in children):
                 continue
         if kind in {'untouched', 'delivery'} and (kind, row['task_id']) not in asked:
-            manual = report.manual_answers or {}
+            answers = report.manual_answers or {}
             answer_key = f"{'delivery_choice' if kind == 'delivery' else 'untouched_comment'}:{row['task_id']}"
-            if manual.get(answer_key):
+            if answers.get(answer_key):
                 continue
         q = existing.get((link.id, kind, key))
-        if q and not rules.delivery_is_pending(q, now, phase):
+        if not manual and q and not rules.delivery_is_pending(q, now, phase):
             continue
         if q is None:
             q = Question(link_id=link.id, task_id=uuid.UUID(row['task_id']) if row.get('task_id') else None,
@@ -171,7 +177,10 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
             db.add(q)
             await db.flush()
             existing[(link.id, kind, key)] = q
-        if len(jobs) < 50:
+        if manual:
+            q.snapshot = {**q.snapshot, **row}
+            jobs.append(question_payload(q, link))
+        elif len(jobs) < 50:
             if q.sent_at and not rules.sent_in_regular_window(q, phase):
                 q.snapshot = {**q.snapshot, '_previous_test_message_id': q.message_id,
                     '_test_sent_at': q.sent_at.isoformat()}
@@ -184,8 +193,28 @@ async def collect_questions(db, *, now, phase, only_user_id=None):
             if q.snapshot.get('_previous_test_message_id'):
                 job['previous_test_message_id'] = q.snapshot['_previous_test_message_id']
             jobs.append(job)
+    if manual:
+        # Keep completed answers visible after progress/status changes remove
+        # their tasks from today's unanswered sections. Recheck current access.
+        included = {job['id'] for job in jobs}
+        for q in existing.values():
+            link = by_user.get(only_user_id)
+            if not link or q.link_id != link.id or q.kind not in {'untouched', 'delivery', 'meeting'} or str(q.id) in included:
+                continue
+            try:
+                await own_question(db, q.id, Actor(discord_user_id=link.discord_user_id,
+                    guild_id=link.guild_id, channel_id=link.channel_id))
+            except HTTPException as exc:
+                if exc.status_code == 403:
+                    continue
+                raise
+            jobs.append(await live_payload(db, q, link, await db.get(User, link.user_id)))
+        # Show the 15:50 report first, then 16:10 task/slot cards, with the
+        # final plan confirmation after all of its individual questions.
+        jobs.sort(key=lambda job: 2 if job['kind'] == 'tomorrow' else
+            1 if job['kind'] in {'tomorrow_task', 'slot'} else 0)
     await db.commit()
-    return {'jobs': jobs}
+    return {'jobs': jobs, 'day': day.isoformat()}
 
 
 async def own_question(db, question_id, actor, *, write=False):

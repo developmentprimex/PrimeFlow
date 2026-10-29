@@ -114,7 +114,7 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
         job = self.job('tomorrow', snapshot={'title': 'Plani', 'tasks': rows}, task_id=None)
         self.assertLessEqual(len(client.prompt(job)), 2000)
         view = client.controls(job)
-        self.assertEqual([item.label for item in view.children], ['Po për të gjitha'])
+        self.assertEqual([item.label for item in view.children], ['Po për të gjitha', 'Raporti M3'])
         self.assertTrue(view.is_persistent())
         for due in (False, True):
             item = self.job('tomorrow_task')
@@ -123,7 +123,7 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('\n', text)
             self.assertIn('RA: Detyrë', text)
             self.assertEqual([button.label for button in client.controls(item).children],
-                ['Po, kryhet' if due else 'Po, punohet', 'Jo — shtyje', 'Hap detyrën', 'Koment'])
+                ['Po, kryhet' if due else 'Po, punohet', 'Jo — shtyje', 'Hap detyrën', 'Koment', 'Raporti M3'])
 
     async def test_m3_open_button_follows_postpone_in_same_row_and_stays_in_discord(self):
         import discord_m3_client as client
@@ -153,7 +153,8 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('/tasks/' + job['task_id'], content)
         self.assertIn('](<', content)
         self.assertIn('>)', content)
-        self.assertTrue(all(item.row == 0 for item in client.controls(job).children))
+        self.assertTrue(all(item.row == 0 for item in client.controls(job).children[:-1]))
+        self.assertEqual(client.controls(job).children[-1].custom_id, 'pf:reports:m3:0')
 
     async def test_open_task_pages_all_text_in_original_message_without_new_replies(self):
         import discord_m3_client as client

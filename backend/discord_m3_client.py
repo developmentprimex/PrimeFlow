@@ -121,6 +121,7 @@ def controls(job, page=0):
                 options=[discord.SelectOption(label=value, value=value) for value in SLOTS]))
     if job.get('task_id') and (kind != 'tomorrow_task' or job.get('resolved')):
         button('Hap detyrën', 'open', row=2 if kind == 'slot' else 0)
+    view.add_item(discord.ui.Button(label='Raporti M3', custom_id='pf:reports:m3:0', row=4))
     return view
 
 
@@ -211,7 +212,7 @@ async def handle(bot, interaction):
         return await bot.bridge(f'/bot/m3/{qid}/open', actor(interaction))
 
     deferred = False
-    acknowledged = action in {'open', 'detail', 'return', 'page', 'task', 'slot', 'pickslot', 'held'}
+    acknowledged = action in {'open', 'detail', 'return', 'page', 'task', 'slot', 'pickslot', 'held', 'question'}
     if acknowledged:
         if action == 'task':
             await interaction.response.defer(ephemeral=True, thinking=True)
@@ -224,6 +225,10 @@ async def handle(bot, interaction):
     # form, so existing messages follow the combined flow as well.
     if job['kind'] == 'tomorrow_task' and action == 'JO':
         action = 'postpone'
+    if action == 'question':
+        await interaction.edit_original_response(content=prompt(job), embeds=[], view=controls(job),
+            allowed_mentions=discord.AllowedMentions.none())
+        return
     if action in {'open', 'detail'} and job.get('task_id'):
         detail = await bot.current_detail(interaction, job['task_id'])
         await show_detail(bot, interaction, job, detail, int(extra[0]) if action == 'detail' else 0)
