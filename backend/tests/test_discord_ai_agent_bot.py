@@ -16,6 +16,7 @@ class AIAgentBotTests(unittest.IsolatedAsyncioTestCase):
     async def test_recording_commands_are_separate_and_start_rejects_other_voice_channels(self):
         from unittest.mock import AsyncMock
         with patch.object(worker.settings, 'DISCORD_GUILD_ID', '123'), \
+             patch.object(worker.settings, 'DISCORD_MEETING_CONTROL_CHANNEL_ID', '77'), \
              patch.object(worker.settings, 'DISCORD_MEETING_NOTES_ENABLED', True), \
              patch.object(worker.settings, 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID', '456'), \
              patch.object(worker.app_commands.CommandTree, 'sync', AsyncMock()), \
@@ -27,8 +28,10 @@ class AIAgentBotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual({command.name for command in group.commands}, {'fillo', 'mbaro', 'statusi'})
                 self.assertIsNone(bot.tree.get_command('mira', guild=discord.Object(id=123)))
                 self.assertIsNone(bot.tree.get_command('takimi', guild=discord.Object(id=123)))
-                interaction = SimpleNamespace(user=SimpleNamespace(voice=SimpleNamespace(channel=SimpleNamespace(id=999))))
-                with self.assertRaises(ValueError), patch.object(bot.meeting_capture, 'begin', AsyncMock()) as begin:
+                interaction = SimpleNamespace(
+                    guild_id=123, channel_id=44,
+                    user=SimpleNamespace(voice=SimpleNamespace(channel=SimpleNamespace(id=999))))
+                with self.assertRaisesRegex(ValueError, 'AI Agent'), patch.object(bot.meeting_capture, 'begin', AsyncMock()) as begin:
                     await bot.meeting_capture.start(interaction, None, None)
                 begin.assert_not_awaited()
             finally:
