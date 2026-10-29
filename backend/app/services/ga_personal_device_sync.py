@@ -34,8 +34,9 @@ def card_id(template_id, owner, concrete_date=None):
     return f"ga_{template_id.hex}_{owner or 'family'}" + (f"__{concrete_date}" if concrete_date else "")
 
 
-def concrete_template(definition):
+def concrete_template(definition, space=None):
     return (definition["frequency"] in {"conditional", "school_day", "unresolved"}
+            or (definition["assignment"] == "rotation" and space and space.config.get("nala_rotation"))
             or definition["assignment"] in {"first_home", "unassigned"}
             or (definition["assignment"] == "rotation" and definition["frequency"] not in {"daily", "near_daily"}))
 
@@ -50,6 +51,8 @@ def area_for(definition):
     area = definition.get("area_id", "home")
     if definition.get("reminder_group") == "nala":
         return "nala"
+    if definition.get("reminder_group") == "roki":
+        return "roki"
     if area in AREAS:
         return area
     if area.endswith("_bathroom"):
@@ -99,7 +102,7 @@ def exported_cards(templates, occurrences, space, people):
         d = template.definition
         if template.archived or not d.get("enabled") or d.get("readiness") != "ready_after_setup":
             continue
-        if concrete_template(d):
+        if concrete_template(d, space):
             for row in occurrences:
                 if row.template_id != template.id or row.status == "cancelled":
                     continue
@@ -179,7 +182,7 @@ async def read_state(db, device, since=None):
         template = by_id[row.template_id]
         d = template.definition
         owner = occurrence_owner(row)
-        identity = card_id(template.id, owner, row.local_date if concrete_template(d) else None)
+        identity = card_id(template.id, owner, row.local_date if concrete_template(d, space) else None)
         period = (date.fromisoformat(row.period_key[8:]) + timedelta(days=5)).isoformat() if row.period_key.startswith("weekend:") else row.local_date
         if since and (not event or tasks.aware(event.created_at) < since) and (period, identity) not in statuses:
             continue
@@ -303,6 +306,8 @@ async def apply_ops(db, device, payload):
         elif op.type == "arrival":
             await write_record(db, space.id, "arrival", (op.day.isoformat(), op.person_id),
                 {"person_id": op.person_id, "day": op.day.isoformat(), "at": op.at}, op)
+            await tasks.record_arrival(db, member, day=op.day, person=op.person_id,
+                                       request_id="arrival:" + str(op.op_id), commit=False)
         elif op.type == "event_upsert":
             if CARD_ID.fullmatch(op.event.id):
                 raise HTTPException(422, "ID e eventit është e rezervuar për detyrat e GA PERSONAL.")

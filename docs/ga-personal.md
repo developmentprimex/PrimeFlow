@@ -70,6 +70,41 @@ Once membership is provisioned and the module is enabled, members can open `/ga-
 
 The original handoff's manifest has stale hashes for four updated seed/export files. Validate the actual dataset and record its reviewed hash before live import. The import API returns a canonical-content hash used to bind preview/apply; it is intentionally distinct from a raw ZIP-file hash.
 
+## Dataset version 2
+
+The importer accepts versions 1 and 2. Version 2 retains task short codes,
+recurrence labels, estimated duration, selected weekdays and suggested times.
+Suggested times never become active deadlines. Nala uses fixed owners Monday
+through Saturday and a separate three-week Sunday cycle; the previous version's
+calendar-day rotation remains supported for version 1. Tablets receive concrete
+dated occurrences for the new rotation so they cannot infer the old three-day rule.
+
+Import preview lists creations, updates, source-ID renames, archives and conflicts.
+The reviewed v1-to-v2 ID mapping preserves template UUIDs and existing occurrence
+snapshots. Only untouched imports can be updated; manual changes cause a conflict.
+The superseded generic `dust` and `robot_prep` models are archived if still untouched
+and disabled. Their history is retained. Repeated imports do not add copies, and
+version 1 cannot downgrade a space already imported with version 2.
+
+For an existing configured module, preview a private JSON directly:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/seed_ga_personal.py --dataset <private-json> --existing-memberships --admin-person <configured-admin>
+```
+
+Apply with `--apply --expected-host <host> --expected-database <db>` after reviewing
+the preview. Existing active memberships supply the exact UUID map; usernames and
+the module administrator are still verified. The command enables only ready daily
+models without inventing clock times. Other models await configuration. Keep the
+private source files and backups outside Git. Deploy the version 2 service code
+before relying on automatic generation with its rotation configuration.
+
+The authenticated **Erdha në shpi** action records the actual member and serializes
+the day's first arrival. Repeated clicks and later arrivals do not reassign the
+first-home duty. It generates that conditional task only after its instructions
+and recurrence have been explicitly confirmed and enabled. Tablet arrivals use
+the same transaction and first-person rule.
+
 ## Isolation
 
 Household rows never enter the work `tasks`, `system_task_templates`, `checklists`, PX Notes, report or notification tables. Company search/exports operate on their existing work tables. No new household attachment/export endpoint is exposed; adding one must use the module's membership dependency.

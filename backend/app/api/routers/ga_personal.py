@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -19,7 +19,7 @@ from app.models.ga_personal import (
 )
 from app.models.user import User
 from app.schemas.ga_personal import (
-    ActionRequest, ArchiveRequest, AutomationRequest, GenerateRequest, ImportRequest, OccurrenceUpdate, TemplateWrite,
+    ActionRequest, ArchiveRequest, ArrivalRequest, AutomationRequest, GenerateRequest, ImportRequest, OccurrenceUpdate, TemplateWrite,
 )
 from app.services import ga_personal as service
 from app.services import ga_personal_discord as discord_service
@@ -103,6 +103,12 @@ async def templates(response: Response, member=Depends(membership), db=Depends(g
     no_store(response)
     rows = (await db.execute(select(Template).where(Template.space_id == member.space_id).order_by(Template.updated_at.desc()))).scalars().all()
     return [service.template_out(row, member) for row in rows]
+
+
+@router.post("/arrival")
+async def arrival(payload: ArrivalRequest, response: Response, member=Depends(membership), db=Depends(get_db)):
+    no_store(response)
+    return await service.record_arrival(db, member, day=datetime.now(service.TZ).date(), request_id=str(payload.request_id))
 
 
 @router.post("/templates")

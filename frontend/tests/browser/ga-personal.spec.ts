@@ -65,6 +65,10 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
       writes.push({ path: relative, body: request.postDataJSON() })
       return route.fulfill({ json: { enabled: automatic } })
     }
+    if (relative === "/arrival") {
+      writes.push({ path: relative, body: request.postDataJSON() })
+      return route.fulfill({ json: { day: localToday(), first_home: "mrika", created: 0 } })
+    }
     if (relative === "/workspace") {
       workspaceReads++
       if (options.workspaceDelay) await new Promise((resolve) => setTimeout(resolve, options.workspaceDelay))
@@ -105,6 +109,15 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
   return { writes, workspaceReads: () => workspaceReads, accessReads: () => accessReads,
     failAccess: () => { accessFailure = true }, forbidAction: () => { forbiddenAction = true }, revoke: () => { available = false } }
 }
+
+test("arrival records the signed-in person and shows the first person for the day", async ({ page }) => {
+  const state = await shell(page)
+  await page.getByRole("button", { name: "Erdha në shpi", exact: true }).click()
+  await expect(page.getByText("Ardhja u regjistrua. Personi i parë: Person 1.")).toBeVisible()
+  expect(state.writes[0].path).toBe("/arrival")
+  expect(state.writes[0].body.request_id).toEqual(expect.any(String))
+  expect(Object.keys(state.writes[0].body)).toEqual(["request_id"])
+})
 
 test("the sidebar and module reject a nonmember", async ({ page }) => {
   const state = await shell(page, { available: false })

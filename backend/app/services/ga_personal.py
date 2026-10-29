@@ -45,7 +45,15 @@ def document_hash(value):
     return digest(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
-def rotation_owner(day: date, anchor: str):
+def rotation_owner(day: date, anchor: str | dict):
+    if isinstance(anchor, dict):
+        if day.weekday() != 6:
+            return anchor["weekday_owners_iso"].get(str(day.weekday()))
+        cycle = anchor["sunday_cycle"]
+        start = date.fromisoformat(cycle["anchor_date"])
+        if day < start:
+            return None
+        return cycle["order"][((day - start).days // 7) % len(cycle["order"])]
     start = date.fromisoformat(anchor)
     if day < start:
         return None
@@ -219,7 +227,7 @@ async def generate(db, member, payload, *, automatic=False, commit=True):
             continue
         owners = d["assignees"]
         if d["assignment"] == "rotation":
-            anchor = space.config.get("rotation_anchor")
+            anchor = space.config.get("nala_rotation") or space.config.get("rotation_anchor")
             owner = rotation_owner(payload.day, anchor) if anchor else None
             owners = [owner] if owner else []
         elif d["assignment"] == "first_home":
@@ -262,6 +270,45 @@ async def generate(db, member, payload, *, automatic=False, commit=True):
 async def cancel_discord(db, occurrence_ids):
     await db.execute(update(DiscordDelivery).where(DiscordDelivery.occurrence_id.in_(occurrence_ids),
         DiscordDelivery.status.in_(["pending", "claimed"])).values(status="cancelled"))
+
+
+async def record_arrival(db, member, *, day, request_id, person=None, commit=True):
+    await lock_member_space(db, member)
+    person = person or member.person_key
+    if person not in PEOPLE:
+        raise HTTPException(422, "Personi nuk është i vlefshëm.")
+    previous = (await db.execute(select(Event).where(
+        Event.space_id == member.space_id, Event.request_id == request_id))).scalar_one_or_none()
+    if previous and (previous.kind != "arrived" or previous.actor_id != member.user_id
+                     or previous.payload != {"day": day.isoformat(), "person_key": person}):
+        raise HTTPException(409, "Ky identifikues është përdorur për një veprim tjetër.")
+    first = (await db.execute(select(Event).where(
+        Event.space_id == member.space_id, Event.kind == "arrived",
+        Event.payload["day"].as_string() == day.isoformat(),
+    ).order_by(Event.created_at, Event.id).limit(1))).scalar_one_or_none()
+    first_person = first.payload["person_key"] if first else person
+    if not previous:
+        db.add(Event(space_id=member.space_id, actor_id=member.user_id, request_id=request_id,
+                     kind="arrived", payload={"day": day.isoformat(), "person_key": person}))
+        await db.flush()
+    administrator = (await db.execute(select(Member).join(User, User.id == Member.user_id).where(
+        Member.space_id == member.space_id, Member.active.is_(True), Member.is_admin.is_(True),
+        User.is_active.is_(True),
+    ).order_by(Member.id).limit(1))).scalar_one_or_none()
+    created = 0
+    if administrator:
+        templates = (await db.execute(select(Template).where(
+            Template.space_id == member.space_id, Template.archived.is_(False)))).scalars().all()
+        # An arrival confirms this condition only; other unresolved conditions
+        # and school days stay untouched, as do inactive first-home templates.
+        conditions = [t.id for t in templates if t.definition["assignment"] == "first_home"]
+        from app.schemas.ga_personal import GenerateRequest
+        result = await generate(db, administrator, GenerateRequest(
+            day=day, first_home=first_person, conditions=conditions), automatic=True, commit=False)
+        created = result["created"]
+    if commit:
+        await db.commit()
+    return {"day": day.isoformat(), "first_home": first_person, "created": created}
 
 
 async def change_status(db, row, status, reschedule_at=None):
@@ -404,7 +451,7 @@ def validate_dataset(dataset):
 
 
 def _validate_dataset(dataset):
-    if dataset.get("format") != "mira.ga_personal.dataset" or dataset.get("format_version") != 1:
+    if dataset.get("format") != "mira.ga_personal.dataset" or dataset.get("format_version") not in (1, 2):
         raise HTTPException(422, "Formati i dataset-it nuk mbështetet.")
     if dataset.get("module", {}).get("timezone") != "Europe/Belgrade":
         raise HTTPException(422, "Zona kohore duhet të jetë Europe/Belgrade.")
@@ -424,28 +471,73 @@ def _validate_dataset(dataset):
             raise HTTPException(422, "Referencë e pavlefshme e modelit/hapësirës.")
         try:
             data = TemplateDefinition(
-                title=t["title"], description=t.get("notes") or "", area_id=t["area_id"],
+                title=t["title"], short_code=t.get("short_code"), recurrence_label=t.get("recurrence_label"),
+                description=t.get("notes") or "", area_id=t["area_id"],
                 completion_definition=t.get("completion_definition") or "Kryerja konfirmohet nga përgjegjësi.",
                 schedule_hints=[{"trigger_type": r["trigger_type"], "start_time": r.get("start_time"),
-                    "end_time": r.get("end_time"), "notes": r.get("notes") or ""} for r in t.get("schedule_rules", [])],
+                    "end_time": r.get("end_time"), "notes": r.get("notes") or "",
+                    "weekdays": dataset_weekdays(r.get("weekdays")),
+                    "suggested_start_time": r.get("suggested_start_time"),
+                    "suggested_end_time": r.get("suggested_end_time")} for r in t.get("schedule_rules", [])],
                 assignment=t["assignment"], assignees=[t["person_id"]] if t.get("person_id") else [],
                 frequency=t["frequency"], steps=[s["instruction"] for s in sorted(t["steps"], key=lambda x: x["position"])],
                 reminder_group=t["details"]["reminder_group"], readiness=t["readiness"],
                 rotation_id=t.get("rotation_id"), enabled=False,
-                coverage_key=(t["area_id"] + ":normal") if t["id"].endswith(("_morning_room", "_room")) else None,
+                estimated_minutes=t.get("estimated_duration_minutes"),
+                weekdays=sorted({d for r in t.get("schedule_rules", []) for d in dataset_weekdays(r.get("weekdays"))}),
+                coverage_key=(t["area_id"] + ":normal") if t["id"].endswith(("_morning_room", "_room", "_room_daily")) else None,
             ).model_dump(mode="json")
         except (ValueError, KeyError, TypeError) as exc:
             raise HTTPException(422, "Model i pavlefshëm në dataset.") from exc
         parsed.append((t["id"], data))
     rotation = next((r for r in dataset.get("rotations", []) if r.get("id") == "nala"), None)
-    if not rotation or [m.get("person_id") for m in sorted(rotation["members"], key=lambda m: m["position"])] != ["rrita", "mrika", "lirza"]:
+    expected_order = ["lirza", "rrita", "mrika"] if dataset["format_version"] == 2 else ["rrita", "mrika", "lirza"]
+    if not rotation or [m.get("person_id") for m in sorted(rotation["members"], key=lambda m: m["position"])] != expected_order:
         raise HTTPException(422, "Rotacioni Nala duhet të ruajë tre anëtaret dhe rendin e tyre.")
+    if dataset["format_version"] == 2:
+        cycle = rotation["sunday_cycle"]
+        if (rotation.get("kind") != "weekday_fixed_sunday_cycle"
+            or rotation.get("timezone") != "Europe/Belgrade"
+            or rotation["weekday_owners_iso"] != dict(zip(map(str, range(6)), ["rrita", "mrika", "lirza"] * 2))
+            or cycle["order"] != expected_order
+            or date.fromisoformat(cycle["anchor_date"]).weekday() != 6):
+            raise HTTPException(422, "Rotacioni Nala nuk ka ditët dhe ciklin e së dielës të vlefshëm.")
     try:
         if rotation.get("anchor_date"):
             date.fromisoformat(rotation["anchor_date"])
     except ValueError as exc:
         raise HTTPException(422, "Data e rotacionit nuk është e vlefshme.") from exc
     return parsed, rotation
+
+
+def dataset_weekdays(value):
+    days = [] if value is None else [int(d) for d in value.split(",")] if isinstance(value, str) else value
+    if not isinstance(days, list) or any(type(d) is not int or d not in range(7) for d in days) or len(set(days)) != len(days):
+        raise ValueError("Invalid weekdays")
+    return days
+
+
+# Explicit identity changes in the reviewed v2 handoff. UUIDs and occurrences
+# stay attached to their original templates, including when a source ID changes.
+V2_SOURCE_ALIASES = {
+    "rrita_room_daily": "rrita_room", "rrita_bathroom_daily": "rrita_bathroom",
+    "mrika_room_daily": "mrika_room", "mrika_bathroom_daily": "mrika_bathroom",
+    "lirza_room_daily": "lirza_room", "lirza_bathroom_daily": "lirza_bathroom",
+    "mrika_living_daily": "mrika_living", "mrika_white_table_daily": "mrika_table",
+    "lirza_large_corridor_daily": "lirza_corridor", "lirza_library_daily": "lirza_library",
+    "lirza_library_corridor_daily": "lirza_library_corridor", "rrita_dishes_daily": "rrita_dishes",
+    "rrita_kitchen_daily": "rrita_kitchen", "rrita_long_corridor_daily": "rrita_corridor",
+    "mrika_living_deep": "living_room_deep", "mrika_white_table_deep": "white_table_deep",
+    "lirza_large_corridor_deep": "large_corridor_deep", "lirza_library_deep": "library_deep",
+    "lirza_library_corridor_deep": "library_corridor_deep", "rrita_kitchen_deep": "kitchen_deep",
+    "rrita_long_corridor_deep": "long_corridor_deep", "nala_prepare_before_sleep": "nala_prepare",
+    "roki_program_1": "roki_kitchen", "roki_program_2": "roki_weekend",
+}
+
+
+def untouched_import(row):
+    # Check the stored shape too: earlier imports predate new optional fields.
+    return bool(row.import_hash) and row.import_hash == document_hash({**row.definition, "enabled": False})
 
 
 async def import_dataset(db, member, dataset, *, apply=False, expected_hash=None, commit=True):
@@ -456,26 +548,46 @@ async def import_dataset(db, member, dataset, *, apply=False, expected_hash=None
     if apply and source_hash != expected_hash:
         raise HTTPException(409, "Dataset-i ndryshoi; bëj preview përsëri.")
     space = await lock_member_space(db, member, need_admin=True)
+    if dataset["format_version"] < space.config.get("dataset_version", 1):
+        raise HTTPException(409, "Dataset-i është më i vjetër se importi aktual.")
     existing = {t.source_id: t for t in (await db.execute(select(Template).where(Template.space_id == member.space_id, Template.source_id.is_not(None)))).scalars().all()}
     active_members = set((await db.execute(select(Member.person_key).join(User, User.id == Member.user_id).where(Member.space_id == member.space_id, Member.active.is_(True), User.is_active.is_(True)))).scalars().all())
-    conflicts, created, unchanged = [], [], []
+    conflicts, created, unchanged, updated, renamed, retired = [], [], [], [], {}, []
+    aliases = V2_SOURCE_ALIASES if dataset["format_version"] == 2 else {}
+    matched = {}
     for key, data in parsed:
-        current = existing.get(key)
+        current = existing.get(key) or existing.get(aliases.get(key))
+        matched[key] = current
+        if key in existing and aliases.get(key) in existing:
+            conflicts.append(key)
+            continue
         if current is None:
             created.append(key)
-        elif current.definition == data or (
+        elif (TemplateDefinition.model_validate(current.definition).model_dump(mode="json") == data or (
             current.import_hash == document_hash(data)
-            and {**current.definition, "enabled": data["enabled"]} == data
-        ):
+            and {**TemplateDefinition.model_validate(current.definition).model_dump(mode="json"), "enabled": False} == data
+        )) and current.source_id == key:
             # A reviewed seed can opt an otherwise untouched model into daily
             # generation. Re-import preserves that activation rather than
             # treating it as a source conflict or disabling it again.
             unchanged.append(key)
+        elif untouched_import(current) and not current.archived:
+            updated.append(key)
+            if current.source_id != key:
+                renamed[key] = current.source_id
         else:
             # Deliberately preserve local edits/activation on every re-import.
             conflicts.append(key)
+    # These two generic v1 preparation tasks are replaced by explicit v2 zone
+    # instructions. Archive them; never delete templates or completion history.
+    if dataset["format_version"] == 2:
+        for key in ("dust", "robot_prep"):
+            current = existing.get(key)
+            if current and not current.archived:
+                (retired if untouched_import(current) and not current.definition["enabled"] else conflicts).append(key)
     result = {"dataset_hash": source_hash, "templates": len(parsed), "steps": sum(len(d["steps"]) for _, d in parsed),
         "create": created, "unchanged": unchanged, "conflicts": conflicts,
+        "update": updated, "rename": renamed, "archive": retired,
         "unresolved_members": sorted(PEOPLE - active_members), "schedules_enabled": False,
         "open_decisions": dataset.get("open_decisions", [])}
     if not apply:
@@ -486,9 +598,20 @@ async def import_dataset(db, member, dataset, *, apply=False, expected_hash=None
     if prior:
         return {**result, "applied": True, "already_applied": True}
     for key, data in parsed:
-        if key not in existing:
+        current = matched[key]
+        if current is None:
             db.add(Template(space_id=member.space_id, source_id=key, created_by=member.user_id, definition=data, import_hash=document_hash(data)))
+        elif key in updated:
+            enabled = current.definition["enabled"] and data["readiness"] == "ready_after_setup" and data["assignment"] != "unassigned"
+            current.source_id, current.definition = key, {**data, "enabled": enabled}
+            current.import_hash, current.version = document_hash(data), current.version + 1
+    for key in retired:
+        existing[key].archived = True
+        existing[key].version += 1
     space.config = {**space.config, "rotation_anchor": rotation.get("anchor_date"),
+        "nala_rotation": rotation if dataset["format_version"] == 2 else None,
+        "dataset_version": dataset["format_version"],
+        "abbreviation_legend": dataset.get("abbreviation_legend", {}),
         "areas": dataset.get("areas", []), "activities": dataset.get("activities", []),
         "seed_settings": dataset.get("settings", {}),
         "open_decisions": dataset.get("open_decisions", []), "reminders_enabled": False}
