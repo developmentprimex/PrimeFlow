@@ -103,7 +103,8 @@ def settings_view(row: MiraHostSettings) -> dict:
             "ga_participants": row.ga_participants or [], "protocol_text": row.protocol_text or DEFAULT_PROTOCOL,
             "target_minutes_per_person": row.target_minutes_per_person,
             "knowledge_char_budget": row.knowledge_char_budget,
-            "configured": bool(settings.MIRA_HOST_ENABLED and settings.MIRA_HOST_BOT_TOKEN),
+            "configured": bool(settings.MIRA_HOST_ENABLED and settings.MIRA_HOST_BOT_TOKEN
+                               and (settings.MIRA_HOST_OPENAI_API_KEY or '').strip()),
             "slots": list(SLOTS)}
 
 
@@ -433,9 +434,10 @@ async def tick(db: AsyncSession, at: datetime | None = None) -> dict:
         # Nobody will schedule its summary now; "FAILED" offers "Provo përsëri" in the Mira view.
         stale.summary_status = "FAILED" if stale.host_transcript else "SKIPPED"
     row = await get_settings(db)
-    if not is_enabled(row, at) or at.weekday() >= 5:
+    enabled = bool(is_enabled(row, at) and (settings.MIRA_HOST_OPENAI_API_KEY or '').strip())
+    if not enabled or at.weekday() >= 5:
         await db.commit()
-        return {"enabled": is_enabled(row, at), "jobs": []}
+        return {"enabled": enabled, "jobs": []}
     day = at.date()
     jobs = []
     data = None
@@ -642,7 +644,8 @@ async def summarize(meeting_id: uuid.UUID) -> None:
                         + (". Detyra të krijuara: " + "; ".join(filter(None, created)) if created else "")
                         + (". Shënime në PX Notes: " + "; ".join(filter(None, px_notes)) if px_notes else "")})
         try:
-            meeting.summary = await provider.summarize_meeting(title, segments, meeting_date=meeting.meeting_date)
+            meeting.summary = await provider.summarize_meeting(title, segments, meeting_date=meeting.meeting_date,
+                                                             scope='host')
             meeting.summary_status = "READY"
         except Exception as exc:
             log.warning("Mira 1H summary failed meeting=%s error=%s", meeting_id, type(exc).__name__)
@@ -694,7 +697,7 @@ async def write_turn_notes(db: AsyncSession, meeting: Mira1HMeeting) -> None:
     payload = {"model": settings.DISCORD_AI_MODEL, "store": False, "text": {"format": {"type": "json_object"}},
                "input": [{"role": "system", "content": TURN_NOTES_SYSTEM},
                          {"role": "user", "content": json.dumps(wanted, ensure_ascii=False)[:60000]}]}
-    notes = json.loads(provider.output_text(await provider.request("responses", json=payload))).get("notes") or {}
+    notes = json.loads(provider.output_text(await provider.request("responses", scope='host', json=payload))).get("notes") or {}
     for turn, _ in turns:
         note = notes.get(str(turn.id))
         if isinstance(note, str) and note.strip():
@@ -1124,8 +1127,9 @@ KNOWLEDGE E PRIMEX{" (e shkurtuar; për më shumë përdor search_knowledge)" if
 async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
     """Short-lived OpenAI Realtime credential; the API key never leaves the backend."""
     import httpx
-    if not settings.OPENAI_API_KEY:
-        raise HTTPException(503, "OPENAI_API_KEY mungon.")
+    key = (settings.MIRA_HOST_OPENAI_API_KEY or '').strip()
+    if not key:
+        raise HTTPException(503, "MIRA_HOST_OPENAI_API_KEY mungon.")
     row = await get_settings(db)
     session = {
         "type": "realtime",
@@ -1154,7 +1158,7 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post("https://api.openai.com/v1/realtime/client_secrets",
-                headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+                headers={"Authorization": f"Bearer {key}"},
                 json={"expires_after": {"anchor": "created_at", "seconds": 600}, "session": session})
     except httpx.RequestError:
         raise HTTPException(502, "Nuk u lidhëm me OpenAI Realtime.") from None

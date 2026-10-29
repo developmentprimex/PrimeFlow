@@ -130,7 +130,7 @@ për audion. Përmbledhjet përdorin `DISCORD_AI_MODEL`; në server është vend
 Mira mund të hyjë me identitetin e botit ekzistues në një voice channel të
 zakonshëm dhe të marrë shënime pa folur. Aktivizo GitHub Actions variable
 `DISCORD_MEETING_NOTES_ENABLED=true` dhe bëj deploy; si parazgjedhje është
-`false`. Përdoren token-i i botit dhe `OPENAI_API_KEY` ekzistues. Nuk duhet bot i
+`false`. Përdoren token-i i botit dhe `MIRA_NOTES_OPENAI_API_KEY`. Nuk duhet bot i
 dytë. Variabla opsionale `DISCORD_VOICE_NODE_BINARY` zgjedh executable-n e Node;
 parazgjedhja është `node`. Kërkohet Node >=22.12.
 
@@ -270,7 +270,7 @@ Nëse dëshironi vetëm thirrje manuale, mos aktivizoni `/mira mbaj-takimet`; ai
 1. Krijo në Discord Developer Portal një aplikacion të ri "Mira Host". Në tab-in Bot merr token-in.
    Nuk duhen privileged intents.
 2. Fto botin në server me lejet View Channel, Connect dhe Speak në kanalin 1H.
-3. Shto Actions secret `MIRA_HOST_BOT_TOKEN` dhe variable `MIRA_HOST_ENABLED=true`, pastaj deploy.
+3. Shto Actions secrets `MIRA_HOST_BOT_TOKEN`, `MIRA_HOST_OPENAI_API_KEY` dhe variable `MIRA_HOST_ENABLED=true`, pastaj deploy.
    Migrimi `0157_mira_host` krijon tabelat.
 4. Sigurohu që Diellza, Gane, Elza, Olsa dhe stafi kanë bërë `/lidh`; kush s'e ka bërë nuk merr mesazhe.
    Emrat e ekipit GA, protokolli dhe minutat për person ndryshohen te **Mira → Cilësimet**.
@@ -327,7 +327,14 @@ Nëse dëshironi vetëm thirrje manuale, mos aktivizoni `/mira mbaj-takimet`; ai
    Worker-i është proces më vete; nuk nis nga API-ja. GitHub Actions e
    konfiguron dhe e nis automatikisht pasi API-ja të jetë gati, kur ekzistojnë
    Repository secrets `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` dhe
-   `DISCORD_BRIDGE_SECRET`. Kërkohet edhe `OPENAI_API_KEY`.
+   `DISCORD_BRIDGE_SECRET`. Kërkohet edhe `OPENAI_API_KEY` për bisedën e përgjithshme.
+   Shënimet e heshtura Discord/desktop dhe kujtesa e punës përdorin vetëm secret
+   `MIRA_NOTES_OPENAI_API_KEY`; Host Realtime, përmbledhjet dhe shënimet për person
+   përdorin vetëm `MIRA_HOST_OPENAI_API_KEY`. `KUJTESA_OPENAI_API_KEY` i takon vetëm
+   botit familjar. Vendosi si GitHub Actions secrets ose në `.env` lokal të injoruar;
+   deploy i shkruan në dotenv pa i kaluar përmes shell-it. Nëse çelësi i rolit mungon,
+   ai rol çaktivizohet; nuk përdor çelësin e përgjithshëm ose të një roli tjetër.
+   Analiza e regjistrimeve dhe veçoritë e tjera AI vazhdojnë me `OPENAI_API_KEY`.
    Biseda e lirë aktivizohet si parazgjedhje: aktivizo Message Content Intent
    edhe në Developer Portal. Deploy-i pret lidhjen reale dhe regjistrimin e komandave.
    Për ndryshime sekretesh, përdor Actions → Primex Auto Deploy → Run workflow

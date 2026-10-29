@@ -13,6 +13,8 @@ from app.models.ga_personal import GaPersonalSpace
 from app.schemas.ga_personal_discord import DiscordSettings, LeaseRequest, DeliveryResult, DiscordAction, PollRequest, SyncResult
 from app.services import ga_personal as tasks
 from app.services import ga_personal_discord as service
+from app.schemas.kujtesa_host import HostRequest
+from app.services import kujtesa_host
 
 router = APIRouter(route_class=PrivateRoute)
 
@@ -41,6 +43,16 @@ async def update_settings(payload: DiscordSettings, member=Depends(admin), db=De
 @router.post("/bridge/poll")
 async def poll(payload: PollRequest = Body(default=PollRequest()), space=Depends(bridge), db=Depends(get_db)):
     return await service.poll(db, space, delivery_enabled=payload.delivery_enabled, health_only=payload.health_only)
+
+
+@router.post("/bridge/host/context")
+async def host_context(payload: HostRequest, space=Depends(bridge), db=Depends(get_db)):
+    return await kujtesa_host.context(db, space, payload)
+
+
+@router.post("/bridge/host/start")
+async def host_start(payload: HostRequest, space=Depends(bridge), db=Depends(get_db)):
+    return await kujtesa_host.start(db, space, payload)
 
 
 @router.post("/bridge/deliveries/{delivery_id}/prepare")

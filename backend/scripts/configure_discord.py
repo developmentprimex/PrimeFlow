@@ -14,6 +14,9 @@ KEYS = (
     "DISCORD_MEETING_VOICE_CHANNEL_ID", "DISCORD_MEETING_NOTES_ENABLED", "DISCORD_VOICE_NODE_BINARY",
     "MIRA_MEMORY_ENABLED", "MIRA_HOST_ENABLED", "MIRA_HOST_BOT_TOKEN",
     "DISCORD_AI_AGENT_VOICE_CHANNEL_ID", "DISCORD_AI_AGENT_BOT_USER_ID",
+    "MIRA_NOTES_OPENAI_API_KEY", "MIRA_HOST_OPENAI_API_KEY", "KUJTESA_OPENAI_API_KEY",
+    "KUJTESA_HOST_ENABLED", "KUJTESA_HOST_MODEL", "KUJTESA_HOST_VOICE",
+    "GA_PERSONAL_ENABLED", "GA_PERSONAL_DISCORD_BRIDGE_SECRET",
 )
 REQUIRED = ("DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_BRIDGE_SECRET")
 
@@ -52,13 +55,28 @@ def build_config(env: dict | os._Environ) -> dict[str, str]:
     voice_enabled = boolean(values["DISCORD_MEETING_NOTES_ENABLED"] or "false", "DISCORD_MEETING_NOTES_ENABLED")
     if voice_enabled and not enabled:
         raise ValueError("Meeting notes require the Discord assistant to be enabled.")
+    if voice_enabled and not values["MIRA_NOTES_OPENAI_API_KEY"]:
+        raise ValueError("DISCORD_MEETING_NOTES_ENABLED requires MIRA_NOTES_OPENAI_API_KEY.")
     values["DISCORD_MEETING_NOTES_ENABLED"] = str(voice_enabled).lower()
     values["DISCORD_VOICE_NODE_BINARY"] = values["DISCORD_VOICE_NODE_BINARY"] or "node"
     values["MIRA_MEMORY_ENABLED"] = str(boolean(values["MIRA_MEMORY_ENABLED"] or "false", "MIRA_MEMORY_ENABLED")).lower()
     host_enabled = boolean(values["MIRA_HOST_ENABLED"] or "false", "MIRA_HOST_ENABLED")
     if host_enabled and not (enabled and values["MIRA_HOST_BOT_TOKEN"]):
         raise ValueError("MIRA_HOST_ENABLED requires the Discord assistant and the MIRA_HOST_BOT_TOKEN secret.")
+    if host_enabled and not values["MIRA_HOST_OPENAI_API_KEY"]:
+        raise ValueError("MIRA_HOST_ENABLED requires MIRA_HOST_OPENAI_API_KEY.")
     values["MIRA_HOST_ENABLED"] = str(host_enabled).lower()
+    values["GA_PERSONAL_ENABLED"] = str(boolean(values["GA_PERSONAL_ENABLED"] or "false", "GA_PERSONAL_ENABLED")).lower()
+    values["KUJTESA_HOST_ENABLED"] = str(boolean(values["KUJTESA_HOST_ENABLED"] or "false", "KUJTESA_HOST_ENABLED")).lower()
+    if values["KUJTESA_HOST_ENABLED"] == "true" and not values["KUJTESA_OPENAI_API_KEY"]:
+        raise ValueError("KUJTESA_HOST_ENABLED requires KUJTESA_OPENAI_API_KEY.")
+    if values["KUJTESA_HOST_ENABLED"] == "true":
+        if values["GA_PERSONAL_ENABLED"] != "true":
+            raise ValueError("KUJTESA_HOST_ENABLED requires GA_PERSONAL_ENABLED=true.")
+        if len(values["GA_PERSONAL_DISCORD_BRIDGE_SECRET"]) < 32:
+            raise ValueError("KUJTESA_HOST_ENABLED requires GA_PERSONAL_DISCORD_BRIDGE_SECRET with at least 32 characters.")
+    values["KUJTESA_HOST_MODEL"] = values["KUJTESA_HOST_MODEL"] or "gpt-realtime-2.1-mini"
+    values["KUJTESA_HOST_VOICE"] = values["KUJTESA_HOST_VOICE"] or "marin"
     values["DISCORD_ASSISTANT_ENABLED"] = str(enabled).lower()
     values["DISCORD_MESSAGE_CONTENT_ENABLED"] = str(boolean(values["DISCORD_MESSAGE_CONTENT_ENABLED"] or "true", "DISCORD_MESSAGE_CONTENT_ENABLED")).lower()
     values["DISCORD_AI_MODEL"] = values["DISCORD_AI_MODEL"] or "gpt-5.4-mini"

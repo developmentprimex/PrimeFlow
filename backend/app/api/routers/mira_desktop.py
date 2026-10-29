@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.get('/capabilities')
 async def capabilities(user=Depends(get_current_user)):
-    return dict(enabled=bool(settings.OPENAI_API_KEY), user_id=str(user.id),
+    return dict(enabled=bool((settings.MIRA_NOTES_OPENAI_API_KEY or '').strip()), user_id=str(user.id),
         max_segment_seconds=10, max_duration_seconds=14400, frontend_url=settings.FRONTEND_URL)
 
 

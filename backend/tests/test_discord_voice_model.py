@@ -62,7 +62,7 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
                         voice_channel_id='55', request_id=request, instance_id=uuid.uuid4(), capture_token='a'*40, title='Staff'))
                 except Exception as exc:
                     return exc
-        with patch.object(settings, 'DISCORD_MEETING_NOTES_ENABLED', True), patch.object(settings, 'OPENAI_API_KEY', 'test'), patch.object(settings, 'DISCORD_GUILD_ID', '123'):
+        with patch.object(settings, 'DISCORD_MEETING_NOTES_ENABLED', True), patch.object(settings, 'MIRA_NOTES_OPENAI_API_KEY', 'test'), patch.object(settings, 'DISCORD_GUILD_ID', '123'):
             results = await asyncio.gather(start('100'), start('101'))
             successes = [r for r in results if isinstance(r, dict)]
             self.assertEqual(len(successes), 1)
@@ -111,7 +111,7 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
                     voice_channel_id=channel, recorder=recorder, request_id=request,
                     instance_id=uuid.uuid4(), capture_token=('a' if recorder == 'primary' else 'b') * 40, title=recorder))
         with patch.object(settings, 'DISCORD_MEETING_NOTES_ENABLED', True), \
-             patch.object(settings, 'OPENAI_API_KEY', 'test'), patch.object(settings, 'DISCORD_GUILD_ID', '123'), \
+             patch.object(settings, 'MIRA_NOTES_OPENAI_API_KEY', 'test'), patch.object(settings, 'DISCORD_GUILD_ID', '123'), \
              patch.object(settings, 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID', '66'):
             one, two = await asyncio.gather(start('201', 'primary', '55'), start('202', 'ai_agent', '66'))
             self.assertNotEqual(one['id'], two['id'])

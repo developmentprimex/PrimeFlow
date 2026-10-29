@@ -133,6 +133,7 @@ class TickTests(unittest.IsolatedAsyncioTestCase):
         self.data = payload([item('EF', '10:00', 'A', rank=0), item('RA', '11:00', 'B', rank=0)])
         targets = {uid: {'discord_user_id': str(n), 'guild_id': '1', 'channel_id': str(100 + n)} for n, uid in enumerate(IDS.values())}
         self.patches = [patch.object(host, 'get_settings', AsyncMock(return_value=self.row)),
+                        patch.object(settings, 'MIRA_HOST_OPENAI_API_KEY', 'host-test'),
                         patch.object(host, 'common_payload', AsyncMock(return_value=self.data)),
                         patch.object(host, 'claim_event', AsyncMock(return_value=True)),
                         patch.object(host, 'discord_targets', AsyncMock(side_effect=lambda db, ids: {i: targets[i] for i in ids}))]
@@ -179,7 +180,7 @@ class RealtimeSessionTests(unittest.IsolatedAsyncioTestCase):
                 sent.update(json)
                 return SimpleNamespace(is_error=False, json=lambda: {'value': 'ek_test'})
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:50')
-        with patch.object(settings, 'OPENAI_API_KEY', 'sk-test'), patch('httpx.AsyncClient', Client),              patch.object(host, 'get_settings', AsyncMock(return_value=MiraHostSettings(knowledge_char_budget=1000))),              patch.object(host, 'instructions', AsyncMock(return_value='Test')):
+        with patch.object(settings, 'MIRA_HOST_OPENAI_API_KEY', 'sk-test'), patch('httpx.AsyncClient', Client),              patch.object(host, 'get_settings', AsyncMock(return_value=MiraHostSettings(knowledge_char_budget=1000))),              patch.object(host, 'instructions', AsyncMock(return_value='Test')):
             result = await host.realtime_session(SimpleNamespace(), meeting)
         self.assertEqual(result['client_secret'], 'ek_test')
         self.assertNotIn('language', sent['session']['audio']['input']['transcription'])

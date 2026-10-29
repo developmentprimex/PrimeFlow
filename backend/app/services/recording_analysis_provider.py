@@ -137,7 +137,7 @@ async def transcribe(wav: bytes, language: str, *, vocabulary=(), previous=''):
             data['languages[]'] = [language]
         else:
             data['language'] = language
-    body = await with_retries(lambda: request('audio/transcriptions', timeout=TRANSCRIBE_TIMEOUT,
+    body = await with_retries(lambda: request('audio/transcriptions', timeout=TRANSCRIBE_TIMEOUT, scope='general',
         data=data, files={'file': ('segment.wav', wav, 'audio/wav')}))
     text = body.get('text')
     if not isinstance(text, str) or len(text) > 20000:
@@ -302,7 +302,7 @@ async def analyze_meeting(title, segments, *, meeting_day, participants=(), cach
         key = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         if key in cache:
             return cache[key]
-        response = await with_retries(lambda: request('responses', timeout=ANALYSIS_TIMEOUT, json=payload))
+        response = await with_retries(lambda: request('responses', timeout=ANALYSIS_TIMEOUT, scope='general', json=payload))
         text = ''.join(part['text'] for item in response.get('output', []) if item.get('type') == 'message'
             for part in item.get('content', []) if part.get('type') == 'output_text' and isinstance(part.get('text'), str))
         if not text or len(text) > 100000:

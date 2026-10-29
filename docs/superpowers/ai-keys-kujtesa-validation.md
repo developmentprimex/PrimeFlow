@@ -1,0 +1,56 @@
+# Separate AI credentials and Kujtesa validation
+
+Full backend discovery was compared against the unchanged base commit `8ec6ca29` in a separate worktree.
+
+- Base: 1566 tests, 18 failures, 16 errors, 184 skipped.
+- Feature: 1619 tests, 18 failures, 16 errors, 184 skipped.
+- The exact failure and error IDs match the base. No new failures were introduced.
+- Additional final changes to deployment bridge validation and live family-context refresh were checked with focused regression suites.
+
+The full backend suite is not green. Its pre-existing failing checks are recorded below. The dashboard JavaScript comparison also needs frontend TypeScript dependencies in the worktree.
+
+## Existing failures
+
+- `test_confirmation_table_includes_category_column (test_after_break_confirmation_category.AfterBreakConfirmationCategoryTests.test_confirmation_table_includes_category_column)`
+- `test_new_system_tasks_include_department_and_finish_period (test_after_break_confirmation_category.NewSystemTaskRowsTests.test_new_system_tasks_include_department_and_finish_period)`
+- `test_settings_routes_require_admin (test_meetings_report_workflow.MeetingsReportWorkflowTests.test_settings_routes_require_admin)`
+- `test_edited_auto_title_keeps_m1_identity_position_and_group (test_morning_report_workflow.MorningReportWorkflowTests.test_edited_auto_title_keeps_m1_identity_position_and_group)`
+- `test_email_html_is_mobile_safe_and_contains_m1_heading (test_morning_report_workflow.MorningReportWorkflowTests.test_email_html_is_mobile_safe_and_contains_m1_heading)`
+- `test_normalization_drops_duplicate_near_match_email_section (test_morning_report_workflow.MorningReportWorkflowTests.test_normalization_drops_duplicate_near_match_email_section)`
+- `test_normalization_keeps_all_six_m1_questions_and_saved_edits (test_morning_report_workflow.MorningReportWorkflowTests.test_normalization_keeps_all_six_m1_questions_and_saved_edits)`
+- `test_normalization_removes_retired_task_status_prompt (test_morning_report_workflow.MorningReportWorkflowTests.test_normalization_removes_retired_task_status_prompt)`
+- `test_normalization_renames_the_previous_notes_section (test_morning_report_workflow.MorningReportWorkflowTests.test_normalization_renames_the_previous_notes_section)`
+- `test_normalization_splits_legacy_notes_emails_into_manual_section (test_morning_report_workflow.MorningReportWorkflowTests.test_normalization_splits_legacy_notes_emails_into_manual_section)`
+- `test_saved_m1_content_can_be_edited (test_morning_report_workflow.MorningReportWorkflowTests.test_saved_m1_content_can_be_edited)`
+- `test_settings_routes_require_admin (test_morning_report_workflow.MorningReportWorkflowTests.test_settings_routes_require_admin)`
+- `test_mst_title_known_total_no_progress (test_project_display_title.TestProjectDisplayTitle.test_mst_title_known_total_no_progress)`
+- `test_trailing_total_is_normalized (test_project_display_title.TestProjectDisplayTitle.test_trailing_total_is_normalized)`
+- `test_project_like_pcm_titles_are_not_fast (test_task_classification.TestTaskClassification.test_project_like_pcm_titles_are_not_fast) (title='MST OTTO - MR 370')`
+- `test_project_like_pcm_titles_are_not_fast (test_task_classification.TestTaskClassification.test_project_like_pcm_titles_are_not_fast) (title='TT - Something')`
+- `test_project_like_pcm_titles_are_not_fast (test_task_classification.TestTaskClassification.test_project_like_pcm_titles_are_not_fast) (title='VS/VL PROJEKT I MADH - X')`
+- `test_project_like_pcm_titles_are_not_fast (test_task_classification.TestTaskClassification.test_project_like_pcm_titles_are_not_fast) (title='VS VL PROJEKT I MADH - X')`
+
+## Existing errors
+
+- `test_matches_realization_dashboard_function (test_daily_realization_summary.DailyRealizationSummaryTests.test_matches_realization_dashboard_function)`
+- `test_daily_report_system_occurrence_filter (unittest.loader._FailedTest.test_daily_report_system_occurrence_filter)`
+- `test_default_filters_inactive (test_list_tasks_inactive_filter.TestListTasksInactiveFilter.test_default_filters_inactive)`
+- `test_include_inactive_true_skips_filter (test_list_tasks_inactive_filter.TestListTasksInactiveFilter.test_include_inactive_true_skips_filter)`
+- `test_added_morning_table_preserves_original_and_accepts_comments_for_new_tasks (test_m2_reporting_points.ReportPersistenceTests.test_added_morning_table_preserves_original_and_accepts_comments_for_new_tasks)`
+- `test_postponement_comments_save_and_export_without_affecting_delivery_answers (test_m2_reporting_points.ReportPersistenceTests.test_postponement_comments_save_and_export_without_affecting_delivery_answers)`
+- `test_saving_answers_merges_and_rejects_task_from_another_report (test_m2_reporting_points.ReportPersistenceTests.test_saving_answers_merges_and_rejects_task_from_another_report)`
+- `test_delivery_answers_save_only_for_report_tasks (test_m3_delivery.DeliveryAnswerTests.test_delivery_answers_save_only_for_report_tasks)`
+- `test_scheduler_regenerates_sections_before_sending (test_morning_report_workflow.MorningReportWorkflowTests.test_scheduler_regenerates_sections_before_sending)`
+- `test_department_and_note_editors_move_the_same_daily_row_to_pm (test_note_task_finish_period_sync.TestNoteTaskFinishPeriodSync.test_department_and_note_editors_move_the_same_daily_row_to_pm) (source='GA_KA', editor='note', status=<TaskStatus.TODO: 'TODO'>)`
+- `test_department_and_note_editors_move_the_same_daily_row_to_pm (test_note_task_finish_period_sync.TestNoteTaskFinishPeriodSync.test_department_and_note_editors_move_the_same_daily_row_to_pm) (source='GA_KA', editor='note', status=<TaskStatus.IN_PROGRESS: 'IN_PROGRESS'>)`
+- `test_department_and_note_editors_move_the_same_daily_row_to_pm (test_note_task_finish_period_sync.TestNoteTaskFinishPeriodSync.test_department_and_note_editors_move_the_same_daily_row_to_pm) (source='PX_JAV', editor='note', status=<TaskStatus.TODO: 'TODO'>)`
+- `test_department_and_note_editors_move_the_same_daily_row_to_pm (test_note_task_finish_period_sync.TestNoteTaskFinishPeriodSync.test_department_and_note_editors_move_the_same_daily_row_to_pm) (source='PX_JAV', editor='note', status=<TaskStatus.IN_PROGRESS: 'IN_PROGRESS'>)`
+- `test_list_system_tasks_includes_templates_without_generated_rows (test_system_tasks_list_generated_only.TestSystemTasksListGeneratedOnly.test_list_system_tasks_includes_templates_without_generated_rows)`
+- `test_list_system_tasks_with_occurrence_date_excludes_previous_occurrence_templates (test_system_tasks_list_generated_only.TestSystemTasksListGeneratedOnly.test_list_system_tasks_with_occurrence_date_excludes_previous_occurrence_templates)`
+- `test_any_authenticated_staff_user_can_update_a_one_h_marker (test_task_update_permissions.TestTaskUpdatePermissions.test_any_authenticated_staff_user_can_update_a_one_h_marker)`
+
+## Runtime checks
+
+All three supplied credentials passed a read-only OpenAI models authentication check. Dedicated keys and the pre-existing matching private family bridge key were encrypted into GitHub Actions secrets. None of the supplied credential values are present in committed source.
+
+The existing Node voice worker passed its local `--check` without connecting to Discord. The family adapter was installed locally without starting a bot, sending messages, changing task grants, or enabling reminder delivery. Live conversation and production rollout remain untested until the change is deployed and an authorized administrator starts a meeting.

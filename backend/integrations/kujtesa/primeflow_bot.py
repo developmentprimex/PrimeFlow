@@ -89,8 +89,11 @@ def card_view(card):
 
 
 class KujtesaBridge(discord.Client):
-    def __init__(self, base_url, bridge_key, *, reminders_enabled=False, receipt_path=STATE):
-        super().__init__(intents=discord.Intents.default(), allowed_mentions=discord.AllowedMentions.none())
+    def __init__(self, base_url, bridge_key, *, reminders_enabled=False, receipt_path=STATE,
+                 host_enabled=False, host_worker="", node_binary="node"):
+        intents = discord.Intents.default()
+        intents.voice_states = bool(host_enabled)
+        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         parsed = urlparse(base_url)
         if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}):
             raise ValueError("Use HTTPS for remote PrimeFlow, or HTTP only on localhost.")
@@ -102,6 +105,15 @@ class KujtesaBridge(discord.Client):
         self.receipts = ReceiptStore(receipt_path)
         self.http_session = None
         self.allowed_user_ids = set()
+        self.host = None
+        if host_enabled:
+            if __package__:
+                from .voice_host import KujtesaHost, register_commands
+            else:
+                from voice_host import KujtesaHost, register_commands
+            self.host = KujtesaHost(self, worker=host_worker, node=node_binary)
+            self.tree = discord.app_commands.CommandTree(self)
+            register_commands(self)
 
     async def api(self, path, body):
         if self.http_session is None or self.http_session.closed:
@@ -114,13 +126,25 @@ class KujtesaBridge(discord.Client):
             return data
 
     async def setup_hook(self):
+        if self.host:
+            await self.tree.sync()
         self.worker.start()
 
     async def close(self):
         self.worker.cancel()
+        if self.host:
+            await self.host.stop()
         if self.http_session:
             await self.http_session.close()
         await super().close()
+
+    async def on_voice_state_update(self, member, before, after):
+        if self.host:
+            await self.host.on_voice_state_update(member, before, after)
+
+    async def on_guild_channel_update(self, before, after):
+        if self.host:
+            await self.host.on_channel_update(before, after)
 
     @tasks.loop(seconds=15)
     async def worker(self):
@@ -282,7 +306,10 @@ def main():
     key = os.environ.get("PRIMEFLOW_GA_BRIDGE_KEY", "").strip()
     if not base or len(key) < 32:
         raise SystemExit("Configure PRIMEFLOW_API_URL and PRIMEFLOW_GA_BRIDGE_KEY in bot/.env.")
-    bot = KujtesaBridge(base, key, reminders_enabled=os.environ.get("REMINDERS_ENABLED") == "1")
+    bot = KujtesaBridge(base, key, reminders_enabled=os.environ.get("REMINDERS_ENABLED") == "1",
+                       host_enabled=os.environ.get("KUJTESA_HOST_ENABLED") == "1",
+                       host_worker=os.environ.get("KUJTESA_HOST_WORKER", "").strip(),
+                       node_binary=os.environ.get("KUJTESA_VOICE_NODE_BINARY", "node").strip())
     if args.check:
         async def check():
             try:

@@ -22,7 +22,7 @@ def client():
 
 
 def test_capabilities_independent_of_discord_flag():
-    with patch.object(service.settings, 'OPENAI_API_KEY', 'fake'), patch.object(
+    with patch.object(service.settings, 'MIRA_NOTES_OPENAI_API_KEY', 'fake'), patch.object(
             service.settings, 'DISCORD_MEETING_NOTES_ENABLED', False):
         response = client().get('/api/mira-desktop/capabilities')
     assert response.status_code == 200

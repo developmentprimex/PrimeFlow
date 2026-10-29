@@ -33,7 +33,7 @@ def now():
 
 
 def enabled():
-    if not settings.OPENAI_API_KEY:
+    if not (settings.MIRA_NOTES_OPENAI_API_KEY or '').strip():
         raise HTTPException(503, 'mira_desktop_not_configured')
 
 

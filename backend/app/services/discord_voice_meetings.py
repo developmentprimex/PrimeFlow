@@ -68,7 +68,7 @@ async def worker_row(db, session_id, payload):
 
 
 async def start_session(db, actor):
-    if not settings.DISCORD_MEETING_NOTES_ENABLED or not settings.OPENAI_API_KEY:
+    if not settings.DISCORD_MEETING_NOTES_ENABLED or not (settings.MIRA_NOTES_OPENAI_API_KEY or '').strip():
         raise HTTPException(503, 'Shënimet e takimeve nuk janë aktivizuar.')
     link, user = await bridge.identity(db, actor)
     if not actor.voice_channel_id:
