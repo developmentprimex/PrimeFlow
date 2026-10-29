@@ -36,14 +36,14 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rate_limited_transcription_waits_and_retries_the_same_segment(self):
         seen,client=self.openai((429,{'retry-after':'3'},{'error':{}}),(503,{},{'error':{}}),(200,{},{'text':'Po.'}))
-        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
+        with patch.object(settings,'MIRA_NOTES_OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
             self.assertEqual(await provider.transcribe_segment(wav()),'Po.')
         self.assertEqual(len(seen),3)
         self.assertEqual([c.args[0] for c in sleep.await_args_list],[3.0,4])
 
     async def test_rejected_transcription_is_not_retried_and_keeps_the_http_status(self):
         seen,client=self.openai((400,{},{'error':{}}))
-        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()):
+        with patch.object(settings,'MIRA_NOTES_OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()):
             with self.assertRaises(provider.ProviderError) as caught:await provider.transcribe_segment(wav())
         self.assertEqual(len(seen),1);self.assertEqual(caught.exception.status,400)
         # Other callers match on this message, so it must not change.
@@ -51,7 +51,7 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_persistent_rate_limit_gives_up_within_the_bot_upload_timeout(self):
         seen,client=self.openai(*[(429,{'retry-after':'120'},{'error':{}})]*5)
-        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
+        with patch.object(settings,'MIRA_NOTES_OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
             with self.assertRaises(provider.ProviderError) as caught:await provider.transcribe_segment(wav())
         self.assertEqual(caught.exception.status,429);self.assertEqual(len(seen),3)
         self.assertLessEqual(sum(c.args[0] for c in sleep.await_args_list)+3*provider.TRANSCRIBE_TIMEOUT,90)
@@ -139,7 +139,7 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rate_limited_notes_wait_and_retry_with_a_long_timeout(self):
         seen,client=self.openai((429,{'retry-after':'7'},{'error':{}}),(200,{},text_response('**Përmbledhja:** x')))
-        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
+        with patch.object(settings,'MIRA_NOTES_OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()) as sleep:
             result=await provider.summarize_meeting('1H',[{'segment':0,'speaker':'Ana','time':'00:00–00:05','text':'Po.'}])
         self.assertTrue(result.endswith('**Përmbledhja:** x'));self.assertEqual(len(seen),2)
         self.assertEqual([c.args[0] for c in sleep.await_args_list],[7.0])
@@ -147,7 +147,7 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rejected_notes_request_is_not_retried(self):
         seen,client=self.openai((400,{},{'error':{}}))
-        with patch.object(settings,'OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()):
+        with patch.object(settings,'MIRA_NOTES_OPENAI_API_KEY','test'),client,patch.object(provider.asyncio,'sleep',AsyncMock()):
             with self.assertRaises(provider.ProviderError) as caught:
                 await provider.summarize_meeting('1H',[{'segment':0,'speaker':'Ana','time':'','text':'Po.'}])
         self.assertEqual(len(seen),1);self.assertFalse(caught.exception.transient)

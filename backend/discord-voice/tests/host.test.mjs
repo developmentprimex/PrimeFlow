@@ -188,6 +188,89 @@ test('tool calls go to PrimeFlow and the answer continues only when all results 
   assert.equal(sent.filter(e=>e.type==='conversation.item.create').length,2);
 });
 
+test('a fast tool result resumes exactly once after its originating response ends',()=>{
+  const {host,sent}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'r1'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'c1',name:'end_person_turn',arguments:'{}'}});
+  host.toolResult('c1',{RADHA:{person:'Elsa'}});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host._onRealtime({type:'response.done',response:{id:'r1'}});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host.toolResult('c1',{RADHA:{person:'Elsa'}});
+  host._onRealtime({type:'response.created',response:{id:'r2'}});
+  host._onRealtime({type:'response.done',response:{id:'r2'}});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+});
+
+test('mixed result arrival waits for every tool and continues once',()=>{
+  const {host,sent}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'r1'}});
+  for(const call_id of ['c1','c2'])
+    host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id,name:'list_ga_tasks',arguments:'{}'}});
+  host.toolResult('c1',{});
+  host._onRealtime({type:'response.done',response:{id:'r1'}});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host.toolResult('c2',{});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host.toolResult('c2',{});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+});
+
+test('a queued handoff and a tool result share one response without a second answer',()=>{
+  const {host,sent}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'r1'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'c1',name:'list_ga_tasks',arguments:'{}'}});
+  host.say('SISTEMI: RADHA EF');
+  host._onRealtime({type:'response.done',response:{id:'r1'}});
+  host.toolResult('c1',{});
+  assert.equal(sent.filter(e=>e.item?.content?.[0]?.text==='SISTEMI: RADHA EF').length,1);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host._onRealtime({type:'response.created',response:{id:'r2'}});
+  host._onRealtime({type:'response.done',response:{id:'r2'}});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+});
+
+test('a fast real tool still resumes when a silence tool is in the same response',()=>{
+  const {host,sent,events}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'r1'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'c1',name:'save_px_note',arguments:'{}'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'w1',name:'wait_for_user',arguments:'{}'}});
+  host.toolResult('c1',{success:true});
+  host._onRealtime({type:'response.done',response:{id:'r1'}});
+  assert.deepEqual(events.filter(e=>e.type==='tool_call').map(e=>e.call_id),['c1']);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+});
+
+test('tool continuation waits for a speaking person before responding',()=>{
+  const {host,sent,advance}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'r1'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'c1',name:'list_ga_tasks',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'r1'}});
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'u1'});
+  host.toolResult('c1',{});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'u1'});
+  advance(1200);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+});
+
+for(const silent of [false,true])
+  test(`an automatic ${silent?'silent':'spoken'} reply consumes tool results without a duplicate answer`,()=>{
+    const {host,sent,advance}=fakes();
+    host._onRealtime({type:'response.created',response:{id:'r1'}});
+    host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'c1',name:'save_px_note',arguments:'{}'}});
+    host._onRealtime({type:'response.done',response:{id:'r1'}});
+    host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'u1'});
+    host.toolResult('c1',{success:true});
+    host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'u1'});
+    // Realtime's create_response=true responds to the speaker with the result already in context.
+    host._onRealtime({type:'response.created',response:{id:'auto'}});
+    if(silent)host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'w1',name:'wait_for_user',arguments:'{}'}});
+    host._onRealtime({type:'response.done',response:{id:'auto'}});
+    advance(1200);
+    assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  });
+
 test('system messages wait for the current answer to finish',()=>{
   const {host,sent}=fakes();
   host._onRealtime({type:'response.created',response:{id:'r1'}});

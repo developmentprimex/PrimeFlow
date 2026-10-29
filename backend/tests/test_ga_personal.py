@@ -467,6 +467,231 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             self.assertEqual((await db.execute(select(func.count(Delivery.id)))).scalar_one(), 0)
 
+    async def bridge_setup(self, *, destination="dm", owner="rrita"):
+        secret_patch = patch.dict(settings.__dict__, {"GA_PERSONAL_DISCORD_BRIDGE_SECRET": "test-only-bridge-secret-which-is-long-enough"})
+        secret_patch.start(); self.patchers.append(secret_patch)
+        await self.unlock()
+        config = {"enabled": True, "guild_id": "111111111111111111", "channel_id": "222222222222222222",
+                  "user_ids": {"rrita": "333333333333333333", "gane": "444444444444444444"}, "expected_version": 0}
+        response = await self.client.put("/api/ga-personal/discord/settings", json=config)
+        self.assertEqual(response.status_code, 200, response.text)
+        d = definition(); d.update(assignees=[owner], due_time="17:00", discord_destination=destination)
+        await self.add_template(d); await self.generate()
+        return (await self.client.get("/api/ga-personal/occurrences")).json()[0]
+
+    async def bridge_poll(self, at):
+        with patch("app.services.ga_personal_discord.utcnow", return_value=datetime.fromisoformat(at)):
+            return await self.client.post("/api/ga-personal/bridge/poll", headers={"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"})
+
+    async def test_bridge_requires_its_own_secret_and_explicit_admin_grant(self):
+        response = await self.client.post("/api/ga-personal/bridge/poll")
+        self.assertEqual(response.status_code, 401)
+        row = await self.bridge_setup()
+        self.assertTrue(row)
+        self.as_person("outsider")
+        response = await self.client.put("/api/ga-personal/discord/settings", json={"enabled": False, "expected_version": 1})
+        self.assertEqual(response.status_code, 403)
+        self.as_person("mrika"); await self.unlock()
+        self.assertEqual((await self.client.get("/api/ga-personal/discord/settings")).status_code, 403)
+        self.assertEqual((await self.client.post("/api/ga-personal/bridge/poll", headers={"X-GA-Bridge-Key": "wrong"})).status_code, 401)
+
+    async def test_bridge_three_phases_are_not_duplicated_by_poll_or_acknowledgement(self):
+        await self.bridge_setup()
+        first = await self.bridge_poll("2026-11-07T15:55:00+00:00")
+        self.assertEqual(first.status_code, 200, first.text)
+        delivery = first.json()["deliveries"][0]
+        self.assertEqual(delivery["phase"], "before")
+        self.assertEqual(delivery["target"], {"kind": "dm", "user_id": "333333333333333333"})
+        headers = {"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}
+        root = f'/api/ga-personal/bridge/deliveries/{delivery["id"]}'
+        report = {"lease": delivery["lease"], "outcome": "sent", "channel_id": "555555555555555555", "message_id": "666666666666666666"}
+        self.assertEqual((await self.client.post(root+"/result", headers=headers, json=report)).status_code, 200)
+        action = {"actor_id": "333333333333333333", "guild_id": None, "channel_id": report["channel_id"],
+                  "message_id": report["message_id"], "interaction_id": "777777777777777777", "action": "acknowledged"}
+        self.assertEqual((await self.client.post(root+"/action", headers=headers, json=action)).status_code, 200)
+        self.assertEqual((await self.bridge_poll("2026-11-07T15:55:10+00:00")).json()["deliveries"], [])
+        self.assertEqual((await self.bridge_poll("2026-11-07T16:00:00+00:00")).json()["deliveries"][0]["phase"], "due")
+        self.assertEqual((await self.bridge_poll("2026-11-07T16:05:00+00:00")).json()["deliveries"][0]["phase"], "after")
+        self.assertEqual((await self.bridge_poll("2026-11-07T16:10:00+00:00")).json()["deliveries"], [])
+
+    async def test_bridge_missing_id_does_not_block_other_people_or_leak_to_channel(self):
+        await self.bridge_setup(owner="mrika")
+        d = definition(); d.update(assignees=["rrita"], due_time="17:00")
+        await self.add_template(d); await self.generate()
+        result = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()
+        self.assertEqual(len(result["deliveries"]), 1)
+        self.assertEqual(result["deliveries"][0]["assignees"], ["rrita"])
+        self.assertIn("mrika", result["missing_people"])
+
+    async def test_bridge_reassignment_invalidates_claim_and_never_uses_old_schedule(self):
+        row = await self.bridge_setup()
+        delivery = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        response = await self.client.patch(f'/api/ga-personal/occurrences/{row["id"]}', json={"expected_version": 1,
+            "request_id": str(uuid.uuid4()), "local_date": row["local_date"], "due_time": "18:30", "assignees": ["gane"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        response = await self.client.post(f'/api/ga-personal/bridge/deliveries/{delivery["id"]}/prepare',
+            headers={"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}, json={"lease": delivery["lease"]})
+        self.assertEqual(response.status_code, 409)
+        fresh = (await self.bridge_poll("2026-11-07T17:25:00+00:00")).json()["deliveries"]
+        self.assertEqual(len(fresh), 1)
+        self.assertEqual(fresh[0]["target"]["user_id"], "444444444444444444")
+
+    async def test_bridge_completion_checks_exact_message_actor_and_is_idempotent(self):
+        row = await self.bridge_setup()
+        headers = {"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}
+        delivery = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        root = f'/api/ga-personal/bridge/deliveries/{delivery["id"]}'
+        report = {"lease": delivery["lease"], "outcome": "sent", "channel_id": "555555555555555555", "message_id": "666666666666666666"}
+        self.assertEqual((await self.client.post(root+"/result", headers=headers, json=report)).status_code, 200)
+        self.assertEqual((await self.client.post(root+"/result", headers=headers, json=report)).status_code, 200)
+        action = {"actor_id": "333333333333333333", "guild_id": None, "channel_id": report["channel_id"],
+                  "message_id": report["message_id"], "interaction_id": "777777777777777777", "action": "done"}
+        self.assertEqual((await self.client.post(root+"/action", headers=headers, json={**action, "actor_id": "444444444444444444"})).status_code, 403)
+        self.assertEqual((await self.client.post(root+"/action", headers=headers, json={**action, "message_id": "888888888888888888"})).status_code, 403)
+        response = await self.client.post(root+"/action", headers=headers, json=action)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "done")
+        self.assertEqual((await self.client.post(root+"/action", headers=headers, json=action)).status_code, 200)
+        self.assertEqual((await self.bridge_poll("2026-11-07T16:05:00+00:00")).json()["deliveries"], [])
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Occurrence, uuid.UUID(row["id"]))).status, "done")
+            count = (await db.execute(select(func.count(Event.id)).where(Event.request_id == "discord:777777777777777777"))).scalar_one()
+            self.assertEqual(count, 1)
+
+    async def test_bridge_untimed_and_finished_tasks_never_notify_and_lirza_uses_adult_contact(self):
+        row = await self.bridge_setup(owner="lirza")
+        first = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        self.assertEqual(first["target"]["user_id"], "444444444444444444")
+        self.assertEqual(first["assignees"], ["lirza"])
+        response = await self.client.patch(f'/api/ga-personal/occurrences/{row["id"]}', json={"expected_version": 1,
+            "request_id": str(uuid.uuid4()), "local_date": row["local_date"], "due_time": None, "assignees": ["lirza"]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((await self.bridge_poll("2026-11-07T16:00:00+00:00")).json()["deliveries"], [])
+
+    async def test_bridge_snooze_retry_is_idempotent_and_does_not_repeat_old_phase(self):
+        await self.bridge_setup()
+        headers = {"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}
+        delivery = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        root = f'/api/ga-personal/bridge/deliveries/{delivery["id"]}'
+        report = {"lease": delivery["lease"], "outcome": "sent", "channel_id": "555555555555555555", "message_id": "666666666666666666"}
+        await self.client.post(root+"/result", headers=headers, json=report)
+        action = {"actor_id": "333333333333333333", "guild_id": None, "channel_id": report["channel_id"],
+                  "message_id": report["message_id"], "interaction_id": "777777777777777777", "action": "later15"}
+        response = await self.client.post(root+"/action", headers=headers, json=action)
+        self.assertEqual(response.status_code, 200, response.text)
+        retry = await self.client.post(root+"/action", headers=headers, json=action)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(response.json()["card"]["due_at"], retry.json()["card"]["due_at"])
+        finish = await self.client.post(root+"/action", headers=headers, json={**action,
+            "interaction_id": "888888888888888888", "action": "done"})
+        self.assertEqual(finish.status_code, 200, finish.text)
+
+    async def test_bridge_returning_to_an_old_schedule_does_not_revive_old_cards(self):
+        row = await self.bridge_setup()
+        headers = {"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}
+        delivery = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        root = f'/api/ga-personal/bridge/deliveries/{delivery["id"]}'
+        report = {"lease": delivery["lease"], "outcome": "sent", "channel_id": "555555555555555555", "message_id": "666666666666666666"}
+        await self.client.post(root+"/result", headers=headers, json=report)
+        endpoint = f'/api/ga-personal/occurrences/{row["id"]}'
+        for version, time in ((1, "18:00"), (2, "17:00")):
+            response = await self.client.patch(endpoint, json={"expected_version": version, "request_id": str(uuid.uuid4()),
+                "local_date": row["local_date"], "due_time": time, "assignees": ["rrita"]})
+            self.assertEqual(response.status_code, 200, response.text)
+        action = {"actor_id": "333333333333333333", "guild_id": None, "channel_id": report["channel_id"],
+                  "message_id": report["message_id"], "interaction_id": "777777777777777777", "action": "done"}
+        self.assertEqual((await self.client.post(root+"/action", headers=headers, json=action)).status_code, 409)
+        replacement = (await self.bridge_poll("2026-11-07T15:55:10+00:00")).json()["deliveries"]
+        self.assertEqual(len(replacement), 1)
+        self.assertNotEqual(replacement[0]["id"], delivery["id"])
+
+    async def test_bridge_acknowledged_card_updates_include_old_history_and_stop_after_sync(self):
+        row = await self.bridge_setup()
+        headers = {"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}
+        delivery = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        root = f'/api/ga-personal/bridge/deliveries/{delivery["id"]}'
+        report = {"lease": delivery["lease"], "outcome": "sent", "channel_id": "555555555555555555", "message_id": "666666666666666666"}
+        await self.client.post(root+"/result", headers=headers, json=report)
+        from app.models.ga_personal import GaPersonalDiscordDelivery
+        async with self.sessions() as db:
+            for i in range(201):
+                db.add(GaPersonalDiscordDelivery(occurrence_id=uuid.UUID(row["id"]), schedule_key="x"+str(i), phase="before",
+                    recipient="channel", scheduled_at=datetime.fromisoformat("2026-11-07T16:00:00+00:00"), status="sent",
+                    channel_id="555555555555555555", message_id=str(700000000000000000+i),
+                    details={"target": {"kind": "dm", "user_id": "333333333333333333"}, "guild_id": "111111111111111111"}))
+            await db.commit()
+        updates = (await self.bridge_poll("2026-11-07T15:55:10+00:00")).json()["updates"]
+        target = next((u for u in updates if u["id"] == delivery["id"]), None)
+        self.assertIsNotNone(target)
+        sync = {"channel_id": report["channel_id"], "message_id": report["message_id"], "sync_key": target["sync_key"]}
+        self.assertEqual((await self.client.post(root+"/sync", headers=headers, json=sync)).status_code, 200)
+        updates = (await self.bridge_poll("2026-11-07T15:55:20+00:00")).json()["updates"]
+        self.assertNotIn(delivery["id"], [u["id"] for u in updates])
+
+    async def test_bridge_health_and_disabled_delivery_never_claim_and_revoked_grant_stops(self):
+        await self.bridge_setup()
+        headers = {"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}
+        moment = datetime.fromisoformat("2026-11-07T15:55:00+00:00")
+        with patch("app.services.ga_personal_discord.utcnow", return_value=moment):
+            for payload in ({"health_only": True}, {"delivery_enabled": False}):
+                response = await self.client.post("/api/ga-personal/bridge/poll", headers=headers, json=payload)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["deliveries"], [])
+        self.assertEqual(len((await self.bridge_poll(moment.isoformat())).json()["deliveries"]), 1)
+        async with self.sessions() as db:
+            space = await db.get(Space, self.space_id)
+            space.password_version += 1
+            await db.commit()
+        self.assertFalse((await self.bridge_poll("2026-11-07T16:00:00+00:00")).json()["enabled"])
+
+    async def test_bridge_inaccessible_message_backoff_does_not_starve_later_updates(self):
+        row = await self.bridge_setup()
+        headers = {"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}
+        original = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        root = f'/api/ga-personal/bridge/deliveries/{original["id"]}'
+        await self.client.post(root+"/result", headers=headers, json={"lease": original["lease"], "outcome": "sent",
+            "channel_id": "555555555555555555", "message_id": "666666666666666666"})
+        from app.models.ga_personal import GaPersonalDiscordDelivery
+        async with self.sessions() as db:
+            older = GaPersonalDiscordDelivery(occurrence_id=uuid.UUID(row["id"]), schedule_key="old", phase="before",
+                recipient="channel", scheduled_at=datetime.fromisoformat("2026-11-07T15:54:00+00:00"), status="sent",
+                channel_id="555555555555555555", message_id="777777777777777777",
+                details={"target": {"kind": "dm", "user_id": "333333333333333333"}, "guild_id": "111111111111111111"})
+            db.add(older); await db.commit(); older_id = str(older.id)
+        with patch("app.services.ga_personal_discord.UPDATE_BATCH_LIMIT", 1, create=True):
+            first = (await self.bridge_poll("2026-11-07T15:55:10+00:00")).json()["updates"]
+            target = next(u for u in first if u["id"] == older_id)
+            with patch("app.services.ga_personal_discord.utcnow", return_value=datetime.fromisoformat("2026-11-07T15:55:10+00:00")):
+                response = await self.client.post(f'/api/ga-personal/bridge/deliveries/{older_id}/sync', headers=headers, json={
+                    "channel_id": target["channel_id"], "message_id": target["message_id"], "sync_key": target["sync_key"], "error": "permissions"})
+                self.assertEqual(response.status_code, 200, response.text)
+            second = (await self.bridge_poll("2026-11-07T15:55:20+00:00")).json()["updates"]
+            self.assertEqual(second[0]["id"], original["id"])
+            retry = (await self.bridge_poll("2026-11-07T16:01:00+00:00")).json()["updates"]
+            self.assertEqual(retry[0]["id"], older_id)
+
+    async def test_bridge_expired_claim_is_visible_and_never_replayed(self):
+        await self.bridge_setup()
+        first = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        second = (await self.bridge_poll("2026-11-07T15:57:00+00:00")).json()["deliveries"]
+        self.assertEqual(second, [])
+        from app.models.ga_personal import GaPersonalDiscordDelivery
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(GaPersonalDiscordDelivery, uuid.UUID(first["id"]))).status, "uncertain")
+
+    async def test_bridge_channel_action_requires_configured_guild_and_channel(self):
+        await self.bridge_setup(destination="channel")
+        headers = {"X-GA-Bridge-Key": "test-only-bridge-secret-which-is-long-enough"}
+        delivery = (await self.bridge_poll("2026-11-07T15:55:00+00:00")).json()["deliveries"][0]
+        root = f'/api/ga-personal/bridge/deliveries/{delivery["id"]}'
+        report = {"lease": delivery["lease"], "outcome": "sent", "channel_id": "222222222222222222", "message_id": "666666666666666666"}
+        self.assertEqual((await self.client.post(root+"/result", headers=headers, json={**report, "channel_id": "555555555555555555"})).status_code, 403)
+        self.assertEqual((await self.client.post(root+"/result", headers=headers, json=report)).status_code, 200)
+        action = {"actor_id": "333333333333333333", "guild_id": "999999999999999999", "channel_id": report["channel_id"],
+                  "message_id": report["message_id"], "interaction_id": "777777777777777777", "action": "done"}
+        self.assertEqual((await self.client.post(root+"/action", headers=headers, json=action)).status_code, 403)
+        self.assertEqual((await self.client.post(root+"/action", headers=headers, json={**action, "guild_id": "111111111111111111"})).status_code, 200)
+
     async def test_automatic_tick_creates_each_local_day_once_and_stops_when_disabled(self):
         from app.services.ga_personal_scheduler import generation_tick
         await self.unlock()

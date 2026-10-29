@@ -5,6 +5,7 @@ import io
 import json
 import re
 import wave
+from typing import Literal
 from zoneinfo import ZoneInfo
 import httpx
 from app.config import settings
@@ -84,12 +85,27 @@ class ProviderError(ValueError):
         return self.status is None or self.status in (408, 409, 429) or self.status >= 500
 
 
-async def request(path, *, timeout=60, **kwargs):
-    if not settings.OPENAI_API_KEY: raise ValueError('openai_not_configured')
+CredentialScope = Literal['notes', 'host', 'general']
+
+
+def credential(scope: CredentialScope = 'notes') -> str:
+    """Select only this role's credential, without changing shared settings."""
+    fields = {'notes': 'MIRA_NOTES_OPENAI_API_KEY', 'host': 'MIRA_HOST_OPENAI_API_KEY',
+              'general': 'OPENAI_API_KEY'}
+    if scope not in fields:
+        raise ValueError('invalid_openai_scope')
+    value = (getattr(settings, fields[scope]) or '').strip()
+    if not value:
+        raise ValueError('openai_not_configured')
+    return value
+
+
+async def request(path, *, timeout=60, scope: CredentialScope = 'notes', **kwargs):
+    key = credential(scope)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             result=await client.post('https://api.openai.com/v1/'+path,
-                headers={'Authorization':'Bearer '+settings.OPENAI_API_KEY}, **kwargs)
+                headers={'Authorization':'Bearer '+key}, **kwargs)
             result.raise_for_status()
             return result.json()
     except httpx.HTTPStatusError as exc:
@@ -112,10 +128,10 @@ SUMMARY_ATTEMPTS = 3
 SUMMARY_MAX_WAIT = 30
 
 
-async def with_retries(path, *, timeout, attempts, max_wait, **kwargs):
+async def with_retries(path, *, timeout, attempts, max_wait, scope: CredentialScope = 'notes', **kwargs):
     for attempt in range(1, attempts+1):
         try:
-            return await request(path, timeout=timeout, **kwargs)
+            return await request(path, timeout=timeout, scope=scope, **kwargs)
         except ProviderError as exc:
             if not exc.transient or attempt == attempts:
                 raise
@@ -248,11 +264,12 @@ def output_text(response):
         for part in item.get('content',[]) if part.get('type')=='output_text' and isinstance(part.get('text'),str)).strip()
 
 
-async def cached(payload, cache, checkpoint, parse):
-    key=hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
+async def cached(payload, cache, checkpoint, parse, *, scope: CredentialScope = 'notes'):
+    # Scope separates persisted caches too; host jobs cannot reuse notes-role output.
+    key=hashlib.sha256(json.dumps([scope,payload],sort_keys=True).encode()).hexdigest()
     if key in cache:return cache[key]
     result=parse(output_text(await with_retries('responses',timeout=SUMMARY_TIMEOUT,
-        attempts=SUMMARY_ATTEMPTS,max_wait=SUMMARY_MAX_WAIT,json=payload)))
+        attempts=SUMMARY_ATTEMPTS,max_wait=SUMMARY_MAX_WAIT,scope=scope,json=payload)))
     cache[key]=result
     if checkpoint:await checkpoint(cache)
     return result
@@ -264,7 +281,8 @@ def checked_summary(text):
     return text
 
 
-async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, checkpoint=None, memory=None):
+async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, checkpoint=None, memory=None,
+                            scope: CredentialScope = 'notes'):
     cache=dict(cache or {})
     async def summarize(parts,final=False):
         system=FINAL_SYSTEM if final else PART_SYSTEM
@@ -276,7 +294,7 @@ async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, c
         payload={'model':settings.DISCORD_AI_MODEL,'store':False,'input':[
             {'role':'system','content':system},
             {'role':'user','content':json.dumps(content,ensure_ascii=False)}]}
-        return await cached(payload,cache,checkpoint,checked_summary)
+        return await cached(payload,cache,checkpoint,checked_summary,scope=scope)
     parts=[json.dumps(segment,ensure_ascii=False) for segment in segments]
     if not parts:raise ValueError('empty_transcript')
     while sum(map(len,parts))>SUMMARY_DIRECT_CHARS:

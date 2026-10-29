@@ -119,6 +119,8 @@ async def save_settings(payload: SettingsIn, db: AsyncSession = Depends(get_db),
 
 @router.post('/host')
 async def switch_host(payload: HostSwitch, db: AsyncSession = Depends(get_db), user=Depends(require_manager_or_admin)):
+    if payload.enabled and not (host.settings.MIRA_HOST_OPENAI_API_KEY or '').strip():
+        raise HTTPException(503, "MIRA_HOST_OPENAI_API_KEY mungon.")
     row = await host.get_settings(db, lock=True)
     row.enabled_until = host.enable_until(host.now(), payload.until) if payload.enabled else None
     row.enabled_by_user_id = user.id if payload.enabled else row.enabled_by_user_id

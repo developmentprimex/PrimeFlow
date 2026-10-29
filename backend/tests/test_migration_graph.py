@@ -18,6 +18,23 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_discord_recorders_and_ga_personal_upgrade_from_either_deployed_branch(self) -> None:
+        scripts = migration_scripts()
+        merge = "0175_merge_discord_ga_personal"
+        recorders = "0174_discord_separate_recorders"
+        personal = "0174_ga_personal_discord"
+        for deployed, expected in (
+            (recorders, {personal, merge}),
+            (personal, {recorders, merge}),
+            ((recorders, personal), {merge}),
+            ("0173_merge_mira_ga_personal", {recorders, personal, merge}),
+        ):
+            with self.subTest(deployed=deployed):
+                revisions = [step.revision.revision for step in scripts._upgrade_revs("head", deployed)]
+                self.assertEqual(set(revisions), expected)
+                self.assertEqual(revisions[-1], merge)
+        self.assertEqual(scripts._upgrade_revs("head", merge), [])
+
     def test_mira_notes_and_ga_personal_upgrade_from_either_deployed_branch(self) -> None:
         scripts = migration_scripts()
         head = "0173_merge_mira_ga_personal"

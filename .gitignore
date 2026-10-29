@@ -40,6 +40,7 @@ backend/private-data/
 backend/.discord-worker-status.json*
 backend/.discord-ai-agent-status.json*
 backend/.discord-agent-recovery/
+.primeflow-receipts.*
 
 # Frontend
 frontend/.next/

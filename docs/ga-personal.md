@@ -33,7 +33,7 @@ All four allowed module members can read family tasks after unlock. A member can
 
 ## Not activated or provisioned
 
-There is no automatic reminder scheduler, dedicated Discord worker, voice playback or family Mira tool in this delivery. The settings page reports them as inactive. Reminder cancellation is implemented at the persistence layer; no message is claimed to have been delivered. These integrations need the chosen administrator, verified identities, schedule/reminder settings and an explicit delegated-access policy before implementation/activation of delivery. Existing work Discord/Mira bindings and memory do not receive household data.
+The dedicated Kujtesa API bridge, reminder outbox and separate bot adapter are implemented. Setup and actual sending are separate: delivery stays disabled until the unlocked module administrator grants the limited delegation and the separate bot enables reminders. See `backend/integrations/kujtesa/README.md` for installation, activation, private channel requirements and failure handling. There is no voice playback or family Mira AI tool in this delivery. Existing work Discord/Mira bindings and memory do not receive household data.
 
 No new user accounts are created. Provisioning currently requires four existing accounts selected explicitly by UUID. If household-only accounts are required, introduce and test a server-enforced account scope before creating them; a normal STAFF account has work permissions and must not be used as a substitute for that restriction.
 
@@ -97,3 +97,11 @@ $env:GA_PERSONAL_TEST_DATABASE_URL="postgresql+asyncpg://<test-user>@127.0.0.1:<
 Database tests require an explicitly supplied disposable PostgreSQL URL. Each test creates unique public/private test schemas and drops only those generated schemas. They never fall back to `DATABASE_URL`. Without the test URL the database tests are skipped; pure rule/migration tests still run.
 
 From `frontend`: `npm run test:ga-personal` and `node node_modules/typescript/bin/tsc --noEmit`. The browser checks use synthetic identities and mocked API responses. If the Playwright-managed browser is unavailable, set `RECORDINGS_CHROMIUM_EXECUTABLE` to an installed supported Chromium. `GA_PERSONAL_REUSE_SERVER=1` can reuse this test suite's local dev server.
+
+## Kujtesa connection
+
+The module administrator configures the separate bot under Settings > Kujtesa. Each task/template can choose private DM, the private family channel, or no Discord notification. Existing occurrences default to DM. Missing personal IDs do not block other recipients; Lirza uses Gane as the adult contact. The dedicated token remains exclusively in the bot environment, while a separate server-side bridge key authorizes only GA PERSONAL delivery operations.
+
+Reminders use three phases at -5/0/+5 minutes with a five-minute window per phase. Generation and acknowledgement do not duplicate phases. Timing/owner/destination changes create a new schedule generation and invalidate old cards; snoozing explicitly keeps its own confirmation card usable. Buttons check actor, active membership, exact message/guild/channel, current assignment and explicit module delegation. Completion and help cancel unsent phases in the same transaction. Interaction IDs and durable claims make retries idempotent; ambiguous sends are not replayed blindly. Dirty message acknowledgements keep older cards synchronized, with backoff for inaccessible messages.
+
+Revision `0174_ga_personal_discord` adds only the private outbox. Local configuration can adopt that table without running unrelated migrations or changing the server Alembic stamp, using `scripts/configure_kujtesa_bridge.py` with explicit expected database checks. The module password and all existing task data are preserved. A password change or removal of the authorizing module administrator revokes the bot delegation.

@@ -36,7 +36,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   // so she cannot answer people who are already chatting in the channel.
   let listening=false;
   // Who is talking: set by Realtime's VAD; lastVoiceAt is our own measure of audible speech.
-  let userSpeaking=false,speechStartedAt=0,lastVoiceAt=-Infinity,bargeTimer=null,sayTimer=null,retryResponse=false;
+  let userSpeaking=false,speechStartedAt=0,lastVoiceAt=-Infinity,bargeTimer=null,sayTimer=null,continuationPending=false;
   const mixer=new Mixer(),pendingCalls=new Set(),queuedSays=[],cancelled=new Set(),speakerOf=new Map();
   const streams=new Map();
   let encoder,playback;
@@ -52,11 +52,14 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   // ---- Realtime
   // System instructions ("RADHA", "koha ka kaluar") wait for a pause, so Mira never talks over someone.
   function maybeContinue(){
-    if(responseActive||pendingCalls.size||!queuedSays.length)return;
+    if(closed||responseActive||pendingCalls.size||(!queuedSays.length&&!continuationPending))return;
     const waited=now()-speechStartedAt;
     if(userSpeaking&&waited<SAY_WAIT_MS){later(SAY_WAIT_MS-waited);return;}
-    const text=queuedSays.shift();
-    rt({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text}]}});
+    if(queuedSays.length){
+      const text=queuedSays.shift();
+      rt({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text}]}});
+    }
+    continuationPending=false;
     rt({type:'response.create'});responseActive=true;
   }
   function interrupt(){
@@ -84,12 +87,17 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
       case 'input_audio_buffer.speech_stopped':
         speakerOf.set(message.item_id,mixer.takeLoudest());
         userSpeaking=false;
-        if(queuedSays.length)later(AFTER_SPEECH_MS);
+        if(queuedSays.length||continuationPending)later(AFTER_SPEECH_MS);
         break;
       case 'conversation.item.input_audio_transcription.completed':
         if(message.transcript?.trim())emit({type:'transcript',role:'staff',speaker_id:speakerOf.get(message.item_id)??null,text:message.transcript.trim()});
         speakerOf.delete(message.item_id);break;
-      case 'response.created':responseActive=true;currentResponse=message.response?.id;break;
+      case 'response.created':
+        responseActive=true;currentResponse=message.response?.id;
+        // An automatic VAD reply can start while our continuation waits for the
+        // speaker. It already sees the returned results: don't answer them twice.
+        if(!pendingCalls.size)continuationPending=false;
+        break;
       case 'response.output_audio.delta':case 'response.audio.delta':
         if(!cancelled.has(message.response_id))playback.push(message.item_id,int16FromBase64(message.delta));break;
       case 'response.output_audio.done':case 'response.audio.done':
@@ -107,12 +115,14 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
         break;
       case 'response.done':
         responseActive=false;cancelled.delete(message.response?.id);
-        // A response.create refused while Realtime was answering someone is sent again now.
-        if(retryResponse){retryResponse=false;rt({type:'response.create'});responseActive=true;break;}
+        // Fast API results can precede response.done. Drain them here too, otherwise
+        // Mira stays silent forever after a turn handoff or a quick tool lookup.
         maybeContinue();break;
       case 'error':
         emit({type:'log',event:'realtime_error',code:message.error?.code??null});
-        if(message.error?.code==='conversation_already_has_active_response'){responseActive=true;retryResponse=true;}
+        if(message.error?.code==='conversation_already_has_active_response'){
+          responseActive=true;continuationPending=true;
+        }
         break;
     }
   }
@@ -228,7 +238,8 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
     toolResult(callId,output){
       if(!pendingCalls.delete(callId))return;
       rt({type:'conversation.item.create',item:{type:'function_call_output',call_id:callId,output:JSON.stringify(output??{})}});
-      if(!pendingCalls.size&&!responseActive){rt({type:'response.create'});responseActive=true;}
+      continuationPending=true;
+      maybeContinue();
     },
     // Exposed for tests.
     _onRealtime:onRealtime,_heard:heard,get _playback(){return playback;},get _listening(){return listening;},

@@ -33,6 +33,17 @@ def payload(items, absent=()):
 
 
 class SlotDataTests(unittest.TestCase):
+    def test_current_task_is_not_asked_again_as_an_earlier_task(self):
+        shared = str(uuid.uuid4())
+        data = host.SlotData(payload([
+            item('EF', '10:00', 'OFERTA', rank=0, task_id=shared),
+            item('EF', '10:00', 'RAPORTI', rank=1),
+            item('EF', '11:00', 'OFERTA', rank=0, task_id=shared),
+        ]), DAY)
+        brief = host.person_brief(data, '11:00', IDS['EF'])
+        self.assertEqual([t['spoken'] for t in brief['current']], ['OFERTA'])
+        self.assertEqual([t['spoken'] for t in brief['previous_open']], ['RAPORTI'])
+
     def test_participants_follow_common_view_order_without_ga_and_absent_people(self):
         data = host.SlotData(payload([
             item('RA', '10:00', 'ASISTENTI PER TAK', rank=1),
@@ -122,6 +133,7 @@ class TickTests(unittest.IsolatedAsyncioTestCase):
         self.data = payload([item('EF', '10:00', 'A', rank=0), item('RA', '11:00', 'B', rank=0)])
         targets = {uid: {'discord_user_id': str(n), 'guild_id': '1', 'channel_id': str(100 + n)} for n, uid in enumerate(IDS.values())}
         self.patches = [patch.object(host, 'get_settings', AsyncMock(return_value=self.row)),
+                        patch.object(settings, 'MIRA_HOST_OPENAI_API_KEY', 'host-test'),
                         patch.object(host, 'common_payload', AsyncMock(return_value=self.data)),
                         patch.object(host, 'claim_event', AsyncMock(return_value=True)),
                         patch.object(host, 'discord_targets', AsyncMock(side_effect=lambda db, ids: {i: targets[i] for i in ids}))]
@@ -168,18 +180,73 @@ class RealtimeSessionTests(unittest.IsolatedAsyncioTestCase):
                 sent.update(json)
                 return SimpleNamespace(is_error=False, json=lambda: {'value': 'ek_test'})
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:50')
-        with patch.object(settings, 'OPENAI_API_KEY', 'sk-test'), patch('httpx.AsyncClient', Client),              patch.object(host, 'get_settings', AsyncMock(return_value=MiraHostSettings(knowledge_char_budget=1000))),              patch.object(host, 'instructions', AsyncMock(return_value='Test')):
+        with patch.object(settings, 'MIRA_HOST_OPENAI_API_KEY', 'sk-test'), patch('httpx.AsyncClient', Client),              patch.object(host, 'get_settings', AsyncMock(return_value=MiraHostSettings(knowledge_char_budget=1000))),              patch.object(host, 'instructions', AsyncMock(return_value='Test')):
             result = await host.realtime_session(SimpleNamespace(), meeting)
         self.assertEqual(result['client_secret'], 'ek_test')
         self.assertNotIn('language', sent['session']['audio']['input']['transcription'])
-        # Mira waits for unfinished sentences; the worker, not OpenAI, decides when she is interrupted.
+        # Balanced endpointing avoids the long low-eagerness pause; interruptions stay with the worker.
         self.assertEqual(sent['session']['audio']['input']['turn_detection'],
-                         {'type': 'semantic_vad', 'eagerness': 'low', 'create_response': True, 'interrupt_response': False})
+                         {'type': 'semantic_vad', 'eagerness': 'medium', 'create_response': True, 'interrupt_response': False})
         self.assertEqual(sent['session']['reasoning'], {'effort': settings.MIRA_HOST_REASONING_EFFORT})
         self.assertIn('wait_for_user', [tool['name'] for tool in sent['session']['tools']])
 
 
 class ProgressTests(unittest.IsolatedAsyncioTestCase):
+    async def test_blocked_only_strike_is_staff_evidence_without_becoming_a_ga_announcement(self):
+        task_id = str(uuid.uuid4())
+        source = payload([])
+        source['items']['blocked'] = [item('EF', None, 'BLLOK RAPORTI', rank=0, task_id=task_id)]
+        data = host.SlotData(source, DAY)
+        strike = SimpleNamespace(task_id=uuid.UUID(task_id), point_key='p1', action='STRUCK',
+                                 point_text='Tabela', occurred_at=datetime(2026, 10, 21, 15, 30, tzinfo=TZ))
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(
+            scalars=Mock(return_value=Mock(all=Mock(return_value=[strike]))))))
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='16:00')
+        self.assertEqual(await host.new_progress(db, meeting, data), {'done': [], 'strikes': []})
+        evidence = await host.new_progress(db, meeting, data, [IDS['EF']], for_brief=True)
+        self.assertEqual([(t['task_id'], t['points'][0]['text']) for t in evidence['strikes']],
+                         [(task_id, 'Tabela')])
+
+    async def test_staff_evidence_keeps_announced_strikes_separate_for_same_named_tasks(self):
+        first, second = str(uuid.uuid4()), str(uuid.uuid4())
+        data = host.SlotData(payload([
+            item('EF', '11:00', 'OFERTA', rank=0, task_id=first),
+            item('EF', '11:00', 'OFERTA', rank=1, task_id=second),
+        ]), DAY)
+        events = [SimpleNamespace(task_id=uuid.UUID(tid), point_key='p1', action='STRUCK',
+                                  point_text=text, occurred_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ))
+                  for tid, text in ((first, 'Klienti A'), (second, 'Klienti B'))]
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(
+            scalars=Mock(return_value=Mock(all=Mock(return_value=events))))))
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
+        seen = {(first, 'STRIKE', 'p1'), (second, 'STRIKE', 'p1')}
+        with patch.object(host, 'mentioned', AsyncMock(return_value=seen)):
+            announcements = await host.new_progress(db, meeting, data)
+            evidence = await host.new_progress(db, meeting, data, for_brief=True)
+        self.assertEqual(announcements['strikes'], [])
+        self.assertEqual([(t['task_id'], t['points'][0]['text']) for t in evidence['strikes']],
+                         [(first, 'Klienti A'), (second, 'Klienti B')])
+
+    async def test_person_context_keeps_recorded_percentage_and_window_evidence(self):
+        task_id, untouched = str(uuid.uuid4()), str(uuid.uuid4())
+        data = host.SlotData(payload([
+            item('EF', '11:00', 'OFERTA', rank=0, task_id=task_id),
+            item('EF', '11:00', 'RAPORTI', rank=1, task_id=untouched, status='TODO'),
+        ]), DAY)
+        since = datetime(2026, 10, 21, 10, tzinfo=TZ)
+        strike = SimpleNamespace(task_id=uuid.UUID(task_id), point_key='p1', action='STRUCK',
+                                 point_text='Drafti', occurred_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ))
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[strike])))),
+            Mock(all=Mock(return_value=[(uuid.UUID(task_id), 40), (uuid.UUID(untouched), 0)])),
+        ]))
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
+        with patch.object(host, 'progress_since', AsyncMock(return_value=since)):
+            brief = await host.person_context(db, meeting, data, IDS['EF'])
+        self.assertEqual(brief['progress_since'], since.isoformat())
+        self.assertEqual(brief['progress_percentages'], {task_id: 40, untouched: 0})
+        self.assertEqual([s['task_id'] for s in brief['new_progress']['strikes']], [task_id])
+
     async def test_done_reported_in_an_earlier_1h_is_not_repeated(self):
         done_id, new_id = str(uuid.uuid4()), str(uuid.uuid4())
         data = host.SlotData(payload([
