@@ -154,6 +154,7 @@ jobs:
           MS_CLIENT_ID: ${{ vars.MS_CLIENT_ID || secrets.MS_CLIENT_ID }}
           MS_TENANT_ID: ${{ vars.MS_TENANT_ID || secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          GA_PERSONAL_DISCORD_BRIDGE_SECRET: ${{ secrets.GA_PERSONAL_DISCORD_BRIDGE_SECRET }}
         run: |
           if not defined MS_CLIENT_ID (echo ::error::MS_CLIENT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
           if not defined MS_TENANT_ID (echo ::error::MS_TENANT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
@@ -176,6 +177,10 @@ jobs:
           echo REDIS_ENABLED=true >> backend\.env
           echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend\.env
           echo APP_TIMEZONE=Europe/Budapest >> backend\.env
+          REM Read the optional family bridge key from the environment, never
+          REM interpolate its value into a shell command or print it in logs.
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "import os,re; from pathlib import Path; key=os.environ.get('GA_PERSONAL_DISCORD_BRIDGE_SECRET','').strip(); assert not key or re.fullmatch(r'[A-Za-z0-9_-]{32,128}',key), 'Invalid GA PERSONAL bridge key; use the generated URL-safe key'; Path('backend/.env').open('a',encoding='utf-8').write('GA_PERSONAL_ENABLED=true\n'+('GA_PERSONAL_DISCORD_BRIDGE_SECRET='+key+'\n' if key else ''))"
+          if errorlevel 1 exit /b 1
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend\.env
           echo FRONTEND_URL=https://primeflow.primexeu.com >> backend\.env
           echo MS_CLIENT_ID=%MS_CLIENT_ID% >> backend\.env
