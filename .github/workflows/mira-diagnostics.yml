@@ -1,4 +1,4 @@
-name: Mira Audio Diagnostics
+name: Mira API Key Verification
 
 on:
   workflow_dispatch:
@@ -11,39 +11,164 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  diagnose:
+  verify:
     runs-on: self-hosted
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
-      - name: Read audio status without meeting content
+      - name: Verify three deployed role keys without meetings or private data
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location (Join-Path $env:GITHUB_WORKSPACE 'backend')
           @'
-          import asyncio, json
-          from sqlalchemy import text
-          from app.db import engine
+          """Small synthetic checks of the deployed role keys; never print credentials/content."""
+          import asyncio
+          import io
+          import json
+          import math
+          from pathlib import Path
+          import re
+          import struct
+          import wave
+
+          import aiohttp
+          import httpx
+          from app.config import settings
+          from app.services import discord_voice_openai as provider
+
+          RESULTS = []
+          FIELDS = {"notes": "MIRA_NOTES_OPENAI_API_KEY", "host": "MIRA_HOST_OPENAI_API_KEY", "kujtesa": "KUJTESA_OPENAI_API_KEY"}
+
+
+          def record(role, check, ok, **details):
+              row = {"role": role, "check": check, "ok": bool(ok), **details}
+              RESULTS.append(row)
+              print("MIRA_KEY_CHECK " + json.dumps(row, ensure_ascii=True), flush=True)
+
+
+          def error_code(body):
+              error = body.get("error") or {} if isinstance(body, dict) else {}
+              if not isinstance(error, dict):
+                  return "provider_error"
+              value = error.get("code") or error.get("type") or "provider_error"
+              return re.sub(r"[^A-Za-z0-9_.-]", "", str(value))[:100]
+
+
+          async def response_check(role, scope):
+              try:
+                  # The deployed transport selects its own role credential here.
+                  data = await provider.request("responses", scope=scope, timeout=45,
+                      json={"model": settings.DISCORD_AI_MODEL, "store": False,
+                            "input": "Synthetic connectivity check. Reply with only OK.", "max_output_tokens": 256})
+                  record(role, "responses", bool(provider.output_text(data)), model=settings.DISCORD_AI_MODEL,
+                         response_status=data.get("status"))
+              except provider.ProviderError as exc:
+                  record(role, "responses", False, http_status=exc.status, error="provider_request_failed")
+              except Exception as exc:
+                  record(role, "responses", False, error=type(exc).__name__)
+
+
+          async def transcription_check():
+              # Generated tone, not human/private audio. Empty returned text is normal.
+              stream = io.BytesIO()
+              with wave.open(stream, "wb") as audio:
+                  audio.setnchannels(1)
+                  audio.setsampwidth(2)
+                  audio.setframerate(16000)
+                  audio.writeframes(b"".join(struct.pack("<h", int(500 * math.sin(2 * math.pi * 440 * n / 16000)))
+                                             for n in range(16000)))
+              try:
+                  body = await provider.request("audio/transcriptions", scope="notes", timeout=30,
+                      data={"model": settings.DISCORD_MEETING_TRANSCRIBE_MODEL},
+                      files={"file": ("synthetic-check.wav", stream.getvalue(), "audio/wav")})
+                  record("notes", "transcription", isinstance(body.get("text"), str),
+                         model=settings.DISCORD_MEETING_TRANSCRIBE_MODEL)
+              except provider.ProviderError as exc:
+                  record("notes", "transcription", False, http_status=exc.status, error="provider_request_failed")
+              except Exception as exc:
+                  record("notes", "transcription", False, error=type(exc).__name__)
+
+
+          async def realtime_check(role, model, voice):
+              key = (getattr(settings, FIELDS[role]) or "").strip()
+              if not key:
+                  record(role, "realtime", False, error="missing_role_key")
+                  return
+              session = {"type": "realtime", "model": model, "instructions": "Synthetic check. Reply only OK.",
+                  "audio": {"input": {"format": {"type": "audio/pcm", "rate": 24000},
+                      "transcription": {"model": "gpt-4o-transcribe"},
+                      "turn_detection": {"type": "semantic_vad", "eagerness": "medium", "create_response": True,
+                                         "interrupt_response": False}, "noise_reduction": {"type": "near_field"}},
+                      "output": {"format": {"type": "audio/pcm", "rate": 24000}, "voice": voice}}}
+              if role == "host":
+                  session["audio"]["output"]["speed"] = settings.MIRA_HOST_SPEED
+                  if settings.MIRA_HOST_REASONING_EFFORT:
+                      session["reasoning"] = {"effort": settings.MIRA_HOST_REASONING_EFFORT}
+              try:
+                  async with httpx.AsyncClient(timeout=25) as client:
+                      response = await client.post("https://api.openai.com/v1/realtime/client_secrets",
+                          headers={"Authorization": "Bearer " + key},
+                          json={"expires_after": {"anchor": "created_at", "seconds": 60}, "session": session})
+                  body = response.json()
+                  if response.is_error:
+                      record(role, "realtime_secret", False, model=model, http_status=response.status_code, error=error_code(body))
+                      return
+                  secret = body.get("value") or (body.get("client_secret") or {}).get("value")
+                  if not isinstance(secret, str) or not secret:
+                      record(role, "realtime_secret", False, model=model, error="missing_ephemeral_secret")
+                      return
+                  record(role, "realtime_secret", True, model=model, http_status=response.status_code)
+                  async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=45)) as client:
+                      async with client.ws_connect("wss://api.openai.com/v1/realtime?model=" + model,
+                              protocols=["realtime", "openai-insecure-api-key." + secret], max_msg_size=2_000_000) as ws:
+                          async with asyncio.timeout(35):
+                              sent = False
+                              async for message in ws:
+                                  if message.type != aiohttp.WSMsgType.TEXT:
+                                      record(role, "realtime_response", False, model=model, error="websocket_closed")
+                                      return
+                                  event = json.loads(message.data)
+                                  if event.get("type") == "session.created" and not sent:
+                                      sent = True
+                                      await ws.send_json({"type": "response.create", "response": {
+                                          "output_modalities": ["text"], "instructions": "Reply with exactly OK.", "max_output_tokens": 128}})
+                                  elif event.get("type") == "error":
+                                      record(role, "realtime_response", False, model=model, error=error_code(event))
+                                      return
+                                  elif event.get("type") == "response.done":
+                                      result = event.get("response") or {}
+                                      has_text = any(part.get("text") for item in result.get("output", [])
+                                                     for part in item.get("content", []) if part.get("type") in {"text", "output_text"})
+                                      detail = result.get("status_details") or {}
+                                      record(role, "realtime_response", result.get("status") == "completed" and has_text,
+                                             model=model, response_status=result.get("status"),
+                                             error=error_code(detail) if result.get("status") != "completed" else None)
+                                      return
+              except Exception as exc:
+                  record(role, "realtime_response", False, model=model, error=type(exc).__name__)
+
+
           async def main():
-              async with engine.connect() as c:
-                  await c.execute(text('SET TRANSACTION READ ONLY'))
-                  meetings = (await c.execute(text('SELECT id, request_id, status, partial, error, created_at, started_at, stopped_at, heartbeat_at, memory_status, memory_attempts, memory_error FROM discord_voice_meetings ORDER BY created_at DESC LIMIT 5'))).mappings().all()
-                  for row in meetings:
-                      print('MIRA_SESSION', json.dumps(dict(row), default=str))
-                      segments = (await c.execute(text('SELECT sequence, status, error, start_ms, end_ms FROM discord_voice_segments WHERE session_id=:id ORDER BY sequence'), {'id': row['id']})).mappings().all()
-                      print('MIRA_SEGMENTS', json.dumps([dict(s) for s in segments], default=str))
-              await engine.dispose()
-          asyncio.run(main())
+              keys = [(getattr(settings, name) or "").strip() for name in FIELDS.values()]
+              record("all", "distinct_server_keys", all(keys) and len(set(keys)) == 3)
+              record("notes", "deployed_binding", provider.credential("notes") == keys[0])
+              record("host", "deployed_binding", provider.credential("host") == keys[1])
+              print("MIRA_KEY_CONFIG " + json.dumps({"notes_enabled": settings.DISCORD_MEETING_NOTES_ENABLED,
+                  "host_enabled": settings.MIRA_HOST_ENABLED, "kujtesa_host_enabled": settings.KUJTESA_HOST_ENABLED}), flush=True)
+              await asyncio.gather(response_check("notes", "notes"), transcription_check(), response_check("host", "host"),
+                  realtime_check("host", settings.MIRA_HOST_MODEL, settings.MIRA_HOST_VOICE),
+                  realtime_check("kujtesa", settings.KUJTESA_HOST_MODEL, settings.KUJTESA_HOST_VOICE))
+              passed = all(row["ok"] for row in RESULTS)
+              print("MIRA_KEY_SUMMARY " + json.dumps({"ok": passed, "checks": len(RESULTS),
+                  "failed": [{"role": row["role"], "check": row["check"]} for row in RESULTS if not row["ok"]]}), flush=True)
+              return 0 if passed else 1
+
+
+          if __name__ == "__main__":
+              try:
+                  raise SystemExit(asyncio.run(main()))
+              except Exception as exc:
+                  print("MIRA_KEY_FATAL " + type(exc).__name__, flush=True)
+                  raise SystemExit(1) from None
           '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
-          if ($LASTEXITCODE -ne 0) { throw 'Audio status query failed.' }
-          Get-ChildItem 'C:\pm2-system\logs\primeflow-discord*' -File -ErrorAction SilentlyContinue | ForEach-Object {
-            Get-Content -LiteralPath $_.FullName -Tail 2000 | Where-Object {
-              $_ -match 'HTTP Request: POST .*voice-meetings/' -or
-              $_ -match 'Discord operation failed:' -or
-              $_ -match 'MIRA_DIAGNOSTIC'
-            } | Select-Object -Last 45
-          }
-          # Memory runs in celery_memory_worker; notes (finalization) in celery_worker. pm2 writes '_' as '-'.
-          Get-ChildItem 'C:\pm2-system\logs\celery*worker*' -File -ErrorAction SilentlyContinue | ForEach-Object {
-            Get-Content -LiteralPath $_.FullName -Tail 4000 | Where-Object { $_ -match 'MIRA_DIAGNOSTIC' } | Select-Object -Last 30
-          }
+          if ($LASTEXITCODE -ne 0) { throw 'One or more role key checks failed; see sanitized MIRA_KEY_CHECK lines.' }
