@@ -21,19 +21,22 @@ class ReportUITests(unittest.IsolatedAsyncioTestCase):
             jobs = [{'id': str(uuid.uuid4()), 'kind': 'delivery', 'snapshot': {'title': f'Task {i}'},
                 'discord_user_id': '11', 'task_id': str(uuid.uuid4()), 'answered': False} for i in range(3)]
             live = [dict(job, answered=True, choice='PO', answer={'action': 'PO'}) for job in jobs]
-            bot = SimpleNamespace(private_channel=AsyncMock(),
+            channel = SimpleNamespace(send=AsyncMock())
+            bot = SimpleNamespace(private_channel=AsyncMock(return_value=channel),
                 bridge=AsyncMock(side_effect=[{'jobs': jobs, 'day': '2026-10-29'}, *live]))
             interaction = SimpleNamespace(guild_id=22, channel_id=33, user=SimpleNamespace(id=11),
                 followup=SimpleNamespace(send=AsyncMock()), edit_original_response=AsyncMock())
             await discord_reports.show(bot, interaction, kind)
-            self.assertEqual(interaction.followup.send.await_count, 3)
-            for call, job in zip(interaction.followup.send.await_args_list, live):
+            self.assertEqual(channel.send.await_count, 3)
+            for call, job in zip(channel.send.await_args_list, live):
                 self.assertEqual(call.args[0], client.prompt(job))
                 self.assertEqual(call.kwargs['view'].to_components(), client.controls(job).to_components())
                 self.assertTrue(call.kwargs['suppress_embeds'])
+                self.assertNotIn('reference', call.kwargs)
             self.assertEqual([call.args[0] for call in bot.bridge.await_args_list],
                 [f'/bot/{kind}/report', *[f"/bot/{kind}/{job['id']}/open" for job in jobs]])
-            interaction.edit_original_response.assert_not_awaited()
+            interaction.followup.send.assert_not_awaited()
+            interaction.edit_original_response.assert_awaited_once()
 
     async def test_empty_report_is_a_single_notice(self):
         bot = SimpleNamespace(private_channel=AsyncMock(),

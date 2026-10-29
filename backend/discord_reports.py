@@ -35,7 +35,7 @@ def report_view(data, kind, page=0):
 async def show(bot, interaction, kind, page=0, *, update=False):
     if kind not in {'m2', 'm3'}:
         raise ValueError('Zgjidh raportin M2 ose M3.')
-    await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+    channel = await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
     actor = {
         'discord_user_id': str(interaction.user.id), 'guild_id': str(interaction.guild_id),
         'channel_id': str(interaction.channel_id)}
@@ -52,8 +52,13 @@ async def show(bot, interaction, kind, page=0, *, update=False):
             allowed_mentions=discord.AllowedMentions.none())
         return
     client = m2_client if kind == 'm2' else m3_client
+    await interaction.edit_original_response(
+        content=f"📋 **Raporti yt {kind.upper()} · {data['day']}** · {len(data['jobs'])} pyetje",
+        embeds=[], view=None, allowed_mentions=discord.AllowedMentions.none())
     for job in data['jobs']:
         # Recheck ownership and answers just before showing each question.
         latest = await bot.bridge(f"/bot/{kind}/{job['id']}/open", actor)
-        await interaction.followup.send(client.prompt(latest), view=client.controls(latest),
+        # Discord renders follow-ups as replies to the command's first card.
+        # Regular channel messages keep each report question independent.
+        await channel.send(client.prompt(latest), view=client.controls(latest),
             suppress_embeds=True, allowed_mentions=discord.AllowedMentions.none())

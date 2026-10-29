@@ -9,7 +9,8 @@ Lidhja me llogarinë identifikohet nga ID-ja dhe topic-u i kanalit, pavarësisht
 Në kanalin personal të krijuar nga `/lidh`, `/m2` dhe `/m3` hapin raportin
 personal të ditës, edhe jashtë orarit të njoftimeve automatike. Çdo pyetje vjen
 drejtpërdrejt në mesazhin e vet, me të njëjtin tekst dhe butona si dërgimi
-automatik M2/M3. Nuk kërkohet zgjedhja e detyrës nga një listë paraprake.
+automatik M2/M3. Pyetjet shfaqen si mesazhe të pavarura, pa citim të përsëritur
+të pyetjes së parë. Nuk kërkohet zgjedhja e detyrës nga një listë paraprake.
 **Raporti M2/M3** hap listën ndihmëse, ku **Rifresko** merr gjendjen aktuale.
 Përgjigjet ruhen në të njëjtat pyetje të ditës dhe
 hapja manuale nuk konsumon njoftimin automatik. `/m3` sjell bashkë pyetjet M3
