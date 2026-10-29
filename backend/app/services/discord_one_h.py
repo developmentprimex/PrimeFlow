@@ -58,7 +58,7 @@ def next_options(tasks, slot):
         if scheduled not in SLOTS or status not in {'TODO', 'IN_PROGRESS'} or task.get('is_active') is False:
             continue
         rank = SLOTS.index(scheduled)
-        group = 'CURRENT' if rank == current and status == 'IN_PROGRESS' else (
+        group = 'CURRENT' if rank <= current and status == 'IN_PROGRESS' else (
             'LATER' if rank > current else 'UNSTARTED' if status == 'TODO' else None)
         if group:
             options[str(task['id'])] = {'id': str(task['id']), 'title': plain_text(task.get('title') or 'Detyrë'),

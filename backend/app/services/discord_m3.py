@@ -27,6 +27,24 @@ def collection_phase(now: datetime) -> str | None:
     return None
 
 
+def regular_delivery_at(day, phase):
+    return datetime.combine(day, time(15, 50) if phase == 'm3' else time(16, 10), report_timezone())
+
+
+def sent_in_regular_window(question, phase):
+    return bool(question.sent_at and question.sent_at >= regular_delivery_at(question.day, phase))
+
+
+def delivery_is_pending(question, now, phase):
+    if question.answered_at or sent_in_regular_window(question, phase):
+        return False
+    # An operator's earlier simulation uses the same durable question but
+    # must not consume the scheduled notification or keep its future lease.
+    if question.sent_at:
+        return True
+    return question.lease_until <= now
+
+
 def context_key(kind: str, row: dict) -> str:
     # A changed plan or slot conflict gets a fresh question; polling an unchanged
     # plan never repeats it. Individual task replies remain bound to that task.

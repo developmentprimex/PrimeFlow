@@ -79,7 +79,7 @@ class DesktopIntegrationTests(unittest.IsolatedAsyncioTestCase):
             role=UserRole.ADMIN, password_hash='not-a-password')
         self.db.add_all([self.user, self.other])
         await self.db.commit()
-        self.flag = patch.object(service.settings, 'OPENAI_API_KEY', 'fake-not-sent')
+        self.flag = patch.object(service.settings, 'MIRA_NOTES_OPENAI_API_KEY', 'fake-not-sent')
         self.flag.start()
         self.payload = DesktopStart(id=uuid.uuid4(), title='Call', consent_acknowledged=True)
         await service.create_session(self.db, self.user, self.payload)

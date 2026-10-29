@@ -43,7 +43,7 @@ export function MiraPage() {
   }, [loadStatus])
 
   return (
-    <div className={cn("mx-auto w-full px-4 py-8 md:px-8", tab !== "shenimet" && "max-w-6xl")}>
+    <div className={cn("mx-auto w-full px-4 py-8 md:px-8", tab !== "takimet" && tab !== "shenimet" && "max-w-6xl")}>
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight">Mira</h1>

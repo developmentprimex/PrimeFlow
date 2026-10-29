@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import uuid
 from pathlib import Path
 from datetime import date, datetime, time, timedelta
@@ -19,6 +18,7 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 from app.db import SessionLocal
 from app.models.enums import GaNoteStatus
 from app.models.ga_note import GaNote
+from app.services.report_note_visibility import is_mira_note, mira_note_expression
 from app.models.plan_note import PlanNote
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
@@ -206,6 +206,7 @@ def _undiscussed_px_notes_statement():
         .where(GaNote.status != GaNoteStatus.CLOSED)
         .where(GaNote.is_discussed.is_(False))
         .where(GaNote.is_converted_to_task.is_(False))
+        .where(~mira_note_expression())
         .where(~active_task_exists)
         .order_by(GaNote.created_at.desc(), GaNote.updated_at.desc())
     )
@@ -213,15 +214,14 @@ def _undiscussed_px_notes_statement():
 
 async def load_undiscussed_notes(*, show_full_mira_notes: bool = False) -> list[ReportUndiscussedNote]:
     """Load the PX Notes rows that still need discussion in the 1H report."""
+    # Keep the legacy request option compatible; Mira notes are always excluded.
     async with SessionLocal() as db:
         rows = (await db.execute(_undiscussed_px_notes_statement())).all()
     notes = []
     for note, full_name, username, email in rows:
+        if is_mira_note(note):
+            continue
         content = clean_description(note.content)
-        if getattr(note, "from_mira", False) and not show_full_mira_notes:
-            # Match the collapsed PX Notes label: title/date before the first
-            # blank line. Keep the stored summary intact.
-            content = re.split(r"\n\s*\n", content, maxsplit=1)[0].strip()
         if not content:
             continue
         notes.append(ReportUndiscussedNote(

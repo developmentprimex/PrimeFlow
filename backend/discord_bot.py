@@ -22,6 +22,8 @@ import discord_ui as ui
 import discord_agent_client as agent_client
 import discord_m2_client as m2_client
 import discord_m3_client as m3_client
+import discord_reports
+from discord_channel_names import personal_channel_name
 import discord_one_h_client as one_h_client
 import discord_m2_approvals as m2_approvals
 import discord_answer_sync as answer_sync
@@ -245,6 +247,9 @@ class PrimeFlowBot(discord.Client):
         expected = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)}
+        if settings.DISCORD_AI_AGENT_BOT_USER_ID:
+            expected[discord.Object(id=int(settings.DISCORD_AI_AGENT_BOT_USER_ID), type=discord.Member)] = discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True)
         if overwrite_signature(channel.overwrites) != overwrite_signature(expected):
             if not channel.permissions_for(guild.me).manage_roles:
                 raise ValueError("Lejet e kanalit privat kanë ndryshuar. Për t'i korrigjuar, botit i duhet leja Manage Roles në Discord.")
@@ -289,11 +294,16 @@ class PrimeFlowBot(discord.Client):
                             category = server.get_channel(int(settings.DISCORD_CATEGORY_ID))
                             if not isinstance(category, discord.CategoryChannel):
                                 raise ValueError("Kategoria Discord e konfiguruar nuk u gjet.")
-                        channel = await server.create_text_channel(f"primeflow-{interaction.user.id}", category=category,
+                        overwrites = {server.default_role: discord.PermissionOverwrite(view_channel=False),
+                            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+                            server.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)}
+                        if settings.DISCORD_AI_AGENT_BOT_USER_ID:
+                            overwrites[discord.Object(id=int(settings.DISCORD_AI_AGENT_BOT_USER_ID), type=discord.Member)] = discord.PermissionOverwrite(
+                                view_channel=True, send_messages=True, read_message_history=True)
+                        channel = await server.create_text_channel(personal_channel_name(result.get('full_name'),
+                            fallback_name=interaction.user.display_name, existing_names=[c.name for c in server.text_channels]), category=category,
                             topic=f"PrimeFlow personal workspace: {interaction.user.id}",
-                            overwrites={server.default_role: discord.PermissionOverwrite(view_channel=False),
-                                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-                                server.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)})
+                            overwrites=overwrites)
                     await self.bridge("/bot/bind-channel", actor(interaction.user.id, server.id, channel.id))
                 await interaction.followup.send(f"Llogaria u lidh. Kanali yt: {channel.mention}. Përdor /detyrat atje.", ephemeral=True)
             except Exception as exc:
@@ -309,6 +319,14 @@ class PrimeFlowBot(discord.Client):
                 await interaction.followup.send(text, view=view or discord.utils.MISSING)
             except Exception as exc:
                 await interaction.followup.send(self.error_message(exc, read_only=True), ephemeral=True)
+
+        @self.tree.command(name="m2", description="Shfaq raportin tënd M2 për sot", guild=guild)
+        async def show_m2(interaction: discord.Interaction):
+            await self.show_personal_report(interaction, 'm2')
+
+        @self.tree.command(name="m3", description="Shfaq raportin tënd M3 për sot", guild=guild)
+        async def show_m3(interaction: discord.Interaction):
+            await self.show_personal_report(interaction, 'm3')
 
         @self.tree.command(name="pyet", description="Jep udhëzim për detyrën që ke zgjedhur", guild=guild)
         async def ask(interaction: discord.Interaction, udhezimi: str):
@@ -349,6 +367,16 @@ class PrimeFlowBot(discord.Client):
         self.m2_questions.start()
         self.meeting_alerts.start()
         self.agent_results.start()
+
+    async def show_personal_report(self, interaction, kind):
+        await interaction.response.defer(thinking=True)
+        try:
+            await discord_reports.show(self, interaction, kind)
+        except Exception as exc:
+            message = str(exc)[:1800] if isinstance(exc, ValueError) else f'Raporti {kind.upper()} nuk u shfaq. Provo /{kind} përsëri.'
+            if not isinstance(exc, ValueError):
+                log.warning('Personal report %s failed: %s', kind, type(exc).__name__)
+            await interaction.followup.send(message, ephemeral=True)
 
     async def show_result(self, interaction, result):
         text = result["message"]
@@ -698,7 +726,13 @@ class PrimeFlowBot(discord.Client):
         if not custom_id.startswith("pf:"):
             return
         try:
-            if custom_id.startswith("pf:1h:"):
+            if custom_id.startswith('pf:mc:primary:'):
+                await self.meeting_capture.panel.handle(interaction)
+            elif custom_id.startswith("pf:reports:"):
+                _, _, kind, page = custom_id.split(':')
+                await interaction.response.defer()
+                await discord_reports.show(self, interaction, kind, int(page), update=True)
+            elif custom_id.startswith("pf:1h:"):
                 await one_h_client.handle(self, interaction)
             elif custom_id.startswith("pf:m3:"):
                 await m3_client.handle(self, interaction)
@@ -986,6 +1020,7 @@ class PrimeFlowBot(discord.Client):
     async def voice_meeting_results(self):
         try:
             await voice_meetings.deliver_meeting_results(self)
+            await self.meeting_capture.panel.tick()
         except Exception:
             log.warning("Mira meeting result delivery unavailable")
 

@@ -7,6 +7,7 @@ import { Check, ChevronDown, RefreshCw, Search } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import { clock, json, type MiraNote } from "@/lib/mira"
+import { MIRA_NOTE_GROUPS, miraNoteGroup, type MiraNoteGroup } from "@/lib/mira-note-groups"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,6 +32,7 @@ export function NotesTab() {
   const [error, setError] = React.useState<string | null>(null)
   const [reload, setReload] = React.useState(0)
   const [query, setQuery] = React.useState("")
+  const [group, setGroup] = React.useState<MiraNoteGroup>("1H")
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set())
   const [sharing, setSharing] = React.useState<Set<string>>(() => new Set())
 
@@ -57,7 +59,12 @@ export function NotesTab() {
     return () => { active = false }
   }, [apiFetch, reload])
 
-  const visibleNotes = notes.filter(note =>
+  const groupCounts = notes.reduce<Record<MiraNoteGroup, number>>((counts, note) => {
+    counts[miraNoteGroup(note)] += 1
+    return counts
+  }, { "1H": 0, AI_AGENT: 0, OTHER: 0 })
+  const groupLabel = MIRA_NOTE_GROUPS.find(item => item.value === group)!.label
+  const visibleNotes = notes.filter(note => miraNoteGroup(note) === group).filter(note =>
     `${note.title} ${note.content} ${SOURCE_LABELS[note.source]} ${STATUS_LABELS[note.status] ?? note.status}`
       .toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
 
@@ -88,11 +95,18 @@ export function NotesTab() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-semibold">Shënimet e Mira-s <span className="ml-1 text-sm font-normal text-muted-foreground">({notes.length})</span></h2>
-          <p className="mt-1 text-sm text-muted-foreground">Të gjitha shënimet e takimeve dhe Mira Desktop. Zgjidh cilat të shfaqen edhe në PX Notes.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Shënimet janë të ndara sipas takimit. Zgjidh cilat të shfaqen edhe në PX Notes.</p>
         </div>
         <Button type="button" variant="outline" size="sm" disabled={loading || sharing.size > 0} onClick={() => setReload(value => value + 1)}>
           <RefreshCw className={cn("size-4", loading && "animate-spin")} /> Rifresko
         </Button>
+      </div>
+      <div role="group" aria-label="Lloji i takimit" className="mb-4 flex flex-wrap gap-2">
+        {MIRA_NOTE_GROUPS.map(item => <Button key={item.value} type="button" size="sm"
+          variant={group === item.value ? "default" : "outline"} aria-pressed={group === item.value}
+          onClick={() => { setGroup(item.value); setExpanded(new Set()) }}>
+          {item.label}<span className="ml-1 tabular-nums">({groupCounts[item.value]})</span>
+        </Button>)}
       </div>
       <div className="relative mb-3 max-w-sm">
         <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
@@ -116,7 +130,7 @@ export function NotesTab() {
           <TableBody>
             {loading ? <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">Duke ngarkuar shënimet...</TableCell></TableRow>
               : visibleNotes.length === 0 ? <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
-                {error ? "Shënimet nuk u ngarkuan." : query ? "Nuk u gjet asnjë shënim." : "Mira nuk ka ende shënime."}
+                {error ? "Shënimet nuk u ngarkuan." : query ? "Nuk u gjet asnjë shënim." : `Nuk ka ende shënime në grupin ${groupLabel}.`}
               </TableCell></TableRow> : visibleNotes.map((note, index) => {
                 const key = noteKey(note), open = expanded.has(key), busy = sharing.has(key)
                 return <TableRow key={key} className="hover:bg-transparent">

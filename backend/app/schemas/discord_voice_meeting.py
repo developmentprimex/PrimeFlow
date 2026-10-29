@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 class StrictModel(BaseModel):
@@ -11,12 +12,17 @@ class VoiceActor(StrictModel):
     voice_channel_id: str | None = Field(default=None, pattern=r'^\d{1,32}$')
 
 class VoiceStart(VoiceActor):
+    recorder: Literal['primary', 'ai_agent'] = 'primary'
     # A Discord interaction ID, or auto1h-YYYYMMDDHHMM for a scheduled 1H meeting.
     request_id: str = Field(pattern=r'^(\d{1,32}|auto1h-\d{12}(-\d)?)$')
     instance_id: uuid.UUID
     capture_token: str = Field(min_length=32, max_length=128)
     title: str = Field(min_length=1, max_length=200)
     department_id: uuid.UUID | None = None
+
+class ControlScope(StrictModel):
+    guild_id: str = Field(pattern=r'^\d{1,32}$')
+    channel_id: str = Field(pattern=r'^\d{1,32}$')
 
 class Worker(StrictModel):
     capture_token: str = Field(min_length=32, max_length=128)
@@ -39,3 +45,6 @@ class Interrupt(Worker):
 class DeliveryAck(StrictModel):
     delivery_token: uuid.UUID
     message_ids: list[str] = Field(max_length=10)
+
+class DeliveryClaim(StrictModel):
+    recorder: Literal['primary', 'ai_agent'] = 'primary'

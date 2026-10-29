@@ -88,6 +88,9 @@ class NewSystemTaskRowsTests(unittest.IsolatedAsyncioTestCase):
             id="linked", content="Already linked to a task", is_discussed=False,
             created_by=None, created_at=datetime(2026, 8, 11, 14, 0), updated_at=None,
         )
+        mira = SimpleNamespace(**{**included.__dict__, "id": "mira", "from_mira": True,
+                                  "mira_shared_to_px": True})
+        desktop = SimpleNamespace(**{**included.__dict__, "id": "desktop", "from_mira_desktop": True})
 
         class FakeResult:
             def __init__(self, values):
@@ -98,7 +101,7 @@ class NewSystemTaskRowsTests(unittest.IsolatedAsyncioTestCase):
 
         class FakeDb:
             def __init__(self):
-                self.results = iter([[included, discussed, linked], [linked.id]])
+                self.results = iter([[included, discussed, linked, mira, desktop], [linked.id]])
 
             async def execute(self, _statement):
                 return FakeResult(next(self.results))

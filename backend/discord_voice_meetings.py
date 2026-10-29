@@ -46,6 +46,8 @@ class MeetingCaptureCoordinator:
         self.bot=bot;self.active=None;self.lock=asyncio.Lock();self.finalization=None;self.background=set()
         self.scheduled=set()  # 1H slots joined or given up by this process
         self.attempts={}  # failed join attempts per 1H slot
+        from discord_meeting_control import MeetingControlPanel
+        self.panel=MeetingControlPanel(self)
 
     async def preflight(self):
         process=await asyncio.create_subprocess_exec(settings.DISCORD_VOICE_NODE_BINARY,str(VOICE_DIR/'worker.mjs'),'--check',
@@ -56,6 +58,9 @@ class MeetingCaptureCoordinator:
         if process.returncode or b'"voice_ready":true' not in output:raise ValueError('Shërbimi i audios nuk është gati.')
 
     async def start(self,interaction,title,department_id):
+        from discord_meeting_control import in_control
+        if in_control(interaction):
+            return await self.panel.start(interaction,title,department_id)
         channel=getattr(getattr(interaction.user,'voice',None),'channel',None)
         if not isinstance(channel,discord.VoiceChannel):raise ValueError('Hyr në një voice channel të zakonshëm.')
         await self.bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
@@ -72,6 +77,7 @@ class MeetingCaptureCoordinator:
             await self.preflight()
             worker={'capture_token':secrets.token_urlsafe(32),'instance_id':str(uuid.uuid4())}
             row=await self.bot.bridge(PREFIX+'/start',{**actor,**worker,
+                'recorder':getattr(self.bot,'voice_recorder','primary'),
                 'request_id':request_id,'title':(title or f'{channel.name} · {datetime.now().strftime("%d.%m.%Y %H:%M")}')[:200],
                 'department_id':department_id})
             active={'id':row['id'],'worker':worker,'actor':actor,'capture':None,
@@ -143,7 +149,9 @@ class MeetingCaptureCoordinator:
     async def stop(self,interaction,session_id=None):
         active=self.active
         if not active or (session_id and session_id!=active['id']):raise ValueError('Nuk ka takim aktiv në këtë proces.')
-        await self.bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
+        from discord_meeting_control import in_control, require_control
+        if in_control(interaction):require_control(interaction)
+        else:await self.bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
         await self.bot.bridge(PREFIX+f"/{active['id']}/authorize-stop",identity(interaction))
         if active['finishing']:
             await interaction.followup.send('Shënimet po përgatiten.');return
@@ -193,7 +201,9 @@ class MeetingCaptureCoordinator:
     def organizer_channel(self,owner):
         guild=self.bot.get_guild(int(settings.DISCORD_GUILD_ID))
         if not guild:raise ValueError('guild_unavailable')
-        private=next((c for c in guild.text_channels if c.topic==f'PrimeFlow personal workspace: {owner}'),None)
+        shared=settings.DISCORD_MEETING_CONTROL_CHANNEL_ID
+        private=(guild.get_channel(int(shared)) if isinstance(shared,str) and shared.isdigit() else None)
+        private=private or next((c for c in guild.text_channels if c.topic==f'PrimeFlow personal workspace: {owner}'),None)
         if private is None:raise ValueError('organizer_private_channel_missing')
         return guild,private
 
@@ -264,9 +274,9 @@ class MeetingCaptureCoordinator:
         if self.active and self.active.get('capture'):await self.active['capture'].close()
 
 
-def register_meeting_commands(bot,guild):
+def register_meeting_commands(bot,guild,*,name='takimi'):
     if not settings.DISCORD_MEETING_NOTES_ENABLED:return
-    group=app_commands.Group(name='takimi',description='Mira dëgjon takimin dhe merr shënime')
+    group=app_commands.Group(name=name,description='Mira dëgjon takimin dhe merr shënime')
     @group.command(name='fillo',description='Fto Mira-n të dëgjojë pa folur')
     async def start(interaction:discord.Interaction,titulli:str|None=None,departamenti:str|None=None):
         await interaction.response.defer(thinking=True)
@@ -284,22 +294,32 @@ def register_meeting_commands(bot,guild):
 
 async def handle_meeting_interaction(bot,interaction):
     _,_,action,sid=interaction.data['custom_id'].split(':');uuid.UUID(sid)
-    await interaction.response.defer(thinking=True,ephemeral=True)
-    await bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
+    from discord_meeting_control import in_control, require_control
+    shared=in_control(interaction)
+    await interaction.response.defer(thinking=True,ephemeral=not shared)
+    if shared:require_control(interaction)
+    else:await bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
     if action=='stop':await bot.meeting_capture.stop(interaction,sid);return
     if action not in ('view','save'):raise ValueError('Veprim i panjohur.')
     row=await bot.bridge(PREFIX+f'/{sid}/'+('save' if action=='save' else 'detail'),identity(interaction))
     parts=result_message(row)
-    try:await interaction.followup.send('U ruajt.' if action=='save' else None,**parts,ephemeral=True)
+    try:await interaction.followup.send('U ruajt.' if action=='save' else None,**parts,ephemeral=not shared)
     finally:
         if 'file' in parts:parts['file'].close()
 
 
 async def deliver_meeting_results(bot):
-    jobs=(await bot.bridge(PREFIX+'/delivery/claim',{}))['jobs']
+    recorder=getattr(bot,'voice_recorder','primary')
+    jobs=(await bot.bridge(PREFIX+'/delivery/claim',{'recorder':recorder}))['jobs']
     for job in jobs:
+        if job.get('recorder')!=recorder:
+            log.warning('Skipped meeting delivery from another recorder')
+            continue
         try:
-            channel=await bot.private_channel(job['guild_id'],job['channel_id'],job['discord_user_id'])
+            if job['guild_id']==settings.DISCORD_GUILD_ID and job['channel_id']==settings.DISCORD_MEETING_CONTROL_CHANNEL_ID:
+                channel=await bot.meeting_capture.panel.channel()
+            else:
+                channel=await bot.private_channel(job['guild_id'],job['channel_id'],job['discord_user_id'])
             row=await bot.bridge(PREFIX+f"/{job['id']}/detail",{k:job[k] for k in ('discord_user_id','guild_id','channel_id')})
             ids=await send_durable(bot,channel,row)
             await bot.bridge(PREFIX+f"/{job['id']}/delivery/ack",{'delivery_token':job['delivery_token'],'message_ids':ids})

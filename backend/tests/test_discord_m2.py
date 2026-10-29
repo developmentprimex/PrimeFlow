@@ -197,11 +197,12 @@ class M2DiscordTests(unittest.TestCase):
                                     'start_date': '2026-10-27', 'old_due_date': '2026-10-26', 'due_date': '2026-10-28'},
                        'reasons': [{'value': code, 'label': label} for code, label in service.REASON_LABELS.items()]}
                 view = client.controls(job)
-                self.assertEqual(view.children[-1].custom_id, f"pf:m2:open:{job['id']}")
-                self.assertIsNone(view.children[-1].url)
+                self.assertEqual(view.children[-2].custom_id, f"pf:m2:open:{job['id']}")
+                self.assertIsNone(view.children[-2].url)
+                self.assertEqual(view.children[-1].custom_id, 'pf:reports:m2:0')
                 self.assertTrue(view.is_persistent())
                 if kind in {'delivery', 'continuation'}:
-                    self.assertEqual(len(view.children), 4 if kind == 'continuation' else 3)
+                    self.assertEqual(len(view.children), 5 if kind == 'continuation' else 4)
                 else:
                     self.assertEqual({option.value for option in view.children[0].options}, set(service.REASON_LABELS))
                 if kind == 'postponed':
@@ -215,7 +216,7 @@ class M2DiscordTests(unittest.TestCase):
             job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': 'continuation'}
             for state in ({'platform_status': 'Saved'}, {'postponement': {'status': 'APPROVED'}}):
                 view = client.controls(job | state)
-                self.assertEqual(len(view.children), 1)
+                self.assertEqual(len(view.children), 2)
                 self.assertEqual(view.children[0].custom_id, f"pf:m2:open:{job['id']}")
                 self.assertIsNone(view.children[0].url)
         asyncio.run(check())

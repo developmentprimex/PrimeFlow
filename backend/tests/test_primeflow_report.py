@@ -39,7 +39,7 @@ from app.services.primeflow_report_delivery import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
-    def test_undiscussed_mira_notes_show_only_px_notes_title_in_reports(self) -> None:
+    def test_mira_notes_are_excluded_from_reports_even_with_full_notes_enabled(self) -> None:
         title = "1H 820/10/11/1150/1420/16 · 22.10.2026 14:18"
         summary = title + "\r\n\r\n**Përmbledhja:**\r\nFull Mira summary must stay in PX Notes."
         ordinary = "Regular PX note\n\nKeep all its details."
@@ -47,6 +47,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         mira = SimpleNamespace(content=summary, from_mira=True, created_at=created)
         rows = [
             (mira, "Elsa", None, None),
+            (SimpleNamespace(content="Desktop summary", from_mira_desktop=True, created_at=created), None, None, None),
+            (SimpleNamespace(content="Shared Mira summary", from_mira=True, mira_shared_to_px=True, created_at=created), None, None, None),
             (SimpleNamespace(content=ordinary, from_mira=False, created_at=created), None, "tester", None),
             (SimpleNamespace(content=" ", from_mira=False, created_at=created), None, None, None),
         ]
@@ -64,21 +66,22 @@ class PrimeFlowReportTests(unittest.TestCase):
         with patch("app.services.primeflow_report_delivery.SessionLocal", return_value=FakeSession()):
             notes = asyncio.run(load_undiscussed_notes())
             full_notes = asyncio.run(load_undiscussed_notes(show_full_mira_notes=True))
-        self.assertEqual([note.content for note in notes], [title, ordinary])
-        self.assertEqual([note.author for note in notes], ["Elsa", "tester"])
+        self.assertEqual([note.content for note in notes], [ordinary])
+        self.assertEqual([note.author for note in notes], ["tester"])
         self.assertEqual(mira.content, summary)
-        self.assertEqual(full_notes[0].content, clean_description(summary))
-        self.assertEqual(full_notes[1].content, ordinary)
+        self.assertEqual(full_notes, notes)
         document = build_report_document({"items": {}}, date(2026, 10, 22), "10:00", undiscussed_notes=notes)
         outputs = [render_html(document), render_plain_text(document),
             zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode("utf-8")]
         for output in outputs:
-            self.assertIn(title, output)
+            self.assertNotIn(title, output)
+            self.assertNotIn("Desktop summary", output)
+            self.assertNotIn("Shared Mira summary", output)
             self.assertIn("Keep all its details.", output)
             self.assertNotIn("Full Mira summary", output)
         full_document = build_report_document({"items": {}}, date(2026, 10, 22), "10:00", undiscussed_notes=full_notes)
-        self.assertIn("Full Mira summary", render_html(full_document))
-        self.assertIn("Full Mira summary", render_plain_text(full_document))
+        self.assertNotIn("Full Mira summary", render_html(full_document))
+        self.assertNotIn("Full Mira summary", render_plain_text(full_document))
 
     def test_extra_questions_share_title_in_html_word_and_text(self) -> None:
         from docx import Document
@@ -484,6 +487,16 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("NOT (EXISTS", query)
         self.assertIn("tasks.ga_note_origin_id = ga_notes.id", query)
         self.assertIn("ga_notes.created_at DESC", query)
+
+    def test_undiscussed_notes_query_excludes_all_mira_sources(self) -> None:
+        conditions = str(_undiscussed_px_notes_statement().whereclause)
+        self.assertIn("NOT ((EXISTS", conditions)
+        for source in (
+            "discord_voice_meetings.saved_note_id",
+            "mira_1h_events.note_id",
+            "mira_desktop_sessions.note_id",
+        ):
+            self.assertIn(f"{source} = ga_notes.id", conditions)
 
     def test_report_management_access_includes_laurent_hoxha(self) -> None:
         laurent = SimpleNamespace(role=SimpleNamespace(value="STAFF"), full_name="Laurent Hoxha")

@@ -185,6 +185,18 @@ def test_closed_notes_are_excluded_from_new_reports():
     assert [note["id"] for note in data["notes"]] == ["open"]
 
 
+@pytest.mark.parametrize("origin", ["from_mira", "from_mira_desktop"])
+@pytest.mark.parametrize("shared", [False, True])
+def test_mira_notes_are_excluded_from_new_reports(origin, shared):
+    notes = [
+        SimpleNamespace(id="open", content="Keep", created_at=at(DAY, 8)),
+        SimpleNamespace(id="mira", content="Meeting summary", created_at=at(DAY, 8),
+                        mira_shared_to_px=shared, **{origin: True}),
+    ]
+    data = service.select_sections([], notes, [], [], DAY, now=at(DAY, 10))
+    assert [note["id"] for note in data["notes"]] == ["open"]
+
+
 def test_build_data_queries_only_open_unconverted_notes(monkeypatch):
     statements = []
 
@@ -261,6 +273,9 @@ def test_excluded_note_lookup_reads_only_px_notes_and_checks_closed_or_converted
             assert "is_converted_to_task" in str(statement)
             assert " OR " in str(statement)
             assert GaNoteStatus.CLOSED in params
+            assert "discord_voice_meetings.saved_note_id = ga_notes.id" in str(statement)
+            assert "mira_1h_events.note_id = ga_notes.id" in str(statement)
+            assert "mira_desktop_sessions.note_id = ga_notes.id" in str(statement)
             return Result()
 
     assert asyncio.run(service.excluded_note_ids(Db(), row)) == {str(ga_id)}

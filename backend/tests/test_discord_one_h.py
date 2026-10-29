@@ -103,13 +103,30 @@ class QuestionTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             service.save_answer(report, item['id'], 'Po', '', '500', AT, asks_completion=True)
 
-    def test_next_options_include_current_later_and_earlier_todo_only(self):
+    def test_next_options_include_current_later_and_unfinished_earlier_tasks(self):
         current, later, earlier = task('IN_PROGRESS', '11:00'), task('TODO', '14:20'), task('TODO', '10:00')
+        ongoing = task('IN_PROGRESS', '10:00')
         excluded = [task('DONE', '14:20'), task('WAITING_CLIENT', '16:00'), task('TODO', None),
-                    task('IN_PROGRESS', '10:00'), task('TODO', '16:00', is_active=False)]
-        options = service.next_options([*excluded, earlier, later, current, current], '11:00')
-        self.assertEqual([t['id'] for t in options], [current['id'], later['id'], earlier['id']])
-        self.assertEqual([t['group'] for t in options], ['CURRENT', 'LATER', 'UNSTARTED'])
+                    task('TODO', '16:00', is_active=False)]
+        options = service.next_options([*excluded, earlier, later, current, ongoing, current], '11:00')
+        self.assertEqual([t['id'] for t in options], [ongoing['id'], current['id'], later['id'], earlier['id']])
+        self.assertEqual([t['group'] for t in options], ['CURRENT', 'CURRENT', 'LATER', 'UNSTARTED'])
+
+    def test_empty_later_slots_offer_earlier_ongoing_work_until_finished(self):
+        ongoing = task('IN_PROGRESS', '10:00')
+        for slot in service.SLOTS[1:]:
+            with self.subTest(slot=slot):
+                report = service.refresh(service.snapshot([], AT, slot=slot), [ongoing])
+                self.assertEqual(report['tasks'], [])
+                self.assertEqual(report['next_options'], [{
+                    'id': ongoing['id'], 'title': ongoing['title'], 'slot': '10:00',
+                    'status': 'IN_PROGRESS', 'group': 'CURRENT'}])
+                selected = service.save_next_choices(report, [ongoing['id']], 'carry-forward', AT,
+                    options_key=service.next_options_key(report))
+                self.assertEqual(selected['next']['selected_tasks'][0]['id'], ongoing['id'])
+                finished = service.refresh(selected, [{**ongoing, 'status': 'DONE'}])
+                self.assertEqual(finished['next_options'], [])
+                self.assertEqual(len(finished['next']['history']), 1)
 
     def test_selection_preserves_other_pages_history_and_never_changes_tasks(self):
         tasks = [task(title=f'Task {i:02d}', slot='11:00') for i in range(31)]

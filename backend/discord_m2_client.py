@@ -53,13 +53,16 @@ def prompt(job):
 
 def controls(job):
     view = discord.ui.View(timeout=None)
+    def finish():
+        view.add_item(discord.ui.Button(label='Raporti M2', custom_id='pf:reports:m2:0', row=4))
+        return view
     open_task = discord.ui.Button(label='Hap detyrën', custom_id=f"pf:m2:open:{job['id']}")
     if job.get('platform_status'):
         view.add_item(open_task)
-        return view
+        return finish()
     if job['kind'] == 'continuation' and job.get('postponement', {}).get('status') == 'APPROVED':
         view.add_item(open_task)
-        return view
+        return finish()
     if job['kind'] in {'delivery', 'continuation'}:
         view.add_item(discord.ui.Button(label='Po, vazhdon' if job['kind'] == 'continuation' else 'Po, e dorëzova', style=discord.ButtonStyle.success,
             custom_id=f"pf:m2:reply:{job['id']}:PO"))
@@ -77,7 +80,7 @@ def controls(job):
             custom_id=f"pf:m2:reason:{job['id']}",
             options=[discord.SelectOption(label=reason['label'][:100], value=reason['value']) for reason in job['reasons']]))
     view.add_item(open_task)
-    return view
+    return finish()
 
 
 def report_content(job, message):
@@ -143,11 +146,15 @@ async def handle(bot, interaction):
         return await bot.bridge(f'/bot/m2/{parts[3]}/open', actor(interaction))
 
     deferred = False
-    if parts[2] in {'open', 'detail', 'return'}:
+    if parts[2] in {'open', 'detail', 'return', 'question'}:
         await interaction.response.defer()
         job = await load()
     else:
         job, deferred = await prepare_modal(interaction, load)
+    if parts[2] == 'question':
+        await interaction.edit_original_response(content=prompt(job), embeds=[], view=controls(job),
+            allowed_mentions=discord.AllowedMentions.none())
+        return
     if parts[2] in {'open', 'detail'}:
         detail = await bot.current_detail(interaction, job['task_id'])
         await show_detail(bot, interaction, job, detail, int(parts[4]) if parts[2] == 'detail' else 0)

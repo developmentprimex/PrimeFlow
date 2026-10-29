@@ -146,6 +146,15 @@ module.exports = {
     },
     {
       ...apiProcess,
+      name: "primeflow-discord-ai-agent",
+      args: "discord_ai_agent_bot.py",
+      env: {
+        ...sharedEnv,
+        DISCORD_AI_AGENT_ENV_FILE: process.env.DISCORD_AI_AGENT_ENV_FILE ?? "C:\\PrimeFlowOps\\MiraAIAgent\\.env",
+      },
+    },
+    {
+      ...apiProcess,
       name: "primeflow-kujtesa",
       args: "integrations/kujtesa/primeflow_bot.py",
       restart_delay: 5000,

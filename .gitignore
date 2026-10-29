@@ -38,6 +38,7 @@ tmp/recorder-baseline.zip
 tmp/recorder-full-lint.json
 backend/private-data/
 backend/.discord-worker-status.json*
+backend/.discord-ai-agent-status.json*
 backend/.discord-agent-recovery/
 .primeflow-receipts.*
 .kujtesa-worker-status.*

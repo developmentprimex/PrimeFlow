@@ -28,11 +28,14 @@ def token_hash(token):
 
 def view(row):
     return dict(id=str(row.id), status=row.status, title=row.title, partial=bool(row.partial),
+        recorder=getattr(row, 'recorder', None) or 'primary',
         created_at=row.created_at.isoformat() if row.created_at else None,
         organizer_user_id=str(row.user_id), voice_channel_id=row.voice_channel_id,
         private_channel_id=row.private_channel_id, error=row.error, draft_text=row.draft_text,
         saved_note_id=str(row.saved_note_id) if row.saved_note_id else None,
-        note_url=settings.FRONTEND_URL.rstrip('/') + '/ga-ka-notes' if row.saved_note_id else None)
+        note_url=settings.FRONTEND_URL.rstrip('/') + ('/mira?tab=shenimet'
+            if settings.DISCORD_MEETING_CONTROL_CHANNEL_ID and row.private_channel_id == settings.DISCORD_MEETING_CONTROL_CHANNEL_ID
+            else '/ga-ka-notes') if row.saved_note_id else None)
 
 
 async def locked(db, session_id):
@@ -44,6 +47,9 @@ async def locked(db, session_id):
 
 
 async def authorize_session(db, actor, session_id, *, operation):
+    from app.services.discord_meeting_control import is_control, authorize_shared_session
+    if is_control(actor):
+        return await authorize_shared_session(db, actor, session_id, operation=operation)
     link, user = await bridge.identity(db, actor)
     row = await locked(db, session_id)
     owner = row.user_id == user.id and row.link_id == link.id and row.private_channel_id == actor.channel_id
@@ -67,33 +73,45 @@ async def worker_row(db, session_id, payload):
 
 
 async def start_session(db, actor):
-    if not settings.DISCORD_MEETING_NOTES_ENABLED or not settings.OPENAI_API_KEY:
+    if not settings.DISCORD_MEETING_NOTES_ENABLED or not (settings.MIRA_NOTES_OPENAI_API_KEY or '').strip():
         raise HTTPException(503, 'Shënimet e takimeve nuk janë aktivizuar.')
-    link, user = await bridge.identity(db, actor)
+    from app.services.discord_meeting_control import is_control, control_identity, validate_voice, audit
+    shared = is_control(actor)
+    link, user = await control_identity(db, actor) if shared else await bridge.identity(db, actor)
+    if shared:
+        validate_voice(actor.recorder, actor.voice_channel_id)
     if not actor.voice_channel_id:
         raise HTTPException(400, 'Hyr fillimisht në voice channel.')
-    # Reserve per guild before checking for replay/another capture.
-    lock_key = int.from_bytes(hashlib.sha256(('voice:' + actor.guild_id).encode()).digest()[:8], 'big', signed=True)
+    recorder = actor.recorder
+    if recorder == 'ai_agent' and (not settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID
+            or actor.voice_channel_id != settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID):
+        raise HTTPException(403, 'Mira AI Agent regjistron vetëm kanalin AI Agent.')
+    if recorder == 'primary' and settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID == actor.voice_channel_id:
+        raise HTTPException(409, 'Në kanalin AI Agent përdor /ai-agent fillo.')
+    # Each recorder has its own reservation, worker secret and session ID.
+    lock_key = int.from_bytes(hashlib.sha256(('voice:' + actor.guild_id + ':' + recorder).encode()).digest()[:8], 'big', signed=True)
     await db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': lock_key})
     prior = (await db.execute(select(Meeting).where(Meeting.request_id == actor.request_id))).scalar_one_or_none()
     if prior:
-        if prior.user_id != user.id or prior.instance_id != actor.instance_id or prior.capture_token_hash != token_hash(actor.capture_token):
+        if prior.user_id != user.id or prior.instance_id != actor.instance_id or prior.capture_token_hash != token_hash(actor.capture_token) or prior.recorder != recorder:
             raise HTTPException(409, 'Kërkesa e nisjes nuk përputhet.')
         return view(prior)
-    active = (await db.execute(select(Meeting).where(Meeting.guild_id == actor.guild_id,
+    active = (await db.execute(select(Meeting).where(Meeting.guild_id == actor.guild_id, Meeting.recorder == recorder,
         Meeting.status.in_(['STARTING', 'LISTENING'])))).scalar_one_or_none()
     if active:
-        raise HTTPException(409, 'Një takim po dëgjohet tashmë në këtë server.')
+        raise HTTPException(409, 'Ky bot po merr shënime në një takim tjetër.')
     department = actor.department_id or user.department_id
     if department:
         ensure_department_access(user, department)
     elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise HTTPException(400, 'Zgjidh departamentin për shënimet.')
     row = Meeting(id=uuid.uuid4(), link_id=link.id, user_id=user.id, department_id=department,
-        guild_id=actor.guild_id, voice_channel_id=actor.voice_channel_id, private_channel_id=actor.channel_id,
+        guild_id=actor.guild_id, recorder=recorder, voice_channel_id=actor.voice_channel_id, private_channel_id=actor.channel_id,
         request_id=actor.request_id, instance_id=actor.instance_id, capture_token_hash=token_hash(actor.capture_token),
         title=actor.title.strip(), status='STARTING', partial=False, stop_authorized=False, heartbeat_at=now())
     db.add(row)
+    if shared:
+        audit(db, row, user, actor, 'START')
     await db.commit()
     return view(row)
 
@@ -112,7 +130,10 @@ async def transition_session(db, session_id, payload, target):
 
 
 async def authorize_stop(db, actor, session_id):
-    row, _ = await authorize_session(db, actor, session_id, operation='stop')
+    row, user = await authorize_session(db, actor, session_id, operation='stop')
+    from app.services.discord_meeting_control import is_control, audit
+    if not row.stop_authorized and is_control(actor):
+        audit(db, row, user, actor, 'STOP')
     row.stop_authorized = True
     await db.commit()
     return view(row)
@@ -139,7 +160,17 @@ async def save_notes(db, actor, session_id):
         raise HTTPException(409, 'Note-i i ruajtur është hequr; nuk krijohet përsëri.')
     if row.status != 'READY' or not (row.draft_text or '').strip():
         raise HTTPException(409, 'Shënimet nuk janë gati.')
-    await store_note(db, row, user)
+    from app.services.discord_meeting_control import is_control, audit
+    if is_control(actor):
+        # Keep the meeting's original department and author; record the person
+        # who pressed Save separately in the shared control audit.
+        organizer = await db.get(User, row.user_id)
+        if not organizer:
+            raise HTTPException(409, 'Organizatori i takimit nuk u gjet.')
+        await store_note(db, row, organizer)
+        audit(db, row, user, actor, 'SAVE')
+    else:
+        await store_note(db, row, user)
     await db.commit()
     return view(row)
 
@@ -200,17 +231,20 @@ async def receive_segment(db, session_id, payload, audio):
     return {'sequence':segment.sequence,'status':segment.status}
 
 
-async def claim_deliveries(db):
+async def claim_deliveries(db, *, recorder='primary'):
+    from app.services.discord_meeting_control import voice_id
+    voice_id(recorder)  # Reject unknown recorders before acquiring any delivery leases.
     rows=(await db.execute(select(Meeting,DiscordLink).join(DiscordLink,DiscordLink.id==Meeting.link_id)
-        .join(User,User.id==Meeting.user_id).where(Meeting.status.in_(['READY','FAILED']),
+        .join(User,User.id==Meeting.user_id).where(Meeting.recorder==recorder, Meeting.status.in_(['READY','FAILED']),
             Meeting.delivered_at.is_(None),or_(Meeting.delivery_until.is_(None),Meeting.delivery_until<now()),
-            DiscordLink.enabled.is_(True),User.is_active.is_(True),DiscordLink.channel_id==Meeting.private_channel_id,
+            DiscordLink.enabled.is_(True),User.is_active.is_(True),or_(DiscordLink.channel_id==Meeting.private_channel_id,
+                Meeting.private_channel_id==settings.DISCORD_MEETING_CONTROL_CHANNEL_ID),
             Meeting.guild_id==settings.DISCORD_GUILD_ID)
         .order_by(Meeting.created_at).with_for_update(of=Meeting,skip_locked=True).limit(10))).all()
     jobs=[]
     for row,link in rows:
         row.delivery_token=uuid.uuid4();row.delivery_until=now()+timedelta(minutes=5)
-        jobs.append(dict(id=str(row.id),guild_id=row.guild_id,channel_id=row.private_channel_id,
+        jobs.append(dict(id=str(row.id),recorder=row.recorder,guild_id=row.guild_id,channel_id=row.private_channel_id,
             discord_user_id=link.discord_user_id,delivery_token=str(row.delivery_token)))
     await db.commit()
     return {'jobs':jobs}

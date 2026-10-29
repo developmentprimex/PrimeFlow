@@ -6,6 +6,7 @@ const meetingId = "33333333-3333-4333-8333-333333333333"
 const rows = [
   { id: desktopId, kind: "PX_NOTE", source: "DESKTOP", title: "Takimi me ekipin", content: "**Vendimet:**\nDetaji i shënimit të desktopit.", status: "OPEN", created_at: "2026-10-28T09:30:00Z", note_id: desktopId, meeting_id: null, url: "/ga-ka-notes", shared_to_px: false },
   { id: meetingId, kind: "1H", source: "1H", title: "1H 10:00 · 28.10.2026", content: "Përmbledhja e takimit 1H.", status: "DONE", created_at: "2026-10-28T08:30:00Z", note_id: null, meeting_id: meetingId, url: "/ga-ka-notes", shared_to_px: false },
+  { id: "44444444-4444-4444-8444-444444444444", kind: "PX_NOTE", source: "DISCORD", meeting_group: "AI_AGENT", title: "Takimi AI Agent", content: "Shënime të veçanta AI Agent.", status: "OPEN", created_at: "2026-10-29T08:30:00Z", note_id: "44444444-4444-4444-8444-444444444444", meeting_id: null, url: "/ga-ka-notes", shared_to_px: false },
 ]
 
 async function shell(page: Page, { failRead = false, failShare = false, paginated = false } = {}) {
@@ -44,6 +45,7 @@ async function shell(page: Page, { failRead = false, failShare = false, paginate
 test("notes table expands content and sharing persists without removing the Mira row", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { writes } = await shell(page)
+  await page.getByRole("button", { name: /^Të tjera/ }).click()
   const desktop = page.getByRole("row").filter({ hasText: "Takimi me ekipin" })
   await expect(desktop.getByText("Mira Desktop")).toBeVisible()
   await expect(page.getByText("Detaji i shënimit të desktopit.")).toBeHidden()
@@ -54,12 +56,15 @@ test("notes table expands content and sharing persists without removing the Mira
   await expect(desktop.getByText("Shfaqet në PX Notes")).toBeVisible()
   expect(writes).toEqual([`POST /api/mira/notes/PX_NOTE/${desktopId}/show-in-px-notes`])
   await page.reload()
+  await page.getByRole("button", { name: /^Të tjera/ }).click()
   await expect(page.getByRole("row").filter({ hasText: "Takimi me ekipin" }).getByText("Shfaqet në PX Notes")).toBeVisible()
+  await page.getByRole("button", { name: /^1H\s*\(/ }).click()
   await expect(page.getByRole("row").filter({ hasText: "1H 10:00" }).getByRole("button", { name: "Shfaq në PX Notes" })).toBeVisible()
 })
 
 test("all pages are loaded and old closed notes remain searchable", async ({ page }) => {
   const { offsets } = await shell(page, { paginated: true })
+  await page.getByRole("button", { name: /^Të tjera/ }).click()
   await page.getByRole("textbox", { name: "Kërko shënime" }).fill("Shënimi i vjetër")
   const row = page.getByRole("row").filter({ hasText: "Shënimi i vjetër" })
   await expect(row.getByText("E mbyllur")).toBeVisible()
@@ -70,6 +75,7 @@ test("read errors offer retry and failed sharing never reports success", async (
   await shell(page, { failRead: true, failShare: true })
   await expect(page.getByRole("alert").filter({ hasText: "Nuk u ngarkuan shënimet." })).toBeVisible()
   await page.getByRole("button", { name: "Provo përsëri" }).click()
+  await page.getByRole("button", { name: /^Të tjera/ }).click()
   const row = page.getByRole("row").filter({ hasText: "Takimi me ekipin" })
   await row.getByRole("button", { name: "Shfaq në PX Notes" }).click()
   await expect(page.getByText("Ruajtja dështoi.")).toBeVisible()
@@ -81,7 +87,23 @@ test("phone keeps the table inside a horizontal scroll container", async ({ page
   await page.setViewportSize({ width: 390, height: 844 })
   await shell(page)
   await page.getByRole("button", { name: "Close sidebar" }).click()
+  await page.getByRole("button", { name: /^Të tjera/ }).click()
   await expect(page.getByRole("button", { name: "Takimi me ekipin" })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: "test-results/mira-notes-phone.png", fullPage: true })
+})
+
+test("1H and AI Agent groups show only their own notes", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await shell(page)
+  await expect(page.getByRole("button", { name: "1H 10:00 · 28.10.2026" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Takimi AI Agent" })).toBeHidden()
+  await expect(page.getByRole("button", { name: "Takimi me ekipin" })).toBeHidden()
+  await page.screenshot({ path: "test-results/mira-notes-group-1h.png", fullPage: true })
+  await page.getByRole("button", { name: /^AI Agent/ }).click()
+  await expect(page.getByRole("button", { name: "Takimi AI Agent" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "1H 10:00 · 28.10.2026" })).toBeHidden()
+  await page.getByRole("button", { name: "Takimi AI Agent" }).click()
+  await expect(page.getByText("Shënime të veçanta AI Agent.")).toBeVisible()
+  await page.screenshot({ path: "test-results/mira-notes-group-ai-agent.png", fullPage: true })
 })

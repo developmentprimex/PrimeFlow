@@ -10,6 +10,7 @@ from app.api.deps import get_current_user, require_manager_or_admin
 from app.db import get_db
 from app.models.mira_host import MiraKnowledgeItem
 from app.services import mira_host as host
+from app.services.mira_note_groups import grouped_notes
 
 router = APIRouter()
 Category = Literal["STRUKTURA", "RREGULLORE", "DEFINIME", "PROCESE", "TJETER"]
@@ -80,7 +81,7 @@ async def resummarize(meeting_id: uuid.UUID, background: BackgroundTasks, db: As
 @router.get('/notes')
 async def notes(limit: int = Query(default=100, ge=1, le=200), offset: int = Query(default=0, ge=0),
                 db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    return await host.mira_notes(db, limit, offset)
+    return await grouped_notes(db, limit, offset)
 
 
 @router.post('/notes/{kind}/{note_id}/show-in-px-notes')
@@ -118,6 +119,8 @@ async def save_settings(payload: SettingsIn, db: AsyncSession = Depends(get_db),
 
 @router.post('/host')
 async def switch_host(payload: HostSwitch, db: AsyncSession = Depends(get_db), user=Depends(require_manager_or_admin)):
+    if payload.enabled and not (host.settings.MIRA_HOST_OPENAI_API_KEY or '').strip():
+        raise HTTPException(503, "MIRA_HOST_OPENAI_API_KEY mungon.")
     row = await host.get_settings(db, lock=True)
     row.enabled_until = host.enable_until(host.now(), payload.until) if payload.enabled else None
     row.enabled_by_user_id = user.id if payload.enabled else row.enabled_by_user_id

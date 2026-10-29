@@ -96,6 +96,7 @@ export type DiscordSlotReport = {
 }
 
 export type MiraNote = {
+  meeting_group?: "1H" | "AI_AGENT" | "OTHER"
   id: string
   kind: "1H" | "PX_NOTE"
   title: string

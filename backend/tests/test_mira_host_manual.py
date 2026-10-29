@@ -28,6 +28,7 @@ class ManualStartTests(unittest.IsolatedAsyncioTestCase):
              patch.object(api.host, 'meeting_row', return_value={'id': str(meeting.id)}), \
              patch.object(api.host, 'now', return_value=at), \
              patch.object(api.settings, 'MIRA_HOST_ENABLED', True), \
+             patch.object(api.settings, 'MIRA_HOST_OPENAI_API_KEY', 'host-test'), \
              patch.object(api.settings, 'MIRA_HOST_BOT_TOKEN', 'test-token'):
             result = await api.start(api.Start(slot='11:00', discord_user_id='11'), db)
         self.assertEqual(result['starts_at'], at.isoformat())

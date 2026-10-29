@@ -15,6 +15,7 @@ class DiscordVoiceMeeting(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('departments.id'))
     guild_id: Mapped[str] = mapped_column(String(32))
+    recorder: Mapped[str] = mapped_column(String(16), default='primary', server_default='primary')
     voice_channel_id: Mapped[str] = mapped_column(String(32))
     private_channel_id: Mapped[str] = mapped_column(String(32))
     request_id: Mapped[str] = mapped_column(String(32), unique=True)
@@ -45,7 +46,7 @@ class DiscordVoiceMeeting(Base):
     memory_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
     memory_error: Mapped[str | None] = mapped_column(String(100))
     memory_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    __table_args__ = (Index('uq_discord_voice_active_guild', 'guild_id', unique=True,
+    __table_args__ = (Index('uq_discord_voice_active_recorder', 'guild_id', 'recorder', unique=True,
         postgresql_where=text("status IN ('STARTING','LISTENING')")),)
 
 

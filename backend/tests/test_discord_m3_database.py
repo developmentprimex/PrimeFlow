@@ -132,6 +132,26 @@ class M3DatabaseTests(unittest.IsolatedAsyncioTestCase):
             async with self.sessions() as db:
                 self.assertEqual(await api.claim(db), {'jobs': []})
 
+    async def test_early_trials_are_reissued_once_for_the_regular_window(self):
+        jobs = await self.claim()
+        early = datetime.combine(self.day, time(11, 25), report_timezone())
+        async with self.sessions() as db:
+            for job in jobs:
+                q = await db.get(Question, uuid.UUID(job['id']))
+                q.sent_at, q.message_id = early, '555'
+            await db.commit()
+        real = await self.claim()
+        self.assertEqual(len(real), len(jobs))
+        self.assertTrue(all(job['previous_test_message_id'] == '555' for job in real))
+        self.assertEqual(await self.claim(), [])
+        regular = datetime.combine(self.day, time(15, 51), report_timezone())
+        async with self.sessions() as db:
+            for job in real:
+                q = await db.get(Question, uuid.UUID(job['id']))
+                q.sent_at, q.message_id = regular, '666'
+            await db.commit()
+        self.assertEqual(await self.claim(), [])
+
     async def test_shared_delivery_waits_for_every_person_and_keeps_comments(self):
         async with self.sessions() as db:
             db.add(TaskAssignee(task_id=self.task_id, user_id=self.uid2))

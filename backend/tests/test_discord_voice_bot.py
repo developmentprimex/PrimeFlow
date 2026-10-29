@@ -9,6 +9,17 @@ from discord_voice_meetings import MeetingCaptureCoordinator
 from discord_voice_ui import meeting_view
 
 class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_result_delivery_uses_its_own_recorder_and_rejects_foreign_jobs(self):
+        from discord_voice_meetings import deliver_meeting_results
+        for recorder in ('primary','ai_agent'):
+            with self.subTest(recorder=recorder):
+                bot=SimpleNamespace(voice_recorder=recorder,bridge=AsyncMock(return_value={'jobs':[
+                    {'id':'other','recorder':'ai_agent' if recorder=='primary' else 'primary'}]}),private_channel=AsyncMock())
+                with patch('discord_voice_meetings.send_durable',AsyncMock()) as send:
+                    await deliver_meeting_results(bot)
+                bot.bridge.assert_awaited_once_with('/bot/voice-meetings/delivery/claim',{'recorder':recorder})
+                send.assert_not_awaited();bot.private_channel.assert_not_awaited()
+
     async def test_installed_discord_websocket_dispatches_voice_data_to_capture(self):
         import json
         import discord.gateway

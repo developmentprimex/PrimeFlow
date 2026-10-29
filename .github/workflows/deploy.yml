@@ -238,6 +238,14 @@ jobs:
           MIRA_MEMORY_ENABLED: ${{ vars.MIRA_MEMORY_ENABLED }}
           MIRA_HOST_ENABLED: ${{ vars.MIRA_HOST_ENABLED }}
           MIRA_HOST_BOT_TOKEN: ${{ secrets.MIRA_HOST_BOT_TOKEN }}
+          MIRA_NOTES_OPENAI_API_KEY: ${{ secrets.MIRA_NOTES_OPENAI_API_KEY }}
+          MIRA_HOST_OPENAI_API_KEY: ${{ secrets.MIRA_HOST_OPENAI_API_KEY }}
+          KUJTESA_OPENAI_API_KEY: ${{ secrets.KUJTESA_OPENAI_API_KEY }}
+          KUJTESA_HOST_ENABLED: ${{ vars.KUJTESA_HOST_ENABLED }}
+          KUJTESA_HOST_MODEL: ${{ vars.KUJTESA_HOST_MODEL }}
+          KUJTESA_HOST_VOICE: ${{ vars.KUJTESA_HOST_VOICE }}
+          GA_PERSONAL_ENABLED: ${{ vars.GA_PERSONAL_ENABLED || 'true' }}
+          GA_PERSONAL_DISCORD_BRIDGE_SECRET: ${{ secrets.GA_PERSONAL_DISCORD_BRIDGE_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           $ErrorActionPreference = "Stop"
@@ -279,7 +287,7 @@ jobs:
           REM process. This catches missing modules and startup-time config errors.
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "from app.main import app; print('Backend application import: OK')"
           if errorlevel 1 exit /b 1
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server tests.test_migration_graph
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server tests.test_migration_graph tests.test_mira_credentials
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_kujtesa_deploy tests.test_kujtesa_bridge
           if errorlevel 1 exit /b 1
@@ -496,6 +504,10 @@ jobs:
           Remove-Item -LiteralPath ".discord-worker-status.json" -Force -ErrorAction SilentlyContinue
           cmd /c "pm2 start ecosystem.config.cjs --only primeflow-discord --update-env" | Out-Host
           if ($LASTEXITCODE -ne 0) { throw "Unable to start the Discord bot." }
+            if (Test-Path -LiteralPath 'C:\PrimeFlowOps\MiraAIAgent\.env') {
+              cmd /c "pm2 start ecosystem.config.cjs --only primeflow-discord-ai-agent --update-env" | Out-Host
+              if ($LASTEXITCODE -ne 0) { throw "Unable to start Mira AI Agent." }
+            }
           $ready = $false
           for ($i = 0; $i -lt 30; $i++) {
             if (Test-Path -LiteralPath ".discord-worker-status.json") {

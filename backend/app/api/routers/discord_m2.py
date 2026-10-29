@@ -80,13 +80,16 @@ async def claim(db: AsyncSession = Depends(get_db)):
     return await collect_questions(db, now=now)
 
 
-async def collect_questions(db: AsyncSession, *, now: datetime, only_user_id: uuid.UUID | None = None):
-    """Shared collector; an operator can run a targeted test without changing the clock.
+@router.post('/report')
+async def personal_report(actor: Actor, db: AsyncSession = Depends(get_db)):
+    _, user = await identity(db, actor, lock=True)
+    return await collect_questions(db, now=datetime.now(timezone.utc), only_user_id=user.id, manual=True)
 
-    Only /claim is an HTTP endpoint and retains its normal scheduling guard.
-    """
+
+async def collect_questions(db: AsyncSession, *, now: datetime, only_user_id: uuid.UUID | None = None, manual=False):
+    """Manual reports reuse questions without claiming scheduled notifications."""
     day = now.astimezone(report_timezone()).date()
-    report = await reports.locked_report(db, day, wait=False)
+    report = await reports.locked_report(db, day, wait=manual)
     if report is None:
         return {'jobs': []}
     data = await data_with_moves(db, day)
@@ -125,18 +128,39 @@ async def collect_questions(db: AsyncSession, *, now: datetime, only_user_id: uu
                     continue
             key = service.context_key(kind, snapshot)
             question = existing.get((link.id, kind, key))
-            if question and (question.answered_at or question.sent_at or question.lease_until > now):
+            if not manual and question and (question.answered_at or question.sent_at or question.lease_until > now):
                 continue
             if question is None:
                 question = Question(link_id=link.id, task_id=task_id, day=day, kind=kind,
                                     context_key=key, snapshot=snapshot, lease_until=now)
                 db.add(question)
                 await db.flush()
-            if len(jobs) < 50:
+                existing[(link.id, kind, key)] = question
+            if manual:
+                question.snapshot = snapshot
+                jobs.append(question_payload(question, link))
+            elif len(jobs) < 50:
                 question.lease_until = now + timedelta(minutes=2)
                 jobs.append(question_payload(question, link))
+    if manual:
+        from app.services.discord_answer_sync import m2_payload
+        included = {job['id'] for job in jobs}
+        for link in links:
+            for question in existing.values():
+                if question.link_id != link.id or str(question.id) in included:
+                    continue
+                try:
+                    await task_owned(db, link.user_id, question.task_id)
+                except HTTPException as exc:
+                    if exc.status_code == 403:
+                        continue
+                    raise
+                jobs.append(question_payload(question, link))
+        by_id = {str(q.id): q for q in existing.values()}
+        jobs = [await m2_payload(db, by_id[job['id']],
+            next(link for link in links if link.discord_user_id == job['discord_user_id'])) for job in jobs]
     await db.commit()
-    return {'jobs': jobs}
+    return {'jobs': jobs, 'day': day.isoformat()}
 
 
 async def own_question(db, question_id, actor):
@@ -153,7 +177,8 @@ async def own_question(db, question_id, actor):
 @router.post('/{question_id}/open')
 async def open_question(question_id: uuid.UUID, actor: Actor, db: AsyncSession = Depends(get_db)):
     question, link, _ = await own_question(db, question_id, actor)
-    result = question_payload(question, link)
+    from app.services.discord_answer_sync import m2_payload
+    result = await m2_payload(db, question, link)
     task = await db.get(Task, question.task_id)
     result['live_dates'] = {field: getattr(task, field).isoformat() if getattr(task, field) else None for field in ('start_date', 'due_date')}
     if question.kind == 'continuation':

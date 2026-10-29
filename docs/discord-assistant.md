@@ -1,5 +1,48 @@
 # Asistenti personal PrimeFlow në Discord
 
+## Identiteti Mira AI Agent
+
+`python discord_ai_agent_bot.py` lidh regjistruesin e veçantë të kanalit AI Agent.
+Konfiguro `DISCORD_AI_AGENT_BOT_TOKEN` dhe `DISCORD_AI_AGENT_VOICE_CHANNEL_ID`
+në `.env`. Në server ruhen te `C:\PrimeFlowOps\MiraAIAgent\.env`, jashtë
+checkout-it të publikimit (`DISCORD_AI_AGENT_ENV_FILE` e ndryshon këtë vend).
+Token-i duhet të jetë i ndryshëm nga `DISCORD_BOT_TOKEN` dhe
+`MIRA_HOST_BOT_TOKEN`. Publiko `DISCORD_AI_AGENT_BOT_USER_ID` dhe ID-në e kanalit
+AI Agent edhe te `.env` e API-së/botit kryesor, që të ruajnë lejet dhe ndarjen.
+
+Hyr në kanalin zanor AI Agent dhe nga kanali yt personal përdor
+`/ai-agent fillo`. `/ai-agent mbaro` ndal dëgjimin dhe përgatit shënimet;
+`/ai-agent statusi` tregon nëse po dëgjon. Boti vetëm merr shënime, pa folur.
+Nuk hyn dhe nuk nis regjistrim gjatë lidhjes. Kur largohet personi i fundit,
+ndalet pas 30 sekondash. Shënimet shfaqen në kanalin personal me rrjedhën
+ekzistuese të shikimit dhe ruajtjes në PX Notes.
+
+Migrimi `0174_discord_separate_recorders` lejon një takim aktiv për secilin
+regjistrues (`primary` për 1H dhe `ai_agent` për AI Agent), me sesione,
+token-a punëtori dhe segmente audio të veçanta. `/takimi` mbetet për regjistruesin
+ekzistues; komandat `/mira` dhe Mira Host nuk ndryshohen.
+`.discord-ai-agent-status.json` verifikon identitetin, serverin dhe lejet e kanalit.
+Mira Host dhe regjistruesi ekzistues 1H vazhdojnë me proceset e tyre.
+
+Kanalet personale përdorin emrin e personit të lidhur: `primeflow-rinesa`,
+`primeflow-elsa`, etj. Nëse emri është zënë, shtohet mbiemri ose një prapashtesë.
+Lidhja me llogarinë identifikohet nga ID-ja dhe topic-u i kanalit, pavarësisht emrit.
+
+## Raportet me komandë
+
+Në kanalin personal të krijuar nga `/lidh`, `/m2` dhe `/m3` hapin raportin
+personal të ditës, edhe jashtë orarit të njoftimeve automatike. Çdo pyetje vjen
+drejtpërdrejt në mesazhin e vet, me të njëjtin tekst dhe butona si dërgimi
+automatik M2/M3. Pyetjet shfaqen si mesazhe të pavarura, pa citim të përsëritur
+të pyetjes së parë. Nuk kërkohet zgjedhja e detyrës nga një listë paraprake.
+**Raporti M2/M3** hap listën ndihmëse, ku **Rifresko** merr gjendjen aktuale.
+Përgjigjet ruhen në të njëjtat pyetje të ditës dhe
+hapja manuale nuk konsumon njoftimin automatik. `/m3` sjell bashkë pyetjet M3
+të orës 15:50 dhe planifikimin e nesërm të orës 16:10: detyrat, slotet dhe
+konfirmimin përfundimtar të planit. Orari automatik vazhdon të funksionojë.
+
+Kërkohet rinisja e API-ve dhe botit që regjistron komandat; nuk ka migrim të ri.
+
 ## Pyetjet M2 në 11:45
 
 **Hap detyrën** shfaq kartën e plotë në të njëjtin mesazh M2: statusin, slotin,
@@ -87,7 +130,7 @@ për audion. Përmbledhjet përdorin `DISCORD_AI_MODEL`; në server është vend
 Mira mund të hyjë me identitetin e botit ekzistues në një voice channel të
 zakonshëm dhe të marrë shënime pa folur. Aktivizo GitHub Actions variable
 `DISCORD_MEETING_NOTES_ENABLED=true` dhe bëj deploy; si parazgjedhje është
-`false`. Përdoren token-i i botit dhe `OPENAI_API_KEY` ekzistues. Nuk duhet bot i
+`false`. Përdoren token-i i botit dhe `MIRA_NOTES_OPENAI_API_KEY`. Nuk duhet bot i
 dytë. Variabla opsionale `DISCORD_VOICE_NODE_BINARY` zgjedh executable-n e Node;
 parazgjedhja është `node`. Kërkohet Node >=22.12.
 
@@ -114,7 +157,8 @@ Takimet 1H: nga e hëna në të premte Mira hyn vetë në kanalin 1H 2 minuta pa
 30 sekonda pasi del personi i fundit, ose pas 10 minutash nëse s'vjen askush.
 Shënimet e këtyre takimeve ruhen direkt në PX Notes dhe nuk dërgohen në Discord.
 
-Mbahet një takim në një kohë për server. Pas ndalimit, Mira del nga voice
+Mbahet një takim në një kohë për regjistrues; 1H dhe AI Agent mund të dëgjohen
+njëkohësisht. Pas ndalimit, Mira del nga voice
 channel menjëherë; radha lokale e transkriptimit përfundon përpara se të nisë
 një takim i ri. Shënimet e ruajtura kanë lejet normale të PX Notes. Teksti i
 takimit nuk zbatohet si komandë për detyra. Përmbledhja nuk postohet në kanalin
@@ -226,7 +270,7 @@ Nëse dëshironi vetëm thirrje manuale, mos aktivizoni `/mira mbaj-takimet`; ai
 1. Krijo në Discord Developer Portal një aplikacion të ri "Mira Host". Në tab-in Bot merr token-in.
    Nuk duhen privileged intents.
 2. Fto botin në server me lejet View Channel, Connect dhe Speak në kanalin 1H.
-3. Shto Actions secret `MIRA_HOST_BOT_TOKEN` dhe variable `MIRA_HOST_ENABLED=true`, pastaj deploy.
+3. Shto Actions secrets `MIRA_HOST_BOT_TOKEN`, `MIRA_HOST_OPENAI_API_KEY` dhe variable `MIRA_HOST_ENABLED=true`, pastaj deploy.
    Migrimi `0157_mira_host` krijon tabelat.
 4. Sigurohu që Diellza, Gane, Elza, Olsa dhe stafi kanë bërë `/lidh`; kush s'e ka bërë nuk merr mesazhe.
    Emrat e ekipit GA, protokolli dhe minutat për person ndryshohen te **Mira → Cilësimet**.
@@ -283,7 +327,14 @@ Nëse dëshironi vetëm thirrje manuale, mos aktivizoni `/mira mbaj-takimet`; ai
    Worker-i është proces më vete; nuk nis nga API-ja. GitHub Actions e
    konfiguron dhe e nis automatikisht pasi API-ja të jetë gati, kur ekzistojnë
    Repository secrets `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` dhe
-   `DISCORD_BRIDGE_SECRET`. Kërkohet edhe `OPENAI_API_KEY`.
+   `DISCORD_BRIDGE_SECRET`. Kërkohet edhe `OPENAI_API_KEY` për bisedën e përgjithshme.
+   Shënimet e heshtura Discord/desktop dhe kujtesa e punës përdorin vetëm secret
+   `MIRA_NOTES_OPENAI_API_KEY`; Host Realtime, përmbledhjet dhe shënimet për person
+   përdorin vetëm `MIRA_HOST_OPENAI_API_KEY`. `KUJTESA_OPENAI_API_KEY` i takon vetëm
+   botit familjar. Vendosi si GitHub Actions secrets ose në `.env` lokal të injoruar;
+   deploy i shkruan në dotenv pa i kaluar përmes shell-it. Nëse çelësi i rolit mungon,
+   ai rol çaktivizohet; nuk përdor çelësin e përgjithshëm ose të një roli tjetër.
+   Analiza e regjistrimeve dhe veçoritë e tjera AI vazhdojnë me `OPENAI_API_KEY`.
    Biseda e lirë aktivizohet si parazgjedhje: aktivizo Message Content Intent
    edhe në Developer Portal. Deploy-i pret lidhjen reale dhe regjistrimin e komandave.
    Për ndryshime sekretesh, përdor Actions → Primex Auto Deploy → Run workflow
@@ -604,3 +655,35 @@ humbasë kërkesat në pritje. Komenti i shtyrjes shfaqet në kolonën **Komenti
 - [Discord interactions](https://github.com/discord/discord-api-docs/blob/main/developers/interactions/receiving-and-responding.mdx)
 - [Discord permissions](https://github.com/discord/discord-api-docs/blob/main/developers/topics/permissions.mdx)
 - [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+
+# Shared meeting controls
+
+`DISCORD_MEETING_CONTROL_CHANNEL_ID` identifies the `mira-kontrolli` text channel.
+The primary bot owns the 1H panel; Mira AI Agent owns the AI Agent panel. Each
+panel starts its fixed configured voice channel even when the person pressing
+Start is not in voice. Start/Stop/Save actions require an enabled Discord link
+and an active PrimeFlow account, and are recorded in `audit_logs` with the actor.
+Another linked colleague can stop or save the shared meeting. Concurrent saves
+use the existing session row lock and return the same note.
+Start, Stop, View and Save confirmations in this shared channel are public to
+everyone who can see the channel. Only the refresh receipt stays ephemeral.
+
+Panels refresh automatically and their stable component IDs survive restarts.
+The configured shared channel also accepts `/takimi fillo`, `/takimi mbaro`,
+`/ai-agent fillo`, and `/ai-agent mbaro`. The 1H scheduler posts its recordings
+to this channel when configured. Saved notes appear under Mira → Shënimet,
+in the existing 1H / AI Agent groups. Personal recordings keep their private
+notes; the common panel can stop an active recording in its fixed voice, but
+cannot read or save its personal notes. The speaking Mira Host is separate.
+
+AI Agent invitations run on weekdays at 08:05, 12:00 and 14:10 in the app timezone.
+The four configured development recipients (Rinesa, Elsa, Endi and Laurent) receive
+the invitation in their personal PrimeFlow text channels from Mira AI Agent,
+with a link to the AI Agent voice channel. The Windows tasks
+`PrimeFlow-AIAgent-0805`, `PrimeFlow-AIAgent-1200` and `PrimeFlow-AIAgent-1410`
+run `C:\PrimeFlowOps\AIAgentReminders\run.py` with the corresponding slot.
+That persistent directory holds the task settings and the installed reminder
+service. The script source is `backend/scripts/discord_ai_agent_reminders.py`.
+It uses the independent bot's existing private token file. The durable
+`AI_AGENT_HH:MM` reminder buckets prevent duplicate invitations after restarts;
+only a five-minute current-time window is eligible, with no past-slot backfill.

@@ -25,6 +25,7 @@ from app.services.meetings_report import (
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.report_rich_text import marked_note_runs, runs_html
+from app.services.report_note_visibility import is_mira_note, mira_note_expression
 from app.services import m2_reporting_points as m2, m3_reporting_points as m3
 from app.services.daily_realization_events import semantic_local_day
 from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga, one_h_marker_label
@@ -127,6 +128,7 @@ def select_sections(entries, ga_notes, _plan_notes, tasks, day: date, *, now: da
     for note in ga_notes:
         if (note_start <= _local(note.created_at) <= cutoff
                 and not getattr(note, "is_converted_to_task", False)
+                and not is_mira_note(note)
                 and getattr(note, "status", GaNoteStatus.OPEN) != GaNoteStatus.CLOSED):
             author = users.get(getattr(note, "created_by", None))
             data["notes"].append({"id": str(note.id), "source": "PX Notes", "content": note.content,
@@ -164,7 +166,8 @@ async def excluded_note_ids(db: AsyncSession, row: M1ReportingPointsReport) -> s
     if not ids:
         return set()
     result = await db.execute(select(GaNote.id).where(
-        GaNote.id.in_(ids), or_(GaNote.is_converted_to_task.is_(True), GaNote.status == GaNoteStatus.CLOSED)))
+        GaNote.id.in_(ids), or_(GaNote.is_converted_to_task.is_(True), GaNote.status == GaNoteStatus.CLOSED,
+                               mira_note_expression())))
     return {str(note_id) for note_id in result.scalars().all()}
 
 
@@ -301,6 +304,7 @@ async def build_data(db: AsyncSession, day: date, now: datetime | None = None) -
     ga_notes = (await db.execute(select(GaNote).where(
         GaNote.created_at >= note_start, GaNote.created_at <= cutoff,
         GaNote.is_converted_to_task.is_(False), GaNote.status == GaNoteStatus.OPEN,
+        ~mira_note_expression(),
     ))).scalars().all()
     tasks = (await db.execute(select(Task).where(Task.created_at >= task_start, Task.created_at <= cutoff))).scalars().all()
     tasks, users, departments, assignees = await prepare_task_context(db, tasks)
