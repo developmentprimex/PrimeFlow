@@ -1,0 +1,147 @@
+"use client"
+
+import * as React from "react"
+import { useAuth } from "@/lib/auth"
+import type { GaAccess, GaOccurrence, GaTemplate, Workspace } from "@/lib/ga-personal"
+
+export type GaEvent = { id: string; kind: string; created_at: string; payload: { from?: string; to?: string; day?: string } }
+export class GaApiError extends Error {
+  constructor(message: string, public status: number) { super(message) }
+}
+
+export function useGaPersonalSession(onLock: () => void) {
+  const { apiFetch, user } = useAuth()
+  const fetchRef = React.useRef(apiFetch)
+  const lockRef = React.useRef(onLock)
+  React.useEffect(() => { fetchRef.current = apiFetch }, [apiFetch])
+  React.useEffect(() => { lockRef.current = onLock }, [onLock])
+  const [access, setAccess] = React.useState<GaAccess | null>(null)
+  const [workspace, setWorkspace] = React.useState<Workspace | null>(null)
+  const [templates, setTemplates] = React.useState<GaTemplate[]>([])
+  const [occurrences, setOccurrences] = React.useState<GaOccurrence[]>([])
+  const [history, setHistory] = React.useState<GaEvent[]>([])
+  const [obscured, setObscured] = React.useState(false)
+  const [connectionError, setConnectionError] = React.useState("")
+  const generation = React.useRef(0)
+  const reads = React.useRef<AbortController | null>(null)
+  const checking = React.useRef<{ generation: number; promise: Promise<void> } | null>(null)
+  const channel = React.useRef<BroadcastChannel | null>(null)
+  const authChanging = React.useRef(false)
+
+  const invalidate = React.useCallback(() => {
+    generation.current += 1
+    reads.current?.abort()
+    checking.current = null
+  }, [])
+
+  const clear = React.useCallback(() => {
+    invalidate()
+    setWorkspace(null); setTemplates([]); setOccurrences([]); setHistory([])
+    setObscured(false); setConnectionError("")
+    setAccess((value) => value ? { ...value, unlocked: false } : value)
+    lockRef.current()
+  }, [invalidate])
+
+  const request = React.useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const version = generation.current
+    const response = await fetchRef.current(`/ga-personal${path}`, {
+      ...init, cache: "no-store", headers: { "Content-Type": "application/json", ...init?.headers },
+    })
+    if (version !== generation.current) throw new GaApiError("Kërkesa u anulua.", 499)
+    if (!response.ok) {
+      // A forbidden edit is not an expired unlock. Network errors and ordinary
+      // permission failures must never discard the page or an unsaved draft.
+      if (response.status === 401 || response.status === 423 || (response.status === 403 && (init?.method || "GET") === "GET" && path !== "/access")) clear()
+      const body = await response.json().catch(() => ({}))
+      throw new GaApiError(typeof body.detail === "string" ? body.detail : "Lidhja me serverin u ndërpre. Provo përsëri.", response.status)
+    }
+    return response.json() as Promise<T>
+  }, [clear])
+
+  const load = React.useCallback(async (signal?: AbortSignal) => {
+    const version = generation.current
+    const [w, t, o, h] = await Promise.all([
+      request<Workspace>("/workspace", { signal }), request<GaTemplate[]>("/templates", { signal }),
+      request<GaOccurrence[]>("/occurrences", { signal }), request<GaEvent[]>("/history", { signal }),
+    ])
+    if (version !== generation.current) return
+    setWorkspace(w); setTemplates(t); setOccurrences(o); setHistory(h)
+  }, [request])
+
+  const check = React.useCallback((): Promise<void> => {
+    if (authChanging.current) return Promise.resolve()
+    const version = generation.current
+    if (checking.current?.generation === version) return checking.current.promise
+    const controller = new AbortController()
+    reads.current = controller
+    const entry = { generation: version, promise: Promise.resolve() as Promise<void> }
+    checking.current = entry
+    entry.promise = (async () => {
+      try {
+        const result = await request<GaAccess>("/access", { signal: controller.signal })
+        if (version !== generation.current) return
+        if (!result.available || !result.unlocked || result.requires_login) {
+          clear(); setAccess(result)
+          return
+        }
+        setAccess(result)
+        await load(controller.signal)
+        if (version === generation.current) {
+          setConnectionError(""); setObscured(document.visibilityState === "hidden")
+        }
+      } catch (error) {
+        if (version === generation.current && !controller.signal.aborted) {
+          setConnectionError(error instanceof Error ? error.message : "Nuk u lidhëm me serverin.")
+        }
+      } finally {
+        if (checking.current === entry) checking.current = null
+      }
+    })()
+    return entry.promise
+  }, [request, load, clear])
+
+  React.useEffect(() => {
+    clear(); setAccess(null)
+    void check()
+    const onFocus = () => { if (document.visibilityState !== "hidden") void check() }
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") setObscured(true)
+      else void check()
+    }
+    const onStorage = (event: StorageEvent) => { if (event.key === "primex_access_token" && !event.newValue) clear() }
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisibility)
+    window.addEventListener("storage", onStorage)
+    const timer = window.setInterval(onFocus, 20000)
+    if (typeof BroadcastChannel !== "undefined") {
+      const c = new BroadcastChannel(`ga-personal-${user?.id}`)
+      channel.current = c
+      c.onmessage = (event) => {
+        if (event.data === "lock") clear()
+        else if (!authChanging.current) { invalidate(); void check() }
+      }
+    }
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisibility)
+      window.removeEventListener("storage", onStorage)
+      window.clearInterval(timer); channel.current?.close(); invalidate()
+    }
+  }, [user?.id, check, clear, invalidate])
+
+  React.useEffect(() => {
+    if (!access?.unlocked || !access.expires_at) return
+    const timer = window.setTimeout(clear, Math.max(0, new Date(access.expires_at).getTime() - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [access?.unlocked, access?.expires_at, clear])
+
+  const announce = React.useCallback((event: "lock" | "unlock") => channel.current?.postMessage(event), [])
+  const changeSession = React.useCallback(async (work: () => Promise<unknown>) => {
+    authChanging.current = true
+    invalidate()
+    try { await work() }
+    finally { authChanging.current = false; invalidate() }
+  }, [invalidate])
+  return { access, workspace, templates, occurrences, history, request, load, check,
+    clear, invalidate, announce, changeSession, obscured: obscured && !!workspace, connectionError }
+}

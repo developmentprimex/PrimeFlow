@@ -24,7 +24,7 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
     return pwd_context.verify(plain_password, password_hash)
 
 
-def create_access_token(*, user_id: uuid.UUID, role: str, department_id: uuid.UUID | None) -> str:
+def create_access_token(*, user_id: uuid.UUID, role: str, department_id: uuid.UUID | None, session_id: str | None = None) -> str:
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
@@ -35,16 +35,19 @@ def create_access_token(*, user_id: uuid.UUID, role: str, department_id: uuid.UU
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
     }
+    if session_id:
+        payload["sid"] = session_id
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=ALGORITHM)
 
 
-def create_refresh_token(*, user_id: uuid.UUID, jti: str) -> tuple[str, datetime]:
+def create_refresh_token(*, user_id: uuid.UUID, jti: str, session_id: str | None = None) -> tuple[str, datetime]:
     now = datetime.now(timezone.utc)
     expire = now + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {
         "type": REFRESH_TOKEN_TYPE,
         "sub": str(user_id),
         "jti": jti,
+        "sid": session_id or jti,
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
     }

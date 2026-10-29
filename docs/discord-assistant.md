@@ -442,11 +442,22 @@ butonin **🎧 Kyçu në takimin 1H** (`DISCORD_1H_VOICE_CHANNEL_ID`). Plani i s
 kur përgatitet dërgimi: detyrat e një sloti tjetër nuk shtohen automatikisht.
 
 Ka vetëm tri pyetje automatike:
-- IN_PROGRESS: “A ke me vazhdu me [detyrën]? Kur pritet me u kry?”
+- IN_PROGRESS: “A ke me vazhdu me [detyrën]?” Vetëm nëse Due është sot në zonën
+  `APP_TIMEZONE`, shtohet “Kur pritet me u kry?”. Pa Due, me afat të kaluar ose me afat
+  në ditë tjetër nuk kërkohet koha e përfundimit.
 - TODO: “Pse s’ke vazhdu me [detyrën]? Kur vazhdon?”
-- Kur të gjitha detyrat e planifikuara janë DONE: “Me çka ke me vazhdu në slotin tjetër?”
+- Gjithmonë, që në mesazhin e parë bashkë me pyetjet e tjera: “Me çka ke me vazhdu
+  në slotin tjetër?”. Kjo pyetje është e pavarur nga përgjigjet dhe statuset e detyrave.
 
-Pa detyra ose pa pyetje të nevojshme, nuk dërgohet mesazh. **Përgjigju** hap formularin
+Edhe pa detyra në slotin aktual dërgohet pyetja e vazhdimit. Lista përzgjedhëse përmban
+detyrat aktuale në proces, detyrat aktive të sloteve pasuese të sotme dhe detyrat TODO
+nga sloti aktual / slotet paraprake. Nuk përfshin DONE, WFE, pritje konfirmimi ose
+detyra pa slot. Përzgjedhja e një ose disa detyrave ruhet menjëherë; faqet mbi 25
+opsione ruajnë edhe zgjedhjet e faqeve të tjera. **Punë tjetër** lejon tekst të lirë,
+ndërsa **Pa vazhdim** shënon mungesën e një plani. Përzgjedhja është vetëm plan vazhdimi:
+nuk ndryshon statuset, slotet ose afatet e detyrave. Lista verifikohet përsëri në ruajtje.
+
+**Përgjigju** hap formularin
 për përgjigjen dhe kohën e vazhdimit/përfundimit. Edhe Reply te karta ruan përgjigjen
 si raportim; shkrimi i një date në përgjigje nuk ndryshon afatin e detyrës.
 **Progres / strike**, **Koment**, **U krye** dhe **Shtyje** përdorin veprimet ekzistuese.

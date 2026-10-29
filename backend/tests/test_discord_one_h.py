@@ -43,12 +43,14 @@ class QuestionTests(unittest.TestCase):
     def test_only_appropriate_questions_and_done_is_not_an_empty_plan(self):
         self.assertIsNone(display(service.snapshot([], AT))['current'])
         for status in ('WAITING_CLIENT', 'WAITING_CONFIRMATION'):
-            self.assertEqual(display(service.snapshot([task(status)], AT))['questions'], [])
+            questions = display(service.snapshot([task(status)], AT))['questions']
+            self.assertEqual([q['id'] for q in questions], ['next'])
         for status, prefix in [('TODO', 'Pse s’ke vazhdu'), ('IN_PROGRESS', 'A ke me vazhdu')]:
             self.assertTrue(display(service.snapshot([task(status)], AT))['current']['question'].startswith(prefix))
         done = display(service.snapshot([task('DONE'), task('DONE')], AT))
         self.assertEqual(len(done['questions']), 1)
-        self.assertEqual(done['current']['question'], service.NEXT_QUESTION)
+        self.assertIsNone(done['current'])
+        self.assertEqual(done['questions'][0]['question'], service.NEXT_QUESTION)
 
     def test_snapshot_stays_scoped_after_rescheduling_and_new_tasks(self):
         planned, unrelated = task(), task(slot='11:00')
@@ -57,7 +59,7 @@ class QuestionTests(unittest.TestCase):
         self.assertEqual([t['id'] for t in updated['tasks']], [planned['id']])
         self.assertEqual(updated['tasks'][0]['planned_status'], 'TODO')
         removed = service.refresh(updated, [unrelated])
-        self.assertEqual(display(removed)['questions'], [])
+        self.assertEqual([q['id'] for q in display(removed)['questions']], ['next'])
         self.assertFalse(service.all_done(removed))
 
     def test_answers_idempotency_corrections_skips_and_stale_status(self):
@@ -76,14 +78,62 @@ class QuestionTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             service.save_answer(changed, item['id'], 'Old question', '', '126', AT, question_status='TODO')
 
-    def test_last_done_task_reveals_next_slot_once(self):
+    def test_next_slot_is_available_before_any_task_is_reported(self):
         item = task()
         report = service.snapshot([item], AT)
-        report = service.refresh(report, [{**item, 'status': 'DONE'}])
-        self.assertEqual(display(report)['current']['id'], 'next')
+        self.assertEqual(display(report)['questions'][-1]['id'], 'next')
         report = service.save_answer(report, 'next', 'Vazhdoj me raportin', '', '127', AT)
+        self.assertEqual(display(report)['state'], 'PARTIAL')
+        self.assertIsNotNone(display(report)['current'])
+        report = service.refresh(report, [{**item, 'status': 'DONE'}])
         self.assertIsNone(display(report)['current'])
         self.assertEqual(display(report)['state'], 'DONE')
+
+    def test_completion_time_only_for_due_today_in_application_timezone(self):
+        for due, expected in [('2026-10-27', True), ('2026-10-30', False),
+                              ('2026-10-26T23:30:00Z', True), ('2026-10-27T23:30:00Z', False),
+                              ('2026-10-26', False), (None, False), ('invalid', False)]:
+            with self.subTest(due=due):
+                report = service.snapshot([task('IN_PROGRESS', due_date=due)], AT)
+                item = display(report)['current']
+                self.assertEqual('Kur pritet me u kry?' in item['question'], expected)
+                self.assertEqual(item['asks_completion'], expected)
+        item = task('IN_PROGRESS', due_date='2026-10-27')
+        report = service.refresh(service.snapshot([item], AT), [{**item, 'due_date': '2026-10-30'}])
+        with self.assertRaises(HTTPException):
+            service.save_answer(report, item['id'], 'Po', '', '500', AT, asks_completion=True)
+
+    def test_next_options_include_current_later_and_earlier_todo_only(self):
+        current, later, earlier = task('IN_PROGRESS', '11:00'), task('TODO', '14:20'), task('TODO', '10:00')
+        excluded = [task('DONE', '14:20'), task('WAITING_CLIENT', '16:00'), task('TODO', None),
+                    task('IN_PROGRESS', '10:00'), task('TODO', '16:00', is_active=False)]
+        options = service.next_options([*excluded, earlier, later, current, current], '11:00')
+        self.assertEqual([t['id'] for t in options], [current['id'], later['id'], earlier['id']])
+        self.assertEqual([t['group'] for t in options], ['CURRENT', 'LATER', 'UNSTARTED'])
+
+    def test_selection_preserves_other_pages_history_and_never_changes_tasks(self):
+        tasks = [task(title=f'Task {i:02d}', slot='11:00') for i in range(31)]
+        report = service.refresh(service.snapshot([], AT), tasks)
+        choices = report['next_options']
+        selected = service.save_next_choices(report, [choices[0]['id']], '600', AT)
+        selected = service.save_next_choices(selected, [choices[30]['id']], '601', AT, page=1)
+        self.assertEqual(len(selected['next']['selected_tasks']), 2)
+        self.assertEqual(len(selected['next']['history']), 2)
+        self.assertEqual(selected['tasks'], [])
+        self.assertTrue(all(t['status'] == 'TODO' and t['one_h_report_slot'] == '11:00' for t in tasks))
+        retry = service.save_next_choices(selected, [], '601', AT, page=1)
+        self.assertEqual(retry, selected)
+        cleared = service.save_next_choices(selected, [], '602', AT, page=1)
+        self.assertEqual([t['id'] for t in cleared['next']['selected_tasks']], [choices[0]['id']])
+        none = service.save_next_choices(cleared, [], '603', AT, none=True)
+        self.assertEqual(none['next']['selection_kind'], 'NONE')
+        self.assertEqual(none['next']['selected_tasks'], [])
+        other = service.save_answer(none, 'next', 'Telefonatë me klientin', '', '604', AT)
+        self.assertEqual(other['next']['selection_kind'], 'OTHER')
+        with self.assertRaises(HTTPException):
+            service.save_next_choices(report, [str(uuid.uuid4())], '605', AT)
+        with self.assertRaises(HTTPException):
+            service.save_next_choices(report, [choices[0]['id']], '606', AT, options_key='0' * 16)
 
 
 URL = os.environ.get('ONE_H_TEST_DATABASE_URL')
@@ -164,8 +214,8 @@ class ReportDatabaseTests(unittest.IsolatedAsyncioTestCase):
         second = next(j for j in jobs if j['discord_user_id'] == '12')
         opened = await self.open(first)
         self.assertEqual(len(opened['one_h']['tasks']), 2)
-        self.assertEqual(len(opened['one_h']['questions']), 1)
-        self.assertEqual((await self.open(second, 1))['one_h']['current']['id'], 'next')
+        self.assertEqual(len(opened['one_h']['questions']), 2)
+        self.assertEqual((await self.open(second, 1))['one_h']['questions'][-1]['id'], 'next')
         await asyncio.gather(self.answer(first), self.answer(first))
         await self.answer(first, '201', 'Tani vazhdoj', expected_at='Sot 14:00')
         async with self.sessions() as db:
@@ -211,6 +261,31 @@ class ReportDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         with self.assertRaises(HTTPException):
             await self.answer(first)
+
+    async def test_no_current_tasks_can_select_future_work_and_archive_it_without_task_writes(self):
+        future = task('TODO', '14:20')
+        self.items[self.user_ids[0]] = [future]
+        first = next(j for j in await self.collect() if j['discord_user_id'] == '11')
+        opened = (await self.open(first))['one_h']
+        self.assertEqual(opened['tasks'], [])
+        self.assertEqual(opened['questions'][0]['id'], 'next')
+        async def choose(request_id, ids, key):
+            async with self.sessions() as db:
+                return await api.answer_one_h(uuid.UUID(first['id']), api.OneHAnswer(
+                    **self.actors[0].model_dump(), item_id='next', request_id=request_id, selection_mode='TASKS',
+                    next_task_ids=ids, next_options_key=key), db)
+        saved = await choose('701', [future['id']], opened['next_options_key'])
+        self.assertEqual(saved['state'], 'DONE')
+        self.assertEqual(future['status'], 'TODO')
+        self.assertEqual(future['one_h_report_slot'], '14:20')
+        async with self.sessions() as db:
+            detail = await host.meeting_detail(db, service.slot_id(AT.date(), '10:00'))
+            self.assertEqual(detail['discord_reports'][0]['next']['selected_tasks'][0]['id'], future['id'])
+        with self.assertRaises(HTTPException):
+            await choose('702', [str(uuid.uuid4())], opened['next_options_key'])
+        future['status'] = 'DONE'
+        with self.assertRaises(HTTPException):
+            await choose('703', [future['id']], opened['next_options_key'])
 
     async def test_migration_preserves_existing_reminders_and_accepts_new_answers(self):
         first = next(j for j in await self.collect() if j['discord_user_id'] == '11')

@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"
+    GA_PERSONAL_ENABLED: bool = False
+    GA_PERSONAL_UNLOCK_MINUTES: int = 60
     MEETING_REMINDER_SCHEDULER_ENABLED: bool = True
     MEETING_REMINDER_POLL_SECONDS: int = 30
     SYSTEM_TASK_SCHEDULER_ENABLED: bool = True

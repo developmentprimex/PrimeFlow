@@ -18,6 +18,10 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _application_schema(name, type_, parent_names):
+    return type_ != "schema" or name in (None, "ga_personal")
+
+
 def _sync_database_url() -> str:
     url = settings.DATABASE_URL
     if url.startswith("postgresql+asyncpg://"):
@@ -32,6 +36,8 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_schemas=True,
+        include_name=_application_schema,
     )
 
     with context.begin_transaction():
@@ -47,7 +53,8 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True,
+                          include_schemas=True, include_name=_application_schema)
 
         with context.begin_transaction():
             context.run_migrations()

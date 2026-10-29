@@ -30,7 +30,10 @@ test("Mira groups Discord answers and task outcomes without requiring a voice-ho
     if (path === `/api/mira/meetings/${row.id}`) return route.fulfill({ json: {
       ...row, turns: [], summary: null, transcript: [], events: [], mentions: [], recorder: null,
       discord_reports: [
-        { id: "report", user_id: user.id, name: user.full_name, state: "PARTIAL", created_at: "2026-10-27T14:20:00+01:00", sent_at: "2026-10-27T14:20:01+01:00", tasks, next: { answer: null, history: [] } },
+        { id: "report", user_id: user.id, name: user.full_name, state: "PARTIAL", created_at: "2026-10-27T14:20:00+01:00", sent_at: "2026-10-27T14:20:01+01:00", tasks,
+          next: { answer: "EF: OFERTA E RADHËS", selection_kind: "TASKS", history: [], selected_tasks: [
+            { id: "66666666-6666-4666-8666-666666666666", title: "EF: OFERTA E RADHËS", status: "TODO", slot: "16:00", group: "LATER" },
+          ] } },
         { id: "done-report", user_id: "oh", name: "Olsa Hajdari", state: "DONE", created_at: "2026-10-27T14:20:00+01:00", sent_at: "2026-10-27T14:20:01+01:00",
           tasks: [{ ...tasks[0], id: "55555555-5555-4555-8555-555555555555", title: "OH: OFERTA", status: "DONE", planned_status: "DONE", answer: null, expected_at: null, history: [], postponements: [] }],
           next: { answer: "Vazhdoj me përgatitjen e ofertës tjetër.", history: [] } },
@@ -45,7 +48,12 @@ test("Mira groups Discord answers and task outcomes without requiring a voice-ho
   await expect(page.getByText("Pjesërisht i raportuar", { exact: true })).toBeVisible()
   await expect(page.getByText("Në pritje të Diellzës", { exact: false })).toBeVisible()
   await expect(page.getByText("E kaluar pa përgjigje", { exact: true })).toBeVisible()
-  await expect(page.getByText("Me çka ke me vazhdu në slotin tjetër?", { exact: true })).toHaveCount(1)
+  const nextQuestion = page.getByText("Me çka ke me vazhdu në slotin tjetër?", { exact: true })
+  await expect(nextQuestion).toHaveCount(2)
+  await expect(page.getByRole("link", { name: "EF: OFERTA E RADHËS" })).toBeVisible()
+  const questionBox = await nextQuestion.first().boundingBox()
+  const taskBox = await page.getByRole("link", { name: "EF/DV: ASIST DISCORD PERSONAL" }).boundingBox()
+  expect(questionBox!.y).toBeLessThan(taskBox!.y)
   await expect(page.getByText("Nuk ka transkript.")).toHaveCount(0)
   await page.getByText("Historiku · 3", { exact: true }).click()
   await expect(page.getByText("Pres materialet.", { exact: true })).toBeVisible()
