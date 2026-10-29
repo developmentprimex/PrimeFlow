@@ -6,6 +6,55 @@ or a household SQLite task store in PrimeFlow mode.
 
 ## Runtime
 
+### Server deployment, like work Mira
+
+The PrimeFlow Actions workflow manages a separate PM2 process named
+`primeflow-kujtesa`. Work Mira remains `primeflow-discord`. This setup does not
+need the Desktop handoff folder or an open PowerShell window.
+
+In the repository that runs the deployment (`developmentprimex/PrimeFlow`), set:
+
+| Actions setting | Name | Value |
+| --- | --- | --- |
+| Secret | `KUJTESA_DISCORD_TOKEN` | The new dedicated Kujtesa token from the existing local bot `.env` |
+| Secret | `GA_PERSONAL_DISCORD_BRIDGE_SECRET` | The same existing private `PRIMEFLOW_GA_BRIDGE_KEY` used by the bot and API |
+| Variable | `KUJTESA_ENABLED` | `true` |
+| Variable | `KUJTESA_REMINDERS_ENABLED` | `true` to deliver; `false` for connection-only operation |
+
+Never overwrite Mira's `DISCORD_BOT_TOKEN` or `DISCORD_BRIDGE_SECRET`.
+The bot token is optional until configuring Kujtesa; without it the existing
+deployment continues with Kujtesa disabled. Explicitly enabling with missing
+secrets fails configuration rather than using work Mira's credentials.
+
+After pushing these changes, the workflow writes a separate private file at
+`C:/PrimeFlowData/Kujtesa/.env`, installs its dependencies, checks the API bridge,
+starts one PM2 worker and verifies a fresh heartbeat for the deployed build.
+The worker uses `http://127.0.0.1:8000/api` on the same server. This leaves the
+browser-facing API URL and the work bot unchanged.
+
+Delivery receipts and the readiness file live under `C:/PrimeFlowData/Kujtesa`,
+outside the Actions checkout, and survive deployments. The existing PM2 save
+and boot recovery also restore this process after a server restart. The module's
+existing administrator grant and task destinations still apply.
+
+Wait for the **Start Kujtesa Worker** step to pass, then stop the Desktop copy
+with Ctrl+C. Keep only the server worker active. The persistent outbox claims
+prevent the same reminder phase being sent twice during handover.
+
+To inspect on the server:
+
+```powershell
+pm2 status primeflow-kujtesa
+pm2 logs primeflow-kujtesa --lines 30 --nostream
+```
+
+To disable it, set `KUJTESA_ENABLED=false` in Actions Variables and run the deploy
+workflow manually. To pause outgoing reminders while retaining the connection,
+use `KUJTESA_REMINDERS_ENABLED=false` instead. Manual workflow runs reconfigure
+and restart the worker even without new backend code.
+
+### Standalone/local development
+
 Install `primeflow_bot.py` and `voice_host.py` beside `kujtesa.py`. Use Python 3.11+ and the bot's
 existing `discord.py` / `aiohttp` dependencies. Install the bridge dependencies
 with `python -m pip install -r bot/requirements-primeflow.txt`; this includes

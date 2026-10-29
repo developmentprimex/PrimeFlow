@@ -158,7 +158,8 @@ async def poll(db, space, *, delivery_enabled=True, health_only=False):
     moment = utcnow()
     cfg = space.config.get("discord", {})
     if health_only:
-        return {"ok": True, "enabled": await granted(db, space), "deliveries": [], "updates": [], "missing_people": []}
+        return {"ok": True, "enabled": await granted(db, space), "guild_id": cfg.get("guild_id"),
+                "deliveries": [], "updates": [], "missing_people": []}
     space.config = {**space.config, "discord": {**cfg, "last_seen_at": moment.isoformat()}}
     if not await granted(db, space):
         await cancel(db, select(Occurrence.id).where(Occurrence.space_id == space.id))

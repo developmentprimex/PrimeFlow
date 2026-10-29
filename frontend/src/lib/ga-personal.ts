@@ -26,7 +26,7 @@ export type Workspace = {
   config: { rotation_anchor?: string; areas?: { id: string; name: string }[]; reminders_enabled?: boolean; automatic_generation?: { enabled: boolean; starts_on: string } }
   discord: { connected: boolean; messages_enabled: boolean; configured?: boolean; last_seen_at?: string | null }
 }
-export type GaAccess = { available: boolean; unlocked: boolean; configured?: boolean; expires_at?: string; setup_allowed?: boolean; requires_login?: boolean }
+export type GaAccess = { available: boolean; unlocked: boolean }
 export type ImportPreview = {
   dataset_hash: string; templates: number; steps: number; create: string[]; unchanged: string[]
   conflicts: string[]; unresolved_members: string[]; applied?: boolean

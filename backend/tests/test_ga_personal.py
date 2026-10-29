@@ -24,7 +24,7 @@ from app.db import Base, get_db
 from app.models.department import Department
 from app.models.enums import UserRole
 from app.models.ga_personal import (
-    SCHEMA, GaPersonalSpace as Space, GaPersonalMember as Member, GaPersonalUnlock as Unlock,
+    SCHEMA, GaPersonalSpace as Space, GaPersonalMember as Member,
     GaPersonalTemplate as Template, GaPersonalOccurrence as Occurrence, GaPersonalEvent as Event,
     GaPersonalDelivery as Delivery,
 )
@@ -136,13 +136,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.client.headers["Authorization"] = "Bearer " + create_access_token(
             user_id=self.ids[person], role="ADMIN" if person == "outsider" else "STAFF", department_id=None, session_id=self.sids[person])
 
-    async def unlock(self):
-        r = await self.client.post("/api/ga-personal/unlock", json={"password": self.password})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertIn("HttpOnly", r.headers["set-cookie"])
-        self.assertIn("Secure", r.headers["set-cookie"])
-        self.assertEqual(r.headers["cache-control"], "private, no-store")
-
     async def add_template(self, d=None):
         r = await self.client.post("/api/ga-personal/templates", json={"definition": d or definition()})
         self.assertEqual(r.status_code, 200, r.text)
@@ -153,92 +146,54 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code, 200, r.text)
         return r.json()
 
-    async def test_nonmember_including_work_admin_cannot_read_or_unlock(self):
+    async def test_nonmember_including_work_admin_cannot_read(self):
         self.as_person("outsider")
         self.assertEqual((await self.client.get("/api/ga-personal/access")).json(), {"available": False, "unlocked": False})
-        for path in ["workspace", "templates", "occurrences", "history"]:
+        for path in ["workspace", "templates", "occurrences", "history", "discord/settings"]:
             self.assertEqual((await self.client.get("/api/ga-personal/"+path)).status_code, 403)
-        self.assertEqual((await self.client.post("/api/ga-personal/unlock", json={"password": self.password})).status_code, 403)
 
-    async def test_lock_expiry_logout_and_session_binding(self):
-        self.assertEqual((await self.client.get("/api/ga-personal/templates")).status_code, 423)
-        await self.unlock()
+    async def test_members_use_normal_login_without_password_cookie_or_session_id(self):
+        for person in ["gane", "mrika", "lirza", "rrita"]:
+            self.client.headers["Authorization"] = "Bearer " + create_access_token(
+                user_id=self.ids[person], role="STAFF", department_id=None)
+            self.client.cookies.clear()
+            access = await self.client.get("/api/ga-personal/access")
+            self.assertEqual(access.json(), {"available": True, "unlocked": True})
+            self.assertEqual(access.headers["cache-control"], "private, no-store")
+            self.assertNotIn("set-cookie", access.headers)
+            for path in ["workspace", "templates", "occurrences", "history"]:
+                self.assertEqual((await self.client.get("/api/ga-personal/"+path)).status_code, 200)
+        async with self.sessions() as db:
+            space = await db.get(Space, self.space_id)
+            space.password_hash = None
+            await db.commit()
         self.assertEqual((await self.client.get("/api/ga-personal/workspace")).status_code, 200)
-        self.as_person("mrika")
-        self.assertEqual((await self.client.get("/api/ga-personal/templates")).status_code, 423)
+
+    async def test_normal_authentication_and_feature_flag_are_required(self):
+        self.client.headers.pop("Authorization")
+        for path in ["access", "workspace", "templates", "occurrences", "history"]:
+            self.assertEqual((await self.client.get("/api/ga-personal/"+path)).status_code, 401)
+        self.client.headers["Authorization"] = "Bearer invalid-token"
+        self.assertEqual((await self.client.get("/api/ga-personal/workspace")).status_code, 401)
         self.as_person("gane")
+        with patch.object(settings, "GA_PERSONAL_ENABLED", False):
+            self.assertEqual((await self.client.get("/api/ga-personal/access")).json(), {"available": False, "unlocked": False})
+            self.assertEqual((await self.client.get("/api/ga-personal/workspace")).status_code, 404)
         async with self.sessions() as db:
-            row = (await db.execute(select(Unlock))).scalar_one()
-            row.expires_at = service.utcnow()-timedelta(seconds=1); await db.commit()
-        self.assertEqual((await self.client.get("/api/ga-personal/templates")).status_code, 423)
-        await self.unlock()
-        from app.auth.security import create_refresh_token
-        token, _ = create_refresh_token(user_id=self.ids["gane"], jti=self.sids["gane"])
-        self.client.cookies.set(auth.REFRESH_COOKIE_NAME, token, domain="test.local", path="/api/auth")
-        self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
-        self.assertEqual((await self.client.get("/api/ga-personal/templates")).status_code, 409)
-        self.assertEqual((await self.client.post("/api/ga-personal/unlock", json={"password": self.password})).status_code, 409)
-
-    async def test_password_attempts_persist_and_wrong_password_is_not_echoed(self):
-        for _ in range(5):
-            r = await self.client.post("/api/ga-personal/unlock", json={"password": "wrong-secret"})
-            self.assertEqual(r.status_code, 403)
-            self.assertNotIn("wrong-secret", r.text)
-        self.assertEqual((await self.client.post("/api/ga-personal/unlock", json={"password": self.password})).status_code, 429)
-
-    async def test_first_password_setup_requires_module_admin_and_cannot_overwrite(self):
-        async with self.sessions() as db:
-            space = await db.get(Space, self.space_id)
-            space.password_hash = None
-            member = (await db.execute(select(Member).where(Member.user_id == self.ids["rrita"])) ).scalar_one()
-            member.is_admin = True
+            user = await db.get(User, self.ids["gane"])
+            user.is_active = False
             await db.commit()
-        self.as_person("outsider")
-        body = {"password": "first-test-password-only"}
-        self.assertEqual((await self.client.post("/api/ga-personal/password/setup", json=body)).status_code, 403)
-        self.as_person("mrika")
-        self.assertFalse((await self.client.get("/api/ga-personal/access")).json()["setup_allowed"])
-        self.assertEqual((await self.client.post("/api/ga-personal/password/setup", json=body)).status_code, 403)
-        self.as_person("rrita")
-        self.assertTrue((await self.client.get("/api/ga-personal/access")).json()["setup_allowed"])
-        self.assertEqual((await self.client.get("/api/ga-personal/workspace")).status_code, 423)
-        response = await self.client.post("/api/ga-personal/password/setup", json=body)
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertNotIn(body["password"], response.text)
-        self.assertEqual((await self.client.post("/api/ga-personal/password/setup", json={"password": "must-not-overwrite-this"})).status_code, 409)
-        self.password = body["password"]
-        await self.unlock()
-        self.assertEqual((await self.client.get("/api/ga-personal/workspace")).status_code, 200)
+        self.assertEqual((await self.client.get("/api/ga-personal/workspace")).status_code, 401)
 
-    async def test_password_setup_requires_current_login_and_uses_serialized_first_write(self):
-        async with self.sessions() as db:
-            space = await db.get(Space, self.space_id)
-            space.password_hash = None
-            await db.commit()
-        old = self.client.headers["Authorization"]
-        self.client.headers["Authorization"] = "Bearer " + create_access_token(user_id=self.ids["gane"], role="STAFF", department_id=None)
-        access = (await self.client.get("/api/ga-personal/access")).json()
-        self.assertTrue(access["requires_login"])
-        self.assertFalse(access["setup_allowed"])
-        body = {"password": "first-test-password-only"}
-        self.assertEqual((await self.client.post("/api/ga-personal/password/setup", json=body)).status_code, 409)
-        self.client.headers["Authorization"] = old
-        results = await asyncio.gather(*[self.client.post("/api/ga-personal/password/setup", json=body) for _ in range(2)])
-        self.assertEqual(sorted(r.status_code for r in results), [200, 409])
-
-    async def test_validation_never_echoes_passwords_and_errors_are_not_cached(self):
-        secret = "malformed-private-value"
-        r = await self.client.post("/api/ga-personal/unlock", json={"password": {"value": secret}})
-        self.assertEqual(r.status_code, 422)
-        self.assertNotIn(secret, r.text)
-        self.assertEqual(r.headers["cache-control"], "private, no-store")
-        await self.unlock()
+    async def test_removed_extra_login_endpoints_and_private_validation(self):
+        for method, path in [("POST", "unlock"), ("POST", "lock"), ("POST", "password/setup"), ("PUT", "password")]:
+            self.assertEqual((await self.client.request(method, "/api/ga-personal/"+path, json={"password": "unused"})).status_code, 404)
         invalid = dataset(); invalid["rotations"] = [None]
-        r = await self.client.post("/api/ga-personal/import/preview", json={"dataset": invalid})
-        self.assertEqual(r.status_code, 422)
+        response = await self.client.post("/api/ga-personal/import/preview", json={"dataset": invalid})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
 
     async def test_individual_multi_assignment_completion_and_reminder_cancellation(self):
-        await self.unlock()
         d = definition(); d["assignees"] = ["mrika", "rrita"]
         await self.add_template(d)
         self.assertEqual((await self.generate())["created"], 2)
@@ -248,7 +203,7 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(Delivery(occurrence_id=uuid.UUID(target["id"]), scheduled_at=service.utcnow()))
             await db.commit()
-        self.as_person("mrika"); await self.unlock()
+        self.as_person("mrika")
         payload = {"status": "done", "expected_version": 1, "request_id": str(uuid.uuid4())}
         endpoint = f'/api/ga-personal/occurrences/{target["id"]}/actions'
         r = await self.client.post(endpoint, json=payload)
@@ -264,7 +219,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post(f'/api/ga-personal/occurrences/{other["id"]}/actions', json={**payload, "request_id": str(uuid.uuid4())})).status_code, 403)
 
     async def test_weekend_dedup_and_template_edits_preserve_snapshots(self):
-        await self.unlock()
         d = definition(); d.update(frequency="weekly", weekdays=[5, 6], reminder_group="weekend_deep_clean")
         t = await self.add_template(d)
         self.assertEqual((await self.generate("2026-11-06"))["created"], 0)
@@ -277,7 +231,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.put('/api/ga-personal/templates/'+t["id"], json={"definition": d, "expected_version": 1})).status_code, 409)
 
     async def test_import_is_previewed_idempotent_and_preserves_edits(self):
-        await self.unlock()
         data = dataset()
         preview = (await self.client.post("/api/ga-personal/import/preview", json={"dataset": data})).json()
         self.assertEqual(preview["templates"], 1)
@@ -292,14 +245,14 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post("/api/ga-personal/import/apply", json={"dataset": data, "expected_hash": preview["dataset_hash"]})).status_code, 409)
 
     async def test_member_can_only_create_and_manage_own_models(self):
-        self.as_person("mrika"); await self.unlock()
+        self.as_person("mrika")
         t = await self.add_template()
         d = definition(); d["assignees"] = ["rrita"]
         self.assertEqual((await self.client.post("/api/ga-personal/templates", json={"definition": d})).status_code, 403)
         self.assertEqual((await self.client.get("/api/ga-personal/templates")).status_code, 200)
 
     async def test_concurrent_generation_and_stale_actions_are_serialized(self):
-        await self.unlock(); await self.add_template()
+        await self.add_template()
         results = await asyncio.gather(*[self.client.post("/api/ga-personal/generate", json={"day": "2026-11-07"}) for _ in range(2)])
         self.assertEqual(sorted(r.json()["created"] for r in results), [0, 1])
         row = (await self.client.get("/api/ga-personal/occurrences")).json()[0]
@@ -307,19 +260,14 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         results = await asyncio.gather(*[self.client.post(path, json={"status": "done", "expected_version": 1, "request_id": str(uuid.uuid4())}) for _ in range(2)])
         self.assertEqual(sorted(r.status_code for r in results), [200, 409])
 
-    async def test_password_change_and_membership_revocation_relock(self):
-        await self.unlock()
-        r = await self.client.put("/api/ga-personal/password", json={"password": "another-test-password"})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual((await self.client.get("/api/ga-personal/templates")).status_code, 423)
-        self.password = "another-test-password"; await self.unlock()
+    async def test_membership_revocation_removes_access(self):
         async with self.sessions() as db:
             member = (await db.execute(select(Member).where(Member.user_id == self.ids["gane"]))).scalar_one()
             member.active = False; await db.commit()
         self.assertEqual((await self.client.get("/api/ga-personal/templates")).status_code, 403)
 
     async def test_one_off_creates_individual_occurrences_without_admin_generation(self):
-        self.as_person("mrika"); await self.unlock()
+        self.as_person("mrika")
         d = definition(); d.update(frequency="once", on_date="2026-11-07")
         await self.add_template(d)
         rows = (await self.client.get("/api/ga-personal/occurrences")).json()
@@ -327,14 +275,13 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["snapshot"]["assignees"], ["mrika"])
 
     async def test_weekday_api_excludes_weekend_duties(self):
-        await self.unlock()
         d = definition(); d.update(frequency="weekly", weekdays=[5, 6])
         await self.add_template(d); await self.generate()
         self.assertEqual((await self.client.get("/api/ga-personal/occurrences?day=2026-11-06")).json(), [])
         self.assertEqual(len((await self.client.get("/api/ga-personal/occurrences?day=2026-11-08")).json()), 1)
 
     async def test_quick_edit_changes_only_instance_and_retains_authorization_and_history(self):
-        await self.unlock(); template = await self.add_template(); await self.generate()
+        template = await self.add_template(); await self.generate()
         row = (await self.client.get("/api/ga-personal/occurrences")).json()[0]
         self.assertTrue(row["can_edit"])
         path = f'/api/ga-personal/occurrences/{row["id"]}'
@@ -358,11 +305,11 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
             events = (await db.execute(select(Event).where(Event.kind == "occurrence_updated"))).scalars().all()
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0].payload["before"]["assignees"], ["mrika"])
-        self.as_person("mrika"); await self.unlock()
+        self.as_person("mrika")
         self.assertEqual((await self.client.patch(path, json={**body, "expected_version": 2, "request_id": str(uuid.uuid4())})).status_code, 403)
 
     async def test_quick_edit_future_updates_template_without_duplicate_or_resolved_history_edits(self):
-        await self.unlock(); template = await self.add_template(); await self.generate()
+        template = await self.add_template(); await self.generate()
         row = (await self.client.get("/api/ga-personal/occurrences")).json()[0]
         body = {"expected_version": 1, "request_id": str(uuid.uuid4()), "local_date": row["local_date"],
                 "due_time": "18:30", "assignees": ["rrita"], "apply_to_future": True, "expected_template_version": 1}
@@ -381,7 +328,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.patch(path, json={**body, "request_id": str(uuid.uuid4())})).status_code, 409)
 
     async def test_quick_edit_rejects_duplicate_assignment_inactive_owner_and_invalid_dst_time(self):
-        await self.unlock()
         d = definition(); d["assignees"] = ["mrika", "rrita"]
         await self.add_template(d); await self.generate()
         rows = (await self.client.get("/api/ga-personal/occurrences")).json()
@@ -395,8 +341,7 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.patch(path, json={**body, "assignees": ["lirza"]})).status_code, 422)
         self.assertEqual((await self.client.patch(path, json={**body, "local_date": "2026-03-29", "due_time": "02:30", "assignees": ["mrika"]})).status_code, 422)
 
-    async def test_access_token_refresh_keeps_module_unlock_and_expiry(self):
-        await self.unlock()
+    async def test_access_token_refresh_keeps_module_access(self):
         before = (await self.client.get("/api/ga-personal/access")).json()
         token, _ = create_refresh_token(user_id=self.ids["gane"], jti=self.sids["gane"])
         self.client.cookies.set(auth.REFRESH_COOKIE_NAME, token)
@@ -407,11 +352,11 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.client.headers["Authorization"] = "Bearer " + access_token
         after = (await self.client.get("/api/ga-personal/access")).json()
         self.assertTrue(after["unlocked"])
-        self.assertEqual(before["expires_at"], after["expires_at"])
+        self.assertEqual(before, after)
         self.assertEqual((await self.client.get("/api/ga-personal/workspace")).status_code, 200)
 
     async def test_future_assignment_after_instance_override_replaces_original_slot(self):
-        await self.unlock(); await self.add_template(); await self.generate()
+        await self.add_template(); await self.generate()
         row = (await self.client.get("/api/ga-personal/occurrences")).json()[0]
         path = f'/api/ga-personal/occurrences/{row["id"]}'
         body = {"expected_version": 1, "request_id": str(uuid.uuid4()), "local_date": row["local_date"],
@@ -427,7 +372,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.generate("2026-11-08"))["created"], 1)
 
     async def test_rotation_instance_reassignment_leaves_future_rotation_intact(self):
-        await self.unlock()
         d = definition(); d.update(assignment="rotation", assignees=[], rotation_id="nala")
         await self.add_template(d); await self.generate()
         row = (await self.client.get("/api/ga-personal/occurrences")).json()[0]
@@ -445,7 +389,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 422)
 
     async def test_one_off_date_change_does_not_regenerate_a_second_occurrence(self):
-        await self.unlock()
         d = definition(); d.update(frequency="once", on_date="2026-11-07")
         t = await self.add_template(d)
         row = (await self.client.get("/api/ga-personal/occurrences")).json()[0]
@@ -457,7 +400,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await self.client.get("/api/ga-personal/occurrences")).json()), 1)
 
     async def test_untimed_daily_tasks_generate_without_invented_deadline(self):
-        await self.unlock()
         d = definition(); d["due_time"] = None
         await self.add_template(d)
         self.assertEqual((await self.generate())["created"], 1)
@@ -470,7 +412,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def bridge_setup(self, *, destination="dm", owner="rrita"):
         secret_patch = patch.dict(settings.__dict__, {"GA_PERSONAL_DISCORD_BRIDGE_SECRET": "test-only-bridge-secret-which-is-long-enough"})
         secret_patch.start(); self.patchers.append(secret_patch)
-        await self.unlock()
         config = {"enabled": True, "guild_id": "111111111111111111", "channel_id": "222222222222222222",
                   "user_ids": {"rrita": "333333333333333333", "gane": "444444444444444444"}, "expected_version": 0}
         response = await self.client.put("/api/ga-personal/discord/settings", json=config)
@@ -491,7 +432,7 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.as_person("outsider")
         response = await self.client.put("/api/ga-personal/discord/settings", json={"enabled": False, "expected_version": 1})
         self.assertEqual(response.status_code, 403)
-        self.as_person("mrika"); await self.unlock()
+        self.as_person("mrika")
         self.assertEqual((await self.client.get("/api/ga-personal/discord/settings")).status_code, 403)
         self.assertEqual((await self.client.post("/api/ga-personal/bridge/poll", headers={"X-GA-Bridge-Key": "wrong"})).status_code, 401)
 
@@ -694,7 +635,6 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_automatic_tick_creates_each_local_day_once_and_stops_when_disabled(self):
         from app.services.ga_personal_scheduler import generation_tick
-        await self.unlock()
         await self.add_template()
         async with self.sessions() as db:
             self.assertEqual(await generation_tick(db, day=date(2026, 11, 7)), 0)
