@@ -106,7 +106,7 @@ Scheduled email failures do not prevent the API from starting. Manual report
 email still requires `EMAIL_USER=130primex.eu@gmail.com` and that account's Gmail
 app password in `EMAIL_PASSWORD`.
 
-Private household sidebar module, extra unlock and deployment/setup instructions:
+Private household sidebar module, membership access and deployment/setup instructions:
 [GA PERSONAL](docs/ga-personal.md). It is disabled until exact member UUIDs and
 the module administrator/password are explicitly configured. Its data stays
 outside the work task/report tables.

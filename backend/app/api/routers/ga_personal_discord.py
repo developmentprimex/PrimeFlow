@@ -23,7 +23,7 @@ async def bridge(x_ga_bridge_key: str | None = Header(default=None), db=Depends(
         or not secrets.compare_digest(expected, x_ga_bridge_key)):
         raise HTTPException(401, "Lidhje e paautorizuar.")
     candidate = (await db.execute(select(GaPersonalSpace).where(GaPersonalSpace.key == "ga_personal"))).scalar_one_or_none()
-    if candidate is None or not candidate.password_hash:
+    if candidate is None:
         raise HTTPException(403, "Hapësira private nuk është konfiguruar.")
     return await tasks.lock_space(db, candidate.id)
 

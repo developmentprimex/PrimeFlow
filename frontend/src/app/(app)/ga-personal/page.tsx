@@ -19,9 +19,6 @@ export default function GaPersonalPage() {
   const [tab, setTab] = React.useState("today")
   const [person, setPerson] = React.useState<string>("all")
   const [day, setDay] = React.useState(localToday)
-  const [password, setPassword] = React.useState("")
-  const [newPassword, setNewPassword] = React.useState("")
-  const [confirmPassword, setConfirmPassword] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState("")
   const [editing, setEditing] = React.useState<GaTemplate | null>(null)
@@ -38,36 +35,14 @@ export default function GaPersonalPage() {
   const [groupFilter, setGroupFilter] = React.useState("all")
   const resetDrafts = React.useCallback(() => {
     setDraft(null); setEditing(null); setImportData(null); setPreview(null); setDeferred(null)
-    setPassword(""); setNewPassword(""); setConfirmPassword(""); setQuick(null); setStepsText("")
+    setQuick(null); setStepsText("")
   }, [])
-  const { access, workspace, templates, occurrences, history, request, load, check, clear, announce, changeSession, obscured, connectionError } = useGaPersonalSession(resetDrafts)
+  const { access, workspace, templates, occurrences, history, request, load, check, obscured, connectionError } = useGaPersonalSession(resetDrafts)
 
   async function run(work: () => Promise<unknown>) {
     setBusy(true); setError("")
     try { await work() } catch (e) { setError(e instanceof Error ? e.message : "Veprimi nuk u krye.") }
     finally { setBusy(false) }
-  }
-
-  async function unlock(e: React.FormEvent) {
-    e.preventDefault()
-    await run(async () => {
-      await changeSession(() => request("/unlock", { method: "POST", body: JSON.stringify({ password }) }))
-      setPassword(""); await check(); announce("unlock")
-    })
-  }
-
-  async function setupPassword(event: React.FormEvent) {
-    event.preventDefault()
-    await run(async () => {
-      if (newPassword !== confirmPassword) throw new Error("Fjalëkalimet nuk përputhen.")
-      const chosenPassword = newPassword
-      await changeSession(async () => {
-        await request("/password/setup", { method: "POST", body: JSON.stringify({ password: chosenPassword }) })
-        await request("/unlock", { method: "POST", body: JSON.stringify({ password: chosenPassword }) })
-      })
-      setNewPassword(""); setConfirmPassword("")
-      await check(); announce("unlock")
-    })
   }
 
   function edit(row?: GaTemplate) {
@@ -131,30 +106,13 @@ export default function GaPersonalPage() {
     <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-card p-5">
       <div className="flex items-center gap-3"><div className="rounded-xl bg-primary/10 p-3"><ShieldCheck className="h-6 w-6 text-primary" /></div>
         <div><h1 className="text-xl font-semibold">GA PERSONAL</h1><p className="text-sm text-muted-foreground">Punët e shtëpisë, me kohë dhe pa nxitim.</p></div></div>
-      {workspace && <div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={() => void run(async () => {
-        clear(); await changeSession(() => request("/lock", { method: "POST" })); announce("lock")
-      })}><LockKeyhole className="mr-2 h-4 w-4" />Kyçe</Button><Button onClick={() => edit()}><Plus className="mr-2 h-4 w-4" />Detyrë e re</Button></div>}
+      {workspace && <Button onClick={() => edit()}><Plus className="mr-2 h-4 w-4" />Detyrë e re</Button>}
     </header>
     {error && !dialogOpen && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
     {connectionError && !obscured && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3 text-sm"><p>{connectionError}</p><Button size="sm" variant="outline" onClick={() => void check()}>Provo përsëri</Button></div>}
-    {(!access || (access.unlocked && !workspace)) ? <div className="flex items-center justify-center gap-3 rounded-xl border p-12 text-sm text-muted-foreground" role="status"><LoaderCircle className="h-5 w-5 animate-spin" />Duke hapur hapësirën…</div>
+    {(!access || (access.available && !workspace)) ? <div className="flex items-center justify-center gap-3 rounded-xl border p-12 text-sm text-muted-foreground" role="status"><LoaderCircle className="h-5 w-5 animate-spin" />Duke hapur hapësirën…</div>
       : !access.available ? <div className="rounded-xl border p-8 text-center"><LockKeyhole className="mx-auto mb-4 h-8 w-8 text-muted-foreground" /><p>Ky modul ende nuk është aktivizuar për llogarinë tënde.</p></div>
-        : access.requires_login ? <div className="mx-auto max-w-sm space-y-3 rounded-xl border p-6"><h2 className="font-medium">Hyr përsëri në PrimeFlow</h2><p className="text-sm text-muted-foreground">Dil nga llogaria dhe hyr përsëri që të hapësh modulin privat.</p></div>
-        : access.setup_allowed && !workspace ? <form onSubmit={setupPassword} className="mx-auto max-w-sm space-y-4 rounded-xl border bg-card p-6">
-          <ShieldCheck className="h-7 w-7 text-primary" /><h2 className="text-lg font-medium">Vendos fjalëkalimin shtesë</h2>
-          <p className="text-sm text-muted-foreground">Si administratore e modulit, zgjidh fjalëkalimin me të cilin familja do ta hapë këtë hapësirë.</p>
-          <label className="block space-y-2 text-sm"><span>Fjalëkalimi i ri</span><Input type="password" autoComplete="new-password" required minLength={12} maxLength={72} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label>
-          <label className="block space-y-2 text-sm"><span>Përsërite fjalëkalimin</span><Input type="password" autoComplete="new-password" required minLength={12} maxLength={72} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label>
-          <p className="text-xs text-muted-foreground">Përdor së paku 12 karaktere dhe një fjalëkalim të ndryshëm nga ai i llogarisë.</p>
-          <Button className="w-full" disabled={busy}>Ruaje dhe hape modulin</Button>
-        </form>
-        : !workspace ? <form onSubmit={unlock} className="mx-auto max-w-sm space-y-4 rounded-xl border bg-card p-6">
-          <LockKeyhole className="h-7 w-7 text-primary" /><h2 className="text-lg font-medium">Hape hapësirën private</h2>
-          <p className="text-sm text-muted-foreground">Përdor fjalëkalimin shtesë të modulit.</p>
-          <label className="block space-y-2 text-sm"><span>Fjalëkalimi shtesë</span><Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
-          <Button className="w-full" disabled={busy || !access.configured}>Hape modulin</Button>
-          {!access.configured && <p className="text-sm text-muted-foreground">Administratori i modulit duhet ta vendosë fjalëkalimin e parë.</p>}
-        </form> : <>
+        : workspace && <>
           <nav className="flex flex-wrap gap-2" aria-label="Pamjet e GA PERSONAL">{[["today", "Detyrat e ditës"], ["week", "Këtë javë"], ["templates", "Përsëritjet"], ["history", "Historiku"], ["settings", "Cilësimet"]].map(([key, label]) =>
             <Button key={key} variant={tab === key ? "default" : "outline"} onClick={() => setTab(key)}>{label}</Button>)}</nav>
           {["today", "week", "templates"].includes(tab) && <div className="space-y-4 rounded-xl border bg-card p-4">
@@ -199,13 +157,6 @@ export default function GaPersonalPage() {
           {tab === "settings" && <div className="grid gap-4 md:grid-cols-2">{workspace.is_admin && <DiscordSettingsPanel request={request} onSaved={load} />}<section className="space-y-3 rounded-xl border p-5"><h2 className="font-semibold">Hapësira private</h2><p className="text-sm">Zona kohore: Europe/Belgrade</p><p className="text-sm">Rotacioni Nala: {workspace.config.rotation_anchor || "Ende pa datë fillestare"}</p><p className="text-sm">Krijimi automatik i detyrave: {workspace.config.automatic_generation?.enabled ? "Aktiv" : "Joaktiv"}</p>{workspace.is_admin && <Button variant="outline" disabled={busy} onClick={() => void run(async () => {
               await request("/automation", { method: "PUT", body: JSON.stringify({ enabled: !workspace.config.automatic_generation?.enabled }) }); await load()
             })}>{workspace.config.automatic_generation?.enabled ? "Ndalo krijimin automatik" : "Aktivizo krijimin automatik"}</Button>}<p className="text-sm text-muted-foreground">Kujtesa në Discord: {workspace.discord.connected ? "I lidhur" : "Jashtë linje"}. Njoftimet: {workspace.discord.messages_enabled ? "Të lejuara" : "Të ndaluara"}. Për Lirzën, kujtesat personale i shkojnë Ganës.</p></section>
-            {workspace.is_admin && <form className="space-y-3 rounded-xl border p-5" onSubmit={(event) => {
-              event.preventDefault(); void run(async () => {
-                if (newPassword !== confirmPassword) throw new Error("Fjalëkalimet nuk përputhen.")
-                await changeSession(() => request("/password", { method: "PUT", body: JSON.stringify({ password: newPassword }) }))
-                clear(); announce("lock"); toast.success("Fjalëkalimi u ndryshua. Hape përsëri modulin.")
-              })
-            }}><h2 className="font-semibold">Ndrysho fjalëkalimin shtesë</h2><label className="block space-y-1 text-sm"><span>Fjalëkalimi i ri</span><Input required minLength={12} maxLength={72} type="password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label><label className="block space-y-1 text-sm"><span>Përsërite fjalëkalimin</span><Input required type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label><p className="text-xs text-muted-foreground">Ndryshimi i kyç të gjitha sesionet e hapura të modulit.</p><Button disabled={busy}>Ndrysho fjalëkalimin</Button></form>}
             {workspace.is_admin && <section className="space-y-4 rounded-xl border p-5"><h2 className="font-semibold">Importo modelet</h2><Input aria-label="Dataset-i i modeleve" type="file" accept="application/json,.json" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; void run(async () => {
               if (file.size > 2 * 1024 * 1024) throw new Error("Skedari duhet të jetë deri në 2 MB.")
               const data = JSON.parse(await file.text()) as Record<string, unknown>; setImportData(data)

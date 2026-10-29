@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -40,6 +40,7 @@ class ReceiptStore:
     """Only delivery receipts, never a second task database. Atomic local writes."""
     def __init__(self, path=STATE):
         self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def pending(self):
         if not self.path.exists():
@@ -89,7 +90,7 @@ def card_view(card):
 
 
 class KujtesaBridge(discord.Client):
-    def __init__(self, base_url, bridge_key, *, reminders_enabled=False, receipt_path=STATE):
+    def __init__(self, base_url, bridge_key, *, reminders_enabled=False, receipt_path=STATE, status_path=None):
         super().__init__(intents=discord.Intents.default(), allowed_mentions=discord.AllowedMentions.none())
         parsed = urlparse(base_url)
         if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}):
@@ -102,6 +103,8 @@ class KujtesaBridge(discord.Client):
         self.receipts = ReceiptStore(receipt_path)
         self.http_session = None
         self.allowed_user_ids = set()
+        self.status_path = Path(status_path) if status_path else None
+        self.expected_guild_id = None
 
     async def api(self, path, body):
         if self.http_session is None or self.http_session.closed:
@@ -114,9 +117,43 @@ class KujtesaBridge(discord.Client):
             return data
 
     async def setup_hook(self):
+        health = await self.api("/poll", {"delivery_enabled": False, "health_only": True})
+        self.expected_guild_id = health.get("guild_id")
+        if not self.expected_guild_id:
+            raise BridgeError(409, "Configure the Kujtesa Discord server in GA PERSONAL settings first.")
         self.worker.start()
 
+    def clear_ready_status(self):
+        if not self.status_path:
+            return
+        try:
+            if json.loads(self.status_path.read_text(encoding="utf-8")).get("pid") == os.getpid():
+                self.status_path.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+
+    def publish_ready_status(self):
+        if not self.status_path or not self.expected_guild_id or not self.is_ready() or not self.get_guild(int(self.expected_guild_id)):
+            self.clear_ready_status()
+            return
+        self.status_path.parent.mkdir(parents=True, exist_ok=True)
+        status = {"pid": os.getpid(), "build": os.environ.get("APP_BUILD_SHA", "unknown"),
+                  "guild_id": self.expected_guild_id, "last_seen_at": datetime.now(timezone.utc).isoformat(),
+                  "reminders_enabled": self.reminders_enabled}
+        temporary = self.status_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(status), encoding="utf-8")
+        temporary.replace(self.status_path)
+
+    async def on_ready(self):
+        if not self.get_guild(int(self.expected_guild_id)):
+            LOG.error("Kujtesa is not installed in the configured Discord server")
+            await self.close()
+
+    async def on_disconnect(self):
+        self.clear_ready_status()
+
     async def close(self):
+        self.clear_ready_status()
         self.worker.cancel()
         if self.http_session:
             await self.http_session.close()
@@ -129,6 +166,7 @@ class KujtesaBridge(discord.Client):
         except Exception as error:
             # Do not print tokens, request payloads or family task content.
             LOG.warning("PrimeFlow needs a retry (%s)", type(error).__name__)
+            self.clear_ready_status()
 
     @worker.before_loop
     async def before_worker(self):
@@ -153,6 +191,7 @@ class KujtesaBridge(discord.Client):
         if self.reminders_enabled:
             await self.flush_receipts()
         batch = await self.api("/poll", {"delivery_enabled": self.reminders_enabled})
+        self.publish_ready_status()
         if not self.reminders_enabled or not batch.get("enabled"):
             return
         self.allowed_user_ids = set(batch.get("allowed_user_ids", []))
@@ -264,13 +303,30 @@ class KujtesaBridge(discord.Client):
             await interaction.followup.send("Lidhja u ndërpre. Kontrollo detyrën në PrimeFlow para se ta provosh përsëri.", ephemeral=True)
 
 
+def runtime_paths():
+    base = Path(__file__).resolve().parent
+    state = Path(os.environ.get("KUJTESA_STATE_DIR", str(base)))
+    return {"env": Path(os.environ.get("KUJTESA_ENV_FILE", str(base / ".env"))),
+            "receipts": state / ".primeflow-receipts.json", "status": state / ".kujtesa-worker-status.json"}
+
+
 def load_env():
-    path = Path(__file__).resolve().with_name(".env")
+    path = runtime_paths()["env"]
     if path.exists():
         for line in path.read_text(encoding="utf-8-sig").splitlines():
             if line.strip() and not line.lstrip().startswith("#") and "=" in line:
                 key, value = line.split("=", 1)
-                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+                value = value.strip()
+                if value.startswith('"') and value.endswith('"'):
+                    value = json.loads(value)
+                else:
+                    value = value.strip("'")
+                # The dedicated server file takes precedence over a stale PM2
+                # inherited environment; standalone mode preserves env overrides.
+                if os.environ.get("KUJTESA_ENV_FILE"):
+                    os.environ[key.strip()] = value
+                else:
+                    os.environ.setdefault(key.strip(), value)
 
 
 def main():
@@ -278,11 +334,16 @@ def main():
     parser.add_argument("--check", action="store_true", help="Check only PrimeFlow authentication; never connect to Discord or claim reminders")
     args = parser.parse_args()
     load_env()
+    if os.environ.get("KUJTESA_ENABLED", "true").lower() == "false":
+        print("Kujtesa server worker is disabled.")
+        return 0
     base = os.environ.get("PRIMEFLOW_API_URL", "").strip()
     key = os.environ.get("PRIMEFLOW_GA_BRIDGE_KEY", "").strip()
     if not base or len(key) < 32:
         raise SystemExit("Configure PRIMEFLOW_API_URL and PRIMEFLOW_GA_BRIDGE_KEY in bot/.env.")
-    bot = KujtesaBridge(base, key, reminders_enabled=os.environ.get("REMINDERS_ENABLED") == "1")
+    paths = runtime_paths()
+    bot = KujtesaBridge(base, key, reminders_enabled=os.environ.get("REMINDERS_ENABLED") == "1",
+                        receipt_path=paths["receipts"], status_path=None if args.check else paths["status"])
     if args.check:
         async def check():
             try:

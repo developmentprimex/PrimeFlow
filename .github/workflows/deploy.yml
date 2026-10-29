@@ -244,6 +244,18 @@ jobs:
           & "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" backend/scripts/configure_discord.py
           if ($LASTEXITCODE -ne 0) { throw "Discord configuration failed. Check the required Actions secrets." }
 
+      - name: Configure Kujtesa Server
+        shell: powershell
+        env:
+          KUJTESA_DISCORD_TOKEN: ${{ secrets.KUJTESA_DISCORD_TOKEN }}
+          GA_PERSONAL_DISCORD_BRIDGE_SECRET: ${{ secrets.GA_PERSONAL_DISCORD_BRIDGE_SECRET }}
+          KUJTESA_ENABLED: ${{ vars.KUJTESA_ENABLED }}
+          KUJTESA_REMINDERS_ENABLED: ${{ vars.KUJTESA_REMINDERS_ENABLED }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" backend/scripts/configure_kujtesa_server.py
+          if ($LASTEXITCODE -ne 0) { throw "Kujtesa configuration failed; check its dedicated Actions secrets." }
+
       - name: Release Mira Voice Dependencies
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
@@ -257,6 +269,8 @@ jobs:
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements-discord.txt
           if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r integrations/kujtesa/requirements-primeflow.txt
+          if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" scripts\check_discord_voice.py --install
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m py_compile mcp_server.py app\api\routers\search.py app\schemas\search.py
@@ -266,6 +280,8 @@ jobs:
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "from app.main import app; print('Backend application import: OK')"
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server tests.test_migration_graph
+          if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_kujtesa_deploy tests.test_kujtesa_bridge
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest discover -s tests -p "test_discord*.py"
           if errorlevel 1 exit /b 1
@@ -495,6 +511,47 @@ jobs:
             throw "Discord bot did not connect. Check DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, the bot's server membership and Message Content Intent."
           }
           Write-Host "Discord assistant connected and slash commands registered."
+
+      - name: Start Kujtesa Worker
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        env:
+          APP_BUILD_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location backend
+          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+          $config = (& $python scripts/configure_kujtesa_server.py --status) | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Unable to inspect Kujtesa configuration." }
+          # Replace only the dedicated process; work Mira stays untouched.
+          cmd /c "pm2 delete primeflow-kujtesa 2>NUL || ver > NUL" | Out-Host
+          if (-not $config.enabled) {
+            Write-Host "Kujtesa is disabled; no dedicated bot process started."
+            exit 0
+          }
+          $env:KUJTESA_ENV_FILE = "C:/PrimeFlowData/Kujtesa/.env"
+          $env:KUJTESA_STATE_DIR = "C:/PrimeFlowData/Kujtesa"
+          # This validates only the bridge; it cannot claim/send reminders.
+          & $python integrations/kujtesa/primeflow_bot.py --check
+          if ($LASTEXITCODE -ne 0) { throw "Kujtesa cannot authenticate with the private PrimeFlow API." }
+          Remove-Item -LiteralPath "C:/PrimeFlowData/Kujtesa/.kujtesa-worker-status.json" -Force -ErrorAction SilentlyContinue
+          cmd /c "pm2 start ecosystem.config.cjs --only primeflow-kujtesa --update-env" | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Unable to start the dedicated Kujtesa worker." }
+          $ready = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            $status = (& $python scripts/check_kujtesa_worker.py --expected-build $env:APP_BUILD_SHA) | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw "Unable to inspect Kujtesa readiness." }
+            if ($status.ready -and $status.reminders_enabled -eq $config.reminders_enabled) {
+              $ready = $true
+              break
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ready) {
+            cmd /c "pm2 stop primeflow-kujtesa" | Out-Host
+            throw "Kujtesa did not connect to both Discord and PrimeFlow. Check KUJTESA_DISCORD_TOKEN and its membership in the configured server."
+          }
+          Write-Host "Kujtesa connected to Discord and PrimeFlow; the dedicated server process is ready."
 
       - name: Wait for MCP Readiness
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
@@ -881,3 +938,4 @@ jobs:
           call pm2 status
           call pm2 logs primex-backend --lines 50 --nostream || ver > NUL
           call pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL
+          call pm2 logs primeflow-kujtesa --lines 30 --nostream || ver > NUL

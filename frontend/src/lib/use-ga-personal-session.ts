@@ -9,12 +9,12 @@ export class GaApiError extends Error {
   constructor(message: string, public status: number) { super(message) }
 }
 
-export function useGaPersonalSession(onLock: () => void) {
+export function useGaPersonalSession(onClear: () => void) {
   const { apiFetch, user } = useAuth()
   const fetchRef = React.useRef(apiFetch)
-  const lockRef = React.useRef(onLock)
+  const clearRef = React.useRef(onClear)
   React.useEffect(() => { fetchRef.current = apiFetch }, [apiFetch])
-  React.useEffect(() => { lockRef.current = onLock }, [onLock])
+  React.useEffect(() => { clearRef.current = onClear }, [onClear])
   const [access, setAccess] = React.useState<GaAccess | null>(null)
   const [workspace, setWorkspace] = React.useState<Workspace | null>(null)
   const [templates, setTemplates] = React.useState<GaTemplate[]>([])
@@ -25,8 +25,6 @@ export function useGaPersonalSession(onLock: () => void) {
   const generation = React.useRef(0)
   const reads = React.useRef<AbortController | null>(null)
   const checking = React.useRef<{ generation: number; promise: Promise<void> } | null>(null)
-  const channel = React.useRef<BroadcastChannel | null>(null)
-  const authChanging = React.useRef(false)
 
   const invalidate = React.useCallback(() => {
     generation.current += 1
@@ -38,8 +36,8 @@ export function useGaPersonalSession(onLock: () => void) {
     invalidate()
     setWorkspace(null); setTemplates([]); setOccurrences([]); setHistory([])
     setObscured(false); setConnectionError("")
-    setAccess((value) => value ? { ...value, unlocked: false } : value)
-    lockRef.current()
+    setAccess((value) => value ? { available: false, unlocked: false } : value)
+    clearRef.current()
   }, [invalidate])
 
   const request = React.useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -49,9 +47,8 @@ export function useGaPersonalSession(onLock: () => void) {
     })
     if (version !== generation.current) throw new GaApiError("Kërkesa u anulua.", 499)
     if (!response.ok) {
-      // A forbidden edit is not an expired unlock. Network errors and ordinary
-      // permission failures must never discard the page or an unsaved draft.
-      if (response.status === 401 || response.status === 423 || (response.status === 403 && (init?.method || "GET") === "GET" && path !== "/access")) clear()
+      // Network errors and forbidden edits preserve the page and unsaved drafts.
+      if (response.status === 401 || (response.status === 403 && (init?.method || "GET") === "GET" && path !== "/access")) clear()
       const body = await response.json().catch(() => ({}))
       throw new GaApiError(typeof body.detail === "string" ? body.detail : "Lidhja me serverin u ndërpre. Provo përsëri.", response.status)
     }
@@ -69,7 +66,6 @@ export function useGaPersonalSession(onLock: () => void) {
   }, [request])
 
   const check = React.useCallback((): Promise<void> => {
-    if (authChanging.current) return Promise.resolve()
     const version = generation.current
     if (checking.current?.generation === version) return checking.current.promise
     const controller = new AbortController()
@@ -80,7 +76,7 @@ export function useGaPersonalSession(onLock: () => void) {
       try {
         const result = await request<GaAccess>("/access", { signal: controller.signal })
         if (version !== generation.current) return
-        if (!result.available || !result.unlocked || result.requires_login) {
+        if (!result.available) {
           clear(); setAccess(result)
           return
         }
@@ -113,35 +109,14 @@ export function useGaPersonalSession(onLock: () => void) {
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("storage", onStorage)
     const timer = window.setInterval(onFocus, 20000)
-    if (typeof BroadcastChannel !== "undefined") {
-      const c = new BroadcastChannel(`ga-personal-${user?.id}`)
-      channel.current = c
-      c.onmessage = (event) => {
-        if (event.data === "lock") clear()
-        else if (!authChanging.current) { invalidate(); void check() }
-      }
-    }
     return () => {
       window.removeEventListener("focus", onFocus)
       document.removeEventListener("visibilitychange", onVisibility)
       window.removeEventListener("storage", onStorage)
-      window.clearInterval(timer); channel.current?.close(); invalidate()
+      window.clearInterval(timer); invalidate()
     }
   }, [user?.id, check, clear, invalidate])
 
-  React.useEffect(() => {
-    if (!access?.unlocked || !access.expires_at) return
-    const timer = window.setTimeout(clear, Math.max(0, new Date(access.expires_at).getTime() - Date.now()))
-    return () => window.clearTimeout(timer)
-  }, [access?.unlocked, access?.expires_at, clear])
-
-  const announce = React.useCallback((event: "lock" | "unlock") => channel.current?.postMessage(event), [])
-  const changeSession = React.useCallback(async (work: () => Promise<unknown>) => {
-    authChanging.current = true
-    invalidate()
-    try { await work() }
-    finally { authChanging.current = false; invalidate() }
-  }, [invalidate])
   return { access, workspace, templates, occurrences, history, request, load, check,
-    clear, invalidate, announce, changeSession, obscured: obscured && !!workspace, connectionError }
+    clear, invalidate, obscured: obscured && !!workspace, connectionError }
 }
