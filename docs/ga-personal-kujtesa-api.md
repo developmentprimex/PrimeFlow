@@ -1,6 +1,6 @@
 # GA PERSONAL → Kujtesa local app
 
-Base address: **https://primeflow.primexeu.com**. This integration requires database migration **0175_ga_personal_devices** and the normal `GA_PERSONAL_ENABLED` flag.
+Base address: **https://primeflow.primexeu.com**. This integration requires database migration **0176_ga_personal_devices** and the normal `GA_PERSONAL_ENABLED` flag.
 
 The frontend exposes these two fixed API paths and forwards their explicit device credentials to the configured backend. The tablet does not need the separate `api-flow` address or a browser login cookie.
 

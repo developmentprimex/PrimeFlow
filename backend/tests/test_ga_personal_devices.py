@@ -29,8 +29,8 @@ class DeviceMigrationTests(unittest.TestCase):
     def test_devices_migration_stays_in_private_schema(self):
         config = Config(); config.set_main_option("script_location", "alembic")
         scripts = ScriptDirectory.from_config(config)
-        revision = scripts.get_revision("0175_ga_personal_devices")
-        self.assertEqual(revision.down_revision, "0174_ga_personal_discord")
+        revision = scripts.get_revision("0176_ga_personal_devices")
+        self.assertEqual(revision.down_revision, "0175_merge_discord_ga_personal")
         output = StringIO()
         operations = Operations(MigrationContext.configure(dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output}))
         with patch.object(revision.module, "op", operations):
@@ -79,7 +79,7 @@ class DeviceDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_migration_creates_and_re_adopts_tables_in_the_disposable_schema(self):
         from sqlalchemy import inspect
         config = Config(); config.set_main_option("script_location", "alembic")
-        migration = ScriptDirectory.from_config(config).get_revision("0175_ga_personal_devices").module
+        migration = ScriptDirectory.from_config(config).get_revision("0176_ga_personal_devices").module
         async with self.engine.begin() as connection:
             def migrate(sync_connection):
                 # These are only the generated per-test tables, via schema_translate_map.
