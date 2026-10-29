@@ -10,6 +10,7 @@ from app.api.deps import get_current_user, require_manager_or_admin
 from app.db import get_db
 from app.models.mira_host import MiraKnowledgeItem
 from app.services import mira_host as host
+from app.services.mira_note_groups import grouped_notes
 
 router = APIRouter()
 Category = Literal["STRUKTURA", "RREGULLORE", "DEFINIME", "PROCESE", "TJETER"]
@@ -80,7 +81,7 @@ async def resummarize(meeting_id: uuid.UUID, background: BackgroundTasks, db: As
 @router.get('/notes')
 async def notes(limit: int = Query(default=100, ge=1, le=200), offset: int = Query(default=0, ge=0),
                 db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    return await host.mira_notes(db, limit, offset)
+    return await grouped_notes(db, limit, offset)
 
 
 @router.post('/notes/{kind}/{note_id}/show-in-px-notes')

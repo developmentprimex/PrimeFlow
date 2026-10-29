@@ -475,6 +475,10 @@ jobs:
           Remove-Item -LiteralPath ".discord-worker-status.json" -Force -ErrorAction SilentlyContinue
           cmd /c "pm2 start ecosystem.config.cjs --only primeflow-discord --update-env" | Out-Host
           if ($LASTEXITCODE -ne 0) { throw "Unable to start the Discord bot." }
+            if (Test-Path -LiteralPath 'C:\PrimeFlowOps\MiraAIAgent\.env') {
+              cmd /c "pm2 start ecosystem.config.cjs --only primeflow-discord-ai-agent --update-env" | Out-Host
+              if ($LASTEXITCODE -ne 0) { throw "Unable to start Mira AI Agent." }
+            }
           $ready = $false
           for ($i = 0; $i -lt 30; $i++) {
             if (Test-Path -LiteralPath ".discord-worker-status.json") {

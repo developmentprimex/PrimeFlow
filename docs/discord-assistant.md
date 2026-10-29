@@ -1,5 +1,29 @@
 # Asistenti personal PrimeFlow në Discord
 
+## Identiteti Mira AI Agent
+
+`python discord_ai_agent_bot.py` lidh regjistruesin e veçantë të kanalit AI Agent.
+Konfiguro `DISCORD_AI_AGENT_BOT_TOKEN` dhe `DISCORD_AI_AGENT_VOICE_CHANNEL_ID`
+në `.env`. Në server ruhen te `C:\PrimeFlowOps\MiraAIAgent\.env`, jashtë
+checkout-it të publikimit (`DISCORD_AI_AGENT_ENV_FILE` e ndryshon këtë vend).
+Token-i duhet të jetë i ndryshëm nga `DISCORD_BOT_TOKEN` dhe
+`MIRA_HOST_BOT_TOKEN`. Publiko `DISCORD_AI_AGENT_BOT_USER_ID` dhe ID-në e kanalit
+AI Agent edhe te `.env` e API-së/botit kryesor, që të ruajnë lejet dhe ndarjen.
+
+Hyr në kanalin zanor AI Agent dhe nga kanali yt personal përdor
+`/ai-agent fillo`. `/ai-agent mbaro` ndal dëgjimin dhe përgatit shënimet;
+`/ai-agent statusi` tregon nëse po dëgjon. Boti vetëm merr shënime, pa folur.
+Nuk hyn dhe nuk nis regjistrim gjatë lidhjes. Kur largohet personi i fundit,
+ndalet pas 30 sekondash. Shënimet shfaqen në kanalin personal me rrjedhën
+ekzistuese të shikimit dhe ruajtjes në PX Notes.
+
+Migrimi `0174_discord_separate_recorders` lejon një takim aktiv për secilin
+regjistrues (`primary` për 1H dhe `ai_agent` për AI Agent), me sesione,
+token-a punëtori dhe segmente audio të veçanta. `/takimi` mbetet për regjistruesin
+ekzistues; komandat `/mira` dhe Mira Host nuk ndryshohen.
+`.discord-ai-agent-status.json` verifikon identitetin, serverin dhe lejet e kanalit.
+Mira Host dhe regjistruesi ekzistues 1H vazhdojnë me proceset e tyre.
+
 Kanalet personale përdorin emrin e personit të lidhur: `primeflow-rinesa`,
 `primeflow-elsa`, etj. Nëse emri është zënë, shtohet mbiemri ose një prapashtesë.
 Lidhja me llogarinë identifikohet nga ID-ja dhe topic-u i kanalit, pavarësisht emrit.
@@ -133,7 +157,8 @@ Takimet 1H: nga e hëna në të premte Mira hyn vetë në kanalin 1H 2 minuta pa
 30 sekonda pasi del personi i fundit, ose pas 10 minutash nëse s'vjen askush.
 Shënimet e këtyre takimeve ruhen direkt në PX Notes dhe nuk dërgohen në Discord.
 
-Mbahet një takim në një kohë për server. Pas ndalimit, Mira del nga voice
+Mbahet një takim në një kohë për regjistrues; 1H dhe AI Agent mund të dëgjohen
+njëkohësisht. Pas ndalimit, Mira del nga voice
 channel menjëherë; radha lokale e transkriptimit përfundon përpara se të nisë
 një takim i ri. Shënimet e ruajtura kanë lejet normale të PX Notes. Teksti i
 takimit nuk zbatohet si komandë për detyra. Përmbledhja nuk postohet në kanalin

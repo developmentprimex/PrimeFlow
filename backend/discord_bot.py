@@ -247,6 +247,9 @@ class PrimeFlowBot(discord.Client):
         expected = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)}
+        if settings.DISCORD_AI_AGENT_BOT_USER_ID:
+            expected[discord.Object(id=int(settings.DISCORD_AI_AGENT_BOT_USER_ID), type=discord.Member)] = discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True)
         if overwrite_signature(channel.overwrites) != overwrite_signature(expected):
             if not channel.permissions_for(guild.me).manage_roles:
                 raise ValueError("Lejet e kanalit privat kanë ndryshuar. Për t'i korrigjuar, botit i duhet leja Manage Roles në Discord.")
@@ -291,12 +294,16 @@ class PrimeFlowBot(discord.Client):
                             category = server.get_channel(int(settings.DISCORD_CATEGORY_ID))
                             if not isinstance(category, discord.CategoryChannel):
                                 raise ValueError("Kategoria Discord e konfiguruar nuk u gjet.")
+                        overwrites = {server.default_role: discord.PermissionOverwrite(view_channel=False),
+                            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+                            server.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)}
+                        if settings.DISCORD_AI_AGENT_BOT_USER_ID:
+                            overwrites[discord.Object(id=int(settings.DISCORD_AI_AGENT_BOT_USER_ID), type=discord.Member)] = discord.PermissionOverwrite(
+                                view_channel=True, send_messages=True, read_message_history=True)
                         channel = await server.create_text_channel(personal_channel_name(result.get('full_name'),
                             fallback_name=interaction.user.display_name, existing_names=[c.name for c in server.text_channels]), category=category,
                             topic=f"PrimeFlow personal workspace: {interaction.user.id}",
-                            overwrites={server.default_role: discord.PermissionOverwrite(view_channel=False),
-                                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-                                server.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)})
+                            overwrites=overwrites)
                     await self.bridge("/bot/bind-channel", actor(interaction.user.id, server.id, channel.id))
                 await interaction.followup.send(f"Llogaria u lidh. Kanali yt: {channel.mention}. Përdor /detyrat atje.", ephemeral=True)
             except Exception as exc:

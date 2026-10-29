@@ -28,6 +28,7 @@ def token_hash(token):
 
 def view(row):
     return dict(id=str(row.id), status=row.status, title=row.title, partial=bool(row.partial),
+        recorder=getattr(row, 'recorder', None) or 'primary',
         created_at=row.created_at.isoformat() if row.created_at else None,
         organizer_user_id=str(row.user_id), voice_channel_id=row.voice_channel_id,
         private_channel_id=row.private_channel_id, error=row.error, draft_text=row.draft_text,
@@ -72,25 +73,31 @@ async def start_session(db, actor):
     link, user = await bridge.identity(db, actor)
     if not actor.voice_channel_id:
         raise HTTPException(400, 'Hyr fillimisht në voice channel.')
-    # Reserve per guild before checking for replay/another capture.
-    lock_key = int.from_bytes(hashlib.sha256(('voice:' + actor.guild_id).encode()).digest()[:8], 'big', signed=True)
+    recorder = actor.recorder
+    if recorder == 'ai_agent' and (not settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID
+            or actor.voice_channel_id != settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID):
+        raise HTTPException(403, 'Mira AI Agent regjistron vetëm kanalin AI Agent.')
+    if recorder == 'primary' and settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID == actor.voice_channel_id:
+        raise HTTPException(409, 'Në kanalin AI Agent përdor /ai-agent fillo.')
+    # Each recorder has its own reservation, worker secret and session ID.
+    lock_key = int.from_bytes(hashlib.sha256(('voice:' + actor.guild_id + ':' + recorder).encode()).digest()[:8], 'big', signed=True)
     await db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': lock_key})
     prior = (await db.execute(select(Meeting).where(Meeting.request_id == actor.request_id))).scalar_one_or_none()
     if prior:
-        if prior.user_id != user.id or prior.instance_id != actor.instance_id or prior.capture_token_hash != token_hash(actor.capture_token):
+        if prior.user_id != user.id or prior.instance_id != actor.instance_id or prior.capture_token_hash != token_hash(actor.capture_token) or prior.recorder != recorder:
             raise HTTPException(409, 'Kërkesa e nisjes nuk përputhet.')
         return view(prior)
-    active = (await db.execute(select(Meeting).where(Meeting.guild_id == actor.guild_id,
+    active = (await db.execute(select(Meeting).where(Meeting.guild_id == actor.guild_id, Meeting.recorder == recorder,
         Meeting.status.in_(['STARTING', 'LISTENING'])))).scalar_one_or_none()
     if active:
-        raise HTTPException(409, 'Një takim po dëgjohet tashmë në këtë server.')
+        raise HTTPException(409, 'Ky bot po merr shënime në një takim tjetër.')
     department = actor.department_id or user.department_id
     if department:
         ensure_department_access(user, department)
     elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise HTTPException(400, 'Zgjidh departamentin për shënimet.')
     row = Meeting(id=uuid.uuid4(), link_id=link.id, user_id=user.id, department_id=department,
-        guild_id=actor.guild_id, voice_channel_id=actor.voice_channel_id, private_channel_id=actor.channel_id,
+        guild_id=actor.guild_id, recorder=recorder, voice_channel_id=actor.voice_channel_id, private_channel_id=actor.channel_id,
         request_id=actor.request_id, instance_id=actor.instance_id, capture_token_hash=token_hash(actor.capture_token),
         title=actor.title.strip(), status='STARTING', partial=False, stop_authorized=False, heartbeat_at=now())
     db.add(row)

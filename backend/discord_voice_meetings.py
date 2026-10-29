@@ -72,6 +72,7 @@ class MeetingCaptureCoordinator:
             await self.preflight()
             worker={'capture_token':secrets.token_urlsafe(32),'instance_id':str(uuid.uuid4())}
             row=await self.bot.bridge(PREFIX+'/start',{**actor,**worker,
+                'recorder':getattr(self.bot,'voice_recorder','primary'),
                 'request_id':request_id,'title':(title or f'{channel.name} · {datetime.now().strftime("%d.%m.%Y %H:%M")}')[:200],
                 'department_id':department_id})
             active={'id':row['id'],'worker':worker,'actor':actor,'capture':None,
@@ -264,9 +265,9 @@ class MeetingCaptureCoordinator:
         if self.active and self.active.get('capture'):await self.active['capture'].close()
 
 
-def register_meeting_commands(bot,guild):
+def register_meeting_commands(bot,guild,*,name='takimi'):
     if not settings.DISCORD_MEETING_NOTES_ENABLED:return
-    group=app_commands.Group(name='takimi',description='Mira dëgjon takimin dhe merr shënime')
+    group=app_commands.Group(name=name,description='Mira dëgjon takimin dhe merr shënime')
     @group.command(name='fillo',description='Fto Mira-n të dëgjojë pa folur')
     async def start(interaction:discord.Interaction,titulli:str|None=None,departamenti:str|None=None):
         await interaction.response.defer(thinking=True)

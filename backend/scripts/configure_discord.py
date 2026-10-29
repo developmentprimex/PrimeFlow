@@ -13,6 +13,7 @@ KEYS = (
     "DISCORD_AI_MODEL", "DISCORD_AI_TIMEOUT_SECONDS", "DISCORD_AGENT_MODEL",
     "DISCORD_MEETING_VOICE_CHANNEL_ID", "DISCORD_MEETING_NOTES_ENABLED", "DISCORD_VOICE_NODE_BINARY",
     "MIRA_MEMORY_ENABLED", "MIRA_HOST_ENABLED", "MIRA_HOST_BOT_TOKEN",
+    "DISCORD_AI_AGENT_VOICE_CHANNEL_ID", "DISCORD_AI_AGENT_BOT_USER_ID",
 )
 REQUIRED = ("DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_BRIDGE_SECRET")
 
@@ -45,6 +46,9 @@ def build_config(env: dict | os._Environ) -> dict[str, str]:
         raise ValueError("DISCORD_CATEGORY_ID must be a numeric Discord category ID.")
     if values["DISCORD_MEETING_VOICE_CHANNEL_ID"] and not re.fullmatch(r"\d{17,20}", values["DISCORD_MEETING_VOICE_CHANNEL_ID"]):
         raise ValueError("DISCORD_MEETING_VOICE_CHANNEL_ID must be a numeric Discord voice channel ID.")
+    for key in ('DISCORD_AI_AGENT_VOICE_CHANNEL_ID', 'DISCORD_AI_AGENT_BOT_USER_ID'):
+        if values[key] and not re.fullmatch(r'\d{17,20}', values[key]):
+            raise ValueError(key + ' must be a numeric Discord ID.')
     voice_enabled = boolean(values["DISCORD_MEETING_NOTES_ENABLED"] or "false", "DISCORD_MEETING_NOTES_ENABLED")
     if voice_enabled and not enabled:
         raise ValueError("Meeting notes require the Discord assistant to be enabled.")
@@ -87,7 +91,17 @@ def main() -> int:
                           "guild_id": values.get("DISCORD_GUILD_ID")}))
         return 0
     try:
-        values = build_config(os.environ)
+        source = dict(os.environ)
+        # Public routing IDs survive runner checkouts alongside the independent
+        # bot's private settings; its token is never copied into this config.
+        private_path = Path(source.get('DISCORD_AI_AGENT_ENV_FILE', r'C:\PrimeFlowOps\MiraAIAgent\.env'))
+        if private_path.exists():
+            from dotenv import dotenv_values
+            private = dotenv_values(private_path, interpolate=False)
+            for key in ('DISCORD_AI_AGENT_VOICE_CHANNEL_ID', 'DISCORD_AI_AGENT_BOT_USER_ID'):
+                if not source.get(key) and private.get(key):
+                    source[key] = private[key]
+        values = build_config(source)
         write_config(args.env_file, values)
     except ValueError as exc:
         print(f"Discord configuration error: {exc}")

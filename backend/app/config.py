@@ -139,6 +139,10 @@ class Settings(BaseSettings):
     DISCORD_VOICE_NODE_BINARY: str = "node"
     DISCORD_BRIDGE_SECRET: str | None = None
     DISCORD_BOT_TOKEN: str | None = None
+    # Separate, receive-only AI Agent identity. Mira Host keeps its own token.
+    DISCORD_AI_AGENT_BOT_TOKEN: str | None = None
+    DISCORD_AI_AGENT_VOICE_CHANNEL_ID: str | None = None
+    DISCORD_AI_AGENT_BOT_USER_ID: str | None = None
     DISCORD_GUILD_ID: str | None = None
     DISCORD_CATEGORY_ID: str | None = None
     DISCORD_MEETING_VOICE_CHANNEL_ID: str | None = None
