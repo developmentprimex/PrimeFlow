@@ -202,3 +202,5 @@ async def automation(payload: AutomationRequest, response: Response, member=Depe
 # authorization separate while using the same private-response handling.
 from app.api.routers.ga_personal_discord import router as discord_router
 router.include_router(discord_router)
+from app.api.routers.ga_personal_devices import router as devices_router
+router.include_router(devices_router)

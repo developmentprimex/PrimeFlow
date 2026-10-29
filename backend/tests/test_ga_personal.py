@@ -114,6 +114,7 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         app = FastAPI()
         app.include_router(api.router, prefix="/api/ga-personal")
         app.include_router(auth.router, prefix="/api/auth")
+        self.app = app
         async def database():
             async with self.sessions() as db:
                 yield db

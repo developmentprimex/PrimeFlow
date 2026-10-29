@@ -12,6 +12,7 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
   let accessReads = 0
   let accessFailure = false
   let forbiddenAction = false
+  let devices: { id: string; name: string; device_id: string | null; created_at: string; last_seen_at: string | null; revoked_at: string | null }[] = []
   let discordSettings = { enabled: false, configured: true, connected: false, version: 0, guild_id: "", channel_id: "", user_ids: {} as Record<string, string>, delivery_counts: {} }
   const writes: { path: string; body: Record<string, unknown> }[] = []
   const rows = [
@@ -34,6 +35,22 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
       return route.fulfill({ json: { available, unlocked: available } })
     }
     if (!available) return route.fulfill({ status: 403, json: { detail: "Nuk ke qasje në këtë modul." } })
+    if (relative === "/devices") {
+      if (request.method() === "POST") {
+        const device = { id: "44444444-4444-4444-8444-444444444444", name: request.postDataJSON().name,
+          device_id: null, created_at: new Date().toISOString(), last_seen_at: null, revoked_at: null }
+        devices = [device, ...devices]
+        writes.push({ path: relative, body: request.postDataJSON() })
+        return route.fulfill({ status: 201, json: { ...device, code: "pfgap_device_browser_test_only" } })
+      }
+      return route.fulfill({ json: devices })
+    }
+    if (relative.startsWith("/devices/") && relative.endsWith("/revoke")) {
+      const device = devices.find((device) => relative.includes(device.id))!
+      device.revoked_at = new Date().toISOString()
+      writes.push({ path: relative, body: {} })
+      return route.fulfill({ json: device })
+    }
     if (relative === "/discord/settings") {
       if (request.method() === "PUT") {
         const body = request.postDataJSON()
@@ -113,6 +130,21 @@ test("the module administrator can pause automatic task creation", async ({ page
   await page.getByRole("button", { name: "Ndalo krijimin automatik", exact: true }).click()
   await expect(page.getByRole("button", { name: "Aktivizo krijimin automatik", exact: true })).toBeVisible()
   expect(state.writes).toEqual([{ path: "/automation", body: { enabled: false } }])
+})
+
+test("the module administrator creates a tablet code, hides it, and revokes access", async ({ page }) => {
+  const state = await shell(page)
+  await page.getByRole("button", { name: "Cilësimet", exact: true }).click()
+  await page.getByLabel("Emri i pajisjes", { exact: true }).fill("Tableti i familjes")
+  await page.getByRole("button", { name: "Krijo kod pajisjeje", exact: true }).click()
+  await expect(page.getByLabel("Kodi i pajisjes", { exact: true })).toHaveValue("pfgap_device_browser_test_only")
+  await expect(page.getByLabel("Adresa e Primeflow", { exact: true })).toHaveValue("https://primeflow.primexeu.com")
+  expect(state.writes[0]).toEqual({ path: "/devices", body: { name: "Tableti i familjes" } })
+  await page.getByRole("button", { name: "E ruajta kodin", exact: true }).click()
+  await expect(page.getByLabel("Kodi i pajisjes", { exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Çaktivizo lidhjen", exact: true }).click()
+  await expect(page.getByText("E çaktivizuar", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Çaktivizo lidhjen", exact: true })).toHaveCount(0)
 })
 
 test("focus, returning to the tab and polling keep the editor stable", async ({ page }) => {

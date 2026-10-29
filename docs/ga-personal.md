@@ -93,6 +93,10 @@ From `frontend`: `npm run test:ga-personal` and `node node_modules/typescript/bi
 
 ## Kujtesa connection
 
+The local tablet app has a separate device-code integration with state download,
+offline operations and revocation. See [Kujtesa local API](ga-personal-kujtesa-api.md)
+for the exact routes, card fields, setup and deployment requirements.
+
 The module administrator configures the separate bot under Settings > Kujtesa. Each task/template can choose private DM, the private family channel, or no Discord notification. Existing occurrences default to DM. Missing personal IDs do not block other recipients; Lirza uses Gane as the adult contact. The dedicated token remains exclusively in the bot environment, while a separate server-side bridge key authorizes only GA PERSONAL delivery operations.
 
 Reminders use three phases at -5/0/+5 minutes with a five-minute window per phase. Generation and acknowledgement do not duplicate phases. Timing/owner/destination changes create a new schedule generation and invalidate old cards; snoozing explicitly keeps its own confirmation card usable. Buttons check actor, active membership, exact message/guild/channel, current assignment and explicit module delegation. Completion and help cancel unsent phases in the same transaction. Interaction IDs and durable claims make retries idempotent; ambiguous sends are not replayed blindly. Dirty message acknowledgements keep older cards synchronized, with backoff for inaccessible messages.
