@@ -10,6 +10,7 @@ export type Definition = {
   on_date: string | null; due_time: string | null; weekdays: number[]; steps: string[]
   estimated_minutes: number | null
   reminder_group: "morning" | "daily_upkeep" | "nala" | "weekend_deep_clean"
+  discord_destination?: "dm" | "channel" | "off"
   enabled: boolean; readiness: "ready_after_setup" | "needs_confirmation"
   rotation_id: "nala" | null; coverage_key: string | null
 }
@@ -23,7 +24,7 @@ export type Workspace = {
   person_key: PersonKey; is_admin: boolean; timezone: string
   members: { person_key: PersonKey; name: string }[]
   config: { rotation_anchor?: string; areas?: { id: string; name: string }[]; reminders_enabled?: boolean; automatic_generation?: { enabled: boolean; starts_on: string } }
-  discord: { connected: boolean; messages_enabled: boolean }
+  discord: { connected: boolean; messages_enabled: boolean; configured?: boolean; last_seen_at?: string | null }
 }
 export type GaAccess = { available: boolean; unlocked: boolean; configured?: boolean; expires_at?: string; setup_allowed?: boolean; requires_login?: boolean }
 export type ImportPreview = {

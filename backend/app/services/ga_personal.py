@@ -13,7 +13,7 @@ from app.models.ga_personal import (
     GaPersonalDelivery as Delivery, GaPersonalEvent as Event, GaPersonalImport as ImportRun,
     GaPersonalMember as Member, GaPersonalOccurrence as Occurrence,
     GaPersonalSpace as Space, GaPersonalTemplate as Template,
-    GaPersonalUnlock as Unlock,
+    GaPersonalUnlock as Unlock, GaPersonalDiscordDelivery as DiscordDelivery,
 )
 from app.schemas.ga_personal import TemplateDefinition
 from app.models.user import User
@@ -25,7 +25,7 @@ TRANSITIONS = {
     "acknowledged": {"in_progress", "needs_help", "rescheduled", "done", "cancelled"},
     "in_progress": {"needs_help", "rescheduled", "done", "cancelled"},
     "needs_help": {"in_progress", "rescheduled", "cancelled"},
-    "rescheduled": {"pending", "cancelled"}, "done": set(), "cancelled": set(),
+    "rescheduled": {"pending", "acknowledged", "in_progress", "done", "needs_help", "cancelled"}, "done": set(), "cancelled": set(),
 }
 
 
@@ -169,6 +169,7 @@ async def archive_template(db, member, template_id, payload):
     if payload.archived:
         ids = select(Occurrence.id).where(Occurrence.template_id == row.id, Occurrence.space_id == member.space_id)
         await db.execute(update(Delivery).where(Delivery.occurrence_id.in_(ids), Delivery.status == "pending").values(status="cancelled"))
+        await cancel_discord(db, ids)
     db.add(Event(space_id=member.space_id, actor_id=member.user_id, request_id=str(uuid.uuid4()),
                  kind="template_archived" if payload.archived else "template_restored", payload={"template_id": str(row.id)}))
     await db.commit()
@@ -264,6 +265,27 @@ async def generate(db, member, payload, *, automatic=False, commit=True):
     return {"created": count, "skipped": skipped}
 
 
+async def cancel_discord(db, occurrence_ids):
+    await db.execute(update(DiscordDelivery).where(DiscordDelivery.occurrence_id.in_(occurrence_ids),
+        DiscordDelivery.status.in_(["pending", "claimed"])).values(status="cancelled"))
+
+
+async def change_status(db, row, status, reschedule_at=None):
+    if status not in TRANSITIONS[row.status]:
+        raise HTTPException(409, "Ky ndryshim gjendjeje nuk lejohet.")
+    if status == "rescheduled":
+        if not reschedule_at or reschedule_at <= utcnow():
+            raise HTTPException(422, "Zgjidh një orë të ardhshme.")
+        row.due_at = reschedule_at
+        row.local_date = reschedule_at.astimezone(TZ).date().isoformat()
+        row.snapshot = {**row.snapshot, "discord_schedule_revision": row.snapshot.get("discord_schedule_revision", 0) + 1}
+    row.status, row.version = status, row.version + 1
+    row.completed_at = utcnow() if status == "done" else None
+    if status in {"done", "cancelled", "needs_help", "rescheduled"}:
+        await db.execute(update(Delivery).where(Delivery.occurrence_id == row.id, Delivery.status == "pending").values(status="cancelled"))
+        await cancel_discord(db, [row.id])
+
+
 async def act(db, member, occurrence_id, payload):
     await lock_member_space(db, member)
     row = (await db.execute(select(Occurrence).where(Occurrence.id == occurrence_id, Occurrence.space_id == member.space_id))).scalar_one_or_none()
@@ -278,18 +300,8 @@ async def act(db, member, occurrence_id, payload):
         return occurrence_out(row)
     if row.version != payload.expected_version:
         raise HTTPException(409, "Detyra ndryshoi ndërkohë. Rifreskoje.")
-    if payload.status not in TRANSITIONS[row.status]:
-        raise HTTPException(409, "Ky ndryshim gjendjeje nuk lejohet.")
     old = row.status
-    if payload.status == "rescheduled":
-        if not payload.reschedule_at or payload.reschedule_at <= utcnow():
-            raise HTTPException(422, "Zgjidh një orë të ardhshme.")
-        row.due_at = payload.reschedule_at
-        row.local_date = payload.reschedule_at.astimezone(TZ).date().isoformat()
-    row.status, row.version = payload.status, row.version + 1
-    row.completed_at = utcnow() if row.status == "done" else None
-    if row.status in {"done", "cancelled", "needs_help", "rescheduled"}:
-        await db.execute(update(Delivery).where(Delivery.occurrence_id == row.id, Delivery.status == "pending").values(status="cancelled"))
+    await change_status(db, row, payload.status, payload.reschedule_at)
     db.add(Event(space_id=member.space_id, occurrence_id=row.id, actor_id=member.user_id,
         request_id=str(payload.request_id), kind="status_changed", payload={"from": old, "to": row.status,
             "completion_method": "self_report" if row.status == "done" else None,
@@ -344,6 +356,10 @@ async def edit_occurrence(db, member, occurrence_id, payload):
             raise HTTPException(422, "Kjo orë nuk ekziston në datën e zgjedhur për shkak të ndryshimit të orës.")
     before = {"local_date": row.local_date, "due_at": aware(row.due_at).isoformat() if row.due_at else None,
               "assignees": row.snapshot["assignees"]}
+    schedule_changed = (row.local_date != payload.local_date.isoformat()
+        or (aware(row.due_at) if row.due_at else None) != due
+        or set(row.snapshot["assignees"]) != set(payload.assignees)
+        or (payload.discord_destination is not None and row.snapshot.get("discord_destination", "dm") != payload.discord_destination))
     if payload.apply_to_future:
         if template.archived or template.version != payload.expected_template_version:
             raise HTTPException(409, "Përsëritja ndryshoi ose është arkivuar. Rifreskoje para ruajtjes.")
@@ -356,6 +372,8 @@ async def edit_occurrence(db, member, occurrence_id, payload):
         owners = list(dict.fromkeys(remaining + payload.assignees))
         data = {**template.definition, "assignees": owners,
                 "due_time": payload.due_time.isoformat() if payload.due_time else None}
+        if payload.discord_destination is not None:
+            data["discord_destination"] = payload.discord_destination
         if data["frequency"] == "once":
             data["on_date"] = payload.local_date.isoformat()
         from pydantic import ValidationError
@@ -368,8 +386,14 @@ async def edit_occurrence(db, member, occurrence_id, payload):
     row.snapshot = {**row.snapshot, "assignees": payload.assignees,
                     "due_time": payload.due_time.isoformat() if payload.due_time else None,
                     "assignment_overridden": True, "schedule_overridden": True}
+    if payload.discord_destination is not None:
+        row.snapshot = {**row.snapshot, "discord_destination": payload.discord_destination}
+    if schedule_changed:
+        row.snapshot = {**row.snapshot, "discord_schedule_revision": row.snapshot.get("discord_schedule_revision", 0) + 1}
     row.version += 1
     await db.execute(update(Delivery).where(Delivery.occurrence_id == row.id, Delivery.status == "pending").values(status="cancelled"))
+    if schedule_changed:
+        await cancel_discord(db, [row.id])
     db.add(Event(space_id=member.space_id, occurrence_id=row.id, actor_id=member.user_id,
         request_id=str(payload.request_id), kind="occurrence_updated", payload={"before": before,
             "after": {"local_date": row.local_date, "due_at": due.isoformat() if due else None, "assignees": payload.assignees},

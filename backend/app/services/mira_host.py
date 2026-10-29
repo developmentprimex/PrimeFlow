@@ -47,7 +47,7 @@ DEFAULT_GA_PARTICIPANTS = [
 ]
 DEFAULT_PROTOCOL = """1. Hap doc dhe det
 2. Share screen side by side DET/REZULTATIN
-3. Sqaro slotin paraprak pastaj aktual
+3. Sqaro slotin aktual pastaj detyrat e pambyllura nga sloti paraprak
 4. BZ Det nga Stafi për GA (Komunikimi GA teams Det nga Stafi / KA email)"""
 MARKERS = {
     "QUESTION": "?", "EXCLAMATION": "!", "CLIENT_URGENT": "!!!", "SHARE": "SHARE", "MONITOR": "👁",
@@ -320,13 +320,14 @@ def task_text(line: dict) -> str:
 def person_brief(data: SlotData, slot: str, user_id: str) -> dict:
     previous = previous_slot(slot)
     earlier = list(SLOTS[:SLOTS.index(slot)]) if slot in ALL_EARLIER_SLOTS else [previous] if previous else []
+    current = [task_line(i) for i in data.user_tasks(slot, user_id)]
+    current_ids = {t["task_id"] for t in current}
     open_lines: list[dict] = []
     for earlier_slot in earlier:
         for item in data.user_tasks(earlier_slot, user_id, open_only=True):
             line = task_line(item)
-            if line["task_id"] not in {t["task_id"] for t in open_lines}:
+            if line["task_id"] not in current_ids and line["task_id"] not in {t["task_id"] for t in open_lines}:
                 open_lines.append(line)
-    current = [task_line(i) for i in data.user_tasks(slot, user_id)]
     return {
         "user_id": user_id, "name": data.name(user_id), "initials": initials(data.name(user_id)), "slot": slot,
         "current": current,
@@ -336,6 +337,19 @@ def person_brief(data: SlotData, slot: str, user_id: str) -> dict:
         "all_done": bool(current) and all(t["status"] == "DONE" for t in current),
         "blocked": [task_line(i) for i in data.blocked_tasks(user_id)] if slot == BLOCKED_SLOT else [],
     }
+
+
+async def person_context(db: AsyncSession, meeting: Mira1HMeeting, data: SlotData, user_id: str) -> dict:
+    """Task facts for a staff turn; reading them never consumes the GA announcements."""
+    brief = person_brief(data, meeting.slot, user_id)
+    since = await progress_since(db, meeting)
+    brief["progress_since"] = since.isoformat()
+    brief["new_progress"] = await new_progress(db, meeting, data, [user_id], since=since, for_brief=True)
+    task_ids = {t["task_id"] for group in ("current", "previous_open", "blocked") for t in brief[group] if t["task_id"]}
+    rows = (await db.execute(select(Task.id, Task.progress_percentage).where(
+        Task.id.in_([uuid.UUID(tid) for tid in task_ids])))).all() if task_ids else []
+    brief["progress_percentages"] = {str(tid): percentage for tid, percentage in rows}
+    return brief
 
 
 def brief_message(brief: dict, protocol: str) -> str:
@@ -568,9 +582,7 @@ async def next_turn(db: AsyncSession, meeting: Mira1HMeeting, summary: str | Non
     view = {t["id"]: t for t in await turns_view(db, meeting)}
     result = {"ended": view.get(str(ended.id)) if ended else None, "current": None, "upcoming": None}
     if current:
-        brief = person_brief(data, meeting.slot, str(current.user_id))
-        brief["new_progress"] = await new_progress(db, meeting, data, [str(current.user_id)],
-                                                   since=await progress_since(db, meeting))
+        brief = await person_context(db, meeting, data, str(current.user_id))
         result["current"] = {**view[str(current.id)], "brief": brief}
     if len(waiting) > 1:
         result["upcoming"] = view[str(waiting[1].id)]
@@ -749,18 +761,21 @@ def completed_after(item: dict, since: datetime) -> bool:
 
 
 async def new_progress(db: AsyncSession, meeting: Mira1HMeeting, data: SlotData, user_ids: list[str] | None = None,
-                       *, since: datetime | None = None, record: bool = False) -> dict:
-    """Done tasks and struck points (any 1H slot) done after `since` and not read in an earlier 1H today."""
+                       *, since: datetime | None = None, record: bool = False, for_brief: bool = False) -> dict:
+    """Progress since the reporting window; staff evidence preserves task IDs and already-read facts."""
     from app.services.task_strike_events import split_strike_timestamp
     since = since or datetime.combine(meeting.meeting_date, time.min, ZoneInfo(settings.APP_TIMEZONE))
     items = {}
-    for slot, values in data.slots.items():
+    sources = list(data.slots.items())
+    if for_brief and meeting.slot == BLOCKED_SLOT:
+        sources.append(("BLLOK", data.blocked))
+    for slot, values in sources:
         for item in values:
             if user_ids is None or set(user_ids) & set(data.owners(item)):
                 items.setdefault(str(item.get("task_id")), (slot, item))
     if not items:
         return {"done": [], "strikes": []}
-    seen = await mentioned(db, meeting)
+    seen = set() if for_brief else await mentioned(db, meeting)
     done = []
     for task_id, (slot, item) in items.items():
         if str(item.get("status") or "").upper() == "DONE" and (task_id, "DONE", "") not in seen \
@@ -781,6 +796,8 @@ async def new_progress(db: AsyncSession, meeting: Mira1HMeeting, data: SlotData,
         entry = strikes.setdefault(task_id, {**task_line(item), "slot": slot, "points": []})
         entry["points"].append({"key": key, "text": split_strike_timestamp(plain(event.point_text))[0][:300],
                                 "at": event.occurred_at.astimezone(ZoneInfo(settings.APP_TIMEZONE)).strftime("%H:%M")})
+    if for_brief:
+        return {"done": done, "strikes": list(strikes.values())}
     if record:
         for line in done:
             await remember(db, meeting, line["task_id"], "DONE", "", line["title"])
@@ -1009,8 +1026,8 @@ dhe secili ta dijë qartë çka ka me bë.
 PERSONALITETI DHE TONI
 - E ngrohtë, e qetë dhe e sigurt, si një koleg që i njeh të gjithë, jo si sekretare që lexon listë.
 - Flet natyrshëm, me ritëm të rehatshëm, as e nxituar as e ngadaltë. Buzëqeshja ndjehet në zë.
-- Kur dikush ka kryer diçka, njihe shkurt ("Bravo", "Super, kjo u kry"). Kur diçka ka ngecur, mos gjyko:
-  pyet çka i duhet.
+- Mos e luaj rolin e prezantueses: hyr direkt në temë, si një kolege në tavolinë. Kur diçka ka ngecur,
+  pyet qetë çka e ka penguar. Pa lavdërim ose pranim të detyrueshëm pas çdo përgjigjeje.
 
 GJUHA
 - Gjithmonë shqip, me të folmen e Kosovës që e kuptojnë të gjithë në zyrë ("qysh", "a ka", "s'ka problem",
@@ -1025,11 +1042,16 @@ SHPEJTËSIA (më e rëndësishmja)
   "po e përmbledh", "po kaloj te tjetri", dhe mos përmend sistemin, "RADHA", "SISTEMI" apo mjetet.
   Thirr mjetin pa folur dhe fol vetëm me rezultatin.
 - Mos kërko konfirmim për gjëra që i tha qartë personi. Konfirmo vetëm kur mungon diçka ose s'je e sigurt.
+- Një pyetje e shkurtër për herë; dëgjo përgjigjen dhe pyet vetëm çka mbeti pa u thënë. Nëse personi
+  dha arsyen, kur vazhdon dhe kur kryhet në një përgjigje, mos ia kërko përsëri asnjërën.
+- Detyrat dhe progresin i ke te RADHA: përdori direkt, pa get_person_brief/find_user shtesë për të njëjtin
+  person. Kërko të dhëna vetëm nëse mungojnë, kanë ndryshuar ose personi kërkon kontroll të ri.
 
 LLOJLLOJSHMËRIA
-- Mos e thuaj të njëjtën frazë dy herë rresht. Ndryshoji pranimet dhe pyetjet.
-- Shembuj, si frymë dhe jo si skript (mos i përdor gjithmonë): "Mirë.", "Okej.", "Super.",
-  "S'ka problem.", "Qysh po shkon me…?", "A u kry ajo e…?", "Çka mbetet edhe te…?", "A ka diçka t're?"
+- Mos nis çdo përgjigje me "Okej", "Super", "Mirë", emrin e personit ose "Faleminderit". Shpesh nuk duhet
+  asnjë pranim: kalo te pyetja e ardhshme. Mos ndrysho vetëm sinonimin për të përsëritur të njëjtën gjë.
+- Mos përsërit fjalët e stafit, afatin që sapo dhanë ose titullin e plotë të detyrës në çdo pyetje.
+  Shembuj janë vetëm orientim: "Ku ke mbërri me ofertën?", "Çka ka mbetë?", "Kur e përfundon?".
 
 KUR S'E KUPTON OSE S'ËSHTË PËR TY
 - Përgjigju vetëm kur e ke kuptuar qartë. Mos hamendëso fjalë që mungojnë dhe mos thirr mjete nga zë i paqartë.
@@ -1051,23 +1073,31 @@ RRJEDHA E TAKIMIT
       Detyrat nga PX Notes janë GJITHMONË 1H.
    c) Done dhe Strike: thirr list_new_done_and_strikes dhe lexoji sipas personave, me radhën që vjen në
       "sipas_personave", një fjali për person: "EF: e kreu ofertën, strike te raporti, pika e dytë." Vetëm të rejat;
-      {earlier} gjëra janë lexuar tashmë në 1H-të e mëparshme të sotme. Nëse s'ka, thuaj "S'ka done të reja."
+      {earlier} gjëra janë lexuar tashmë në 1H-të e mëparshme të sotme. Nëse s'ka, kalo pa hyrje shtesë.
    d) Sapo mbaron me GA, thirr end_ga_phase. Nëse rezultati thotë të presësh, thuaj vetëm "Fillojmë në
       {meeting.slot}." dhe hesht; përndryshe vazhdo me personin që të jep.
-2) Faza e stafit: merr "RADHA" me detyrat e personit. Fol VETËM me personin e ri; mos i përsërit pyetjet e
-   personit të mëparshëm. Me secilin person ndiq protokollin:
+2) Faza e stafit: merr "RADHA" me detyrat e personit. Fol VETËM me personin e ri. Ndiq plan_discutimi në
+   rendin që vjen: së pari AKTUAL, pastaj PARAPRAK, pastaj BLLOK kur ka. Ky rend ka përparësi edhe nëse
+   teksti i protokollit më poshtë përmban rendin e vjetër. Ruaj kërkesat praktike për doc/share screen:
 {(row.protocol_text or DEFAULT_PROTOCOL).strip()}
-   Fillo me detyrat nga slotet paraprake që kanë mbetur në proces / pa progres, pastaj me ato të slotit aktual.
-   Për ÇDO detyrë pyet sipas ngjyrës ("ngjyra" te detyra), një pyetje e shkurtër:
-   - e verdhë (në proces): "A ke me vazhdu me …? Kur pritet me u kry?"
-   - rozë (pa progres): "Pse s'ke vazhdu me …? Kur vazhdon?"
-   - e gjelbër (kryer): njihe me një fjalë ("Super.") dhe kalo. Nëse "te_gjitha_kryer" është true:
-     "Me çka ke me vazhdu në slotin tjetër?"
-   - BLLOK (vetëm në 16:00, kur ka "bllok"): pyet për secilën detyrë bllok si më lart.
-   Titujt thuaji me fushën "spoken" (pa "EF:" dhe pa numrin në fillim). Progresin e ri (strike/done) mos e
-   lexo përsëri; e ke lexuar te GA. MOS pyet stafin "a ka detyra për GA" (as BZ): pikën 4 stafi e bën vetë.
-   Kur personi është te detyra e fundit thirr call_next_person. Kur mbaron, thuaj "Faleminderit" dhe thirr
-   end_person_turn pa përmbledhje me zë; pastaj thirre të riun me emër ("Rinesa, …?"). Synimi: rreth
+   Hyr direkt te detyra e parë aktuale, p.sh. "Elsa, për këtë slot e ke ofertën. Ku ke mbërri?".
+   Mos thuaj këtë hyrje për çdo detyrë/person me të njëjtat fjalë. Për secilën detyrë:
+   - Nëse kryer=true, mos pyet më për progresin ose pse s'u punua. Kalo te puna ende e hapur.
+   - Nëse ka_progres_te_regjistruar=true, shfrytëzo progresin pa e rilexuar: pyet çka mbetet ose kur kryhet.
+   - Nëse ka_progres_te_regjistruar=false, thuaj shkurt se s'shihet përditësim dhe pyet ku ka mbërri ose
+     çka e ka penguar. Mungesa e strike/përqindjes NUK provon se s'ka punuar. Dëgjo shpjegimin.
+   - Pastaj kërko vetëm çka mungon: kur vazhdon, kur pritet me u kry ose arsyen e ngecjes. Mos bëj tri
+     pyetje njëherësh dhe mos e pyet sërish atë që u sqarua, edhe kur e tha duke folur për një detyrë tjetër.
+   - progres_perqindje është gjendja e ruajtur, jo domosdoshmërisht ndryshim gjatë slotit. strike_ne_interval
+     janë pikat e bëra gjatë intervalit të raportit (progres_nga), edhe kur GA i ka dëgjuar tashmë.
+   Pasi mbarojnë detyrat AKTUAL, trajto të pambyllurat PARAPRAK: a vazhdon me to dhe kur kryhen, vetëm nëse
+   ende s'u tha. Mos pyet përsëri për të njëjtën detyrë në dy grupe. Në 16:00 bëj të njëjtën gjë për BLLOK.
+   Nëse të gjitha aktualet janë kryer, përfundo së pari çdo detyrë PARAPRAK/BLLOK; pastaj, nëse s'u tha,
+   pyet "Me çka vazhdon në slotin tjetër?". Pa lista të gjata për detyrat tashmë të përfunduara.
+   Titujt thuaji me fushën "detyra" / "spoken", pa inicialet dhe numrat në fillim. Mos rilexo done/strike
+   nga GA. MOS pyet stafin "a ka detyra për GA" (as BZ): pikën 4 stafi e bën vetë.
+   Kur personi është te detyra e fundit thirr call_next_person. Sapo mbaron, thirr end_person_turn direkt,
+   pa përmbledhje ose falënderim ritual; pastaj thirre të riun me emër dhe pyete për detyrën e tij. Synimi: rreth
    {row.target_minutes_per_person} minuta për person.
 3) Rishikimi PM (vetëm në 11:50, kur end_person_turn kthen "PM_RISHIKIMI"): për secilin person me radhë, thuaj
    detyrat PM shkurt dhe pyet: "A vazhdon me këto PM? A ka ndonjë që shtyhet për nesër ose për datë tjetër?"
@@ -1099,7 +1129,7 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
     row = await get_settings(db)
     session = {
         "type": "realtime",
-        "model": settings.VOICE_ASSISTANT_MODEL,
+        "model": settings.MIRA_HOST_MODEL,
         "instructions": await instructions(db, meeting, row),
         "audio": {
             "input": {
@@ -1107,10 +1137,9 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
                 # No "language" (OpenAI rejects "sq") and no "prompt": on noise or silence the transcriber
                 # wrote the prompt back as if someone had said it.
                 "transcription": {"model": "gpt-4o-transcribe"},
-                # Semantic VAD waits while a sentence is unfinished, so a pause to read the next task is not
-                # taken as the end of the turn. Interruptions are decided by host-worker.mjs, which lets a
-                # short "aha" or "po" pass instead of cutting Mira off.
-                "turn_detection": {"type": "semantic_vad", "eagerness": "low", "create_response": True,
+                # Balanced semantic endpointing responds sooner than low eagerness while still waiting
+                # for unfinished sentences. The worker owns interruptions so a short "aha/po" can pass.
+                "turn_detection": {"type": "semantic_vad", "eagerness": "medium", "create_response": True,
                                    "interrupt_response": False},
                 "noise_reduction": {"type": "near_field"},
             },
@@ -1139,7 +1168,7 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
         raise HTTPException(502, "OpenAI refuzoi sesionin zanor të Mira-s.")
     body = response.json()
     return {"client_secret": body.get("value") or (body.get("client_secret") or {}).get("value"),
-            "model": settings.VOICE_ASSISTANT_MODEL}
+            "model": settings.MIRA_HOST_MODEL}
 
 
 # ---------------------------------------------------------------- tools
@@ -1168,9 +1197,7 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
             return {"error": "Nuk u gjet saktë.", "candidates": [data.name(u) for u in found[:5]]}
         if name == "find_user":
             return {"name": data.name(found[0]), "initials": initials(data.name(found[0]))}
-        brief = person_brief(data, meeting.slot, found[0])
-        brief["new_progress"] = await new_progress(db, meeting, data, [found[0]], since=await progress_since(db, meeting))
-        return brief
+        return await person_context(db, meeting, data, found[0])
     if name == "search_knowledge":
         return {"results": await search_knowledge(db, args.query)}
     if name in {"add_meeting_note", "end_person_turn"}:

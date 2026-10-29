@@ -220,8 +220,13 @@ nuk ndryshon: ai vazhdon të transkriptojë si më parë, edhe kur Mira e mban t
 
 **Si funksionon.** Zëri i Mira-s është një bot i dytë Discord, "Mira Host", me token të vetin,
 sepse një bot mund të jetë vetëm në një voice channel për server. Mira Host hyn në kanalin 1H dhe
-flet përmes OpenAI Realtime (`VOICE_ASSISTANT_MODEL`). Kur dikush flet më shumë se një "aha" ose "po", ajo ndalet
-dhe dëgjon; nuk flet përmbi askënd dhe pret kur dikush ndalet në mes të fjalisë.
+flet përmes OpenAI Realtime (`MIRA_HOST_MODEL`, parazgjedhje `gpt-realtime-2.1-mini`).
+Për kthim te modeli i mëparshëm vendos `MIRA_HOST_MODEL=gpt-realtime-2.1` në `backend/.env`
+dhe rinis API-n. Ky konfigurim vlen vetëm për Mira Host; zëri `marin` dhe transkriptimi
+`gpt-4o-transcribe` ruhen gjatë provës në shqip. Semantic VAD përdor `eagerness=medium` për
+përgjigje më të shpejta pa e trajtuar çdo pauzë si fjali të përfunduar. Kur dikush flet më shumë se një
+"aha" ose "po", ajo ndalet dhe dëgjon. Pas një veprimi, përgjigjja vazhdon sapo përfundojnë të gjitha
+rezultatet dhe përgjigjja përkatëse Realtime, pavarësisht rendit në të cilin mbërrijnë.
 Mesazhet me shkrim i dërgon boti ekzistues PrimeFlow në kanalet private të `/lidh`.
 
 | Kur | Çka ndodh |
@@ -231,17 +236,34 @@ Mesazhet me shkrim i dërgon boti ekzistues PrimeFlow në kanalet private të `/
 | 2 min para | Thirren në 1H Diellza, Gane dhe Elza; Olsa, nëse Elza mungon sot ose s'është kyçur në fillim të slotit. Mira fillon të flasë |
 | 2 min para, faza GA | 1) "A ka reply nga GA te detyrat për GA?" (detyrat me simbolin GA, sipas personave). 2) "Notes të reja?": për secilin note "A krijojmë detyrë për dikë?"; kur thonë për kë, detyra 1H krijohet menjëherë. 3) Done dhe Strike të bëra në intervalin e 1H Reports për atë slot (p.sh. 11:00 = 10:00–11:00, nga çdo slot), sipas personave në renditjen e 1H SHTYPI, pa përsëritur çka është lexuar më herët sot. Stafi fillon kur mbaron GA (jo para orës së slotit, e shumta 8 min pas saj) |
 | Gjatë gjithë takimit | "Mira, shënoje në PX Notes…": Mira e ruan menjëherë në PX Notes me avatarin e Mira-s dhe e shënon te takimi |
-| Stafi | Një nga një sipas renditjes së Common View: së pari detyrat e slotit paraprak në proces / pa progres (në 11:50 të të gjitha sloteve paraprake), pastaj ato të slotit. Pyetja sipas ngjyrës: e verdhë "A ke me vazhdu, kur pritet me u kry?", rozë "Pse s'ke vazhdu, kur vazhdon?", e gjelbër (kur janë kryer të gjitha) "Me çka vazhdon në slotin tjetër?". Në 16:00 edhe detyrat BLLOK. Mira thërret të radhës pak para se të mbarojë personi aktual |
+| Stafi | Një nga një sipas renditjes së Common View: së pari detyrat e slotit aktual, pastaj të pambyllurat nga sloti paraprak (në 11:50 nga të gjitha slotet paraprake), pa e diskutuar dy herë të njëjtën detyrë. Hyn direkt në temë dhe pyet vetëm çka mungon: progresin, arsyen e ngecjes, kur vazhdon ose kur kryhet. Në 16:00 edhe detyrat BLLOK. Kur aktualet janë kryer, trajton ende të hapurat para se të pyesë për slotin tjetër. Mira thërret të radhës pak para se të mbarojë personi aktual |
 | 11:50, në fund | Rishikimi PM: për secilin detyrat PM të hapura: a vazhdon, a shtyhet ndonjë (për nesër / datë tjetër) dhe pse. Shtyrjet ruhen si shënime të takimit; Mira nuk i ndryshon detyrat |
 | Fundi | Transkripti dhe përmbledhja ruhen te faqja **Mira → Takimet 1H** |
+
+Mira merr progresin sipas detyrës: përqindjen e ruajtur dhe strike/done të intervalit të raportit.
+Një strike i lexuar te GA mbetet provë progresi për bisedën me stafin, por nuk shpallet përsëri.
+Mungesa e një përditësimi nuk provohet si mungesë pune: Mira kërkon sqarim pa akuzuar.
+Përqindja është gjendja e ruajtur, jo domosdoshmërisht progres i bërë vetëm në slotin aktual.
+Pyetjet janë një nga një; nëse personi e dha tashmë arsyen ose afatin, Mira nuk pyet përsëri.
+Nuk përsërit përgjigjet e stafit, hyrjet, ose "super/okej/faleminderit" pas çdo përgjigjeje.
+Protokolli i ruajtur vazhdon të vlejë për doc/share screen; rendi i diskutimit është gjithmonë aktual → paraprak.
 
 **Komandat** (vetëm admin/menaxher; edhe nga faqja **Mira → Cilësimet**):
 
 | Komanda | Çka bën |
 |---|---|
+| `/mira hyr sloti:11:00` | Mira Host hyn menjëherë në kanalin 1H dhe nis takimin për slotin e zgjedhur; nuk aktivizon orarin ditor |
 | `/mira mbaj-takimet [deri_ne_ore]` | Mira i mban 1H-të sot, deri në orën e dhënë ose deri në 16:45 |
 | `/mira ndalo` | Mira ndalet menjëherë |
 | `/mira statusi` | Tregon a është aktive dhe kush është në radhë tani |
+
+Për thirrje manuale zgjidh një slot nga lista: 10:00, 11:00, 11:50, 14:20 ose 16:00.
+Komanda `/mira hyr` nuk pret orën e slotit: fillon me GA-në tani dhe kalon te stafi kur faza GA mbaron.
+Konfirmimi i kyçjes shfaqet vetëm pasi lidhja zanore është gati. Nëse Mira është duke u kyçur ose mban
+një takim tjetër, kërkesa e dytë refuzohet. `/mira ndalo` anulon edhe një kyçje që ende po përgatitet.
+Kërkohet llogari aktive e lidhur me `/lidh`, me rol admin ose menaxher në PrimeFlow.
+Një slot i mbajtur tashmë atë ditë nuk rihapet dhe historiku nuk mbishkruhet.
+Nëse dëshironi vetëm thirrje manuale, mos aktivizoni `/mira mbaj-takimet`; ai mbetet opsioni i orarit automatik.
 
 **Aktivizimi në server**
 
