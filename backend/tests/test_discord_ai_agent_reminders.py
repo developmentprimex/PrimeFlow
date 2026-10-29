@@ -10,7 +10,7 @@ os.environ.setdefault('JWT_SECRET','reminder-tests-only')
 from app.services import discord_ai_agent_reminders as service
 from tests.test_discord_voice_model import PostgresMeetingTests
 
-CONFIG={'enabled':True,'times':['08:05','12:00','14:10'],'timezone':'Europe/Budapest',
+CONFIG={'enabled':True,'times':['08:05','12:00','16:10'],'timezone':'Europe/Budapest',
     'guild_id':'123','voice_channel_id':'66','user_ids':[]}
 
 class InvitationTests(unittest.IsolatedAsyncioTestCase):
@@ -23,14 +23,16 @@ class InvitationTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(service.due(at-timedelta(seconds=1),slot,CONFIG))
             self.assertFalse(service.due(at+timedelta(minutes=5),slot,CONFIG))
             self.assertFalse(service.due(at.replace(day=31),slot,CONFIG))
-        self.assertFalse(service.due(at,'16:10',CONFIG))
+        for excluded in ('10:00','11:00','11:50','14:10','14:20','16:00'):
+            hour,minute=map(int,excluded.split(':'))
+            self.assertFalse(service.due(at.replace(hour=hour,minute=minute),excluded,CONFIG))
         self.assertFalse(service.due(at,slot,{**CONFIG,'enabled':False}))
         # The same local 08:05 follows DST rather than a fixed UTC time.
         self.assertTrue(service.due(datetime(2026,7,1,6,5,tzinfo=timezone.utc),'08:05',CONFIG))
         self.assertFalse(service.due(datetime(2026,7,1,7,5,tzinfo=timezone.utc),'08:05',CONFIG))
 
     def job(self):
-        return {'id':str(uuid.uuid4()),'day':'2026-10-29','slot':'14:10','discord_user_id':'12',
+        return {'id':str(uuid.uuid4()),'day':'2026-10-29','slot':'16:10','discord_user_id':'12',
             'guild_id':'123','channel_id':'44','voice_channel_id':'66'}
 
     async def test_invitation_mentions_only_recipient_and_retries_do_not_duplicate(self):
@@ -66,8 +68,8 @@ class ReminderDatabaseTests(PostgresMeetingTests):
                 db.add(DiscordLink(user_id=uid,discord_user_id=discord_id,guild_id='123',channel_id=channel))
             await db.commit()
         config={**CONFIG,'user_ids':[str(self.uid),str(other)]}
-        at=datetime(2026,10,29,13,10,tzinfo=timezone.utc)
-        async def claim(slot='14:10',when=at):
+        at=datetime(2026,10,29,15,10,tzinfo=timezone.utc)
+        async def claim(slot='16:10',when=at):
             async with self.sessions() as db:return await service.claim(db,when,slot,config)
         a,b=await asyncio.gather(claim(),claim());jobs=a+b
         self.assertEqual(len(jobs),2)

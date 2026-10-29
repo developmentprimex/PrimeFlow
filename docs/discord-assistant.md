@@ -676,11 +676,11 @@ in the existing 1H / AI Agent groups. Personal recordings keep their private
 notes; the common panel can stop an active recording in its fixed voice, but
 cannot read or save its personal notes. The speaking Mira Host is separate.
 
-AI Agent invitations run on weekdays at 08:05, 12:00 and 14:10 in the app timezone.
+AI Agent invitations run on weekdays at 08:05, 12:00 and 16:10 in the app timezone.
 The four configured development recipients (Rinesa, Elsa, Endi and Laurent) receive
 the invitation in their personal PrimeFlow text channels from Mira AI Agent,
 with a link to the AI Agent voice channel. The Windows tasks
-`PrimeFlow-AIAgent-0805`, `PrimeFlow-AIAgent-1200` and `PrimeFlow-AIAgent-1410`
+`PrimeFlow-AIAgent-0805`, `PrimeFlow-AIAgent-1200` and `PrimeFlow-AIAgent-1610`
 run `C:\PrimeFlowOps\AIAgentReminders\run.py` with the corresponding slot.
 That persistent directory holds the task settings and the installed reminder
 service. The script source is `backend/scripts/discord_ai_agent_reminders.py`.

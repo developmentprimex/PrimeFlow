@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timedelta
 import discord
 from discord.http import handle_message_parameters
+from app.config import settings
 
 
 def meeting_view(row):
@@ -21,7 +22,7 @@ def meeting_view(row):
 
 def result_message(row):
     text=row.get('draft_text') or row.get('error') or 'Shënimet po përgatiten.'
-    embed=discord.Embed(title='Shënimet e takimit',description=text if len(text)<=1800 else 'Shënimet e plota janë në skedar.')
+    embed=discord.Embed(title='Shënimet e takimit',description=text if len(text)<=1800 else None)
     parts={'embed':embed,'view':meeting_view(row)}
     if len(text)>1800:parts['file']=discord.File(io.BytesIO(text.encode('utf-8')),filename='shenimet-e-takimit.txt')
     return parts
@@ -29,10 +30,11 @@ def result_message(row):
 
 async def send_durable(bot, channel, row):
     marker=f"Mira takim · {row['id']}"
+    marker_url=settings.FRONTEND_URL.rstrip('/')+'/mira?tab=shenimet&meeting='+row['id']
     created=datetime.fromisoformat(row['created_at']) if row.get('created_at') else None
     async for previous in channel.history(limit=None,after=created-timedelta(seconds=5) if created else None):
-        if previous.author.id==bot.user.id and any(e.footer.text==marker for e in previous.embeds):return [str(previous.id)]
-    parts=result_message(row);parts['embed'].set_footer(text=marker)
+        if previous.author.id==bot.user.id and any(e.footer.text==marker or e.url==marker_url for e in previous.embeds):return [str(previous.id)]
+    parts=result_message(row);parts['embed'].url=marker_url
     nonce=hashlib.sha256(marker.encode()).hexdigest()[:24]
     try:
         with handle_message_parameters(**parts,nonce=nonce,allowed_mentions=discord.AllowedMentions.none()) as params:
