@@ -13,7 +13,7 @@ from app.models.ga_personal import (
     GaPersonalDelivery as Delivery, GaPersonalEvent as Event, GaPersonalImport as ImportRun,
     GaPersonalMember as Member, GaPersonalOccurrence as Occurrence,
     GaPersonalSpace as Space, GaPersonalTemplate as Template,
-    GaPersonalUnlock as Unlock, GaPersonalDiscordDelivery as DiscordDelivery,
+    GaPersonalDiscordDelivery as DiscordDelivery,
 )
 from app.schemas.ga_personal import TemplateDefinition
 from app.models.user import User
@@ -86,12 +86,6 @@ async def lock_member_space(db, member, *, need_admin=False):
     ).execution_options(populate_existing=True))).scalar_one_or_none()
     if current is None or (need_admin and not current.is_admin):
         raise HTTPException(403, "Autorizimi i modulit ka ndryshuar.")
-    token_hash = db.info.get("ga_personal_unlock_hash")
-    if token_hash:
-        session = await db.get(Unlock, token_hash, populate_existing=True)
-        if (not session or session.revoked or session.password_version != space.password_version
-            or aware(session.expires_at) <= utcnow()):
-            raise HTTPException(423, "Hape përsëri modulin.")
     return space
 
 

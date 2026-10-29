@@ -14,6 +14,24 @@ def adapter():
 
 
 class KujtesaBridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_server_readiness_requires_discord_membership_and_is_removed_on_disconnect(self):
+        m = adapter()
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "worker.json"
+            bot = m.KujtesaBridge("http://127.0.0.1:8000/api", "test-key", status_path=path)
+            bot.expected_guild_id = "111111111111111111"
+            bot.is_ready = Mock(return_value=True)
+            bot.get_guild = Mock(return_value=object())
+            bot.publish_ready_status()
+            self.assertTrue(path.exists())
+            await bot.on_disconnect()
+            self.assertFalse(path.exists())
+            bot.get_guild.return_value = None
+            bot.publish_ready_status()
+            self.assertFalse(path.exists())
+            await bot.close()
+
     async def test_disabled_delivery_only_sends_a_health_request(self):
         m = adapter()
         bot = m.KujtesaBridge("http://127.0.0.1:8000/api", "test-bridge-key", reminders_enabled=False)

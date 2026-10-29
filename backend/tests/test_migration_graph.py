@@ -30,10 +30,21 @@ class MigrationGraphTests(unittest.TestCase):
             ("0173_merge_mira_ga_personal", {recorders, personal, merge}),
         ):
             with self.subTest(deployed=deployed):
-                revisions = [step.revision.revision for step in scripts._upgrade_revs("head", deployed)]
+                revisions = [step.revision.revision for step in scripts._upgrade_revs(merge, deployed)]
                 self.assertEqual(set(revisions), expected)
                 self.assertEqual(revisions[-1], merge)
-        self.assertEqual(scripts._upgrade_revs("head", merge), [])
+        self.assertEqual(scripts._upgrade_revs(merge, merge), [])
+
+    def test_tablet_devices_follow_the_merged_discord_and_personal_head(self) -> None:
+        scripts = migration_scripts()
+        head = "0176_ga_personal_devices"
+        merge = "0175_merge_discord_ga_personal"
+        self.assertEqual(scripts.get_current_head(), head)
+        self.assertEqual(scripts.get_revision(head).down_revision, merge)
+        for deployed in (merge, "0174_discord_separate_recorders", "0174_ga_personal_discord"):
+            revisions = [step.revision.revision for step in scripts._upgrade_revs("head", deployed)]
+            self.assertEqual(revisions[-1], head)
+            self.assertEqual(revisions.count(head), 1)
 
     def test_mira_notes_and_ga_personal_upgrade_from_either_deployed_branch(self) -> None:
         scripts = migration_scripts()

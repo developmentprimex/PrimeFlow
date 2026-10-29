@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -62,6 +62,44 @@ class GaPersonalThrottle(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     failures: Mapped[int] = mapped_column(Integer, default=0)
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class GaPersonalDevice(Base):
+    __tablename__ = "devices"
+    __table_args__ = {"schema": SCHEMA}
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{SCHEMA}.spaces.id"), index=True)
+    authorized_by: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{SCHEMA}.memberships.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    device_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GaPersonalDeviceOp(Base):
+    __tablename__ = "device_ops"
+    __table_args__ = (UniqueConstraint("space_id", "op_id"), {"schema": SCHEMA})
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{SCHEMA}.spaces.id"), index=True)
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{SCHEMA}.devices.id"))
+    op_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    payload: Mapped[dict] = mapped_column(DOCUMENT)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class GaPersonalDeviceRecord(Base):
+    __tablename__ = "device_records"
+    __table_args__ = (UniqueConstraint("space_id", "kind", "key"), {"schema": SCHEMA})
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{SCHEMA}.spaces.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(12))
+    key: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(DOCUMENT)
+    client_at: Mapped[int] = mapped_column(BigInteger)
+    op_id: Mapped[str] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class GaPersonalTemplate(Base):

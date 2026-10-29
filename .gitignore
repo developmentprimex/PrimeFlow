@@ -41,6 +41,7 @@ backend/.discord-worker-status.json*
 backend/.discord-ai-agent-status.json*
 backend/.discord-agent-recovery/
 .primeflow-receipts.*
+.kujtesa-worker-status.*
 
 # Frontend
 frontend/.next/

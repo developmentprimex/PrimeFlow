@@ -155,6 +155,20 @@ module.exports = {
     },
     {
       ...apiProcess,
+      name: "primeflow-kujtesa",
+      args: "integrations/kujtesa/primeflow_bot.py",
+      restart_delay: 5000,
+      // Keep credentials and send receipts outside the Actions checkout.
+      // No work Mira credentials are inherited through sharedEnv.
+      env: {
+        APP_BUILD_SHA: process.env.APP_BUILD_SHA ?? "unknown",
+        KUJTESA_ENV_FILE: "C:/PrimeFlowData/Kujtesa/.env",
+        KUJTESA_STATE_DIR: "C:/PrimeFlowData/Kujtesa",
+        PYTHONUNBUFFERED: "1",
+      },
+    },
+    {
+      ...apiProcess,
       name: "primeflow-report-scheduler",
       args: "report_scheduler.py",
       env: {

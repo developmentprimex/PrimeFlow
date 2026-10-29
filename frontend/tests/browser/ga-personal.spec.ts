@@ -5,16 +5,15 @@ const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test Adul
 const firstId = "11111111-1111-4111-8111-111111111111"
 const secondId = "33333333-3333-4333-8333-333333333333"
 
-async function shell(page: Page, options: { available?: boolean; initiallyUnlocked?: boolean; initiallyConfigured?: boolean; automatic?: boolean; workspaceDelay?: number; expiresInMs?: number } = {}) {
-  let unlocked = options.initiallyUnlocked ?? false
-  let configured = options.initiallyConfigured ?? true
+async function shell(page: Page, options: { available?: boolean; automatic?: boolean; workspaceDelay?: number } = {}) {
+  let available = options.available ?? true
   let automatic = options.automatic ?? false
   let workspaceReads = 0
   let accessReads = 0
   let accessFailure = false
   let forbiddenAction = false
+  let devices: { id: string; name: string; device_id: string | null; created_at: string; last_seen_at: string | null; revoked_at: string | null }[] = []
   let discordSettings = { enabled: false, configured: true, connected: false, version: 0, guild_id: "", channel_id: "", user_ids: {} as Record<string, string>, delivery_counts: {} }
-  const expiresAt = options.expiresInMs ? new Date(Date.now() + options.expiresInMs).toISOString() : undefined
   const writes: { path: string; body: Record<string, unknown> }[] = []
   const rows = [
     { id: firstId, template_id: firstId, local_date: localToday(), period_key: localToday(), due_at: null as string | null, snapshot: { ...emptyDefinition("mrika"), frequency: "daily" as const, enabled: true, title: "Detyra e personit të parë" }, status: "pending", version: 1, can_edit: true },
@@ -33,20 +32,25 @@ async function shell(page: Page, options: { available?: boolean; initiallyUnlock
     if (relative === "/access") {
       accessReads++
       if (accessFailure) { accessFailure = false; return route.fulfill({ status: 503, json: { detail: "Lidhje e përkohshme e ndërprerë." } }) }
-      return route.fulfill({ json: { available: options.available ?? true, unlocked, configured, setup_allowed: !configured, requires_login: false, expires_at: expiresAt } })
+      return route.fulfill({ json: { available, unlocked: available } })
     }
-    if (relative === "/password/setup") {
-      configured = true
-      writes.push({ path: relative, body: request.postDataJSON() })
-      return route.fulfill({ json: { configured: true, unlocked: false } })
+    if (!available) return route.fulfill({ status: 403, json: { detail: "Nuk ke qasje në këtë modul." } })
+    if (relative === "/devices") {
+      if (request.method() === "POST") {
+        const device = { id: "44444444-4444-4444-8444-444444444444", name: request.postDataJSON().name,
+          device_id: null, created_at: new Date().toISOString(), last_seen_at: null, revoked_at: null }
+        devices = [device, ...devices]
+        writes.push({ path: relative, body: request.postDataJSON() })
+        return route.fulfill({ status: 201, json: { ...device, code: "pfgap_device_browser_test_only" } })
+      }
+      return route.fulfill({ json: devices })
     }
-    if (relative === "/unlock") {
-      if (request.postDataJSON().password !== "test-only-password") return route.fulfill({ status: 403, json: { detail: "Fjalëkalimi nuk është i saktë." } })
-      unlocked = true
-      return route.fulfill({ json: { unlocked: true } })
+    if (relative.startsWith("/devices/") && relative.endsWith("/revoke")) {
+      const device = devices.find((device) => relative.includes(device.id))!
+      device.revoked_at = new Date().toISOString()
+      writes.push({ path: relative, body: {} })
+      return route.fulfill({ json: device })
     }
-    if (relative === "/lock") { unlocked = false; return route.fulfill({ json: { unlocked: false } }) }
-    if (!unlocked) return route.fulfill({ status: 423, json: { detail: "Hape modulin." } })
     if (relative === "/discord/settings") {
       if (request.method() === "PUT") {
         const body = request.postDataJSON()
@@ -99,7 +103,7 @@ async function shell(page: Page, options: { available?: boolean; initiallyUnlock
   })
   await page.goto("/ga-personal")
   return { writes, workspaceReads: () => workspaceReads, accessReads: () => accessReads,
-    failAccess: () => { accessFailure = true }, forbidAction: () => { forbiddenAction = true }, expire: () => { unlocked = false } }
+    failAccess: () => { accessFailure = true }, forbidAction: () => { forbiddenAction = true }, revoke: () => { available = false } }
 }
 
 test("the sidebar and module reject a nonmember", async ({ page }) => {
@@ -109,45 +113,43 @@ test("the sidebar and module reject a nonmember", async ({ page }) => {
   expect(state.workspaceReads()).toBe(0)
 })
 
-test("household data loads only after the extra password and disappears on lock", async ({ page }) => {
+test("members open household tasks directly with their existing PrimeFlow login", async ({ page }) => {
   const state = await shell(page)
-  await expect(page.getByRole("heading", { name: "Hape hapësirën private" })).toBeVisible()
-  expect(state.workspaceReads()).toBe(0)
-  await page.getByLabel("Fjalëkalimi shtesë").fill("wrong")
-  await page.getByRole("button", { name: "Hape modulin", exact: true }).click()
-  await expect(page.getByText("Fjalëkalimi nuk është i saktë.", { exact: true })).toBeVisible()
-  expect(state.workspaceReads()).toBe(0)
-  await page.getByLabel("Fjalëkalimi shtesë").fill("test-only-password")
-  await page.getByRole("button", { name: "Hape modulin", exact: true }).click()
-  await expect(page.getByText("Detyra e personit të parë")).toBeVisible()
-  await page.screenshot({ path: "test-results/ga-personal-desktop.png", fullPage: true })
-  await page.getByRole("button", { name: "Kyçe", exact: true }).click()
-  await expect(page.getByText("Detyra e personit të parë")).toHaveCount(0)
-  await expect(page.getByRole("heading", { name: "Hape hapësirën private" })).toBeVisible()
-})
-
-test("the module administrator chooses the first extra password in the page", async ({ page }) => {
-  const state = await shell(page, { initiallyConfigured: false })
-  await expect(page.getByRole("heading", { name: "Vendos fjalëkalimin shtesë" })).toBeVisible()
-  expect(state.workspaceReads()).toBe(0)
-  await page.getByLabel("Fjalëkalimi i ri", { exact: true }).fill("test-only-password")
-  await page.getByLabel("Përsërite fjalëkalimin", { exact: true }).fill("test-only-password")
-  await page.getByRole("button", { name: "Ruaje dhe hape modulin", exact: true }).click()
   await expect(page.getByText("Detyra e personit të parë", { exact: true })).toBeVisible()
-  expect(state.writes.filter((w) => w.path === "/password/setup")).toHaveLength(1)
+  expect(state.workspaceReads()).toBeGreaterThan(0)
+  await expect(page.locator('input[type="password"]')).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Kyçe", exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Cilësimet", exact: true }).click()
+  await expect(page.locator('input[type="password"]')).toHaveCount(0)
+  expect(state.writes).toEqual([])
 })
 
 test("the module administrator can pause automatic task creation", async ({ page }) => {
-  const state = await shell(page, { initiallyUnlocked: true, automatic: true })
+  const state = await shell(page, { automatic: true })
   await page.getByRole("button", { name: "Cilësimet", exact: true }).click()
   await page.getByRole("button", { name: "Ndalo krijimin automatik", exact: true }).click()
   await expect(page.getByRole("button", { name: "Aktivizo krijimin automatik", exact: true })).toBeVisible()
   expect(state.writes).toEqual([{ path: "/automation", body: { enabled: false } }])
 })
 
-test("focus, returning to the tab and polling keep the editor and unlocked page stable", async ({ page }) => {
+test("the module administrator creates a tablet code, hides it, and revokes access", async ({ page }) => {
+  const state = await shell(page)
+  await page.getByRole("button", { name: "Cilësimet", exact: true }).click()
+  await page.getByLabel("Emri i pajisjes", { exact: true }).fill("Tableti i familjes")
+  await page.getByRole("button", { name: "Krijo kod pajisjeje", exact: true }).click()
+  await expect(page.getByLabel("Kodi i pajisjes", { exact: true })).toHaveValue("pfgap_device_browser_test_only")
+  await expect(page.getByLabel("Adresa e Primeflow", { exact: true })).toHaveValue("https://primeflow.primexeu.com")
+  expect(state.writes[0]).toEqual({ path: "/devices", body: { name: "Tableti i familjes" } })
+  await page.getByRole("button", { name: "E ruajta kodin", exact: true }).click()
+  await expect(page.getByLabel("Kodi i pajisjes", { exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Çaktivizo lidhjen", exact: true }).click()
+  await expect(page.getByText("E çaktivizuar", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Çaktivizo lidhjen", exact: true })).toHaveCount(0)
+})
+
+test("focus, returning to the tab and polling keep the editor stable", async ({ page }) => {
   await page.clock.install()
-  const state = await shell(page, { initiallyUnlocked: true })
+  const state = await shell(page)
   await page.getByRole("button", { name: "Detyrë e re", exact: true }).click()
   await page.getByLabel("Titulli", { exact: true }).fill("Drafti ruhet gjatë punës")
   const before = state.accessReads()
@@ -167,7 +169,7 @@ test("focus, returning to the tab and polling keep the editor and unlocked page 
 })
 
 test("a temporary connection error or forbidden action does not ask for the password", async ({ page }) => {
-  const state = await shell(page, { initiallyUnlocked: true, automatic: true })
+  const state = await shell(page, { automatic: true })
   await expect(page.getByText("Detyra e personit të parë", { exact: true })).toBeVisible()
   state.failAccess()
   await page.evaluate(() => window.dispatchEvent(new Event("focus")))
@@ -184,25 +186,25 @@ test("a temporary connection error or forbidden action does not ask for the pass
   await expect(page.getByRole("heading", { name: "Hape hapësirën private" })).toHaveCount(0)
 })
 
-test("an already unlocked session loads slowly without flashing a password form", async ({ page }) => {
-  await shell(page, { initiallyUnlocked: true, workspaceDelay: 1000 })
+test("a slow workspace opens without displaying a password form", async ({ page }) => {
+  await shell(page, { workspaceDelay: 1000 })
   await expect(page.getByText("Duke hapur hapësirën…", { exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Hape hapësirën private" })).toHaveCount(0)
   await expect(page.getByText("Detyra e personit të parë", { exact: true })).toBeVisible()
 })
 
-test("real module expiry removes private data and asks for the extra password", async ({ page }) => {
+test("membership revocation removes household data on the next access check", async ({ page }) => {
   await page.clock.install()
-  const state = await shell(page, { initiallyUnlocked: true, expiresInMs: 10000 })
+  const state = await shell(page)
   await expect(page.getByText("Detyra e personit të parë", { exact: true })).toBeVisible()
-  state.expire()
-  await page.clock.fastForward(11000)
-  await expect(page.getByRole("heading", { name: "Hape hapësirën private" })).toBeVisible()
+  state.revoke()
+  await page.clock.fastForward(21000)
+  await expect(page.getByText("Ky modul ende nuk është aktivizuar për llogarinë tënde.")).toBeVisible()
   await expect(page.getByText("Detyra e personit të parë", { exact: true })).toHaveCount(0)
 })
 
 test("the task card edits time and assignee for only this occurrence", async ({ page }) => {
-  const state = await shell(page, { initiallyUnlocked: true })
+  const state = await shell(page)
   const card = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
   await card.getByRole("button", { name: "Ndrysho", exact: true }).click()
   await page.getByLabel("Ora e detyrës", { exact: true }).fill("18:30")
@@ -215,7 +217,7 @@ test("the task card edits time and assignee for only this occurrence", async ({ 
 })
 
 test("the task card can explicitly apply a schedule change to future recurrences", async ({ page }) => {
-  const state = await shell(page, { initiallyUnlocked: true })
+  const state = await shell(page)
   const card = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
   await card.getByRole("button", { name: "Ndrysho", exact: true }).click()
   await page.getByLabel("Ora e detyrës", { exact: true }).fill("19:15")
@@ -226,7 +228,7 @@ test("the task card can explicitly apply a schedule change to future recurrences
 })
 
 test("module admin saves separate Kujtesa settings without requiring all personal IDs", async ({ page }) => {
-  const state = await shell(page, { initiallyUnlocked: true })
+  const state = await shell(page)
   await page.getByRole("button", { name: "Cilësimet", exact: true }).click()
   await page.getByLabel("Discord Server ID", { exact: true }).fill("111111111111111111")
   await page.getByLabel("Kanali privat i familjes · Channel ID", { exact: true }).fill("222222222222222222")
@@ -239,7 +241,7 @@ test("module admin saves separate Kujtesa settings without requiring all persona
 })
 
 test("an existing task can route its reminders to the family channel", async ({ page }) => {
-  const state = await shell(page, { initiallyUnlocked: true })
+  const state = await shell(page)
   const card = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
   await card.getByRole("button", { name: "Ndrysho", exact: true }).click()
   await page.getByRole("combobox", { name: "Kujtesat në Discord", exact: true }).selectOption("channel")
@@ -249,7 +251,7 @@ test("an existing task can route its reminders to the family channel", async ({ 
 })
 
 test("creating a task supports several people and individual completion", async ({ page }) => {
-  const state = await shell(page, { initiallyUnlocked: true })
+  const state = await shell(page)
   await page.getByRole("button", { name: "Detyrë e re", exact: true }).click()
   await page.getByLabel("Titulli", { exact: true }).fill("Puna e përbashkët e rutinës")
   await page.getByLabel("Person 1", { exact: true }).check()
@@ -262,7 +264,7 @@ test("creating a task supports several people and individual completion", async 
 
 test("completing one person's occurrence preserves the other and the mobile layout fits", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const state = await shell(page, { initiallyUnlocked: true })
+  const state = await shell(page)
   await page.getByRole("button", { name: "Close sidebar" }).click()
   const first = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
   await first.getByRole("button", { name: "U kry", exact: true }).click()
