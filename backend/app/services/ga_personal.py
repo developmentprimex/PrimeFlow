@@ -151,7 +151,7 @@ async def save_template(db, member, payload, template_id=None):
         for assigned in owners:
             db.add(Occurrence(space_id=member.space_id, template_id=row.id, period_key=data["on_date"],
                 assignment_key="shared" if data["completion_mode"] == "shared" else assigned[0], local_date=data["on_date"],
-                due_at=datetime.combine(date.fromisoformat(data["on_date"]), time.fromisoformat(data["due_time"]), TZ),
+                due_at=datetime.combine(date.fromisoformat(data["on_date"]), time.fromisoformat(data["due_time"]), TZ) if data["due_time"] else None,
                 snapshot={**data, "assignees": assigned, "template_version": row.version}))
     db.add(Event(space_id=member.space_id, actor_id=member.user_id, request_id=str(uuid.uuid4()),
                  kind="template_updated" if template_id else "template_created",

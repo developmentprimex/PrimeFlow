@@ -1,5 +1,5 @@
 import { test, expect, Page } from "@playwright/test"
-import { emptyDefinition, localToday } from "../../src/lib/ga-personal"
+import { emptyDefinition, localToday, moveDay, type GaOccurrence, type GaTemplate } from "../../src/lib/ga-personal"
 
 const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test Adult", email: "test@example.com", role: "STAFF", is_active: true, department_id: null }
 const firstId = "11111111-1111-4111-8111-111111111111"
@@ -15,11 +15,11 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
   let devices: { id: string; name: string; device_id: string | null; created_at: string; last_seen_at: string | null; revoked_at: string | null }[] = []
   let discordSettings = { enabled: false, configured: true, connected: false, version: 0, guild_id: "", channel_id: "", user_ids: {} as Record<string, string>, delivery_counts: {} }
   const writes: { path: string; body: Record<string, unknown> }[] = []
-  const rows = [
-    { id: firstId, template_id: firstId, local_date: localToday(), period_key: localToday(), due_at: null as string | null, snapshot: { ...emptyDefinition("mrika"), frequency: "daily" as const, enabled: true, title: "Detyra e personit të parë" }, status: "pending", version: 1, can_edit: true },
-    { id: secondId, template_id: secondId, local_date: localToday(), period_key: localToday(), due_at: null as string | null, snapshot: { ...emptyDefinition("rrita"), frequency: "daily" as const, enabled: true, title: "Detyra e personit të dytë" }, status: "pending", version: 1, can_edit: true },
+  const rows: GaOccurrence[] = [
+    { id: firstId, template_id: firstId, local_date: localToday(), period_key: localToday(), due_at: null, snapshot: { ...emptyDefinition("mrika"), frequency: "daily", enabled: true, title: "Detyra e personit të parë" }, status: "pending", version: 1, completed_at: null, can_edit: true },
+    { id: secondId, template_id: secondId, local_date: localToday(), period_key: localToday(), due_at: null, snapshot: { ...emptyDefinition("rrita"), frequency: "daily", enabled: true, title: "Detyra e personit të dytë" }, status: "pending", version: 1, completed_at: null, can_edit: true },
   ]
-  const templates = rows.map((r) => ({ id: r.template_id, definition: { ...r.snapshot }, version: 1, archived: false, source_id: null, can_manage: true }))
+  const templates: GaTemplate[] = rows.map((r) => ({ id: r.template_id, definition: { ...r.snapshot }, version: 1, archived: false, source_id: null, can_manage: true }))
   await page.addInitScript(({ user }) => {
     localStorage.setItem("primex_access_token", "browser-test-only")
     localStorage.setItem("primex_user", JSON.stringify(user))
@@ -79,7 +79,16 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
     if (relative === "/templates") {
       if (request.method() === "POST") {
         writes.push({ path: relative, body: request.postDataJSON() })
-        return route.fulfill({ json: { id: firstId, ...request.postDataJSON(), can_manage: true, version: 1, archived: false } })
+        const template: GaTemplate = { id: "55555555-5555-4555-8555-555555555555", ...request.postDataJSON(), can_manage: true, version: 1, archived: false, source_id: null }
+        templates.push(template)
+        if (template.definition.enabled && template.definition.frequency === "once") {
+          const d = template.definition
+          const assignments = d.completion_mode === "shared" ? [d.assignees] : d.assignees.map(person => [person])
+          for (const assignees of assignments) rows.push({ id: `${template.id}-${assignees[0]}`, template_id: template.id,
+            local_date: d.on_date!, period_key: d.on_date!, due_at: null, snapshot: { ...d, assignees },
+            status: "pending", version: 1, completed_at: null, can_edit: true })
+        }
+        return route.fulfill({ json: template })
       }
       return route.fulfill({ json: templates })
     }
@@ -273,6 +282,48 @@ test("creating a task supports several people and individual completion", async 
   await page.getByRole("button", { name: "Ruaje detyrën", exact: true }).click()
   await expect(page.getByRole("dialog")).toHaveCount(0)
   expect((state.writes[0].body.definition as { assignees: string[] }).assignees).toEqual(["gane", "mrika", "rrita"])
+})
+
+test("a new untimed task is active, visible after saving, and survives reload", async ({ page }) => {
+  const state = await shell(page)
+  await page.getByRole("button", { name: "Të miat", exact: true }).click()
+  await page.getByLabel("Kërko detyrë", { exact: true }).fill("unrelated filter")
+  await page.getByRole("button", { name: "Detyrë e re", exact: true }).click()
+  await page.getByLabel("Titulli", { exact: true }).fill("Detyrë e re pa orar")
+  await expect(page.getByLabel("Shto te detyrat e datës", { exact: true })).toBeChecked()
+  await page.getByRole("button", { name: "Ruaje detyrën", exact: true }).click()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  expect(state.writes[0].body.definition).toMatchObject({ enabled: true, frequency: "once", due_time: null })
+  await expect(page.locator("article").getByText("Detyrë e re pa orar", { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.locator("article").getByText("Detyrë e re pa orar", { exact: true })).toBeVisible()
+})
+
+test("new tasks use the selected day and saving follows a changed date", async ({ page }) => {
+  await shell(page)
+  const selectedDay = moveDay(localToday(), 2), changedDay = moveDay(selectedDay, 1)
+  const displayDate = (day: string) => day.split("-").reverse().join("/")
+  await page.getByLabel("Data", { exact: true }).fill(displayDate(selectedDay))
+  await page.getByRole("button", { name: "Detyrë e re", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByLabel("Data", { exact: true })).toHaveValue(displayDate(selectedDay))
+  await dialog.getByLabel("Data", { exact: true }).fill(displayDate(changedDay))
+  await dialog.getByLabel("Titulli", { exact: true }).fill("Detyra për datën tjetër")
+  await page.getByRole("button", { name: "Ruaje detyrën", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByLabel("Data", { exact: true })).toHaveValue(displayDate(changedDay))
+  await expect(page.locator("article").getByText("Detyra për datën tjetër", { exact: true })).toBeVisible()
+})
+
+test("an intentionally inactive task remains visible in templates after saving", async ({ page }) => {
+  await shell(page)
+  await page.getByRole("button", { name: "Detyrë e re", exact: true }).click()
+  await page.getByLabel("Titulli", { exact: true }).fill("Detyrë në pritje")
+  await page.getByLabel("Shto te detyrat e datës", { exact: true }).uncheck()
+  await page.getByRole("button", { name: "Ruaje detyrën", exact: true }).click()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  const card = page.locator("article").filter({ has: page.getByText("Detyrë në pritje", { exact: true }) })
+  await expect(card.getByText("Pret konfigurim", { exact: true })).toBeVisible()
 })
 
 test("completing one person's occurrence preserves the other and the mobile layout fits", async ({ page }) => {

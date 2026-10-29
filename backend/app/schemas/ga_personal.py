@@ -71,8 +71,8 @@ class TemplateDefinition(BaseModel):
         if self.enabled:
             if self.readiness != "ready_after_setup" or self.frequency == "unresolved" or self.assignment == "unassigned":
                 raise ValueError("Plotëso konfigurimin para aktivizimit.")
-            if self.frequency == "once" and (self.on_date is None or self.due_time is None):
-                raise ValueError("Cakto datën/orën para aktivizimit.")
+            if self.frequency == "once" and self.on_date is None:
+                raise ValueError("Cakto datën para aktivizimit.")
             if self.frequency in {"weekly", "near_daily"} and not self.weekdays:
                 raise ValueError("Zgjidh ditët.")
             if self.frequency == "weekly" and any(d not in (5, 6) for d in self.weekdays):

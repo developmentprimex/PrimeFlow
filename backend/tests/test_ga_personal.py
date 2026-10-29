@@ -275,6 +275,31 @@ class GaPersonalDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["snapshot"]["assignees"], ["mrika"])
 
+    async def test_untimed_one_off_persists_immediately_without_reminders_or_duplicates(self):
+        self.as_person("mrika")
+        d = definition()
+        d.update(frequency="once", on_date="2026-11-07", due_time=None)
+        template = await self.add_template(d)
+        # A separate GET/session must see the committed task, not just a response echo.
+        rows = (await self.client.get("/api/ga-personal/occurrences?day=2026-11-07")).json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["template_id"], template["id"])
+        self.assertEqual(rows[0]["snapshot"]["assignees"], ["mrika"])
+        self.assertIsNone(rows[0]["due_at"])
+        self.assertEqual((await self.client.get("/api/ga-personal/templates")).json()[0]["definition"], template["definition"])
+        self.as_person("gane")
+        self.assertEqual((await self.generate())["created"], 0)
+        async with self.sessions() as db:
+            self.assertEqual((await db.execute(select(func.count(Delivery.id)))).scalar_one(), 0)
+            self.assertEqual((await db.execute(select(func.count(Occurrence.id)))).scalar_one(), 1)
+
+    async def test_one_off_still_requires_a_date_to_be_activated(self):
+        d = definition()
+        d.update(frequency="once", on_date=None, due_time=None)
+        response = await self.client.post("/api/ga-personal/templates", json={"definition": d})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual((await self.client.get("/api/ga-personal/templates")).json(), [])
+
     async def test_weekday_api_excludes_weekend_duties(self):
         d = definition(); d.update(frequency="weekly", weekdays=[5, 6])
         await self.add_template(d); await self.generate()

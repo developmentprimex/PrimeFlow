@@ -49,7 +49,7 @@ export default function GaPersonalPage() {
   function edit(row?: GaTemplate) {
     setError(""); setQuick(null)
     setEditing(row || null)
-    const d = row?.definition || emptyDefinition(workspace!.person_key)
+    const d = row?.definition || { ...emptyDefinition(workspace!.person_key), on_date: day, enabled: true }
     setDraft({ ...d }); setStepsText(d.steps.join("\n"))
   }
 
@@ -71,10 +71,18 @@ export default function GaPersonalPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault()
     await run(async () => {
-      await request(editing ? `/templates/${editing.id}` : "/templates", { method: editing ? "PUT" : "POST", body: JSON.stringify({
+      const saved = await request<GaTemplate>(editing ? `/templates/${editing.id}` : "/templates", { method: editing ? "PUT" : "POST", body: JSON.stringify({
         definition: { ...draft, steps: stepsText.split("\n").map((s) => s.trim()).filter(Boolean) }, expected_version: editing?.version,
       }) })
-      setDraft(null); await load(); toast.success("Detyra u ruajt.")
+      setDraft(null); await load()
+      setPerson("all"); setSearch(""); setStatusFilter("all"); setGroupFilter("all")
+      if (!editing && saved.definition.enabled && saved.definition.frequency === "once" && saved.definition.on_date) {
+        setDay(saved.definition.on_date); setTab("today")
+        toast.success("Detyra u ruajt.")
+      } else {
+        setTab("templates")
+        toast.success(saved.definition.enabled ? "Përsëritja u ruajt." : "Detyra u ruajt te Përsëritjet. Aktivizoje që të shfaqet te detyrat e ditës.")
+      }
     })
   }
 
@@ -181,12 +189,12 @@ export default function GaPersonalPage() {
         {draft.assignment === "fixed" && <fieldset className="space-y-2"><legend className="text-sm">Përgjegjësit</legend><div className="flex flex-wrap gap-4">{workspace.members.map((m) => <label key={m.person_key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.assignees.includes(m.person_key)} disabled={!workspace.is_admin} onChange={(e) => setDraft({ ...draft, assignees: e.target.checked ? [...draft.assignees, m.person_key] : draft.assignees.filter((p) => p !== m.person_key) })} />{m.name}</label>)}</div></fieldset>}
         {draft.assignees.length > 1 && <label className="block space-y-1 text-sm"><span>Kryerja</span><select className={fieldClass} value={draft.completion_mode} onChange={(e) => setDraft({ ...draft, completion_mode: e.target.value as Definition["completion_mode"] })}><option value="individual">Secili e kryen veçmas</option><option value="shared">Një punë e përbashkët</option></select></label>}
         <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1 text-sm"><span>Përsëritja</span><select className={fieldClass} value={draft.frequency} onChange={(e) => setDraft({ ...draft, frequency: e.target.value as Definition["frequency"], enabled: false, weekdays: [] })}>{Object.entries(frequencies).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="space-y-1 text-sm"><span>Grupi</span><select className={fieldClass} value={draft.reminder_group} onChange={(e) => setDraft({ ...draft, reminder_group: e.target.value as Definition["reminder_group"] })}>{Object.entries(groups).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></div>
-        <div className="grid gap-3 sm:grid-cols-2">{draft.frequency === "once" && <label className="space-y-1 text-sm"><span>Data</span><Input type="date" value={draft.on_date || ""} onChange={(e) => setDraft({ ...draft, on_date: e.target.value || null })} /></label>}<label className="space-y-1 text-sm"><span>Ora</span><Input type="time" value={draft.due_time?.slice(0, 5) || ""} onChange={(e) => setDraft({ ...draft, due_time: e.target.value || null })} /></label><label className="space-y-1 text-sm"><span>Kohëzgjatja (opsionale, minuta)</span><Input type="number" min={1} max={1440} value={draft.estimated_minutes || ""} onChange={(e) => setDraft({ ...draft, estimated_minutes: e.target.value ? Number(e.target.value) : null })} /></label></div>
+        <div className="grid gap-3 sm:grid-cols-2">{draft.frequency === "once" && <label className="space-y-1 text-sm"><span>Data</span><Input type="date" required={draft.enabled} value={draft.on_date || ""} onChange={(e) => setDraft({ ...draft, on_date: e.target.value || null })} /></label>}<label className="space-y-1 text-sm"><span>Ora (opsionale)</span><Input type="time" value={draft.due_time?.slice(0, 5) || ""} onChange={(e) => setDraft({ ...draft, due_time: e.target.value || null })} /></label><label className="space-y-1 text-sm"><span>Kohëzgjatja (opsionale, minuta)</span><Input type="number" min={1} max={1440} value={draft.estimated_minutes || ""} onChange={(e) => setDraft({ ...draft, estimated_minutes: e.target.value ? Number(e.target.value) : null })} /></label></div>
         {["weekly", "near_daily", "school_day"].includes(draft.frequency) && <fieldset><legend className="mb-2 text-sm">Ditët</legend><div className="flex flex-wrap gap-3">{["Hën", "Mar", "Mër", "Enj", "Pre", "Sht", "Die"].map((label, i) => <label key={i} className="flex items-center gap-1 text-sm"><input type="checkbox" disabled={draft.frequency === "weekly" && i < 5} checked={draft.weekdays.includes(i)} onChange={(e) => setDraft({ ...draft, weekdays: e.target.checked ? [...draft.weekdays, i] : draft.weekdays.filter((v) => v !== i) })} />{label}</label>)}</div></fieldset>}
         <label className="block space-y-1 text-sm"><span>Hapat ndihmës (një për rresht)</span><Textarea rows={4} value={stepsText} onChange={(e) => setStepsText(e.target.value)} /></label>
         {!!draft.schedule_hints?.length && <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground"><p className="mb-1 font-medium">Orari nga materiali burimor — për konfirmim</p>{draft.schedule_hints.map((hint, i) => <p key={i}>{(hint.suggested_start_time || hint.start_time)?.slice(0, 5)}{(hint.suggested_end_time || hint.end_time) ? `–${(hint.suggested_end_time || hint.end_time)!.slice(0, 5)}` : ""} {hint.notes}</p>)}</div>}
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.readiness === "ready_after_setup"} onChange={(e) => setDraft({ ...draft, readiness: e.target.checked ? "ready_after_setup" : "needs_confirmation", enabled: false })} />Udhëzimet janë të konfirmuara</label>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />Krijo detyrat sipas kësaj përsëritjeje</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />{draft.frequency === "once" ? "Shto te detyrat e datës" : "Krijo detyrat sipas kësaj përsëritjeje"}</label>
         <p className="text-xs text-muted-foreground">Tiku vlen vetëm për ditën ose periudhën e detyrës. Hapat janë ndihmë; nuk duhen shënuar një nga një.</p>
         <Button type="submit" disabled={busy}>Ruaje detyrën</Button>
       </form>}
