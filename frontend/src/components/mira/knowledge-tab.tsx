@@ -102,7 +102,7 @@ export function KnowledgeTab({ canManage }: { canManage: boolean }) {
       )}
 
       {draft && (
-        <fieldset disabled={busy} className="mt-4 max-w-3xl space-y-3 rounded-lg border p-4">
+        <fieldset disabled={busy} className="mt-4 space-y-3 rounded-lg border p-4">
           <div className="flex flex-wrap gap-2">
             <Input aria-label="Titulli" placeholder="Titulli, p.sh. Rregullorja e 1H" value={draft.title} maxLength={200}
               onChange={(e) => setDraft({ ...draft, title: e.target.value })} className="min-w-[240px] flex-1" />

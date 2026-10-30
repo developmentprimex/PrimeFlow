@@ -92,11 +92,7 @@ export function NotesTab() {
 
   return (
     <section className="mt-6 rounded-xl border bg-background p-4 shadow-sm md:p-6" aria-label="Shënimet e Mira-s">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="font-semibold">Shënimet e Mira-s <span className="ml-1 text-sm font-normal text-muted-foreground">({notes.length})</span></h2>
-          <p className="mt-1 text-sm text-muted-foreground">Shënimet janë të ndara sipas takimit. Zgjidh cilat të shfaqen edhe në PX Notes.</p>
-        </div>
+      <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
         <Button type="button" variant="outline" size="sm" disabled={loading || sharing.size > 0} onClick={() => setReload(value => value + 1)}>
           <RefreshCw className={cn("size-4", loading && "animate-spin")} /> Rifresko
         </Button>

@@ -140,6 +140,7 @@ export function TaskEditDialog({
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [oneHReportSlot, setOneHReportSlot] = React.useState<string>(ONE_H_REPORT_SLOT_NONE_VALUE)
   const [confirmationAssigneeId, setConfirmationAssigneeId] = React.useState("")
+  const [isRepetitive, setIsRepetitive] = React.useState(false)
   const [skillCategory, setSkillCategory] = React.useState<SkillCategory | null>(null)
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [saving, setSaving] = React.useState(false)
@@ -156,6 +157,7 @@ export function TaskEditDialog({
     setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setOneHReportSlot(getOneHReportSlotValue(task.one_h_report_slot))
     setConfirmationAssigneeId(task.confirmation_assignee_id || "")
+    setIsRepetitive(Boolean(task.is_repetitive))
     setSkillCategory(task.skill_category || null)
   }, [task])
 
@@ -251,6 +253,7 @@ export function TaskEditDialog({
         ...(nextStartDate !== currentStartDate ? { start_date: nextStartDate } : {}),
         ...(nextDueDate !== currentDueDate ? { due_date: nextDueDate } : {}),
         ...(nextFinishPeriod !== currentFinishPeriod ? { finish_period: nextFinishPeriod } : {}),
+        ...(isRepetitive !== Boolean(task.is_repetitive) ? { is_repetitive: isRepetitive } : {}),
         ...(skillCategory !== (task.skill_category || null) ? { skill_category: skillCategory } : {}),
         ...(nextOneHReportSlot !== currentOneHReportSlot ? { one_h_report_slot: nextOneHReportSlot } : {}),
         ...(isFastTask(task) && fastTaskType !== currentFastTaskType
@@ -307,6 +310,7 @@ export function TaskEditDialog({
   }, [
     apiFetch,
     confirmationAssigneeId,
+    isRepetitive,
     description,
     dueDate,
     fastTaskType,
@@ -370,6 +374,10 @@ export function TaskEditDialog({
             ) : null}
 
             <div className="md:col-span-2">
+              <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                <input type="checkbox" checked={isRepetitive} onChange={(event) => setIsRepetitive(event.target.checked)} disabled={saving} />
+                <span className="text-sm font-medium">Detyrë e përsëritur</span>
+              </label>
               <TaskSkillField value={skillCategory} onChange={setSkillCategory} disabled={saving} />
             </div>
 

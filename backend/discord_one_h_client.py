@@ -47,7 +47,7 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
     view = discord.ui.View(timeout=None)
     if item:
         item_id = uuid.UUID(item['id']).hex
-        text += f'{ui.icon(item["status"])} **{discord.utils.escape_markdown(ui.label(item["title"], 180))}**\n'
+        text += f'{ui.icon(item["status"])} **{discord.utils.escape_markdown(ui.heading(item))}**\n'
         text += f'Start: {approvals.date_text(item.get("start_date"))} · Due: {approvals.date_text(item.get("due_date"))}\n'
         text += '\n' + discord.utils.escape_markdown(item['question'][:400])
         if item.get('answer'):
@@ -64,7 +64,7 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
                  'WAITING': 'Raportimi ka pyetje pa përgjigje.'}[data['state']]
         text += '\nPërgjigjet i gjen te Mira → Takimet 1H.'
         for done in [t for t in data['tasks'] if t['status'] == 'DONE'][:5]:
-            text += '\n✅ ' + discord.utils.escape_markdown(ui.label(done['title'], 100)) + ' · E kryer'
+            text += '\n✅ ' + discord.utils.escape_markdown(ui.heading(done)) + ' · E kryer'
         view.add_item(discord.ui.Button(label='💬 Koment', custom_id=f'pf:1h:{rid}:next:answer',
                                        style=discord.ButtonStyle.primary, row=0))
     if join_url:
@@ -76,9 +76,12 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
     pages = max(1, (len(choices) + 24) // 25)
     next_page = max(0, min(next_page, pages - 1))
     chosen_ids = {t['id'] for t in data['next'].get('selected_tasks', [])}
-    groups = {'CURRENT': 'Vazhdo aktualen', 'LATER': 'E planifikuar më pas', 'UNSTARTED': 'Pa progres'}
-    options = [discord.SelectOption(label=ui.label(q['title'], 90), value=q['id'], default=q['id'] in chosen_ids,
-        emoji=ui.icon(q['status']), description=f'{groups[q["group"]]} · {q["slot"]}'[:100])
+    groups = {'CURRENT': 'Vazhdo aktualen', 'LATER': 'E planifikuar më pas', 'UNSTARTED': 'Pa progres',
+              'UNSCHEDULED': 'Bllok / Personale'}
+    options = [discord.SelectOption(label=ui.label(ui.heading(q), 90), value=q['id'], default=q['id'] in chosen_ids,
+        emoji=ui.icon(q['status']), description=(q.get('task_type', '1H') +
+            (' · ' + groups[q['group']] if q['group'] != 'UNSCHEDULED' else '') +
+            (f' · {q["slot"]}' if q.get('slot') else ''))[:100])
         for q in choices[next_page * 25:(next_page + 1) * 25]]
     if options:
         text += '\nZgjidh një ose disa detyra; zgjedhjet ruhen menjëherë.'

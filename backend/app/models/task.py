@@ -96,6 +96,7 @@ class Task(Base):
     original_due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    is_repetitive: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_deadline_important: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_bllok: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_1h_report: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

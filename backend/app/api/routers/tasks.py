@@ -990,6 +990,7 @@ def _task_to_out(
         late_days=late_days,
         moved_days=moved_days,
         completed_at=task.completed_at,
+        is_repetitive=bool(task.is_repetitive),
         is_deadline_important=task.is_deadline_important,
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
@@ -1172,6 +1173,7 @@ async def _create_pcm_control_for_product(
         progress_percentage=0,
         start_date=product_task.start_date,
         due_date=None,
+        is_repetitive=bool(product_task.is_repetitive),
         is_deadline_important=product_task.is_deadline_important,
     )
     db.add(control)
@@ -1732,6 +1734,7 @@ async def list_task_summaries_by_ga_notes(
             Task.finish_period,
             Task.start_date,
             Task.due_date,
+            Task.is_repetitive,
             Task.is_deadline_important,
             Task.is_bllok,
             Task.is_1h_report,
@@ -1763,6 +1766,7 @@ async def list_task_summaries_by_ga_notes(
             finish_period=task.finish_period,
             start_date=task.start_date,
             due_date=task.due_date,
+            is_repetitive=bool(task.is_repetitive),
             is_deadline_important=task.is_deadline_important,
             is_bllok=task.is_bllok,
             is_1h_report=task.is_1h_report,
@@ -2271,6 +2275,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                     due_date=due_date_value,
                     original_due_date=original_due_date_value,
                     completed_at=completed_at,
+                    is_repetitive=bool(payload.is_repetitive),
                     is_deadline_important=payload.is_deadline_important or False,
                     is_bllok=payload.is_bllok or False,
                     is_1h_report=payload.is_1h_report or False,
@@ -2407,6 +2412,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                             due_date=due_date_value,
                             original_due_date=original_due_date_value,
                             completed_at=completed_at,
+                            is_repetitive=bool(payload.is_repetitive),
                             is_deadline_important=payload.is_deadline_important or False,
                             is_bllok=payload.is_bllok or False,
                             is_1h_report=payload.is_1h_report or False,
@@ -2526,6 +2532,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 due_date=due_date_value,
                 original_due_date=original_due_date_value,
                 completed_at=completed_at,
+                is_repetitive=bool(payload.is_repetitive),
                 is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
@@ -2634,6 +2641,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 due_date=due_date_value,
                 original_due_date=original_due_date_value,
                 completed_at=completed_at,
+                is_repetitive=bool(payload.is_repetitive),
                 is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
@@ -2739,6 +2747,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
         due_date=due_date_value,
         original_due_date=original_due_date_value,
         completed_at=completed_at,
+        is_repetitive=bool(payload.is_repetitive),
         is_deadline_important=payload.is_deadline_important or False,
         is_bllok=payload.is_bllok or False,
         is_1h_report=payload.is_1h_report or False,
@@ -3014,6 +3023,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "is_active": task.is_active,
+        "is_repetitive": bool(task.is_repetitive),
         "is_deadline_important": task.is_deadline_important,
     }
     old_assignee_ids = set((await db.execute(
@@ -3469,6 +3479,8 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     if payload.completed_at is not None:
         task.completed_at = payload.completed_at
     _sync_due_date_to_done_day(task)
+    if payload.is_repetitive is not None:
+        task.is_repetitive = payload.is_repetitive
     if payload.is_deadline_important is not None:
         task.is_deadline_important = payload.is_deadline_important
     if payload.is_bllok is not None:
@@ -3663,6 +3675,8 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             shared_values["due_date"] = task.due_date
         if start_date_set:
             shared_values["start_date"] = task.start_date
+        if payload.is_repetitive is not None:
+            shared_values["is_repetitive"] = task.is_repetitive
         if payload.is_deadline_important is not None:
             shared_values["is_deadline_important"] = task.is_deadline_important
         if payload.priority is not None:
@@ -3763,6 +3777,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
                         due_date=task.due_date,
                         original_due_date=task.original_due_date,
                         completed_at=None,
+                        is_repetitive=bool(task.is_repetitive),
                         is_deadline_important=task.is_deadline_important,
                         is_bllok=task.is_bllok,
                         is_1h_report=task.is_1h_report,
@@ -3829,6 +3844,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "is_active": task.is_active,
+        "is_repetitive": bool(task.is_repetitive),
         "is_deadline_important": task.is_deadline_important,
         "one_h_report_slot": task.one_h_report_slot,
     }

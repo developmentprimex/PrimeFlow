@@ -37,6 +37,16 @@ def interaction(data, action):
 
 @unittest.skipUnless(AVAILABLE, 'Install requirements-discord.txt')
 class CardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unslotted_block_and_personal_options_render_without_fake_time(self):
+        tasks = [{'id': str(uuid.uuid4()), 'title': name, 'status': status, 'one_h_report_slot': None, flag: True}
+            for name, status, flag in [('Bllok', 'IN_PROGRESS', 'is_bllok'), ('Personale', 'TODO', 'is_personal')]]
+        data = service.presentation(SimpleNamespace(id=uuid.uuid4(), day=AT.date(), bucket='10:00',
+            one_h_report=service.refresh(service.snapshot([], AT), tasks)))
+        _, view = client.continuation_card(data)
+        menu = next(c for c in view.children if isinstance(c, discord.ui.Select))
+        self.assertEqual({o.value for o in menu.options}, {t['id'] for t in tasks})
+        self.assertEqual({o.description for o in menu.options}, {'Bllok', 'Personalisht'})
+
     async def test_task_dates_are_displayed_between_title_and_question(self):
         data = data_of('IN_PROGRESS', due_date='2026-10-30T00:00:00+00:00')
         data['current']['start_date'] = '2026-10-26T00:00:00+00:00'
@@ -75,6 +85,7 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(any(isinstance(c, discord.ui.Select) for c in view.children))
             self.assertNotIn('Notes të reja', text)
             self.assertNotIn('Pika e parë?', text)
+            self.assertNotIn('Pika e parë', text)
             self.assertLessEqual(len(text), 2000)
             for control in view.children:
                 if control.custom_id:

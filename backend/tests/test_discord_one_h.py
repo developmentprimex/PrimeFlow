@@ -42,6 +42,30 @@ def display(report):
 
 
 class QuestionTests(unittest.TestCase):
+    def test_continuation_types_use_real_flags_including_r1(self):
+        tasks = [task('TODO', '10:00', is_r1=True), task('TODO', None, is_bllok=True),
+                 task('IN_PROGRESS', None, is_personal=True)]
+        types = {row['id']: row['task_type'] for row in service.next_options(tasks, '10:00')}
+        self.assertEqual([types[t['id']] for t in tasks], ['R1', 'Bllok', 'Personalisht'])
+
+    def test_block_and_personal_without_slot_are_valid_continuations_only(self):
+        from copy import deepcopy
+        block = task('IN_PROGRESS', None, is_bllok=True)
+        personal = task('TODO', None, is_personal=True)
+        ordinary = task('TODO', None)
+        excluded = [task('DONE', None, is_bllok=True), task('WAITING_CLIENT', None, is_personal=True),
+                    task('TODO', None, is_bllok=True, is_active=False)]
+        tasks = [block, personal, ordinary, *excluded, block]
+        original = deepcopy(tasks)
+        report = service.refresh(service.snapshot([], AT), tasks)
+        self.assertEqual(report['tasks'], [])
+        self.assertEqual({t['id'] for t in report['next_options']}, {block['id'], personal['id']})
+        self.assertTrue(all(t['group'] == 'UNSCHEDULED' and t['slot'] is None for t in report['next_options']))
+        selected = service.save_next_choices(report, [block['id'], personal['id']], 'unslotted', AT,
+            options_key=service.next_options_key(report))
+        self.assertEqual({t['id'] for t in selected['next']['selected_tasks']}, {block['id'], personal['id']})
+        self.assertEqual(tasks, original)
+
     def test_live_updates_keep_original_answers_and_plan(self):
         original = task('IN_PROGRESS', title='Titulli i vjetër')
         report = service.save_answer(service.snapshot([original], AT), original['id'], 'Vazhdoj', '', '1', AT)
@@ -137,7 +161,7 @@ class QuestionTests(unittest.TestCase):
                 self.assertEqual(report['tasks'], [])
                 self.assertEqual(report['next_options'], [{
                     'id': ongoing['id'], 'title': ongoing['title'], 'slot': '10:00',
-                    'status': 'IN_PROGRESS', 'group': 'CURRENT'}])
+                    'status': 'IN_PROGRESS', 'group': 'CURRENT', 'task_type': '1H'}])
                 selected = service.save_next_choices(report, [ongoing['id']], 'carry-forward', AT,
                     options_key=service.next_options_key(report))
                 self.assertEqual(selected['next']['selected_tasks'][0]['id'], ongoing['id'])
