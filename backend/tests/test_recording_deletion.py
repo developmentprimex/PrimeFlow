@@ -17,15 +17,20 @@ class RecordingDeletionTests(unittest.IsolatedAsyncioTestCase):
         db.execute.return_value.scalar_one_or_none.return_value = row
         return db
 
-    async def test_staff_including_creator_cannot_delete(self):
-        db = self.database(None)
-        with self.assertRaises(HTTPException) as error:
-            await delete_recording(uuid.uuid4(), db, SimpleNamespace(role=UserRole.STAFF))
-        self.assertEqual(error.exception.status_code, 403)
-        db.execute.assert_not_called()
+    async def test_non_admin_including_creator_cannot_delete(self):
+        for role in (UserRole.STAFF, UserRole.MANAGER):
+            with self.subTest(role=role):
+                user = SimpleNamespace(id=uuid.uuid4(), role=role)
+                row = SimpleNamespace(id=uuid.uuid4(), created_by=user.id, status='READY', deleted_at=None)
+                db = self.database(row)
+                with self.assertRaises(HTTPException) as error:
+                    await delete_recording(row.id, db, user)
+                self.assertEqual(error.exception.status_code, 403)
+                db.execute.assert_not_called()
+                db.commit.assert_not_awaited()
 
-    async def test_admin_and_manager_delete_with_audit(self):
-        for role in (UserRole.ADMIN, UserRole.MANAGER):
+    async def test_admin_deletes_with_audit(self):
+        for role in (UserRole.ADMIN,):
             row = SimpleNamespace(id=uuid.uuid4(), title='Takimi', status='READY', deleted_at=None)
             db = self.database(row)
             with patch('app.api.routers.meeting_recordings.audit') as audit:

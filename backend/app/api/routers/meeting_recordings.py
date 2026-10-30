@@ -140,8 +140,8 @@ async def update_recording(recording_id: uuid.UUID, payload: RecordingUpdate,
 
 @router.delete("/{recording_id}", status_code=204)
 async def delete_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    if not management(user):
-        raise HTTPException(403, "Only admins and managers can delete recordings")
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Only admins can delete recordings")
     row = (await db.execute(select(Recording).where(Recording.id == recording_id)
                             .with_for_update())).scalar_one_or_none()
     if row is None:
