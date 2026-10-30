@@ -34,6 +34,26 @@ def database(*results):
 
 
 class TestRepetitiveTaskReport(unittest.IsolatedAsyncioTestCase):
+    async def test_frequency_comes_only_from_system_template(self):
+        for frequency, expected in (
+            ("DAILY", "Daily"), ("WEEKLY", "Weekly"), ("MONTHLY", "Monthly"),
+            ("YEARLY", "Yearly"), ("3_MONTHS", "Every 3 months"), ("6_MONTHS", "Every 6 months"),
+        ):
+            with self.subTest(frequency=frequency):
+                template = SystemTaskTemplate(id=uuid.uuid4(), title="System", frequency=frequency)
+                task = Task(id=uuid.uuid4(), title="Ordinary")
+                rows = await repetitive_task_report_rows(database([template], [task], [], []))
+                self.assertEqual(rows[0][-2:], ["SYS", expected])
+                self.assertEqual(rows[1][-2:], ["", ""])
+
+    async def test_titles_hide_edit_and_done_markers_but_keep_the_text(self):
+        title = "First\n[[added]]New [[done]]finished[[/done]][[/added]]\n[done]]Legacy[/done]]"
+        template = SystemTaskTemplate(id=uuid.uuid4(), title=title)
+        task = Task(id=uuid.uuid4(), title=title)
+        rows = await repetitive_task_report_rows(database([template], [task], [], []))
+        self.assertEqual(rows, [["First\nNew finished\nLegacy", "-", "-", "SYS", ""],
+                                ["First\nNew finished\nLegacy", "-", "-", "", ""]])
+
     async def test_sources_merge_people_and_departments_once_per_logical_task(self):
         dev, pcm = uuid.uuid4(), uuid.uuid4()
         alice, bob = uuid.uuid4(), uuid.uuid4()
@@ -60,9 +80,9 @@ class TestRepetitiveTaskReport(unittest.IsolatedAsyncioTestCase):
         db = database([template], tasks, slots, [(separate.id, alice)], users, departments)
         rows = await repetitive_task_report_rows(db)
         self.assertEqual(len(rows), 5)
-        self.assertEqual(rows[0], ["System work", "Alice Example, Bob Example", "DEV / PCM", "System"])
-        self.assertEqual(rows.count(["Shared work", "Alice Example, Bob Example", "DEV / PCM", "Jo system"]), 3)
-        self.assertIn(["Shared work", "Alice Example", "DEV", "Jo system"], rows)
+        self.assertEqual(rows[0], ["System work", "Alice Example, Bob Example", "DEV / PCM", "SYS", ""])
+        self.assertEqual(rows.count(["Shared work", "Alice Example, Bob Example", "DEV / PCM", "", ""]), 3)
+        self.assertIn(["Shared work", "Alice Example", "DEV", "", ""], rows)
         queries = [str(call.args[0]) for call in db.execute.call_args_list]
         self.assertIn("system_task_templates.is_repetitive IS true", queries[0])
         self.assertIn("system_task_templates.approval_status =", queries[0])
@@ -75,7 +95,7 @@ class TestRepetitiveTaskReport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await repetitive_task_report_rows(database([], [])), [])
         template = SystemTaskTemplate(id=uuid.uuid4(), title="All staff", scope="ALL")
         self.assertEqual(await repetitive_task_report_rows(database([template], [], [])),
-                         [["All staff", "All", "ALL", "System"]])
+                         [["All staff", "All", "ALL", "SYS", ""]])
 
     async def test_legacy_assignees_and_multiple_task_assignees(self):
         alice, bob = uuid.uuid4(), uuid.uuid4()
@@ -84,12 +104,12 @@ class TestRepetitiveTaskReport(unittest.IsolatedAsyncioTestCase):
         users = [User(id=alice, full_name="Alice"), User(id=bob, full_name="Bob")]
         db = database([template], [task], [], [(task.id, alice), (task.id, bob)], users)
         rows = await repetitive_task_report_rows(db)
-        self.assertEqual(rows, [["Legacy", "Alice, Bob", "-", "System"],
-                                ["Project work", "Alice, Bob", "-", "Jo system"]])
+        self.assertEqual(rows, [["Legacy", "Alice, Bob", "-", "SYS", ""],
+                                ["Project work", "Alice, Bob", "-", "", ""]])
 
     async def test_excel_design_numbering_text_and_empty_export(self):
-        for rows in ([], [["=A1", "Alice, Bob", "DEV / PCM", "System"],
-                          ["Long title " * 20, "Alice", "DEV", "Jo system"]]):
+        for rows in ([], [["=A1", "Alice, Bob", "DEV / PCM", "SYS", ""],
+                          ["Long title " * 20, "Alice", "DEV", "", ""]]):
             for role in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF):
                 with self.subTest(rows=len(rows), role=role):
                     user = SimpleNamespace(role=role, full_name="Test User", username="test")
@@ -98,15 +118,15 @@ class TestRepetitiveTaskReport(unittest.IsolatedAsyncioTestCase):
                         response = await export_repetitive_tasks_xlsx(db=database(), user=user)
                     content = b"".join([chunk async for chunk in response.body_iterator])
                     ws = load_workbook(io.BytesIO(content)).active
-                    self.assertEqual([cell.value for cell in ws[5]], ["NR", "TITULLI", "PERSONAT", "DEPARTAMENTI", "TYPE"])
+                    self.assertEqual([cell.value for cell in ws[5]], ["NR", "TITLE", "ASSIGNEE", "DEP", "SOURCE", "FREQUENCY"])
                     self.assertEqual(ws["A3"].value, "DETYRA TË PËRSËRITURA")
                     self.assertEqual(ws["B5"].fill.fgColor.rgb, "00D9D9D9")
                     self.assertEqual(ws["B5"].border.bottom.style, "thin")
-                    self.assertEqual(ws.auto_filter.ref, f"A5:E{5 + len(rows)}")
+                    self.assertEqual(ws.auto_filter.ref, f"A5:F{5 + len(rows)}")
                     self.assertEqual(ws.freeze_panes, "C6")
                     self.assertEqual(ws.page_setup.fitToHeight, 0)
                     if rows:
-                        self.assertEqual(list(ws.values)[5:], [(index, *row) for index, row in enumerate(rows, 1)])
+                        self.assertEqual(list(ws.values)[5:], [(index, *(value if value != "" else None for value in row)) for index, row in enumerate(rows, 1)])
                         self.assertEqual(ws["B6"].data_type, "s")
                         self.assertTrue(ws["B7"].alignment.wrap_text)
                         self.assertGreater(ws.row_dimensions[7].height, 30)

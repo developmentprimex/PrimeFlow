@@ -11,6 +11,7 @@ from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssi
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
+from app.services.note_markup import parse_marked_note_content
 
 
 def _task_group_key(task: Task) -> tuple[str, object]:
@@ -97,7 +98,12 @@ async def repetitive_task_report_rows(db: AsyncSession) -> list[list[str]]:
             people = "All"
         if department == "-" and template.scope in {SystemTaskScope.ALL.value, SystemTaskScope.GA.value}:
             department = template.scope
-        rows.append([template.title, people, department, "System"])
+        frequency = getattr(template.frequency, "value", template.frequency) or ""
+        frequency_label = {
+            "DAILY": "Daily", "WEEKLY": "Weekly", "MONTHLY": "Monthly", "YEARLY": "Yearly",
+            "3_MONTHS": "Every 3 months", "6_MONTHS": "Every 6 months",
+        }.get(frequency, frequency)
+        rows.append([parse_marked_note_content(template.title).text, people, department, "SYS", frequency_label])
 
     grouped = {}
     for task in tasks:
@@ -108,5 +114,5 @@ async def repetitive_task_report_rows(db: AsyncSession) -> list[list[str]]:
             group["departments"].add(task.department_id)
     for group in grouped.values():
         people, department = labels(group["people"], group["departments"])
-        rows.append([group["title"], people, department, "Jo system"])
-    return sorted(rows, key=lambda row: (row[3] != "System", row[0].casefold(), row[1].casefold()))
+        rows.append([parse_marked_note_content(group["title"]).text, people, department, "", ""])
+    return sorted(rows, key=lambda row: (row[3] != "SYS", row[0].casefold(), row[1].casefold()))

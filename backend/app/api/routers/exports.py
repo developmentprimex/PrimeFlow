@@ -4938,13 +4938,13 @@ async def export_repetitive_tasks_xlsx(
     wb = Workbook()
     ws = wb.active
     ws.title = "Repetitive Tasks"
-    ws.merge_cells("A3:E3")
+    ws.merge_cells("A3:F3")
     ws["A3"] = "DETYRA TË PËRSËRITURA"
     ws["A3"].font = Font(name="Arial", bold=True, size=16)
     ws["A3"].alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[3].height = 26
-    headers = ["NR", "TITULLI", "PERSONAT", "DEPARTAMENTI", "TYPE"]
-    widths = [6, 70, 40, 25, 18]
+    headers = ["NR", "TITLE", "ASSIGNEE", "DEP", "SOURCE", "FREQUENCY"]
+    widths = [6, 70, 40, 25, 18, 22]
     thin = Side(style="thin", color="000000")
     for col, (header, width) in enumerate(zip(headers, widths), 1):
         cell = ws.cell(5, col, header)
@@ -4971,9 +4971,9 @@ async def export_repetitive_tasks_xlsx(
         ws.row_dimensions[row_num].height = min(409, max(30, line_count * 16 + 8))
     last_row = max(5, ws.max_row)
     ws.freeze_panes = "C6"
-    ws.auto_filter.ref = f"A5:E{last_row}"
+    ws.auto_filter.ref = f"A5:F{last_row}"
     ws.print_title_rows = "5:5"
-    ws.print_area = f"A3:E{last_row}"
+    ws.print_area = f"A3:F{last_row}"
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4

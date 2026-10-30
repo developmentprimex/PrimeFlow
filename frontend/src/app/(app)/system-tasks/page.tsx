@@ -253,51 +253,6 @@ function isGlobalScopeValue(value: string) {
   return value === ALL_DEPARTMENTS_VALUE || value === GA_DEPARTMENTS_VALUE
 }
 
-function parseCSV(text: string): string[][] {
-  const rows: string[][] = []
-  let row: string[] = []
-  let field = ""
-  let inQuotes = false
-
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i]
-    if (inQuotes) {
-      if (char === "\"") {
-        const next = text[i + 1]
-        if (next === "\"") {
-          field += "\""
-          i += 1
-        } else {
-          inQuotes = false
-        }
-      } else {
-        field += char
-      }
-    } else if (char === "\"") {
-      inQuotes = true
-    } else if (char === ",") {
-      row.push(field)
-      field = ""
-    } else if (char === "\n") {
-      row.push(field)
-      if (row.some((cell) => cell.trim().length)) rows.push(row)
-      row = []
-      field = ""
-    } else if (char !== "\r") {
-      field += char
-    }
-  }
-
-  row.push(field)
-  if (row.some((cell) => cell.trim().length)) rows.push(row)
-  return rows
-}
-
-function csvEscape(value: unknown): string {
-  const str = String(value ?? "")
-  return /[",\n]/.test(str) ? `"${str.replace(/"/g, "\"\"")}"` : str
-}
-
 function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
   const normalized = typeof value === "string" ? value.toUpperCase() : null
   if (normalized === "URGENT") return "HIGH"
@@ -569,7 +524,6 @@ export function SystemTasksView({
   const [frequencyFilters, setFrequencyFilters] = React.useState<SystemTaskFrequency[]>([])
   const [frequencyMultiSelect, setFrequencyMultiSelect] = React.useState(false)
   const [priorityFilters, setPriorityFilters] = React.useState<TaskPriority[]>([])
-  const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const [searchQuery, setSearchQuery] = React.useState("")
   const [printing, setPrinting] = React.useState(false)
@@ -1739,7 +1693,6 @@ export function SystemTasksView({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium text-slate-900">{template.title}</div>
-                      {template.is_repetitive && <Badge variant="outline">Detyrë e përsëritur / Mund të automatizohet</Badge>}
                       <Badge
                         variant="outline"
                         className={cn("border text-[11px]", PRIORITY_BADGE_STYLES[priorityValue])}
@@ -1860,76 +1813,6 @@ export function SystemTasksView({
       : [...current, value]
     next.sort((a, b) => Number(a) - Number(b))
     setter(next)
-  }
-
-  const exportTemplatesCSV = (mode: "all" | "active" | "inactive") => {
-    const rows = templates.filter((template) => {
-      if (mode === "active") return template.is_active
-      if (mode === "inactive") return !template.is_active
-      return true
-    })
-    const header = [
-      "Title",
-      "Description",
-      "Department",
-      "DepartmentCode",
-      "Frequency",
-      "Priority",
-      "FinishPeriod",
-      "DayOfWeek",
-      "DayOfMonth",
-      "MonthOfYear",
-      "DefaultAssignee",
-      "ZV1",
-      "ZV2",
-      "Active",
-    ]
-    const dayOfMonthLabel = (value?: number | null) => {
-      if (value == null) return ""
-      if (value === 0) return "end_of_month"
-      if (value === -1) return "first_working_day"
-      return String(value)
-    }
-    const dayOfWeekLabel = (template: SystemTaskTemplateDefinition) => {
-      const days =
-        template.days_of_week && template.days_of_week.length
-          ? template.days_of_week
-          : template.day_of_week != null
-            ? [template.day_of_week]
-            : []
-      return days.join("|")
-    }
-
-    const body = rows.map((template) => {
-      const assignee = template.default_assignee_id ? userMap.get(template.default_assignee_id) : null
-      const zv1 = template.zv1_user_id ? userMap.get(template.zv1_user_id) : null
-      const zv2 = template.zv2_user_id ? userMap.get(template.zv2_user_id) : null
-      const departmentLabel = templateDepartmentLabel(template)
-      const departmentCode = departmentLabel === "-" ? "" : departmentLabel
-      return [
-        template.title,
-        template.description || "",
-        departmentLabel,
-        departmentCode,
-        template.frequency,
-        normalizePriority(template.priority),
-        template.finish_period || "",
-        dayOfWeekLabel(template),
-        dayOfMonthLabel(template.day_of_month),
-        template.month_of_year ?? "",
-        assignee ? assignee.username || assignee.email || assignee.full_name || "" : "",
-        zv1 ? zv1.username || zv1.email || zv1.full_name || "" : "",
-        zv2 ? zv2.username || zv2.email || zv2.full_name || "" : "",
-        template.is_active ? "true" : "false",
-      ]
-        .map(csvEscape)
-        .join(",")
-    })
-    const blob = new Blob([header.join(",") + "\n" + body.join("\n")], { type: "text/csv" })
-    const link = document.createElement("a")
-    link.href = URL.createObjectURL(blob)
-    link.download = `system_task_templates_${mode}.csv`
-    link.click()
   }
 
   const exportTemplatesExcel = async () => {
@@ -2495,245 +2378,6 @@ export function SystemTasksView({
     sections,
   ])
 
-  const importTemplatesFromFile = async (file: File) => {
-    if (!canCreate) return
-    const text = await file.text()
-    const rows = parseCSV(text)
-    if (!rows.length) return
-
-    const header = rows[0].map((cell) => cell.trim().toLowerCase())
-    const hasHeader = header.includes("title") || header.includes("frequency")
-    if (!hasHeader) {
-      toast.error("CSV import requires a header row with ZV1 and ZV2 columns.")
-      return
-    }
-    const dataRows = hasHeader ? rows.slice(1) : rows
-    const noHeaderHasPriority = !hasHeader && (dataRows[0]?.length ?? 0) >= 11
-    const noHeaderHasFinishPeriod = !hasHeader && (dataRows[0]?.length ?? 0) >= 12
-
-    const getIndex = (name: string, aliases: string[] = []) => {
-      const target = [name, ...aliases]
-      return header.findIndex((cell) => target.includes(cell.replace(/\s+/g, "")))
-    }
-
-    const idxTitle = hasHeader ? getIndex("title") : 0
-    const idxDescription = hasHeader ? getIndex("description") : 1
-    const idxDepartment = hasHeader ? getIndex("department", ["departmentcode", "department_code"]) : 2
-    const idxFrequency = hasHeader ? getIndex("frequency") : 3
-    const idxPriority = hasHeader ? getIndex("priority") : noHeaderHasPriority ? 4 : -1
-    const idxFinishPeriod = hasHeader
-      ? getIndex("finishperiod", ["finish_period", "finish"])
-      : noHeaderHasFinishPeriod
-        ? 5
-        : -1
-    const idxDayOfWeek = hasHeader
-      ? getIndex("dayofweek", ["day_of_week"])
-      : noHeaderHasFinishPeriod
-        ? 6
-        : noHeaderHasPriority
-          ? 5
-          : 4
-    const idxDayOfMonth = hasHeader
-      ? getIndex("dayofmonth", ["day_of_month"])
-      : noHeaderHasFinishPeriod
-        ? 7
-        : noHeaderHasPriority
-          ? 6
-          : 5
-    const idxMonthOfYear = hasHeader
-      ? getIndex("monthofyear", ["month_of_year"])
-      : noHeaderHasFinishPeriod
-        ? 8
-        : noHeaderHasPriority
-          ? 7
-          : 6
-    const idxAssignee = hasHeader
-      ? getIndex("defaultassignee", ["assignee"])
-      : noHeaderHasFinishPeriod
-        ? 9
-        : noHeaderHasPriority
-          ? 8
-          : 7
-    const idxZv1 = getIndex("zv1", ["zv1userid", "zv1_user_id"])
-    const idxZv2 = getIndex("zv2", ["zv2userid", "zv2_user_id"])
-    if (idxZv1 < 0 || idxZv2 < 0) {
-      toast.error("CSV import requires ZV1 and ZV2 columns.")
-      return
-    }
-    const idxActive = hasHeader
-      ? getIndex("active")
-      : noHeaderHasFinishPeriod
-        ? 10
-        : noHeaderHasPriority
-          ? 9
-          : 8
-
-    const normalize = (value: string) => value.trim().toLowerCase()
-    const frequencyForValue = (value: string): SystemTaskFrequency | null => {
-      const raw = normalize(value)
-      const upper = value.trim().toUpperCase()
-      if ((FREQUENCY_VALUES as string[]).includes(upper)) {
-        return upper as SystemTaskFrequency
-      }
-      if (raw.includes("daily") || raw.includes("every day") || raw.includes("ditore")) return "DAILY"
-      if (raw.includes("weekly") || raw.includes("every week") || raw.includes("javore")) return "WEEKLY"
-      if (raw.includes("yearly") || raw.includes("annual") || raw.includes("vjetore")) return "YEARLY"
-      if (raw.includes("3") && raw.includes("month")) return "3_MONTHS"
-      if (raw.includes("6") && raw.includes("month")) return "6_MONTHS"
-      if (raw.includes("3") && raw.includes("mujore")) return "3_MONTHS"
-      if (raw.includes("6") && raw.includes("mujore")) return "6_MONTHS"
-      if (raw.includes("monthly") || raw.includes("mujore")) return "MONTHLY"
-      return null
-    }
-
-    const priorityForValue = (value: string): TaskPriority | null => {
-      const raw = normalize(value)
-      if (!raw) return null
-      const upper = value.trim().toUpperCase()
-      if ((PRIORITY_OPTIONS as string[]).includes(upper)) {
-        return upper as TaskPriority
-      }
-      if (raw.includes("urgent") || raw.includes("critical")) return "HIGH"
-      if (raw.includes("high")) return "HIGH"
-      if (raw.includes("medium") || raw.includes("low") || raw.includes("normal")) return "NORMAL"
-      return null
-    }
-
-    const finishPeriodForValue = (value: string): TaskFinishPeriod | null => {
-      const raw = normalize(value)
-      if (!raw) return null
-      if (raw.includes("none") || raw.includes("all day") || raw.includes("allday")) return null
-      const upper = value.trim().toUpperCase()
-      if ((FINISH_PERIOD_OPTIONS as string[]).includes(upper)) {
-        return upper as TaskFinishPeriod
-      }
-      if (raw.includes("am")) return "AM"
-      if (raw.includes("pm")) return "PM"
-      return null
-    }
-
-    const dayOfWeekForValue = (value: string): number[] | null => {
-      const raw = normalize(value)
-      if (!raw) return null
-      const map: Record<string, number> = {
-        monday: 0,
-        tuesday: 1,
-        wednesday: 2,
-        thursday: 3,
-        friday: 4,
-        saturday: 5,
-        sunday: 6,
-        "e hene": 0,
-        "e marte": 1,
-        "e merkure": 2,
-        "e enjte": 3,
-        "e premte": 4,
-        "e shtune": 5,
-        "e diel": 6,
-      }
-      const parseToken = (token: string) => {
-        const cleaned = token.trim().toLowerCase()
-        if (!cleaned) return null
-        const numeric = Number(cleaned)
-        if (!Number.isNaN(numeric)) return numeric
-        return map[cleaned] ?? null
-      }
-      const segments = raw.split(/[|;,\s]+/).filter(Boolean)
-      const parsed = segments.map(parseToken).filter((day): day is number => day != null)
-      if (parsed.length) return Array.from(new Set(parsed)).sort((a, b) => a - b)
-      const single = parseToken(raw)
-      return single != null ? [single] : null
-    }
-
-    const scopeForValue = (value: string): { scope: SystemTaskScope; departmentId: string | null } => {
-      const raw = normalize(value)
-      if (!raw || raw === "all" || raw === "all departments") {
-        return { scope: "ALL", departmentId: null }
-      }
-      if (raw === "ga") {
-        return { scope: "GA", departmentId: null }
-      }
-      const byCode = departments.find((dept) => dept.code.toLowerCase() === raw)
-      if (byCode) return { scope: "DEPARTMENT", departmentId: byCode.id }
-      const byName = departments.find((dept) => dept.name.toLowerCase() === raw)
-      return { scope: "DEPARTMENT", departmentId: byName?.id ?? null }
-    }
-
-    const assigneeIdForValue = (value: string) => {
-      const raw = normalize(value)
-      if (!raw) return null
-      const byUsername = users.find((u) => (u.username || "").toLowerCase() === raw)
-      if (byUsername) return byUsername.id
-      const byEmail = users.find((u) => (u.email || "").toLowerCase() === raw)
-      if (byEmail) return byEmail.id
-      const byName = users.find((u) => (u.full_name || "").toLowerCase() === raw)
-      return byName?.id ?? null
-    }
-
-    const activeForValue = (value: string) => {
-      const raw = normalize(value)
-      if (!raw) return true
-      if (["true", "yes", "1", "active", "open"].includes(raw)) return true
-      if (["false", "no", "0", "inactive", "closed"].includes(raw)) return false
-      return true
-    }
-
-    const dayOfMonthForValue = (value: string) => {
-      const raw = normalize(value)
-      if (!raw) return null
-      if (raw.includes("first") && raw.includes("work")) return -1
-      if (raw.includes("end") && raw.includes("month")) return 0
-      const numeric = Number(raw)
-      return Number.isNaN(numeric) ? null : numeric
-    }
-
-    for (const row of dataRows) {
-      const title = row[idxTitle]?.trim()
-      if (!title) continue
-      const frequencyValue = frequencyForValue(row[idxFrequency] || "")
-      if (!frequencyValue) continue
-      const priorityValue =
-        idxPriority >= 0 ? priorityForValue(row[idxPriority] || "") : null
-      const finishPeriodValue =
-        idxFinishPeriod >= 0 ? finishPeriodForValue(row[idxFinishPeriod] || "") : null
-
-      const scopeEntry = scopeForValue(row[idxDepartment] || "")
-      const dayOfWeekValue = dayOfWeekForValue(row[idxDayOfWeek] || "")
-      const assigneeId = assigneeIdForValue(row[idxAssignee] || "")
-      const zv1UserId = assigneeIdForValue(row[idxZv1] || "")
-      const zv2UserId = assigneeIdForValue(row[idxZv2] || "")
-      if (replacementSelectionError(zv1UserId || "", zv2UserId || "", assigneeId ? [assigneeId] : [])) {
-        toast.error(`Skipped "${title}": invalid ZV1/ZV2.`)
-        continue
-      }
-      const payload = {
-        title,
-        description: row[idxDescription]?.trim() || null,
-        scope: scopeEntry.scope,
-        department_id: scopeEntry.departmentId,
-        default_assignee_id: assigneeId,
-        zv1_user_id: zv1UserId || null,
-        zv2_user_id: zv2UserId || null,
-        frequency: frequencyValue,
-        priority: priorityValue,
-        finish_period: finishPeriodValue,
-        day_of_week: dayOfWeekValue ? dayOfWeekValue[0] : null,
-        days_of_week: dayOfWeekValue,
-        day_of_month: dayOfMonthForValue(row[idxDayOfMonth] || ""),
-        month_of_year: row[idxMonthOfYear] ? Number(row[idxMonthOfYear]) : null,
-        is_active: activeForValue(row[idxActive] || ""),
-      }
-
-      await apiFetch("/system-tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-    }
-
-    await load()
-  }
-
   const effectiveHeadingTitle =
     headingTitle ?? (scopeFilter === "GA" ? "Admin System Tasks" : "System Tasks")
   const effectiveHeadingDescription =
@@ -2831,33 +2475,6 @@ export function SystemTasksView({
                     className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
                   >
                     {exportingRepetitive ? "Exporting..." : "Export Repetitive"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => exportTemplatesCSV("all")}
-                    size="sm"
-                    className="h-9 border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    Export CSV
-                  </Button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0]
-                      if (file) void importTemplatesFromFile(file)
-                      event.target.value = ""
-                    }}
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => fileInputRef.current?.click()}
-                    size="sm"
-                    className="h-9 border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    Import CSV
                   </Button>
                 </>
               ) : null}
@@ -4144,9 +3761,6 @@ export function SystemTasksView({
                                 <div className="text-[13px] sm:text-[14px] md:text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
                                   {template.title}
                                 </div>
-                                {template.is_repetitive && (
-                                  <Badge variant="outline" className="mt-1 text-[11px]">Detyrë e përsëritur / Mund të automatizohet</Badge>
-                                )}
                               </div>
 
                               <div className="truncate text-xs sm:text-sm text-slate-700 font-normal" title={departmentLabel}>
