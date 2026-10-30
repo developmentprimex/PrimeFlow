@@ -574,6 +574,7 @@ export function SystemTasksView({
   const [searchQuery, setSearchQuery] = React.useState("")
   const [printing, setPrinting] = React.useState(false)
   const [exportingExcel, setExportingExcel] = React.useState(false)
+  const [exportingRepetitive, setExportingRepetitive] = React.useState(false)
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
@@ -1958,6 +1959,31 @@ export function SystemTasksView({
     }
   }
 
+  const exportRepetitiveExcel = async () => {
+    if (exportingRepetitive) return
+    setExportingRepetitive(true)
+    try {
+      const res = await apiFetch("/exports/repetitive-tasks.xlsx")
+      if (!res.ok) {
+        toast.error("Failed to export repetitive tasks.")
+        return
+      }
+      const url = window.URL.createObjectURL(await res.blob())
+      const link = document.createElement("a")
+      link.href = url
+      link.download = "repetitive_tasks.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to export repetitive tasks", err)
+      toast.error("Failed to export repetitive tasks.")
+    } finally {
+      setExportingRepetitive(false)
+    }
+  }
+
   const handlePrint = React.useCallback(() => {
     const escapeHtml = (value: unknown) => {
       return String(value ?? "")
@@ -2795,6 +2821,16 @@ export function SystemTasksView({
                     className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
                   >
                     {exportingExcel ? "Exporting..." : "Export Excel"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void exportRepetitiveExcel()}
+                    disabled={exportingRepetitive}
+                    size="sm"
+                    title="Export all repetitive tasks and system templates, grouped by task"
+                    className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                  >
+                    {exportingRepetitive ? "Exporting..." : "Export Repetitive"}
                   </Button>
                   <Button
                     variant="outline"

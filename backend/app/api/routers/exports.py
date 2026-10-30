@@ -4926,6 +4926,74 @@ async def export_daily_report_xlsx(
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
+@router.get("/repetitive-tasks.xlsx")
+async def export_repetitive_tasks_xlsx(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    from app.services.repetitive_task_report import repetitive_task_report_rows
+
+    ensure_reports_access(user)
+    rows = await repetitive_task_report_rows(db)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Repetitive Tasks"
+    ws.merge_cells("A3:E3")
+    ws["A3"] = "DETYRA TË PËRSËRITURA"
+    ws["A3"].font = Font(name="Arial", bold=True, size=16)
+    ws["A3"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[3].height = 26
+    headers = ["NR", "TITULLI", "PERSONAT", "DEPARTAMENTI", "TYPE"]
+    widths = [6, 70, 40, 25, 18]
+    thin = Side(style="thin", color="000000")
+    for col, (header, width) in enumerate(zip(headers, widths), 1):
+        cell = ws.cell(5, col, header)
+        cell.font = Font(name="Arial", bold=True, size=10)
+        cell.fill = PatternFill(fill_type="solid", fgColor="D9D9D9")
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.row_dimensions[5].height = 28
+    for index, values in enumerate(rows, 1):
+        row_num = index + 5
+        for col, value in enumerate([index, *values], 1):
+            cell = ws.cell(row_num, col, value)
+            # Export user text literally, including titles beginning with '='.
+            if isinstance(value, str):
+                cell.data_type = "s"
+            cell.font = Font(name="Arial", size=10, bold=col == 1)
+            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        line_count = max(
+            sum(max(1, (len(line) + int(width) - 3) // (int(width) - 2)) for line in str(value).split("\n"))
+            for value, width in zip([index, *values], widths)
+        )
+        ws.row_dimensions[row_num].height = min(409, max(30, line_count * 16 + 8))
+    last_row = max(5, ws.max_row)
+    ws.freeze_panes = "C6"
+    ws.auto_filter.ref = f"A5:E{last_row}"
+    ws.print_title_rows = "5:5"
+    ws.print_area = f"A3:E{last_row}"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = ws.page_margins.right = 0.1
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {_initials(user.full_name or user.username or '') or '____'}"
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    filename = f"REPETITIVE_TASKS_{datetime.now():%d_%m_%Y}.xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/system-task-templates.xlsx")
 async def export_system_task_templates_xlsx(
     mode: str = "all",
