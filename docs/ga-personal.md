@@ -21,7 +21,7 @@ stamp. Migration `0171_ga_personal` can adopt those existing tables on deploymen
 - Sidebar visibility based on the authenticated server capability, with no implicit company-admin access.
 - Members use their existing PrimeFlow login directly. No additional module password, unlock cookie, setup step or separate expiry is required. All read/write endpoints still require an active exact-UUID module membership; module administrator permissions are checked separately.
 - Tasks/templates, optional guidance steps, explicit ownership, one or multiple assignees, individual/shared completion, archive/restore, version checks and an append-only event history.
-- One-off tasks create their occurrences immediately when enabled with a date/time. Recurring tasks can be generated explicitly or by the opted-in private generation worker. A confirmed recurrence can create an untimed task shown as “Pa orar”; it never invents a deadline or activates a reminder. School-day/conditional/first-home inputs require explicit confirmation; the automatic worker does not infer these.
+- New one-off tasks are active by default and create their occurrences immediately for the selected date; time is optional. Saving opens the task's date and clears filters so the new task is visible. Intentionally inactive tasks and recurring models open in Përsëritjet after saving. Recurring tasks can be generated explicitly or by the opted-in private generation worker. Untimed tasks are shown as “Pa orar”; they never invent a deadline or activate a reminder. School-day/conditional/first-home inputs require explicit confirmation; the automatic worker does not infer these.
 - Daily, weekend, selected-day and rotation rules using Europe/Belgrade calendar dates. A weekly period is unique across Saturday/Sunday. Unconfigured schedules stay inactive. Imported source times remain suggestions for review, rather than activating alerts.
 - Completion persists an event and cancels pending reminder rows in the same transaction. Concurrent generation/actions serialize on the family space row; retries of the same action ID do not duplicate events.
 - Dataset preview/apply, stable source-ID mapping, safe repeat import and explicit conflicts when a model has local changes. Existing occurrences retain snapshots after a template changes.
@@ -69,6 +69,41 @@ Once membership is provisioned and the module is enabled, members can open `/ga-
 5. Open GA PERSONAL while signed in to PrimeFlow. The module administrator uploads the reviewed `data/ga-personal.dataset.json` through Settings, previews the changes and applies the import. Repeat import never silently overwrites local changes. Imported schedules stay disabled until reviewed individually.
 
 The original handoff's manifest has stale hashes for four updated seed/export files. Validate the actual dataset and record its reviewed hash before live import. The import API returns a canonical-content hash used to bind preview/apply; it is intentionally distinct from a raw ZIP-file hash.
+
+## Dataset version 2
+
+The importer accepts versions 1 and 2. Version 2 retains task short codes,
+recurrence labels, estimated duration, selected weekdays and suggested times.
+Suggested times never become active deadlines. Nala uses fixed owners Monday
+through Saturday and a separate three-week Sunday cycle; the previous version's
+calendar-day rotation remains supported for version 1. Tablets receive concrete
+dated occurrences for the new rotation so they cannot infer the old three-day rule.
+
+Import preview lists creations, updates, source-ID renames, archives and conflicts.
+The reviewed v1-to-v2 ID mapping preserves template UUIDs and existing occurrence
+snapshots. Only untouched imports can be updated; manual changes cause a conflict.
+The superseded generic `dust` and `robot_prep` models are archived if still untouched
+and disabled. Their history is retained. Repeated imports do not add copies, and
+version 1 cannot downgrade a space already imported with version 2.
+
+For an existing configured module, preview a private JSON directly:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/seed_ga_personal.py --dataset <private-json> --existing-memberships --admin-person <configured-admin>
+```
+
+Apply with `--apply --expected-host <host> --expected-database <db>` after reviewing
+the preview. Existing active memberships supply the exact UUID map; usernames and
+the module administrator are still verified. The command enables only ready daily
+models without inventing clock times. Other models await configuration. Keep the
+private source files and backups outside Git. Deploy the version 2 service code
+before relying on automatic generation with its rotation configuration.
+
+The authenticated **Erdha në shpi** action records the actual member and serializes
+the day's first arrival. Repeated clicks and later arrivals do not reassign the
+first-home duty. It generates that conditional task only after its instructions
+and recurrence have been explicitly confirmed and enabled. Tablet arrivals use
+the same transaction and first-person rule.
 
 ## Isolation
 

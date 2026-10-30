@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 Person = Literal["mrika", "lirza", "rrita", "gane"]
-Group = Literal["morning", "daily_upkeep", "nala", "weekend_deep_clean"]
+Group = Literal["morning", "daily_upkeep", "nala", "weekend_deep_clean", "roki"]
 Status = Literal["pending", "acknowledged", "in_progress", "needs_help", "rescheduled", "done", "cancelled"]
 
 
@@ -20,11 +20,16 @@ class ScheduleHint(BaseModel):
     start_time: time | None = None
     end_time: time | None = None
     notes: str = Field(default="", max_length=3000)
+    weekdays: list[int] = Field(default_factory=list, max_length=7)
+    suggested_start_time: time | None = None
+    suggested_end_time: time | None = None
 
 
 class TemplateDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
+    short_code: str | None = Field(default=None, max_length=40)
+    recurrence_label: str | None = Field(default=None, max_length=200)
     description: str = Field(default="", max_length=10000)
     completion_definition: str = Field(default="Kryerja konfirmohet nga përgjegjësi.", max_length=3000)
     schedule_hints: list[ScheduleHint] = Field(default_factory=list, max_length=20)
@@ -66,8 +71,8 @@ class TemplateDefinition(BaseModel):
         if self.enabled:
             if self.readiness != "ready_after_setup" or self.frequency == "unresolved" or self.assignment == "unassigned":
                 raise ValueError("Plotëso konfigurimin para aktivizimit.")
-            if self.frequency == "once" and (self.on_date is None or self.due_time is None):
-                raise ValueError("Cakto datën/orën para aktivizimit.")
+            if self.frequency == "once" and self.on_date is None:
+                raise ValueError("Cakto datën para aktivizimit.")
             if self.frequency in {"weekly", "near_daily"} and not self.weekdays:
                 raise ValueError("Zgjidh ditët.")
             if self.frequency == "weekly" and any(d not in (5, 6) for d in self.weekdays):
@@ -112,6 +117,10 @@ class ImportRequest(BaseModel):
 
 class AutomationRequest(BaseModel):
     enabled: bool
+
+
+class ArrivalRequest(BaseModel):
+    request_id: uuid.UUID
 
 
 class OccurrenceUpdate(BaseModel):

@@ -66,6 +66,14 @@ The tablet should keep its own pending operation for a `period|task_id` ahead of
 
 ## Responses and deployment
 
+For pending queues created by older Kujtesa builds, status `task_id` may also be an exact imported dataset source ID or its explicit v1/v2 rename. The server resolves it only within the authenticated family, only when it identifies one exported card for that period; it never guesses between people or activates an unconfirmed schedule. Stored/downloaded statuses use the canonical card ID. New clients must continue using IDs downloaded from `device/state`.
+
+Within a batch, event mutations and arrivals are applied before statuses so a status can refer to an event whose `event_upsert` occurs later in the same batch. The response preserves the submitted operation order; retries remain idempotent and the batch remains atomic. A truly missing identity still returns `422`, now including `task_id` and `op_id` so the local console identifies the blocked operation.
+
+The public frontend handles CORS for both device paths. Browser preflights (`OPTIONS`) do not require device credentials or contact the backend. HTTP/HTTPS loopback origins (`localhost`, `127.0.0.1`, `[::1]`, including `http://localhost:8799`) are allowed on any port. Additional hosted Kujtesa origins must be listed exactly, without a trailing slash, in the frontend server environment variable `GA_PERSONAL_DEVICE_CORS_ORIGINS` (comma-separated).
+
+Preflight and GET/POST responses, including authentication, validation and gateway errors, return the allowed request origin, `Access-Control-Allow-Headers: Authorization, X-Device-Id, Accept, Content-Type`, `Access-Control-Allow-Methods: GET, POST, OPTIONS`, and `Vary: Origin`. Browser cookies are not enabled; actual requests still require both device credentials. Other PrimeFlow routes keep their existing CORS policy.
+
 - `401`: missing/invalid code, invalid/mismatched tablet UUID, revoked code or removed authorizing membership.
 - `403`: POST body UUID does not match the authenticated tablet, or a signed-in user lacks device-management permission.
 - `404`: module disabled or a management target is absent.

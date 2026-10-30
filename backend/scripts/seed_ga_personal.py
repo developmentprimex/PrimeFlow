@@ -1,4 +1,4 @@
-"""Preview/import the reviewed ZIP seed; never rebuild or replace live history."""
+"""Preview/import a reviewed JSON or ZIP seed; preserve live IDs and history."""
 from __future__ import annotations
 
 import argparse
@@ -19,7 +19,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models.ga_personal import (
     GaPersonalSpace as Space, GaPersonalMember as Member, GaPersonalTemplate as Template,
-    GaPersonalImport as ImportRun,
+    GaPersonalImport as ImportRun, GaPersonalOccurrence as Occurrence,
 )
 from app.models.user import User
 from app.schemas.ga_personal import GenerateRequest
@@ -37,6 +37,15 @@ def read_archive(path):
         return json.loads(archive.read(key).decode("utf-8-sig"))
 
 
+def read_dataset(path):
+    path = Path(path)
+    if path.suffix.lower() == ".zip":
+        return read_archive(path)
+    if path.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError("Dataset is too large.")
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
 async def seed(db, dataset, mapping, *, admin_person="rrita", apply=False, day=None):
     day = day or datetime.now(service.TZ).date()
     parsed, rotation = service.validate_dataset(dataset)
@@ -46,8 +55,6 @@ async def seed(db, dataset, mapping, *, admin_person="rrita", apply=False, day=N
     if len(users) != 4 or any(users[uid].username != USERNAMES[person] for person, uid in mapping.items()):
         raise ValueError("Verified account identity/active status differs from the mapping.")
     space = (await db.execute(select(Space).where(Space.key == "ga_personal").with_for_update())).scalar_one()
-    if not space.password_hash:
-        raise ValueError("The module administrator must configure the additional password first.")
     members = {m.person_key: m for m in (await db.execute(select(Member).where(Member.space_id == space.id))).scalars()}
     if any(m.person_key not in mapping or m.user_id != mapping[m.person_key] or not m.active for m in members.values()):
         raise ValueError("Existing membership differs or is revoked; no membership was replaced.")
@@ -64,10 +71,9 @@ async def seed(db, dataset, mapping, *, admin_person="rrita", apply=False, day=N
         "steps": sum(len(d["steps"]) for _, d in parsed), "daily_candidates": len(eligible),
         "other_models_waiting_configuration": len(parsed) - len(eligible), "memberships_to_add": missing,
         "already_imported": bool(prior), "rotation_anchor": rotation.get("anchor_date"), "day": day.isoformat()}
+    preview = await service.import_dataset(db, admin, dataset)
+    summary.update({key: preview[key] for key in ("create", "update", "rename", "archive", "conflicts")})
     if not apply:
-        if not prior:
-            preview = await service.import_dataset(db, admin, dataset)
-            summary["conflicts"] = preview["conflicts"]
         return summary
     for person in missing:
         db.add(Member(space_id=space.id, user_id=mapping[person], person_key=person, is_admin=False, active=True))
@@ -92,7 +98,7 @@ async def seed(db, dataset, mapping, *, admin_person="rrita", apply=False, day=N
     previous = space.config.get("automatic_generation", {})
     space.config = {**space.config, "automatic_generation": {
         "enabled": True, "starts_on": previous.get("starts_on") or day.isoformat(),
-        "policy": "reviewed_daily_seed_v1", "seed_source_ids": sorted(activated),
+        "policy": "reviewed_daily_seed_v" + str(dataset["format_version"]), "seed_source_ids": sorted(activated),
     }}
     await db.flush()
     result = await service.generate(db, admin, GenerateRequest(day=day), automatic=True, commit=False)
@@ -107,21 +113,45 @@ async def main(args):
     target = make_url(settings.DATABASE_URL)
     if args.apply and (target.host != args.expected_host or target.database != args.expected_database):
         raise SystemExit("Database target differs from the explicit host/database.")
-    dataset = read_archive(args.archive)
-    mapping = {key: uuid.UUID(value) for key, value in json.loads(Path(args.mapping).read_text(encoding="utf-8-sig")).items()}
+    dataset = read_dataset(args.dataset or args.archive)
     async with SessionLocal() as db:
+        if args.existing_memberships:
+            rows = (await db.execute(select(Member).join(Space, Member.space_id == Space.id).where(
+                Space.key == "ga_personal", Member.active.is_(True)))).scalars().all()
+            mapping = {m.person_key: m.user_id for m in rows}
+        else:
+            mapping = {key: uuid.UUID(value) for key, value in json.loads(Path(args.mapping).read_text(encoding="utf-8-sig")).items()}
+        if args.apply and args.backup:
+            # Validate and acquire the space lock before taking a consistent
+            # private backup. The subsequent seed shares this transaction.
+            review = await seed(db, dataset, mapping, admin_person=args.admin_person)
+            if review["conflicts"]:
+                raise ValueError("Resolve preview conflicts before applying.")
+            space = (await db.execute(select(Space).where(Space.key == "ga_personal"))).scalar_one()
+            snapshot = {"created_at": service.utcnow().isoformat(), "space_id": str(space.id),
+                        "config": space.config, "dataset_hash": review["dataset_hash"]}
+            for label, model in (("templates", Template), ("occurrences", Occurrence), ("imports", ImportRun)):
+                rows = (await db.execute(select(model).where(model.space_id == space.id))).scalars().all()
+                snapshot[label] = [{column.key: getattr(row, column.key) for column in model.__table__.columns} for row in rows]
+            with Path(args.backup).open("x", encoding="utf-8") as backup:
+                json.dump(snapshot, backup, ensure_ascii=False, indent=2, default=str)
         result = await seed(db, dataset, mapping, admin_person=args.admin_person, apply=args.apply)
     print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--archive", required=True)
-    parser.add_argument("--mapping", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--archive")
+    source.add_argument("--dataset")
+    identities = parser.add_mutually_exclusive_group(required=True)
+    identities.add_argument("--mapping")
+    identities.add_argument("--existing-memberships", action="store_true")
     parser.add_argument("--admin-person", default="rrita", choices=sorted(USERNAMES))
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--expected-host")
     parser.add_argument("--expected-database")
+    parser.add_argument("--backup", help="Private, new JSON file for the pre-apply config/templates/history snapshot.")
     args = parser.parse_args()
     if args.apply and (not args.expected_host or not args.expected_database):
         parser.error("--apply requires --expected-host and --expected-database")

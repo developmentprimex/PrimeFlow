@@ -6,6 +6,47 @@ type Context = { params: Promise<{ action: string }> }
 const MAX_BYTES = 2 * 1024 * 1024
 const privateHeaders = { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" }
 const failure = (status: number, detail: string) => Response.json({ detail }, { status, headers: privateHeaders })
+const allowedMethods = "GET, POST, OPTIONS"
+const allowedHeaders = "Authorization, X-Device-Id, Accept, Content-Type"
+
+function allowedOrigin(request: Request): string | null {
+  const origin = request.headers.get("origin")
+  if (!origin) return null
+  try {
+    const url = new URL(origin)
+    if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) return null
+    // Kujtesa uses a tablet loopback server; device credentials remain required.
+    if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return origin
+    if (origin === new URL(request.url).origin) return origin
+    const configured = (process.env.GA_PERSONAL_DEVICE_CORS_ORIGINS || "").split(",").map(value => value.trim())
+    return configured.includes(origin) ? origin : null
+  } catch { return null }
+}
+
+function withCors(request: Request, response: Response): Response {
+  response.headers.append("Vary", "Origin")
+  const origin = allowedOrigin(request)
+  if (origin) {
+    response.headers.set("Access-Control-Allow-Origin", origin)
+    response.headers.set("Access-Control-Allow-Headers", allowedHeaders)
+    response.headers.set("Access-Control-Allow-Methods", allowedMethods)
+  }
+  return response
+}
+
+export async function OPTIONS(request: Request, context: Context): Promise<Response> {
+  const { action } = await context.params
+  if (!["state", "ops"].includes(action)) return withCors(request, failure(404, "Rruga nuk u gjet."))
+  if (!allowedOrigin(request)) return withCors(request, failure(403, "Origjina nuk lejohet."))
+  const method = request.headers.get("access-control-request-method")
+  const requestedHeaders = (request.headers.get("access-control-request-headers") || "")
+    .split(",").map(value => value.trim().toLowerCase()).filter(Boolean)
+  const headers = allowedHeaders.toLowerCase().split(", ")
+  if (method !== (action === "state" ? "GET" : "POST") || requestedHeaders.some(value => !headers.includes(value))) {
+    return withCors(request, failure(400, "Preflight nuk lejohet."))
+  }
+  return withCors(request, new Response(null, { status: 204, headers: privateHeaders }))
+}
 
 async function proxy(request: Request, context: Context): Promise<Response> {
   const { action } = await context.params
@@ -54,5 +95,9 @@ async function proxy(request: Request, context: Context): Promise<Response> {
   } catch { return failure(503, "Lidhja me PrimeFlow u ndërpre. Provo përsëri.") }
 }
 
-export const GET = proxy
-export const POST = proxy
+async function handle(request: Request, context: Context): Promise<Response> {
+  return withCors(request, await proxy(request, context))
+}
+
+export const GET = handle
+export const POST = handle
