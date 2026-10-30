@@ -4,10 +4,32 @@ from types import SimpleNamespace
 
 from app.models.task import Task
 from app.schemas.task import TaskCreate, TaskUpdate
-from app.services.ga_note_task_instances import _copy_for_new_assignee, _copy_for_new_plan_assignee
+from app.schemas.ga_note import GaNoteTaskBundleUpdate
+from app.schemas.plan_note import PlanNoteTaskBundleUpdate
+from app.services.ga_note_task_instances import (
+    _copy_for_new_assignee, _copy_for_new_plan_assignee, apply_ga_note_shared_task_fields,
+)
 
 
 class TestTaskRepetitive(unittest.TestCase):
+    def test_note_editor_can_check_and_uncheck_all_person_copies(self):
+        tasks = [Task(title="Work", status="TODO", is_repetitive=False),
+                 Task(title="Work", status="DONE", is_repetitive=False)]
+        for schema in (GaNoteTaskBundleUpdate, PlanNoteTaskBundleUpdate):
+            for value in (True, False):
+                payload = schema(is_repetitive=value)
+                self.assertEqual(apply_ga_note_shared_task_fields(tasks, is_repetitive=payload.is_repetitive), 2)
+                self.assertEqual([task.is_repetitive for task in tasks], [value, value])
+                self.assertEqual([task.status for task in tasks], ["TODO", "DONE"])
+
+    def test_unrelated_note_edits_preserve_mixed_repetitive_flags(self):
+        tasks = [Task(title="Work", is_repetitive=True), Task(title="Work", is_repetitive=False)]
+        for schema in (GaNoteTaskBundleUpdate, PlanNoteTaskBundleUpdate):
+            payload = schema(description="New description")
+            apply_ga_note_shared_task_fields(tasks, description_is_set=True,
+                                            description=payload.description, is_repetitive=payload.is_repetitive)
+            self.assertEqual([task.is_repetitive for task in tasks], [True, False])
+
     def test_existing_tasks_default_to_unchecked(self):
         column = Task.__table__.c.is_repetitive
         self.assertFalse(column.nullable)

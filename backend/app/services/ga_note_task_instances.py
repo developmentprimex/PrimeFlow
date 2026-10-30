@@ -391,6 +391,7 @@ def apply_ga_note_shared_task_fields(
     title: str | None = None,
     description_is_set: bool = False,
     description: str | None = None,
+    is_repetitive: bool | None = None,
 ) -> int:
     """Apply GA-controlled fields without touching per-person execution state."""
 
@@ -402,6 +403,9 @@ def apply_ga_note_shared_task_fields(
             changed = True
         if description_is_set and task.description != description:
             task.description = description
+            changed = True
+        if is_repetitive is not None and task.is_repetitive != is_repetitive:
+            task.is_repetitive = is_repetitive
             changed = True
         if changed:
             updated_count += 1

@@ -180,6 +180,7 @@ type NoteTaskInfo = {
   startDate?: string | null
   finishPeriod?: TaskFinishPeriod | null
   isDeadlineImportant?: boolean | null
+  isRepetitive?: boolean | "indeterminate"
   taskCreatedAt?: string | null
   taskUpdatedAt?: string | null
   assigneeStates: Record<string, GaAssigneeTaskState>
@@ -1322,6 +1323,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const [editAddedRanges, setEditAddedRanges] = React.useState<TextMarkRange[]>([])
   const [editDescription, setEditDescription] = React.useState("")
   const [editTaskProjectId, setEditTaskProjectId] = React.useState("NONE")
+  const [editTaskIsRepetitive, setEditTaskIsRepetitive] = React.useState<boolean | "indeterminate">(false)
   const [editTaskAssigneeIds, setEditTaskAssigneeIds] = React.useState<string[]>([])
   const [editTaskAssigneeStates, setEditTaskAssigneeStates] = React.useState<Record<string, GaAssigneeTaskState>>({})
   const [savingEdit, setSavingEdit] = React.useState(false)
@@ -1777,6 +1779,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         finishPeriod: existing?.finishPeriod ?? t.finish_period ?? null,
         isDeadlineImportant:
           existing?.isDeadlineImportant ?? (t.is_deadline_important ?? null),
+        isRepetitive: existing?.isRepetitive === undefined
+          ? Boolean(t.is_repetitive)
+          : existing.isRepetitive === Boolean(t.is_repetitive) ? existing.isRepetitive : "indeterminate",
         taskCreatedAt: existing?.taskCreatedAt ?? t.created_at,
         taskUpdatedAt:
           existing?.taskUpdatedAt && new Date(existing.taskUpdatedAt).getTime() > new Date(t.updated_at).getTime()
@@ -2210,6 +2215,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       setEditAddedRanges(addedRanges)
       const taskInfo = freshTaskInfo.get(note.id)
       setEditDescription(taskInfo?.description || "")
+      setEditTaskIsRepetitive(taskInfo?.isRepetitive ?? false)
       setEditTaskProjectId(taskInfo?.taskProjectId ?? note.project_id ?? "NONE")
       setEditTaskAssigneeStates(taskInfo?.assigneeStates ?? {})
       setEditTaskAssigneeIds(
@@ -2507,6 +2513,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         })
         const editedDescription = editDescription.trim() || null
         const originalDescription = taskInfo.description?.trim() || null
+
+        if (editTaskIsRepetitive !== "indeterminate" && editTaskIsRepetitive !== (taskInfo.isRepetitive ?? false)) {
+          body.is_repetitive = editTaskIsRepetitive
+        }
 
         if (editedDescription !== originalDescription) {
           body.description = editedDescription
@@ -3818,6 +3828,16 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                   </div>
                 )}
               </div>
+            ) : null}
+            {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
+                <label className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm font-medium">
+                  <Checkbox
+                    checked={editTaskIsRepetitive}
+                    onCheckedChange={(checked) => setEditTaskIsRepetitive(checked === true)}
+                    disabled={savingEdit}
+                  />
+                  Detyrë e përsëritur
+                </label>
             ) : null}
           </div>
             <div className="flex shrink-0 justify-end gap-2 border-t bg-background pt-3">

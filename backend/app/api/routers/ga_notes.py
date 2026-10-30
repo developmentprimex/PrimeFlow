@@ -578,6 +578,7 @@ async def update_ga_note_task_bundle(
         title=title,
         description_is_set=description_is_set,
         description=payload.description,
+        is_repetitive=payload.is_repetitive,
     )
     if "project_id" in fields_set:
         for task in active_tasks:

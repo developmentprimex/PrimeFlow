@@ -113,6 +113,7 @@ class GaNoteTaskBundleUpdate(TaskPostponementExplanations):
 
     content: str | None = None
     description: str | None = None
+    is_repetitive: bool | None = None
     project_id: uuid.UUID | None = None
     one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$")
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
