@@ -27,6 +27,10 @@ export function WeekTable({ rows, start, workspace, onOpen }: {
   const days = Array.from({ length: 7 }, (_, i) => moveDay(start, i))
   const tasks = new Map<string, GaOccurrence[]>()
   for (const row of rows) tasks.set(row.template_id, [...(tasks.get(row.template_id) || []), row])
+  const orderedTasks = Object.keys(groups).flatMap((group) => Array.from(tasks.entries())
+    .filter(([, entries]) => entries[0].snapshot.reminder_group === group)
+    .sort((a, b) => a[1][0].snapshot.title.localeCompare(b[1][0].snapshot.title, "sq")))
+  const rowNumbers = new Map(orderedTasks.map(([id], index) => [id, index + 1]))
   const today = localToday()
   const completed = rows.filter((r) => r.status === "done").length
   const inProgress = rows.filter((r) => r.status === "in_progress").length
@@ -39,14 +43,15 @@ export function WeekTable({ rows, start, workspace, onOpen }: {
       ["Kërkojnë ndihmë", needHelp, "text-rose-600"],
     ].map(([label, value, color]) => <div key={label} className="rounded-xl border bg-card px-4 py-3"><p className="text-xs font-medium text-muted-foreground">{label}</p><p className={`mt-1 text-2xl font-semibold tabular-nums ${color}`}>{value}</p></div>)}</div>
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-4 py-2.5"><p className="text-sm font-semibold">{dayLabel(start, true)} – {dayLabel(days[6], true)}</p><div className="flex flex-wrap gap-2 text-[11px]">{(["pending", "in_progress", "needs_help", "done"] as GaStatus[]).map((status) => { const Icon = statusIcons[status]; return <span key={status} className={`inline-flex items-center gap-1 rounded px-2 py-1 ${statusColors[status]}`}><Icon className="h-3 w-3" />{statuses[status]}</span> })}</div></div>
-    <div className="max-h-[68vh] overflow-auto rounded-xl border bg-card" tabIndex={0} role="region" aria-label="Tabela e planit javor">
+    <div className="max-h-[68vh] overflow-auto rounded-xl border-2 border-slate-400 bg-card dark:border-slate-500" tabIndex={0} role="region" aria-label="Tabela e planit javor">
     <table className="w-full min-w-[1050px] table-fixed border-separate border-spacing-0 text-sm">
       <caption className="sr-only">Plani javor sipas rutinave</caption>
-      <thead><tr className="border-y bg-muted/50"><th scope="col" className="sticky top-0 left-0 z-30 w-60 min-w-60 bg-card p-4 text-left">Detyra</th>{days.map((date) => {
+      <thead><tr className="border-y bg-muted/50"><th scope="col" className="sticky top-0 left-0 z-30 w-12 border-b-2 border-r border-slate-300 bg-muted px-2 py-3 text-center text-xs font-semibold dark:border-slate-600">Nr.</th><th scope="col" className="sticky top-0 left-12 z-30 w-60 min-w-60 border-b-2 border-slate-300 bg-card p-4 dark:border-slate-600 text-left">Detyra</th>{days.map((date) => {
         const daily = rows.filter((row) => row.local_date === date)
-        return <th key={date} scope="col" className={`sticky top-0 z-20 border-b border-l px-3 py-3 text-left shadow-sm ${date === today ? "bg-blue-50 dark:bg-blue-950" : "bg-card"}`}>
-          <span className="block">{["E hënë", "E martë", "E mërkurë", "E enjte", "E premte", "E shtunë", "E diel"][days.indexOf(date)]}</span>
-          <span className="block text-xs font-normal text-muted-foreground">{dayLabel(date, true)}{date === today ? " · Sot" : ""}</span>
+        return <th key={date} scope="col" className={`sticky top-0 z-20 border-b-2 border-l border-slate-300 dark:border-slate-600 px-3 py-3 text-left shadow-sm ${date === today ? "bg-blue-50 dark:bg-blue-950" : "bg-card"}`}>
+          <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"><span className="font-semibold">{["E hënë", "E martë", "E mërkurë", "E enjte", "E premte", "E shtunë", "E diel"][days.indexOf(date)]}</span>
+            <span className="whitespace-nowrap text-[11px] font-normal text-muted-foreground">{dayLabel(date, true)}{date === today ? " · Sot" : ""}</span>
+          </span>
           <span className="mt-2 block text-[11px] font-normal text-muted-foreground">{daily.length ? `${daily.filter((r) => r.status === "done").length}/${daily.length} të kryera` : "Pa detyra të krijuara"}</span>
           <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`Progresi: ${dayLabel(date)}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={daily.length ? Math.round(daily.filter((r) => r.status === "done").length / daily.length * 100) : 0}><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${daily.length ? daily.filter((r) => r.status === "done").length / daily.length * 100 : 0}%` }} /></span>
         </th>
@@ -54,11 +59,12 @@ export function WeekTable({ rows, start, workspace, onOpen }: {
       <tbody>{Object.entries(groups).map(([group, label]) => {
         const grouped = Array.from(tasks.entries()).filter(([, entries]) => entries[0].snapshot.reminder_group === group).sort((a, b) => a[1][0].snapshot.title.localeCompare(b[1][0].snapshot.title, "sq"))
         if (!grouped.length) return null
-        return <Fragment key={group}><tr><th colSpan={8} scope="rowgroup" className="border-b bg-muted/60 px-4 py-2 text-left text-xs font-semibold"><span className="sticky left-4">{label}<span className="ml-2 font-normal text-muted-foreground">{grouped.length} detyra</span></span></th></tr>{grouped.map(([id, entries]) => <tr key={id} className="border-b last:border-0">
-        <th scope="row" className="sticky left-0 z-10 border-b bg-card px-4 py-3 text-left align-middle text-[13px] font-medium">{entries[0].snapshot.title}{entries[0].snapshot.short_code && <span className="mt-1 block text-xs text-muted-foreground">{entries[0].snapshot.short_code}</span>}</th>
+        return <Fragment key={group}><tr><th colSpan={9} scope="rowgroup" className="border-b border-slate-300 dark:border-slate-600 bg-muted/60 px-4 py-2 text-left text-xs font-semibold"><span className="sticky left-4">{label}<span className="ml-2 font-normal text-muted-foreground">{grouped.length} detyra</span></span></th></tr>{grouped.map(([id, entries]) => <tr key={id} className="border-b last:border-0">
+        <td className="sticky left-0 z-10 border-b border-r border-slate-300 bg-muted px-2 py-3 text-center text-xs font-semibold tabular-nums text-muted-foreground dark:border-slate-600">{rowNumbers.get(id)}</td>
+        <th scope="row" className="sticky left-12 z-10 border-b border-slate-300 dark:border-slate-600 bg-card px-4 py-3 text-left align-middle text-[13px] font-medium">{entries[0].snapshot.title}{entries[0].snapshot.short_code && <span className="mt-1 block text-xs text-muted-foreground">{entries[0].snapshot.short_code}</span>}</th>
         {days.map((date) => {
           const cell = entries.filter((row) => row.local_date === date)
-          return <td key={date} className={`border-b border-l p-1.5 align-middle ${date === today ? "bg-blue-50/40 dark:bg-blue-950/20" : cell.length ? "" : "bg-muted/25"}`}>
+          return <td key={date} className={`border-b border-l border-slate-300 dark:border-slate-600 p-1.5 align-middle ${date === today ? "bg-blue-50/40 dark:bg-blue-950/20" : cell.length ? "" : "bg-muted/25"}`}>
             {cell.length ? <button type="button" onClick={() => onOpen(cell)} className="w-full space-y-1 rounded-md text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${entries[0].snapshot.title}, ${dayLabel(date)}`}>
               {cell.map((row) => <span key={row.id} className={`block space-y-1.5 rounded-md px-2 py-1.5 ${row.status === "done" ? "bg-emerald-50 dark:bg-emerald-950/30" : ""}`}>
                 <span className="flex flex-wrap gap-1">{row.snapshot.assignees.length ? row.snapshot.assignees.map((key) => {

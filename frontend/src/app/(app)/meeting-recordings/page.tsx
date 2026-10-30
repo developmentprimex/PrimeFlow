@@ -51,7 +51,7 @@ export default function MeetingRecordingsPage() {
             <td className="p-2 tabular-nums">{row.duration_seconds == null ? "—" : recordingTime(row.duration_seconds)}</td><td className="p-2">{recordingSize(row.size_bytes)}</td>
             <td className="p-2">{row.media_available === false ? <span className="text-destructive">Skedari nuk është i arritshëm</span> : RECORDING_STATUS[row.status]}{row.is_partial && <p className="text-amber-700">Pjesë e rikuperuar</p>}{row.error_message && <p className="max-w-64 text-destructive">{row.error_message}</p>}</td>
             <td className="space-y-2 p-2"><Link className="underline" href={`/meeting-recordings/${row.id}`}>Open</Link>
-              {canDelete && ["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="destructive" className="ml-2" disabled={deletingId !== null || row.id === manifest?.id} onClick={() => void removeRecording(row)}>{deletingId === row.id ? "Duke fshirë…" : "Fshi"}</Button>}
+              {canDelete && ["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="destructive" className="ml-2" disabled={deletingId !== null || row.id === manifest?.id} onClick={() => void removeRecording(row)}>{deletingId === row.id ? "Duke fshirë…" : "Delete"}</Button>}
               {row.created_by === user?.id && row.id !== manifest?.id && !["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="ghost" disabled={saving} onClick={async () => {
                 if (!window.confirm("Braktis këtë sesion të papërfunduar? Mos e përdorni për një regjistrim aktiv në një pajisje tjetër.")) return
                 await discard(row.id)
