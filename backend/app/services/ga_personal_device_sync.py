@@ -35,7 +35,9 @@ def card_id(template_id, owner, concrete_date=None):
 
 
 def concrete_template(definition, space=None):
-    return (definition["frequency"] in {"conditional", "school_day", "unresolved"}
+    return (bool(definition.get("recurrence_anchor_date"))
+            or definition.get("recurrence_interval_weeks", 1) > 1
+            or definition["frequency"] in {"conditional", "school_day", "unresolved"}
             or (definition["assignment"] == "rotation" and space and space.config.get("nala_rotation"))
             or definition["assignment"] in {"first_home", "unassigned"}
             or (definition["assignment"] == "rotation" and definition["frequency"] not in {"daily", "near_daily"}))

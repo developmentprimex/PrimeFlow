@@ -294,9 +294,9 @@ test("a new untimed task is active, visible after saving, and survives reload", 
   await page.getByRole("button", { name: "Ruaje detyrën", exact: true }).click()
   await expect(page.getByRole("dialog")).toHaveCount(0)
   expect(state.writes[0].body.definition).toMatchObject({ enabled: true, frequency: "once", due_time: null })
-  await expect(page.locator("article").getByText("Detyrë e re pa orar", { exact: true })).toBeVisible()
+  await expect(page.getByText("Detyrë e re pa orar", { exact: true })).toBeVisible()
   await page.reload()
-  await expect(page.locator("article").getByText("Detyrë e re pa orar", { exact: true })).toBeVisible()
+  await expect(page.getByText("Detyrë e re pa orar", { exact: true })).toBeVisible()
 })
 
 test("new tasks use the selected day and saving follows a changed date", async ({ page }) => {

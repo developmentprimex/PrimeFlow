@@ -38,6 +38,8 @@ class TemplateDefinition(BaseModel):
     assignees: list[Person] = Field(default_factory=list, max_length=4)
     completion_mode: Literal["individual", "shared"] = "individual"
     frequency: Literal["once", "daily", "weekly", "school_day", "conditional", "near_daily", "unresolved"] = "once"
+    recurrence_interval_weeks: int = Field(default=1, ge=1, le=52, strict=True)
+    recurrence_anchor_date: date | None = None
     on_date: date | None = None
     due_time: time | None = None
     weekdays: list[int] = Field(default_factory=list, max_length=7)
@@ -68,6 +70,11 @@ class TemplateDefinition(BaseModel):
             raise ValueError("Detyra njëherëshe duhet të ketë përgjegjës të zgjedhur.")
         if (self.assignment == "rotation") != (self.rotation_id is not None):
             raise ValueError("Rotacioni duhet të jetë i përcaktuar.")
+        if self.recurrence_interval_weeks > 1 or self.recurrence_anchor_date is not None:
+            if self.frequency not in {"weekly", "near_daily"}:
+                raise ValueError("Intervali javor kërkon përsëritje me ditë të zgjedhura.")
+            if self.recurrence_anchor_date is None:
+                raise ValueError("Cakto datën e parë të ciklit javor.")
         if self.enabled:
             if self.readiness != "ready_after_setup" or self.frequency == "unresolved" or self.assignment == "unassigned":
                 raise ValueError("Plotëso konfigurimin para aktivizimit.")
