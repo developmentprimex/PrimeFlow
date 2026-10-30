@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 Person = Literal["mrika", "lirza", "rrita", "gane"]
-Group = Literal["morning", "daily_upkeep", "nala", "weekend_deep_clean", "roki"]
+Group = Literal["events", "morning", "daily_upkeep", "nala", "weekend_deep_clean", "roki"]
 Status = Literal["pending", "acknowledged", "in_progress", "needs_help", "rescheduled", "done", "cancelled"]
 
 

@@ -5,7 +5,7 @@ const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test Adul
 const firstId = "11111111-1111-4111-8111-111111111111"
 const secondId = "33333333-3333-4333-8333-333333333333"
 
-async function shell(page: Page, options: { available?: boolean; automatic?: boolean; workspaceDelay?: number } = {}) {
+async function shell(page: Page, options: { available?: boolean; automatic?: boolean; workspaceDelay?: number; view?: "today" | "week" } = {}) {
   let available = options.available ?? true
   let automatic = options.automatic ?? false
   let workspaceReads = 0
@@ -115,7 +115,13 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
     return route.fulfill({ json: [] })
   })
   await page.goto("/ga-personal")
+  if (available && options.view !== "week") {
+    await expect(page.getByRole("navigation", { name: "Pamjet e GA PERSONAL" })).toBeVisible()
+    if (page.viewportSize()!.width < 768) await page.getByRole("button", { name: "Close sidebar", exact: true }).click()
+    await page.getByRole("button", { name: "Detyrat e ditës", exact: true }).click()
+  }
   return { writes, workspaceReads: () => workspaceReads, accessReads: () => accessReads,
+    rows, templates,
     failAccess: () => { accessFailure = true }, forbidAction: () => { forbiddenAction = true }, revoke: () => { available = false } }
 }
 
@@ -209,7 +215,7 @@ test("a temporary connection error or forbidden action does not ask for the pass
 })
 
 test("a slow workspace opens without displaying a password form", async ({ page }) => {
-  await shell(page, { workspaceDelay: 1000 })
+  await shell(page, { workspaceDelay: 1000, view: "week" })
   await expect(page.getByText("Duke hapur hapësirën…", { exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Hape hapësirën private" })).toHaveCount(0)
   await expect(page.getByText("Detyra e personit të parë", { exact: true })).toBeVisible()
@@ -296,7 +302,8 @@ test("a new untimed task is active, visible after saving, and survives reload", 
   expect(state.writes[0].body.definition).toMatchObject({ enabled: true, frequency: "once", due_time: null })
   await expect(page.getByText("Detyrë e re pa orar", { exact: true })).toBeVisible()
   await page.reload()
-  await expect(page.getByText("Detyrë e re pa orar", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Detyrat e ditës", exact: true }).click()
+  await expect(page.getByRole("row").filter({ hasText: "Detyrë e re pa orar" })).toBeVisible()
 })
 
 test("new tasks use the selected day and saving follows a changed date", async ({ page }) => {
@@ -329,7 +336,6 @@ test("an intentionally inactive task remains visible in templates after saving",
 test("completing one person's occurrence preserves the other and the mobile layout fits", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const state = await shell(page)
-  await page.getByRole("button", { name: "Close sidebar" }).click()
   const first = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
   await first.getByRole("button", { name: "U kry", exact: true }).click()
   await expect(first.getByRole("button", { name: "U kry", exact: true })).toHaveCount(0)
@@ -338,4 +344,196 @@ test("completing one person's occurrence preserves the other and the mobile layo
   expect(state.writes).toHaveLength(1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: "test-results/ga-personal-mobile.png", fullPage: true })
+})
+
+test("weekly KPIs precede all filters and codes survive older occurrence snapshots", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  const state = await shell(page, { view: "week" })
+  state.templates[0].definition.short_code = "BP-M-D"
+  state.templates[1].definition.short_code = "BP-R-D"
+  state.rows[1].due_at = `${localToday()}T18:30:00+01:00`
+  state.rows[1].status = "needs_help"
+  await page.reload()
+  const table = page.getByRole("table")
+  await expect(table.getByRole("rowheader", { name: "BP-R/M-D", exact: true })).toBeVisible()
+  await expect(table.getByRole("columnheader", { name: "Ora", exact: true })).toBeVisible()
+  const timeAction = table.getByRole("button", { name: "Cakto orën: BP-R/M-D", exact: true })
+  const timeCell = timeAction.locator("..")
+  await expect(timeCell).not.toContainText("Shto")
+  await expect(timeAction.locator("svg.lucide-plus")).toBeVisible()
+  await expect(timeCell.locator("svg.lucide-pencil")).toHaveCount(0)
+  await expect(timeCell).toContainText("18:30")
+  const timeBox = (await timeCell.boundingBox())!, plusBox = (await timeAction.locator("svg").boundingBox())!
+  expect(plusBox.x).toBeGreaterThan(timeBox.x + timeBox.width / 2)
+  expect(plusBox.y).toBeLessThan(timeBox.y + 15)
+  const summary = page.getByTestId("ga-task-summary"), filters = page.getByTestId("ga-task-filters")
+  const summaryBounds = (await summary.boundingBox())!, filterBounds = (await filters.boundingBox())!, tableBounds = (await table.boundingBox())!
+  expect(summaryBounds.y + summaryBounds.height).toBeLessThan(filterBounds.y)
+  expect(filterBounds.y + filterBounds.height).toBeLessThan(tableBounds.y)
+  expect(filterBounds.height).toBeLessThan(75)
+  const titleBounds = (await summary.getByRole("heading", { name: "Plani i javës", exact: true }).boundingBox())!
+  const kpiBounds = (await summary.getByText("Detyra të javës", { exact: true }).locator("..").boundingBox())!
+  expect(titleBounds.y + titleBounds.height / 2).toBeGreaterThanOrEqual(kpiBounds.y)
+  expect(titleBounds.y + titleBounds.height / 2).toBeLessThanOrEqual(kpiBounds.y + kpiBounds.height)
+  expect(kpiBounds.width).toBeLessThan(190)
+  const filterCenters = await Promise.all([filters.getByLabel("Data", { exact: true }), filters.getByRole("group", { name: "Filtro sipas personit" }), filters.getByLabel("Filtro grupin"), filters.getByLabel("Filtro gjendjen"), filters.getByLabel("Kërko detyrë")].map(async (locator) => { const box = (await locator.boundingBox())!; return box.y + box.height / 2 }))
+  expect(Math.max(...filterCenters) - Math.min(...filterCenters)).toBeLessThan(4)
+  await page.screenshot({ path: "test-results/ga-personal-summary-filters-wide.png", fullPage: true })
+  await expect(filters.getByLabel("Filtro grupin")).toBeVisible()
+  await expect(filters.getByLabel("Filtro gjendjen")).toBeVisible()
+  await filters.getByLabel("Kërko detyrë").fill("BP-M-D")
+  await expect(table.getByRole("rowheader", { name: "BP-M-D", exact: true })).toBeVisible()
+  await expect(table.getByRole("rowheader", { name: "BP-R-D", exact: true })).toHaveCount(0)
+  await expect(summary.getByText("Detyra të javës").locator("..").getByText("2", { exact: true })).toBeVisible()
+  await filters.getByLabel("Filtro gjendjen").selectOption("done")
+  await expect(page.getByText("Nuk ka detyra në këtë pamje", { exact: true })).toBeVisible()
+  await expect(summary).toBeVisible()
+  expect(state.writes).toEqual([])
+})
+
+test("the weekly table scrolls within phone and tablet widths and cells still open", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("primeflow-sidebar-open", "false"))
+  const state = await shell(page, { view: "week" })
+  state.templates[0].definition.short_code = "DHGJ-M-D"
+  state.templates[1].definition.short_code = "DHGJ-R-D"
+  await page.reload()
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    const region = page.getByRole("region", { name: "Tabela e planit javor", exact: true })
+    await expect(region).toBeVisible()
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    if (width <= 768) expect(await region.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+    await region.evaluate((el) => { el.scrollLeft = el.scrollWidth })
+    const code = page.getByRole("rowheader", { name: "DHGJ-R/M-D", exact: true })
+    const codeBox = (await code.boundingBox())!, regionBox = (await region.boundingBox())!
+    expect(codeBox.x).toBeGreaterThanOrEqual(regionBox.x)
+    expect(codeBox.x + codeBox.width).toBeLessThan(regionBox.x + regionBox.width)
+    await region.evaluate((el) => { el.scrollLeft = 0 })
+    await page.screenshot({ path: `test-results/ga-personal-week-${width}.png`, fullPage: true })
+  }
+  await page.getByRole("table").getByRole("button", { name: /^Detyra e personit të parë,/ }).click()
+  await expect(page.getByRole("dialog").getByRole("heading", { name: /DHGJ-M-D.*Detyra e personit të parë/ })).toBeVisible()
+})
+
+test("personal duties share a row with independent people, full hover titles and source legend", async ({ page }) => {
+  const state = await shell(page, { view: "week" })
+  const titles = ["Mirëmbajtja ditore e banjos së Mrika", "Mirëmbajtja ditore e banjos së Rrita", "Mirëmbajtja ditore e banjos së Lirza"]
+  state.rows.forEach((row, i) => { row.snapshot.title = titles[i]; state.templates[i].definition.short_code = ["BP-M-D", "BP-R-D"][i] })
+  state.rows[1].status = "done"
+  state.rows.push({ ...state.rows[0], id: "third", template_id: "third", snapshot: { ...state.rows[0].snapshot, title: titles[2], short_code: "BP-L-D", assignees: ["lirza"] }, status: "needs_help" })
+  state.rows.push({ ...state.rows[0], id: "deep", template_id: "deep", status: "in_progress", snapshot: { ...state.rows[0].snapshot, title: "Deep clean i banjos së Mrika", short_code: "BP-M-TH", frequency: "weekly", reminder_group: "weekend_deep_clean" } })
+  await page.reload()
+  const table = page.getByRole("table"), header = table.getByRole("rowheader", { name: "BP-R/M/L-D", exact: true })
+  await expect(header).toHaveCount(1)
+  await expect(table.getByRole("rowheader", { name: "BP-M-TH", exact: true })).toBeVisible()
+  expect((await table.getByRole("columnheader", { name: "Detyra", exact: true }).boundingBox())!.width).toBeLessThanOrEqual(112)
+  expect((await table.getByRole("columnheader", { name: "Ora", exact: true }).boundingBox())!.width).toBeLessThanOrEqual(64)
+  await header.getByRole("button").hover()
+  for (const title of titles) await expect(page.getByRole("tooltip")).toContainText(title)
+  await expect(page.getByRole("tooltip")).toContainText("BP-L-D")
+  await page.screenshot({ path: "test-results/ga-personal-grouped-hover.png", fullPage: true })
+  await page.getByText("Legjenda e shkurtesave", { exact: true }).click()
+  await expect(page.getByText("Korridori i vogël", { exact: true })).toBeVisible()
+  await expect(page.getByText("Korridori i bibliotekës", { exact: true })).toBeVisible()
+  await expect(page.getByText("Para shkollës / mëngjes shkolle", { exact: true })).toBeVisible()
+  await expect(page.getByText("Nala përgatitje para gjumit", { exact: true })).toBeVisible()
+  await expect(page.getByText("Mërkurë", { exact: true })).toBeVisible()
+  await expect(page.locator('dl[aria-label="Të gjitha shkurtesat"] dt')).toHaveCount(40)
+  await expect(page.getByRole("group", { name: "Kategoritë e legjendës", exact: true })).toHaveCount(0)
+  await page.screenshot({ path: "test-results/ga-personal-legend.png", fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: "test-results/ga-personal-legend-mobile.png", fullPage: true })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByText("Legjenda e shkurtesave", { exact: true }).click()
+  const cell = table.getByRole("button", { name: new RegExp(`^${titles[0]},`) })
+  const personTextColors = new Set<string>()
+  for (const [person, status, initials] of [["Person 1", "Për t’u bërë", "MC"], ["Person 2", "U kry", "RRC"], ["Person 3", "Më duhet ndihmë", "LC"]]) {
+    const badge = cell.getByRole("img", { name: `${person} · ${status}`, exact: true })
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveAttribute("title", `${person} · ${status}`)
+    await expect(badge).toHaveText(initials)
+    await expect(badge.locator("svg")).toHaveCount(0)
+    expect((await badge.boundingBox())!.width).toBeGreaterThanOrEqual(40)
+    expect(Number.parseFloat(await badge.evaluate((el) => getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(13)
+    expect(Number.parseFloat(await badge.evaluate((el) => getComputedStyle(el).borderRadius))).toBeGreaterThanOrEqual(20)
+    personTextColors.add(await badge.locator("span").evaluate((el) => getComputedStyle(el).color))
+    await expect(cell.getByText(status, { exact: true })).toHaveCount(0)
+  }
+  expect(personTextColors.size).toBe(3)
+  expect(await cell.getByRole("img", { name: "Person 1 · Për t’u bërë", exact: true }).locator("span").evaluate((el) => getComputedStyle(el).color)).toBe(await table.getByRole("img", { name: "Person 1 · Po e bëj", exact: true }).locator("span").evaluate((el) => getComputedStyle(el).color))
+  await expect(cell.getByRole("img", { name: "Person 1 · Për t’u bërë", exact: true })).toHaveCSS("background-color", "rgb(255, 196, 237)")
+  await expect(cell.getByRole("img", { name: "Person 2 · U kry", exact: true })).toHaveCSS("background-color", "rgb(196, 253, 196)")
+  await expect(table.getByRole("img", { name: "Person 1 · Po e bëj", exact: true })).toHaveCSS("background-color", "rgb(255, 255, 0)")
+  expect((await cell.boundingBox())!.height).toBeLessThan(100)
+  await page.screenshot({ path: "test-results/ga-personal-compact-cells.png", fullPage: true })
+  await cell.click()
+  await expect(page.getByRole("dialog").locator("article")).toHaveCount(3)
+  expect(state.writes).toEqual([])
+})
+
+test("clicking the time column updates selected unfinished duties and each recurrence only once", async ({ page }) => {
+  const state = await shell(page, { view: "week" })
+  state.templates[0].definition.short_code = "BP-M-D"
+  state.templates[1].definition.short_code = "BP-R-D"
+  const date = new Date(`${localToday()}T12:00:00Z`)
+  const otherDay = moveDay(localToday(), date.getUTCDay() === 0 ? -1 : 1)
+  state.rows.push({ ...state.rows[0], id: "other-day", local_date: otherDay, period_key: otherDay })
+  state.rows.push({ ...state.rows[1], id: "completed", due_at: `${localToday()}T18:10:00+01:00`, status: "done" })
+  await page.reload()
+  await page.getByRole("button", { name: "Cakto orën: BP-R/M-D", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("heading", { name: "Cakto orën", exact: true })).toBeVisible()
+  await expect(dialog.getByRole("checkbox")).toHaveCount(4)
+  await dialog.getByLabel("Ora e detyrës", { exact: true }).fill("19:45")
+  await page.screenshot({ path: "test-results/ga-personal-time-editor.png", fullPage: true })
+  await dialog.getByLabel("Edhe përsëritjet e ardhshme", { exact: false }).check()
+  await dialog.getByRole("button", { name: "Ruaj orën", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(state.writes).toHaveLength(3)
+  expect(state.writes.filter((w) => w.body.apply_to_future)).toHaveLength(2)
+  expect(state.writes.map((w) => w.path)).not.toContain("/occurrences/completed")
+  for (const write of state.writes) expect(write.body).toMatchObject({ due_time: "19:45", expected_version: 1 })
+  expect(state.writes[0].body.assignees).toEqual(["mrika"])
+  expect(state.writes[1].body.assignees).toEqual(["rrita"])
+  expect(state.rows.find((r) => r.id === "completed")!.status).toBe("done")
+  await page.reload()
+  const timeAction = page.getByRole("button", { name: "Cakto orën: BP-R/M-D", exact: true })
+  const timeCell = timeAction.locator("..")
+  await expect(timeCell).toContainText("19:45")
+  await expect(timeCell).toContainText("18:10")
+  await timeAction.click()
+  await dialog.getByLabel("Ora e detyrës", { exact: true }).fill("20:00")
+  await dialog.getByRole("checkbox", { name: /Person 2/ }).uncheck()
+  await dialog.getByRole("button", { name: "Ruaj orën", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(state.writes).toHaveLength(5)
+  expect(state.writes.slice(3).every((w) => w.body.apply_to_future === false)).toBe(true)
+  expect(state.writes.slice(3).some((w) => w.path === `/occurrences/${secondId}`)).toBe(false)
+})
+
+test("a partial time-save failure preserves the remaining selection without repeating saved duties", async ({ page }) => {
+  const state = await shell(page, { view: "week" })
+  state.templates[0].definition.short_code = "BP-M-D"
+  state.templates[1].definition.short_code = "BP-R-D"
+  let fail = true
+  await page.route(`**/ga-personal/occurrences/${secondId}`, async (route) => {
+    if (route.request().method() === "PATCH" && fail) {
+      fail = false
+      return route.fulfill({ status: 409, json: { detail: "Detyra ndryshoi ndërkohë." } })
+    }
+    return route.fallback()
+  })
+  await page.reload()
+  await page.getByRole("button", { name: "Cakto orën: BP-R/M-D", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Ora e detyrës", { exact: true }).fill("20:10")
+  await dialog.getByRole("button", { name: "Ruaj orën", exact: true }).click()
+  await expect(dialog.getByRole("alert")).toContainText("Ora u ruajt për 1 detyra.")
+  await expect(dialog.getByRole("checkbox", { name: /Person 1/ })).toHaveCount(0)
+  await expect(dialog.getByRole("checkbox", { name: /Person 2/ })).toBeChecked()
+  await expect(dialog.getByLabel("Ora e detyrës", { exact: true })).toHaveValue("20:10")
+  await dialog.getByRole("button", { name: "Ruaj orën", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(state.writes.map((w) => w.path)).toEqual([`/occurrences/${firstId}`, `/occurrences/${secondId}`])
 })

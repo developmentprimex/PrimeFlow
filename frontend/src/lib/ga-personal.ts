@@ -11,7 +11,7 @@ export type Definition = {
   recurrence_interval_weeks?: number; recurrence_anchor_date?: string | null
   on_date: string | null; due_time: string | null; weekdays: number[]; steps: string[]
   estimated_minutes: number | null
-  reminder_group: "morning" | "daily_upkeep" | "nala" | "weekend_deep_clean" | "roki"
+  reminder_group: "events" | "morning" | "daily_upkeep" | "nala" | "weekend_deep_clean" | "roki"
   discord_destination?: "dm" | "channel" | "off"
   enabled: boolean; readiness: "ready_after_setup" | "needs_confirmation"
   rotation_id: "nala" | null; coverage_key: string | null
@@ -35,7 +35,7 @@ export type ImportPreview = {
   update?: string[]; archive?: string[]; rename?: Record<string, string>
 }
 export const groups = {
-  morning: "Mëngjesi", daily_upkeep: "Mirëmbajtja ditore", nala: "Nala", weekend_deep_clean: "Vikendi", roki: "Roki",
+  events: "Eventet", morning: "Mëngjesi", daily_upkeep: "Mirëmbajtja ditore", nala: "Nala", weekend_deep_clean: "Vikendi", roki: "Roki",
 }
 export const statuses: Record<GaStatus, string> = {
   pending: "Për t’u bërë", acknowledged: "E pashë", in_progress: "Po e bëj", needs_help: "Më duhet ndihmë",

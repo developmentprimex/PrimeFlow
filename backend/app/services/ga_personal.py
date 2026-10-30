@@ -132,7 +132,7 @@ async def get_template(db, space_id, template_id):
 
 
 async def save_template(db, member, payload, template_id=None):
-    await lock_member_space(db, member)
+    space = await lock_member_space(db, member)
     data = await checked_definition(db, member, payload.definition)
     if template_id:
         row = await get_template(db, member.space_id, template_id)
@@ -144,6 +144,9 @@ async def save_template(db, member, payload, template_id=None):
     else:
         row = Template(space_id=member.space_id, created_by=member.user_id, definition=data)
         db.add(row)
+    generation = {**space.config.get("automatic_generation", {})}
+    generation.pop("future_generated_through", None)
+    space.config = {**space.config, "automatic_generation": generation}
     await db.flush()
     existing_once = (await db.execute(select(Occurrence.id).where(Occurrence.template_id == row.id).limit(1))).scalar_one_or_none() if data["frequency"] == "once" else None
     if existing_once is None and data["enabled"] and data["frequency"] == "once":

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 async def generation_tick(db, *, day=None):
+    explicit_day = day is not None
     day = day or datetime.now(service.TZ).date()
     spaces = (await db.execute(select(GaPersonalSpace).where(GaPersonalSpace.key == "ga_personal"))).scalars().all()
     created = 0
@@ -33,11 +34,25 @@ async def generation_tick(db, *, day=None):
         ).order_by(GaPersonalMember.id).limit(1))).scalar_one_or_none()
         if member is None:
             continue
+        # Keep today's list current, then maintain a rolling 14-day window so
+        # the week view has actual occurrences before those dates arrive.
         # School days, presence, first-home and conditions are not inferred.
-        result = await service.generate(db, member, GenerateRequest(day=day), automatic=True, commit=False)
-        created += result["created"]
+        days = {day}
+        if not explicit_day:
+            horizon = day + timedelta(days=13)
+            through = config.get("future_generated_through")
+            try:
+                first_future = max(day, datetime.fromisoformat(through).date() + timedelta(days=1)) if through else day
+            except (TypeError, ValueError):
+                first_future = day
+            if first_future <= horizon:
+                days.update(first_future + timedelta(days=offset) for offset in range((horizon - first_future).days + 1))
+            config = {**config, "future_generated_through": horizon.isoformat()}
+        for scheduled_day in sorted(days):
+            result = await service.generate(db, member, GenerateRequest(day=scheduled_day), automatic=True, commit=False)
+            created += result["created"]
         space.config = {**space.config, "automatic_generation": {
-            **space.config["automatic_generation"], "last_checked_at": service.utcnow().isoformat(),
+            **config, "last_checked_at": service.utcnow().isoformat(),
         }}
     await db.commit()
     return created
