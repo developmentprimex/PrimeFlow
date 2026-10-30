@@ -25,39 +25,47 @@ def message_context(message):
     return None
 
 
-def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next_page=0):
+NEXT_HEADING = '**Me çka ke me vazhdu në slotin tjetër?**'
+
+
+def is_continuation(message):
+    return (getattr(message, 'content', '') or '').startswith(NEXT_HEADING)
+
+
+def continuation_card(data, *, notice=None, next_page=0):
+    return card(data, notice=notice, next_page=next_page, continuation=True)
+
+
+def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next_page=0, continuation=False):
     # Selecting an already answered item is useful for corrections, without restarting the report.
     questions = [t for t in data['questions'] if t['id'] != 'next']
     item = next((t for t in questions if t['id'] == requested), None) if requested else data['current']
     rid = uuid.UUID(data['id']).hex
-    text = (f'<@{user_id}> ' if user_id else '') + f'⏰ **Sloti {data["bucket"]}** · {len(data["tasks"])} detyra\n'
-    text += f'🎧 **Takimi 1H i orës {data["bucket"]}.**\n'
+    text = f'⏰ **Sloti {data["bucket"]}** · {len(data["tasks"])} detyra\n'
     if notice:
         text += discord.utils.escape_markdown(notice[:150]) + '\n'
     view = discord.ui.View(timeout=None)
     if item:
         item_id = uuid.UUID(item['id']).hex
         text += f'{ui.icon(item["status"])} **{discord.utils.escape_markdown(ui.label(item["title"], 180))}**\n'
-        if item.get('progress_percentage') is not None:
-            text += f'Progresi: {item["progress_percentage"]}%\n'
-        text += discord.utils.escape_markdown(item['question'][:400])
+        text += f'Start: {approvals.date_text(item.get("start_date"))} · Due: {approvals.date_text(item.get("due_date"))}\n'
+        text += '\n' + discord.utils.escape_markdown(item['question'][:400])
         if item.get('answer'):
             text += '\n✅ ' + discord.utils.escape_markdown(item['answer'][:150])
             if item.get('expected_at'):
                 text += ' · ' + discord.utils.escape_markdown(item['expected_at'][:100])
-        text += '\nPër këtë detyrë: **Raporto** ose Reply te mesazhi.'
-        view.add_item(discord.ui.Button(label='✍️ Raporto', custom_id=f'pf:1h:{rid}:{item_id}:answer',
-                                       style=discord.ButtonStyle.primary, row=0))
-        for label, action in [('📊 Progres / strike', 'task'),
+        for label, action in [('☑ Strike', 'task'),
                                ('✅ U krye', 'done'), ('📅 Shtyje', 'postpone')]:
             view.add_item(discord.ui.Button(label=label, custom_id=f'pf:1h:{rid}:{item_id}:{action}', row=0))
+        view.add_item(discord.ui.Button(label='💬 Koment', custom_id=f'pf:1h:{rid}:{item_id}:answer',
+                                       style=discord.ButtonStyle.primary, row=0))
     else:
         text += {'DONE': '✅ Raportimi u ruajt.', 'PARTIAL': '◐ Raportimi u ruajt pjesërisht.',
                  'WAITING': 'Raportimi ka pyetje pa përgjigje.'}[data['state']]
         text += '\nPërgjigjet i gjen te Mira → Takimet 1H.'
         for done in [t for t in data['tasks'] if t['status'] == 'DONE'][:5]:
             text += '\n✅ ' + discord.utils.escape_markdown(ui.label(done['title'], 100)) + ' · E kryer'
-        view.add_item(discord.ui.Button(label='✍️ Raporto', custom_id=f'pf:1h:{rid}:next:answer',
+        view.add_item(discord.ui.Button(label='💬 Koment', custom_id=f'pf:1h:{rid}:next:answer',
                                        style=discord.ButtonStyle.primary, row=0))
     if join_url:
         view.add_item(discord.ui.Button(label='🎧 Kyçu në 1H', url=join_url, row=0))
@@ -78,7 +86,7 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
             options=options, min_values=0, max_values=len(options),
             custom_id=f'pf:1h:{rid}:next:nselect{next_page}-{data["next_options_key"]}', row=1))
     else:
-        text += '\nShkruaj te Raporto me çfarë vazhdon ose pse nuk ke vazhdim.'
+        text += '\nNuk ka detyra për vazhdim.'
     if pages > 1:
         for label, target, disabled in [('← Vazhdimi', next_page - 1, next_page == 0), ('Vazhdimi →', next_page + 1, next_page == pages - 1)]:
             view.add_item(discord.ui.Button(label=label, custom_id=f'pf:1h:{rid}:-:npage{max(0, target)}', disabled=disabled, row=2))
@@ -89,6 +97,29 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
             view.add_item(discord.ui.Button(label=label, custom_id=f'pf:1h:{rid}:-:q{max(0, target)}', disabled=disabled, row=3))
     elif questions and not item:
         view.add_item(discord.ui.Button(label='Rishiko detyrat', custom_id=f'pf:1h:{rid}:-:q0', row=3))
+    task_text, _, next_text = text.partition('\n\n' + NEXT_HEADING)
+    # The navigation caption belongs with the task, not the continuation.
+    next_text, separator, navigation = next_text.rpartition('\n\nDetyra ') if '\n\nDetyra ' in next_text else (next_text, '', '')
+    if separator:
+        task_text += separator + navigation
+    for control in list(view.children):
+        parts = (getattr(control, 'custom_id', '') or '').split(':')
+        next_control = len(parts) == 5 and (parts[3] == 'next' or parts[4].startswith('npage'))
+        if next_control != continuation:
+            view.remove_item(control)
+    if continuation:
+        for control in list(view.children):
+            if (getattr(control, 'custom_id', '') or '').endswith(':next:answer'):
+                view.remove_item(control)
+        if not options:
+            view.add_item(discord.ui.Select(placeholder='Nuk ka detyra për vazhdim',
+                custom_id=f'pf:1h:{rid}:next:nempty', disabled=True, row=1,
+                options=[discord.SelectOption(label='Nuk ka detyra për vazhdim', value='empty')]))
+        text = NEXT_HEADING + next_text
+        if notice:
+            text += '\n' + discord.utils.escape_markdown(notice[:150])
+    else:
+        text = task_text
     return text[:2000], view
 
 
@@ -123,7 +154,7 @@ class AnswerModal(discord.ui.Modal):
                 'answer': str(self.answer), 'expected_at': str(self.expected) if self.has_expected else '',
                 'question_status': self.item['status'], 'asks_completion': self.item.get('asks_completion'),
                 'continuation': str(self.continuation) if self.continuation is not None else None})
-            text, view = card(data, join_url=self.bot.one_h_url(data['bucket'], interaction.guild_id), notice='✅ Përgjigjja u ruajt.')
+            text, view = card(data, continuation=is_continuation(self.message), join_url=self.bot.one_h_url(data['bucket'], interaction.guild_id), notice='✅ Përgjigjja u ruajt.')
             await self.message.edit(content=text, embed=None, view=view)
             receipt = '✅ U ruajt te Mira → Takimet 1H'
             if self.item['id'] != 'next':
@@ -190,7 +221,18 @@ async def handle(bot, interaction):
             return
         detail = await bot.select(interaction, item_id)
         if action == 'task':
-            await bot.show_task(interaction, detail, new=True)
+            next_page = 0
+            for row in getattr(interaction.message, 'components', []) or []:
+                for component in row.children:
+                    cid = getattr(component, 'custom_id', '') or ''
+                    if ':nselect' in cid:
+                        next_page = int(cid.split(':nselect')[1].split('-')[0])
+            back = f'pf:1h:{uuid.UUID(rid).hex}:{uuid.UUID(item_id).hex}:backn{next_page}'
+            view = ui.with_one_h_return(ui.points_view(detail), back)
+            content = 'Zgjidh pikat për strike / heqje strike:' if any(isinstance(c, discord.ui.Select) for c in view.children) else 'Kjo detyrë nuk ka pika për strike.'
+            await interaction.edit_original_response(content=content,
+                embed=ui.card(detail['task'], detail=detail), view=view,
+                allowed_mentions=discord.AllowedMentions.none())
         elif action == 'postpone':
             job = await bot.bridge(f'/bot/m2/postponements/tasks/{item_id}/open', actor(interaction))
             view = discord.ui.View(timeout=None)
@@ -208,8 +250,9 @@ async def handle(bot, interaction):
     if action == 'skip':
         data = await bot.bridge(f'/bot/reminders/{rid}/one-h-answer', {**actor(interaction),
             'item_id': item_id, 'request_id': str(interaction.id), 'skip': True})
-    elif action == 'back':
+    elif action == 'back' or (action.startswith('backn') and action[5:].isdigit()):
         requested = item_id
+        next_page = int(action[5:]) if action != 'back' else 0
     elif action == 'review':
         requested = interaction.data['values'][0]
     elif action == 'none' or (action.startswith('nselect') and action[7:].split('-')[0].isdigit()):
@@ -238,9 +281,11 @@ async def handle(bot, interaction):
         if offset >= len(data['questions']):
             raise ValueError('Faqja nuk është e disponueshme. Rifresko raportimin.')
         requested = data['questions'][offset]['id']
-    elif action != 'refresh':
+    elif action not in {'refresh', 'choices', 'closechoices'}:
         raise ValueError('Veprim i panjohur.')
-    text, view = card(data, requested=requested, next_page=next_page, notice=notice, join_url=bot.one_h_url(data['bucket'], interaction.guild_id))
+    text, view = card(data, continuation=is_continuation(interaction.message),
+        requested=requested,
+        next_page=next_page, notice=notice, join_url=bot.one_h_url(data['bucket'], interaction.guild_id))
     await interaction.edit_original_response(content=text, embed=None, view=view)
 
 
@@ -257,7 +302,7 @@ async def reply(bot, message):
         'discord_user_id': str(message.author.id), 'guild_id': str(message.guild.id), 'channel_id': str(message.channel.id),
         'item_id': 'next' if item_id == 'next' else str(uuid.UUID(item_id)), 'request_id': str(message.id), 'answer': message.content[:4000],
         'question_status': 'TODO' if 'Pse s’ke vazhdu' in source.content else 'IN_PROGRESS' if 'A ke me vazhdu' in source.content else None})
-    text, view = card(data, notice='✅ Përgjigjja u ruajt.', join_url=bot.one_h_url(data['bucket'], message.guild.id))
+    text, view = card(data, continuation=is_continuation(source), notice='✅ Përgjigjja u ruajt.', join_url=bot.one_h_url(data['bucket'], message.guild.id))
     await source.edit(content=text, embed=None, view=view)
     return True
 
@@ -289,6 +334,12 @@ async def sync(bot):
                     try:
                         message = await channel.fetch_message(int(mid))
                         context = message_context(message)
+                        if not context and message.components and message.content.startswith('⏰ **Sloti '):
+                            context = (uuid.UUID(job['id']).hex, '-')
+                        # Do not replace an open strike picker during a task
+                        # revision scan. Returning reads the fresh report.
+                        if ui.one_h_strike_return(message):
+                            continue
                         # Retired cards and other bots' messages remain untouched.
                         if message.author.id != bot.user.id or not context or context[0] != uuid.UUID(job['id']).hex:
                             cache[key] = job['revision']
@@ -300,7 +351,7 @@ async def sync(bot):
                                 if ':nselect' in cid:
                                     page = int(cid.split(':nselect')[1].split('-')[0])
                         selected = str(uuid.UUID(context[1])) if context[1] not in {'next', '-'} else None
-                        content, view = card(data, user_id=job['discord_user_id'], requested=selected, next_page=page,
+                        content, view = card(data, continuation=is_continuation(message), user_id=job['discord_user_id'], requested=selected, next_page=page,
                             join_url=bot.one_h_url(job['bucket'], job['guild_id']))
                         components = [row.to_dict() for row in message.components]
                         if content != message.content or components != view.to_components():

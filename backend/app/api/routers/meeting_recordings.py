@@ -20,7 +20,7 @@ from app.models.enums import UserRole
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.meeting_recording import MeetingRecording as Recording, MeetingRecordingChunk as Chunk
 from app.models.user import User
-from app.schemas.meeting_recording import RecordingComplete, RecordingCreate, RecordingOut
+from app.schemas.meeting_recording import RecordingComplete, RecordingCreate, RecordingOut, RecordingUpdate
 from app.services.audit import add_audit_log
 from app.services.meeting_recording_storage import LocalMeetingStorage, StorageBusy, StorageError, durable_replace
 
@@ -119,6 +119,23 @@ async def get_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(get_
     result.recorded_by_name = await db.scalar(select(User.full_name).where(User.id == row.created_by))
     result.meeting_title = await db.scalar(select(Meeting.title).where(Meeting.id == row.meeting_id)) if row.meeting_id else None
     return result
+
+
+@router.patch("/{recording_id}", response_model=RecordingOut)
+async def update_recording(recording_id: uuid.UUID, payload: RecordingUpdate,
+                           db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    row = (await db.execute(select(Recording).where(
+        Recording.id == recording_id, Recording.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Recording not found")
+    if row.created_by != user.id and not management(user):
+        raise HTTPException(403, "Only the creator, admins and managers can edit recordings")
+    previous_title = row.title
+    row.title = payload.title
+    audit(db, user, row, "recording_title_updated", previous_title=previous_title, title=row.title)
+    await db.commit()
+    await db.refresh(row)
+    return await get_recording(recording_id, db, user)
 
 
 @router.delete("/{recording_id}", status_code=204)

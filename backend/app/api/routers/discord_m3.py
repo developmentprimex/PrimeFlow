@@ -238,6 +238,13 @@ async def own_question(db, question_id, actor, *, write=False):
 
 async def live_payload(db, q, link, user):
     result = question_payload(q, link)
+    if (q.answer or {}).get('postponement_id'):
+        from app.models.discord_m2_postponement import DiscordM2Postponement
+        from app.services.discord_m2_postponements import STATUS_LABELS
+        request = await db.get(DiscordM2Postponement, uuid.UUID(q.answer['postponement_id']))
+        if request and request.requester_link_id == link.id and request.task_id == q.task_id:
+            result['postponement'] = {'id': str(request.id), 'status': request.status,
+                                      'status_label': STATUS_LABELS[request.status]}
     if q.task_id:
         task = await task_owned(db, user.id, q.task_id)
         result['live_dates'] = {field: getattr(task, field).isoformat() if getattr(task, field) else None for field in ('start_date', 'due_date')}
@@ -327,6 +334,7 @@ class Answer(Actor):
     expected_dates: dict[str, str | None] | None = None
     expected_slot_key: str | None = None
     plan_key: str | None = None
+    request_id: str | None = Field(default=None, pattern=r'^\d{1,32}$')
 
 
 def validate_answer(q, value):
@@ -373,6 +381,8 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
     validate_answer(q, value)
     recorded = {key: item for key, item in value.model_dump(mode='json').items()
         if key in {'action', 'progress', 'slot', 'start_date', 'due_date'}}
+    if (q.answer or {}).get('postponement_id'):
+        recorded['postponement_id'] = q.answer['postponement_id']
     if q.kind == 'tomorrow':
         recorded['plan_key'] = value.plan_key
     if q.kind != 'tomorrow' and q.answered_at and q.answer == recorded and q.comment == value.comment.strip():
@@ -380,6 +390,8 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
     if value.expected_answered_at != q.answered_at:
         raise HTTPException(409, 'Përgjigjja ndryshoi ndërkohë. Hape përsëri pyetjen.')
     live = await live_payload(db, q, link, user)
+    if live.get('postponement', {}).get('status') == 'PENDING':
+        raise HTTPException(409, 'Kërkesa për shtyrje është në pritje të Diellza Veliut.')
     if live.get('resolved'):
         raise HTTPException(409, live['resolved'])
     if q.kind == 'tomorrow' and value.plan_key != live['plan_key']:
@@ -441,25 +453,36 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
                 if child.message_id:
                     message_updates.append(question_payload(child, link))
 
-    if value.action in {'postpone', 'done', 'progress'}:
+    if value.action == 'postpone':
+        from app.api.routers.discord_m2_postponements import Proposal, create_proposal
+        from app.services.discord_m2_postponements import iso
+        task = await task_owned(db, user.id, q.task_id)
+        changed = {field: getattr(value, field) for field in ('start_date', 'due_date')
+                   if iso(getattr(task, field)) != iso(getattr(value, field))}
+        if not changed:
+            raise HTTPException(422, 'Ndrysho të paktën Start ose Due për ta kërkuar shtyrjen.')
+        # Stable for older open modals too; retries cannot queue two reviews.
+        request_id = value.request_id or str(uuid.uuid5(q.id,
+            str(recorded) + value.comment.strip() + str(value.expected_answered_at)).int % 10**32)
+        proposal = Proposal(**{key: getattr(value, key) for key in ('discord_user_id', 'guild_id', 'channel_id')},
+            request_id=request_id, change_kind='start_due' if len(changed) == 2 else
+                'start' if 'start_date' in changed else 'due',
+            reason_code='OTHER', comment=value.comment, **changed)
+        request = await create_proposal(db, proposal, link, user, q.task_id,
+            commit=False, expected_dates=value.expected_dates)
+        recorded['postponement_id'] = request['id']
+        await persist()
+        await db.commit()
+        return {'ok': True, 'message': 'Kërkesa është në pritje të Diellza Veliut.',
+                'postponement': request, 'updates': message_updates}
+    elif value.action in {'done', 'progress'}:
         from app.api.routers.tasks import update_task_in_session
         from app.schemas.task import TaskUpdate
         updates = {'status': 'DONE', 'progress_percentage': 100} if value.action == 'done' else {
             'status': 'IN_PROGRESS', 'progress_percentage': value.progress}
-        if value.action == 'postpone':
-            updates = {'start_date': value.start_date, 'due_date': value.due_date,
-                'postponement_reason_code': 'OTHER', 'postponement_comment': value.comment}
-
         async def recheck(task):
             await task_owned(db, user.id, q.task_id)
-            if value.action == 'postpone':
-                from app.services.discord_m2_postponements import iso
-                if any(iso(getattr(task, field)) != iso(value.expected_dates.get(field)) for field in ('start_date', 'due_date')):
-                    raise HTTPException(409, 'Datat ndryshuan ndërkohë. Hape përsëri formularin.')
-                changed = [field for field in ('start_date', 'due_date') if iso(getattr(task, field)) != iso(getattr(value, field))]
-                if not changed or any(getattr(task, field) and getattr(value, field) < getattr(task, field) for field in changed):
-                    raise HTTPException(422, 'Shty Start ose Due përpara; lëre të pandryshuar datën tjetër sipas nevojës.')
-            elif task.status == 'DONE':
+            if task.status == 'DONE':
                 raise HTTPException(409, 'Detyra është përfunduar ndërkohë.')
 
         await update_task_in_session(q.task_id, TaskUpdate(**updates), db, user,

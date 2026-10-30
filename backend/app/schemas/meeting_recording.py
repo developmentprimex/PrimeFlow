@@ -23,6 +23,17 @@ class RecordingCreate(BaseModel):
         return value.strip()
 
 
+class RecordingUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, value):
+        if not value.strip():
+            raise ValueError("Title is required")
+        return value.strip()
+
+
 class RecordingComplete(BaseModel):
     chunks: int = Field(ge=1, le=100000)
     partial: bool = False

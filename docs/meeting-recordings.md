@@ -27,6 +27,9 @@ speaker/input contributed sound.
 Every authenticated active user may list, view, play and download all undeleted
 recordings, including recordings without a linked meeting, and read their analysis.
 Only the creator may upload, complete, abandon or start analysis for a recording.
+The creator and ADMIN/MANAGER may rename a recording using **Edito titullin** in
+the history table, then **Ruaj** or **Anulo**. Titles must contain 1–200 characters;
+the authenticated PATCH endpoint validates permissions and audits title changes.
 Only ADMIN/MANAGER may delete it. Anonymous and deactivated users have no access;
 authentication is checked on media requests. Deleted recordings remain inaccessible
 to every role. Meeting creation/linking permissions are unchanged.

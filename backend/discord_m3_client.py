@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 
 def date_default(value):
-    return datetime.fromisoformat(value).astimezone(report_timezone()).strftime('%d.%m.%Y %H:%M') if value else ''
+    return datetime.fromisoformat(value).astimezone(report_timezone()).strftime('%d.%m.%Y') if value else ''
 
 
 def form_date(value, current):
@@ -30,7 +30,10 @@ def prompt(job, page=0):
     if kind == 'tomorrow_task':
         title = discord.utils.escape_markdown(task_ui.heading(row))
         text = f"**[{title}](<{task_ui.task_url(job['task_id'])}>)**"
-        if job.get('resolved'):
+        if job.get('postponement'):
+            state = job['postponement']
+            text += ' · ' + ('⏳ ' if state['status'] == 'PENDING' else '') + state['status_label']
+        elif job.get('resolved'):
             text += ' · ✅ ' + job['resolved'][:80]
         elif job.get('answered'):
             label = {'PO': 'Po', 'JO': 'Jo', 'postpone': 'U shty'}.get(job.get('answer', {}).get('action'), '')
@@ -66,7 +69,12 @@ def prompt(job, page=0):
             for peer in row.get('peers', []):
                 text += f"{peer['people']}: **{peer['slot'] or 'PA SLOT'}**\n"
             text += 'Vendos slotin.' if row.get('missing_slot') else 'A e konfirmon slotin tënd, apo e ndryshon sipas kolegut?'
-    if job.get('resolved'):
+    if job.get('postponement'):
+        state = job['postponement']
+        text += '\n\n' + ('⏳ ' if state['status'] == 'PENDING' else '') + '**' + state['status_label'] + '**'
+        if job.get('comment'):
+            text += '\n' + discord.utils.escape_markdown(job['comment'][:250])
+    elif job.get('resolved'):
         text += '\n\n✅ ' + job['resolved']
     elif job.get('plan_changed'):
         text += '\n\n⚠️ Plani ka ndryshuar pas përgjigjes. Kontrolloje dhe konfirmoje përsëri.'
@@ -90,6 +98,11 @@ def controls(job, page=0):
     def button(label, action, style=discord.ButtonStyle.secondary, row=0):
         view.add_item(discord.ui.Button(label=label, custom_id=f'pf:m3:{action}:{qid}', style=style, row=row))
 
+    if job.get('postponement', {}).get('status') == 'PENDING':
+        if job.get('task_id'):
+            button('Hap detyrën', 'open')
+        view.add_item(discord.ui.Button(label='Raporti M3', custom_id='pf:reports:m3:0', row=4))
+        return view
     if not job.get('resolved'):
         if kind == 'untouched':
             for label, action in [('Komento', 'comment'), ('Në progres', 'progress'), ('Mbylle', 'done'), ('Shtyje', 'postpone')]:
@@ -144,7 +157,8 @@ async def show_detail(bot, interaction, job, detail, page=0, *, notice=None):
 
 async def save(bot, interaction, job, action, comment='', *, source_message=None, **fields):
     result = await bot.bridge(f"/bot/m3/{job['id']}/answer", {**actor(interaction), 'action': action, 'comment': comment,
-        'expected_answered_at': job.get('answered_at'), 'plan_key': job.get('plan_key'), **fields})
+        'expected_answered_at': job.get('answered_at'), 'plan_key': job.get('plan_key'),
+        'request_id': str(interaction.id), **fields})
     latest = await bot.bridge(f"/bot/m3/{job['id']}/open", actor(interaction))
     message = source_message or getattr(interaction, 'message', None)
     if message:
@@ -171,7 +185,7 @@ class AnswerModal(discord.ui.Modal):
         if action == 'postpone':
             for field, label in (('start_date', 'Start'), ('due_date', 'Due')):
                 item = discord.ui.TextInput(label=label, default=date_default(job['live_dates'].get(field)),
-                    placeholder='DD.MM.YYYY HH:MM', required=True, max_length=32)
+                    placeholder='DD.MM.YYYY', required=True, max_length=32)
                 self.dates[field] = item
                 self.add_item(item)
         if action == 'progress':

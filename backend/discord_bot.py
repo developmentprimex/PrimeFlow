@@ -469,6 +469,21 @@ class PrimeFlowBot(discord.Client):
             # Remember the order first: a closed task leaves the list.
             order = [task["id"] for task in await self.today(interaction)] if closing and in_place(interaction) and not ui.report_card_origin(getattr(interaction, 'message', None)) else None
             result = await self.apply(interaction, task_id, fingerprint, actions, instruction)
+            source = getattr(interaction, 'message', None)
+            if ui.one_h_strike_return(source) and (getattr(interaction, 'data', None) or {}).get('custom_id', '').startswith('pf:pointset:'):
+                detail = result if result.get('task') else await self.select(interaction, task_id)
+                page = 0
+                for row in source.components:
+                    for component in row.children:
+                        cid = getattr(component, 'custom_id', '') or ''
+                        if cid.startswith('pf:points:') and '/' in (getattr(component, 'label', '') or ''):
+                            page = int(cid.rsplit(':', 1)[1])
+                picker = ui.report_return(ui.points_view(detail, page), source)
+                self.remember_task(interaction, detail)
+                await interaction.edit_original_response(content=result['message'][:900],
+                    embed=ui.card(detail['task'], detail=detail), view=picker,
+                    allowed_mentions=discord.AllowedMentions.none())
+                return
             if order is not None:
                 if result.get("status") == "DONE":
                     await self.advance(interaction, task_id, order, "✅ U mbyll: " + ui.label(ui.heading(result.get("task") or {}), 80))
@@ -924,16 +939,20 @@ class PrimeFlowBot(discord.Client):
                             if data.get('one_h'):
                                 text, view = one_h_client.card(data['one_h'], user_id=job['discord_user_id'],
                                     join_url=self.one_h_url(job['bucket'], job['guild_id']))
+                                cards = [(text, view), one_h_client.continuation_card(data['one_h'])]
                             else:
                                 text, view = ui.report_intro(job["bucket"], data["tasks"], job["id"], job["discord_user_id"],
                                     join_url=self.one_h_url(job["bucket"], job["guild_id"]))
+                                cards = [(text, view)]
                             # Discord deduplicates the same nonce on a retried
                             # send. The key survives worker/API restarts.
-                            nonce = hashlib.sha256(f"{job['id']}:0".encode()).hexdigest()[:24]
-                            message = await self.http.request(discord.http.Route("POST", "/channels/{channel_id}/messages", channel_id=channel.id),
-                                json={"content": text, "components": view.to_components(),
-                                    "allowed_mentions": {"parse": [], "users": [job["discord_user_id"]]}, "nonce": nonce, "enforce_nonce": True})
-                            message_ids.append(str(message["id"]))
+                            for index, (text, view) in enumerate(cards):
+                                nonce = hashlib.sha256(f"{job['id']}:{index}".encode()).hexdigest()[:24]
+                                message = await self.http.request(discord.http.Route("POST", "/channels/{channel_id}/messages", channel_id=channel.id),
+                                    json={"content": text, "components": view.to_components(),
+                                        "flags": 4096 if index else 0,
+                                        "allowed_mentions": {"parse": [], "users": [job["discord_user_id"]]}, "nonce": nonce, "enforce_nonce": True})
+                                message_ids.append(str(message["id"]))
                         await self.bridge(f"/bot/reminders/{job['id']}/ack", {**identity, "message_ids": message_ids})
                     except Exception as exc:
                         log.warning("Reminder %s failed: %s", job["id"], type(exc).__name__)

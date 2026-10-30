@@ -93,7 +93,7 @@ class MeetingCaptureCoordinator:
                 active['heartbeat']=asyncio.create_task(self.heartbeat(active))
                 async def upload(message):await self.upload(active,message)
                 async def interrupted(reason):await self.interrupt(reason)
-                capture=VoiceCaptureClient(self.bot.ws.send_as_json,upload,interrupted);active['capture']=capture
+                capture=VoiceCaptureClient(self.send_voice_gateway,upload,interrupted);active['capture']=capture
                 await capture.start(session_id=row['id'],instance_id=worker['instance_id'],guild_id=actor['guild_id'],
                     channel_id=channel.id,bot_user_id=self.bot.user.id,node=settings.DISCORD_VOICE_NODE_BINARY)
                 if active['finishing'] or self.active is not active:raise ValueError('Nisja e takimit u anulua.')
@@ -294,6 +294,21 @@ class MeetingCaptureCoordinator:
             if not active.get('notice'):
                 await channel.send('Dëgjimi u ndërpre. Shënimet mund të jenë të pjesshme.',
                                    allowed_mentions=discord.AllowedMentions.none(),silent=True)
+
+    async def send_voice_gateway(self,payload):
+        # A resumed Discord session replaces bot.ws. Never retain a bound
+        # method from the socket that existed when the meeting started.
+        async with asyncio.timeout(12):
+            while True:
+                socket=self.bot.ws
+                try:
+                    if socket is None or not socket.open:
+                        await asyncio.sleep(0.5)
+                        continue
+                    await socket.send_as_json(payload)
+                    return
+                except (OSError, discord.ConnectionClosed):
+                    await asyncio.sleep(0.5)
 
     async def gateway(self,event):
         if self.active and self.active.get('capture'):

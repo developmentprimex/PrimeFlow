@@ -102,6 +102,14 @@ class M3RulesTests(unittest.TestCase):
 
 
 class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pending_postponement_is_not_shown_as_already_postponed(self):
+        import discord_m3_client as client
+        for kind in ('tomorrow_task', 'untouched'):
+            job = self.job(kind, answered=True, answer={'action': 'postpone'},
+                postponement={'id':str(uuid.uuid4()), 'status':'PENDING', 'status_label':'Në pritje të Diellzës'})
+            self.assertIn('Në pritje të Diellzës', client.prompt(job))
+            self.assertNotIn('U shty', client.prompt(job))
+            self.assertEqual([c.label for c in client.controls(job).children], ['Hap detyrën','Raporti M3'])
     def job(self, kind, **values):
         return {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': kind,
             'target_date': '2026-10-28', 'discord_user_id': '11', 'snapshot': {'title': 'RA: Detyrë',
@@ -222,9 +230,11 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
         import discord_m3_client as client
         job = self.job('untouched')
         modal = client.AnswerModal(None, job, 'postpone')
-        self.assertEqual(modal.dates['start_date'].default, '27.10.2026 08:00')
-        self.assertEqual(modal.dates['due_date'].default, '28.10.2026 16:00')
+        self.assertEqual(modal.dates['start_date'].default, '27.10.2026')
+        self.assertEqual(modal.dates['due_date'].default, '28.10.2026')
         self.assertEqual(client.form_date(modal.dates['start_date'].default, job['live_dates']['start_date']), job['live_dates']['start_date'])
+        self.assertEqual(client.form_date(modal.dates['due_date'].default, job['live_dates']['due_date']), job['live_dates']['due_date'])
+        self.assertEqual(client.form_date('30.10.2026', job['live_dates']['due_date']), '2026-10-30T16:00:00+01:00')
         self.assertTrue(modal.comment.required)
 
     async def test_slot_buttons_parse_colons_and_allow_keep_or_peer(self):

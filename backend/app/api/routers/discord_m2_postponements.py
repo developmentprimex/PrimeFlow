@@ -98,7 +98,7 @@ async def propose_task(task_id: uuid.UUID, value: Proposal, db: AsyncSession = D
     return await create_proposal(db, value, link, user, task_id)
 
 
-async def create_proposal(db, value, link, user, task_id, question=None):
+async def create_proposal(db, value, link, user, task_id, question=None, *, commit=True, expected_dates=None):
     duplicate = (await db.execute(select(Request).where(Request.request_id == value.request_id))).scalar_one_or_none()
     if duplicate:
         if duplicate.requester_link_id != link.id or duplicate.task_id != task_id:
@@ -110,6 +110,12 @@ async def create_proposal(db, value, link, user, task_id, question=None):
     if pending:
         raise HTTPException(409, 'Kjo detyrë ka tashmë një kërkesë në pritje të Diellzës.')
     task = await task_owned(db, user.id, task_id)
+    task = (await db.execute(select(Task).where(Task.id == task_id).with_for_update()
+        .execution_options(populate_existing=True))).scalar_one()
+    await task_owned(db, user.id, task_id)
+    if expected_dates is not None and any(rules.iso(getattr(task, field)) != rules.iso(expected_dates.get(field))
+                                          for field in ('start_date', 'due_date')):
+        raise HTTPException(409, 'Datat ndryshuan ndërkohë. Hape përsëri formularin.')
     from app.services.m2_reporting_points import select_task_sections
     if question and not select_task_sections([task], [], question.day)['pm_continuation']:
         raise HTTPException(409, 'Detyra nuk është më në planin PM të sotëm.')
@@ -129,7 +135,8 @@ async def create_proposal(db, value, link, user, task_id, question=None):
     add_audit_log(db=db, actor_user_id=user.id, entity_type='task', entity_id=task.id,
         action='task.m2_postponement_requested', after={'request_id': str(request.id), 'proposed_dates': proposed,
             'reason_code': value.reason_code, 'comment': request.comment, 'status': 'PENDING'})
-    await db.commit()
+    if commit:
+        await db.commit()
     return payload(request, user, approver)
 
 
@@ -262,6 +269,17 @@ async def claim_notifications(db: AsyncSession = Depends(get_db)):
             question = await db.get(DiscordM2Question, request.question_id) if request.question_id else None
             message_id = question.message_id if question else None
         job = payload(request, requester, approver)
+        from app.models.discord_m3_question import DiscordM3Question
+        m3_question = (await db.execute(select(DiscordM3Question).where(
+            DiscordM3Question.link_id == request.requester_link_id, DiscordM3Question.task_id == request.task_id,
+            DiscordM3Question.answer['postponement_id'].astext == str(request.id))
+            .order_by(DiscordM3Question.answered_at.desc()).limit(1))).scalar_one_or_none()
+        if m3_question:
+            job['source'] = 'm3'
+            if role == 'requester':
+                from app.api.routers.discord_m3 import live_payload
+                job['m3_question'] = await live_payload(db, m3_question, requester_link, requester)
+                message_id = m3_question.message_id
         job.update(role=role, discord_user_id=target.discord_user_id, guild_id=target.guild_id,
                    channel_id=target.channel_id, message_id=message_id)
         if role == 'requester' and question:

@@ -80,6 +80,7 @@ def snapshot(tasks, at, *, slot='10:00'):
         {'id': str(t['id']), 'title': plain_text(t.get('title') or 'Detyrë'),
          'planned_status': t['status'], 'status': t['status'], 'available': True,
          'due_date': t.get('due_date'),
+         'start_date': t.get('start_date'),
          'question': question(t['status'], plain_text(t.get('title') or 'Detyrë'), t.get('due_date'), at.date()),
          'progress_percentage': t.get('progress_percentage'), 'comment': t.get('user_comment'),
          'answer': None, 'expected_at': None, 'skipped': False, 'history': []}
@@ -99,6 +100,7 @@ def refresh(report, tasks, *, slot=None):
             entry['title'] = plain_text(task.get('title') or 'Detyrë')
             entry['status'] = task['status']
             entry['due_date'] = task.get('due_date')
+            entry['start_date'] = task.get('start_date')
             entry['progress_percentage'] = task.get('progress_percentage')
             entry['comment'] = task.get('user_comment')
     return result

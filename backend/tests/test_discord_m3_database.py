@@ -265,23 +265,103 @@ class M3DatabaseTests(unittest.IsolatedAsyncioTestCase):
             task = await db.get(Task, self.task_id)
             self.assertEqual((task.status, task.progress_percentage), ('DONE', 100))
 
-    async def test_postpone_only_due_commits_dates_comment_and_question_together(self):
+    async def test_postpone_waits_for_review_and_updates_dates_only_after_approval(self):
+        from app.api.routers import discord_m2_postponements as approvals
+        from app.models.discord_m2_postponement import DiscordM2Postponement as Request
+        async with self.sessions() as db:
+            reviewer = await db.get(User, self.uid2)
+            reviewer.username, reviewer.full_name = 'diellza.veliu', 'Diellza Veliu'
+            await db.commit()
         await self.setup_tomorrow()
         job = next(job for job in await self.claim('tomorrow') if job['kind'] == 'tomorrow_task' and job['discord_user_id'] == '11')
         live = await self.opened(job)
         start, due = (datetime.fromisoformat(live['live_dates'][field]) for field in ('start_date', 'due_date'))
+        result = await self.reply(job, 'postpone', comment='Pres të dhëna', start_date=start,
+            due_date=due + timedelta(days=1), expected_dates=live['live_dates'])
         await self.reply(job, 'postpone', comment='Pres të dhëna', start_date=start,
             due_date=due + timedelta(days=1), expected_dates=live['live_dates'])
         async with self.sessions() as db:
             task = await db.get(Task, self.task_id)
             self.assertEqual(task.start_date, start)
-            self.assertEqual(task.due_date, due + timedelta(days=1))
+            self.assertEqual(task.due_date, due)
+            self.assertEqual((await db.execute(select(func.count()).select_from(Request))).scalar_one(), 1)
             question = await db.get(Question, uuid.UUID(job['id']))
             self.assertEqual(question.answer['action'], 'postpone')
             self.assertEqual(question.comment, 'Pres të dhëna')
             comment = (await db.execute(select(TaskUserComment.comment).where(TaskUserComment.user_id == self.uid))).scalar_one()
             self.assertIn('Existing task comment', comment)
             self.assertIn('Pres të dhëna', comment)
+            self.assertEqual(comment.count('Pres të dhëna'), 1)
+            notifications = (await approvals.claim_notifications(db))['jobs']
+            self.assertEqual(len(notifications), 1)
+            self.assertEqual(notifications[0]['role'], 'review')
+            self.assertEqual(notifications[0]['discord_user_id'], '44')
+            self.assertEqual(notifications[0]['source'], 'm3')
+        pending = await self.opened(job)
+        self.assertEqual(pending['postponement']['status'], 'PENDING')
+        request_id = uuid.UUID(result['postponement']['id'])
+        async with self.sessions() as db:
+            rejected_actor = approvals.Decision(**self.actor.model_dump(), decision='APPROVED')
+            with self.assertRaises(HTTPException):
+                await approvals.decide(request_id, rejected_actor, db)
+        async with self.sessions() as db:
+            outcome = await approvals.decide(request_id, approvals.Decision(
+                discord_user_id='44', guild_id='22', channel_id='55', decision='APPROVED'), db)
+            self.assertEqual(outcome['status'], 'APPROVED')
+        async with self.sessions() as db:
+            task = await db.get(Task, self.task_id)
+            self.assertEqual(task.due_date, due + timedelta(days=1))
+        self.assertEqual((await self.opened(job))['postponement']['status'], 'APPROVED')
+        async with self.sessions() as db:
+            notifications = (await approvals.claim_notifications(db))['jobs']
+            requester = next(row for row in notifications if row['role'] == 'requester')
+            self.assertEqual(requester['source'], 'm3')
+            self.assertEqual(requester['m3_question']['postponement']['status'], 'APPROVED')
+            self.assertEqual(requester['message_id'], live['message_id'])
+
+    async def test_rejected_m3_postponement_keeps_dates_and_reports_rejection(self):
+        from app.api.routers import discord_m2_postponements as approvals
+        async with self.sessions() as db:
+            reviewer = await db.get(User, self.uid2)
+            reviewer.username = 'diellza.veliu'
+            await db.commit()
+        await self.setup_tomorrow()
+        job = next(job for job in await self.claim('tomorrow') if job['kind'] == 'tomorrow_task' and job['discord_user_id'] == '11')
+        live = await self.opened(job)
+        start, due = (datetime.fromisoformat(live['live_dates'][f]) for f in ('start_date', 'due_date'))
+        result = await self.reply(job, 'postpone', comment='Pres të dhëna', start_date=start,
+            due_date=due + timedelta(days=1), expected_dates=live['live_dates'])
+        async with self.sessions() as db:
+            await approvals.decide(uuid.UUID(result['postponement']['id']), approvals.Decision(
+                discord_user_id='44', guild_id='22', channel_id='55', decision='REJECTED'), db)
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Task, self.task_id)).due_date, due)
+        self.assertEqual((await self.opened(job))['postponement']['status'], 'REJECTED')
+
+    async def test_postpone_missing_reviewer_or_failed_persist_rolls_back_everything(self):
+        from app.api.routers import discord_m2_postponements as approvals
+        from app.models.discord_m2_postponement import DiscordM2Postponement as Request
+        await self.setup_tomorrow()
+        job = next(job for job in await self.claim('tomorrow') if job['kind'] == 'tomorrow_task' and job['discord_user_id'] == '11')
+        live = await self.opened(job)
+        start, due = (datetime.fromisoformat(live['live_dates'][f]) for f in ('start_date', 'due_date'))
+        with self.assertRaises(HTTPException):
+            await self.reply(job, 'postpone', comment='Pres të dhëna', start_date=start,
+                due_date=due + timedelta(days=1), expected_dates=live['live_dates'])
+        async with self.sessions() as db:
+            self.assertEqual((await db.execute(select(func.count()).select_from(Request))).scalar_one(), 0)
+            self.assertIsNone((await db.get(Question, uuid.UUID(job['id']))).answered_at)
+            reviewer = await db.get(User, self.uid2)
+            reviewer.username = 'diellza.veliu'
+            await db.commit()
+        with patch.object(api, 'update_report_answers', AsyncMock(side_effect=RuntimeError('Commit failed'))):
+            with self.assertRaises(RuntimeError):
+                await self.reply(job, 'postpone', comment='Not committed', start_date=start,
+                    due_date=due + timedelta(days=1), expected_dates=live['live_dates'])
+        async with self.sessions() as db:
+            self.assertEqual((await db.execute(select(func.count()).select_from(Request))).scalar_one(), 0)
+            self.assertIsNone((await db.get(Question, uuid.UUID(job['id']))).answered_at)
+            self.assertEqual((await db.get(Task, self.task_id)).due_date, due)
 
     async def test_meetings_route_to_assignees_or_diellza_and_store_status(self):
         async with self.sessions() as db:

@@ -640,6 +640,13 @@ hyrja me botin dhe rrjedha reale duhen verifikuar pas konfigurimit të Discord-i
 
 ### M2: vazhdimi në PM dhe kërkesat për shtyrje
 
+Shtyrjet nga **M3** përdorin të njëjtin konfirmim të Diellza Veliut. Formulari
+shfaq vetëm datat Start/Due dhe komentin. Pas dërgimit, karta tregon **Në pritje
+të Diellzës**; detyra nuk ndryshon deri në konfirmim. Refuzimi i mban datat
+ekzistuese. Përgjigjja M3 dhe kërkesa ruhen bashkë; një ridërgim nuk krijon dy
+kërkesa. Vendimi rifreskon kartën M3 të kërkuesit. Kërkesat e vjetra dhe shtyrjet
+e përfunduara më parë ruhen si histori.
+
 Butoni **Kërko shtyrje** gjendet edhe te kartat e zakonshme të detyrave të hapura
 nga `/detyrat`, në çdo orar dhe për AM/PM. Këto kërkesa nuk varen nga pyetja M2:
 zgjedhja e datave, arsyeja dhe komenti kalojnë te e njëjta Diellza Veliu për

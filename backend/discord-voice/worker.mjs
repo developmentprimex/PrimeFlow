@@ -1,4 +1,5 @@
 import {pathToFileURL} from 'node:url';
+import {Console} from 'node:console';
 import {SegmentBuffer} from './audio.mjs';
 import {decodeMessage,MAX_LINE} from './protocol.mjs';
 
@@ -109,6 +110,9 @@ export function createReceiver({sessionId,instanceId,guildId,channelId,userId,em
 }
 
 async function main(){
+  // stdout is exclusively framed IPC. Dependency diagnostics (including WASM
+  // console output) must not be interpreted as audio protocol messages.
+  globalThis.console=new Console({stdout:process.stderr,stderr:process.stderr});
   const voice=await import('@discordjs/voice');const {createOpusDecoder}=await import('./opus.mjs');await import('@snazzah/davey');
   const makeDecoder=createOpusDecoder;
   const probe=makeDecoder();probe.delete();

@@ -264,7 +264,31 @@ def report_card_origin(message):
     return None
 
 
+def one_h_strike_return(message):
+    """The persisted return control is the strike picker's reporting context."""
+    rows = getattr(message, 'components', None)
+    if not isinstance(rows, (list, tuple)):
+        return None
+    for row in rows:
+        for item in row.children:
+            cid = getattr(item, 'custom_id', '') or ''
+            if re.fullmatch(r'pf:1h:[0-9a-f]{32}:[0-9a-f]{32}:back(?:n\d+)?', cid):
+                return cid
+    return None
+
+
+def with_one_h_return(view, custom_id):
+    # Replace the generic task-card return; there is only one way back.
+    for item in list(view.children):
+        if (getattr(item, 'custom_id', '') or '').startswith('pf:back:'):
+            view.remove_item(item)
+    view.add_item(discord.ui.Button(label='← Kthehu te raportimi', row=4, custom_id=custom_id))
+    return view
+
+
 def report_return(view, message=None, *, report_kind=None, question_id=None):
+    if question_id is None and report_kind is None and (one_h := one_h_strike_return(message)):
+        return with_one_h_return(view, one_h)
     if question_id is None:
         origin = report_card_origin(message)
         if origin is None or (report_kind and origin[0] != report_kind):

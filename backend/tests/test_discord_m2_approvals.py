@@ -15,6 +15,27 @@ from app.api.routers import discord_m2_postponements as api
 
 
 class ProposalRulesTests(unittest.TestCase):
+    def test_m3_decision_updates_existing_requester_card(self):
+        import discord_m2_approvals as client
+        async def check():
+            from types import SimpleNamespace
+            payload = {'id':str(uuid.uuid4()), 'kind':'tomorrow_task', 'task_id':str(uuid.uuid4()),
+                'snapshot':{'title':'Detyra M3'}, 'postponement':{'status':'REJECTED',
+                    'status_label':'Shtyrja u refuzua — datat nuk ndryshuan'}}
+            job = {'id':str(uuid.uuid4()), 'source':'m3', 'role':'requester', 'message_id':'900',
+                   'discord_user_id':'11', 'guild_id':'22', 'channel_id':'33', 'm3_question':payload}
+            message = SimpleNamespace(id=900, edit=AsyncMock())
+            channel = SimpleNamespace(fetch_message=AsyncMock(return_value=message))
+            async def bridge(path, body):
+                return {'jobs':[job]} if path.endswith('/claim') else {'ok':True}
+            bot = SimpleNamespace(private_channel=AsyncMock(return_value=channel),bridge=AsyncMock(side_effect=bridge),
+                                  http=SimpleNamespace(request=AsyncMock()))
+            await client.deliver(bot)
+            self.assertIn('Shtyrja u refuzua',message.edit.call_args.kwargs['content'])
+            bot.http.request.assert_not_awaited()
+            self.assertTrue(bot.bridge.call_args.args[0].endswith('/ack'))
+        asyncio.run(check())
+
     def test_postponement_submit_updates_source_message_without_a_new_response(self):
         import discord_m2_approvals as client
         from unittest.mock import Mock
@@ -163,7 +184,9 @@ from app.models.task_alignment_user import TaskAlignmentUser
 
 @unittest.skipUnless(os.getenv('M2_TEST_DATABASE_URL'), 'Set M2_TEST_DATABASE_URL for isolated PostgreSQL schemas')
 class ApprovalDatabaseTests(unittest.IsolatedAsyncioTestCase):
+    from app.models.discord_m3_question import DiscordM3Question
     extra_tables = {DailyPlanAdjustment.__table__, TaskDailyProgress.__table__, TaskPlannerExclusion.__table__, TaskAlignmentUser.__table__}
+    extra_tables.add(DiscordM3Question.__table__)
     asyncTearDown = fixtures.M2DatabaseTests.asyncTearDown
     fresh_data = fixtures.M2DatabaseTests.fresh_data
     claim = fixtures.M2DatabaseTests.claim

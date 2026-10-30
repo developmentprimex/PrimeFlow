@@ -81,7 +81,12 @@ class VoiceCaptureClient:
                 if len(line)>MAX_LINE: raise ValueError('ipc_size')
                 await self.handle(json.loads(line))
             if not self.closing: await self._fail('voice_process_closed')
-        except (ValueError, OSError, asyncio.IncompleteReadError):
+        except (ValueError, OSError, asyncio.IncompleteReadError) as exc:
+            # Never log the frame: it can contain audio or gateway credentials.
+            safe_codes={'ipc_size','ipc_type','ipc_version','ipc_session','ipc_sequence',
+                'ipc_gap_reason','gateway_shape','gateway_operation','gateway_scope'}
+            detail=str(exc) if type(exc) is ValueError and str(exc) in safe_codes else type(exc).__name__
+            log.warning('MIRA_DIAGNOSTIC session=%s stage=protocol detail=%s',self.session_id,detail)
             if not self.closing: await self._fail('voice_protocol_error')
 
     async def handle(self, message):

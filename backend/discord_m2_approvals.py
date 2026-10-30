@@ -36,7 +36,7 @@ def date_text(value):
 
 
 def review_prompt(job):
-    heading = 'M2' if job.get('question_id') else 'PrimeFlow'
+    heading = 'M3' if job.get('source') == 'm3' else 'M2' if job.get('question_id') else 'PrimeFlow'
     text = f"**{heading} · Kërkesë për shtyrje**\n**{job['original_tasks'][0]['title']}**\nNga: {job['requester']}"
     original = next(row for row in job['original_tasks'] if row['id'] == job['task_id'])
     for field, value in job['proposed_dates'].items():
@@ -174,7 +174,12 @@ async def deliver(bot):
             actor = {key: job[key] for key in ('discord_user_id', 'guild_id', 'channel_id')}
             if job['role'] == 'requester' and job.get('message_id'):
                 message = await channel.fetch_message(int(job['message_id']))
-                await message.edit(content=questions.prompt(job['question']), view=questions.controls(job['question']), allowed_mentions=discord.AllowedMentions.none())
+                if job.get('source') == 'm3':
+                    import discord_m3_client as m3
+                    await message.edit(content=m3.prompt(job['m3_question']), view=m3.controls(job['m3_question']),
+                                       allowed_mentions=discord.AllowedMentions.none())
+                else:
+                    await message.edit(content=questions.prompt(job['question']), view=questions.controls(job['question']), allowed_mentions=discord.AllowedMentions.none())
                 message_id = str(message.id)
             elif job['role'] == 'review_update':
                 message = await channel.fetch_message(int(job['message_id']))

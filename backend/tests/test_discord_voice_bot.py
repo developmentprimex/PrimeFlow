@@ -9,6 +9,28 @@ from discord_voice_meetings import MeetingCaptureCoordinator
 from discord_voice_ui import meeting_view
 
 class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_voice_send_uses_replacement_socket_after_disconnect(self):
+        bot,c,_=self.fixture()
+        replacement=SimpleNamespace(open=True,send_as_json=AsyncMock())
+        old=SimpleNamespace(open=True,send_as_json=AsyncMock(side_effect=OSError('closed')))
+        bot.ws=old
+        async def reconnect(_):bot.ws=replacement
+        payload={'op':4,'d':{'guild_id':'1','channel_id':'2'}}
+        with patch('discord_voice_meetings.asyncio.sleep',side_effect=reconnect):
+            await c.send_voice_gateway(payload)
+        replacement.send_as_json.assert_awaited_once_with(payload)
+
+    async def test_voice_send_waits_for_closed_socket_to_be_replaced(self):
+        bot,c,_=self.fixture()
+        old=SimpleNamespace(open=False,send_as_json=AsyncMock())
+        replacement=SimpleNamespace(open=True,send_as_json=AsyncMock())
+        bot.ws=old
+        async def reconnect(_):bot.ws=replacement
+        with patch('discord_voice_meetings.asyncio.sleep',side_effect=reconnect):
+            await c.send_voice_gateway({'op':4})
+        old.send_as_json.assert_not_awaited()
+        replacement.send_as_json.assert_awaited_once()
+
     async def test_repeated_stop_reports_finished_and_leaves_voice_after_authorization(self):
         bot,c,i=self.fixture()
         bot.voice_recorder='ai_agent'

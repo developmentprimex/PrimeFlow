@@ -41,7 +41,9 @@ class M2DatabaseTests(unittest.IsolatedAsyncioTestCase):
                   TaskUserComment.__table__, TaskAssignee.__table__, AuditLog.__table__, DiscordM2Postponement.__table__}
         tables.update(getattr(self, 'extra_tables', set()))
         if getattr(self, 'full_schema', False):
-            tables = set(Base.metadata.tables.values())
+            # Explicit external schemas (e.g. ga_personal) are independent of
+            # these disposable task/report schemas and must not leak into them.
+            tables = {table for table in Base.metadata.tables.values() if table.schema is None}
         while True:
             expanded = tables | {fk.column.table for table in tables for fk in table.foreign_keys}
             if expanded == tables:
