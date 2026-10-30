@@ -14,8 +14,8 @@ from app.services.task_strike_events import _point_entries, _struck_points_by_id
 
 REMINDERS = (
     ("10:00", time(10, 0)), ("11:00", time(11, 0)),
-    ("11:50", time(11, 50)), ("AM", time(11, 50)),
-    ("14:20", time(14, 20)), ("16:00", time(16, 0)), ("PM", time(16, 5)),
+    # M2/M3 cover midday and end-of-day reporting separately.
+    ("14:20", time(14, 20)),
 )
 
 

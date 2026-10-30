@@ -24,6 +24,8 @@ from app.models.discord_assistant import DiscordLink, DiscordReminder, DiscordAc
 from app.models.mira_host import Mira1HMeeting, Mira1HTurn
 from app.models.discord_m2_postponement import DiscordM2Postponement
 from app.models.user import User
+from app.models.task import Task
+from app.models.task_user_comment import TaskUserComment
 from app.services import discord_one_h as service, mira_host as host
 from app.api.routers import discord_assistant as api
 
@@ -40,6 +42,21 @@ def display(report):
 
 
 class QuestionTests(unittest.TestCase):
+    def test_live_updates_keep_original_answers_and_plan(self):
+        original = task('IN_PROGRESS', title='Titulli i vjetër')
+        report = service.save_answer(service.snapshot([original], AT), original['id'], 'Vazhdoj', '', '1', AT)
+        refreshed = service.refresh(report, [{**original, 'title': 'Titulli i ri', 'status': 'DONE',
+            'progress_percentage': 100, 'user_comment': 'Përfunduar'}])
+        entry = refreshed['tasks'][0]
+        self.assertEqual(entry['status'], 'DONE')
+        self.assertEqual(entry['title'], 'Titulli i ri')
+        self.assertEqual(entry['planned_title'], 'Titulli i vjetër')
+        self.assertEqual(entry['planned_status'], 'IN_PROGRESS')
+        self.assertEqual(entry['progress_percentage'], 100)
+        self.assertEqual(entry['comment'], 'Përfunduar')
+        self.assertEqual(entry['answer'], 'Vazhdoj')
+        self.assertEqual(entry['history'], report['tasks'][0]['history'])
+
     def test_only_appropriate_questions_and_done_is_not_an_empty_plan(self):
         self.assertIsNone(display(service.snapshot([], AT))['current'])
         for status in ('WAITING_CLIENT', 'WAITING_CONFIRMATION'):
@@ -165,7 +182,9 @@ class ReportDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.schema = 'one_h_' + uuid.uuid4().hex
         self.engine = create_async_engine(URL, connect_args={'server_settings': {'search_path': self.schema}})
         tables = {DiscordLink.__table__, DiscordReminder.__table__, DiscordAction.__table__,
-                  Mira1HMeeting.__table__, Mira1HTurn.__table__, DiscordM2Postponement.__table__}
+                  Mira1HMeeting.__table__, Mira1HTurn.__table__, DiscordM2Postponement.__table__,
+                  TaskUserComment.__table__, models.TaskAssignee.__table__}
+        tables.add(models.TaskOneHReportSlot.__table__)
         while True:
             expanded = tables | {fk.column.table for t in tables for fk in t.foreign_keys}
             if expanded == tables:
@@ -190,6 +209,12 @@ class ReportDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         self.items = {self.user_ids[0]: [task(), task('IN_PROGRESS', '11:00'), task('DONE')],
                       self.user_ids[1]: [task('DONE')]}
+        async with self.sessions() as db:
+            for uid, items in self.items.items():
+                for item in items:
+                    db.add(Task(id=uuid.UUID(item['id']), title=item['title'], assigned_to=uid,
+                                status=item['status'], is_active=True))
+            await db.commit()
         class Clock(datetime):
             @classmethod
             def now(cls, tz=None):
@@ -245,6 +270,11 @@ class ReportDatabaseTests(unittest.IsolatedAsyncioTestCase):
             listed = await host.list_meetings(db, 50, 0)
             self.assertEqual(listed['total'], 1)
             self.assertEqual(len(listed['items']), 1)
+            comment = (await db.execute(select(TaskUserComment).where(
+                TaskUserComment.task_id == uuid.UUID(self.items[self.user_ids[0]][0]['id'])))).scalar_one()
+            self.assertEqual(comment.comment.count('Pres materialet'), 1)
+            self.assertIn('Tani vazhdoj', comment.comment)
+            self.assertIn('Sot 14:00', comment.comment)
             db.add(Mira1HMeeting(meeting_date=AT.date(), slot='10:00', status='DONE', host_transcript=[]))
             await db.commit()
         async with self.sessions() as db:
@@ -278,6 +308,83 @@ class ReportDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         with self.assertRaises(HTTPException):
             await self.answer(first)
+
+    async def test_combined_report_preserves_comment_and_blank_continuation_keeps_selection(self):
+        first = next(j for j in await self.collect() if j['discord_user_id'] == '11')
+        await self.open(first)
+        tid = uuid.UUID(self.items[self.user_ids[0]][0]['id'])
+        async with self.sessions() as db:
+            db.add(TaskUserComment(task_id=tid, user_id=self.user_ids[0], comment='Komenti i mëparshëm'))
+            await db.commit()
+        saved = await self.answer(first, continuation='Pastaj testoj ofertën')
+        self.assertEqual(saved['next']['answer'], 'Pastaj testoj ofertën')
+        await self.answer(first, '201', 'Vazhdoj tani', continuation='')
+        # A delayed retry must leave the later correction and comment untouched.
+        retry = await self.answer(first, continuation='Retry')
+        self.assertEqual(retry['tasks'][0]['answer'], 'Vazhdoj tani')
+        self.assertEqual(retry['next']['answer'], 'Pastaj testoj ofertën')
+        async with self.sessions() as db:
+            comment = (await db.execute(select(TaskUserComment.comment).where(TaskUserComment.task_id == tid))).scalar_one()
+            self.assertTrue(comment.startswith('Komenti i mëparshëm\n\n'))
+            self.assertIn('Vazhdimi: Pastaj testoj ofertën', comment)
+            self.assertEqual(comment.count('Pres materialet'), 1)
+            self.assertNotIn('Retry', comment)
+
+    async def test_comment_failure_rolls_back_both_report_and_comment(self):
+        from app.api.routers import tasks as task_api
+        first = next(j for j in await self.collect() if j['discord_user_id'] == '11')
+        await self.open(first)
+        real = task_api.update_task_user_comment_in_session
+        async def fail_after_comment(*args, **kwargs):
+            await real(*args, **kwargs)
+            await args[2].flush()
+            raise RuntimeError('Simulated failure before commit')
+        with patch.object(task_api, 'update_task_user_comment_in_session', fail_after_comment):
+            with self.assertRaises(RuntimeError):
+                await self.answer(first, continuation='Pastaj testoj')
+        async with self.sessions() as db:
+            report = await db.get(DiscordReminder, uuid.UUID(first['id']))
+            self.assertIsNone(report.one_h_report['tasks'][0]['answer'])
+            self.assertIsNone(report.one_h_report['next']['answer'])
+            self.assertEqual((await db.execute(select(TaskUserComment))).scalars().all(), [])
+
+    async def test_task_comment_rechecks_current_assignment(self):
+        first = next(j for j in await self.collect() if j['discord_user_id'] == '11')
+        await self.open(first)
+        async with self.sessions() as db:
+            item = await db.get(Task, uuid.UUID(self.items[self.user_ids[0]][0]['id']))
+            item.assigned_to = self.user_ids[1]
+            await db.commit()
+        with self.assertRaises(HTTPException) as error:
+            await self.answer(first)
+        self.assertEqual(error.exception.status_code, 403)
+
+    async def test_sync_revisions_follow_platform_changes_and_respect_links(self):
+        jobs = await self.collect()
+        first = next(j for j in jobs if j['discord_user_id'] == '11')
+        await self.open(first)
+        async with self.sessions() as db:
+            row = await db.get(DiscordReminder, uuid.UUID(first['id']))
+            row.sent_at, row.message_ids = AT, ['900', '901']
+            await db.commit()
+        async with self.sessions() as db:
+            original = await service.sync_jobs(db, AT)
+            self.assertEqual(len(original), 1)
+            self.assertEqual(original[0]['message_ids'], ['900', '901'])
+            self.assertEqual(await service.sync_jobs(db, AT), original)
+            await db.execute(text("UPDATE tasks SET status='DONE', updated_at=now() WHERE id=:id"),
+                             {'id': uuid.UUID(self.items[self.user_ids[0]][0]['id'])})
+            await db.commit()
+        async with self.sessions() as db:
+            changed = await service.sync_jobs(db, AT)
+            self.assertNotEqual(changed[0]['revision'], original[0]['revision'])
+            row = await db.get(DiscordReminder, uuid.UUID(first['id']))
+            self.assertEqual(row.one_h_report['tasks'][0]['status'], 'TODO')  # Scan has no writes.
+            link = await db.get(DiscordLink, self.links[0].id)
+            link.enabled = False
+            await db.commit()
+        async with self.sessions() as db:
+            self.assertEqual(await service.sync_jobs(db, AT), [])
 
     async def test_no_current_tasks_can_select_future_work_and_archive_it_without_task_writes(self):
         future = task('TODO', '14:20')

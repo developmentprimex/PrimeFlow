@@ -9,6 +9,65 @@ from discord_voice_meetings import MeetingCaptureCoordinator
 from discord_voice_ui import meeting_view
 
 class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_repeated_stop_reports_finished_and_leaves_voice_after_authorization(self):
+        bot,c,i=self.fixture()
+        bot.voice_recorder='ai_agent'
+        c.panel.state=AsyncMock(return_value={'meeting':{'id':'finished'}})
+        bot.bridge.return_value={'status':'READY','recorder':'ai_agent'}
+        with patch.object(c,'leave_voice',AsyncMock()) as leave:
+            await c.stop(i)
+        bot.bridge.assert_awaited_once_with('/bot/voice-meetings/finished/authorize-stop',
+            {'discord_user_id':str(i.user.id),'guild_id':str(i.guild_id),
+             'channel_id':str(i.channel_id),'voice_channel_id':None})
+        leave.assert_awaited_once_with(str(i.guild_id))
+        self.assertIn('Shënimet janë gati',i.followup.send.call_args.args[0])
+
+    async def test_stop_without_local_capture_requests_owner_worker_stop(self):
+        bot,c,i=self.fixture()
+        c.panel.state=AsyncMock(return_value={'meeting':{'id':'running'}})
+        bot.bridge.return_value={'status':'LISTENING','recorder':'primary'}
+        with patch.object(c,'leave_voice',AsyncMock()) as leave:
+            await c.stop(i)
+        leave.assert_not_awaited()
+        self.assertIn('Kërkesa për përfundim',i.followup.send.call_args.args[0])
+
+    async def test_finished_stop_requires_authorization_and_never_touches_new_capture(self):
+        bot,c,i=self.fixture()
+        bot.bridge.side_effect=ValueError('Forbidden')
+        with patch.object(c,'leave_voice',AsyncMock()) as leave:
+            with self.assertRaisesRegex(ValueError,'Forbidden'):
+                await c.stop(i,'old')
+            leave.assert_not_awaited()
+        c.active={'id':'new'}
+        with self.assertRaisesRegex(ValueError,'tjetër'):
+            await c.stop(i,'old')
+
+    async def test_idle_voice_cleanup_only_leaves_its_own_room_and_never_a_live_capture(self):
+        bot,c,i=self.fixture()
+        bot.voice_recorder='ai_agent'
+        channel=SimpleNamespace(id=55)
+        bot.get_guild.return_value=SimpleNamespace(me=SimpleNamespace(voice=SimpleNamespace(channel=channel)))
+        c.panel.state=AsyncMock(return_value={'meeting':{'status':'READY'}})
+        with patch('discord_voice_meetings.settings') as s,patch.object(c,'leave_voice',AsyncMock()) as leave:
+            s.DISCORD_GUILD_ID='123';s.DISCORD_AI_AGENT_VOICE_CHANNEL_ID='55'
+            await c.cleanup_idle_voice();leave.assert_awaited_once_with('123')
+            leave.reset_mock()
+            c.panel.state.return_value={'meeting':{'status':'LISTENING'}}
+            await c.cleanup_idle_voice();leave.assert_not_awaited()
+            c.panel.state.return_value={'meeting':{'status':'READY'}}
+            channel.id=56
+            await c.cleanup_idle_voice();leave.assert_not_awaited()
+            channel.id=55;c.active={'id':'current'}
+            await c.cleanup_idle_voice();leave.assert_not_awaited()
+
+    async def test_authorized_remote_stop_is_applied_by_worker_heartbeat(self):
+        bot,c,i=self.fixture()
+        active={'id':'running','worker':{},'finishing':False};c.active=active
+        bot.bridge.return_value={'stop_authorized':True}
+        with patch('discord_voice_meetings.asyncio.sleep',AsyncMock()),patch.object(c,'end',AsyncMock()) as end:
+            await c.heartbeat(active)
+        end.assert_awaited_once_with(active)
+
     async def test_result_delivery_uses_its_own_recorder_and_rejects_foreign_jobs(self):
         from discord_voice_meetings import deliver_meeting_results
         for recorder in ('primary','ai_agent'):
@@ -87,6 +146,20 @@ class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
         c.active={'id':'s','capture':capture,'worker':{},'actor':{},'partial':False,'heartbeat':None,'finishing':False}
         await c.stop(i,'s');self.assertEqual(sequence,['leave']);bot.bridge.assert_awaited()
         await asyncio.sleep(0);self.assertEqual(sequence,['leave','drain']);block.set()
+        await c.finalization
+
+    async def test_stop_removes_stale_listening_notice_and_its_stop_button(self):
+        bot,c,i=self.fixture()
+        notice=SimpleNamespace(edit=AsyncMock())
+        capture=SimpleNamespace(stop=AsyncMock(return_value={'last_sequence':1,'partial':False}),
+            drain=AsyncMock(),failed=False,close=AsyncMock())
+        c.active={'id':'s','capture':capture,'worker':{},'actor':{'guild_id':'123'},'partial':False,
+                  'heartbeat':None,'finishing':False,'notice':notice}
+        await c.stop(i,'s')
+        notice.edit.assert_awaited_once()
+        self.assertIsNone(notice.edit.call_args.kwargs['view'])
+        bot.ws.send_as_json.assert_awaited_once_with({'op':4,'d':{
+            'guild_id':'123','channel_id':None,'self_mute':True,'self_deaf':False}})
         await c.finalization
 
     async def test_one_failed_heartbeat_does_not_interrupt_the_meeting(self):

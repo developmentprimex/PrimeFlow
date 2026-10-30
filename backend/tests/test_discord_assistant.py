@@ -25,11 +25,17 @@ def plan(*actions):
 
 class ScheduleTests(unittest.TestCase):
     def test_exact_agreed_times(self):
-        expected = {"10:00": ["10:00"], "11:00": ["11:00"], "11:50": ["11:50", "AM"],
-                    "14:20": ["14:20"], "16:00": ["16:00"], "16:05": ["PM"]}
+        expected = {"10:00": ["10:00"], "11:00": ["11:00"], "11:50": [],
+                    "14:20": ["14:20"], "16:00": [], "16:05": []}
         for at, buckets in expected.items():
             hour, minute = map(int, at.split(":"))
             self.assertEqual(tools.due_buckets(NOW.replace(hour=hour, minute=minute)), buckets)
+
+    def test_m2_m3_windows_never_receive_extra_1h_or_legacy_am_pm_reports(self):
+        for hour,minute in ((11,45),(11,50),(15,50),(16,0),(16,5),(16,10)):
+            for second in (0,30):
+                with self.subTest(hour=hour,minute=minute,second=second):
+                    self.assertEqual(tools.due_buckets(NOW.replace(hour=hour,minute=minute,second=second)),[])
 
     def test_no_early_or_stale_or_weekend_reminders(self):
         for now in (NOW, NOW.replace(hour=10, minute=5), NOW.replace(day=17, hour=10, minute=0)):

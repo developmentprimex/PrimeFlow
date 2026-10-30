@@ -31,12 +31,26 @@ def interaction(data, action):
     tid = 'next' if item['id'] == 'next' else uuid.UUID(item['id']).hex
     return SimpleNamespace(user=SimpleNamespace(id=11), guild_id=22, channel_id=33, id=555,
         message=SimpleNamespace(edit=AsyncMock()), data={'custom_id': f'pf:1h:{uuid.UUID(data["id"]).hex}:{tid}:{action}'},
-        response=SimpleNamespace(send_modal=AsyncMock(), send_message=AsyncMock(), defer=AsyncMock()),
+        response=SimpleNamespace(send_modal=AsyncMock(), send_message=AsyncMock(), defer=AsyncMock(), edit_message=AsyncMock()),
         followup=SimpleNamespace(send=AsyncMock()), edit_original_response=AsyncMock())
 
 
 @unittest.skipUnless(AVAILABLE, 'Install requirements-discord.txt')
 class CardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stale_done_button_refreshes_instead_of_closing_again(self):
+        data = data_of()
+        click = interaction(data, 'done')
+        final = {**data, 'current': None, 'questions': [data['questions'][-1]],
+                 'tasks': [{**t, 'status': 'DONE'} for t in data['tasks']]}
+        bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value={'one_h': final}),
+            select=AsyncMock(), one_h_url=Mock(return_value=None))
+        await client.handle(bot, click)
+        bot.select.assert_not_awaited()
+        click.response.send_modal.assert_not_awaited()
+        self.assertIn('E kryer', click.response.edit_message.call_args.kwargs['content'])
+        labels = [getattr(c, 'label', '') for c in click.response.edit_message.call_args.kwargs['view'].children]
+        self.assertNotIn('✅ U krye', labels)
+
     async def test_cards_keep_structure_and_only_relevant_question(self):
         for status, expected in [('TODO', 'Pse s’ke vazhdu'), ('IN_PROGRESS', 'A ke me vazhdu'), ('DONE', service.NEXT_QUESTION)]:
             data = data_of(status)
@@ -51,6 +65,14 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
                 if control.custom_id:
                     self.assertLessEqual(len(control.custom_id), 100)
             labels = [getattr(c, 'label', None) for c in view.children]
+            self.assertEqual(labels.count('✍️ Raporto'), 1)
+            self.assertNotIn('💬 Koment', labels)
+            self.assertNotIn('✍️ Punë tjetër', labels)
+            self.assertNotIn('Pa vazhdim', labels)
+            self.assertNotIn('🔄 Rifresko', labels)
+            self.assertNotIn('⏭ Kalo', labels)
+            buttons = [c for c in view.children if isinstance(c, discord.ui.Button)]
+            self.assertTrue(all(c.row == 0 for c in buttons))
             if status == 'DONE':
                 self.assertNotIn('📅 Shtyje', labels)
             else:
@@ -95,6 +117,17 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('konfirmim', args['content'])
         menu = args['view'].children[0]
         self.assertTrue(menu.custom_id.startswith('pf:m2a:taskreason:'))
+        back = args['view'].children[1]
+        self.assertEqual(back.label, '← Kthehu te raportimi')
+        self.assertTrue(back.custom_id.endswith(':back'))
+        click.data['custom_id'] = back.custom_id
+        bot.bridge.reset_mock(side_effect=True)
+        bot.bridge.return_value = {'one_h': data}
+        bot.one_h_url = Mock(return_value=None)
+        await client.handle(bot, click)
+        self.assertIn('Pse s’ke vazhdu', click.edit_original_response.call_args.kwargs['content'])
+        self.assertTrue(bot.bridge.call_args.args[0].endswith('/tasks'))
+        self.assertEqual(bot.bridge.await_count, 1)
 
     async def test_answer_modal_saves_text_and_time_without_changing_task_dates(self):
         data = data_of()
@@ -104,11 +137,14 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
         modal = client.AnswerModal(bot, data, data['current'], click.message)
         modal.answer._value = 'Pres materialet'
         modal.expected._value = 'Nesër 10:00'
+        modal.continuation._value = 'Pastaj testoj ofertën'
         await modal.on_submit(click)
         path, payload = bot.bridge.call_args.args
         self.assertTrue(path.endswith('/one-h-answer'))
         self.assertEqual(payload['answer'], 'Pres materialet')
         self.assertEqual(payload['expected_at'], 'Nesër 10:00')
+        self.assertEqual(payload['continuation'], 'Pastaj testoj ofertën')
+        self.assertIn('komenti i detyrës', click.followup.send.call_args.args[0])
         self.assertNotIn('direct_actions', payload)
         click.message.edit.assert_awaited_once()
 
@@ -156,7 +192,7 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
         for due, count in [('2026-10-27', 2), ('2026-10-30', 1), (None, 1)]:
             data = data_of('IN_PROGRESS', due_date=due)
             modal = client.AnswerModal(SimpleNamespace(), data, data['current'], SimpleNamespace())
-            self.assertEqual(len(modal.children), count)
+            self.assertEqual(len(modal.children), count + 1)
             text, _ = client.card(data)
             self.assertEqual('Kur pritet me u kry?' in text, count == 2)
 
@@ -172,3 +208,69 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload['next_task_ids'], click.data['values'])
         self.assertEqual(payload['next_options_key'], data['next_options_key'])
         self.assertIn('Pse s’ke vazhdu', click.edit_original_response.call_args.kwargs['content'])
+
+
+@unittest.skipUnless(AVAILABLE, 'Install requirements-discord.txt')
+class SyncTests(unittest.IsolatedAsyncioTestCase):
+    def setup_sync(self):
+        data = data_of('IN_PROGRESS')
+        content, view = client.card(data, user_id='11')
+        messages = {mid: SimpleNamespace(author=SimpleNamespace(id=99), content=content,
+            components=[discord.components.ActionRow(row) for row in view.to_components()], edit=AsyncMock())
+            for mid in ('900', '901')}
+        fresh = {**data, 'current': None, 'questions': [data['questions'][-1]],
+                 'tasks': [{**t, 'status': 'DONE'} for t in data['tasks']]}
+        job = {'id': data['id'], 'bucket': '10:00', 'revision': 'revision-1', 'message_ids': ['900', '901'],
+               'discord_user_id': '11', 'guild_id': '22', 'channel_id': '33'}
+        async def bridge(path, payload):
+            return {'jobs': [job]} if path.endswith('/jobs') else {'one_h': fresh}
+        async def fetch(mid):
+            return messages[str(mid)]
+        channel = SimpleNamespace(fetch_message=AsyncMock(side_effect=fetch), send=AsyncMock())
+        bot = SimpleNamespace(bridge=AsyncMock(side_effect=bridge), private_channel=AsyncMock(return_value=channel),
+                              user=SimpleNamespace(id=99), one_h_url=Mock(return_value=None))
+        return bot, channel, messages, job
+
+    async def test_platform_completion_edits_all_existing_copies_once_and_keeps_silent(self):
+        bot, channel, messages, job = self.setup_sync()
+        await client.sync(bot)
+        for message in messages.values():
+            message.edit.assert_awaited_once()
+            kwargs = message.edit.call_args.kwargs
+            self.assertIn('E kryer', kwargs['content'])
+            self.assertNotIn('✅ U krye', [getattr(c, 'label', '') for c in kwargs['view'].children])
+            self.assertEqual(kwargs['allowed_mentions'].to_dict(), {'parse': []})
+        calls = bot.bridge.await_count
+        await client.sync(bot)
+        self.assertEqual(bot.bridge.await_count, calls + 1)  # Only the revision scan runs.
+        self.assertEqual(channel.fetch_message.await_count, 2)
+        channel.send.assert_not_awaited()
+
+    async def test_retired_and_deleted_messages_are_not_recreated(self):
+        bot, channel, messages, job = self.setup_sync()
+        messages['900'].components = []
+        async def fetch(mid):
+            if mid == 901:
+                raise discord.NotFound(SimpleNamespace(status=404, reason='Not Found'), 'Unknown message')
+            return messages[str(mid)]
+        channel.fetch_message.side_effect = fetch
+        await client.sync(bot)
+        for message in messages.values():
+            message.edit.assert_not_awaited()
+        channel.send.assert_not_awaited()
+        await client.sync(bot)
+        self.assertEqual(channel.fetch_message.await_count, 2)
+
+    async def test_failed_edit_is_retried_and_privacy_check_precedes_discord_reads(self):
+        bot, channel, messages, job = self.setup_sync()
+        messages['900'].edit.side_effect = RuntimeError('Temporary failure')
+        await client.sync(bot)
+        self.assertNotIn((job['id'], '900'), bot.one_h_sync_cache)
+        messages['900'].edit.side_effect = None
+        await client.sync(bot)
+        self.assertEqual(messages['900'].edit.await_count, 2)
+        bot.one_h_sync_cache.clear()
+        channel.fetch_message.reset_mock()
+        bot.private_channel.side_effect = ValueError('Wrong private channel')
+        await client.sync(bot)
+        channel.fetch_message.assert_not_awaited()

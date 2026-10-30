@@ -584,8 +584,16 @@ def meeting_alert(job: dict, voice_url: str | None = None):
     url = (meeting.get("url") or "").strip()
     if url.startswith(("https://", "http://")):
         view.add_item(discord.ui.Button(label="🔗 Hap takimin", url=url[:512]))
-    if internal and voice_url:
-        view.add_item(discord.ui.Button(label="🎧 Hyr në kanalin zanor", url=voice_url))
+    if internal:
+        guild_id = job.get('guild_id') or settings.DISCORD_GUILD_ID
+        one_h_url = (f'https://discord.com/channels/{guild_id}/{settings.DISCORD_1H_VOICE_CHANNEL_ID}'
+                     if guild_id and settings.DISCORD_1H_VOICE_CHANNEL_ID else voice_url)
+        ai_url = (f'https://discord.com/channels/{guild_id}/{settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID}'
+                  if guild_id and settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID else None)
+        if one_h_url:
+            view.add_item(discord.ui.Button(label='🎧 Hyr në 1H', url=one_h_url, row=0))
+        if ai_url:
+            view.add_item(discord.ui.Button(label='🎧 Hyr në AI Agent', url=ai_url, row=0))
     return content[:2000], embed, view
 
 

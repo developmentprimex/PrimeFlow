@@ -171,7 +171,7 @@ class MiraHost:
     def running(self) -> bool:
         return self.starting or self.session is not None or bool(self.task and not self.task.done())
 
-    async def join_now(self, guild, slot: str, discord_user_id: str):
+    async def join_now(self, guild, slot: str, discord_user_id: str, *, command_context: dict | None = None):
         """One explicit meeting; do not enable the daily automatic schedule."""
         if self.running():
             raise ValueError("Mira është duke u kyçur ose po e mban një takim. Përdor /mira ndalo fillimisht.")
@@ -189,13 +189,15 @@ class MiraHost:
             if generation != self.start_generation:
                 raise ValueError("Kyçja e Mira-s u anulua me /mira ndalo.")
             # Authorize and prepare before confirming anything to the caller.
-            prepared = await self.bot.bridge(PREFIX + "/session/start", {"slot": slot, "discord_user_id": discord_user_id})
+            prepared = await self.bot.bridge(PREFIX + "/session/start", {"slot": slot, "discord_user_id": discord_user_id,
+                **(command_context or {})})
             if generation != self.start_generation:
                 await self.bot.bridge(PREFIX + f"/meetings/{prepared['meeting']['id']}/finish", {"reason": "stopped_by_command"})
                 raise ValueError("Kyçja e Mira-s u anulua me /mira ndalo.")
             ready = asyncio.get_running_loop().create_future()
             self.task = asyncio.create_task(self.run(slot, guild, voice, manual_by=discord_user_id,
-                                                     prepared=prepared, ready=ready, start_generation=generation))
+                                                     prepared=prepared, ready=ready, start_generation=generation,
+                                                     command_context=command_context))
         finally:
             self.starting = False
         await ready
@@ -238,6 +240,7 @@ class MiraHost:
             payload = {"slot": slot}
             if session.get("manual_by"):
                 payload["discord_user_id"] = session["manual_by"]
+                payload.update(session.get('command_context') or {})
             started = prepared if prepared is not None and attempt == 1 else await self.bot.bridge(PREFIX + "/session/start", payload)
             session["meeting"] = started["meeting"]["id"]
             # A stop may arrive while the API prepares the session. Preserve its ID
@@ -268,12 +271,14 @@ class MiraHost:
         raise ValueError("connect_failed")
 
     async def run(self, slot: str, guild, voice, talk_at: datetime | None = None, *, manual_by: str | None = None,
-                  prepared: dict | None = None, ready: asyncio.Future | None = None, start_generation: int | None = None):
+                  prepared: dict | None = None, ready: asyncio.Future | None = None, start_generation: int | None = None,
+                  command_context: dict | None = None):
         session = {"slot": slot, "guild": guild, "voice": voice, "lines": [], "ready": asyncio.Event(),
                    "failed": asyncio.Event(), "closed": asyncio.Event(), "attempt": 0, "turn_started": None,
                    "turn_nudged": False, "upcoming": None, "finished": False, "ending": False, "meeting": None,
                    "process": None, "reason": "completed", "ga_done": asyncio.Event(), "staff_started": False,
-                   "starts_at": None, "pm_reviewed": False, "manual_by": manual_by}
+                   "starts_at": None, "pm_reviewed": False, "manual_by": manual_by,
+                   "command_context": command_context}
         self.session = session
         try:
             if prepared:
@@ -522,35 +527,51 @@ def register_host_commands(bot, guild):
         return
     group = app_commands.Group(name="mira", description="Mira mban takimet 1H (test)")
 
+    def command_scope(interaction):
+        gid = getattr(interaction, 'guild_id', None) or getattr(getattr(interaction, 'guild', None), 'id', None)
+        cid = getattr(interaction, 'channel_id', None)
+        return {'guild_id': str(gid), 'channel_id': str(cid)} if gid and cid else {}
+
+    def shared(interaction):
+        scope = command_scope(interaction)
+        return bool(settings.DISCORD_MEETING_CONTROL_CHANNEL_ID and scope.get('guild_id') == settings.DISCORD_GUILD_ID
+            and scope.get('channel_id') == settings.DISCORD_MEETING_CONTROL_CHANNEL_ID)
+
     @group.command(name="hyr", description="Mira Host hyn tani në 1H dhe nis takimin e slotit të zgjedhur")
     @app_commands.describe(sloti="Sloti 1H për të cilin do të mbahet takimi tani")
     @app_commands.choices(sloti=[app_commands.Choice(name=slot, value=slot) for slot in SLOTS])
     async def join(interaction: discord.Interaction, sloti: str):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        public = shared(interaction)
+        await interaction.response.defer(thinking=True, ephemeral=not public)
         try:
-            await bot.mira_host.join_now(interaction.guild, sloti, str(interaction.user.id))
-            await interaction.followup.send(f"🎙️ Mira Host u kyç në **1H** dhe po nis takimin për slotin **{sloti}**.", ephemeral=True)
+            scope = command_scope(interaction)
+            extra = {'command_context': scope} if scope else {}
+            await bot.mira_host.join_now(interaction.guild, sloti, str(interaction.user.id), **extra)
+            await interaction.followup.send(f"🎙️ Mira Host u kyç në **1H** · **{sloti}**.", ephemeral=not public)
         except Exception as exc:
             await interaction.followup.send(bot.error_message(exc), ephemeral=True)
 
     @group.command(name="mbaj-takimet", description="Mira i mban vetë takimet 1H (test)")
     @app_commands.describe(deri_ne_ore="Deri në cilën orë sot, p.sh. 12:00 (bosh = deri në fund të ditës)")
     async def start(interaction: discord.Interaction, deri_ne_ore: str | None = None):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        public = shared(interaction)
+        await interaction.response.defer(thinking=True, ephemeral=not public)
         try:
             await bot.mira_host.preflight()
-            state = await bot.bridge(PREFIX + "/enable", {"discord_user_id": str(interaction.user.id), "until": deri_ne_ore})
-            await interaction.followup.send(status_text(state), ephemeral=True)
+            state = await bot.bridge(PREFIX + "/enable", {"discord_user_id": str(interaction.user.id), "until": deri_ne_ore,
+                **command_scope(interaction)})
+            await interaction.followup.send(status_text(state), ephemeral=not public)
         except Exception as exc:
             await interaction.followup.send(bot.error_message(exc), ephemeral=True)
 
     @group.command(name="ndalo", description="Ndalo Mira-n si mbajtëse e takimeve 1H")
     async def stop(interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        public = shared(interaction)
+        await interaction.response.defer(thinking=True, ephemeral=not public)
         try:
-            await bot.bridge(PREFIX + "/disable", {"discord_user_id": str(interaction.user.id)})
+            await bot.bridge(PREFIX + "/disable", {"discord_user_id": str(interaction.user.id), **command_scope(interaction)})
             await bot.mira_host.stop("stopped_by_command")
-            await interaction.followup.send("⏹️ Mira nuk i mban më takimet. Regjistrimi i heshtur vazhdon si më parë.", ephemeral=True)
+            await interaction.followup.send("⏹️ Mira Host u ndal.", ephemeral=not public)
         except Exception as exc:
             await interaction.followup.send(bot.error_message(exc), ephemeral=True)
 

@@ -34,6 +34,30 @@ def session(guild=None):
 
 
 class ControllerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shared_join_and_stop_forward_scope_and_are_public(self):
+        fake=SimpleNamespace(tree=Mock(),bridge=AsyncMock(return_value={}),
+            mira_host=SimpleNamespace(join_now=AsyncMock(),stop=AsyncMock()),error_message=str)
+        interaction=SimpleNamespace(guild=SimpleNamespace(id=1),guild_id=1,channel_id=77,user=SimpleNamespace(id=11),
+            response=SimpleNamespace(defer=AsyncMock()),followup=SimpleNamespace(send=AsyncMock()))
+        with patch.object(mira_host.settings,'MIRA_HOST_ENABLED',True), \
+             patch.object(mira_host.settings,'MIRA_HOST_BOT_TOKEN','host-test'), \
+             patch.object(mira_host.settings,'DISCORD_GUILD_ID','1'), \
+             patch.object(mira_host.settings,'DISCORD_MEETING_CONTROL_CHANNEL_ID','77'):
+            mira_host.register_host_commands(fake,mira_host.discord.Object(id=1))
+            group=fake.tree.add_command.call_args.args[0]
+            await group.get_command('hyr').callback(interaction,'14:20')
+            fake.mira_host.join_now.assert_awaited_once_with(interaction.guild,'14:20','11',
+                command_context={'guild_id':'1','channel_id':'77'})
+            interaction.response.defer.assert_awaited_with(thinking=True,ephemeral=False)
+            self.assertFalse(interaction.followup.send.await_args.kwargs['ephemeral'])
+            # A colleague who did not start the host can stop her through the same channel.
+            interaction.user.id=22
+            await group.get_command('ndalo').callback(interaction)
+            fake.bridge.assert_awaited_once_with('/bot/mira-host/disable',{
+                'discord_user_id':'22','guild_id':'1','channel_id':'77'})
+            fake.mira_host.stop.assert_awaited_once_with('stopped_by_command')
+            self.assertFalse(interaction.followup.send.await_args.kwargs['ephemeral'])
+
     async def test_connection_failure_reaches_manual_caller_and_closes_prepared_meeting(self):
         fake, calls = bot({})
         host = mira_host.MiraHost(fake)
@@ -309,10 +333,12 @@ class ConnectRetryTests(unittest.IsolatedAsyncioTestCase):
         prepared = {'meeting': {'id': 'm1'}, 'client_secret': 'ek', 'model': 'm', 'target_minutes': 4}
         fake, calls = bot({'/session/start': prepared})
         host = mira_host.MiraHost(fake)
-        state = {**session(), 'manual_by': '11', 'attempt': 0, 'failed': asyncio.Event(), 'reason': 'completed'}
+        state = {**session(), 'manual_by': '11', 'attempt': 0, 'failed': asyncio.Event(), 'reason': 'completed',
+                 'command_context': {'guild_id': '1', 'channel_id': '77'}}
         with patch.object(mira_host, 'HostProcess', FakeProcess), patch.object(mira_host.asyncio, 'sleep', AsyncMock()):
             await host.connect(state, '11:00', SimpleNamespace(id=1), SimpleNamespace(id=5), prepared=prepared)
-        self.assertEqual(calls, [('/bot/mira-host/session/start', {'slot': '11:00', 'discord_user_id': '11'})])
+        self.assertEqual(calls, [('/bot/mira-host/session/start', {'slot': '11:00', 'discord_user_id': '11',
+            'guild_id': '1', 'channel_id': '77'})])
 
     async def test_a_failed_connection_is_retried_before_mira_must_talk(self):
         outcomes = iter([{'type': 'interrupted', 'reason': 'connect_timeout'}, {'type': 'ready'}])

@@ -4098,7 +4098,17 @@ async def update_task_user_comment(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
-    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    task = await update_task_user_comment_in_session(task_id, payload, db, user)
+    await db.commit()
+    await db.refresh(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
+    return _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
+
+
+async def update_task_user_comment_in_session(task_id, payload, db, user, *, append=False):
+    """Use the same comment permissions inside a larger atomic transaction."""
+    task = (await db.execute(select(Task).where(Task.id == task_id).with_for_update())).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     
@@ -4138,13 +4148,9 @@ async def update_task_user_comment(
         )
         db.add(user_comment)
     else:
-        user_comment.comment = payload.comment
-    
-    await db.commit()
-    await db.refresh(task)
-    assignee_map = await _assignees_for_tasks(db, [task.id])
-    comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
-    return _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
+        previous = (user_comment.comment or '').rstrip()
+        user_comment.comment = previous + '\n\n' + payload.comment if append and previous else payload.comment
+    return task
 
 
 class SharedCommentsRequest(BaseModel):

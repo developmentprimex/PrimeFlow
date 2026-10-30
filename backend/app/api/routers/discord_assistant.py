@@ -479,6 +479,11 @@ async def claim_reminders(db: AsyncSession = Depends(get_db)):
     return {"jobs": jobs}
 
 
+@router.post('/bot/one-h-sync/jobs', dependencies=[Depends(require_bot)])
+async def one_h_sync_jobs(db: AsyncSession = Depends(get_db)):
+    return {'jobs': await one_h.sync_jobs(db, datetime.now(ZoneInfo(settings.APP_TIMEZONE)))}
+
+
 @router.post("/bot/reminders/{reminder_id}/tasks", dependencies=[Depends(require_bot)])
 async def reminder_tasks(reminder_id: uuid.UUID, payload: Actor, db: AsyncSession = Depends(get_db)):
     link, user = await identity(db, payload, lock=True)
@@ -502,6 +507,7 @@ class OneHAnswer(Actor):
     request_id: str = Field(pattern=r'^\d{1,32}$')
     answer: str = Field(default='', max_length=4000)
     expected_at: str = Field(default='', max_length=200)
+    continuation: str | None = Field(default=None, max_length=4000)
     skip: bool = False
     question_status: str | None = Field(default=None, max_length=24)
     asks_completion: bool | None = None
@@ -518,8 +524,15 @@ async def answer_one_h(reminder_id: uuid.UUID, payload: OneHAnswer, db: AsyncSes
     reminder = await one_h.reminder_for(db, reminder_id, link, at, lock=True)
     if reminder.one_h_report is None:
         raise HTTPException(409, 'Rifresko raportimin para se të përgjigjesh.')
+    # A retry must not append the comment again or replace a later corrected answer.
+    if any(h.get('request_id') == payload.request_id
+           for item in [*reminder.one_h_report['tasks'], reminder.one_h_report['next']]
+           for h in item['history']):
+        return one_h.presentation(reminder)
     reminder.one_h_report = one_h.refresh(reminder.one_h_report, await daily_tasks(db, user, include_done=True), slot=reminder.bucket)
     if payload.selection_mode is not None:
+        if payload.continuation is not None:
+            raise HTTPException(422, 'Vazhdimi me tekst ruhet nga formulari i raportimit.')
         if payload.item_id != 'next' or payload.skip or (payload.selection_mode == 'NONE' and payload.next_task_ids):
             raise HTTPException(422, 'Përzgjedhja vlen vetëm për vazhdimin në slotin tjetër.')
         reminder.one_h_report = one_h.save_next_choices(reminder.one_h_report, list(map(str, payload.next_task_ids)),
@@ -529,7 +542,9 @@ async def answer_one_h(reminder_id: uuid.UUID, payload: OneHAnswer, db: AsyncSes
             raise HTTPException(422, 'Përcakto llojin e përzgjedhjes.')
         reminder.one_h_report = one_h.save_answer(reminder.one_h_report, payload.item_id, payload.answer,
             payload.expected_at, payload.request_id, at, skip=payload.skip, question_status=payload.question_status,
-            asks_completion=payload.asks_completion)
+            asks_completion=payload.asks_completion, continuation=payload.continuation)
+        if payload.item_id != 'next' and not payload.skip:
+            await one_h.save_report_comment(db, user, reminder, payload.item_id, payload.request_id, at)
     result = one_h.presentation(reminder)
     await db.commit()
     return result

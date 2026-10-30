@@ -64,8 +64,10 @@ class MeetingCaptureCoordinator:
         channel=getattr(getattr(interaction.user,'voice',None),'channel',None)
         if not isinstance(channel,discord.VoiceChannel):raise ValueError('Hyr në një voice channel të zakonshëm.')
         await self.bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
+        async def notify(*args,**kwargs):
+            return await interaction.followup.send(*args,**kwargs,wait=True)
         await self.begin(actor=identity(interaction),guild=interaction.guild,voice=channel,
-            request_id=str(interaction.id),title=title,department_id=department_id,notify=interaction.followup.send)
+            request_id=str(interaction.id),title=title,department_id=department_id,notify=notify)
 
     async def begin(self,*,actor,guild,voice,request_id,title,department_id,notify):
         channel=voice
@@ -97,7 +99,7 @@ class MeetingCaptureCoordinator:
                 if active['finishing'] or self.active is not active:raise ValueError('Nisja e takimit u anulua.')
                 await self.bot.bridge(PREFIX+f"/{row['id']}/listening",worker)
                 row['status']='LISTENING';active['listening']=True
-                await notify('Mira po dëgjon në heshtje.',view=meeting_view(row))
+                active['notice']=await notify('Mira po dëgjon në heshtje.',view=meeting_view(row))
             except Exception:
                 if active['capture']:
                     with suppress(Exception):await active['capture'].close()
@@ -114,7 +116,9 @@ class MeetingCaptureCoordinator:
             while self.active is active:
                 await asyncio.sleep(10)
                 try:
-                    await self.bot.bridge(PREFIX+f"/{active['id']}/heartbeat",active['worker']);failures=0
+                    state=await self.bot.bridge(PREFIX+f"/{active['id']}/heartbeat",active['worker']);failures=0
+                    if isinstance(state,dict) and state.get('stop_authorized') and not active['finishing']:
+                        await self.end(active);return
                 except asyncio.CancelledError:raise
                 except Exception:
                     failures+=1
@@ -148,10 +152,28 @@ class MeetingCaptureCoordinator:
 
     async def stop(self,interaction,session_id=None):
         active=self.active
-        if not active or (session_id and session_id!=active['id']):raise ValueError('Nuk ka takim aktiv në këtë proces.')
         from discord_meeting_control import in_control, require_control
         if in_control(interaction):require_control(interaction)
         else:await self.bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
+        if not active:
+            if not session_id:
+                latest=(await self.panel.state()).get('meeting')
+                session_id=latest.get('id') if latest else None
+            if not session_id:raise ValueError('Nuk ka regjistrim aktiv për të përfunduar.')
+            row=await self.bot.bridge(PREFIX+f'/{session_id}/authorize-stop',identity(interaction))
+            if row.get('recorder','primary')!=getattr(self.bot,'voice_recorder','primary'):
+                raise ValueError('Përdor komandën e regjistruesit përkatës.')
+            if row['status'] in ('STARTING','LISTENING'):
+                await interaction.followup.send('Kërkesa për përfundim u dërgua. Po ndalet regjistrimi.')
+            else:
+                await self.leave_voice(str(interaction.guild_id))
+                text=('Takimi ka përfunduar. Shënimet janë gati.' if row['status'] in ('READY','SAVED') else
+                      'Takimi ka përfunduar. Shënimet po përgatiten.' if row['status']=='FINALIZING' else
+                      'Regjistrimi është ndërprerë. Kontrollo shënimet e përgatitura.')
+                await interaction.followup.send(text)
+            return
+        if session_id and session_id!=active['id']:
+            raise ValueError('Ky takim ka përfunduar; një takim tjetër është aktiv.')
         await self.bot.bridge(PREFIX+f"/{active['id']}/authorize-stop",identity(interaction))
         if active['finishing']:
             await interaction.followup.send('Shënimet po përgatiten.');return
@@ -168,6 +190,9 @@ class MeetingCaptureCoordinator:
             with suppress(Exception):await active['capture'].close()
             with suppress(Exception):await self.bot.bridge(PREFIX+f"/{active['id']}/interrupt",{**active['worker'],'reason':'stop_failed'})
             end={'last_sequence':getattr(active['capture'],'last_sequence',0),'partial':True}
+        # A dead child or a resumed gateway must not leave the bot visibly in voice.
+        await self.leave_voice(active['actor'].get('guild_id'))
+        await self.update_notice(active,'Dëgjimi u ndal. Shënimet po përgatiten.')
         self.finalization=asyncio.create_task(self.finalize(active,end))
         self.background.add(self.finalization);self.finalization.add_done_callback(self.background.discard)
 
@@ -221,7 +246,9 @@ class MeetingCaptureCoordinator:
 
     async def check_presence(self,now):
         active=self.active
-        if not active or active['finishing'] or not active.get('listening'):return
+        if not active:
+            await self.cleanup_idle_voice();return
+        if active['finishing'] or not active.get('listening'):return
         if any(not member.bot for member in active['voice_channel'].members):
             active['seen_people']=True;active['empty_since']=None;return
         if active['empty_since'] is None:active['empty_since']=now
@@ -255,16 +282,53 @@ class MeetingCaptureCoordinator:
             if active['capture']:await active['capture'].close()
             end={'last_sequence':getattr(active['capture'],'last_sequence',0),'partial':True}
         with suppress(Exception):await self.bot.bridge(PREFIX+f"/{active['id']}/interrupt",{**active['worker'],'reason':'audio_interrupted'})
+        await self.leave_voice(active['actor'].get('guild_id'))
+        await self.update_notice(active,'Dëgjimi u ndërpre. Shënimet mund të jenë të pjesshme.')
         self.finalization=asyncio.create_task(self.finalize(active,end)) if active['capture'] else None
         if self.finalization:self.background.add(self.finalization);self.finalization.add_done_callback(self.background.discard)
         with suppress(Exception):
-            channel=await self.bot.private_channel(active['actor']['guild_id'],active['actor']['channel_id'],active['actor']['discord_user_id'])
-            await channel.send('Dëgjimi u ndërpre. Shënimet mund të jenë të pjesshme.')
+            if active['actor'].get('channel_id')==settings.DISCORD_MEETING_CONTROL_CHANNEL_ID:
+                channel=await self.panel.channel()
+            else:
+                channel=await self.bot.private_channel(active['actor']['guild_id'],active['actor']['channel_id'],active['actor']['discord_user_id'])
+            if not active.get('notice'):
+                await channel.send('Dëgjimi u ndërpre. Shënimet mund të jenë të pjesshme.',
+                                   allowed_mentions=discord.AllowedMentions.none(),silent=True)
 
     async def gateway(self,event):
         if self.active and self.active.get('capture'):
             try:await self.active['capture'].gateway(event)
             except Exception:await self.interrupt('gateway_failed')
+
+    async def leave_voice(self,guild_id):
+        if not guild_id:return False
+        try:
+            await asyncio.wait_for(self.bot.ws.send_as_json({'op':4,'d':{
+                'guild_id':str(guild_id),'channel_id':None,'self_mute':True,'self_deaf':False}}),3)
+            return True
+        except Exception:
+            log.warning('Recorder voice leave deferred to reconnect')
+            return False
+
+    async def update_notice(self,active,text):
+        notice=active.get('notice')
+        if notice:
+            with suppress(Exception):
+                await notice.edit(content=text,view=None,allowed_mentions=discord.AllowedMentions.none())
+
+    async def cleanup_idle_voice(self):
+        async with self.lock:
+            if self.active:return
+            guild_id=settings.DISCORD_GUILD_ID
+            guild=self.bot.get_guild(int(guild_id)) if guild_id and guild_id.isdigit() else None
+            channel=getattr(getattr(getattr(guild,'me',None),'voice',None),'channel',None)
+            recorder=getattr(self.bot,'voice_recorder','primary')
+            configured=settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID if recorder=='ai_agent' else settings.DISCORD_1H_VOICE_CHANNEL_ID
+            if not channel or str(channel.id)!=configured:return
+            # Another live capture must never be disconnected by an idle worker.
+            row=(await self.panel.state()).get('meeting') or {}
+            if row.get('status') in ('STARTING','LISTENING','FINALIZING'):return
+            await self.leave_voice(guild_id)
 
     async def close(self):
         if self.active:await self.interrupt('shutdown')

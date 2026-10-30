@@ -6,15 +6,20 @@ The frozen plan survives later date/slot edits; a new slot never inherits all TO
 from copy import deepcopy
 from datetime import date, datetime
 from hashlib import sha256
+import json
 import uuid
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.config import settings
 from app.models.discord_assistant import DiscordLink, DiscordReminder
 from app.models.user import User
+from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
+from app.models.task_user_comment import TaskUserComment
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.discord_task_tools import plain_text
 
 SLOTS = ('10:00', '11:00', '11:50', '14:20', '16:00')
@@ -90,9 +95,51 @@ def refresh(report, tasks, *, slot=None):
         task = current.get(entry['id'])
         entry['available'] = task is not None and task.get('is_active') is not False
         if task:
+            entry.setdefault('planned_title', entry['title'])
+            entry['title'] = plain_text(task.get('title') or 'Detyrë')
             entry['status'] = task['status']
             entry['due_date'] = task.get('due_date')
+            entry['progress_percentage'] = task.get('progress_percentage')
+            entry['comment'] = task.get('user_comment')
     return result
+
+
+async def sync_jobs(db, at):
+    """Read revisions for today's sent cards; preparation still verifies each actor.
+
+    No task, answer or delivery state is changed by this scan. Fingerprinting IDs
+    as well as timestamps detects deletes/reassignment, without a task-write hook.
+    """
+    rows = (await db.execute(select(DiscordReminder, DiscordLink).join(
+        DiscordLink, DiscordLink.id == DiscordReminder.link_id).join(User, User.id == DiscordLink.user_id).where(
+        DiscordReminder.day == at.date(), DiscordReminder.bucket.in_(SLOTS),
+        DiscordReminder.one_h_report.is_not(None), DiscordReminder.sent_at.is_not(None),
+        DiscordReminder.message_ids.is_not(None), DiscordLink.enabled.is_(True),
+        DiscordLink.channel_id.is_not(None), DiscordLink.guild_id == settings.DISCORD_GUILD_ID,
+        User.is_active.is_(True)).order_by(DiscordReminder.id))).all()
+    revisions, jobs = {}, []
+    for reminder, link in rows:
+        if not reminder.message_ids:
+            continue
+        if link.user_id not in revisions:
+            owned = or_(Task.assigned_to == link.user_id, Task.id.in_(select(TaskAssignee.task_id).where(
+                TaskAssignee.user_id == link.user_id)))
+            owned_ids = select(Task.id).where(owned)
+            tasks = (await db.execute(select(Task.id, Task.updated_at, Task.status, Task.is_active).where(
+                owned).order_by(Task.id))).all()
+            comments = (await db.execute(select(TaskUserComment.task_id, TaskUserComment.updated_at).where(
+                TaskUserComment.user_id == link.user_id, TaskUserComment.task_id.in_(owned_ids))
+                .order_by(TaskUserComment.task_id))).all()
+            slots = (await db.execute(select(TaskOneHReportSlot.task_id, TaskOneHReportSlot.updated_at,
+                TaskOneHReportSlot.one_h_report_slot).where(TaskOneHReportSlot.report_date == at.date(),
+                TaskOneHReportSlot.task_id.in_(owned_ids)).order_by(TaskOneHReportSlot.task_id))).all()
+            revisions[link.user_id] = repr((tasks, comments, slots))
+        revision = sha256((revisions[link.user_id] + json.dumps(reminder.one_h_report, sort_keys=True,
+            default=str) + repr(reminder.message_ids)).encode()).hexdigest()
+        jobs.append({'id': str(reminder.id), 'bucket': reminder.bucket, 'revision': revision,
+                     'message_ids': reminder.message_ids, 'discord_user_id': link.discord_user_id,
+                     'guild_id': link.guild_id, 'channel_id': link.channel_id})
+    return jobs
 
 
 def all_done(report):
@@ -124,7 +171,7 @@ def presentation(reminder, requested=None):
             'next_options_key': next_options_key(report)}
 
 
-def save_answer(report, item_id, text, expected_at, request_id, at, *, skip=False, question_status=None, asks_completion=None):
+def save_answer(report, item_id, text, expected_at, request_id, at, *, skip=False, question_status=None, asks_completion=None, continuation=None):
     result = deepcopy(report)
     item = result['next'] if item_id == 'next' else next((t for t in result['tasks'] if t['id'] == item_id), None)
     if item is None:
@@ -149,7 +196,27 @@ def save_answer(report, item_id, text, expected_at, request_id, at, *, skip=Fals
     item['history'].append({'kind': 'SKIP' if skip else 'ANSWER', 'request_id': request_id,
                             'question': prompt, 'answer': text.strip(), 'expected_at': expected_at.strip() or None,
                             'at': at.isoformat()})
+    if not skip and item_id != 'next' and continuation and continuation.strip():
+        following = result['next']
+        following.update(answer=continuation.strip(), expected_at=None, selected_tasks=[], selection_kind='OTHER')
+        following['history'].append({'kind': 'ANSWER', 'request_id': request_id,
+                                    'question': NEXT_QUESTION, 'answer': continuation.strip(),
+                                    'expected_at': None, 'at': at.isoformat()})
     return result
+
+
+async def save_report_comment(db, user, reminder, item_id, request_id, at):
+    """Append the accepted answer through task permissions, before the report commits."""
+    from app.api.routers.tasks import TaskCommentUpdate, update_task_user_comment_in_session
+    item = next(t for t in reminder.one_h_report['tasks'] if t['id'] == item_id)
+    lines = [f'1H {reminder.day:%d.%m.%Y} · {reminder.bucket}', item['answer']]
+    if item.get('expected_at'):
+        lines.append('Afati i planifikuar: ' + item['expected_at'])
+    following = reminder.one_h_report['next']
+    if any(h.get('request_id') == request_id for h in following['history']):
+        lines.append('Vazhdimi: ' + following['answer'])
+    await update_task_user_comment_in_session(uuid.UUID(item_id), TaskCommentUpdate(comment='\n'.join(lines)),
+                                             db, user, append=True)
 
 
 def save_next_choices(report, task_ids, request_id, at, *, page=0, none=False, options_key=None):

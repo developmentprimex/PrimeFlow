@@ -89,10 +89,14 @@ class MeetingMessageTests(unittest.IsolatedAsyncioTestCase):
                             "starts_at": START.isoformat(), "others": [{"name": "Anisa Ternava", "discord_user_id": "4"}]}}
 
     def test_internal_start_pings_and_links_voice_room(self):
-        content, embed, view = ui.meeting_alert(self.job("start"), "https://discord.com/channels/1/9")
+        with patch.object(ui.settings, 'DISCORD_1H_VOICE_CHANNEL_ID', '9'), patch.object(
+                ui.settings, 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID', '10'):
+            content, embed, view = ui.meeting_alert(self.job("start"), "https://discord.com/channels/1/99")
         self.assertTrue(content.startswith("<@3> 🔴 **Takimi po fillon tani**"))
         self.assertIn("Anisa Ternava", embed.description)
-        self.assertEqual([item.label for item in view.children], ["🔗 Hap takimin", "🎧 Hyr në kanalin zanor"])
+        self.assertEqual([item.label for item in view.children], ["🔗 Hap takimin", "🎧 Hyr në 1H", "🎧 Hyr në AI Agent"])
+        self.assertEqual([item.url for item in view.children[1:]],
+                         ['https://discord.com/channels/1/9', 'https://discord.com/channels/1/10'])
 
     def test_after_question_offers_held_or_canceled(self):
         job = self.job("after")

@@ -13,7 +13,12 @@ from app.services import mira_host as host
 router = APIRouter(dependencies=[Depends(require_bot)])
 
 
-class Caller(BaseModel):
+class CommandContext(BaseModel):
+    guild_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
+    channel_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
+
+
+class Caller(CommandContext):
     discord_user_id: str = Field(pattern=r"^\d{1,32}$")
 
 
@@ -21,7 +26,7 @@ class Enable(Caller):
     until: str | None = Field(default=None, max_length=5)
 
 
-class Start(BaseModel):
+class Start(CommandContext):
     slot: str = Field(pattern=r"^\d{2}:\d{2}$")
     # Present only for an explicit slash command, never for a scheduled start.
     discord_user_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
@@ -54,9 +59,23 @@ async def manager(db: AsyncSession, caller: Caller):
     return user
 
 
+async def command_user(db: AsyncSession, caller: Caller):
+    if caller.guild_id is not None or caller.channel_id is not None:
+        if (caller.guild_id == settings.DISCORD_GUILD_ID and settings.DISCORD_MEETING_CONTROL_CHANNEL_ID
+                and caller.channel_id == settings.DISCORD_MEETING_CONTROL_CHANNEL_ID):
+            from app.services.discord_meeting_control import control_identity
+            from app.schemas.discord_voice_meeting import VoiceActor
+            _, user = await control_identity(db, VoiceActor(discord_user_id=caller.discord_user_id,
+                guild_id=caller.guild_id, channel_id=caller.channel_id))
+            return user
+        if caller.guild_id != settings.DISCORD_GUILD_ID:
+            raise HTTPException(403, 'Përdor serverin Discord të PrimeFlow.')
+    return await manager(db, caller)
+
+
 @router.post('/enable')
 async def enable(payload: Enable, db: AsyncSession = Depends(get_db)):
-    user = await manager(db, payload)
+    user = await command_user(db, payload)
     if not (settings.MIRA_HOST_ENABLED and settings.MIRA_HOST_BOT_TOKEN
             and (settings.MIRA_HOST_OPENAI_API_KEY or '').strip()):
         raise HTTPException(503, "Mira Host nuk është konfiguruar (MIRA_HOST_ENABLED / MIRA_HOST_BOT_TOKEN / MIRA_HOST_OPENAI_API_KEY).")
@@ -68,7 +87,7 @@ async def enable(payload: Enable, db: AsyncSession = Depends(get_db)):
 
 @router.post('/disable')
 async def disable(payload: Caller, db: AsyncSession = Depends(get_db)):
-    await manager(db, payload)
+    await command_user(db, payload)
     row = await host.get_settings(db, lock=True)
     row.enabled_until = None
     await db.commit()
@@ -90,7 +109,8 @@ async def tick(db: AsyncSession = Depends(get_db)):
 @router.post('/session/start')
 async def start(payload: Start, db: AsyncSession = Depends(get_db)):
     if payload.discord_user_id:
-        await manager(db, Caller(discord_user_id=payload.discord_user_id))
+        await command_user(db, Caller(discord_user_id=payload.discord_user_id,
+            guild_id=payload.guild_id, channel_id=payload.channel_id))
         if not (settings.MIRA_HOST_ENABLED and settings.MIRA_HOST_BOT_TOKEN):
             raise HTTPException(503, "Mira Host nuk është konfiguruar në server.")
     row = await host.get_settings(db)

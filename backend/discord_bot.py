@@ -886,7 +886,7 @@ class PrimeFlowBot(discord.Client):
 
     @tasks.loop(seconds=30)
     async def m2_questions(self):
-        results = await asyncio.gather(m2_client.deliver(self), m3_client.deliver(self), m2_approvals.deliver(self), answer_sync.deliver(self), return_exceptions=True)
+        results = await asyncio.gather(m2_client.deliver(self), m3_client.deliver(self), m2_approvals.deliver(self), answer_sync.deliver(self), one_h_client.sync(self), return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
                 log.warning('M2 polling failed: %s', type(result).__name__)

@@ -10,6 +10,16 @@ log = logging.getLogger('primeflow.discord.control')
 PREFIX = '/bot/voice-meetings'
 
 
+def panel_recorder(message):
+    """Recognize panels so the two bots never keep moving past each other."""
+    for row in getattr(message, 'components', ()):
+        for button in row.children:
+            parts = (getattr(button, 'custom_id', '') or '').split(':')
+            if len(parts) == 5 and parts[:2] == ['pf', 'mc'] and parts[2] in ('primary', 'ai_agent'):
+                return parts[2]
+    return None
+
+
 def in_control(interaction):
     return bool(settings.DISCORD_MEETING_CONTROL_CHANNEL_ID and
         str(interaction.channel_id) == settings.DISCORD_MEETING_CONTROL_CHANNEL_ID and
@@ -30,15 +40,10 @@ def panel_content(recorder, data):
     states = {'STARTING':'Duke u lidhur', 'LISTENING':'Duke regjistruar', 'FINALIZING':'Duke përgatitur shënimet',
         'READY':'Përfunduar · shënimet janë gati', 'SAVED':'Ruajtur', 'FAILED':'Shënimet nuk u përgatitën',
         'INTERRUPTED':'Regjistrimi u ndërpre'}
-    text = f'**🎧 Shënimet {label}**\nKanali zanor: <#{data["voice_channel_id"]}>\n'
+    text = f'**🎧 Shënimet {label}**\n'
     text += f'**Gjendja: {states.get(status, "Gati")}**\n'
-    if meeting.get('title'):
-        text += '\nTakimi: ' + discord.utils.escape_markdown(meeting['title'])
     if meeting.get('private'):
         text += '\nRegjistrimi u nis jashtë panelit; shënimet mbeten në kanalin e organizatorit.'
-    labels = {'CONTROL_START':'Nisur nga', 'CONTROL_STOP':'Përfunduar nga', 'CONTROL_SAVE':'Ruajtur nga'}
-    for item in data.get('activity', []):
-        text += f'\n{labels[item["action"]]} <@{item["discord_user_id"]}>'
     if meeting.get('partial'):
         text += '\n⚠ Shënimet mund të jenë të pjesshme.'
     embed = discord.Embed(description=text[:3900], color=0x5865F2)
@@ -68,6 +73,20 @@ class MeetingControlPanel:
         self.signature = None
         self.checked_at = 0
         self.lock = asyncio.Lock()
+        self.retired = []
+
+    async def remove_retired(self):
+        for message in self.retired[:]:
+            if message.author.id != self.bot.user.id or panel_recorder(message) != self.recorder:
+                self.retired.remove(message)
+                continue
+            try:
+                await message.delete()
+            except discord.NotFound:
+                pass
+            except discord.HTTPException:
+                continue
+            self.retired.remove(message)
 
     async def channel(self):
         if not settings.DISCORD_MEETING_CONTROL_CHANNEL_ID:
@@ -89,23 +108,36 @@ class MeetingControlPanel:
             data = await self.state()
             signature = json.dumps(data,sort_keys=True)
             self.checked_at = time.monotonic()
-            if not force and signature == self.signature and self.message:
-                return
             channel = await self.channel()
+            await self.remove_retired()
             if self.message is None:
                 marker = f'PrimeFlow shared recorder · {self.recorder}'
-                async for message in channel.history(limit=200):
-                    owns_panel = any((getattr(button, 'custom_id', '') or '').startswith(f'pf:mc:{self.recorder}:')
-                        for row in message.components for button in row.children)
+                async for message in channel.history(limit=None):
+                    owns_panel = panel_recorder(message) == self.recorder
                     if message.author.id == self.bot.user.id and (owns_panel or any(e.footer.text == marker for e in message.embeds)):
-                        self.message = message
+                        if self.message is None:
+                            self.message = message
+                        else:
+                            self.retired.append(message)
+                await self.remove_retired()
+            move = bool(self.message and not self.message.flags.suppress_notifications)
+            if self.message:
+                async for newer in channel.history(limit=100, after=self.message, oldest_first=False):
+                    if panel_recorder(newer) is None:
+                        move = True
                         break
+            if not force and signature == self.signature and self.message and not move:
+                return
             embed, view = panel_content(self.recorder, data)
             try:
-                if self.message:
+                if self.message and not move:
                     await self.message.edit(content=None,embed=embed,view=view,allowed_mentions=discord.AllowedMentions.none())
                 else:
-                    self.message = await channel.send(embed=embed,view=view,allowed_mentions=discord.AllowedMentions.none())
+                    previous = self.message
+                    self.message = await channel.send(embed=embed,view=view,allowed_mentions=discord.AllowedMentions.none(),silent=True)
+                    if previous:
+                        self.retired.append(previous)
+                        await self.remove_retired()
             except discord.NotFound:
                 self.message = None
                 self.signature = None
@@ -126,8 +158,10 @@ class MeetingControlPanel:
             raise ValueError('Kanali zanor i panelit nuk u gjet.')
         actor = {'discord_user_id':str(interaction.user.id),'guild_id':str(interaction.guild_id),
             'channel_id':str(interaction.channel_id),'voice_channel_id':str(channel.id)}
+        async def notify(*args, **kwargs):
+            return await interaction.followup.send(*args, **kwargs, wait=True)
         await self.coordinator.begin(actor=actor,guild=interaction.guild,voice=channel,
-            request_id=str(interaction.id),title=title,department_id=department_id,notify=interaction.followup.send)
+            request_id=str(interaction.id),title=title,department_id=department_id,notify=notify)
         await self.refresh(force=True)
 
     async def handle(self, interaction):

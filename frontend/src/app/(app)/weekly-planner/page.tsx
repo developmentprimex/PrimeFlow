@@ -1626,6 +1626,9 @@ export default function WeeklyPlannerPage() {
         if (statusValue === "WAITING_CONFIRMATION") {
           return getStatusCardClasses("WAITING_CONFIRMATION")
         }
+        if (statusValue === "WAITING_CLIENT") {
+          return getStatusCardClasses("WAITING_CLIENT")
+        }
         if (statusValue === "IN_PROGRESS") {
           return getStatusCardClasses("IN_PROGRESS")
         }

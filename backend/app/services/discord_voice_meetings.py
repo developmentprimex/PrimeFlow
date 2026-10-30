@@ -28,6 +28,7 @@ def token_hash(token):
 
 def view(row):
     return dict(id=str(row.id), status=row.status, title=row.title, partial=bool(row.partial),
+        stop_authorized=bool(getattr(row,'stop_authorized',False)),
         recorder=getattr(row, 'recorder', None) or 'primary',
         created_at=row.created_at.isoformat() if row.created_at else None,
         organizer_user_id=str(row.user_id), voice_channel_id=row.voice_channel_id,

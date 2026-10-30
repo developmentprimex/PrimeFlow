@@ -170,9 +170,11 @@ class AIAgentBot(discord.Client):
         log.info('Mira AI Agent connected; voice permissions ready=%s', status['ready'])
 
     async def on_ready(self):
+        await self.meeting_capture.cleanup_idle_voice()
         self.publish_status()
 
     async def on_resumed(self):
+        await self.meeting_capture.cleanup_idle_voice()
         self.publish_status()
 
     async def on_disconnect(self):

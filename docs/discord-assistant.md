@@ -17,6 +17,13 @@ Nuk hyn dhe nuk nis regjistrim gjatë lidhjes. Kur largohet personi i fundit,
 ndalet pas 30 sekondash. Shënimet shfaqen në kanalin personal me rrjedhën
 ekzistuese të shikimit dhe ruajtjes në PX Notes.
 
+Nëse regjistrimi përfundoi ose u ndërpre, **Mbaro** e verifikon sesionin në API dhe
+heq lidhjen zanore të mbetur; shënimet e gatshme ruhen. Një buton i vjetër nuk
+ndalon një takim të ri. Gjatë rilidhjes, boti pastron praninë zanore vetëm kur
+nuk ka regjistrim aktiv. Njoftimi “Mira po dëgjon” përditësohet dhe butoni i tij
+hiqet kur ndalet dëgjimi. Kërkesat e autorizuara të ndalimit zbatohen edhe nga
+punëtori që e mban regjistrimin, gjatë rrahjes së radhës të lidhjes.
+
 Migrimi `0174_discord_separate_recorders` lejon një takim aktiv për secilin
 regjistrues (`primary` për 1H dhe `ai_agent` për AI Agent), me sesione,
 token-a punëtori dhe segmente audio të veçanta. `/takimi` mbetet për regjistruesin
@@ -483,11 +490,12 @@ Nga e hëna në të premte, në `APP_TIMEZONE`:
 |---|---|
 | 10:00 | Sloti 10:00 |
 | 11:00 | Sloti 11:00 |
-| 11:50 | Sloti 11:50 |
-| 11:50 | AM |
 | 14:20 | Sloti 14:20 |
-| 16:00 | Sloti 16:00 |
-| 16:05 | PM |
+
+Mesazhet personale 1H dërgohen vetëm në këto tri orare. Raportet e 11:50 dhe
+16:00, si edhe kujtesat e vjetra AM/PM, janë hequr nga ky dërgim; M2 dhe M3
+vazhdojnë në rrjedhat e tyre të veçanta. Slotet e planifikimit dhe raportimet
+historike mbeten të ruajtura.
 
 Në fillim të secilit slot 1H, çdo staf aktiv me Discord të lidhur dhe kanal personal
 merr pyetjet që vlejnë për detyrat e atij sloti, pavarësisht pranisë në kanalin zanor
@@ -507,17 +515,31 @@ Edhe pa detyra në slotin aktual dërgohet pyetja e vazhdimit. Lista përzgjedh�
 detyrat aktuale në proces, detyrat aktive të sloteve pasuese të sotme dhe detyrat TODO
 nga sloti aktual / slotet paraprake. Nuk përfshin DONE, WFE, pritje konfirmimi ose
 detyra pa slot. Përzgjedhja e një ose disa detyrave ruhet menjëherë; faqet mbi 25
-opsione ruajnë edhe zgjedhjet e faqeve të tjera. **Punë tjetër** lejon tekst të lirë,
-ndërsa **Pa vazhdim** shënon mungesën e një plani. Përzgjedhja është vetëm plan vazhdimi:
+opsione ruajnë edhe zgjedhjet e faqeve të tjera. **Raporto** lejon tekst të lirë për vazhdimin,
+ku shënohet edhe mungesa e një vazhdimi. Përzgjedhja është vetëm plan vazhdimi:
 nuk ndryshon statuset, slotet ose afatet e detyrave. Lista verifikohet përsëri në ruajtje.
 
-**Përgjigju** hap formularin
-për përgjigjen dhe kohën e vazhdimit/përfundimit. Edhe Reply te karta ruan përgjigjen
-si raportim; shkrimi i një date në përgjigje nuk ndryshon afatin e detyrës.
-**Progres / strike**, **Koment**, **U krye** dhe **Shtyje** përdorin veprimet ekzistuese.
-Shtyrjet ndjekin formularin dhe konfirmimin ekzistues të Diellzës. Mesazhi **Rifresko**
-lexon gjendjen e fundit; **Rishiko / ndrysho përgjigjen** ruan edhe historikun origjinal.
-**Kalo** e lë pyetjen pa përgjigje. Kartat 1H mbeten të përdorshme gjatë ditës.
+**Raporto** bashkon përgjigjen për detyrën, kohën e vazhdimit/përfundimit dhe një fushë
+opsionale për vazhdimin. Një përgjigje për detyrën ruhet në të njëjtin transaksion si
+raportim 1H dhe si shtesë te komenti i personit në detyrë, me datën dhe slotin.
+Komentet e mëparshme ruhen; ridërgimi i të njëjtit ndërveprim nuk shton kopje.
+Edhe Reply te karta ruhet në të dy vendet. Kur nuk ka detyrë aktuale, teksti i
+vazhdimit ruhet vetëm në raportim. Vazhdimi bosh mban zgjedhjen ekzistuese nga lista.
+Shkrimi i një date në përgjigje nuk ndryshon afatin e detyrës.
+**Progres / strike**, **U krye** dhe **Shtyje** përdorin veprimet ekzistuese.
+Shtyrjet ndjekin formularin dhe konfirmimin ekzistues të Diellzës. Çdo veprim lexon
+gjendjen e fundit; ndryshimi i përgjigjes ruan edhe historikun origjinal.
+Te zgjedhja e arsyes së shtyrjes, **← Kthehu te raportimi** rikthen kartën 1H pa
+dërguar kërkesë për shtyrje dhe pa ndryshuar detyrën.
+Pa raportim, pyetja mbetet pa përgjigje. Nuk ka buton **Kalo**.
+**Raporto**, **Progres / strike**, **U krye**, **Shtyje** dhe **Kyçu në 1H** janë
+në të njëjtin rresht; lista e vazhdimit shfaqet poshtë. Kartat 1H mbeten të përdorshme gjatë ditës.
+
+Ndryshimet e detyrave në PrimeFlow rifreskojnë automatikisht kartat ekzistuese 1H
+brenda rreth 30 sekondave, pa dërguar mesazhe ose njoftime të reja. Rifreskimi ruan
+përgjigjet dhe historikun, lexon statusin, titullin, progresin, komentin dhe afatin aktual.
+Për një detyrë DONE tregohet **E kryer** dhe hiqen veprimet për mbyllje/shtyrje.
+Mesazhet e fshira nuk rikrijohen dhe kartat pa kontrolle aktive mbeten të arkivuara.
 
 Te **Mira → Takimet 1H**, përgjigjet shfaqen sipas datës, slotit, personit dhe detyrës:
 gjendja në fillim/aktuale, përgjigjja, koha e pritshme, historiku i veprimeve dhe shtyrjet
@@ -548,9 +570,10 @@ para), si dhe anulimet dhe përsëritjet, njësoj si njoftimet në shfletues.
 - **Takim i jashtëm:** "🔔 Takim pas N min", me butonin **🔗 Hap takimin** kur
   takimi ka link.
 - **Takim i brendshëm:** kujtesa para takimit dhe, kur fillon, "🔴 Takimi po fillon
-  tani" për secilin pjesëmarrës, me **🎧 Hyr në kanalin zanor**. Kanali zanor është
-  `DISCORD_MEETING_VOICE_CHANNEL_ID` (GitHub Actions variable, opsionale); pa të
-  përdoret kanali i parë zanor i serverit.
+  tani" për secilin pjesëmarrës, me **🎧 Hyr në 1H** dhe **🎧 Hyr në AI Agent**
+  në një rresht, sipas `DISCORD_1H_VOICE_CHANNEL_ID` dhe
+  `DISCORD_AI_AGENT_VOICE_CHANNEL_ID`. Kur mungon kanali 1H, përdoret lidhja zanore
+  e përgjithshme si rezervë.
 - **Pas takimit:** kur mbaron takimi (sipas orës së përfundimit; pa të, 30 min pas fillimit)
   secili pjesëmarrës merr "❓ A u mbajt takimi?" me **✅ Mbajtur / ✖ Anuluar**. Zgjedhja ruhet
   njësoj si kolona Mbajtur/Anuluar te Common View, dhe pyetja te pjesëmarrësit e tjerë
@@ -669,12 +692,28 @@ Start, Stop, View and Save confirmations in this shared channel are public to
 everyone who can see the channel. Only the refresh receipt stays ephemeral.
 
 Panels refresh automatically and their stable component IDs survive restarts.
+Within the existing 15-second panel polling cycle, a new ordinary channel message
+moves both controls below the conversation. Each bot replaces and removes only
+its own old panel after the new one has been sent. The bots ignore each other's
+panels so idle polling never causes repeated reposts. Restarts rediscover panels
+and remove only duplicate controls, preserving meeting notes and conversation.
+Panel creation and repositioning suppress Discord notifications (`silent=True`).
+The separately scheduled meeting invitations continue to notify their recipients.
 The configured shared channel also accepts `/takimi fillo`, `/takimi mbaro`,
 `/ai-agent fillo`, and `/ai-agent mbaro`. The 1H scheduler posts its recordings
 to this channel when configured. Saved notes appear under Mira → Shënimet,
 in the existing 1H / AI Agent groups. Personal recordings keep their private
 notes; the common panel can stop an active recording in its fixed voice, but
 cannot read or save its personal notes. The speaking Mira Host is separate.
+
+Mira Host can also be controlled from `mira-kontrolli` by any active linked
+PrimeFlow staff member: `/mira hyr sloti:14:20` starts one meeting immediately,
+`/mira mbaj-takimet` enables the existing daily host schedule, and `/mira ndalo`
+stops the host and disables that schedule. A colleague can stop a host started
+by someone else. These confirmations are public in the shared channel and do
+not require the caller to join voice. Outside the shared channel, host start
+and stop commands keep the existing admin/manager requirement. The two silent
+recorders continue independently.
 
 AI Agent invitations run on weekdays at 08:05, 12:00 and 16:10 in the app timezone.
 The four configured development recipients (Rinesa, Elsa, Endi and Laurent) receive
