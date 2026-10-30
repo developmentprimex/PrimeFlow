@@ -4,6 +4,7 @@ import * as React from "react"
 import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, LoaderCircle, LockKeyhole, Plus, Search, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { useGaPersonalSession } from "@/lib/use-ga-personal-session"
+import { WeekTable } from "@/components/ga-personal/week-table"
 import { TaskList } from "@/components/ga-personal/task-list"
 import { QuickEditDialog, QuickEditValues } from "@/components/ga-personal/quick-edit-dialog"
 import { DiscordSettingsPanel } from "@/components/ga-personal/discord-settings"
@@ -17,7 +18,8 @@ import { dayLabel, Definition, emptyDefinition, frequencies, GaOccurrence, GaSta
 const fieldClass = "w-full rounded-md border bg-background px-3 py-2 text-sm"
 
 export default function GaPersonalPage() {
-  const [tab, setTab] = React.useState("today")
+  const [tab, setTab] = React.useState("week")
+  const [weekSelection, setWeekSelection] = React.useState<string[]>([])
   const [person, setPerson] = React.useState<string>("all")
   const [day, setDay] = React.useState(localToday)
   const [busy, setBusy] = React.useState(false)
@@ -36,7 +38,7 @@ export default function GaPersonalPage() {
   const [groupFilter, setGroupFilter] = React.useState("all")
   const resetDrafts = React.useCallback(() => {
     setDraft(null); setEditing(null); setImportData(null); setPreview(null); setDeferred(null)
-    setQuick(null); setStepsText("")
+    setQuick(null); setStepsText(""); setWeekSelection([])
   }, [])
   const { access, workspace, templates, occurrences, history, request, load, check, obscured, connectionError } = useGaPersonalSession(resetDrafts)
 
@@ -110,7 +112,7 @@ export default function GaPersonalPage() {
     || (t.definition.assignment === "rotation" && ["rrita", "mrika", "lirza"].includes(person))) && `${t.definition.short_code || ""} ${t.definition.title}`.toLowerCase().includes(search.toLowerCase()))
   const dialogOpen = !!draft || !!quick || !!deferred
 
-  return <div className="relative mx-auto max-w-5xl space-y-5 pb-8" data-testid="ga-personal">
+  return <div className={`relative mx-auto ${tab === "week" ? "max-w-[1600px]" : "max-w-5xl"} space-y-5 pb-8`} data-testid="ga-personal">
     {obscured && <div className="fixed inset-0 z-[200] flex items-center justify-center bg-background" role="status"><div className="space-y-3 text-center"><LoaderCircle className="mx-auto h-6 w-6 animate-spin text-muted-foreground" /><p className="text-sm">Po verifikohet sesioni…</p>{connectionError && <><p className="max-w-sm text-sm text-muted-foreground">{connectionError}</p><Button variant="outline" onClick={() => void check()}>Provo përsëri</Button></>}</div></div>}
     <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-card p-5">
       <div className="flex items-center gap-3"><div className="rounded-xl bg-primary/10 p-3"><ShieldCheck className="h-6 w-6 text-primary" /></div>
@@ -154,7 +156,7 @@ export default function GaPersonalPage() {
               </div>
             </div>
             {!visible.length ? <div className="space-y-3 rounded-xl border bg-card p-8 text-center"><ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" /><h3 className="font-medium">Nuk ka detyra në këtë pamje</h3><p className="mx-auto max-w-md text-sm text-muted-foreground">{personRows.length ? "Provo një filtër tjetër ose pastro kërkimin." : "Për këtë datë nuk janë krijuar ende detyra. Detyrat e aktivizuara shtohen automatikisht në ditën përkatëse."}</p></div>
-              : <TaskList rows={visible} workspace={workspace} busy={busy} showDate={tab === "week"} onEdit={openQuick} onAction={(row, status) => void action(row, status)} onDefer={(row) => { setError(""); setDeferred(row); setDeferTime("") }} />}
+              : tab === "week" ? <WeekTable rows={visible} start={monday.toISOString().slice(0, 10)} workspace={workspace} onOpen={(rows) => setWeekSelection(rows.map((r) => r.id))} /> : <TaskList rows={visible} workspace={workspace} busy={busy} showDate={tab === "week"} onEdit={openQuick} onAction={(row, status) => void action(row, status)} onDefer={(row) => { setError(""); setDeferred(row); setDeferTime("") }} />}
             {workspace.is_admin && <details className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground"><summary className="cursor-pointer">Mundësi të tjera për datën</summary><div className="mt-3 flex flex-wrap items-center gap-3"><p>Krijo detyrat e aktivizuara për datën e zgjedhur.</p><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => {
               const result = await request<{ created: number }>("/generate", { method: "POST", body: JSON.stringify({ day }) }); await load(); toast.success(`${result.created} detyra të përgatitura.`)
             })}>Përgatit detyrat e datës</Button></div></details>}
@@ -199,6 +201,7 @@ export default function GaPersonalPage() {
         <Button type="submit" disabled={busy}>Ruaje detyrën</Button>
       </form>}
     </DialogContent></Dialog>
+    <Dialog open={weekSelection.length > 0 && !!workspace} onOpenChange={(open) => { if (!open) setWeekSelection([]) }}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>Detajet e detyr?s</DialogTitle></DialogHeader>{workspace && <TaskList rows={occurrences.filter((r) => weekSelection.includes(r.id))} workspace={workspace} busy={busy} showDate onEdit={(row) => { setWeekSelection([]); openQuick(row) }} onAction={(row, status) => void action(row, status)} onDefer={(row) => { setWeekSelection([]); setError(""); setDeferred(row); setDeferTime("") }} />}</DialogContent></Dialog>
     <QuickEditDialog row={quick} template={templates.find((t) => t.id === quick?.template_id)} workspace={workspace} busy={busy} error={error} onClose={() => { setQuick(null); setError("") }} onSave={(values) => void saveQuick(values)} onEditTemplate={(row) => edit(row)} />
     <Dialog open={!!deferred && !!workspace} onOpenChange={(open) => { if (!open) setDeferred(null) }}><DialogContent><DialogHeader><DialogTitle>Kur të përshtatet?</DialogTitle></DialogHeader>{error && <p role="alert" className="text-sm text-destructive">{error}</p>}<label className="space-y-2 text-sm"><span>Data dhe ora sipas pajisjes tënde</span><Input type="datetime-local" value={deferTime} onChange={(e) => setDeferTime(e.target.value)} /></label><Button disabled={busy || !deferTime} onClick={() => deferred && void action(deferred, "rescheduled", new Date(deferTime).toISOString())}>Shtyje detyrën</Button></DialogContent></Dialog>
   </div>
