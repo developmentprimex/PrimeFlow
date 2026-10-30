@@ -37,14 +37,25 @@ class MigrationGraphTests(unittest.TestCase):
 
     def test_tablet_devices_follow_the_merged_discord_and_personal_head(self) -> None:
         scripts = migration_scripts()
-        head = "0176_ga_personal_devices"
+        devices = "0176_ga_personal_devices"
         merge = "0175_merge_discord_ga_personal"
-        self.assertEqual(scripts.get_current_head(), head)
-        self.assertEqual(scripts.get_revision(head).down_revision, merge)
+        self.assertEqual(len(scripts.get_heads()), 1)
+        self.assertEqual(scripts.get_revision(devices).down_revision, merge)
         for deployed in (merge, "0174_discord_separate_recorders", "0174_ga_personal_discord"):
-            revisions = [step.revision.revision for step in scripts._upgrade_revs("head", deployed)]
-            self.assertEqual(revisions[-1], head)
-            self.assertEqual(revisions.count(head), 1)
+            revisions = [step.revision.revision for step in scripts._upgrade_revs(devices, deployed)]
+            self.assertEqual(revisions[-1], devices)
+            self.assertEqual(revisions.count(devices), 1)
+
+    def test_task_repetitive_flag_follows_tablet_devices_on_the_single_head(self) -> None:
+        scripts = migration_scripts()
+        repetitive = "0177_task_is_repetitive"
+        devices = "0176_ga_personal_devices"
+        self.assertEqual(scripts.get_revision(repetitive).down_revision, devices)
+        self.assertEqual(len(scripts.get_heads()), 1)
+        revisions = [step.revision.revision for step in scripts._upgrade_revs("head", devices)]
+        self.assertEqual(revisions[0], repetitive)
+        self.assertEqual(revisions.count(repetitive), 1)
+        self.assertEqual(revisions[-1], scripts.get_current_head())
 
     def test_mira_notes_and_ga_personal_upgrade_from_either_deployed_branch(self) -> None:
         scripts = migration_scripts()

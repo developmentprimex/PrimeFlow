@@ -42,11 +42,12 @@ export function NotesTab() {
       setLoading(true)
       setError(null)
       try {
-        // Read every page, including older closed notes, rather than silently stopping at 100.
+        // Show each page immediately while continuing to fetch the full history.
         const all: MiraNote[] = []
         for (let offset = 0; active; offset += PAGE_SIZE) {
           const page = await json<MiraNote[]>(await apiFetch(`/mira/notes?limit=${PAGE_SIZE}&offset=${offset}`))
           all.push(...page)
+          if (active) setNotes([...all])
           if (page.length < PAGE_SIZE) break
         }
         if (active) setNotes(all)
@@ -92,17 +93,17 @@ export function NotesTab() {
 
   return (
     <section className="mt-6 rounded-xl border bg-background p-4 shadow-sm md:p-6" aria-label="Shënimet e Mira-s">
-      <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
-        <Button type="button" variant="outline" size="sm" disabled={loading || sharing.size > 0} onClick={() => setReload(value => value + 1)}>
-          <RefreshCw className={cn("size-4", loading && "animate-spin")} /> Rifresko
-        </Button>
-      </div>
-      <div role="group" aria-label="Lloji i takimit" className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div role="group" aria-label="Lloji i takimit" className="flex flex-wrap gap-2">
         {MIRA_NOTE_GROUPS.map(item => <Button key={item.value} type="button" size="sm"
           variant={group === item.value ? "default" : "outline"} aria-pressed={group === item.value}
           onClick={() => { setGroup(item.value); setExpanded(new Set()) }}>
           {item.label}<span className="ml-1 tabular-nums">({groupCounts[item.value]})</span>
         </Button>)}
+      </div>
+        <Button type="button" variant="outline" size="sm" disabled={loading || sharing.size > 0} onClick={() => setReload(value => value + 1)}>
+          <RefreshCw className={cn("size-4", loading && "animate-spin")} /> Rifresko
+        </Button>
       </div>
       <div className="relative mb-3 max-w-sm">
         <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
@@ -124,7 +125,7 @@ export function NotesTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">Duke ngarkuar shënimet...</TableCell></TableRow>
+            {loading && notes.length === 0 ? <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">Duke ngarkuar shënimet...</TableCell></TableRow>
               : visibleNotes.length === 0 ? <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
                 {error ? "Shënimet nuk u ngarkuan." : query ? "Nuk u gjet asnjë shënim." : `Nuk ka ende shënime në grupin ${groupLabel}.`}
               </TableCell></TableRow> : visibleNotes.map((note, index) => {
