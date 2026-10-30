@@ -183,6 +183,18 @@ def scheduled(definition, day, *, school_day=False, condition=False):
     # invented deadlines or an authorization to send reminders.
     if not definition["enabled"] or definition["readiness"] != "ready_after_setup":
         return False
+    anchor = definition.get("recurrence_anchor_date")
+    interval = definition.get("recurrence_interval_weeks", 1)
+    if anchor:
+        start = date.fromisoformat(anchor)
+        if day < start:
+            return False
+        start_monday = start - timedelta(days=start.weekday())
+        day_monday = day - timedelta(days=day.weekday())
+        if ((day_monday - start_monday).days // 7) % interval:
+            return False
+    elif interval > 1:
+        return False
     frequency = definition["frequency"]
     if frequency == "once":
         return definition["on_date"] == day.isoformat()
@@ -480,6 +492,8 @@ def _validate_dataset(dataset):
                     "suggested_start_time": r.get("suggested_start_time"),
                     "suggested_end_time": r.get("suggested_end_time")} for r in t.get("schedule_rules", [])],
                 assignment=t["assignment"], assignees=[t["person_id"]] if t.get("person_id") else [],
+                recurrence_interval_weeks=t.get("recurrence_interval_weeks", 1),
+                recurrence_anchor_date=t.get("recurrence_anchor_date"),
                 frequency=t["frequency"], steps=[s["instruction"] for s in sorted(t["steps"], key=lambda x: x["position"])],
                 reminder_group=t["details"]["reminder_group"], readiness=t["readiness"],
                 rotation_id=t.get("rotation_id"), enabled=False,

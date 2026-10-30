@@ -8,6 +8,7 @@ export type Definition = {
   assignment: "fixed" | "rotation" | "first_home" | "unassigned"
   assignees: PersonKey[]; completion_mode: "individual" | "shared"
   frequency: "once" | "daily" | "weekly" | "school_day" | "conditional" | "near_daily" | "unresolved"
+  recurrence_interval_weeks?: number; recurrence_anchor_date?: string | null
   on_date: string | null; due_time: string | null; weekdays: number[]; steps: string[]
   estimated_minutes: number | null
   reminder_group: "morning" | "daily_upkeep" | "nala" | "weekend_deep_clean" | "roki"
