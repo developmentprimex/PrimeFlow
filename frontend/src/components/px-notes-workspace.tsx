@@ -1298,6 +1298,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   )
   const [taskDueDate, setTaskDueDate] = React.useState("")
   const [taskStartDate, setTaskStartDate] = React.useState("")
+  const [taskIsRepetitive, setTaskIsRepetitive] = React.useState(false)
   const [taskDeadlineImportant, setTaskDeadlineImportant] = React.useState(false)
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   // Knowledge PX prompt notes: who tests the prompt ("PROMPT: TESTO: ..." task).
@@ -2642,6 +2643,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
     setTaskDueDate("")
     setTaskStartDate("")
+    setTaskIsRepetitive(false)
     setTaskDeadlineImportant(false)
     setTaskAssigneeIds([])
     setTaskPromptTesterId(note.knowledge_tester_id ?? "")
@@ -2839,6 +2841,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           finish_period: taskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : taskFinishPeriod,
           due_date: dueDateValue,
           start_date: startDateValue,
+          is_repetitive: taskIsRepetitive,
           is_deadline_important: taskDeadlineImportant,
           assigned_to: taskAssigneeIds[0] ?? null,
           assignees: taskAssigneeIds,
@@ -5561,6 +5564,13 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                   onCheckedChange={(checked) => setTaskDeadlineImportant(checked === true)}
                 />
                 <span className="text-sm font-medium">Deadline important</span>
+              </label>
+              <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                <Checkbox
+                  checked={taskIsRepetitive}
+                  onCheckedChange={(checked) => setTaskIsRepetitive(checked === true)}
+                />
+                <span className="text-sm font-medium">Detyrë e përsëritur</span>
               </label>
               <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-2">

@@ -60,15 +60,22 @@ def next_options(tasks, slot):
     for task in tasks:
         scheduled = task.get('one_h_report_slot')
         status = task.get('status')
-        if scheduled not in SLOTS or status not in {'TODO', 'IN_PROGRESS'} or task.get('is_active') is False:
+        if status not in {'TODO', 'IN_PROGRESS'} or task.get('is_active') is False:
             continue
-        rank = SLOTS.index(scheduled)
-        group = 'CURRENT' if rank <= current and status == 'IN_PROGRESS' else (
-            'LATER' if rank > current else 'UNSTARTED' if status == 'TODO' else None)
+        if scheduled not in SLOTS:
+            if not (task.get('is_bllok') or task.get('is_personal')):
+                continue
+            scheduled, group = None, 'UNSCHEDULED'
+        else:
+            rank = SLOTS.index(scheduled)
+            group = 'CURRENT' if rank <= current and status == 'IN_PROGRESS' else (
+                'LATER' if rank > current else 'UNSTARTED' if status == 'TODO' else None)
         if group:
+            task_type = ' · '.join(label for flag, label in (
+                ('is_personal', 'Personalisht'), ('is_bllok', 'Bllok'), ('is_r1', 'R1')) if task.get(flag)) or '1H'
             options[str(task['id'])] = {'id': str(task['id']), 'title': plain_text(task.get('title') or 'Detyrë'),
-                                      'slot': scheduled, 'status': status, 'group': group}
-    return sorted(options.values(), key=lambda t: ({'CURRENT': 0, 'LATER': 1, 'UNSTARTED': 2}[t['group']], t['slot'], t['title']))
+                                      'slot': scheduled, 'status': status, 'group': group, 'task_type': task_type}
+    return sorted(options.values(), key=lambda t: ({'CURRENT': 0, 'LATER': 1, 'UNSTARTED': 2, 'UNSCHEDULED': 3}[t['group']], t['slot'] or '', t['title']))
 
 
 def next_options_key(report):

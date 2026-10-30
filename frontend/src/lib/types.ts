@@ -358,6 +358,7 @@ export interface Task {
   late_days?: number | null
   moved_days?: number | null
   completed_at?: string | null
+  is_repetitive?: boolean
   is_deadline_important?: boolean
   is_bllok?: boolean
   is_1h_report?: boolean

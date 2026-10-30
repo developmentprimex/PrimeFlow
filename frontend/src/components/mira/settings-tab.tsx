@@ -44,7 +44,7 @@ export function SettingsTab({ canManage, status, onChange }: { canManage: boolea
   }, "Cilësimet u ruajtën.")
 
   return (
-    <div className="max-w-3xl py-5">
+    <div className="w-full py-5">
       <section className="rounded-lg border p-4">
         <h3 className="text-sm font-semibold">Mira si mbajtëse e 1H (test)</h3>
         {!status.configured && (

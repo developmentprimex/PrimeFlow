@@ -107,7 +107,7 @@ export function MiraMemoryPage() {
   const empty = list && list.items.length === 0
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
+    <div className="mx-auto w-full px-4 py-8 md:px-8">
       <header className="mb-6">
         <h1 className="text-[22px] font-semibold tracking-tight">Kujtesa e Mira-s</h1>
         <p className="mt-1 text-sm text-muted-foreground">Çka mban mend Mira nga takimet. Përditësohet pas çdo takimi.</p>

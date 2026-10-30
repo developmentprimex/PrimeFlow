@@ -52,6 +52,7 @@ class TaskOut(BaseModel):
     late_days: int | None = None
     moved_days: int | None = None
     completed_at: datetime | None = None
+    is_repetitive: bool = False
     is_deadline_important: bool
     is_bllok: bool
     is_1h_report: bool
@@ -87,6 +88,7 @@ class GaNoteTaskSummaryOut(BaseModel):
     finish_period: TaskFinishPeriod | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
+    is_repetitive: bool = False
     is_deadline_important: bool
     is_bllok: bool
     is_1h_report: bool
@@ -121,6 +123,7 @@ class TaskCreate(BaseModel):
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
+    is_repetitive: bool | None = None
     is_deadline_important: bool | None = None
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
@@ -162,6 +165,7 @@ class TaskUpdate(BaseModel):
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
+    is_repetitive: bool | None = None
     is_deadline_important: bool | None = None
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
