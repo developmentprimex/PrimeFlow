@@ -43,6 +43,8 @@ For the reviewed ZIP handoff, `scripts/seed_ga_personal.py --archive <zip> --map
 
 The seed opts the private space into automatic occurrence creation from the import date. The API checks once per minute while it is running, using Europe/Belgrade local dates, configured memberships and the persisted recurrence rules. Untimed daily tasks have no deadline and create no notification deliveries. School-day/conditional/first-home rules are not inferred. The module administrator can pause/resume this process from Settings. The same period keys and space-row transaction lock prevent duplicate occurrences across repeated seeds, API workers and restarts.
 
+The worker maintains a rolling 14-day window. Opening a later calendar week also prepares that selected week when automatic creation is enabled, using the same active administrator, recurrence rules and duplicate protection. This does not backfill past days or infer conditional inputs. The browser requests the selected seven-day range, so the 500-row limit on unbounded occurrence history cannot truncate a week. Weekly status buttons and the abbreviation legend remain available when a filter returns no rows.
+
 Once membership is provisioned and the module is enabled, members can open `/ga-personal` directly with their normal PrimeFlow login. The former password setup/unlock/lock/change endpoints have been removed. Existing password/unlock database fields are retained for compatibility with provisioning and bot delegation; they no longer gate browser access.
 
 1. Back up the database and run the normal Alembic upgrade. Revision `0171_ga_personal` creates only the private schema/tables; it inserts no seed or users. It follows `0170_discord_one_h_reports`.

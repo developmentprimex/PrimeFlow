@@ -9,6 +9,7 @@ import { WeekTimeDialog } from "@/components/ga-personal/week-time-dialog"
 import { TaskList } from "@/components/ga-personal/task-list"
 import { DailyTaskTable } from "@/components/ga-personal/daily-task-table"
 import { TaskStatusFilter } from "@/components/ga-personal/task-status-filter"
+import { AbbreviationLegend } from "@/components/ga-personal/abbreviation-legend"
 import { QuickEditDialog, QuickEditValues } from "@/components/ga-personal/quick-edit-dialog"
 import { DiscordSettingsPanel } from "@/components/ga-personal/discord-settings"
 import { DeviceSettingsPanel } from "@/components/ga-personal/device-settings"
@@ -44,7 +45,10 @@ export default function GaPersonalPage() {
     setDraft(null); setEditing(null); setImportData(null); setPreview(null); setDeferred(null)
     setQuick(null); setStepsText(""); setWeekSelection([]); setWeekTimeRows([])
   }, [])
-  const { access, workspace, templates, occurrences, history, request, load, check, obscured, connectionError } = useGaPersonalSession(resetDrafts)
+  const monday = new Date(`${day}T12:00:00Z`)
+  monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7)
+  const weekStart = monday.toISOString().slice(0, 10)
+  const { access, workspace, templates, occurrences, history, request, load, check, obscured, connectionError, loading } = useGaPersonalSession(resetDrafts, weekStart, moveDay(weekStart, 6))
 
   async function run(work: () => Promise<unknown>) {
     setBusy(true); setError("")
@@ -128,8 +132,6 @@ export default function GaPersonalPage() {
   }
 
   const names = (keys: PersonKey[]) => keys.map((key) => workspace?.members.find((m) => m.person_key === key)?.name || key).join(", ")
-  const monday = new Date(`${day}T12:00:00Z`)
-  monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7)
   const weekendKey = `weekend:${monday.toISOString().slice(0, 10)}`
   // Earlier occurrences retain their original snapshots after a dataset upgrade.
   // Fill only the display code from the current template; keep stored history intact.
@@ -193,10 +195,10 @@ export default function GaPersonalPage() {
             </div>}
             <label className="relative w-full min-w-0 sm:ml-auto sm:w-auto sm:min-w-[180px] sm:max-w-[280px] sm:flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><Input aria-label="Kërko detyrë" placeholder="Kërko një detyrë…" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
           </div>}
-          {tab === "today" && <div className="flex justify-end"><TaskStatusFilter value={statusFilter} onChange={setStatusFilter} /></div>}
+          {["today", "week"].includes(tab) && <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-muted/30 px-3 py-2"><TaskStatusFilter value={statusFilter} onChange={setStatusFilter} />{tab === "week" && <AbbreviationLegend />}</div>}
           {["today", "week"].includes(tab) && <>
-            {!visible.length ? <div className="space-y-3 rounded-xl border bg-card p-8 text-center"><ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" /><h3 className="font-medium">Nuk ka detyra në këtë pamje</h3><p className="mx-auto max-w-md text-sm text-muted-foreground">{personRows.length ? "Provo një filtër tjetër ose pastro kërkimin." : "Për këtë datë nuk janë krijuar ende detyra. Detyrat e aktivizuara shtohen automatikisht në ditën përkatëse."}</p></div>
-              : tab === "week" ? <WeekTable rows={visible} start={monday.toISOString().slice(0, 10)} workspace={workspace} busy={busy} selectedPerson={person} statusFilter={statusFilter} onStatusFilter={setStatusFilter} onOpen={(rows) => setWeekSelection(rows.map((r) => r.id))} onEditTime={(rows) => { setError(""); setWeekTimeRows(rows) }} /> : <DailyTaskTable rows={visible} workspace={workspace} busy={busy} selectedPerson={person} onEdit={openQuick} onAction={(row, status) => void action(row, status)} onDefer={(row) => { setError(""); setDeferred(row); setDeferTime("") }} />}
+            {loading ? <div role="status" className="flex items-center justify-center gap-2 rounded-xl border p-8 text-sm text-muted-foreground"><LoaderCircle className="h-5 w-5 animate-spin" />Duke ngarkuar detyrat…</div> : !visible.length ? <div className="space-y-3 rounded-xl border bg-card p-8 text-center"><ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" /><h3 className="font-medium">Nuk ka detyra në këtë pamje</h3><p className="mx-auto max-w-md text-sm text-muted-foreground">{personRows.length ? "Provo një filtër tjetër ose pastro kërkimin." : "Për këtë datë nuk ka detyra sipas përsëritjeve dhe cilësimeve aktive."}</p></div>
+              : tab === "week" ? <WeekTable rows={visible} start={weekStart} workspace={workspace} busy={busy} selectedPerson={person} onOpen={(rows) => setWeekSelection(rows.map((r) => r.id))} onEditTime={(rows) => { setError(""); setWeekTimeRows(rows) }} /> : <DailyTaskTable rows={visible} workspace={workspace} busy={busy} selectedPerson={person} onEdit={openQuick} onAction={(row, status) => void action(row, status)} onDefer={(row) => { setError(""); setDeferred(row); setDeferTime("") }} />}
             {workspace.is_admin && <details className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground"><summary className="cursor-pointer">Mundësi të tjera për datën</summary><div className="mt-3 flex flex-wrap items-center gap-3"><p>Krijo detyrat e aktivizuara për datën e zgjedhur.</p><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => {
               const result = await request<{ created: number }>("/generate", { method: "POST", body: JSON.stringify({ day }) }); await load(); toast.success(`${result.created} detyra të përgatitura.`)
             })}>Përgatit detyrat e datës</Button></div></details>}

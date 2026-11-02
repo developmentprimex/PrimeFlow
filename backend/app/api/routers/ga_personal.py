@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.api.deps import get_current_user
 from app.config import settings
@@ -130,21 +130,37 @@ async def archive(template_id: uuid.UUID, payload: ArchiveRequest, response: Res
 
 
 @router.get("/occurrences")
-async def occurrences(response: Response, day: str | None = None, member=Depends(membership), db=Depends(get_db)):
+async def occurrences(response: Response, day: str | None = None, start: str | None = None,
+                      end: str | None = None, member=Depends(membership), db=Depends(get_db)):
     no_store(response)
+    bounded = start is not None or end is not None
+    if bounded:
+        try:
+            first, last = service.date.fromisoformat(start or ""), service.date.fromisoformat(end or "")
+            if day is not None or not 0 <= (last - first).days <= 6:
+                raise ValueError
+        except ValueError:
+            raise HTTPException(422, "Zgjidh një periudhë të vlefshme deri në shtatë ditë.")
+        from app.services.ga_personal_scheduler import prepare_occurrence_window
+        await prepare_occurrence_window(db, member.space_id, first, last)
     stmt = select(Occurrence, Template).join(Template, Template.id == Occurrence.template_id).where(
         Occurrence.space_id == member.space_id, Template.space_id == member.space_id)
-    if day:
+    if bounded:
+        weekends = {"weekend:" + (d - timedelta(days=d.weekday())).isoformat()
+                    for offset in range((last - first).days + 1)
+                    if (d := first + timedelta(days=offset)).weekday() in (5, 6)}
+        stmt = stmt.where(or_(Occurrence.local_date.between(first.isoformat(), last.isoformat()), Occurrence.period_key.in_(weekends)))
+    elif day:
         try:
             service.date.fromisoformat(day)
         except ValueError:
             raise HTTPException(422, "Data nuk është e vlefshme.")
         # Keep unfinished weekend duties visible throughout their period.
         weekend = "weekend:" + (service.date.fromisoformat(day) - timedelta(days=service.date.fromisoformat(day).weekday())).isoformat()
-        from sqlalchemy import or_
         stmt = stmt.where(or_(Occurrence.local_date == day, Occurrence.period_key == weekend)
                           if service.date.fromisoformat(day).weekday() in (5, 6) else Occurrence.local_date == day)
-    rows = (await db.execute(stmt.order_by(Occurrence.local_date.desc(), Occurrence.due_at, Occurrence.id).limit(500))).all()
+    stmt = stmt.order_by(Occurrence.local_date.desc(), Occurrence.due_at, Occurrence.id)
+    rows = (await db.execute(stmt if bounded else stmt.limit(500))).all()
     return [service.occurrence_out(row, can_edit=service.may_edit_occurrence(member, template, row))
             for row, template in rows]
 

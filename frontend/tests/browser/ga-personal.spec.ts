@@ -125,6 +125,66 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
     failAccess: () => { accessFailure = true }, forbidAction: () => { forbiddenAction = true }, revoke: () => { available = false } }
 }
 
+test("weekly status controls and legend survive an empty filter and recover the table", async ({ page }) => {
+  await shell(page, { view: "week" })
+  await expect(page.getByRole("table")).toBeVisible()
+  const filters = page.getByRole("group", { name: "Filtro sipas gjendjes" })
+  await filters.getByRole("button", { name: "Po e bëj", exact: true }).click()
+  await expect(page.getByText("Nuk ka detyra në këtë pamje", { exact: true })).toBeVisible()
+  await expect(filters).toBeVisible()
+  await expect(page.getByText("Legjenda", { exact: true })).toBeVisible()
+  await filters.getByRole("button", { name: "U kry", exact: true }).click()
+  await expect(filters.getByRole("button", { name: "U kry", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await filters.getByRole("button", { name: "Pastro filtrin", exact: true }).click()
+  await expect(page.getByRole("table")).toBeVisible()
+})
+
+test("navigating to a distant week loads that week's occurrences", async ({ page }) => {
+  const state = await shell(page, { view: "week" })
+  await page.route("**/ga-personal/occurrences?**", async route => {
+    const url = new URL(route.request().url())
+    const start = url.searchParams.get("start")!
+    return route.fulfill({ json: [{ ...state.rows[0], local_date: start, period_key: start,
+      snapshot: { ...state.rows[0].snapshot, title: "Detyra e javës së zgjedhur" } }] })
+  })
+  await page.getByLabel("Data", { exact: true }).fill("01/02/2027")
+  await expect(page.getByRole("table").getByText("Detyra e javës së zgjedhur", { exact: true })).toBeVisible()
+  await expect(page.getByRole("columnheader", { name: /1 shkurt/ })).toBeVisible()
+})
+
+test("a late response from the previous week cannot replace the selected week", async ({ page }) => {
+  const state = await shell(page, { view: "week" })
+  await expect(page.getByRole("table")).toBeVisible()
+  let releaseOld!: () => void
+  let markOldStarted!: () => void
+  const oldStarted = new Promise<void>(resolve => { markOldStarted = resolve })
+  const oldGate = new Promise<void>(resolve => { releaseOld = resolve })
+  await page.route("**/ga-personal/occurrences?**", async route => {
+    const start = new URL(route.request().url()).searchParams.get("start")!
+    if (start === "2027-02-01") { markOldStarted(); await oldGate }
+    await route.fulfill({ json: [{ ...state.rows[0], local_date: start, period_key: start,
+      snapshot: { ...state.rows[0].snapshot, title: `Java ${start}` } }] }).catch(() => {})
+  })
+  await page.getByLabel("Data", { exact: true }).fill("01/02/2027")
+  await oldStarted
+  await page.getByLabel("Data", { exact: true }).fill("08/02/2027")
+  await expect(page.getByRole("table").getByText("Java 2027-02-08", { exact: true })).toBeVisible()
+  releaseOld()
+  await page.getByRole("button", { name: "Këtë javë", exact: true }).click()
+  await expect(page.getByRole("table").getByText("Java 2027-02-08", { exact: true })).toBeVisible()
+})
+
+test("background access checks keep the weekly table mounted", async ({ page }) => {
+  await shell(page, { view: "week" })
+  const region = page.getByRole("region", { name: "Tabela e planit javor" })
+  await expect(region).toBeVisible()
+  await region.evaluate(element => element.setAttribute("data-poll-check", "kept"))
+  const refreshed = page.waitForResponse(response => response.url().includes("/ga-personal/occurrences?") && response.status() === 200)
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")))
+  await refreshed
+  await expect(region).toHaveAttribute("data-poll-check", "kept")
+})
+
 test("arrival records the signed-in person and shows the first person for the day", async ({ page }) => {
   const state = await shell(page)
   await page.getByRole("button", { name: "Erdha në shpi", exact: true }).click()
