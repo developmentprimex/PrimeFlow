@@ -39,7 +39,9 @@ async def main():
         headers={'Authorization':'Bot '+token}) as client:
         response=await client.get('/users/@me');response.raise_for_status()
         bot=response.json();assert bot['id']==config['bot_id']
-        if args.check:
+        # Personal-channel privacy repairs can remove this bot's overwrite.
+        # Revalidate access at every due slot, not only during installation.
+        if args.check or service.due(datetime.now(timezone.utc), args.slot, config):
             async with SessionLocal() as db:
                 from sqlalchemy import select
                 from app.models.discord_assistant import DiscordLink
@@ -65,7 +67,7 @@ async def main():
                     r=await client.get(f'/channels/{link.channel_id}/messages',params={'limit':1});r.raise_for_status()
                 print(json.dumps({'ready':True,'bot_id':bot['id'],'times':config['times'],'timezone':config['timezone'],
                     'recipients':[name for link,name in links],'weekdays_only':True}),flush=True)
-        else:
+        if not args.check:
             async with SessionLocal() as db:jobs=await service.claim(db,datetime.now(timezone.utc),args.slot,config)
             for job in jobs:
                 try:
@@ -75,6 +77,9 @@ async def main():
                 except Exception as exc:
                     async with SessionLocal() as db:await service.release(db,job,datetime.now(timezone.utc))
                     failures.append(type(exc).__name__)
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        print(json.dumps({'failed_recipient':job['name'], 'slot':args.slot,
+                            'status':exc.response.status_code, 'error':exc.response.text[:500]}),flush=True)
             print(json.dumps({'claimed':len(jobs),'failed':len(failures),'slot':args.slot}),flush=True)
     await engine.dispose()
     if failures:raise RuntimeError('Invitation delivery failed: '+','.join(failures))

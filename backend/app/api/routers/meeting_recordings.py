@@ -128,8 +128,7 @@ async def update_recording(recording_id: uuid.UUID, payload: RecordingUpdate,
         Recording.id == recording_id, Recording.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Recording not found")
-    if row.created_by != user.id and not management(user):
-        raise HTTPException(403, "Only the creator, admins and managers can edit recordings")
+    # Every authenticated active account may rename shared recordings.
     previous_title = row.title
     row.title = payload.title
     audit(db, user, row, "recording_title_updated", previous_title=previous_title, title=row.title)

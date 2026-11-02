@@ -733,3 +733,6 @@ service. The script source is `backend/scripts/discord_ai_agent_reminders.py`.
 It uses the independent bot's existing private token file. The durable
 `AI_AGENT_HH:MM` reminder buckets prevent duplicate invitations after restarts;
 only a five-minute current-time window is eligible, with no past-slot backfill.
+Before each due slot, the worker verifies the four personal channels and restores
+the AI Agent bot's access if a channel privacy repair removed it. HTTP delivery
+failures include the recipient, status and Discord error in the slot log.

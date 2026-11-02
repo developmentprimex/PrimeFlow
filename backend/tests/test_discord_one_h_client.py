@@ -37,6 +37,30 @@ def interaction(data, action):
 
 @unittest.skipUnless(AVAILABLE, 'Install requirements-discord.txt')
 class CardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_yes_continue_button_saves_then_updates_main_and_companion(self):
+        data = data_of('IN_PROGRESS')
+        saved_report = service.save_continue(service.snapshot([data['tasks'][0]], AT), data['current']['id'], '955', AT)
+        saved = service.presentation(SimpleNamespace(id=uuid.UUID(data['id']), day=AT.date(), bucket='10:00', one_h_report=saved_report))
+        click = interaction(data, 'continue')
+        bot = SimpleNamespace(private_channel=AsyncMock(), ack=AsyncMock(),
+            bridge=AsyncMock(side_effect=[{'one_h': data}, saved]), one_h_url=Mock(return_value=None))
+        with patch.object(client, 'refresh_continuations', new_callable=AsyncMock) as refresh:
+            await client.handle(bot, click)
+            refresh.assert_awaited_once_with(bot, click, saved)
+        self.assertEqual(bot.bridge.call_args.args[1]['selection_mode'], 'CONTINUE')
+        self.assertIn('Po, vazhdoj.', click.edit_original_response.call_args.kwargs['content'])
+        summary, view = client.continuation_card(saved)
+        self.assertTrue(summary.startswith(client.CONTINUED_HEADING))
+        self.assertNotIn('?', summary)
+        self.assertEqual(view.children, [])
+        another = {'id': str(uuid.uuid4()), 'title': 'Tjetër', 'status': 'TODO', 'finish_period': 'AM'}
+        report = service.refresh(saved_report, [data['tasks'][0], another])
+        saved['next_options'] = report['next_options']
+        summary, view = client.continuation_card(saved)
+        self.assertIn(client.OTHER_HEADING, summary)
+        menu = next(c for c in view.children if isinstance(c, discord.ui.Select))
+        self.assertEqual([o.value for o in menu.options], [another['id']])
+
     async def test_unslotted_block_and_personal_options_render_without_fake_time(self):
         tasks = [{'id': str(uuid.uuid4()), 'title': name, 'status': status, 'one_h_report_slot': None, flag: True}
             for name, status, flag in [('Bllok', 'IN_PROGRESS', 'is_bllok'), ('Personale', 'TODO', 'is_personal')]]
@@ -98,12 +122,12 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('🔄 Rifresko', labels)
             self.assertNotIn('⏭ Kalo', labels)
             buttons = [c for c in view.children if isinstance(c, discord.ui.Button)]
-            self.assertTrue(all(c.row == 0 for c in buttons))
+            self.assertTrue(all(c.row == 0 for c in buttons if c.label != '🎧 Kyçu në 1H'))
             if status == 'DONE':
                 self.assertNotIn('📅 Shtyje', labels)
             else:
                 self.assertIn('📅 Shtyje', labels)
-                self.assertEqual(labels[:5], ['☑ Strike', '✅ U krye', '📅 Shtyje', '💬 Koment', '🎧 Kyçu në 1H'])
+                self.assertEqual(labels[:6], ['Po, vazhdon', '☑ Strike', '✅ U krye', '📅 Shtyje', '💬 Koment', '🎧 Kyçu në 1H'])
 
     async def test_more_than_25_tasks_remain_revisable(self):
         data = data_of(count=31)
@@ -344,6 +368,14 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(AVAILABLE, 'Install requirements-discord.txt')
 class SyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_confirmation_summary_without_controls_can_refresh_when_task_finishes(self):
+        bot, channel, messages, job = self.setup_sync()
+        messages['901'].content = client.CONTINUED_HEADING + '\n• Detyra'
+        messages['901'].components = []
+        await client.sync(bot)
+        messages['901'].edit.assert_awaited_once()
+        self.assertTrue(messages['901'].edit.call_args.kwargs['content'].startswith(client.NEXT_HEADING))
+
     async def test_sync_keeps_task_and_continuation_copies_in_their_roles(self):
         bot, channel, messages, job = self.setup_sync()
         data = data_of('IN_PROGRESS')

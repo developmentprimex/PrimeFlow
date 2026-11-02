@@ -42,6 +42,38 @@ def display(report):
 
 
 class QuestionTests(unittest.TestCase):
+    def test_continue_yes_only_asks_for_other_open_work_in_the_same_period(self):
+        for slot, period, other_period in [('10:00', 'AM', 'PM'), ('11:00', 'AM', 'PM'), ('14:20', 'PM', 'AM')]:
+            with self.subTest(slot=slot):
+                current = task('IN_PROGRESS', slot, finish_period=period)
+                excluded = [task('TODO', None, finish_period=other_period, is_personal=True),
+                    task('DONE', None, finish_period=period, is_bllok=True),
+                    task('WAITING_CLIENT', None, finish_period=period)]
+                report = service.refresh(service.snapshot([current], AT, slot=slot), [current, *excluded])
+                continued = service.save_continue(report, current['id'], '900', AT)
+                self.assertEqual(continued['tasks'][0]['answer'], 'Po, vazhdoj.')
+                self.assertEqual(continued['next_options'], [])
+                self.assertEqual([t['id'] for t in continued['next']['selected_tasks']], [current['id']])
+                self.assertEqual(service.save_continue(continued, current['id'], '901', AT), continued)
+                other = [task('TODO', None, finish_period=period), task('IN_PROGRESS', None, finish_period='AM/PM', is_bllok=True),
+                    task('TODO', None, finish_period=None, is_personal=True)]
+                refreshed = service.refresh(continued, [current, *excluded, *other])
+                self.assertEqual({t['id'] for t in refreshed['next_options']}, {t['id'] for t in other})
+                chosen = service.save_next_choices(refreshed, [other[0]['id']], '902', AT,
+                    options_key=service.next_options_key(refreshed))
+                self.assertEqual({t['id'] for t in chosen['next']['selected_tasks']}, {current['id'], other[0]['id']})
+                self.assertEqual(current['status'], 'IN_PROGRESS')
+                self.assertEqual(current['finish_period'], period)
+
+    def test_finished_or_removed_continued_task_is_not_still_shown_as_continuing(self):
+        current = task('IN_PROGRESS', '10:00')
+        report = service.save_continue(service.snapshot([current], AT), current['id'], '910', AT)
+        for tasks in ([], [{**current, 'status': 'DONE'}]):
+            result = service.refresh(report, tasks)
+            self.assertEqual(result['next']['continued_tasks'], [])
+            self.assertIsNone(result['next']['answer'])
+            self.assertEqual(len(result['next']['history']), 1)
+
     def test_continuation_types_use_real_flags_including_r1(self):
         tasks = [task('TODO', '10:00', is_r1=True), task('TODO', None, is_bllok=True),
                  task('IN_PROGRESS', None, is_personal=True)]
@@ -59,7 +91,7 @@ class QuestionTests(unittest.TestCase):
         original = deepcopy(tasks)
         report = service.refresh(service.snapshot([], AT), tasks)
         self.assertEqual(report['tasks'], [])
-        self.assertEqual({t['id'] for t in report['next_options']}, {block['id'], personal['id']})
+        self.assertEqual({t['id'] for t in report['next_options']}, {block['id'], personal['id'], ordinary['id']})
         self.assertTrue(all(t['group'] == 'UNSCHEDULED' and t['slot'] is None for t in report['next_options']))
         selected = service.save_next_choices(report, [block['id'], personal['id']], 'unslotted', AT,
             options_key=service.next_options_key(report))
@@ -147,7 +179,7 @@ class QuestionTests(unittest.TestCase):
     def test_next_options_include_current_later_and_unfinished_earlier_tasks(self):
         current, later, earlier = task('IN_PROGRESS', '11:00'), task('TODO', '14:20'), task('TODO', '10:00')
         ongoing = task('IN_PROGRESS', '10:00')
-        excluded = [task('DONE', '14:20'), task('WAITING_CLIENT', '16:00'), task('TODO', None),
+        excluded = [task('DONE', '14:20'), task('WAITING_CLIENT', '16:00'),
                     task('TODO', '16:00', is_active=False)]
         options = service.next_options([*excluded, earlier, later, current, ongoing, current], '11:00')
         self.assertEqual([t['id'] for t in options], [ongoing['id'], current['id'], later['id'], earlier['id']])
@@ -199,6 +231,34 @@ URL = os.environ.get('ONE_H_TEST_DATABASE_URL')
 
 @unittest.skipUnless(URL, 'Requires explicit disposable local PostgreSQL URL')
 class ReportDatabaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_continue_yes_saves_both_answers_and_comment_once_without_task_edits(self):
+        first = next(j for j in await self.collect() if j['discord_user_id'] == '11')
+        await self.open(first)
+        result = await self.answer(first, request='950', selection_mode='CONTINUE', question_status='TODO')
+        self.assertEqual(result['tasks'][0]['answer'], 'Po, vazhdoj.')
+        self.assertEqual(result['next']['continued_tasks'][0]['id'], self.items[self.user_ids[0]][0]['id'])
+        await self.answer(first, request='951', selection_mode='CONTINUE', question_status='TODO')
+        async with self.sessions() as db:
+            task_id = uuid.UUID(self.items[self.user_ids[0]][0]['id'])
+            saved = await db.get(Task, task_id)
+            self.assertEqual(saved.status, 'TODO')
+            self.assertIsNone(saved.one_h_report_slot)
+            comment = (await db.execute(select(TaskUserComment.comment).where(TaskUserComment.task_id == task_id))).scalar_one()
+            self.assertEqual(comment.count('Po, vazhdoj.'), 1)
+            self.assertIn('Vazhdimi:', comment)
+
+    async def test_continue_comment_failure_rolls_back_confirmation_and_plan(self):
+        first = next(j for j in await self.collect() if j['discord_user_id'] == '11')
+        await self.open(first)
+        with patch.object(service, 'save_report_comment', side_effect=RuntimeError('comment failed')):
+            with self.assertRaises(RuntimeError):
+                await self.answer(first, selection_mode='CONTINUE')
+        async with self.sessions() as db:
+            saved = await db.get(DiscordReminder, uuid.UUID(first['id']))
+            self.assertIsNone(saved.one_h_report['tasks'][0]['answer'])
+            self.assertIsNone(saved.one_h_report['next']['answer'])
+            self.assertNotIn('continued_tasks', saved.one_h_report['next'])
+
     async def asyncSetUp(self):
         parsed = make_url(URL)
         if parsed.host not in ('localhost', '127.0.0.1') or parsed.database != 'one_h_test':

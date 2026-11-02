@@ -513,7 +513,7 @@ class OneHAnswer(Actor):
     asks_completion: bool | None = None
     next_task_ids: list[uuid.UUID] = Field(default_factory=list, max_length=25)
     next_page: int = Field(default=0, ge=0, le=1000)
-    selection_mode: Literal['TASKS', 'NONE'] | None = None
+    selection_mode: Literal['TASKS', 'NONE', 'CONTINUE'] | None = None
     next_options_key: str | None = Field(default=None, pattern=r'^[0-9a-f]{16}$')
 
 
@@ -530,7 +530,15 @@ async def answer_one_h(reminder_id: uuid.UUID, payload: OneHAnswer, db: AsyncSes
            for h in item['history']):
         return one_h.presentation(reminder)
     reminder.one_h_report = one_h.refresh(reminder.one_h_report, await daily_tasks(db, user, include_done=True), slot=reminder.bucket)
-    if payload.selection_mode is not None:
+    if payload.selection_mode == 'CONTINUE':
+        if payload.item_id == 'next' or payload.skip or payload.next_task_ids or payload.continuation is not None:
+            raise HTTPException(422, 'Vazhdo vetëm detyrën e zgjedhur në raportim.')
+        if any(t['id'] == payload.item_id for t in reminder.one_h_report['next'].get('continued_tasks', [])):
+            return one_h.presentation(reminder)
+        reminder.one_h_report = one_h.save_continue(reminder.one_h_report, payload.item_id, payload.request_id, at,
+            question_status=payload.question_status, asks_completion=payload.asks_completion)
+        await one_h.save_report_comment(db, user, reminder, payload.item_id, payload.request_id, at)
+    elif payload.selection_mode is not None:
         if payload.continuation is not None:
             raise HTTPException(422, 'Vazhdimi me tekst ruhet nga formulari i raportimit.')
         if payload.item_id != 'next' or payload.skip or (payload.selection_mode == 'NONE' and payload.next_task_ids):

@@ -18,10 +18,9 @@ class RecordingTitleTests(unittest.IsolatedAsyncioTestCase):
         db.execute.return_value.scalar_one_or_none.return_value = row
         return db
 
-    async def test_creator_admin_and_manager_can_rename_with_audit(self):
+    async def test_all_roles_can_rename_shared_recordings_with_audit(self):
         owner_id = uuid.uuid4()
-        for role, user_id in ((UserRole.STAFF, owner_id), (UserRole.ADMIN, uuid.uuid4()),
-                              (UserRole.MANAGER, uuid.uuid4())):
+        for role, user_id in [(UserRole.STAFF, owner_id)] + [(role, uuid.uuid4()) for role in UserRole]:
             row = SimpleNamespace(id=uuid.uuid4(), created_by=owner_id, title="Old title")
             user = SimpleNamespace(id=user_id, role=role)
             db = self.database(row)
@@ -37,16 +36,6 @@ class RecordingTitleTests(unittest.IsolatedAsyncioTestCase):
             query = str(db.execute.call_args.args[0])
             self.assertIn("deleted_at IS NULL", query)
             self.assertIn("FOR UPDATE", query)
-
-    async def test_other_staff_cannot_rename(self):
-        row = SimpleNamespace(id=uuid.uuid4(), created_by=uuid.uuid4(), title="Original")
-        db = self.database(row)
-        with self.assertRaises(HTTPException) as error:
-            await update_recording(row.id, RecordingUpdate(title="Changed"), db,
-                                   SimpleNamespace(id=uuid.uuid4(), role=UserRole.STAFF))
-        self.assertEqual(error.exception.status_code, 403)
-        self.assertEqual(row.title, "Original")
-        db.commit.assert_not_awaited()
 
     async def test_missing_or_deleted_recording_is_not_editable(self):
         db = self.database(None)

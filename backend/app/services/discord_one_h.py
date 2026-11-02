@@ -26,6 +26,19 @@ SLOTS = ('10:00', '11:00', '11:50', '14:20', '16:00')
 NEXT_QUESTION = 'Me çka ke me vazhdu në slotin tjetër?'
 
 
+def task_type(task):
+    return ' · '.join(label for flag, label in (
+        ('is_personal', 'Personalisht'), ('is_bllok', 'Bllok'), ('is_r1', 'R1')) if task.get(flag)) or (
+            '1H' if task.get('is_1h_report') or task.get('one_h_report_slot') in SLOTS else 'Detyrë')
+
+
+def matches_period(task, slot):
+    period = str(task.get('finish_period') or '').upper()
+    # An unset finish_period means all-day work in PrimeFlow.
+    wanted = 'AM' if slot in {'10:00', '11:00', '11:50'} else 'PM'
+    return period in {'', 'AM/PM', wanted}
+
+
 def due_today(due_date, day):
     if not due_date or day is None:
         return False
@@ -62,19 +75,17 @@ def next_options(tasks, slot):
         status = task.get('status')
         if status not in {'TODO', 'IN_PROGRESS'} or task.get('is_active') is False:
             continue
+        if not matches_period(task, slot):
+            continue
         if scheduled not in SLOTS:
-            if not (task.get('is_bllok') or task.get('is_personal')):
-                continue
             scheduled, group = None, 'UNSCHEDULED'
         else:
             rank = SLOTS.index(scheduled)
             group = 'CURRENT' if rank <= current and status == 'IN_PROGRESS' else (
                 'LATER' if rank > current else 'UNSTARTED' if status == 'TODO' else None)
         if group:
-            task_type = ' · '.join(label for flag, label in (
-                ('is_personal', 'Personalisht'), ('is_bllok', 'Bllok'), ('is_r1', 'R1')) if task.get(flag)) or '1H'
             options[str(task['id'])] = {'id': str(task['id']), 'title': plain_text(task.get('title') or 'Detyrë'),
-                                      'slot': scheduled, 'status': status, 'group': group, 'task_type': task_type}
+                                      'slot': scheduled, 'status': status, 'group': group, 'task_type': task_type(task)}
     return sorted(options.values(), key=lambda t: ({'CURRENT': 0, 'LATER': 1, 'UNSTARTED': 2, 'UNSCHEDULED': 3}[t['group']], t['slot'] or '', t['title']))
 
 
@@ -88,6 +99,7 @@ def snapshot(tasks, at, *, slot='10:00'):
          'planned_status': t['status'], 'status': t['status'], 'available': True,
          'due_date': t.get('due_date'),
          'start_date': t.get('start_date'),
+         'task_type': task_type(t),
          'question': question(t['status'], plain_text(t.get('title') or 'Detyrë'), t.get('due_date'), at.date()),
          'progress_percentage': t.get('progress_percentage'), 'comment': t.get('user_comment'),
          'answer': None, 'expected_at': None, 'skipped': False, 'history': []}
@@ -108,8 +120,23 @@ def refresh(report, tasks, *, slot=None):
             entry['status'] = task['status']
             entry['due_date'] = task.get('due_date')
             entry['start_date'] = task.get('start_date')
+            entry['task_type'] = task_type(task)
             entry['progress_percentage'] = task.get('progress_percentage')
             entry['comment'] = task.get('user_comment')
+    if 'continued_tasks' in result['next']:
+        following = result['next']
+        old_ids = {t['id'] for t in following['continued_tasks']}
+        live = {t['id']: t for t in result['next_options']}
+        anchors = [{**t, 'title': plain_text(current[t['id']].get('title') or 'Detyrë'),
+                    'status': current[t['id']]['status']} for t in following['continued_tasks']
+                   if t['id'] in current and current[t['id']].get('is_active') is not False
+                   and current[t['id']]['status'] in {'TODO', 'IN_PROGRESS'}]
+        following['continued_tasks'] = anchors
+        following['selected_tasks'] = anchors + [live[t['id']] for t in following.get('selected_tasks', [])
+            if t['id'] not in old_ids and t['id'] in live]
+        following['answer'] = '\n'.join(t['title'] for t in following['selected_tasks']) or None
+        anchor_ids = {t['id'] for t in anchors}
+        result['next_options'] = [t for t in result['next_options'] if t['id'] not in anchor_ids]
     return result
 
 
@@ -177,7 +204,7 @@ def presentation(reminder, requested=None):
     return {'id': str(reminder.id), 'date': reminder.day.isoformat(), 'bucket': reminder.bucket,
             'state': report_state(report), 'tasks': report['tasks'], 'questions': [*candidates, next_question],
             'current': selected, 'next': report['next'], 'next_options': report.get('next_options', []),
-            'next_options_key': next_options_key(report)}
+            'next_options_key': next_options_key(report), 'message_ids': getattr(reminder, 'message_ids', None) or []}
 
 
 def save_answer(report, item_id, text, expected_at, request_id, at, *, skip=False, question_status=None, asks_completion=None, continuation=None):
@@ -202,15 +229,43 @@ def save_answer(report, item_id, text, expected_at, request_id, at, *, skip=Fals
         item['answer'], item['expected_at'] = text.strip(), expected_at.strip() or None
         if item_id == 'next':
             item['selected_tasks'], item['selection_kind'] = [], 'OTHER'
+            item.pop('continued_tasks', None)
     item['history'].append({'kind': 'SKIP' if skip else 'ANSWER', 'request_id': request_id,
                             'question': prompt, 'answer': text.strip(), 'expected_at': expected_at.strip() or None,
                             'at': at.isoformat()})
     if not skip and item_id != 'next' and continuation and continuation.strip():
         following = result['next']
         following.update(answer=continuation.strip(), expected_at=None, selected_tasks=[], selection_kind='OTHER')
+        following.pop('continued_tasks', None)
         following['history'].append({'kind': 'ANSWER', 'request_id': request_id,
                                     'question': NEXT_QUESTION, 'answer': continuation.strip(),
                                     'expected_at': None, 'at': at.isoformat()})
+    return result
+
+
+def save_continue(report, item_id, request_id, at, *, question_status=None, asks_completion=None):
+    if any(h.get('request_id') == request_id for t in [*report['tasks'], report['next']] for h in t['history']):
+        return report
+    item = next((t for t in report['tasks'] if t['id'] == item_id), None)
+    if item is None:
+        raise HTTPException(404, 'Detyra nuk është pjesë e këtij raportimi.')
+    if any(t['id'] == item_id for t in report['next'].get('continued_tasks', [])):
+        return report
+    result = save_answer(report, item_id, 'Po, vazhdoj.', item.get('expected_at') or '', request_id, at,
+        question_status=question_status, asks_completion=asks_completion)
+    selected = next((t for t in result.get('next_options', []) if t['id'] == item_id), None) or {
+        'id': item_id, 'title': item['title'], 'status': item['status'], 'slot': result['slot'],
+        'group': 'CURRENT', 'task_type': item.get('task_type', '1H')}
+    following = result['next']
+    anchors = following.get('continued_tasks', []) + [deepcopy(selected)]
+    following['continued_tasks'] = anchors
+    ids = {t['id'] for t in anchors}
+    chosen = anchors + [t for t in following.get('selected_tasks', []) if t['id'] not in ids]
+    answer = '\n'.join(t['title'] for t in chosen)
+    following.update(answer=answer, selected_tasks=chosen, selection_kind='TASKS', skipped=False, expected_at=None)
+    following['history'].append({'kind': 'ANSWER', 'request_id': request_id, 'question': NEXT_QUESTION,
+        'answer': answer, 'selected_tasks': deepcopy(chosen), 'selection_kind': 'TASKS', 'at': at.isoformat()})
+    result['next_options'] = [t for t in result.get('next_options', []) if t['id'] not in ids]
     return result
 
 
@@ -240,7 +295,9 @@ def save_next_choices(report, task_ids, request_id, at, *, page=0, none=False, o
     if not none and (not page_ids or not set(task_ids) <= page_ids):
         raise HTTPException(409, 'Lista e detyrave ndryshoi. Rifresko vazhdimin.')
     keep = {t['id'] for t in item.get('selected_tasks', [])} - page_ids
-    chosen = [] if none else [t for t in options if t['id'] in keep | set(task_ids)]
+    chosen = [] if none else [*item.get('continued_tasks', []), *[t for t in options if t['id'] in keep | set(task_ids)]]
+    if none:
+        item.pop('continued_tasks', None)
     answer = 'Nuk kam vazhdim të planifikuar.' if none else '\n'.join(t['title'] for t in chosen) or None
     item.update(answer=answer, expected_at=None, selected_tasks=chosen,
                 selection_kind='NONE' if none else 'TASKS', skipped=False)

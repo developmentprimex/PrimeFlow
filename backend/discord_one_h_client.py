@@ -26,10 +26,12 @@ def message_context(message):
 
 
 NEXT_HEADING = '**Me çka ke me vazhdu në slotin tjetër?**'
+CONTINUED_HEADING = '✅ **Vazhdohet me:**'
+OTHER_HEADING = '**Me çka vazhdon tjetër?**'
 
 
 def is_continuation(message):
-    return (getattr(message, 'content', '') or '').startswith(NEXT_HEADING)
+    return (getattr(message, 'content', '') or '').startswith((NEXT_HEADING, CONTINUED_HEADING, OTHER_HEADING))
 
 
 def continuation_card(data, *, notice=None, next_page=0):
@@ -54,6 +56,9 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
             text += '\n✅ ' + discord.utils.escape_markdown(item['answer'][:150])
             if item.get('expected_at'):
                 text += ' · ' + discord.utils.escape_markdown(item['expected_at'][:100])
+        view.add_item(discord.ui.Button(label='Po, vazhdon', style=discord.ButtonStyle.success,
+            custom_id=f'pf:1h:{rid}:{item_id}:continue', row=0,
+            disabled=any(t['id'] == item['id'] for t in data['next'].get('continued_tasks', []))))
         for label, action in [('☑ Strike', 'task'),
                                ('✅ U krye', 'done'), ('📅 Shtyje', 'postpone')]:
             view.add_item(discord.ui.Button(label=label, custom_id=f'pf:1h:{rid}:{item_id}:{action}', row=0))
@@ -68,7 +73,7 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
         view.add_item(discord.ui.Button(label='💬 Koment', custom_id=f'pf:1h:{rid}:next:answer',
                                        style=discord.ButtonStyle.primary, row=0))
     if join_url:
-        view.add_item(discord.ui.Button(label='🎧 Kyçu në 1H', url=join_url, row=0))
+        view.add_item(discord.ui.Button(label='🎧 Kyçu në 1H', url=join_url, row=2 if item else 0))
     text += '\n\n**Me çka ke me vazhdu në slotin tjetër?**'
     if data['next'].get('answer'):
         text += '\n✅ ' + discord.utils.escape_markdown(ui.label(data['next']['answer'], 180))
@@ -119,6 +124,17 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
                 custom_id=f'pf:1h:{rid}:next:nempty', disabled=True, row=1,
                 options=[discord.SelectOption(label='Nuk ka detyra për vazhdim', value='empty')]))
         text = NEXT_HEADING + next_text
+        continued = data['next'].get('continued_tasks', [])
+        if continued:
+            text = CONTINUED_HEADING + '\n' + '\n'.join('• ' + discord.utils.escape_markdown(ui.heading(t)) for t in continued)
+            ids = {t['id'] for t in continued}
+            additional = [t for t in data['next'].get('selected_tasks', []) if t['id'] not in ids]
+            if additional:
+                text += '\n✅ Tjetër: ' + '; '.join(discord.utils.escape_markdown(ui.heading(t)) for t in additional)
+            if options:
+                text += '\n\n' + OTHER_HEADING + '\nZgjidh një ose disa detyra; zgjedhjet ruhen menjëherë.'
+            else:
+                view.clear_items()
         if notice:
             text += '\n' + discord.utils.escape_markdown(notice[:150])
     else:
@@ -193,6 +209,28 @@ class TaskActionModal(ui.CommentModal):
             await interaction.followup.send(self.bot.error_message(exc), ephemeral=True)
 
 
+async def refresh_continuations(bot, interaction, data):
+    """Update existing companion messages immediately after a saved Yes."""
+    ids = data.get('message_ids', [])
+    if not ids:
+        return
+    try:
+        channel = await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+        for mid in ids:
+            if str(mid) == str(getattr(interaction.message, 'id', '')):
+                continue
+            try:
+                message = await channel.fetch_message(int(mid))
+                if message.author.id != bot.user.id or not is_continuation(message):
+                    continue
+                text, view = continuation_card(data)
+                await message.edit(content=text, embed=None, view=view, allowed_mentions=discord.AllowedMentions.none())
+            except discord.NotFound:
+                continue
+    except Exception:
+        log.warning('Continuation saved; companion refresh deferred to sync: %s', data['id'])
+
+
 async def handle(bot, interaction):
     _, _, rid, item_id, action = interaction.data['custom_id'].split(':')
     rid = str(uuid.UUID(rid))
@@ -205,6 +243,16 @@ async def handle(bot, interaction):
     if not data:
         raise ValueError('Ky slot nuk ka pyetje për ty.')
     item = next((t for t in data['questions'] if t['id'] == item_id), None)
+    if action == 'continue':
+        if not item or item_id == 'next':
+            raise ValueError('Detyra nuk është më e disponueshme.')
+        data = await bot.bridge(f'/bot/reminders/{rid}/one-h-answer', {**actor(interaction),
+            'item_id': item_id, 'request_id': str(interaction.id), 'selection_mode': 'CONTINUE',
+            'question_status': item['status'], 'asks_completion': item.get('asks_completion')})
+        text, view = card(data, requested=item_id, join_url=bot.one_h_url(data['bucket'], interaction.guild_id))
+        await interaction.edit_original_response(content=text, embed=None, view=view, allowed_mentions=discord.AllowedMentions.none())
+        await refresh_continuations(bot, interaction, data)
+        return
     if action in {'answer', 'other', 'comment'}:
         if action == 'other':
             item = data['current'] or next(t for t in data['questions'] if t['id'] == 'next')
@@ -337,7 +385,7 @@ async def sync(bot):
                     try:
                         message = await channel.fetch_message(int(mid))
                         context = message_context(message)
-                        if not context and message.components and message.content.startswith('⏰ **Sloti '):
+                        if not context and (is_continuation(message) or (message.components and message.content.startswith('⏰ **Sloti '))):
                             context = (uuid.UUID(job['id']).hex, '-')
                         # Do not replace an open strike picker during a task
                         # revision scan. Returning reads the fresh report.

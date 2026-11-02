@@ -148,6 +148,7 @@ type NoteTaskInfo = {
   startDate?: string | null
   finishPeriod?: TaskFinishPeriod | null
   isDeadlineImportant?: boolean | null
+  isRepetitive?: boolean | "indeterminate"
 }
 
 type CommonLeaveItem = {
@@ -987,6 +988,7 @@ export default function NextWeekPlanPage() {
   const [taskDueDate, setTaskDueDate] = React.useState("")
   const [taskStartDate, setTaskStartDate] = React.useState("")
   const [taskDeadlineImportant, setTaskDeadlineImportant] = React.useState(false)
+  const [taskIsRepetitive, setTaskIsRepetitive] = React.useState(false)
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
@@ -1004,6 +1006,7 @@ export default function NextWeekPlanPage() {
   const [editTaskDeadlineImportant, setEditTaskDeadlineImportant] = React.useState(false)
   const [editTaskInitialDeadline, setEditTaskInitialDeadline] = React.useState("")
   const [editTaskInitialDeadlineImportant, setEditTaskInitialDeadlineImportant] = React.useState(false)
+  const [editTaskIsRepetitive, setEditTaskIsRepetitive] = React.useState<boolean | "indeterminate">(false)
   const [editPlannedHorizon, setEditPlannedHorizon] = React.useState<PlannedHorizonOption>(PLANNED_HORIZON_NONE)
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
@@ -1306,6 +1309,9 @@ export default function NextWeekPlanPage() {
         finishPeriod: existing?.finishPeriod ?? t.finish_period ?? null,
         isDeadlineImportant:
           existing?.isDeadlineImportant ?? (t.is_deadline_important ?? null),
+        isRepetitive: existing?.isRepetitive === undefined
+          ? Boolean(t.is_repetitive)
+          : existing.isRepetitive === Boolean(t.is_repetitive) ? existing.isRepetitive : "indeterminate",
       })
     }
     if (noteIdsOverride) {
@@ -1767,6 +1773,7 @@ export default function NextWeekPlanPage() {
     setEditAddedRanges(parsedContent.addedRanges)
     const taskInfo = noteTaskInfo.get(note.id)
     setEditDescription(taskInfo?.description || "")
+    setEditTaskIsRepetitive(taskInfo?.isRepetitive ?? false)
     const isoDeadline = taskDateKey(taskInfo?.dueDate ?? null) || ""
     const importantInitial = Boolean(taskInfo?.isDeadlineImportant)
     setEditTaskDeadline(isoDeadline)
@@ -1925,6 +1932,19 @@ export default function NextWeekPlanPage() {
         // Update the task description if a task exists
         const taskInfo = noteTaskInfo.get(editNoteId)
         if (taskInfo?.taskId) {
+          if (editTaskIsRepetitive !== "indeterminate" && editTaskIsRepetitive !== (taskInfo.isRepetitive ?? false)) {
+            const repetitiveRes = await apiFetch(`/plan-notes/${editNoteId}/task-bundle`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ is_repetitive: editTaskIsRepetitive, expected_updated_at: updated.updated_at }),
+            })
+            if (!repetitiveRes.ok) {
+              toast.error("Note updated, but repetitive task setting could not be saved")
+              return
+            }
+            const bundle = await repetitiveRes.json() as { note: PlanNote }
+            setNotes((prev) => prev.map((note) => note.id === bundle.note.id ? bundle.note : note))
+          }
           const taskRes = await apiFetch(`/tasks/${taskInfo.taskId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -1980,6 +2000,9 @@ export default function NextWeekPlanPage() {
                   taskStatus: existing?.taskStatus ?? t.status ?? null,
                   taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
                   taskTypeLabels: mergeTaskTypeLabels(existing?.taskTypeLabels, getTaskTypeLabels(t)),
+                  isRepetitive: existing?.isRepetitive === undefined
+                    ? Boolean(t.is_repetitive)
+                    : existing.isRepetitive === Boolean(t.is_repetitive) ? existing.isRepetitive : "indeterminate",
                 })
               }
               setNoteTaskInfo(map)
@@ -2081,6 +2104,7 @@ export default function NextWeekPlanPage() {
     setTaskDueDate("")
     setTaskStartDate("")
     setTaskDeadlineImportant(false)
+    setTaskIsRepetitive(false)
     setTaskAssigneeIds([])
     setTaskDepartmentIds([])
     setTaskProjectId(note.project_id ?? "NONE")
@@ -2192,6 +2216,7 @@ export default function NextWeekPlanPage() {
           due_date: dueDateValue,
           start_date: startDateValue,
           is_deadline_important: taskDeadlineImportant,
+          is_repetitive: taskIsRepetitive,
           assigned_to: taskAssigneeIds[0] ?? null,
           assignees: taskAssigneeIds,
           plan_note_origin_id: note.id,
@@ -2267,6 +2292,7 @@ export default function NextWeekPlanPage() {
           startDate: createdTask.start_date ?? null,
           finishPeriod: createdTask.finish_period ?? null,
           isDeadlineImportant: createdTask.is_deadline_important ?? null,
+          isRepetitive: Boolean(createdTask.is_repetitive),
         })
         return next
       })
@@ -4390,6 +4416,14 @@ export default function NextWeekPlanPage() {
                 />
                 <span className="text-sm font-medium">Deadline important</span>
               </label>
+              <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                <Checkbox
+                  checked={taskIsRepetitive}
+                  onCheckedChange={(checked) => setTaskIsRepetitive(checked === true)}
+                  disabled={creatingTask}
+                />
+                <span className="text-sm font-medium">Detyrë e përsëritur</span>
+              </label>
               <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Departments</Label>
@@ -4690,6 +4724,16 @@ export default function NextWeekPlanPage() {
                   </p>
                 )}
               </div>
+            ) : null}
+            {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
+              <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                <Checkbox
+                  checked={editTaskIsRepetitive}
+                  onCheckedChange={(checked) => setEditTaskIsRepetitive(checked === true)}
+                  disabled={savingEdit}
+                />
+                <span className="text-sm font-medium">Detyrë e përsëritur</span>
+              </label>
             ) : null}
           </div>
             <div className="flex shrink-0 justify-end gap-2 border-t bg-background pt-3">

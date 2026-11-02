@@ -32,7 +32,7 @@ import { MeetingCanceledBadge } from "@/components/meeting-canceled-badge"
 import { useCanceledMeetings } from "@/lib/use-canceled-meetings"
 import { PxJavPlanningBriefView } from "@/components/px-jav-planning-brief-view"
 import { useAuth } from "@/lib/auth"
-import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, nextWorkingDay, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { readPersistentPageCache, writePersistentPageCache } from "@/lib/persistent-page-cache"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -576,7 +576,7 @@ function todayInputValue() {
 }
 
 function tomorrowInputValue() {
-  return dateInputValueWithOffset(1)
+  return toDateInputValue(nextWorkingDay(new Date()))
 }
 
 function dateInputValueWithOffset(offsetDays: number) {
@@ -2124,7 +2124,7 @@ export default function DepartmentKanban() {
   const canceledTodayMeetings = useCanceledMeetings(toDateInputValue(todayDate))
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
   const tomorrowDate = React.useMemo(
-    () => new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() + 1),
+    () => nextWorkingDay(todayDate),
     [todayDate]
   )
   const selectedAllDate = React.useMemo(

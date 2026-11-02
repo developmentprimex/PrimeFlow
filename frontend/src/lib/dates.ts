@@ -1,3 +1,11 @@
+export function nextWorkingDay(value: Date): Date {
+  const next = new Date(value.getFullYear(), value.getMonth(), value.getDate() + 1)
+  while (next.getDay() === 0 || next.getDay() === 6) {
+    next.setDate(next.getDate() + 1)
+  }
+  return next
+}
+
 export function normalizeDueDateInput(value: string): string {
   if (!value) return ""
   const base = new Date(`${value}T00:00:00`)
