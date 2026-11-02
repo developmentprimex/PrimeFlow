@@ -6,6 +6,10 @@ on:
         description: Base64 release ZIP; empty performs read-only inspection
         required: false
         default: ''
+      bundle_tail:
+        description: Second release chunk for Windows environment size limits
+        required: false
+        default: ''
       sha:
         description: KUJTESA-BOT commit SHA
         required: false
@@ -54,6 +58,7 @@ jobs:
         shell: powershell
         env:
           KUJTESA_RELEASE_BUNDLE: ${{ inputs.bundle }}
+          KUJTESA_RELEASE_BUNDLE_TAIL: ${{ inputs.bundle_tail }}
           KUJTESA_RELEASE_SHA: ${{ inputs.sha }}
           KUJTESA_RELEASE_DIGEST: ${{ inputs.digest }}
         run: |
@@ -66,7 +71,7 @@ jobs:
           import base64,hashlib,io,os,re,zipfile
           from pathlib import Path
           assert re.fullmatch(r'[0-9a-f]{40}',os.environ['KUJTESA_RELEASE_SHA'])
-          data=base64.b64decode(os.environ['KUJTESA_RELEASE_BUNDLE'],validate=True)
+          data=base64.b64decode(os.environ['KUJTESA_RELEASE_BUNDLE']+os.environ.get('KUJTESA_RELEASE_BUNDLE_TAIL',''),validate=True)
           assert hashlib.sha256(data).hexdigest()==os.environ['KUJTESA_RELEASE_DIGEST'],'Release digest mismatch'
           root=Path(os.environ['KUJTESA_RELEASE_STAGE']).resolve()
           with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -78,6 +83,6 @@ jobs:
               archive.extractall(root)
           '@ | & $python -
           if ($LASTEXITCODE -ne 0) { throw 'Release validation failed.' }
-          Remove-Item Env:KUJTESA_RELEASE_BUNDLE
+          Remove-Item Env:KUJTESA_RELEASE_BUNDLE, Env:KUJTESA_RELEASE_BUNDLE_TAIL
           & $python (Join-Path $stage 'scripts/deploy_server.py') --source $stage --sha $env:KUJTESA_RELEASE_SHA
           if ($LASTEXITCODE -ne 0) { throw 'Kujtesa deployment failed; inspect rollback result.' }

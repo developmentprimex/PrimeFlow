@@ -253,6 +253,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Discord configuration failed. Check the required Actions secrets." }
 
       - name: Configure Kujtesa Server
+        if: ${{ vars.KUJTESA_EXTERNAL_MANAGED != 'true' }}
         shell: powershell
         env:
           KUJTESA_DISCORD_TOKEN: ${{ secrets.KUJTESA_DISCORD_TOKEN }}
@@ -525,7 +526,7 @@ jobs:
           Write-Host "Discord assistant connected and slash commands registered."
 
       - name: Start Kujtesa Worker
-        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        if: ${{ steps.changes.outputs.backend_changed == 'true' && vars.KUJTESA_EXTERNAL_MANAGED != 'true' }}
         shell: powershell
         env:
           APP_BUILD_SHA: ${{ github.sha }}
