@@ -39,11 +39,15 @@ class TemplateDefinition(BaseModel):
     completion_mode: Literal["individual", "shared"] = "individual"
     frequency: Literal["once", "daily", "weekly", "school_day", "conditional", "near_daily", "unresolved"] = "once"
     recurrence_interval_weeks: int = Field(default=1, ge=1, le=52, strict=True)
+    recurrence_interval_days: int = Field(default=1, ge=1, le=365, strict=True)
     recurrence_anchor_date: date | None = None
     on_date: date | None = None
     due_time: time | None = None
+    agenda_time: time | None = None
+    routine_key: Literal["morning", "rooms"] | None = None
     weekdays: list[int] = Field(default_factory=list, max_length=7)
     steps: list[str] = Field(default_factory=list, max_length=100)
+    weekday_steps: dict[str, list[str]] = Field(default_factory=dict, max_length=7)
     estimated_minutes: int | None = Field(default=None, ge=1, le=1440)
     reminder_group: Group = "daily_upkeep"
     discord_destination: Literal["dm", "channel", "off"] = "dm"
@@ -62,6 +66,9 @@ class TemplateDefinition(BaseModel):
             raise ValueError("Ditët duhet të jenë 0–6, pa përsëritje.")
         if any(not step.strip() or len(step) > 2000 for step in self.steps):
             raise ValueError("Hapat duhet të kenë tekst deri në 2000 karaktere.")
+        if any(k not in {str(i) for i in range(7)} or len(v) > 100
+               or any(not s.strip() or len(s) > 2000 for s in v) for k, v in self.weekday_steps.items()):
+            raise ValueError("Hapat sipas ditës duhet të kenë ditë 0–6 dhe tekst të vlefshëm.")
         if self.assignment == "fixed" and not self.assignees:
             raise ValueError("Zgjidh përgjegjësin.")
         if self.assignment != "fixed" and self.assignees:
@@ -70,7 +77,10 @@ class TemplateDefinition(BaseModel):
             raise ValueError("Detyra njëherëshe duhet të ketë përgjegjës të zgjedhur.")
         if (self.assignment == "rotation") != (self.rotation_id is not None):
             raise ValueError("Rotacioni duhet të jetë i përcaktuar.")
-        if self.recurrence_interval_weeks > 1 or self.recurrence_anchor_date is not None:
+        if self.recurrence_interval_days > 1 or (self.frequency == "daily" and self.recurrence_anchor_date is not None):
+            if self.frequency != "daily" or self.recurrence_interval_weeks != 1 or self.recurrence_anchor_date is None:
+                raise ValueError("Intervali ditor kërkon detyrë ditore dhe datën e parë të ciklit.")
+        elif self.recurrence_interval_weeks > 1 or self.recurrence_anchor_date is not None:
             if self.frequency not in {"weekly", "near_daily"}:
                 raise ValueError("Intervali javor kërkon përsëritje me ditë të zgjedhura.")
             if self.recurrence_anchor_date is None:

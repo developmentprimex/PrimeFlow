@@ -125,6 +125,66 @@ async function shell(page: Page, options: { available?: boolean; automatic?: boo
     failAccess: () => { accessFailure = true }, forbidAction: () => { forbiddenAction = true }, revoke: () => { available = false } }
 }
 
+test("weekly status controls and legend survive an empty filter and recover the table", async ({ page }) => {
+  await shell(page, { view: "week" })
+  await expect(page.getByRole("table")).toBeVisible()
+  const filters = page.getByRole("group", { name: "Filtro sipas gjendjes" })
+  await filters.getByRole("button", { name: "Po e bëj", exact: true }).click()
+  await expect(page.getByText("Nuk ka detyra në këtë pamje", { exact: true })).toBeVisible()
+  await expect(filters).toBeVisible()
+  await expect(page.getByText("Legjenda", { exact: true })).toBeVisible()
+  await filters.getByRole("button", { name: "U kry", exact: true }).click()
+  await expect(filters.getByRole("button", { name: "U kry", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await filters.getByRole("button", { name: "Pastro filtrin", exact: true }).click()
+  await expect(page.getByRole("table")).toBeVisible()
+})
+
+test("navigating to a distant week loads that week's occurrences", async ({ page }) => {
+  const state = await shell(page, { view: "week" })
+  await page.route("**/ga-personal/occurrences?**", async route => {
+    const url = new URL(route.request().url())
+    const start = url.searchParams.get("start")!
+    return route.fulfill({ json: [{ ...state.rows[0], local_date: start, period_key: start,
+      snapshot: { ...state.rows[0].snapshot, title: "Detyra e javës së zgjedhur" } }] })
+  })
+  await page.getByLabel("Data", { exact: true }).fill("01/02/2027")
+  await expect(page.getByRole("table").getByText("Detyra e javës së zgjedhur", { exact: true })).toBeVisible()
+  await expect(page.getByRole("columnheader", { name: /1 shkurt/ })).toBeVisible()
+})
+
+test("a late response from the previous week cannot replace the selected week", async ({ page }) => {
+  const state = await shell(page, { view: "week" })
+  await expect(page.getByRole("table")).toBeVisible()
+  let releaseOld!: () => void
+  let markOldStarted!: () => void
+  const oldStarted = new Promise<void>(resolve => { markOldStarted = resolve })
+  const oldGate = new Promise<void>(resolve => { releaseOld = resolve })
+  await page.route("**/ga-personal/occurrences?**", async route => {
+    const start = new URL(route.request().url()).searchParams.get("start")!
+    if (start === "2027-02-01") { markOldStarted(); await oldGate }
+    await route.fulfill({ json: [{ ...state.rows[0], local_date: start, period_key: start,
+      snapshot: { ...state.rows[0].snapshot, title: `Java ${start}` } }] }).catch(() => {})
+  })
+  await page.getByLabel("Data", { exact: true }).fill("01/02/2027")
+  await oldStarted
+  await page.getByLabel("Data", { exact: true }).fill("08/02/2027")
+  await expect(page.getByRole("table").getByText("Java 2027-02-08", { exact: true })).toBeVisible()
+  releaseOld()
+  await page.getByRole("button", { name: "Këtë javë", exact: true }).click()
+  await expect(page.getByRole("table").getByText("Java 2027-02-08", { exact: true })).toBeVisible()
+})
+
+test("background access checks keep the weekly table mounted", async ({ page }) => {
+  await shell(page, { view: "week" })
+  const region = page.getByRole("region", { name: "Tabela e planit javor" })
+  await expect(region).toBeVisible()
+  await region.evaluate(element => element.setAttribute("data-poll-check", "kept"))
+  const refreshed = page.waitForResponse(response => response.url().includes("/ga-personal/occurrences?") && response.status() === 200)
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")))
+  await refreshed
+  await expect(region).toHaveAttribute("data-poll-check", "kept")
+})
+
 test("arrival records the signed-in person and shows the first person for the day", async ({ page }) => {
   const state = await shell(page)
   await page.getByRole("button", { name: "Erdha në shpi", exact: true }).click()
@@ -233,21 +293,21 @@ test("membership revocation removes household data on the next access check", as
 
 test("the task card edits time and assignee for only this occurrence", async ({ page }) => {
   const state = await shell(page)
-  const card = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
-  await card.getByRole("button", { name: "Ndrysho", exact: true }).click()
+  const card = page.getByRole("row").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
+  await card.getByRole("button", { name: "Cakto orën", exact: true }).click()
   await page.getByLabel("Ora e detyrës", { exact: true }).fill("18:30")
   await page.getByLabel("Përgjegjësi i detyrës", { exact: true }).selectOption("rrita")
   await page.getByRole("button", { name: "Ruaj ndryshimet", exact: true }).click()
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(card.getByText("18:30", { exact: true })).toBeVisible()
-  await expect(card.getByText("Person 2", { exact: true })).toBeVisible()
+  await expect(card.getByRole("img", { name: "Person 2 · Për t’u bërë", exact: true })).toBeVisible()
   expect(state.writes[0].body).toMatchObject({ due_time: "18:30", assignees: ["rrita"], expected_version: 1, apply_to_future: false })
 })
 
 test("the task card can explicitly apply a schedule change to future recurrences", async ({ page }) => {
   const state = await shell(page)
-  const card = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
-  await card.getByRole("button", { name: "Ndrysho", exact: true }).click()
+  const card = page.getByRole("row").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
+  await card.getByRole("button", { name: "Cakto orën", exact: true }).click()
   await page.getByLabel("Ora e detyrës", { exact: true }).fill("19:15")
   await page.getByLabel("Këtë dhe përsëritjet e ardhshme", { exact: true }).check()
   await page.getByRole("button", { name: "Ruaj ndryshimet", exact: true }).click()
@@ -270,8 +330,8 @@ test("module admin saves separate Kujtesa settings without requiring all persona
 
 test("an existing task can route its reminders to the family channel", async ({ page }) => {
   const state = await shell(page)
-  const card = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
-  await card.getByRole("button", { name: "Ndrysho", exact: true }).click()
+  const card = page.getByRole("row").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
+  await card.getByRole("button", { name: "Cakto orën", exact: true }).click()
   await page.getByRole("combobox", { name: "Kujtesat në Discord", exact: true }).selectOption("channel")
   await page.getByRole("button", { name: "Ruaj ndryshimet", exact: true }).click()
   await expect(page.getByRole("dialog")).toHaveCount(0)
@@ -319,7 +379,7 @@ test("new tasks use the selected day and saving follows a changed date", async (
   await page.getByRole("button", { name: "Ruaje detyrën", exact: true }).click()
   await expect(dialog).toHaveCount(0)
   await expect(page.getByLabel("Data", { exact: true })).toHaveValue(displayDate(changedDay))
-  await expect(page.locator("article").getByText("Detyra për datën tjetër", { exact: true })).toBeVisible()
+  await expect(page.getByRole("row").getByText("Detyra për datën tjetër", { exact: true })).toBeVisible()
 })
 
 test("an intentionally inactive task remains visible in templates after saving", async ({ page }) => {
@@ -336,10 +396,10 @@ test("an intentionally inactive task remains visible in templates after saving",
 test("completing one person's occurrence preserves the other and the mobile layout fits", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const state = await shell(page)
-  const first = page.locator("article").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
+  const first = page.getByRole("row").filter({ has: page.getByText("Detyra e personit të parë", { exact: true }) })
   await first.getByRole("button", { name: "U kry", exact: true }).click()
   await expect(first.getByRole("button", { name: "U kry", exact: true })).toHaveCount(0)
-  const second = page.locator("article").filter({ has: page.getByText("Detyra e personit të dytë", { exact: true }) })
+  const second = page.getByRole("row").filter({ has: page.getByText("Detyra e personit të dytë", { exact: true }) })
   await expect(second.getByRole("button", { name: "U kry", exact: true })).toBeVisible()
   expect(state.writes).toHaveLength(1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
@@ -432,20 +492,20 @@ test("personal duties share a row with independent people, full hover titles and
   for (const title of titles) await expect(page.getByRole("tooltip")).toContainText(title)
   await expect(page.getByRole("tooltip")).toContainText("BP-L-D")
   await page.screenshot({ path: "test-results/ga-personal-grouped-hover.png", fullPage: true })
-  await page.getByText("Legjenda e shkurtesave", { exact: true }).click()
+  await page.getByText("Legjenda", { exact: true }).click()
   await expect(page.getByText("Korridori i vogël", { exact: true })).toBeVisible()
   await expect(page.getByText("Korridori i bibliotekës", { exact: true })).toBeVisible()
   await expect(page.getByText("Para shkollës / mëngjes shkolle", { exact: true })).toBeVisible()
   await expect(page.getByText("Nala përgatitje para gjumit", { exact: true })).toBeVisible()
   await expect(page.getByText("Mërkurë", { exact: true })).toBeVisible()
-  await expect(page.locator('dl[aria-label="Të gjitha shkurtesat"] dt')).toHaveCount(40)
+  await expect(page.locator("details").filter({ has: page.getByText("Legjenda", { exact: true }) }).locator("dt")).toHaveCount(40)
   await expect(page.getByRole("group", { name: "Kategoritë e legjendës", exact: true })).toHaveCount(0)
   await page.screenshot({ path: "test-results/ga-personal-legend.png", fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: "test-results/ga-personal-legend-mobile.png", fullPage: true })
   await page.setViewportSize({ width: 1280, height: 900 })
-  await page.getByText("Legjenda e shkurtesave", { exact: true }).click()
+  await page.getByText("Legjenda", { exact: true }).click()
   const cell = table.getByRole("button", { name: new RegExp(`^${titles[0]},`) })
   const personTextColors = new Set<string>()
   for (const [person, status, initials] of [["Person 1", "Për t’u bërë", "MC"], ["Person 2", "U kry", "RRC"], ["Person 3", "Më duhet ndihmë", "LC"]]) {
@@ -536,4 +596,30 @@ test("a partial time-save failure preserves the remaining selection without repe
   await dialog.getByRole("button", { name: "Ruaj orën", exact: true }).click()
   await expect(dialog).toHaveCount(0)
   expect(state.writes.map((w) => w.path)).toEqual([`/occurrences/${firstId}`, `/occurrences/${secondId}`])
+})
+
+test("family additions are reviewed before import and agenda switches save independently", async ({ page }) => {
+  const state = await shell(page)
+  const imports: unknown[] = []
+  await page.route("**/ga-personal/discord/family-pack", async (route) => {
+    if (route.request().method() === "POST") {
+      imports.push(route.request().postDataJSON())
+      return route.fulfill({ json: { applied: true } })
+    }
+    return route.fulfill({ json: { hash: "a".repeat(64), counts: { create: 1, update: 0, existing: 1 }, rotation_will_change: false,
+      tasks: [{ source_id: "family-demo", title: "Rutina shtesë", action: "create", definition: { due_time: "20:20:00", steps: ["Hapi i rutinës"], frequency: "daily" } }] } })
+  })
+  await page.getByRole("button", { name: "Cilësimet", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Importo rutinat në PrimeFlow", exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Shiko shtesat para importimit", exact: true }).click()
+  await expect(page.getByText("Rutina shtesë · 20:20 · Shtohet", { exact: true })).toBeVisible()
+  expect(imports).toHaveLength(0)
+  await page.getByRole("button", { name: "Importo rutinat në PrimeFlow", exact: true }).click()
+  await expect(page.getByRole("status")).toContainText("Rutinat u ruajtën në PrimeFlow.")
+  expect(imports).toEqual([{ expected_hash: "a".repeat(64) }])
+  await page.getByRole("checkbox", { name: /Dërgo agjendën e ditës/ }).check()
+  await page.getByRole("checkbox", { name: /Njofto zgjimin/ }).check()
+  await page.getByRole("button", { name: "Ruaj lidhjen me Kujtesën", exact: true }).click()
+  await expect.poll(() => state.writes.filter(w => w.path === "/discord/settings").length).toBe(1)
+  expect(state.writes.find(w => w.path === "/discord/settings")!.body).toMatchObject({ daily_agenda: true, presence_notifications: true })
 })

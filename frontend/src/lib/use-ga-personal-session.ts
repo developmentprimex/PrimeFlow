@@ -9,7 +9,7 @@ export class GaApiError extends Error {
   constructor(message: string, public status: number) { super(message) }
 }
 
-export function useGaPersonalSession(onClear: () => void) {
+export function useGaPersonalSession(onClear: () => void, start: string, end: string) {
   const { apiFetch, user } = useAuth()
   const fetchRef = React.useRef(apiFetch)
   const clearRef = React.useRef(onClear)
@@ -22,12 +22,20 @@ export function useGaPersonalSession(onClear: () => void) {
   const [history, setHistory] = React.useState<GaEvent[]>([])
   const [obscured, setObscured] = React.useState(false)
   const [connectionError, setConnectionError] = React.useState("")
+  const [loading, setLoading] = React.useState(false)
+  const rangeKey = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+  const rangeRef = React.useRef(rangeKey)
+  rangeRef.current = rangeKey
+  const loadSequence = React.useRef(0)
+  const loadedRange = React.useRef<string | null>(null)
   const generation = React.useRef(0)
   const reads = React.useRef<AbortController | null>(null)
   const checking = React.useRef<{ generation: number; promise: Promise<void> } | null>(null)
 
   const invalidate = React.useCallback(() => {
     generation.current += 1
+    loadSequence.current += 1
+    loadedRange.current = null
     reads.current?.abort()
     checking.current = null
   }, [])
@@ -35,7 +43,7 @@ export function useGaPersonalSession(onClear: () => void) {
   const clear = React.useCallback(() => {
     invalidate()
     setWorkspace(null); setTemplates([]); setOccurrences([]); setHistory([])
-    setObscured(false); setConnectionError("")
+    setObscured(false); setConnectionError(""); setLoading(false)
     setAccess((value) => value ? { available: false, unlocked: false } : value)
     clearRef.current()
   }, [invalidate])
@@ -57,13 +65,32 @@ export function useGaPersonalSession(onClear: () => void) {
 
   const load = React.useCallback(async (signal?: AbortSignal) => {
     const version = generation.current
-    const [w, t, o, h] = await Promise.all([
-      request<Workspace>("/workspace", { signal }), request<GaTemplate[]>("/templates", { signal }),
-      request<GaOccurrence[]>("/occurrences", { signal }), request<GaEvent[]>("/history", { signal }),
-    ])
-    if (version !== generation.current) return
-    setWorkspace(w); setTemplates(t); setOccurrences(o); setHistory(h)
+    const range = rangeRef.current, sequence = ++loadSequence.current
+    if (loadedRange.current !== range) setLoading(true)
+    try {
+      const [w, t, o, h] = await Promise.all([
+        request<Workspace>("/workspace", { signal }), request<GaTemplate[]>("/templates", { signal }),
+        request<GaOccurrence[]>(`/occurrences?${range}`, { signal }), request<GaEvent[]>("/history", { signal }),
+      ])
+      if (version !== generation.current || range !== rangeRef.current || sequence !== loadSequence.current) return
+      loadedRange.current = range
+      setWorkspace(w); setTemplates(t); setOccurrences(o); setHistory(h); setConnectionError("")
+    } finally {
+      if (sequence === loadSequence.current) setLoading(false)
+    }
   }, [request])
+
+  const previousRange = React.useRef(rangeKey)
+  React.useEffect(() => {
+    if (previousRange.current === rangeKey) return
+    previousRange.current = rangeKey
+    if (!access?.available) return
+    const controller = new AbortController()
+    void load(controller.signal).catch((error) => {
+      if (!controller.signal.aborted) setConnectionError(error instanceof Error ? error.message : "Nuk u lidhëm me serverin.")
+    })
+    return () => controller.abort()
+  }, [rangeKey, access?.available, load])
 
   const check = React.useCallback((): Promise<void> => {
     const version = generation.current
@@ -118,5 +145,5 @@ export function useGaPersonalSession(onClear: () => void) {
   }, [user?.id, check, clear, invalidate])
 
   return { access, workspace, templates, occurrences, history, request, load, check,
-    clear, invalidate, obscured: obscured && !!workspace, connectionError }
+    clear, invalidate, obscured: obscured && !!workspace, connectionError, loading }
 }

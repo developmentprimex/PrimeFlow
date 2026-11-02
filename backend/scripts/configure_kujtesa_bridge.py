@@ -19,7 +19,7 @@ from sqlalchemy.engine import make_url
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models.ga_personal import GaPersonalSpace as Space, GaPersonalMember as Member, GaPersonalOccurrence as Occurrence, GaPersonalDiscordDelivery as Outbox, GaPersonalEvent as Event
+from app.models.ga_personal import GaPersonalSpace as Space, GaPersonalMember as Member, GaPersonalOccurrence as Occurrence, GaPersonalDiscordDelivery as Outbox, GaPersonalDiscordNotice as Notice, GaPersonalEvent as Event
 from app.models.user import User
 from app.schemas.ga_personal_discord import DiscordSettings
 from app.services import ga_personal as service
@@ -92,9 +92,10 @@ async def configure(args):
                               "bot_directory": str(bot_dir), "outgoing_messages": False, "existing_tasks": count_before}))
             return
         connection = await db.connection()
-        # Only this private new table is provisioned. Do not run all migrations
+        # Only the private Discord queues are provisioned. Do not run all migrations
         # or modify the production Alembic stamp from this local setup script.
         await connection.run_sync(lambda sync: Outbox.__table__.create(sync, checkfirst=True))
+        await connection.run_sync(lambda sync: Notice.__table__.create(sync, checkfirst=True))
         space = await service.lock_space(db, space.id)
         previous = space.config.get("discord", {})
         if not previous:
@@ -111,6 +112,8 @@ async def configure(args):
     update_env(ROOT / ".env", {"GA_PERSONAL_DISCORD_BRIDGE_SECRET": key})
     adapter = ROOT / "integrations" / "kujtesa" / "primeflow_bot.py"
     (bot_dir / "primeflow_bot.py").write_bytes(adapter.read_bytes())
+    for name in ("family_commands.py", "voice_host.py"):
+        (bot_dir / name).write_bytes((adapter.parent / name).read_bytes())
     readme = ROOT / "integrations" / "kujtesa" / "README.md"
     if readme.exists():
         (bot_dir / "README-primeflow.md").write_bytes(readme.read_bytes())

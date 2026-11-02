@@ -52,6 +52,7 @@ async def get_settings(db, member):
     counts = (await db.execute(select(Outbox.status, func.count(Outbox.id)).join(Occurrence, Occurrence.id == Outbox.occurrence_id)
         .where(Occurrence.space_id == space.id).group_by(Outbox.status))).all()
     return {**public_status(space), "enabled": await granted(db, space), "guild_id": cfg.get("guild_id", ""),
+            "daily_agenda": bool(cfg.get("daily_agenda")), "presence_notifications": bool(cfg.get("presence_notifications")),
             "channel_id": cfg.get("channel_id", ""), "user_ids": cfg.get("user_ids", {}),
             "missing_people": [p for p in ("rrita", "mrika", "gane") if not cfg.get("user_ids", {}).get(p)],
             "delivery_counts": dict(counts)}
@@ -70,12 +71,16 @@ async def save_settings(db, member, payload):
     current["user_ids"] = {p: uid for p, uid in cfg.get("user_ids", {}).items() if uid}
     if current == data and cfg.get("password_version") == space.password_version and (not payload.enabled or await granted(db, space)):
         return await get_settings(db, member)
+    routing_changed = (any(current[key] != data[key] for key in ("enabled", "guild_id", "channel_id", "user_ids"))
+        or cfg.get("password_version") != space.password_version or (payload.enabled and not await granted(db, space)))
     space.config = {**space.config, "discord": {**cfg,
         **data, "version": cfg.get("version", 0) + 1,
+        "routing_version": cfg.get("version", 0) + 1 if routing_changed else cfg.get("routing_version", cfg.get("version", 0)),
         "authorized_by": str(member.user_id), "password_version": space.password_version,
     }}
     ids = select(Occurrence.id).where(Occurrence.space_id == space.id)
-    await cancel(db, ids)
+    if routing_changed:
+        await cancel(db, ids)
     db.add(Event(space_id=space.id, actor_id=member.user_id, request_id=str(tasks.uuid.uuid4()),
         kind="discord_configured", payload={"enabled": payload.enabled, "version": cfg.get("version", 0) + 1}))
     await db.commit()
@@ -108,7 +113,7 @@ def routes(row, cfg, active):
 def schedule_key(row, cfg, target):
     return tasks.document_hash({"due_at": tasks.aware(row.due_at).isoformat() if row.due_at else None,
         "assignees": sorted(row.snapshot["assignees"]), "target": target, "guild": cfg.get("guild_id"),
-        "revision": row.snapshot.get("discord_schedule_revision", 0), "grant_version": cfg.get("version", 0)})
+        "revision": row.snapshot.get("discord_schedule_revision", 0), "grant_version": cfg.get("routing_version", cfg.get("version", 0))})
 
 
 def live(row, archived):
@@ -122,6 +127,8 @@ def card(delivery, row, active):
         "names": [active[p][1] if p in active else p for p in row.snapshot["assignees"]],
         "due_at": tasks.aware(row.due_at).isoformat() if row.due_at else None,
         "status": row.status, "version": row.version,
+        "nala_kaki": row.snapshot.get("nala_kaki"),
+        "nala_question": bool(delivery.details.get("nala_question")),
         "channel_id": delivery.channel_id, "message_id": delivery.message_id}
     result["sync_key"] = tasks.document_hash({k: v for k, v in result.items() if k not in {"lease", "channel_id", "message_id"}})
     return result
@@ -150,7 +157,8 @@ async def occurrence(db, space, delivery_id):
 
 
 def valid_target(delivery, row, archived, cfg, active):
-    return live(row, archived) and any(delivery.recipient == recipient and delivery.schedule_key == schedule_key(row, cfg, target)
+    reference = delivery.details.get("action_key") if delivery.phase == "manual" else delivery.schedule_key
+    return live(row, archived) and any(delivery.recipient == recipient and reference == schedule_key(row, cfg, target)
         for recipient, target in routes(row, cfg, active))
 
 
@@ -184,10 +192,20 @@ async def poll(db, space, *, delivery_enabled=True, health_only=False):
         elif delivery.status == "claimed" and tasks.aware(delivery.leased_until) <= moment:
             # An interrupted worker may already have sent. Never replay blindly.
             delivery.status = "uncertain"
+    manual = []
+    for delivery in existing:
+        if delivery.phase == "manual" and delivery.status == "pending":
+            if moment >= tasks.aware(delivery.scheduled_at) + timedelta(minutes=5):
+                delivery.status = "skipped"
+            elif len(manual) < 20:
+                delivery.status = "claimed"
+                delivery.lease = secrets.token_hex(24)
+                delivery.leased_until = moment + timedelta(seconds=90)
+                manual.append(card(delivery, row_map[delivery.occurrence_id][0], active))
     known = {(d.occurrence_id, d.schedule_key, d.phase, d.recipient) for d in (await db.execute(
         select(Outbox).join(Occurrence, Occurrence.id == Outbox.occurrence_id).where(Occurrence.space_id == space.id)
     )).scalars()}
-    deliveries = []
+    deliveries = manual
     for row, archived in rows:
         if not live(row, archived):
             continue
@@ -220,13 +238,19 @@ async def poll(db, space, *, delivery_enabled=True, health_only=False):
         retry_at = delivery.details.get("sync_retry_at")
         if retry_at and datetime.fromisoformat(retry_at) > moment:
             continue
-        updated = current_card(delivery, row, archived, cfg, active)
+        from app.services import kujtesa_routines as routines
+        updated = await routines.current_card(db, delivery, row, archived, cfg, active)
         if delivery.details.get("synced_key") != updated["sync_key"]:
             updates.append(updated)
             if len(updates) >= UPDATE_BATCH_LIMIT:
                 break
+    from app.services.kujtesa_family import poll_notices
+    from app.services.kujtesa_routines import bundle_claims
+    deliveries = await bundle_claims(db, deliveries)
+    notices = await poll_notices(db, space)
     await db.commit()
     return {"enabled": True, "deliveries": deliveries, "updates": updates,
+            "notices": notices,
             "allowed_user_ids": [uid for p, uid in cfg.get("user_ids", {}).items() if uid and p in active],
             "missing_people": [p for p in active if p != "lirza" and not cfg.get("user_ids", {}).get(p)]}
 
@@ -238,7 +262,14 @@ async def prepare(db, space, delivery_id, payload):
         or tasks.aware(delivery.leased_until) <= utcnow() or not await granted(db, space)
         or not valid_target(delivery, row, archived, space.config["discord"], active)):
         raise HTTPException(409, "Kjo kujtesë ndryshoi ose skadoi; nuk duhet dërguar.")
-    return {**card(delivery, row, active), "allowed_user_ids": [uid for p, uid in space.config["discord"].get("user_ids", {}).items() if uid and p in active]}
+    template = await db.get(Template, row.template_id)
+    delivery.details = {**delivery.details, "nala_question": template.source_id == "nala_afternoon"}
+    from app.services import kujtesa_routines as routines
+    result = await routines.current_card(db, delivery, row, False, space.config["discord"], active)
+    if result.get("removed"):
+        raise HTTPException(409, "Rutina ndryshoi para dërgimit.")
+    await db.commit()
+    return {**result, "allowed_user_ids": [uid for p, uid in space.config["discord"].get("user_ids", {}).items() if uid and p in active]}
 
 
 async def report(db, space, delivery_id, payload):
@@ -276,7 +307,8 @@ async def synced(db, space, delivery_id, payload):
         await db.commit()
         return {"recorded": True}
     active = await members(db, space.id)
-    updated = current_card(delivery, row, archived, space.config.get("discord", {}), active)
+    from app.services import kujtesa_routines as routines
+    updated = await routines.current_card(db, delivery, row, archived, space.config.get("discord", {}), active)
     if updated["sync_key"] != payload.sync_key:
         return {"recorded": False}
     delivery.details = {**delivery.details, "synced_key": payload.sync_key, "sync_error": None, "sync_retry_at": None}
@@ -306,14 +338,40 @@ async def action(db, space, delivery_id, payload):
     if previous:
         if previous.actor_id != member.user_id or previous.occurrence_id != row.id or previous.payload.get("discord_action") != signature:
             raise HTTPException(409, "Ky veprim është përdorur më herët.")
-        return {"status": row.status, "card": card(delivery, row, active)}
+        from app.services import kujtesa_routines as routines
+        updated = await routines.current_card(db, delivery, row, archived, cfg, active)
+        return {"status": row.status, "card": updated}
     # Check retries first: a successful snooze necessarily changed the schedule.
     # New interactions from stale cards must still be rejected.
     reference = delivery.details.get("action_key", delivery.schedule_key)
     if archived or not any(delivery.recipient == r and reference == schedule_key(row, cfg, t) for r, t in routes(row, cfg, active)):
         raise HTTPException(409, "Detyra ndryshoi. Hape kartelën e përditësuar.")
+    if delivery.details.get("bundle_members"):
+        from app.services import kujtesa_routines as routines
+        result = await routines.act(db, delivery, row, archived, cfg, active, payload.action)
+        if payload.action == "steps":
+            return result
+        for change in result["changed"]:
+            if change["id"] != str(row.id):
+                db.add(Event(space_id=space.id, occurrence_id=tasks.uuid.UUID(change["id"]), actor_id=member.user_id,
+                    request_id=request_id + ":" + change["id"], kind="status_changed",
+                    payload={**change, "via": "kujtesa", "bundle": str(delivery.id)}))
+        db.add(Event(space_id=space.id, occurrence_id=row.id, actor_id=member.user_id, request_id=request_id,
+            kind="status_changed", payload={"via": "kujtesa", "discord_action": signature, "changes": result["changed"]}))
+        await db.commit()
+        updated = await routines.current_card(db, delivery, row, archived, cfg, active)
+        return {"status": updated["status"], "card": updated}
     if payload.action == "steps":
         return {"status": row.status, "steps": row.snapshot.get("steps", []), "description": row.snapshot.get("description", "")}
+    if payload.action in {"kaki-po", "kaki-jo"}:
+        template = await db.get(Template, row.template_id)
+        if template.source_id != "nala_afternoon":
+            raise HTTPException(409, "Kjo pyetje është për shëtitjen e pasdites së Nalës.")
+        from app.services.kujtesa_family import apply_kaki
+        await apply_kaki(db, space, row.local_date, payload.action[5:], actor_id=member.user_id, request_id=request_id,
+                         discord_action=signature)
+        await db.commit()
+        return {"status": row.status, "card": card(delivery, row, active)}
     new_status = payload.action
     reschedule_at = None
     if new_status.startswith("later"):

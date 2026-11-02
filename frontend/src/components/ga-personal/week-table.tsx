@@ -3,8 +3,6 @@
 import { Plus } from "lucide-react"
 import { Fragment, useEffect, useId, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { AbbreviationLegend } from "./abbreviation-legend"
-import { TaskStatusFilter } from "./task-status-filter"
 import { canEditTime, groupWeekTasks } from "@/lib/ga-personal-week"
 import { groups, dayLabel, GaOccurrence, GaStatus, PersonKey, localTime, localToday, moveDay, statuses, Workspace } from "@/lib/ga-personal"
 
@@ -40,8 +38,8 @@ function TaskTitle({ label, titles }: { label: string; titles: string[] }) {
   </>
 }
 
-export function WeekTable({ rows, start, workspace, busy, selectedPerson, statusFilter, onStatusFilter, onOpen, onEditTime }: {
-  rows: GaOccurrence[]; start: string; workspace: Workspace; busy: boolean; selectedPerson: string; statusFilter: string; onStatusFilter: (value: string) => void; onOpen: (rows: GaOccurrence[]) => void; onEditTime: (rows: GaOccurrence[]) => void
+export function WeekTable({ rows, start, workspace, busy, selectedPerson, onOpen, onEditTime }: {
+  rows: GaOccurrence[]; start: string; workspace: Workspace; busy: boolean; selectedPerson: string; onOpen: (rows: GaOccurrence[]) => void; onEditTime: (rows: GaOccurrence[]) => void
 }) {
   const days = Array.from({ length: 7 }, (_, i) => moveDay(start, i))
   const tasks = groupWeekTasks(rows)
@@ -52,10 +50,6 @@ export function WeekTable({ rows, start, workspace, busy, selectedPerson, status
     ...Object.entries(groups).map(([group, label]) => ({ key: group, label, tasks: tasks.filter((task) => task.group === group && !task.isEvent) })),
   ].filter((section) => section.tasks.length)
   return <div className="min-w-0 space-y-3" data-testid="ga-week-table">
-    <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-muted/30 px-3 py-2">
-      <TaskStatusFilter value={statusFilter} onChange={onStatusFilter} />
-      <AbbreviationLegend />
-    </div>
     <p className="text-xs text-muted-foreground sm:hidden">Rrëshqit tabelën anash për të parë ditët. Prek një qelizë për detajet.</p>
     <div className="max-h-[68vh] w-full min-w-0 overflow-auto overscroll-x-contain rounded-xl border-2 border-slate-400 bg-card dark:border-slate-500" tabIndex={0} role="region" aria-label="Tabela e planit javor">
     <table className="w-full min-w-[1140px] table-fixed border-separate border-spacing-0 text-sm">

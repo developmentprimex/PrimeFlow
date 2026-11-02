@@ -3,8 +3,9 @@
 import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { FamilyPack } from "./family-pack"
 
-type Settings = { enabled: boolean; configured: boolean; connected: boolean; version: number; guild_id: string; channel_id: string; user_ids: Record<string, string>; delivery_counts?: Record<string, number> }
+type Settings = { enabled: boolean; daily_agenda?: boolean; presence_notifications?: boolean; configured: boolean; connected: boolean; version: number; guild_id: string; channel_id: string; user_ids: Record<string, string>; delivery_counts?: Record<string, number> }
 type Request = <T>(path: string, init?: RequestInit) => Promise<T>
 
 export function DiscordSettingsPanel({ request, onSaved }: { request: Request; onSaved: () => Promise<void> }) {
@@ -22,6 +23,7 @@ export function DiscordSettingsPanel({ request, onSaved }: { request: Request; o
     try {
       const saved = await request<Settings>("/discord/settings", { method: "PUT", body: JSON.stringify({
         enabled: value.enabled, guild_id: value.guild_id.trim(), channel_id: value.channel_id.trim(),
+        daily_agenda: !!value.daily_agenda, presence_notifications: !!value.presence_notifications,
         user_ids: Object.fromEntries(Object.entries(value.user_ids).map(([p, id]) => [p, id.trim()])), expected_version: value.version,
       }) })
       setValue(saved); await onSaved()
@@ -37,9 +39,12 @@ export function DiscordSettingsPanel({ request, onSaved }: { request: Request; o
       {[["rrita", "Rrita"], ["mrika", "Mrika"], ["gane", "Gane"]].map(([person, name]) => <label key={person} className="block space-y-1 text-sm"><span>{name} · Discord User ID</span><Input value={value.user_ids[person] || ""} inputMode="numeric" placeholder="Mund të shtohet më vonë" onChange={(e) => setValue({ ...value, user_ids: { ...value.user_ids, [person]: e.target.value } })} /></label>)}
       <p className="text-xs text-muted-foreground">Kujtesat personale të Lirzës i shkojnë Ganës. Pa ID, mesazhi personal pret konfigurimin dhe nuk kalon në kanal.</p>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={value.enabled} disabled={!value.configured} onChange={(e) => setValue({ ...value, enabled: e.target.checked })} /><span>Lejo Kujtesën të lexojë detyrat për njoftim dhe të ruajë konfirmimet nga Discord.</span></label>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={!!value.daily_agenda} onChange={(e) => setValue({ ...value, daily_agenda: e.target.checked })} /><span>Dërgo agjendën e ditës pas orës 06:00. Respektohen destinacionet private të detyrave.</span></label>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={!!value.presence_notifications} onChange={(e) => setValue({ ...value, presence_notifications: e.target.checked })} /><span>Njofto zgjimin dhe kthimin në shtëpi në kanalin privat të familjes.</span></label>
       {!!value.delivery_counts && <p className="text-xs text-muted-foreground">Të dërguara: {value.delivery_counts.sent || 0} · Të pasigurta: {value.delivery_counts.uncertain || 0} · Dështime: {value.delivery_counts.failed || 0}</p>}
       <p className="text-xs text-muted-foreground">Dërgimi kërkon edhe aktivizimin te boti. Detyrat pa orë nuk dërgojnë kujtesa.</p>
       <Button type="submit" disabled={busy}>{busy ? "Duke ruajtur…" : "Ruaj lidhjen me Kujtesën"}</Button>
     </form>}
+    <FamilyPack request={request} onSaved={onSaved} />
   </section>
 }

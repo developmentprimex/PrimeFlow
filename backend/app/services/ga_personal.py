@@ -188,15 +188,18 @@ def scheduled(definition, day, *, school_day=False, condition=False):
         return False
     anchor = definition.get("recurrence_anchor_date")
     interval = definition.get("recurrence_interval_weeks", 1)
+    days_interval = definition.get("recurrence_interval_days", 1)
     if anchor:
         start = date.fromisoformat(anchor)
         if day < start:
             return False
+        if days_interval > 1:
+            return definition["frequency"] == "daily" and (day - start).days % days_interval == 0
         start_monday = start - timedelta(days=start.weekday())
         day_monday = day - timedelta(days=day.weekday())
         if ((day_monday - start_monday).days // 7) % interval:
             return False
-    elif interval > 1:
+    elif interval > 1 or days_interval > 1:
         return False
     frequency = definition["frequency"]
     if frequency == "once":
@@ -266,7 +269,8 @@ async def generate(db, member, payload, *, automatic=False, commit=True):
             due = datetime.combine(payload.day, time.fromisoformat(d["due_time"]), TZ).astimezone(timezone.utc) if d["due_time"] else None
             occurrence = Occurrence(space_id=member.space_id, template_id=row.id, period_key=period,
                 assignment_key=key, local_date=payload.day.isoformat(), due_at=due,
-                snapshot={**d, "assignees": assigned, "template_version": row.version})
+                snapshot={**d, "steps": d.get("weekday_steps", {}).get(str(payload.day.weekday()), d.get("steps", [])),
+                          "assignees": assigned, "template_version": row.version})
             db.add(occurrence)
             identities.add(identity)
             coverage.update((period, p, d.get("coverage_key")) for p in assigned if d.get("coverage_key"))
@@ -287,15 +291,18 @@ async def cancel_discord(db, occurrence_ids):
         DiscordDelivery.status.in_(["pending", "claimed"])).values(status="cancelled"))
 
 
-async def record_arrival(db, member, *, day, request_id, person=None, commit=True):
+async def record_arrival(db, member, *, day, request_id, person=None, commit=True, at=None):
     await lock_member_space(db, member)
     person = person or member.person_key
     if person not in PEOPLE:
         raise HTTPException(422, "Personi nuk është i vlefshëm.")
     previous = (await db.execute(select(Event).where(
         Event.space_id == member.space_id, Event.request_id == request_id))).scalar_one_or_none()
+    arrival_payload = {"day": day.isoformat(), "person_key": person}
+    if at is not None:
+        arrival_payload["at"] = at
     if previous and (previous.kind != "arrived" or previous.actor_id != member.user_id
-                     or previous.payload != {"day": day.isoformat(), "person_key": person}):
+                     or previous.payload != arrival_payload):
         raise HTTPException(409, "Ky identifikues është përdorur për një veprim tjetër.")
     first = (await db.execute(select(Event).where(
         Event.space_id == member.space_id, Event.kind == "arrived",
@@ -304,7 +311,7 @@ async def record_arrival(db, member, *, day, request_id, person=None, commit=Tru
     first_person = first.payload["person_key"] if first else person
     if not previous:
         db.add(Event(space_id=member.space_id, actor_id=member.user_id, request_id=request_id,
-                     kind="arrived", payload={"day": day.isoformat(), "person_key": person}))
+                     kind="arrived", payload=arrival_payload))
         await db.flush()
     administrator = (await db.execute(select(Member).join(User, User.id == Member.user_id).where(
         Member.space_id == member.space_id, Member.active.is_(True), Member.is_admin.is_(True),

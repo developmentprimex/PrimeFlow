@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -14,6 +14,30 @@ from app.schemas.ga_personal import GenerateRequest
 from app.services import ga_personal as service
 
 logger = logging.getLogger(__name__)
+
+
+async def prepare_occurrence_window(db, space_id, start: date, end: date):
+    """Extend opted-in automation to the viewed week, without backfilling history."""
+    today = datetime.now(service.TZ).date()
+    if end < today:
+        return
+    space = await service.lock_space(db, space_id)
+    config = space.config.get("automatic_generation", {})
+    if not config.get("enabled") or not space.password_hash or not config.get("starts_on"):
+        return
+    first = max(start, today, date.fromisoformat(config["starts_on"]))
+    if first > end:
+        return
+    member = (await db.execute(select(GaPersonalMember).join(User, User.id == GaPersonalMember.user_id).where(
+        GaPersonalMember.space_id == space.id, GaPersonalMember.active.is_(True),
+        GaPersonalMember.is_admin.is_(True), User.is_active.is_(True),
+    ).order_by(GaPersonalMember.id).limit(1))).scalar_one_or_none()
+    if member is None:
+        return
+    for offset in range((end - first).days + 1):
+        await service.generate(db, member, GenerateRequest(day=first + timedelta(days=offset)),
+                               automatic=True, commit=False)
+    await db.commit()
 
 
 async def generation_tick(db, *, day=None):

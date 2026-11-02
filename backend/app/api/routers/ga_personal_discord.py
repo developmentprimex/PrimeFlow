@@ -15,6 +15,8 @@ from app.services import ga_personal as tasks
 from app.services import ga_personal_discord as service
 from app.schemas.kujtesa_host import HostRequest
 from app.services import kujtesa_host
+from app.schemas.ga_personal_discord import FamilyCommand, FamilyPackApply
+from app.services import kujtesa_family, kujtesa_family_pack
 
 router = APIRouter(route_class=PrivateRoute)
 
@@ -38,6 +40,31 @@ async def read_settings(member=Depends(admin), db=Depends(get_db)):
 @router.put("/discord/settings")
 async def update_settings(payload: DiscordSettings, member=Depends(admin), db=Depends(get_db)):
     return await service.save_settings(db, member, payload)
+
+
+@router.get("/discord/family-pack")
+async def family_pack_preview(member=Depends(admin), db=Depends(get_db)):
+    return await kujtesa_family_pack.install(db, member)
+
+
+@router.post("/discord/family-pack")
+async def family_pack_apply(payload: FamilyPackApply, member=Depends(admin), db=Depends(get_db)):
+    return await kujtesa_family_pack.install(db, member, expected_hash=payload.expected_hash)
+
+
+@router.post("/bridge/command")
+async def family_command(payload: FamilyCommand, space=Depends(bridge), db=Depends(get_db)):
+    return await kujtesa_family.command(db, space, payload, delivery_enabled=payload.delivery_enabled)
+
+
+@router.post("/bridge/notices/{notice_id}/prepare")
+async def notice_prepare(notice_id: uuid.UUID, payload: LeaseRequest, space=Depends(bridge), db=Depends(get_db)):
+    return await kujtesa_family.prepare_notice(db, space, notice_id, payload)
+
+
+@router.post("/bridge/notices/{notice_id}/result")
+async def notice_result(notice_id: uuid.UUID, payload: DeliveryResult, space=Depends(bridge), db=Depends(get_db)):
+    return await kujtesa_family.report_notice(db, space, notice_id, payload)
 
 
 @router.post("/bridge/poll")
