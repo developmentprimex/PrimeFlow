@@ -14,6 +14,7 @@ import uuid
 import unicodedata
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
+from typing import Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -56,7 +57,7 @@ MARKERS = {
     "F": "F", "BZ1N1": "BZ1N1",
 }
 KNOWLEDGE_CATEGORIES = ("STRUKTURA", "RREGULLORE", "DEFINIME", "PROCESE", "TJETER")
-PROMPT_VERSION = "2026-11-02"
+PROMPT_VERSION = "2026-11-02.2"
 
 
 def effective_protocol(value: str | None) -> str:
@@ -493,7 +494,7 @@ async def tick(db: AsyncSession, at: datetime | None = None) -> dict:
                                  **targets[fallback]})
         if due_join:
             meeting = (await db.execute(select(Mira1HMeeting).where(Mira1HMeeting.meeting_date == day,
-                Mira1HMeeting.slot == slot))).scalar_one_or_none()
+                Mira1HMeeting.slot == slot, Mira1HMeeting.is_test.is_(False)))).scalar_one_or_none()
             if meeting is None or can_retry(meeting, row):
                 jobs.append({"kind": "join", "slot": slot, "starts_at": start.isoformat(),
                              "talk_at": max(call_at, at).isoformat()})
@@ -526,15 +527,32 @@ def can_retry(meeting: Mira1HMeeting, row: MiraHostSettings) -> bool:
     return error.startswith(RETRYABLE_PREFIXES) or bool(restarted)
 
 
-async def start_meeting(db: AsyncSession, slot: str, at: datetime | None = None) -> Mira1HMeeting:
+async def start_meeting(db: AsyncSession, slot: str, at: datetime | None = None, *, test_mode: bool = False,
+                        test_meeting_id: uuid.UUID | None = None) -> Mira1HMeeting:
     if slot not in SLOTS:
         raise HTTPException(422, "Slot i panjohur.")
     at = at or now()
     day = at.date()
+    if test_meeting_id:
+        meeting = await meeting_for(db, test_meeting_id, lock=True)
+        if not test_mode or not meeting.is_test or meeting.meeting_date != day or meeting.slot != slot:
+            raise HTTPException(409, "ID-ja nuk i përket këtij testimi; takimi real nuk mund të ripërdoret për test.")
+        if meeting.status not in {"GA_PHASE", "ABORTED"} or (meeting.join_attempts or 0) >= MAX_JOIN_ATTEMPTS:
+            raise HTTPException(409, "Ky test nuk mund të rilidhet. Nis një test të ri.")
+        meeting.join_attempts = (meeting.join_attempts or 0) + 1
+        meeting.status, meeting.ended_at, meeting.error = "GA_PHASE", None, None
+        return meeting
+    if test_mode:
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=day, slot=slot, is_test=True,
+            status="GA_PHASE", started_at=at, host_transcript=[], join_attempts=1)
+        db.add(meeting)
+        await db.flush()
+        return meeting
     await db.execute(insert(Mira1HMeeting).values(id=uuid.uuid4(), meeting_date=day, slot=slot, status="GA_PHASE",
-        started_at=at, host_transcript=[]).on_conflict_do_nothing(constraint="uq_mira_1h_meeting_slot"))
+        is_test=False, started_at=at, host_transcript=[]).on_conflict_do_nothing(
+            index_elements=[Mira1HMeeting.meeting_date, Mira1HMeeting.slot], index_where=Mira1HMeeting.is_test.is_(False)))
     meeting = (await db.execute(select(Mira1HMeeting).where(Mira1HMeeting.meeting_date == day,
-        Mira1HMeeting.slot == slot).with_for_update())).scalar_one()
+        Mira1HMeeting.slot == slot, Mira1HMeeting.is_test.is_(False)).with_for_update())).scalar_one()
     if meeting.status == "DONE" or (meeting.status == "ABORTED" and not can_retry(meeting, await get_settings(db))):
         raise HTTPException(409, "Ky 1H është mbajtur tashmë.")
     if meeting.status == "ABORTED":
@@ -635,6 +653,23 @@ async def next_turn(db: AsyncSession, meeting: Mira1HMeeting, summary: str | Non
     return result
 
 
+async def current_turn_state(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
+    """Recover an uncertain handoff without ending another person's turn."""
+    if meeting.status != "STAFF_PHASE":
+        raise HTTPException(409, "Takimi nuk është në fazën e stafit.")
+    turns = await turns_view(db, meeting)
+    data = SlotData(await common_payload(db, meeting.meeting_date), meeting.meeting_date)
+    current = next((turn for turn in turns if turn["status"] == "ACTIVE"), None)
+    waiting = [turn for turn in turns if turn["status"] == "WAITING"]
+    result = {"current": None, "upcoming": waiting[0] if waiting else None, "turns": turns,
+              "deferred": [turn for turn in turns if turn["status"] == "DEFERRED"]}
+    if current:
+        result["current"] = {**current, "brief": await person_context(db, meeting, data, current["user_id"])}
+    elif not waiting and not result["deferred"] and meeting.slot == PM_REVIEW_SLOT:
+        result["pm_review"] = data.pm_open()
+    return result
+
+
 async def mark_invited(db: AsyncSession, meeting: Mira1HMeeting, turn_id: uuid.UUID) -> None:
     turn = await db.get(Mira1HTurn, turn_id, with_for_update=True)
     if turn and turn.meeting_id == meeting.id and not turn.invited_at:
@@ -677,7 +712,8 @@ async def finish_meeting(db: AsyncSession, meeting: Mira1HMeeting, reason: str) 
     meeting.ended_at = at
     meeting.error = None if reason == "completed" else reason[:300]
     meeting.summary_status = "PENDING" if meeting.host_transcript else "SKIPPED"
-    meeting.voice_meeting_id = meeting.voice_meeting_id or await recorder_session(db, meeting.meeting_date, meeting.slot)
+    if not meeting.is_test:
+        meeting.voice_meeting_id = meeting.voice_meeting_id or await recorder_session(db, meeting.meeting_date, meeting.slot)
 
 
 async def summarize(meeting_id: uuid.UUID) -> None:
@@ -764,7 +800,9 @@ async def write_turn_notes(db: AsyncSession, meeting: Mira1HMeeting) -> None:
 
 async def meeting_events(db: AsyncSession, meeting: Mira1HMeeting) -> list[dict]:
     rows = (await db.execute(select(Mira1HEvent, User.full_name).outerjoin(User, User.id == Mira1HEvent.user_id)
-        .where(Mira1HEvent.meeting_date == meeting.meeting_date, Mira1HEvent.slot == meeting.slot)
+        .where(or_(Mira1HEvent.meeting_id == meeting.id,
+                   and_(Mira1HEvent.meeting_id.is_(None), Mira1HEvent.meeting_date == meeting.meeting_date,
+                        Mira1HEvent.slot == meeting.slot)) if not meeting.is_test else Mira1HEvent.meeting_id == meeting.id)
         .order_by(Mira1HEvent.created_at))).all()
     return [{"kind": e.kind, "user": name, "initials": initials(name) if name else None, "data": e.data or {},
              "at": e.created_at.isoformat() if e.created_at else None} for e, name in rows]
@@ -774,6 +812,8 @@ async def meeting_events(db: AsyncSession, meeting: Mira1HMeeting) -> list[dict]
 
 async def mentioned(db: AsyncSession, meeting: Mira1HMeeting) -> set[tuple[str, str, str]]:
     """Mentions from today's earlier 1H meetings; the current meeting may repeat its own."""
+    if meeting.is_test:
+        return set()
     rows = (await db.execute(select(Mira1HMention.task_id, Mira1HMention.kind, Mira1HMention.point_key).where(
         Mira1HMention.meeting_date == meeting.meeting_date,
         (Mira1HMention.meeting_id != meeting.id) | Mira1HMention.meeting_id.is_(None)))).all()
@@ -781,6 +821,8 @@ async def mentioned(db: AsyncSession, meeting: Mira1HMeeting) -> set[tuple[str, 
 
 
 async def remember(db: AsyncSession, meeting: Mira1HMeeting, task_id: str, kind: str, point_key: str, text: str) -> None:
+    if meeting.is_test:
+        return
     await db.execute(insert(Mira1HMention).values(id=uuid.uuid4(), meeting_date=meeting.meeting_date,
         task_id=uuid.UUID(task_id), kind=kind, point_key=point_key, text=text[:1000], meeting_id=meeting.id)
         .on_conflict_do_nothing(constraint="uq_mira_1h_mention"))
@@ -800,16 +842,21 @@ async def progress_since(db: AsyncSession, meeting: Mira1HMeeting) -> datetime:
     starts at her reading instead. Anything already read stays out through the mentions.
     """
     start = report_window_start(meeting.meeting_date, meeting.slot)
+    if meeting.is_test:
+        return start
     previous = previous_slot(meeting.slot)
     if not previous:
         return start
     read_at = (await db.execute(select(func.max(Mira1HEvent.sent_at)).where(
         Mira1HEvent.meeting_date == meeting.meeting_date, Mira1HEvent.kind == "PROGRESS_READ",
         Mira1HEvent.meeting_id != meeting.id,
+        Mira1HEvent.meeting_id.in_(select(Mira1HMeeting.id).where(Mira1HMeeting.is_test.is_(False))),
         Mira1HEvent.sent_at >= report_window_start(meeting.meeting_date, previous)))).scalar_one_or_none()
-    pending_at = (await db.execute(select(func.min(Mira1HEvent.sent_at)).where(
+    pending_query = select(func.min(Mira1HEvent.sent_at)).where(
         Mira1HEvent.meeting_date == meeting.meeting_date, Mira1HEvent.kind == "PROGRESS_PENDING",
-        Mira1HEvent.meeting_id != meeting.id))).scalar_one_or_none()
+        Mira1HEvent.meeting_id != meeting.id,
+        Mira1HEvent.meeting_id.in_(select(Mira1HMeeting.id).where(Mira1HMeeting.is_test.is_(False))))
+    pending_at = (await db.execute(pending_query)).scalar_one_or_none()
     return min(v for v in (start, read_at, pending_at) if v is not None)
 
 
@@ -1018,6 +1065,11 @@ class NoArgs(Args):
     pass
 
 
+class WaitForUser(Args):
+    reason: Literal["noise", "side_conversation", "user_pause", "awaiting_answer"] = Field(
+        default="noise", description="user_pause kur personi kërkon të presësh; noise për zhurmë; awaiting_answer vetëm pasi bëre pyetje")
+
+
 class CreateTask(Args):
     note_id: str = Field(description="note_id nga list_new_px_notes")
     title: str | None = Field(default=None, description="Titulli i detyrës; null = teksti i note-it")
@@ -1085,7 +1137,7 @@ TOOLS = {
                                  "(ose, në 11:50 pas të fundit, rishikimin e detyrave PM)."),
     "call_next_person": (NoArgs, "Njofto personin e radhës të kyçet (thirre kur personi aktual është te detyra e fundit)."),
     # Answered inside host-worker.mjs: it keeps Mira quiet and never reaches PrimeFlow.
-    "wait_for_user": (NoArgs, "Qëndro në heshtje: për zhurmë, heshtje, 'aha/po/mhm' ose fjalë që s'janë për ty."),
+    "wait_for_user": (WaitForUser, "Qëndro në heshtje për zhurmë ose pritje të kërkuar. Mos e përdor në vend të vazhdimit pas raportimit ose rezultatit të një mjeti."),
 }
 
 
@@ -1108,11 +1160,17 @@ async def instructions(db: AsyncSession, meeting: Mira1HMeeting, row: MiraHostSe
     ga =", ".join(data.name(p["user_id"]) for p in ga_people(data, row)) or "ekipi GA"
     people = data.participants(meeting.slot)
     from app.services.mira_host_prompt import render
-    return render(slot=meeting.slot, day=meeting.meeting_date.strftime("%d.%m.%Y"),
+    policy = render(slot=meeting.slot, day=meeting.meeting_date.strftime("%d.%m.%Y"),
                   time=now().strftime("%H:%M"), timezone=settings.APP_TIMEZONE, ga=ga,
                   people=", ".join(initials(data.name(u)) for u in people) or "askush me detyra 1H",
                   protocol=effective_protocol(row.protocol_text), target_minutes=row.target_minutes_per_person,
                   knowledge=knowledge, memory=memory, truncated=truncated)
+    if meeting.is_test:
+        policy = ("TEST MODE: Këto rregulla të testimit kanë përparësi ndaj udhëzimeve të ruajtjes më poshtë. "
+                  "Ky është provim zanor për slotin e zgjedhur, jo takimi real. Thuaj shkurt në fillim se është test. "
+                  "Personi që po teston mund të luajë rolin e GA-së dhe të çdo personi të radhës. "
+                  "Nuk presim stafin të kyçet. Krijimet e detyrave dhe PX Notes simulohen; thuaj 'u simulua', jo se u ruajtën realisht.\n" + policy)
+    return policy
 
 
 async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
@@ -1242,7 +1300,7 @@ async def authorize_speaker(db, meeting, data, *, speaker_id, speech_id, ga_only
     if not speaker_id or not speech_id:
         raise HTTPException(403, "Folësi nuk u identifikua qartë. Kërko që një person të flasë vetëm dhe ta përsërisë.")
     actor = await user_for_discord(db, speaker_id)
-    if ga_only:
+    if ga_only and not meeting.is_test:
         row = await get_settings(db)
         allowed = {p["user_id"] for p in ga_people(data, row)}
         allowed |= {p["fallback_user_id"] for p in ga_people(data, row) if p.get("fallback_user_id")}
@@ -1300,7 +1358,8 @@ async def prepare_task_proposal(db, meeting, data, args, *, speech_id, actor):
     if args.symbol:
         details += ", me simbolin " + args.symbol
     return {"success": True, "proposal_id": str(proposal.id), "requires_confirmation": True,
-            "proposal": {**args.model_dump(mode="json"), "title": title}, "read_aloud": details + ". Ta krijoj?"}
+            "proposal": {**args.model_dump(mode="json"), "title": title},
+            "read_aloud": details + (". Ta simulojmë?" if meeting.is_test else ". Ta krijoj?")}
 
 
 async def acknowledge_proposal(db, meeting, token, played_at):
@@ -1331,7 +1390,10 @@ async def confirm_task_proposal(db, meeting, data, proposal_id, *, speech_id, sp
         return saved["result"]
     normalized = " ".join(re.findall(r"\w+", ''.join(c for c in unicodedata.normalize('NFKD', speech_text or '').casefold()
                                                    if not unicodedata.combining(c))))
-    if normalized not in {"po", "po krijoje", "krijoje", "po konfirmoj", "konfirmoj", "dakord", "po dakord", "po krijoje detyren"}:
+    affirmative = {"po", "po krijoje", "krijoje", "po konfirmoj", "konfirmoj", "dakord", "po dakord", "po krijoje detyren"}
+    if meeting.is_test:
+        affirmative |= {"po simuloje", "simuloje", "po testoje", "testoje"}
+    if normalized not in affirmative:
         return {"success": False, "error": "Kërko konfirmim të qartë: 'po, krijoje'. Ndryshimet kërkojnë propozim të ri."}
     try:
         spoken = datetime.fromisoformat((speech_started_at or '').replace('Z', '+00:00'))
@@ -1358,7 +1420,7 @@ async def record_discussion(db, meeting, data, args, *, speech_id, actor=None):
     turn = await db.get(Mira1HTurn, args.turn_id)
     if meeting.status != "STAFF_PHASE" or not turn or turn.meeting_id != meeting.id or turn.status != "ACTIVE":
         return {"success": False, "error": "Kjo nuk është radha aktive."}
-    if actor is not None and actor.id != turn.user_id:
+    if actor is not None and actor.id != turn.user_id and not meeting.is_test:
         return {"success": False, "error": "Ruaj raportimin vetëm nga personi i radhës aktive; për ndërhyrje përdor shënim takimi."}
     brief = person_brief(data, meeting.slot, str(turn.user_id))
     task_ids = {t["task_id"] for group in ("current", "previous_open", "blocked") for t in brief[group]}
@@ -1381,6 +1443,10 @@ async def record_discussion(db, meeting, data, args, *, speech_id, actor=None):
 async def save_px_note(db: AsyncSession, meeting: Mira1HMeeting, args: PxNote) -> dict:
     """A PX Note dictated in the 1H, written through the notes API as the 1H organizer and linked to the meeting."""
     from app.services import discord_task_tools as tools
+    if meeting.is_test:
+        db.add(Mira1HEvent(meeting_id=meeting.id, meeting_date=meeting.meeting_date, slot=meeting.slot,
+            kind="TEST_PX_NOTE", sent_at=now(), data={"text": args.text, "symbol": args.symbol}))
+        return {"success": True, "simulated": True, "message": "Shënimi u simulua vetëm në këtë test; PX Notes reale nuk u ndryshuan."}
     symbol = (args.symbol or "").upper() or None
     symbol = next((key for key, label in MARKERS.items() if symbol in {key, label.upper()}), None) if symbol else None
     actor = await acting_user(db)
@@ -1439,6 +1505,12 @@ async def create_task(db: AsyncSession, meeting: Mira1HMeeting, data: SlotData, 
             "ga_note_origin_id": str(note.id), "department_id": department, "project_id": None,
             "is_bllok": False, "is_1h_report": True, "one_h_report_slot": slot,
             "one_h_marker": symbol, "one_h_marker_comment": None, "is_r1": False, "is_personal": False}
+    if meeting.is_test:
+        db.add(Mira1HEvent(meeting_id=meeting.id, meeting_date=meeting.meeting_date, slot=meeting.slot,
+            kind="TEST_TASK_CREATED", sent_at=now(), data={"title": title, "assignees": args.assignees, "due": args.due_date}))
+        return {"success": True, "simulated": True, "title": title,
+                "assignees": [data.name(uid) for uid in assignees], "slot": slot,
+                "message": "Detyra u simulua; asnjë detyrë reale nuk u krijua dhe note-i mbetet i pandryshuar."}
     actor = await acting_user(db)
     await db.commit()  # the task API runs in its own transaction
     try:
@@ -1460,6 +1532,7 @@ def meeting_row(meeting: Mira1HMeeting, turns: list[dict] | None = None) -> dict
     if meeting.started_at and meeting.ended_at:
         duration = int((meeting.ended_at - meeting.started_at).total_seconds() // 60)
     return {"id": str(meeting.id), "date": meeting.meeting_date.isoformat(), "slot": meeting.slot, "status": meeting.status,
+            "is_test": bool(meeting.is_test),
             "started_at": meeting.started_at.isoformat() if meeting.started_at else None,
             "staff_started_at": meeting.staff_started_at.isoformat() if meeting.staff_started_at else None,
             "ended_at": meeting.ended_at.isoformat() if meeting.ended_at else None, "duration_minutes": duration,
@@ -1469,18 +1542,19 @@ def meeting_row(meeting: Mira1HMeeting, turns: list[dict] | None = None) -> dict
 
 async def list_meetings(db: AsyncSession, limit: int, offset: int) -> dict:
     from app.services import discord_one_h
-    rows = (await db.execute(select(Mira1HMeeting).order_by(Mira1HMeeting.meeting_date.desc(), Mira1HMeeting.slot.desc())
+    rows = (await db.execute(select(Mira1HMeeting).order_by(Mira1HMeeting.meeting_date.desc(), Mira1HMeeting.slot.desc(),
+        Mira1HMeeting.started_at.desc().nulls_last(), Mira1HMeeting.id.desc())
         .limit(limit + offset))).scalars().all()
     total = (await db.execute(select(func.count()).select_from(Mira1HMeeting))).scalar_one()
-    items = {(m.meeting_date, m.slot): meeting_row(m, await turns_view(db, m)) for m in rows}
-    host_slots = set((await db.execute(select(Mira1HMeeting.meeting_date, Mira1HMeeting.slot))).all())
+    items = [meeting_row(m, await turns_view(db, m)) for m in rows]
+    host_slots = set((await db.execute(select(Mira1HMeeting.meeting_date, Mira1HMeeting.slot)
+        .where(Mira1HMeeting.is_test.is_(False)))).all())
     for day, slot in await discord_one_h.slot_groups(db):
-        if (day, slot) not in items:
-            if (day, slot) in host_slots:
-                continue
-            items[(day, slot)] = discord_one_h.virtual_meeting(day, slot)
-            total += 1
-    ordered = [items[key] for key in sorted(items, reverse=True)]
+        if (day, slot) in host_slots:
+            continue
+        items.append(discord_one_h.virtual_meeting(day, slot))
+        total += 1
+    ordered = sorted(items, key=lambda item: (item["date"], item["slot"], item.get("started_at") or "", item["id"]), reverse=True)
     return {"total": total, "items": ordered[offset:offset + limit]}
 
 
@@ -1512,7 +1586,7 @@ async def meeting_detail(db: AsyncSession, meeting_id: uuid.UUID) -> dict:
             "transcript": meeting.host_transcript or [], "events": await meeting_events(db, meeting),
             "mentions": [{"kind": m.kind, "text": m.text, "task_id": str(m.task_id)} for m in mentions],
             "recorder": recorder,
-            "discord_reports": await discord_one_h.reports_for(db, meeting.meeting_date, meeting.slot)}
+            "discord_reports": [] if meeting.is_test else await discord_one_h.reports_for(db, meeting.meeting_date, meeting.slot)}
 
 
 async def note_transcript(db: AsyncSession, note_id: uuid.UUID) -> dict:
@@ -1558,7 +1632,7 @@ async def mira_notes(db: AsyncSession, limit: int, offset: int = 0) -> list[dict
         .outerjoin(summary_event, and_(summary_event.meeting_id == Mira1HMeeting.id,
                                       summary_event.kind == "SUMMARY_NOTE"))
         .outerjoin(GaNote, GaNote.id == summary_event.note_id)
-        .where(Mira1HMeeting.summary.is_not(None))
+        .where(Mira1HMeeting.summary.is_not(None), Mira1HMeeting.is_test.is_(False))
         .order_by(func.coalesce(Mira1HMeeting.ended_at, Mira1HMeeting.created_at).desc(), Mira1HMeeting.id.desc())
         .limit(fetch_limit))).all()
     for meeting, shared_note in meetings:
@@ -1590,6 +1664,8 @@ async def show_mira_note_in_px(db: AsyncSession, kind: str, note_id: uuid.UUID, 
     if kind == "1H":
         # Serialize repeated clicks so a meeting summary gets exactly one PX Note.
         meeting = await meeting_for(db, note_id, lock=True)
+        if meeting.is_test:
+            raise HTTPException(409, "Shënimet e testit ruhen vetëm te historiku i testit, jo në PX Notes reale.")
         if not meeting.summary:
             raise HTTPException(409, "Takimi nuk ka ende shënime.")
         event = (await db.execute(select(Mira1HEvent).where(

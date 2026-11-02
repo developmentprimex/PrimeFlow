@@ -43,6 +43,7 @@ class TurnGuards(unittest.IsolatedAsyncioTestCase):
         with patch.object(host, 'notify', notify):
             await host.advance(state, None, announce=False)
             await host.advance(state, None, announce=False)
+            await asyncio.gather(*list(state.get('notification_tasks', set())))
         self.assertEqual(targets, ['11'])
 
     async def test_handoff_cannot_consume_a_turn_changed_while_waiting_for_the_lock(self):

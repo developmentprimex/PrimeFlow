@@ -771,3 +771,52 @@ uploaded end-of-speech to first generated audio, including endpointing and tool
 waits; Discord delivery/playback time is additional. Tool durations are also stored
 as PERFORMANCE events. Tests use synthetic audio and mocks; a real Albanian voice
 check after deployment is needed to assess pacing and pronunciation.
+
+Mira Host also monitors response liveness independently of the person budget.
+When automatic VAD misses a reply while a previous response is active, a fallback
+checks after 900 ms. Tool continuations wait 500 ms after speech, instead of 1.2 s.
+A request or response with no generation progress for eight seconds is cancelled
+and recovered, at most twice. Repeated failure is reported as `response_stalled`
+instead of leaving the meeting silent. Late events from cancelled responses cannot
+release a newer response or execute its tools. Client metadata identifies retries.
+Normal speech, playback, explicit user pauses and pending writes are respected.
+A silent noise response cannot consume a continuation owed after a tool result;
+the active person's identifiable answer can also trigger a single clarification.
+
+Tool lookups have an eight-second deadline and writes a twelve-second deadline.
+A timed-out write is explicitly unconfirmed and is never automatically replayed;
+recovered duplicate dictations from the same utterance reuse the previous result.
+An uncertain handoff reads `/turns/current` under the meeting lock, rather than
+advancing again. Discord invitations run in bounded background tasks so a slow
+notification does not hold the conversation. The work model stays
+`gpt-realtime-2.1`. The Realtime response lifecycle and automatic VAD behavior are
+documented in the [official OpenAI guide](https://developers.openai.com/api/docs/guides/realtime-conversations).
+
+## Repeatable Mira Host test mode
+
+Use `/mira hyr sloti:14:20 test:true` in `mira-kontrolli` for a rehearsal. Any
+listed slot can be selected at any hour, including a slot already held today.
+Each manual rehearsal gets a separate TEST meeting; a connection retry reuses
+that test ID. Normal `/mira hyr sloti:14:20` keeps the one-real-meeting-per-slot rule.
+Authorization is the same as normal manual entry. Scheduled requests cannot
+create test sessions. The OpenAI model remains `gpt-realtime-2.1`.
+
+Rehearsals use today's real slot tasks as context, but task creation and PX Notes
+are simulated and saved only as events in that test. They do not convert source
+notes, mark global Done/Strike announcements read, link the real recorder, enter
+normal Mira Notes, or replace the real slot's Discord reports. Test summaries and
+transcripts remain in meeting history with a TEST label. The tester may play each
+participant; the host sends no rehearsal invitations and does not defer absent staff.
+
+`/mira ndalo` during a test stops that test without disabling the existing daily
+schedule. Real meetings take priority in every slot: both a due scheduled meeting
+and an authorized normal `/mira hyr` interrupt an active or still-connecting test.
+Tests cannot interrupt a real meeting. The test voice worker closes before the
+real worker joins, with at most three seconds for graceful shutdown before being
+killed. Test history uploads and transcript recovery run in the background so
+they do not hold up real joins. The independent silent recorders keep their
+existing controls.
+
+Deploy the backend migration `0181_mira_host_test_mode` before restarting the host
+worker. It adds `is_test` and scopes the unique date/slot index to real meetings.
+Older meetings remain real by default. No real meeting rows are reset or deleted.

@@ -4,6 +4,7 @@ export type TurnPerson = { initials: string; status: string }
 
 export type MeetingRow = {
   id: string
+  is_test?: boolean
   date: string
   slot: string
   status: "PREP" | "GA_PHASE" | "STAFF_PHASE" | "DONE" | "ABORTED" | "DISCORD_REPORT"

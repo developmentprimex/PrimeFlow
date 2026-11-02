@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
-from tests.test_mira_host_bot import session
+from tests.test_mira_host_bot import session, BRIEF
 from tests.test_mira_host_service import DAY, IDS, payload, item
 import mira_host as controller
 from app.services import mira_host as service
@@ -18,6 +18,93 @@ from app.config import Settings
 
 
 class PacingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discord_invitation_does_not_block_the_tool_continuation(self):
+        async def slow(*args):
+            await asyncio.Event().wait()
+        host = controller.MiraHost(SimpleNamespace())
+        state = {**session(), 'upcoming': {'id': 'next', 'name': 'Elsa', 'discord': {'discord_user_id': '11'}}}
+        with patch.object(host, 'notify', slow):
+            result = await asyncio.wait_for(host._tool(state, {'name': 'call_next_person', 'arguments': '{}'}), 0.5)
+            self.assertEqual(result['njoftim_ne_dergim'], 'Elsa')
+            pending = list(state['notification_tasks'])
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    async def test_uncertain_handoff_reads_server_state_instead_of_advancing_twice(self):
+        calls = []
+        async def bridge(path, body):
+            calls.append(path)
+            if path.endswith('/turns/next'):
+                raise asyncio.TimeoutError()
+            return {'current': {'id': 'new', 'user_id': IDS['EF'], 'name': 'Elsa', 'initials': 'EF',
+                                'discord': None, 'brief': BRIEF}, 'upcoming': None, 'deferred': [],
+                    'turns': [{'id': 'old', 'status': 'TIMEOUT'}]}
+        host = controller.MiraHost(SimpleNamespace(bridge=bridge))
+        state = {**session(), 'current_turn': {'id': 'old'}}
+        result = await host.advance(state, None, announce=False, outcome='TIMEOUT', expected_turn_id='old')
+        self.assertEqual(result['RADHA']['turn_id'], 'new')
+        self.assertEqual(state['incomplete_turns'], ['old'])
+        self.assertEqual(sum(path.endswith('/turns/next') for path in calls), 1)
+        self.assertTrue(calls[-1].endswith('/turns/current'))
+
+    async def test_staff_phase_is_not_marked_started_when_the_request_times_out(self):
+        async def slow(*args):
+            await asyncio.Event().wait()
+        host = controller.MiraHost(SimpleNamespace(bridge=slow))
+        state = session()
+        with patch.object(controller, 'LOOKUP_TIMEOUT_SECONDS', 0.01), self.assertRaises(asyncio.TimeoutError):
+            await host.start_staff(state, announce=False)
+        self.assertFalse(state.get('staff_started', False))
+
+    async def test_current_turn_snapshot_does_not_advance_or_write(self):
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='STAFF_PHASE')
+        turns = [{'id': 'active', 'user_id': IDS['EF'], 'status': 'ACTIVE'},
+                 {'id': 'waiting', 'user_id': IDS['RA'], 'status': 'WAITING'}]
+        with patch.object(service, 'turns_view', AsyncMock(return_value=turns)), \
+             patch.object(service, 'common_payload', AsyncMock(return_value=payload([]))), \
+             patch.object(service, 'person_context', AsyncMock(return_value={'current': []})):
+            result = await service.current_turn_state(SimpleNamespace(), meeting)
+        self.assertEqual(result['current']['id'], 'active')
+        self.assertEqual(result['upcoming']['id'], 'waiting')
+        self.assertEqual(turns[0]['status'], 'ACTIVE')
+
+    async def test_slow_lookup_returns_an_explicit_error_instead_of_waiting_indefinitely(self):
+        async def slow(*args):
+            await asyncio.Event().wait()
+        host = controller.MiraHost(SimpleNamespace(bridge=slow))
+        with patch.object(controller, 'LOOKUP_TIMEOUT_SECONDS', 0.01):
+            result = await asyncio.wait_for(host._tool(session(), {'name': 'get_person_brief', 'arguments': '{}'}), 1)
+        self.assertTrue(result['retry_safe'])
+        self.assertFalse(result['result_unknown'])
+        self.assertIn('error', result)
+
+    async def test_a_timed_out_write_is_unknown_and_is_not_replayed_with_a_new_call_id(self):
+        calls = []
+        async def slow(*args):
+            calls.append(args)
+            await asyncio.Event().wait()
+        host = controller.MiraHost(SimpleNamespace(bridge=slow))
+        state = session()
+        message = {'name': 'save_px_note', 'call_id': 'first', 'speech_id': 'dictation', 'arguments': '{"text":"Oferta u dërgua"}'}
+        with patch.object(controller, 'WRITE_TIMEOUT_SECONDS', 0.01):
+            await asyncio.wait_for(host.tool(state, message), 1)
+            first = state['process'].send.await_args.args[0]['output']
+            await host.tool(state, {**message, 'call_id': 'recovery'})
+        self.assertTrue(first['result_unknown'])
+        self.assertFalse(first['retry_safe'])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(state['process'].send.await_args.args[0]['output'], first)
+
+    async def test_successful_dictation_is_not_saved_again_after_response_recovery(self):
+        host = controller.MiraHost(SimpleNamespace())
+        state = session()
+        message = {'name': 'save_px_note', 'call_id': 'first', 'speech_id': 'dictation', 'arguments': '{"text":"Oferta u dërgua"}'}
+        with patch.object(host, '_tool', AsyncMock(return_value={'success': True})) as tool:
+            await host.tool(state, message)
+            await host.tool(state, {**message, 'call_id': 'recovery'})
+        self.assertEqual(tool.await_count, 1)
+
     async def test_warns_fifteen_seconds_before_target_once(self):
         host = controller.MiraHost(SimpleNamespace())
         state = {**session(), 'target': 2, 'turn_started': controller.datetime.now(controller.tz()) - timedelta(seconds=106),

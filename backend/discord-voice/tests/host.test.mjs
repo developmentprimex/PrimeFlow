@@ -94,6 +94,142 @@ function fakes({realtimeReady=true,voiceReady=false,toolsets={}}={}){
 
 const speech=()=>Int16Array.from({length:240},(_,i)=>i%2?2000:-2000);
 
+test('speech ending during an older response gets a reply when automatic VAD misses it',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA EF',{respond:false});
+  host._onRealtime({type:'response.created',response:{id:'old'}});
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'answer'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'answer'});
+  host._onRealtime({type:'response.done',response:{id:'old',status:'completed'}});
+  advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+});
+
+test('a rejected response request cannot leave the host permanently busy',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA EF');
+  const request=sent.find(e=>e.type==='response.create');
+  host._onRealtime({type:'error',error:{code:'server_error',event_id:request.event_id}});
+  advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,2);
+});
+
+test('a response which never starts is recovered before the person budget expires',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA EF');
+  advance(8500);advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,2);
+  assert.ok(sent.some(e=>e.type==='response.cancel'));
+});
+
+test('late completion of a cancelled response cannot clear a newer active response',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA EF');
+  host._onRealtime({type:'response.created',response:{id:'old'}});
+  advance(8500);advance(1000);
+  host._onRealtime({type:'response.created',response:{id:'new'}});
+  const before=sent.filter(e=>e.type==='response.create').length;
+  host.say('SISTEMI: follow-up');
+  host._onRealtime({type:'response.done',response:{id:'old',status:'cancelled'}});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,before);
+});
+
+test('failed responses retry with a bound instead of staying silent or looping forever',()=>{
+  const {host,sent,events,advance}=fakes();
+  host.say('SISTEMI: RADHA EF');
+  for(let i=0;i<4;i++){
+    host._onRealtime({type:'response.created',response:{id:'failed-'+i}});
+    host._onRealtime({type:'response.done',response:{id:'failed-'+i,status:'failed'}});
+    advance(1000);
+  }
+  assert.ok(sent.filter(e=>e.type==='response.create').length<=3);
+  assert.ok(events.some(e=>e.type==='interrupted'&&e.reason==='response_stalled'));
+});
+
+test('watchdog never retries while speech, playback or an unresolved tool is active',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA EF');
+  host._onRealtime({type:'response.created',response:{id:'working'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'c1',name:'save_px_note',arguments:'{}'}});
+  advance(8500);advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  assert.ok(!sent.some(e=>e.type==='response.cancel'));
+});
+
+test('explicit user pause preserves silence even when a tool continuation is owed',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA EF',{respond:false});
+  host._onRealtime({type:'response.created',response:{id:'save'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'save',name:'save_px_note',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'save'}});
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'pause'});
+  host.toolResult('save',{success:true});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'pause'});
+  host._onRealtime({type:'response.created',response:{id:'pause'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'wait',name:'wait_for_user',arguments:'{"reason":"user_pause"}'}});
+  host._onRealtime({type:'response.done',response:{id:'pause',status:'completed'}});
+  advance(10000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+});
+
+test('a delayed response from an older request cannot execute tools or overwrite a retry',()=>{
+  const {host,sent,events,advance}=fakes();
+  host.say('SISTEMI: RADHA EF');
+  const original=sent.find(e=>e.type==='response.create').event_id;
+  advance(8500);advance(1000);
+  const retry=sent.filter(e=>e.type==='response.create').at(-1).event_id;
+  host._onRealtime({type:'response.created',response:{id:'late',metadata:{mira_request:original}}});
+  host._onRealtime({type:'response.created',response:{id:'retry',metadata:{mira_request:retry}}});
+  host._onRealtime({type:'response.output_item.done',response_id:'late',item:{type:'function_call',call_id:'unsafe',name:'save_px_note',arguments:'{}'}});
+  host.say('SISTEMI: next');
+  host._onRealtime({type:'response.done',response:{id:'late',status:'cancelled'}});
+  assert.equal(events.filter(e=>e.type==='tool_call').length,0);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,2);
+});
+
+test('an empty response to a manual request is retried with a bound',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA EF');
+  const request=sent.find(e=>e.type==='response.create');
+  host._onRealtime({type:'response.created',response:{id:'empty',metadata:request.response.metadata}});
+  host._onRealtime({type:'response.done',response:{id:'empty',status:'completed'}});
+  advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,2);
+});
+
+test('a clear active-person answer is resumed if the model silently ignores it, even with late ASR',async()=>{
+  const {host,events,sent,dispatch,advance,connection,streams}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  host.configure('STAFF_PHASE','11');
+  host.say('SISTEMI: RADHA EF',{respond:false});
+  connection.receiver.speaking.emit('start','11');
+  streams.get('11').emit('data',toDiscord(new Int16Array(2400).fill(2000)).pcm);
+  advance(100);
+  host._onRealtime({type:'input_audio_buffer.speech_started',audio_start_ms:0,item_id:'answer'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',audio_end_ms:100,item_id:'answer'});
+  host._onRealtime({type:'response.created',response:{id:'ignored'}});
+  host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'wait',name:'wait_for_user',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'ignored',status:'completed'}});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'answer',transcript:'Duhet me prit furnitorin; e mbyll deri në njëmbëdhjetë.'});
+  advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  assert.ok(events.some(e=>e.event==='response_recovery'&&e.reason==='ignored_staff_answer'));
+});
+
+test('partial audio from repeatedly failed responses does not reset the recovery limit',()=>{
+  const {host,sent,events,advance}=fakes();
+  host.say('SISTEMI: RADHA EF');
+  for(let i=0;i<3;i++){
+    host._onRealtime({type:'response.created',response:{id:'partial-'+i}});
+    host._onRealtime({type:'response.output_audio.delta',response_id:'partial-'+i,item_id:'item-'+i,delta:int16ToBase64(speech())});
+    host._playback.clear();
+    host._onRealtime({type:'response.done',response:{id:'partial-'+i,status:'failed'}});
+    advance(1000);
+  }
+  assert.equal(sent.filter(e=>e.type==='response.create').length,3);
+  assert.ok(events.some(e=>e.type==='interrupted'&&e.reason==='response_stalled'));
+});
+
 test('phase-specific tools wait for Realtime readiness and change at handoff',()=>{
   const tools=[{type:'function',name:'record_task_discussion',parameters:{type:'object'}}];
   const {host,sent}=fakes({realtimeReady:false,toolsets:{STAFF_PHASE:tools,ENDING:[]}});
@@ -256,6 +392,18 @@ test('a short "aha" while Mira speaks does not cut her off',()=>{
   assert.ok(!sent.some(e=>e.type==='response.cancel'||e.type==='conversation.item.truncate'));
 });
 
+test('a real interruption releases the cancelled response so the staff answer is handled promptly',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA EF',{respond:false});
+  speaking(host);
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'answer'});
+  advance(300);host._heard(speech());advance(BARGE_IN_MS-300);
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'answer'});
+  host._onRealtime({type:'response.done',response:{id:'r1',status:'cancelled'}});
+  advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+});
+
 test('a system instruction waits until the speaker stops, and Realtime answers them first',()=>{
   const {host,sent,advance}=fakes();
   host.say('SISTEMI: Faza GA');
@@ -384,7 +532,7 @@ test('tool continuation waits for a speaking person before responding',()=>{
 });
 
 for(const silent of [false,true])
-  test(`an automatic ${silent?'silent':'spoken'} reply consumes tool results without a duplicate answer`,()=>{
+  test(`an automatic ${silent?'silent reply preserves':'spoken reply consumes'} the owed tool continuation`,()=>{
     const {host,sent,advance}=fakes();
     host._onRealtime({type:'response.created',response:{id:'r1'}});
     host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'c1',name:'save_px_note',arguments:'{}'}});
@@ -397,7 +545,7 @@ for(const silent of [false,true])
     if(silent)host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'w1',name:'wait_for_user',arguments:'{}'}});
     host._onRealtime({type:'response.done',response:{id:'auto'}});
     advance(1200);
-    assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+    assert.equal(sent.filter(e=>e.type==='response.create').length,silent?1:0);
   });
 
 test('system messages wait for the current answer to finish',()=>{

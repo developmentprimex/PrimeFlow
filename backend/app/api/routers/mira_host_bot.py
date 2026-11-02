@@ -27,10 +27,16 @@ class Enable(Caller):
     until: str | None = Field(default=None, max_length=5)
 
 
+class Stop(Caller):
+    test_only: bool = False
+
+
 class Start(CommandContext):
     slot: str = Field(pattern=r"^\d{2}:\d{2}$")
     # Present only for an explicit slash command, never for a scheduled start.
     discord_user_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
+    test_mode: bool = False
+    test_meeting_id: uuid.UUID | None = None
 
 
 class NextTurn(BaseModel):
@@ -109,11 +115,19 @@ async def enable(payload: Enable, db: AsyncSession = Depends(get_db)):
     return host.settings_view(row)
 
 
+@router.post('/authorize')
+async def authorize(payload: Caller, db: AsyncSession = Depends(get_db)):
+    """Authorize a manual takeover before interrupting a rehearsal."""
+    await command_user(db, payload)
+    return {"ok": True}
+
+
 @router.post('/disable')
-async def disable(payload: Caller, db: AsyncSession = Depends(get_db)):
+async def disable(payload: Stop, db: AsyncSession = Depends(get_db)):
     await command_user(db, payload)
     row = await host.get_settings(db, lock=True)
-    row.enabled_until = None
+    if not getattr(payload, 'test_only', False):
+        row.enabled_until = None
     await db.commit()
     return host.settings_view(row)
 
@@ -132,6 +146,10 @@ async def tick(db: AsyncSession = Depends(get_db)):
 
 @router.post('/session/start')
 async def start(payload: Start, db: AsyncSession = Depends(get_db)):
+    if payload.test_mode and not payload.discord_user_id:
+        raise HTTPException(422, "Test mode niset vetëm me komandën manuale /mira hyr.")
+    if payload.test_meeting_id and not payload.test_mode:
+        raise HTTPException(422, "Vetëm testet mund të ripërdorin ID të testimit.")
     if payload.discord_user_id:
         await command_user(db, Caller(discord_user_id=payload.discord_user_id,
             guild_id=payload.guild_id, channel_id=payload.channel_id))
@@ -142,7 +160,8 @@ async def start(payload: Start, db: AsyncSession = Depends(get_db)):
         raise HTTPException(409, "Mira nuk është nisur si mbajtëse takimesh.")
     if not (settings.MIRA_HOST_OPENAI_API_KEY or '').strip():
         raise HTTPException(503, "MIRA_HOST_OPENAI_API_KEY mungon.")
-    meeting = await host.start_meeting(db, payload.slot)
+    extra = {'test_meeting_id': payload.test_meeting_id} if payload.test_meeting_id else {}
+    meeting = await host.start_meeting(db, payload.slot, test_mode=payload.test_mode, **extra)
     await db.commit()
     try:
         session = await host.realtime_session(db, meeting)
@@ -181,6 +200,14 @@ async def invited(meeting_id: uuid.UUID, payload: Invited, db: AsyncSession = De
     await host.mark_invited(db, meeting, payload.turn_id)
     await db.commit()
     return {"ok": True}
+
+
+@router.post('/meetings/{meeting_id}/turns/current')
+async def current_turn(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
+    result = await host.current_turn_state(db, meeting)
+    await db.commit()
+    return result
 
 
 @router.post('/meetings/{meeting_id}/transcript')

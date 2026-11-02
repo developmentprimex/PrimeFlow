@@ -156,7 +156,10 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
       <button type="button" onClick={onBack} className="mb-4 text-sm text-muted-foreground underline-offset-4 hover:underline md:hidden">
         Kthehu te lista
       </button>
-      <h2 className="text-lg font-semibold">1H {detail.slot} · {dayLabel(detail.date)}</h2>
+      <h2 className="text-lg font-semibold">{detail.is_test && "🧪 TEST · "}1H {detail.slot} · {dayLabel(detail.date)}</h2>
+      {detail.is_test && <p className="mt-2 text-sm text-muted-foreground">
+        Provë zanore për këtë slot. Takimi real mbetet i pandryshuar; krijimet e detyrave dhe PX Notes janë të simuluara.
+      </p>}
       <p className="mt-1 text-sm text-muted-foreground">
         {STATUS_LABELS[detail.status]}{detail.status !== "DISCORD_REPORT" && <> · filloi {clock(detail.started_at)}, stafi {clock(detail.staff_started_at)}, mbaroi {clock(detail.ended_at)}</>}
         {detail.duration_minutes !== null && ` · ${detail.duration_minutes} min`}
@@ -318,6 +321,7 @@ export function MeetingsTab({ canManage }: { canManage: boolean }) {
                   className={cn("flex w-full items-baseline gap-3 rounded-md px-3 py-2.5 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
                     selected === row.id ? "bg-muted" : "hover:bg-muted/60")}>
                   <span className="w-12 shrink-0 font-semibold tabular-nums">{row.slot}</span>
+                  {row.is_test && <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">TEST</span>}
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
                     {row.status === "DISCORD_REPORT" ? "Raportimet e stafit" : row.people.length ? row.people.map((p) => p.initials).join(" → ") : "pa staf"}
                   </span>

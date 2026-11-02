@@ -89,7 +89,7 @@ class MiraNotesTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_not_called()
 
     async def test_summary_is_materialized_once_and_remains_linked_to_the_meeting(self):
-        meeting = SimpleNamespace(id=uuid.uuid4(), slot="11:00", meeting_date=date(2026, 10, 28), summary="Summary")
+        meeting = SimpleNamespace(id=uuid.uuid4(), slot="11:00", meeting_date=date(2026, 10, 28), summary="Summary", is_test=False)
         user = SimpleNamespace(id=uuid.uuid4())
         stored = {"event": None, "note": None}
 

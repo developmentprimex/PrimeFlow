@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
@@ -28,6 +28,7 @@ class Mira1HMeeting(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     meeting_date: Mapped[date] = mapped_column(Date)
     slot: Mapped[str] = mapped_column(String(5))
+    is_test: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # PREP -> GA_PHASE -> STAFF_PHASE -> DONE, or ABORTED.
     status: Mapped[str] = mapped_column(String(20), default='PREP')
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -41,7 +42,8 @@ class Mira1HMeeting(Base):
     error: Mapped[str | None] = mapped_column(String(300))
     join_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    __table_args__ = (UniqueConstraint('meeting_date', 'slot', name='uq_mira_1h_meeting_slot'),)
+    __table_args__ = (Index('uq_mira_1h_meeting_slot', 'meeting_date', 'slot', unique=True,
+                           postgresql_where=text('is_test IS FALSE')),)
 
 
 class Mira1HTurn(Base):

@@ -29,7 +29,7 @@ def bot(responses):
 
 def session(guild=None):
     return {'slot': '11:00', 'meeting': 'm1', 'guild': guild or SimpleNamespace(get_member=Mock(return_value=None)),
-            'voice': SimpleNamespace(id=5), 'process': SimpleNamespace(send=AsyncMock()), 'lines': [], 'target': 4,
+            'voice': SimpleNamespace(id=5), 'process': SimpleNamespace(send=AsyncMock(), close=AsyncMock()), 'lines': [], 'target': 4,
             'ending': False, 'closed': asyncio.Event(), 'ready': asyncio.Event(), 'upcoming': None, 'current_turn': {'id': 't1'}}
 
 
@@ -249,6 +249,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['call_id'], 'c1')
         self.assertEqual(result['output']['RADHA']['initials'], 'RA')
         self.assertIn('M2/3', result['output']['RADHA']['detyrat_e_slotit'])
+        await asyncio.gather(*list(state.get('notification_tasks', set())))
         fake.private_channel.assert_awaited()  # RA was not in the voice channel, so she is called
         self.assertEqual(state['upcoming']['id'], 't3')
 
