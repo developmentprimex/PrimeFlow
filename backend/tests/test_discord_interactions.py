@@ -21,13 +21,50 @@ class InteractionDeadlineTests(unittest.IsolatedAsyncioTestCase):
             response=SimpleNamespace(defer=AsyncMock(), send_modal=AsyncMock()),
             edit_original_response=AsyncMock(), followup=SimpleNamespace(send=AsyncMock()))
 
+    async def test_slow_m2_yes_acknowledges_before_loading_and_saves_without_a_form(self):
+        for kind in ('delivery', 'continuation'):
+            with self.subTest(kind=kind):
+                job = {'id': str(uuid.uuid4()), 'kind': kind, 'choice': None, 'answered_at': None}
+                interaction = self.interaction(f"pf:m2:reply:{job['id']}:PO")
+                release = asyncio.Event()
+
+                async def load(*args):
+                    interaction.response.defer.assert_awaited_once_with()
+                    await release.wait()
+                    return job
+
+                bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(side_effect=load))
+                with patch.object(m2, 'save_reply', AsyncMock()) as save, \
+                     patch.object(m2, 'prepare_modal', AsyncMock()) as prepare:
+                    running = asyncio.create_task(m2.handle(bot, interaction))
+                    try:
+                        for _ in range(20):
+                            await asyncio.sleep(0)
+                            if bot.bridge.await_count:
+                                break
+                        bot.bridge.assert_awaited_once()
+                        self.assertFalse(running.done())
+                        save.assert_not_awaited()
+                    finally:
+                        release.set()
+                        await running
+                    save.assert_awaited_once_with(bot, interaction, job, choice='PO', comment='')
+                    prepare.assert_not_awaited()
+                    interaction.response.send_modal.assert_not_awaited()
+                    interaction.edit_original_response.assert_not_awaited()
+
     async def test_slow_m2_and_m3_forms_acknowledge_before_loading_finishes(self):
         for client, prefix in ((m2, 'm2'), (m3, 'm3')):
             for choice in ('PO', 'JO'):
                 with self.subTest(prefix=prefix, choice=choice):
                     job = {'id': str(uuid.uuid4()), 'kind': 'delivery', 'snapshot': {'title': 'Task'},
                            'choice': None, 'answered_at': None}
-                    custom_id = f"pf:m2:reply:{job['id']}:{choice}" if prefix == 'm2' else f"pf:m3:{choice}:{job['id']}"
+                    if prefix == 'm2' and choice == 'PO':
+                        # M2 Yes saves directly; its separate comment button opens the form.
+                        job['choice'] = 'PO'
+                        custom_id = f"pf:m2:comment:{job['id']}"
+                    else:
+                        custom_id = f"pf:m2:reply:{job['id']}:{choice}" if prefix == 'm2' else f"pf:m3:{choice}:{job['id']}"
                     interaction = self.interaction(custom_id)
                     release = asyncio.Event()
 
@@ -55,8 +92,11 @@ class InteractionDeadlineTests(unittest.IsolatedAsyncioTestCase):
                         modal = click.response.send_modal.call_args.args[0]
                         self.assertIs(modal.source_message, interaction.message)
                         if choice == 'PO':
-                            save.assert_awaited_once()
-                            self.assertIs(modal.initial_save.result(), job)
+                            if prefix == 'm3':
+                                save.assert_awaited_once()
+                                self.assertIs(modal.initial_save.result(), job)
+                            else:
+                                save.assert_not_awaited()
                             self.assertFalse(modal.comment.required)
                         else:
                             save.assert_not_awaited()
