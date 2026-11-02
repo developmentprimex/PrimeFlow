@@ -20,6 +20,7 @@ Language = Literal['en', 'de']
 class Start(BaseModel):
     model_config = ConfigDict(extra='forbid')
     language: Language
+    regenerate: bool = False
 
 
 def output(job):
@@ -42,14 +43,15 @@ async def start_protocol(recording_id: uuid.UUID, payload: Start,
     # Recording lock serializes concurrent requests, including a first insert.
     row = await load_recording(db, recording_id, user, write=True)
     job = await db.get(RecordingProtocol, (row.id, payload.language))
-    if job and job.status != 'FAILED':
+    if job and (job.status in ('QUEUED', 'GENERATING') or
+            (job.status == 'READY' and not payload.regenerate)):
         return output(job)
     analysis = await db.get(RecordingAnalysis, row.id)
     if not analysis or analysis.status != 'READY':
         raise HTTPException(409, 'Përfundo transkriptimin dhe përmbledhjen para protokollit.')
     if not settings.RECORDING_ANALYSIS_ENABLED or not settings.OPENAI_API_KEY:
         raise HTTPException(503, 'Shërbimi AI nuk është konfiguruar.')
-    if job:
+    if job and not payload.regenerate:
         job.status, job.error_message, job.lease_token, job.lease_until = 'QUEUED', None, None, None
     else:
         segments = (await db.execute(select(RecordingTranscript.text).where(
@@ -64,10 +66,16 @@ async def start_protocol(recording_id: uuid.UUID, payload: Start,
             'transcript': transcript, 'summary': analysis.summary, 'decisions': analysis.decisions or [],
             'proposed_actions': [{'title': a.title, 'description': a.description, 'evidence': a.evidence,
                 'responsible': a.assignee_text, 'deadline': a.deadline_text} for a in actions]}
-        job = RecordingProtocol(recording_id=row.id, language=payload.language, requested_by=user.id,
-            status='QUEUED', source=source)
-        db.add(job)
-    audit(db, user, row, 'recording_protocol_requested', language=payload.language)
+        if job:
+            job.source, job.requested_by = source, user.id
+            job.status, job.error_message = 'QUEUED', None
+            job.checkpoint, job.content, job.document = None, None, None
+            job.lease_token, job.lease_until = None, None
+        else:
+            job = RecordingProtocol(recording_id=row.id, language=payload.language, requested_by=user.id,
+                status='QUEUED', source=source)
+            db.add(job)
+    audit(db, user, row, 'recording_protocol_requested', language=payload.language, regenerate=payload.regenerate)
     await db.commit()
     await db.refresh(job)
     return output(job)

@@ -16,8 +16,12 @@ Rows expand with content; the table header repeats across pages.
 The existing recording analysis worker processes durable protocol jobs before
 each analysis tick. Each language has one cached DOCX in PostgreSQL. Repeated
 requests/downloads reuse it. Failed jobs preserve source snapshots, paid response
-checkpoints and completed content. There is no regeneration/editor endpoint and
-no automatic task creation. Backups must include recording_protocols; its rows
+checkpoints and completed content. Owners can explicitly choose Rigjenero for the
+selected language (`POST` with `regenerate: true`). This refreshes the source and
+clears that language's document, generated content and checkpoints so current
+generation rules apply. Requests during processing reuse the active job. Ordinary
+downloads still reuse the saved result. There is no automatic task creation or
+document editor. Backups must include recording_protocols; its rows
 cascade when recording metadata is hard-deleted.
 
 The transcript is the factual source; summaries and action proposals guide the

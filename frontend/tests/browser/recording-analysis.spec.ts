@@ -26,7 +26,9 @@ async function shell(page: Page, configured = true) {
         const body = request.postDataJSON()
         writes.push({ url: path, body })
         const job = { language: body.language, status: 'READY', error: null }
-        protocols.push(job)
+        const existing = protocols.findIndex(protocol => protocol.language === body.language)
+        if (existing >= 0) protocols[existing] = job
+        else protocols.push(job)
         return route.fulfill({ status: 202, json: job })
       }
       return route.fulfill({ json: { protocols } })
@@ -121,6 +123,12 @@ test('protocol downloads directly in the selected language and reuses saved resu
   await panel.getByRole('button', { name: 'Shkarko Word', exact: true }).click()
   await second
   expect(harness.writes.filter(w => w.url.endsWith('/protocols'))).toHaveLength(1)
+  const regenerated = page.waitForEvent('download')
+  await panel.getByRole('button', { name: 'Rigjenero', exact: true }).click()
+  expect((await regenerated).suggestedFilename()).toBe(`PRIMEX-Protocol-${id}-DE.docx`)
+  expect(harness.writes.filter(w => w.url.endsWith('/protocols')).map(w => w.body)).toEqual([
+    { language: 'de' }, { language: 'de', regenerate: true },
+  ])
   await panel.getByRole('button', { name: 'English (EN)', exact: true }).click()
   await expect(panel.getByRole('button', { name: 'Deutsch (DE)', exact: true })).toHaveAttribute('aria-pressed', 'false')
   const english = page.waitForEvent('download')

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Download } from "lucide-react"
+import { Download, RefreshCw } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { recordingJson } from "@/lib/recording-outbox"
 import { Button } from "@/components/ui/button"
@@ -73,13 +73,14 @@ export function RecordingProtocolPanel({ recordingId, canManage, configured }: {
       .finally(() => { downloading.current = false })
   }, [protocols, download])
 
-  const start = async () => {
+  const start = async (regenerate = false) => {
+    if (busy || processing) return
     setBusy(true); setError("")
     try {
-      if (current?.status === "READY") await download(language)
+      if (current?.status === "READY" && !regenerate) await download(language)
       else {
         const result = await recordingJson(await apiFetch(base, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language }),
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language, ...(regenerate ? { regenerate: true } : {}) }),
         })) as Protocol
         autoDownload.current = language
         setProtocols(previous => [...previous.filter(p => p.language !== language), result])
@@ -107,6 +108,10 @@ export function RecordingProtocolPanel({ recordingId, canManage, configured }: {
         disabled={!loaded || busy || processing || (current?.status !== "READY" && !configured)} onClick={() => void start()}>
         <Download aria-hidden="true" />
         {busy ? "Duke përpunuar…" : processing ? "Duke gjeneruar…" : current?.status === "READY" ? "Shkarko Word" : current?.status === "FAILED" ? "Riprovo dhe shkarko Word" : "Gjenero dhe shkarko Word"}
+      </Button>}
+      {canManage && current?.status === "READY" && <Button variant="outline" className="h-10"
+        disabled={busy || !configured} onClick={() => void start(true)}>
+        <RefreshCw aria-hidden="true" />Rigjenero
       </Button>}
       </div>
     </div>

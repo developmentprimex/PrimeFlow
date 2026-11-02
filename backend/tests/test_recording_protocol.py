@@ -181,3 +181,46 @@ class ProtocolApiTests(unittest.TestCase):
             asyncio.run(process_recording_protocols(self.session))
             generate.assert_awaited_once()
         self.assertEqual(self.client.get(path + '/en/download', headers=self.auth()).status_code, 200)
+
+    def test_explicit_regeneration_refreshes_source_and_clears_only_selected_language(self):
+        from app.jobs.recording_protocol import process_recording_protocols
+        from app.models.recording_protocol import RecordingProtocol
+        from app.models.recording_analysis import RecordingAnalysis
+        sid = self.saved()
+        self.seed(sid)
+        path = f'/api/meeting-recordings/{sid}/protocols'
+        for language in ('en', 'de'):
+            self.client.post(path, headers=self.auth(), json={'language': language})
+        with patch('app.jobs.recording_protocol.provider.generate_content', new=AsyncMock(return_value=sample())) as generate:
+            for _ in range(2): asyncio.run(process_recording_protocols(self.session))
+            german = self.client.get(path + '/de/download', headers=self.auth()).content
+
+            async def change_source():
+                async with self.session() as db:
+                    analysis = await db.get(RecordingAnalysis, uuid.UUID(sid))
+                    analysis.summary = 'Updated meeting summary'
+                    job = await db.get(RecordingProtocol, (uuid.UUID(sid), 'en'))
+                    job.checkpoint = {'old': {'content': sample()}}
+                    await db.commit()
+            asyncio.run(change_source())
+            payload = {'language': 'en', 'regenerate': True}
+            self.assertEqual(self.client.post(path, headers=self.auth('participant'), json=payload).status_code, 404)
+            self.assertEqual(self.client.post(path, headers=self.auth(), json=payload).json()['status'], 'QUEUED')
+            # A double-click must reuse the queued job rather than reset it again.
+            self.assertEqual(self.client.post(path, headers=self.auth(), json=payload).json()['status'], 'QUEUED')
+
+            async def check_reset():
+                async with self.session() as db:
+                    job = await db.get(RecordingProtocol, (uuid.UUID(sid), 'en'))
+                    self.assertEqual(job.source['summary'], 'Updated meeting summary')
+                    self.assertIsNone(job.checkpoint)
+                    self.assertIsNone(job.content)
+                    self.assertIsNone(job.document)
+            asyncio.run(check_reset())
+            self.assertEqual(self.client.get(path + '/en/download', headers=self.auth()).status_code, 409)
+            self.assertEqual(self.client.get(path + '/de/download', headers=self.auth()).content, german)
+            asyncio.run(process_recording_protocols(self.session))
+            self.assertEqual(generate.await_count, 3)
+            self.assertIsNone(generate.call_args.args[2])
+            self.assertEqual(generate.call_args.args[0]['summary'], 'Updated meeting summary')
+            self.assertEqual(self.client.get(path + '/en/download', headers=self.auth()).status_code, 200)
