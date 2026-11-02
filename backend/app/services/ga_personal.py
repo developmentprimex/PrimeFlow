@@ -132,7 +132,7 @@ async def get_template(db, space_id, template_id):
 
 
 async def save_template(db, member, payload, template_id=None):
-    await lock_member_space(db, member)
+    space = await lock_member_space(db, member)
     data = await checked_definition(db, member, payload.definition)
     if template_id:
         row = await get_template(db, member.space_id, template_id)
@@ -144,6 +144,9 @@ async def save_template(db, member, payload, template_id=None):
     else:
         row = Template(space_id=member.space_id, created_by=member.user_id, definition=data)
         db.add(row)
+    generation = {**space.config.get("automatic_generation", {})}
+    generation.pop("future_generated_through", None)
+    space.config = {**space.config, "automatic_generation": generation}
     await db.flush()
     existing_once = (await db.execute(select(Occurrence.id).where(Occurrence.template_id == row.id).limit(1))).scalar_one_or_none() if data["frequency"] == "once" else None
     if existing_once is None and data["enabled"] and data["frequency"] == "once":
@@ -182,6 +185,18 @@ def scheduled(definition, day, *, school_day=False, condition=False):
     # A known recurrence can create an untimed task. Missing times never become
     # invented deadlines or an authorization to send reminders.
     if not definition["enabled"] or definition["readiness"] != "ready_after_setup":
+        return False
+    anchor = definition.get("recurrence_anchor_date")
+    interval = definition.get("recurrence_interval_weeks", 1)
+    if anchor:
+        start = date.fromisoformat(anchor)
+        if day < start:
+            return False
+        start_monday = start - timedelta(days=start.weekday())
+        day_monday = day - timedelta(days=day.weekday())
+        if ((day_monday - start_monday).days // 7) % interval:
+            return False
+    elif interval > 1:
         return False
     frequency = definition["frequency"]
     if frequency == "once":
@@ -480,6 +495,8 @@ def _validate_dataset(dataset):
                     "suggested_start_time": r.get("suggested_start_time"),
                     "suggested_end_time": r.get("suggested_end_time")} for r in t.get("schedule_rules", [])],
                 assignment=t["assignment"], assignees=[t["person_id"]] if t.get("person_id") else [],
+                recurrence_interval_weeks=t.get("recurrence_interval_weeks", 1),
+                recurrence_anchor_date=t.get("recurrence_anchor_date"),
                 frequency=t["frequency"], steps=[s["instruction"] for s in sorted(t["steps"], key=lambda x: x["position"])],
                 reminder_group=t["details"]["reminder_group"], readiness=t["readiness"],
                 rotation_id=t.get("rotation_id"), enabled=False,

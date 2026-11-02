@@ -87,3 +87,5 @@ Apply the migration and deploy backend + frontend before issuing the real tablet
 ## Verification
 
 Backend: `tests.test_ga_personal_devices`, `tests.test_ga_personal`, `tests.test_migration_graph`, using an explicitly supplied disposable `GA_PERSONAL_TEST_DATABASE_URL`. Browser: `npm run test:ga-personal`. Origin proxy: `npm run test:ga-personal:proxy`. TypeScript: `tsc --noEmit`.
+
+Anchored weekly/selected-day schedules (`recurrence_anchor_date`, `recurrence_interval_weeks`) also export generated, concrete dated occurrences with no local repeat rule. The server applies the calendar-week interval; ungenerated periods are not inferred by the tablet.
