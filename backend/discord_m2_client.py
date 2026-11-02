@@ -118,7 +118,6 @@ class ReplyModal(discord.ui.Modal):
         super().__init__(title='Komenti për PM' if job['kind'] == 'continuation' else 'Komenti për dorëzimin' if choice == 'PO' else 'Përgjigjja për M2', timeout=900)
         self.bot, self.job, self.reason, self.choice = bot, job, reason, choice
         self.source_message = source_message
-        self.initial_save = None
         self.comment = discord.ui.TextInput(label=('Pse nuk vazhdon në PM?' if job['kind'] == 'continuation' else 'Pse nuk u dorëzua?') if choice == 'JO' else 'Komenti (opsional)' if choice == 'PO' else 'Komenti / progresi',
             style=discord.TextStyle.paragraph, required=choice != 'PO', max_length=4000,
             default=(job.get('comment') or None) if choice == job.get('choice') else None)
@@ -127,11 +126,6 @@ class ReplyModal(discord.ui.Modal):
     async def on_submit(self, interaction):
         await interaction.response.defer()
         try:
-            if self.initial_save is not None:
-                latest = await asyncio.shield(self.initial_save)
-                if isinstance(latest, Exception):
-                    raise latest
-                self.job = latest or await self.bot.bridge(f"/bot/m2/{self.job['id']}/open", actor(interaction))
             await save_reply(self.bot, interaction, self.job, reason=self.reason, comment=str(self.comment),
                              choice=self.choice, source_message=self.source_message)
         except Exception as exc:
@@ -146,7 +140,7 @@ async def handle(bot, interaction):
         return await bot.bridge(f'/bot/m2/{parts[3]}/open', actor(interaction))
 
     deferred = False
-    if parts[2] in {'open', 'detail', 'return', 'question'}:
+    if direct_yes or parts[2] in {'open', 'detail', 'return', 'question'}:
         await interaction.response.defer()
         job = await load()
     else:
@@ -164,18 +158,8 @@ async def handle(bot, interaction):
             view=controls(job), suppress=True, allowed_mentions=discord.AllowedMentions.none())
         return
     if direct_yes:
-        modal = ReplyModal(bot, job, choice='PO', source_message=getattr(interaction, 'message', None))
-        modal.initial_save = asyncio.get_running_loop().create_future()
-        # Open the optional comment immediately. The yes answer is saved even
-        # when the person closes the form; an early submit waits for its version.
-        await open_modal(interaction, modal, deferred=deferred)
-        try:
-            latest = await save_reply(bot, interaction, job, choice='PO',
-                comment=(job.get('comment') or '') if job.get('choice') == 'PO' else '')
-            modal.initial_save.set_result(latest)
-        except Exception as exc:
-            modal.initial_save.set_result(exc)
-            raise
+        await save_reply(bot, interaction, job, choice='PO',
+            comment=(job.get('comment') or '') if job.get('choice') == 'PO' else '')
         return
     if parts[2] == 'comment' and job.get('choice') != 'PO':
         send = interaction.followup.send if deferred else interaction.response.send_message

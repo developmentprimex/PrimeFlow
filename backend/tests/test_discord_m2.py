@@ -110,7 +110,7 @@ class M2RulesTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec('discord'), 'discord.py is optional')
 class M2DiscordTests(unittest.TestCase):
-    def test_yes_opens_optional_comment_and_saves_even_without_submitting_it(self):
+    def test_yes_saves_without_opening_optional_comment(self):
         import discord_m2_client as client
         async def check():
             job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': 'delivery',
@@ -124,11 +124,8 @@ class M2DiscordTests(unittest.TestCase):
                 followup=SimpleNamespace(send=AsyncMock()))
             bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(side_effect=[job, {'ok': True}, latest]))
             await client.handle(bot, interaction)
-            interaction.response.defer.assert_not_awaited()
-            interaction.response.send_modal.assert_awaited_once()
-            modal = interaction.response.send_modal.call_args.args[0]
-            self.assertFalse(modal.comment.required)
-            self.assertEqual(modal.initial_save.result(), latest)
+            interaction.response.defer.assert_awaited_once_with()
+            interaction.response.send_modal.assert_not_awaited()
             interaction.followup.send.assert_not_awaited()
             interaction.message.edit.assert_awaited_once()
             payload = bot.bridge.call_args_list[1].args[1]
@@ -137,22 +134,22 @@ class M2DiscordTests(unittest.TestCase):
             self.assertIn('E dorëzuar', interaction.message.edit.call_args.kwargs['content'])
         asyncio.run(check())
 
-    def test_comment_submit_waits_for_yes_save_and_uses_its_new_version(self):
+    def test_continuation_yes_preserves_comment_and_does_not_prepare_a_form(self):
         import discord_m2_client as client
         async def check():
-            job = {'id': str(uuid.uuid4()), 'kind': 'delivery', 'choice': 'JO', 'answered_at': 'old'}
-            latest = {**job, 'choice': 'PO', 'answered_at': 'new'}
-            bot = SimpleNamespace(error_message=str)
-            modal = client.ReplyModal(bot, job, choice='PO')
-            modal.initial_save = asyncio.get_running_loop().create_future()
-            interaction = SimpleNamespace(response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
-            with patch.object(client, 'save_reply', AsyncMock()) as save:
-                submission = asyncio.create_task(modal.on_submit(interaction))
-                await asyncio.sleep(0)
-                save.assert_not_awaited()
-                modal.initial_save.set_result(latest)
-                await submission
-                self.assertEqual(save.call_args.args[2]['answered_at'], 'new')
+            job = {'id': str(uuid.uuid4()), 'kind': 'continuation', 'choice': 'PO',
+                   'comment': 'Existing comment', 'answered_at': 'old'}
+            bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job))
+            interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3),
+                data={'custom_id': f"pf:m2:reply:{job['id']}:PO"},
+                response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
+            with patch.object(client, 'save_reply', AsyncMock()) as save, \
+                 patch.object(client, 'prepare_modal', AsyncMock()) as prepare, \
+                 patch.object(client, 'open_modal', AsyncMock()) as open_form:
+                await client.handle(bot, interaction)
+                prepare.assert_not_awaited()
+                open_form.assert_not_awaited()
+                save.assert_awaited_once_with(bot, interaction, job, choice='PO', comment='Existing comment')
                 interaction.followup.send.assert_not_awaited()
         asyncio.run(check())
 
