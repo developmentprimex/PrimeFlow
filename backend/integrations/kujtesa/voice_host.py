@@ -159,6 +159,8 @@ class KujtesaHost:
         session["allowed"], session["signature"] = allowed, signature
 
     async def start(self, interaction):
+        if getattr(self.bot, "family_chime", None) or getattr(self.bot, "family_chime_starting", False):
+            raise HostError(ERROR)
         if self.session is not None:
             raise HostError("Një bisedë është duke u nisur ose po vazhdon. Përdor /kujtesa ndalo.")
         voice = getattr(interaction.user, "voice", None)

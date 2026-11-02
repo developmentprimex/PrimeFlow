@@ -186,3 +186,19 @@ class GaPersonalImport(Base):
     actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     summary: Mapped[dict] = mapped_column(DOCUMENT)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class GaPersonalDiscordNotice(Base):
+    __tablename__ = "discord_notices"
+    __table_args__ = (UniqueConstraint("space_id", "notice_key"), {"schema": SCHEMA})
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{SCHEMA}.spaces.id"), index=True)
+    notice_key: Mapped[str] = mapped_column(String(64))
+    local_date: Mapped[str] = mapped_column(String(10))
+    kind: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20), default="claimed")
+    lease: Mapped[str] = mapped_column(String(64))
+    leased_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    channel_id: Mapped[str | None] = mapped_column(String(24))
+    message_id: Mapped[str | None] = mapped_column(String(24))
+    details: Mapped[dict] = mapped_column(DOCUMENT, default=dict)

@@ -1,5 +1,11 @@
 # Kujtesa / PrimeFlow bridge
 
+Family routines, daily agendas, presence, Nala's conditional evening walk and
+manual tools are documented in [the family additions guide](../../../docs/kujtesa-family-additions.md).
+Install `family_commands.py` alongside the adapter and `voice_host.py`, including
+when AI voice is disabled. The routines are reviewed/imported from GA PERSONAL
+settings; no downloaded dataset or separate household SQLite database is needed.
+
 The separate Kujtesa bot reads due GA PERSONAL reminders through a dedicated,
 secret-authenticated API. It never reads the work Mira database, a seed dataset,
 or a household SQLite task store in PrimeFlow mode.

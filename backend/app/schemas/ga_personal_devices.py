@@ -97,7 +97,19 @@ class ArrivalOp(DeviceOp):
     day: Date
 
 
-Operation = Annotated[StatusOp | EventUpsertOp | EventDeleteOp | ArrivalOp, Field(discriminator="type")]
+class WakeOp(DeviceOp):
+    type: Literal["wake"]
+    person_id: Person
+    day: Date
+
+
+class KakiOp(DeviceOp):
+    type: Literal["kaki"]
+    date: Date
+    answer: Literal["po", "jo"]
+
+
+Operation = Annotated[StatusOp | EventUpsertOp | EventDeleteOp | ArrivalOp | WakeOp | KakiOp, Field(discriminator="type")]
 
 
 class DeviceOpsRequest(StrictModel):

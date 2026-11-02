@@ -14,6 +14,8 @@ class PollRequest(BaseModel):
 class DiscordSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
+    daily_agenda: bool = False
+    presence_notifications: bool = False
     guild_id: str = Field(default="", pattern=r"^(\d{17,20})?$")
     channel_id: str = Field(default="", pattern=r"^(\d{17,20})?$")
     user_ids: dict[Literal["rrita", "mrika", "gane"], str] = Field(default_factory=dict)
@@ -57,4 +59,18 @@ class DiscordAction(BaseModel):
     channel_id: str = Field(pattern=r"^\d{17,20}$")
     message_id: str = Field(pattern=r"^\d{17,20}$")
     interaction_id: str = Field(pattern=r"^\d{17,20}$")
-    action: Literal["acknowledged", "in_progress", "done", "needs_help", "steps", "later15", "later30", "later60"]
+    action: Literal["acknowledged", "in_progress", "done", "needs_help", "steps", "later15", "later30", "later60", "kaki-po", "kaki-jo"]
+
+
+class FamilyCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor_id: str = Field(pattern=r"^\d{17,20}$")
+    guild_id: str | None = Field(default=None, pattern=r"^\d{17,20}$")
+    channel_id: str = Field(pattern=r"^\d{17,20}$")
+    interaction_id: str = Field(pattern=r"^\d{17,20}$")
+    delivery_enabled: bool = False
+    command: Literal["sot", "provo", "mengjesi", "kujto", "ndihme", "ore", "kush", "nala", "vikendi", "zeri", "dil", "zgjova", "erdha"]
+
+
+class FamilyPackApply(BaseModel):
+    expected_hash: str = Field(pattern=r"^[a-f0-9]{64}$")

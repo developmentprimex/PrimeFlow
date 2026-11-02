@@ -53,6 +53,7 @@ frontend/.env.local
 
 
 .superpowers/
+.worktrees/
 
 # Mira Windows build/runtime artifacts
 desktop/.venv/

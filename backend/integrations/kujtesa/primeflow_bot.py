@@ -60,6 +60,8 @@ class ReceiptStore:
 
 
 def card_text(card):
+    if card.get("kind") == "notice":
+        return card.get("text", "")[:1900]
     if card.get("removed"):
         return "Kjo kujtesë ka ndryshuar. Shiko detyrën e përditësuar në PrimeFlow."
     when = datetime.fromisoformat(card["due_at"]).astimezone(ZONE).strftime("%d/%m · %H:%M") if card.get("due_at") else "Pa orar"
@@ -67,7 +69,11 @@ def card_text(card):
     hint = {"before": "Edhe 5 minuta deri te detyra.", "due": "Është koha për këtë detyrë.",
             "after": "A u kry? Konfirmo kur ta kesh përfunduar."}.get(card.get("phase"), "")
     title = discord.utils.escape_markdown(card.get("title", "Detyra"))
-    return f"{who}\n**{title}**\n{when}\n{LABELS.get(card.get('status'), '')}\n{hint}"[:2000]
+    parts = "\n".join("• " + discord.utils.escape_markdown(p["title"]) + (" ✓" if p["status"] == "done" else "")
+                      for p in card.get("parts", []))
+    kaki = {"po": "E ka bërë kakin. Dalja e fundit mbetet sipas orarit.",
+            "jo": "S’e ka bërë kakin. Kontrollo orën e daljes së mbrëmjes në PrimeFlow."}.get(card.get("nala_kaki"), "")
+    return f"{who}\n**{title}**\n{when}\n{LABELS.get(card.get('status'), '')}\n{parts}\n{hint}\n{kaki}".strip()[:2000]
 
 
 def card_view(card):
@@ -76,9 +82,10 @@ def card_view(card):
     buttons = [("acknowledged", "E pashë", discord.ButtonStyle.secondary),
                ("in_progress", "Po ia nisi", discord.ButtonStyle.primary),
                ("done", "U kry", discord.ButtonStyle.success),
-               ("needs_help", "Më duhet ndihmë", discord.ButtonStyle.secondary)]
+               ("needs_help", "Më duhet ndihmë", discord.ButtonStyle.danger)]
     for action, label, style in buttons:
-        view.add_item(discord.ui.Button(label=label, style=style, custom_id=f"gap:{card['id']}:{action}", disabled=bool(disabled)))
+        emoji = {"acknowledged": "👀", "in_progress": "✨", "done": "✅", "needs_help": "🙋"}[action]
+        view.add_item(discord.ui.Button(label=label, emoji=emoji, style=style, custom_id=f"gap:{card['id']}:{action}", disabled=bool(disabled)))
     menu = discord.ui.Select(custom_id=f"gap:{card['id']}:menu", placeholder="Hapat ose më duhet kohë", disabled=bool(disabled), options=[
         discord.SelectOption(label="Hapat / Si bëhet?", value="steps"),
         discord.SelectOption(label="Më duhet kohë · 15 minuta", value="later15"),
@@ -86,6 +93,10 @@ def card_view(card):
         discord.SelectOption(label="Më duhet kohë · 1 orë", value="later60"),
     ])
     view.add_item(menu)
+    if card.get("nala_question"):
+        for action, label in (("kaki-po", "Po, e ka bërë kakin"), ("kaki-jo", "Jo, dalja në 19:30")):
+            view.add_item(discord.ui.Button(label=label, custom_id=f"gap:{card['id']}:{action}", row=2,
+                                          style=discord.ButtonStyle.secondary, disabled=bool(card.get("removed"))))
     return view
 
 
@@ -93,7 +104,7 @@ class KujtesaBridge(discord.Client):
     def __init__(self, base_url, bridge_key, *, reminders_enabled=False, receipt_path=STATE, status_path=None,
                  host_enabled=False, host_worker="", node_binary="node"):
         intents = discord.Intents.default()
-        intents.voice_states = bool(host_enabled)
+        intents.voice_states = True
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         parsed = urlparse(base_url)
         if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}):
@@ -107,13 +118,24 @@ class KujtesaBridge(discord.Client):
         self.http_session = None
         self.allowed_user_ids = set()
         self.host = None
+        self.family_chime = None
+        self.family_chime_starting = False
+        self.family_chime_allowed = set()
+        self.tree = discord.app_commands.CommandTree(self)
+        if __package__:
+            from .family_commands import register_family_commands
+        else:
+            try:
+                from family_commands import register_family_commands
+            except ModuleNotFoundError:
+                from integrations.kujtesa.family_commands import register_family_commands
+        register_family_commands(self)
         if host_enabled:
             if __package__:
                 from .voice_host import KujtesaHost, register_commands
             else:
                 from voice_host import KujtesaHost, register_commands
             self.host = KujtesaHost(self, worker=host_worker, node=node_binary)
-            self.tree = discord.app_commands.CommandTree(self)
             register_commands(self)
         self.status_path = Path(status_path) if status_path else None
         self.expected_guild_id = None
@@ -129,12 +151,14 @@ class KujtesaBridge(discord.Client):
             return data
 
     async def setup_hook(self):
-        if self.host:
-            await self.tree.sync()
         health = await self.api("/poll", {"delivery_enabled": False, "health_only": True})
         self.expected_guild_id = health.get("guild_id")
         if not self.expected_guild_id:
             raise BridgeError(409, "Configure the Kujtesa Discord server in GA PERSONAL settings first.")
+        guild = discord.Object(id=int(self.expected_guild_id))
+        self.tree.copy_global_to(guild=guild)
+        await self.tree.sync(guild=guild)
+        await self.tree.sync()
         self.worker.start()
 
     def clear_ready_status(self):
@@ -171,6 +195,8 @@ class KujtesaBridge(discord.Client):
         self.worker.cancel()
         if self.host:
             await self.host.stop()
+        if self.family_chime:
+            await self.family_chime.disconnect()
         if self.http_session:
             await self.http_session.close()
         await super().close()
@@ -178,10 +204,24 @@ class KujtesaBridge(discord.Client):
     async def on_voice_state_update(self, member, before, after):
         if self.host:
             await self.host.on_voice_state_update(member, before, after)
+        chime = self.family_chime
+        if chime and getattr(after.channel, "id", None) == chime.channel.id and member.id != self.user.id:
+            if member.bot or str(member.id) not in self.family_chime_allowed:
+                await chime.disconnect()
 
     async def on_guild_channel_update(self, before, after):
         if self.host:
             await self.host.on_channel_update(before, after)
+        chime = self.family_chime
+        if chime and after.id == chime.channel.id:
+            if __package__:
+                from .voice_host import KujtesaHost
+            else:
+                from voice_host import KujtesaHost
+            try:
+                KujtesaHost(self)._private(after, self.family_chime_allowed)
+            except Exception:
+                await chime.disconnect()
 
     @tasks.loop(seconds=15)
     async def worker(self):
@@ -203,7 +243,8 @@ class KujtesaBridge(discord.Client):
     async def flush_receipts(self):
         for delivery_id, body in self.receipts.pending().items():
             try:
-                await self.api(f"/deliveries/{delivery_id}/result", body)
+                route = f"/notices/{delivery_id[7:]}" if delivery_id.startswith("notice-") else f"/deliveries/{delivery_id}"
+                await self.api(route + "/result", body)
                 self.receipts.remove(delivery_id)
             except BridgeError as error:
                 if error.status not in {404, 409}:
@@ -221,6 +262,8 @@ class KujtesaBridge(discord.Client):
         self.allowed_user_ids = set(batch.get("allowed_user_ids", []))
         for card in batch.get("deliveries", []):
             await self.deliver(card)
+        for notice in batch.get("notices", []):
+            await self.deliver(notice)
         for card in batch.get("updates", []):
             try:
                 channel = await self.destination(card, editing=True)
@@ -268,8 +311,11 @@ class KujtesaBridge(discord.Client):
 
     async def deliver(self, original):
         delivery_id, lease = original["id"], original["lease"]
+        is_notice = original.get("kind") == "notice"
+        route = f"/notices/{delivery_id}" if is_notice else f"/deliveries/{delivery_id}"
+        receipt_id = "notice-" + delivery_id if is_notice else delivery_id
         try:
-            card = await self.api(f"/deliveries/{delivery_id}/prepare", {"lease": lease})
+            card = await self.api(route + "/prepare", {"lease": lease})
         except BridgeError as error:
             if error.status in {403, 404, 409}:
                 return
@@ -281,17 +327,19 @@ class KujtesaBridge(discord.Client):
             channel = await self.destination(card)
             # Persist uncertainty before the network send. A crash never causes
             # an automatic replay of a potentially delivered private message.
-            self.receipts.put(delivery_id, {**report, "outcome": "uncertain", "error": "network"})
-            message = await channel.send(content=card_text(card), view=card_view(card),
+            self.receipts.put(receipt_id, {**report, "outcome": "uncertain", "error": "network"})
+            message = await channel.send(content=card_text(card), view=None if is_notice else card_view(card),
                 allowed_mentions=discord.AllowedMentions.none(), nonce=int(delivery_id.replace("-", "")[:15], 16))
-            report.update(outcome="sent", channel_id=str(channel.id), message_id=str(message.id), sync_key=card["sync_key"])
+            report.update(outcome="sent", channel_id=str(channel.id), message_id=str(message.id))
+            if not is_notice:
+                report["sync_key"] = card["sync_key"]
         except DeliveryFailure as error:
             report.update(outcome="failed", error=str(error))
         except discord.Forbidden:
             report.update(outcome="failed", error="blocked_dm" if card["target"]["kind"] == "dm" else "permissions")
         except (discord.HTTPException, aiohttp.ClientError, asyncio.TimeoutError):
             report.update(outcome="uncertain", error="network")
-        await self.record(delivery_id, report)
+        await self.record(receipt_id, report)
 
     async def on_interaction(self, interaction):
         if interaction.type is not discord.InteractionType.component:
@@ -315,7 +363,9 @@ class KujtesaBridge(discord.Client):
             })
             if action == "steps":
                 body = result.get("description", "") + "\n" + "\n".join(f"{i}. {step}" for i, step in enumerate(result.get("steps", []), 1))
-                await interaction.followup.send(body.strip()[:1900] or "Ende pa hapa të shkruar.", ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+                body = body.strip() or "Ende pa hapa të shkruar."
+                for index in range(0, len(body), 1900):
+                    await interaction.followup.send(body[index:index + 1900], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
             else:
                 card = result["card"]
                 await interaction.message.edit(content=card_text(card), view=card_view(card), allowed_mentions=discord.AllowedMentions.none())

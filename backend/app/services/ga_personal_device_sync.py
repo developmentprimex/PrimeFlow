@@ -36,6 +36,8 @@ def card_id(template_id, owner, concrete_date=None):
 
 def concrete_template(definition, space=None):
     return (bool(definition.get("recurrence_anchor_date"))
+            or bool(definition.get("weekday_steps"))
+            or (space and bool(space.config.get("kujtesa_family_pack")) and definition.get("reminder_group") == "nala")
             or definition.get("recurrence_interval_weeks", 1) > 1
             or definition["frequency"] in {"conditional", "school_day", "unresolved"}
             or (definition["assignment"] == "rotation" and space and space.config.get("nala_rotation"))
@@ -194,12 +196,29 @@ async def read_state(db, device, since=None):
         old = statuses.get((period, identity))
         if old is None or old["at"] <= timestamp:
             statuses[(period, identity)] = value
+    presence = {kind: {(r.payload["day"], r.payload["person_id"]): r.payload for r in changed if r.kind == kind}
+                for kind in ("arrival", "wake")}
+    presence_events = (await db.execute(select(Event).where(Event.space_id == space.id, Event.kind.in_(["arrived", "woke"])))).scalars().all()
+    for event in presence_events:
+        if since and tasks.aware(event.created_at) < since:
+            continue
+        person, day = event.payload.get("person_key"), event.payload.get("day")
+        if person not in people or not day:
+            continue
+        kind = "arrival" if event.kind == "arrived" else "wake"
+        timestamp = event.payload.get("at") or millis(event.created_at)
+        value = {"person_id": person, "day": day, "at": timestamp}
+        previous = presence[kind].get((day, person))
+        if previous is None or previous["at"] < timestamp:
+            presence[kind][(day, person)] = value
     return {"cursor": cursor.isoformat().replace("+00:00", "Z"),
         # Sending tasks always replaces the tablet's complete base list, including removals.
         "tasks": exported_cards(templates, occurrences, space, people),
         "events": [r.payload for r in changed if r.kind == "event"],
         "statuses": sorted(statuses.values(), key=lambda item: (item["period"], item["task_id"])),
-        "arrivals": [r.payload for r in changed if r.kind == "arrival"]}
+        "arrivals": list(presence["arrival"].values()),
+        "wakes": list(presence["wake"].values()),
+        "kaki": [r.payload for r in changed if r.kind == "kaki"]}
 
 
 async def status_occurrence(db, member, op):
@@ -340,8 +359,10 @@ async def apply_ops(db, device, payload):
                     record = (await db.execute(select(Record).where(
                         Record.space_id == space.id, Record.kind == "status", Record.op_id == str(op.op_id),
                     ))).scalar_one_or_none()
-            elif op.type == "arrival":
-                record = await get_record(db, space.id, "arrival", op.day.isoformat(), op.person_id)
+            elif op.type in {"arrival", "wake"}:
+                record = await get_record(db, space.id, op.type, op.day.isoformat(), op.person_id)
+            elif op.type == "kaki":
+                record = await get_record(db, space.id, "kaki", op.date.isoformat())
             else:
                 record = await get_record(db, space.id, "event", op.event.id if op.type == "event_upsert" else op.id)
             if record:
@@ -355,7 +376,17 @@ async def apply_ops(db, device, payload):
             await write_record(db, space.id, "arrival", (op.day.isoformat(), op.person_id),
                 {"person_id": op.person_id, "day": op.day.isoformat(), "at": op.at}, op)
             await tasks.record_arrival(db, member, day=op.day, person=op.person_id,
-                                       request_id="arrival:" + str(op.op_id), commit=False)
+                                       request_id="arrival:" + str(op.op_id), commit=False, at=op.at)
+        elif op.type == "wake":
+            from app.services.kujtesa_family import record_wake
+            changed = await write_record(db, space.id, "wake", (op.day.isoformat(), op.person_id),
+                {"person_id": op.person_id, "day": op.day.isoformat(), "at": op.at}, op)
+            if changed:
+                await record_wake(db, space, member, op.day.isoformat(), op.person_id, "wake:" + str(op.op_id), at=op.at)
+        elif op.type == "kaki":
+            from app.services.kujtesa_family import apply_kaki
+            await apply_kaki(db, space, op.date.isoformat(), op.answer, actor_id=member.user_id,
+                request_id="kaki:" + str(op.op_id), at=op.at, op_id=str(op.op_id), allow_historical=True)
         elif op.type == "event_upsert":
             if CARD_ID.fullmatch(op.event.id):
                 raise HTTPException(422, "ID e eventit është e rezervuar për detyrat e GA PERSONAL.")
