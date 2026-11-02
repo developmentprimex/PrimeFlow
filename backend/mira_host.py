@@ -22,6 +22,7 @@ import discord
 from discord import app_commands
 
 from app.config import settings
+from app.services.mira_host_speech import speech_text
 from discord_voice_client import VOICE_DIR, VoiceCaptureClient
 
 PREFIX = "/bot/mira-host"
@@ -32,6 +33,7 @@ CONNECT_ATTEMPTS = 3
 LOOKUP_TIMEOUT_SECONDS = 8
 WRITE_TIMEOUT_SECONDS = 12
 WORKER_SHUTDOWN_SECONDS = 3
+MISSING_STAFF_GRACE_SECONDS = 5
 LOOKUP_TOOLS = {"list_ga_tasks", "list_new_px_notes", "list_new_done_and_strikes", "get_person_brief", "find_user", "search_knowledge"}
 # GA goes first (GA tasks, notes, done/strike); the staff starts when GA is done, at most this long after the hour.
 GA_OVERRUN_MINUTES = 8
@@ -47,7 +49,7 @@ def tz():
 def task_lines(tasks: list[dict]) -> str:
     def line(t):
         # The Albanian label, so Mira never says "IN_PROGRESS" aloud; the colour decides her question.
-        parts = [t.get("spoken") or t["title"], t.get("status_label") or t["status"], t["period"]]
+        parts = [t.get("read_aloud") or t.get("spoken") or t["title"], t.get("status_label") or t["status"], t["period"]]
         if t.get("color"):
             parts.append("ngjyra " + t["color"])
         if t.get("symbol"):
@@ -78,7 +80,7 @@ def turn_brief(current: dict) -> dict:
             percentage = percentages.get(task_id)
             points = strikes.get(task_id, [])
             discussion.append({
-                "task_id": task_id, "grupi": label, "detyra": task.get("spoken") or task["title"],
+                "task_id": task_id, "grupi": label, "detyra": task.get("read_aloud") or task.get("spoken") or task["title"],
                 "status": task.get("status_label") or task["status"], "kryer": task["status"] == "DONE",
                 "progres_perqindje": percentage, "strike_ne_interval": points,
                 "ka_progres_te_regjistruar": bool(points or task_id in done or task["status"] == "DONE"
@@ -88,6 +90,7 @@ def turn_brief(current: dict) -> dict:
     result = {
         "turn_id": current.get("id"),
         "person": current["name"], "initials": current["initials"],
+        "initials_read_aloud": speech_text(current["initials"], [current["initials"]]),
         "plan_discutimi": discussion, "progres_nga": brief.get("progress_since"),
         "detyrat_e_slotit": task_lines(brief["current"]),
         "te_gjitha_kryer": bool(brief.get("all_done")),
@@ -473,7 +476,7 @@ class MiraHost:
             available = self.available_people(session)
             if any(t.get("user_id") in available for t in session["deferred"]):
                 await self.advance(session, None, announce=True)
-            elif (datetime.now(tz()) - session["missing_since"]).total_seconds() >= 60:
+            elif (datetime.now(tz()) - session["missing_since"]).total_seconds() >= MISSING_STAFF_GRACE_SECONDS:
                 session["reason"], session["ending"] = "missing_staff", True
                 session["ending_at"] = datetime.now(tz()) + timedelta(seconds=15)
                 await self.say(session, "SISTEMI: Personat e mbetur mungojnë. Mbyll shkurt; mos thuaj se kanë raportuar.")
@@ -481,10 +484,8 @@ class MiraHost:
         current = session.get("current_turn") or {}
         target = current.get("discord")
         if not session.get("test_mode") and target and not self.in_voice(session["guild"], session["voice"], target["discord_user_id"]):
-            session.setdefault("missing_since", datetime.now(tz()))
-            if (datetime.now(tz()) - session["missing_since"]).total_seconds() >= 30:
-                await self.advance(session, None, announce=True, outcome="DEFERRED", expected_turn_id=current["id"])
-                return
+            await self.advance(session, None, announce=True, outcome="DEFERRED", expected_turn_id=current["id"])
+            return
         else:
             session.pop("missing_since", None)
         started = session.get("turn_started")
@@ -567,8 +568,11 @@ class MiraHost:
     async def _advance(self, session, summary: str | None, *, announce: bool, outcome: str) -> dict:
         expected = (session.get("current_turn") or {}).get("id")
         payload = {"summary": summary, "expected_turn_id": expected, "outcome": outcome}
-        if "turns" in session:
-            payload["available_user_ids"] = self.available_people(session)
+        if "turns" in session and not session.get("test_mode"):
+            # An unlinked identity cannot be verified as absent. Keep that turn;
+            # only known Discord identities outside this channel are deferred.
+            payload["available_user_ids"] = self.available_people(session) + [
+                turn["user_id"] for turn in session["turns"] if not turn.get("discord")]
         if session.get("pm_reviewed") and not expected and not session.get("deferred"):
             result = {"current": None}
         else:
@@ -589,6 +593,16 @@ class MiraHost:
                     raise ValueError("Kalimi nuk u konfirmua; radha aktuale mbetet e njëjtë. Mos e shëno si të përfunduar.") from None
                 result["ended"] = next((turn for turn in result.get("turns", []) if turn["id"] == expected), None)
         current, upcoming = result.get("current"), result.get("upcoming")
+        absent = list(result.get("skipped", []))
+        previous_deferred = {turn["id"] for turn in session.get("deferred", [])}
+        absent_ids = {turn["id"] for turn in absent}
+        for turn in result.get("deferred", []):
+            if turn["id"] not in previous_deferred and turn["id"] not in absent_ids:
+                absent.append(turn)
+                absent_ids.add(turn["id"])
+        if (result.get("ended") or {}).get("status") == "DEFERRED":
+            if result["ended"]["id"] not in absent_ids:
+                absent.append(result["ended"])
         if (result.get("ended") or {}).get("status") == "TIMEOUT":
             session.setdefault("incomplete_turns", []).append(result["ended"].get("id"))
         session["current_turn"], session["deferred"] = current, result.get("deferred", [])
@@ -622,15 +636,17 @@ class MiraHost:
                       "udhezim": f"{current['name']}: hyr direkt te detyra e parë AKTUAL në plan_discutimi. "
                                  "Pyet shkurt vetëm çka mungon për progresin, vazhdimin ose përfundimin; "
                                  "pastaj trajto PARAPRAK dhe BLLOK. Mos përsërit përgjigjet apo hyrjet."}
+        if absent:
+            output["mungojne"] = [turn["name"] for turn in absent]
+            missing = "; ".join(f"{turn['name']} nuk është në kanalin zanor" for turn in absent)
+            output["udhezim"] = f"Thuaj shkurt: '{missing}.' Mos prit; " + output["udhezim"]
         phase = "ENDING" if session.get("ending") else "PM_REVIEW" if session.get("pm_reviewed") else "STAFF_PHASE"
         if session.get("process"):
             await session["process"].send({"type": "configure", "phase": phase,
                 "speaker_id": session.get("manual_by") if session.get("test_mode") else
                     ((current or {}).get("discord") or {}).get("discord_user_id")})
         if announce:
-            opening = "Ora e slotit, fillo me stafin." if session.get("ga_done") and session["ga_done"].is_set() else \
-                "Koha e GA-së mbaroi: mbylle me një fjali dhe fillo me stafin."
-            await self.say(session, f"SISTEMI: {opening} " + json.dumps(output, ensure_ascii=False))
+            await self.say(session, "SISTEMI: Vazhdo sipas radhës aktuale. " + json.dumps(output, ensure_ascii=False))
         return output
 
     async def say(self, session, text: str):

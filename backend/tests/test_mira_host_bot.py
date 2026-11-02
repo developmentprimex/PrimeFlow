@@ -274,7 +274,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(state['ending'])
 
     async def test_staff_starts_when_ga_is_done_but_not_before_the_hour(self):
-        fake, calls = bot({'/staff': {'turns': [{'id': 't1'}]},
+        fake, calls = bot({'/staff': {'turns': [{'id': 't1', 'user_id': 'staff-user'}]},
                            '/turns/next': {'current': {'id': 't1', 'name': 'Rinesa Ahmeti', 'initials': 'RA', 'discord': None,
                                                        'brief': BRIEF}, 'upcoming': None}})
         host = mira_host.MiraHost(fake)

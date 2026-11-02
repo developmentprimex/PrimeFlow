@@ -100,7 +100,7 @@ class SlotDataTests(unittest.TestCase):
         ]), DAY)
         self.assertEqual([p['person'] for p in data.ga_flagged()], ['RA', 'EF'])
         self.assertEqual(data.pm_open()[0]['initials'], 'EF')
-        self.assertEqual(data.pm_open()[0]['detyrat_pm'], ['PM PUNE (e verdhë)'])
+        self.assertEqual(data.pm_open()[0]['detyrat_pm'], ['pë më PUNE (e verdhë)'])
         progress = {'done': [{'spoken': 'A', 'owners': ['EF']}],
                     'strikes': [{'spoken': 'B', 'owners': ['RA'], 'points': [{'text': 'p1'}]}]}
         self.assertEqual([g['person'] for g in host.by_person(data, progress)], ['RA', 'EF'])

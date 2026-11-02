@@ -17,7 +17,7 @@ from datetime import timedelta
 
 
 class TurnGuards(unittest.IsolatedAsyncioTestCase):
-    async def test_waiting_staff_keep_their_order_before_they_are_invited(self):
+    async def test_waiting_absentees_are_deferred_before_the_next_person_is_asked(self):
         first = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.UUID(IDS['EF']), status='WAITING', invited_at=None,
                                 started_at=None, ended_at=None, notes='')
         second = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.UUID(IDS['RA']), status='WAITING', invited_at=None,
@@ -29,8 +29,9 @@ class TurnGuards(unittest.IsolatedAsyncioTestCase):
         with patch.object(service,'common_payload',AsyncMock(return_value=payload([]))), \
              patch.object(service,'turns_view',view), patch.object(service,'person_context',AsyncMock(return_value={})):
             result = await service.next_turn(db, meeting, None, available_user_ids=[second.user_id])
-        self.assertEqual(result['current']['id'], str(first.id))
-        self.assertEqual(result['upcoming']['id'], str(second.id))
+        self.assertEqual(first.status, 'DEFERRED')
+        self.assertEqual(result['current']['id'], str(second.id))
+        self.assertIsNone(result['upcoming'])
 
     async def test_deferred_people_receive_an_invitation_before_waiting(self):
         targets = []

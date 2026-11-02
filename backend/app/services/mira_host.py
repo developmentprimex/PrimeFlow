@@ -34,6 +34,7 @@ from app.models.mira_host import (Mira1HEvent, Mira1HMeeting, Mira1HMention, Mir
 from app.models.task import Task
 from app.models.task_strike_event import TaskStrikeEvent
 from app.models.user import User
+from app.services.mira_host_speech import speech_text as albanian_speech
 
 log = logging.getLogger("primeflow.mira.host")
 
@@ -57,7 +58,7 @@ MARKERS = {
     "F": "F", "BZ1N1": "BZ1N1",
 }
 KNOWLEDGE_CATEGORIES = ("STRUKTURA", "RREGULLORE", "DEFINIME", "PROCESE", "TJETER")
-PROMPT_VERSION = "2026-11-02.2"
+PROMPT_VERSION = "2026-11-02.3"
 
 
 def effective_protocol(value: str | None) -> str:
@@ -225,7 +226,7 @@ class SlotData:
                         tasks.append(line)
         order = self.order()
         ranked = sorted(people, key=lambda uid: order.index(uid) if uid in order else len(order))
-        return [{"person": initials(self.name(uid)) if uid else "?", "tasks": [t["spoken"] for t in people[uid]]}
+        return [{"person": initials(self.name(uid)) if uid else "?", "tasks": [t["read_aloud"] for t in people[uid]]}
                 for uid in ranked]
 
     def pm_open(self) -> list[dict]:
@@ -240,7 +241,7 @@ class SlotData:
                         tasks.append(line)
             if tasks:
                 result.append({"person": self.name(uid), "initials": initials(self.name(uid)),
-                               "detyrat_pm": [f"{t['spoken']} ({t['color']})" for t in tasks]})
+                               "detyrat_pm": [f"{t['read_aloud']} ({t['color']})" for t in tasks]})
         return result
 
     def blocked_tasks(self, user_id: str) -> list[dict]:
@@ -289,10 +290,13 @@ def spoken_title(title: str, owners: list[str] | None = None) -> str:
 def task_line(item: dict) -> dict:
     from app.services.tomorrow_print_report import _assignees, _task_marker_label, _task_period_label, _task_title
     title = _task_title(item, personal=False)[:300]
+    owners = _assignees(item) + owner_initials(title).split("/")
+    spoken = spoken_title(title, owners)
     return {
         "task_id": str(item.get("task_id") or ""),
         "title": title,
-        "spoken": spoken_title(title, _assignees(item) + owner_initials(title).split("/")),
+        "spoken": spoken,
+        "read_aloud": albanian_speech(spoken, owners),
         "status": str(item.get("status") or "TODO").upper(),
         "status_label": STATUS_LABELS.get(str(item.get("status") or "TODO").upper(), str(item.get("status") or "TODO")),
         "color": STATUS_COLORS.get(str(item.get("status") or "TODO").upper(), ""),
@@ -630,8 +634,14 @@ async def next_turn(db: AsyncSession, meeting: Mira1HMeeting, summary: str | Non
                 turn.notes = (turn.notes + "\n" + summary).strip()[:4000]
             ended = turn
     available = {str(uid) for uid in available_user_ids} if available_user_ids is not None else None
-    # Waiting staff have not been invited yet: preserve the published order even when
-    # they are outside voice. Only the controller defers an invited, absent person.
+    # Presence is supplied by Discord. Defer all verified absentees in one locked
+    # transition, preserving the original order among staff who are available.
+    skipped = []
+    if available is not None and not meeting.is_test:
+        for turn in turns:
+            if turn.status == "WAITING" and str(turn.user_id) not in available:
+                turn.status = "DEFERRED"
+                skipped.append(turn)
     waiting = [t for t in turns if t.status == "WAITING"]
     waiting += [t for t in turns if t.status == "DEFERRED" and available is not None
                 and str(t.user_id) in available and t is not ended]
@@ -643,6 +653,7 @@ async def next_turn(db: AsyncSession, meeting: Mira1HMeeting, summary: str | Non
     view = {t["id"]: t for t in await turns_view(db, meeting)}
     result = {"ended": view.get(str(ended.id)) if ended else None, "current": None, "upcoming": None}
     result["deferred"] = [view[str(t.id)] for t in turns if t.status == "DEFERRED"]
+    result["skipped"] = [view[str(t.id)] for t in skipped]
     if current:
         brief = await person_context(db, meeting, data, str(current.user_id))
         result["current"] = {**view[str(current.id)], "brief": brief}
@@ -1120,7 +1131,7 @@ class Discussion(Args):
 
 TOOLS = {
     "list_ga_tasks": (NoArgs, "Detyrat e hapura me simbolin GA (detyrat nga stafi për GA), sipas personave. Thirre në fillim të fazës GA."),
-    "list_new_px_notes": (NoArgs, "Lexo PX Notes të hapura që ende nuk janë kthyer në detyrë. Thirre në fazën GA te pyetja 'Notes të reja?'."),
+    "list_new_px_notes": (NoArgs, "PROAKTIVE: merr PX Notes të hapura në fazën GA, pa pyetur nëse ka notes ose nëse duhet t'i lexosh. Lexo read_aloud menjëherë; pastaj trajto notes një nga një."),
     "prepare_task_from_note": (CreateTask, "Përgatit propozimin e saktë për një PX Note. Lexo personin, detyrën dhe afatin; prit konfirmim të ri nga GA. Nuk krijon detyrë."),
     "create_task_from_note": (ConfirmTask, "Krijo vetëm propozimin që GA konfirmoi qartë në një përgjigje të re, pas prepare_task_from_note. Mos e thirr për të njëjtën përgjigje ose për jo/kalo."),
     "record_task_discussion": (Discussion, "Ruaj në heshtje vetëm faktet që sapo u thanë për detyrën/personin aktual. Nuk ndryshon detyrën. Përdori që të mos pyesësh përsëri."),
@@ -1251,9 +1262,17 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
         return await record_discussion(db, meeting, data, args, speech_id=speech_id, actor=actor)
     if name == "list_new_px_notes":
         notes = await open_notes(db)
+        codes = [initials(data.name(uid)) for uid in data.users]
         for note in notes:
             note["suggested_people"] = note_people(data, note["text"])
-        return {"total": len(notes), "notes": notes}
+            note["read_aloud"] = albanian_speech(note["text"], codes)
+        return {"total": len(notes), "notes": notes,
+                "current_note_id": notes[0]["note_id"] if notes else None,
+                "read_aloud": (f"Shënimi {notes[0]['number']}: {notes[0]['read_aloud']} "
+                               "A duhet kthyer në detyrë dhe për kë?") if notes else "",
+                "next_step": "discuss_notes" if notes else "list_new_done_and_strikes",
+                "udhezim": "Lexo shënimin e parë menjëherë, pastaj pyet vetëm për veprimin. Pas tij lexo shënimin tjetër pa leje shtesë."
+                           if notes else "Nuk ka shënime të hapura. Vazhdo menjëherë me list_new_done_and_strikes, pa pyetje ose pritje."}
     if name == "list_new_done_and_strikes":
         since = await progress_since(db, meeting)
         progress = await new_progress(db, meeting, data, since=since, record=False)
@@ -1271,7 +1290,8 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
             parts += ["strike te " + item["detyra"] + ", " + ", ".join(item["pikat"]) for item in group["strike"]]
             if parts:
                 spoken.append(group["person"] + ": " + "; ".join(parts) + ".")
-        return {"sipas_personave": groups, "progress_token": str(event.id), "read_aloud": " ".join(spoken)}
+        return {"sipas_personave": groups, "progress_token": str(event.id),
+                "read_aloud": albanian_speech(" ".join(spoken), [initials(data.name(uid)) for uid in data.users])}
     if name == "list_ga_tasks":
         return {"detyrat_per_ga": data.ga_flagged()}
     if name in {"get_person_brief", "find_user"}:
@@ -1359,7 +1379,8 @@ async def prepare_task_proposal(db, meeting, data, args, *, speech_id, actor):
         details += ", me simbolin " + args.symbol
     return {"success": True, "proposal_id": str(proposal.id), "requires_confirmation": True,
             "proposal": {**args.model_dump(mode="json"), "title": title},
-            "read_aloud": details + (". Ta simulojmë?" if meeting.is_test else ". Ta krijoj?")}
+            "read_aloud": albanian_speech(details, [initials(data.name(uid)) for uid in data.users]) +
+                          (". Ta simulojmë?" if meeting.is_test else ". Ta krijoj?")}
 
 
 async def acknowledge_proposal(db, meeting, token, played_at):

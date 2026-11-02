@@ -94,6 +94,19 @@ function fakes({realtimeReady=true,voiceReady=false,toolsets={}}={}){
 
 const speech=()=>Int16Array.from({length:240},(_,i)=>i%2?2000:-2000);
 
+test('existing Notes are read immediately without another tool or permission pause',()=>{
+  const {host,sent}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'notes'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'notes',item:{type:'function_call',name:'list_new_px_notes',call_id:'notes-read',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'notes',status:'completed'}});
+  const reading='Shënimi 1: fë gë, kontrollo ofertën. A duhet kthyer në detyrë dhe për kë?';
+  host.toolResult('notes-read',{notes:[{note_id:'n1',text:'FG, kontrollo ofertën.'}],current_note_id:'n1',read_aloud:reading});
+  const request=sent.filter(e=>e.type==='response.create').at(-1);
+  assert.ok(request?.response.instructions?.includes(reading));
+  assert.equal(request.response.tool_choice,'none');
+  host.stop();
+});
+
 test('speech ending during an older response gets a reply when automatic VAD misses it',()=>{
   const {host,sent,advance}=fakes();
   host.say('SISTEMI: RADHA EF',{respond:false});

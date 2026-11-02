@@ -820,3 +820,34 @@ existing controls.
 Deploy the backend migration `0181_mira_host_test_mode` before restarting the host
 worker. It adds `is_test` and scopes the unique date/slot index to real meetings.
 Older meetings remain real by default. No real meeting rows are reset or deleted.
+
+## Proactive Notes, Albanian pronunciation and staff presence
+
+The GA Notes step fetches open Notes without an initial permission question. Its
+first result includes a speech-ready reading of the first note and one question
+about whether it should become a task. Later notes are discussed individually;
+an empty list advances directly to Done/Strike. The reading response disables
+tools for that response only, preserving the existing fresh GA confirmation
+requirement for task creation.
+
+Speech-only fields spell known codes and person initials in Albanian (FG as
+`fë gë`, PDF as `pë dë fë`). Source titles, saved dictations, IDs and task-creation
+arguments remain intact. The prompt also requests clear articulation, short
+pauses and direct transitions. This follows OpenAI's
+[pronunciation and tool-use guidance](https://developers.openai.com/api/docs/guides/voice-prompting)
+and the per-response `tool_choice` options in the
+[Realtime client reference](https://developers.openai.com/api/reference/resources/realtime/client-events).
+
+For real meetings the controller supplies a voice-channel presence snapshot at
+each handoff. Absent linked staff are deferred together, their names are announced
+and the next present person is selected in the original order. Someone who leaves
+during their turn is deferred on the next presence check (normally within five
+seconds), without the former thirty-second wait. Deferred staff may report if
+they join while the meeting continues; a meeting with only absent staff remaining
+uses a five-second grace period rather than waiting a minute. An unlinked Discord
+identity is not evidence of absence. TEST MODE bypasses this presence filtering.
+
+Restart both the backend API and the Discord controller/voice worker to load
+these corrections. No additional database migration is introduced here. Automated
+checks use mocks and synthetic audio; Albanian pronunciation and conversational
+pacing still need a listening check in a test meeting with `gpt-realtime-2.1`.
