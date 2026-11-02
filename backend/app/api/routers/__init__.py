@@ -97,6 +97,8 @@ api_router.include_router(microsoft_router, prefix="/microsoft", tags=["microsof
 api_router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
 api_router.include_router(meeting_recordings_router, prefix="/meeting-recordings", tags=["meeting-recordings"])
 api_router.include_router(recording_analysis_router, prefix="/meeting-recordings", tags=["meeting-recordings"])
+from app.api.routers.recording_protocol import router as recording_protocol_router
+api_router.include_router(recording_protocol_router, prefix="/meeting-recordings", tags=["meeting-recordings"])
 api_router.include_router(meeting_scheduler_router, prefix="/meeting-scheduler", tags=["meeting-scheduler"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(marker_comments_router, prefix="/marker-comments", tags=["marker-comments"])

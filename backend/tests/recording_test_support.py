@@ -37,8 +37,8 @@ def prepare_database(*, full_schema=False):
         connection.execute(sa.text("CREATE SCHEMA public"))
         if full_schema:
             from app.db import Base
-            exclude = {'meeting_recordings', 'meeting_recording_chunks', 'recording_analyses', 'recording_transcripts', 'recording_actions'}
-            Base.metadata.create_all(connection, tables=[t for t in Base.metadata.sorted_tables if t.name not in exclude])
+            exclude = {'meeting_recordings', 'meeting_recording_chunks', 'recording_analyses', 'recording_transcripts', 'recording_actions', 'recording_protocols'}
+            Base.metadata.create_all(connection, tables=[t for t in Base.metadata.sorted_tables if t.name not in exclude and t.schema is None])
         else:
             Department.__table__.create(connection)
             User.__table__.create(connection)
@@ -72,6 +72,16 @@ def prepare_database(*, full_schema=False):
             deletion.upgrade()
             deletion.downgrade()
             deletion.upgrade()
+    if full_schema:
+        protocol_path = Path(__file__).resolve().parents[1] / 'alembic/versions/0179_recording_protocols.py'
+        spec = importlib.util.spec_from_file_location('recording_protocol_migration', protocol_path)
+        protocol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(protocol)
+        with engine.begin() as connection:
+            with Operations.context(MigrationContext.configure(connection)):
+                protocol.upgrade()
+                protocol.downgrade()
+                protocol.upgrade()
     with Session(engine) as db:
         department = Department(name="Recorder test", code="REC")
         db.add(department); db.flush()

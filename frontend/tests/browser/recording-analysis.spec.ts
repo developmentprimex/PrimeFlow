@@ -10,6 +10,7 @@ const user = { id: owner, full_name: "Test owner", email: "owner@example.com", r
 const action = { id: actionId, segment_index: 0, title: "Dërgo raportin", description: "Përgatit raportin.", evidence: "Do ta dërgoj raportin.", assignee_text: null, deadline_text: null, suggested_assignee_id: null, suggested_due_date: null, created_task_id: null, confirmed_at: null }
 
 async function shell(page: Page, configured = true) {
+  const protocols: { language: string; status: string; error: string | null }[] = []
   let state: Record<string, unknown> = { configured, can_manage: true, timing_configured: true, timing: null, analysis: null, actions: [], segments: [] }
   let savedTask: Record<string, unknown> = { id: taskId, department_id: department, title: action.title, description: action.description, status: "TODO", priority: "NORMAL", assigned_to: null, assignees: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
   const writes: { url: string; body: Record<string, unknown> }[] = []
@@ -20,6 +21,19 @@ async function shell(page: Page, configured = true) {
   await page.route("http://127.0.0.1:8012/api/**", async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
     if (path === "/api/auth/me") return route.fulfill({ json: user })
+    if (path.endsWith('/protocols')) {
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON()
+        writes.push({ url: path, body })
+        const job = { language: body.language, status: 'READY', error: null }
+        protocols.push(job)
+        return route.fulfill({ status: 202, json: job })
+      }
+      return route.fulfill({ json: { protocols } })
+    }
+    if (/\/protocols\/(en|de)\/download$/.test(path)) return route.fulfill({
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', body: Buffer.from('PK-test-document'),
+    })
     if (path.endsWith('/citation-times')) {
       writes.push({ url: path, body: {} })
       state = { ...state, timing: { status: 'QUEUED' } }
@@ -87,6 +101,29 @@ test('citation timing requires a click and survives reload without reprocessing'
   await jump.click()
   expect(await page.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeCloseTo(7.58)
   expect(harness.writes).toHaveLength(1)
+})
+
+test('protocol downloads directly in the selected language and reuses saved results', async ({ page }) => {
+  const harness = await shell(page)
+  harness.ready()
+  await page.reload()
+  const panel = page.getByRole('region', { name: 'Protokolli i takimit', exact: true })
+  await panel.getByLabel('Gjuha e protokollit').selectOption('de')
+  const downloaded = page.waitForEvent('download')
+  await panel.getByRole('button', { name: 'Gjenero dhe shkarko Word', exact: true }).click()
+  expect((await downloaded).suggestedFilename()).toBe(`PRIMEX-Protocol-${id}-DE.docx`)
+  expect(harness.writes.filter(w => w.url.endsWith('/protocols')).map(w => w.body)).toEqual([{ language: 'de' }])
+  await expect(panel.locator('textarea,[contenteditable=true]')).toHaveCount(0)
+  await page.reload()
+  await panel.getByLabel('Gjuha e protokollit').selectOption('de')
+  const second = page.waitForEvent('download')
+  await panel.getByRole('button', { name: 'Shkarko Word', exact: true }).click()
+  await second
+  expect(harness.writes.filter(w => w.url.endsWith('/protocols'))).toHaveLength(1)
+  await panel.getByLabel('Gjuha e protokollit').selectOption('en')
+  const english = page.waitForEvent('download')
+  await panel.getByRole('button', { name: 'Gjenero dhe shkarko Word', exact: true }).click()
+  expect((await english).suggestedFilename()).toBe(`PRIMEX-Protocol-${id}-EN.docx`)
 })
 
 test("configuration and consent guard processing; proposals require review and persist after reload", async ({ page }) => {

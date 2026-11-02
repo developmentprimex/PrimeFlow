@@ -40,6 +40,13 @@ async def load_people(db, row):
 
 
 async def process_recording_analyses():
+    from app.jobs.recording_protocol import process_recording_protocols
+    protocols = await process_recording_protocols(SessionLocal)
+    analyses = await _process_recording_analysis()
+    return protocols + analyses
+
+
+async def _process_recording_analysis():
     if not settings.RECORDING_ANALYSIS_ENABLED or not settings.OPENAI_API_KEY:
         return 0
     from app.services import recording_analysis_provider as provider

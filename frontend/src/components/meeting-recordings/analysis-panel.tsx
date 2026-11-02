@@ -10,6 +10,7 @@ import { recordingTime } from "@/lib/recording-types"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { RecordingTaskDialog } from "./task-dialog"
+import { RecordingProtocolPanel } from "./protocol-panel"
 import { transcriptParagraphs } from "@/lib/recording-transcript"
 import { Label } from "@/components/ui/label"
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "@/components/ui/table"
@@ -156,6 +157,7 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
       </div>}
       {data.analysis?.summary && <section className="space-y-2"><h3 className="font-semibold">Përmbledhja</h3><p className="whitespace-pre-wrap text-sm">{data.analysis.summary}</p></section>}
       {(data.analysis?.decisions?.length ?? 0) > 0 && <section className="space-y-2"><h3 className="font-semibold">Vendimet</h3><ul className="list-disc space-y-1 pl-5 text-sm">{data.analysis!.decisions.map((d, i) => <li key={i}>{d}</li>)}</ul></section>}
+      {data.analysis?.status === "READY" && <RecordingProtocolPanel recordingId={recordingId} canManage={data.can_manage} configured={data.configured} />}
       {data.analysis?.status === "READY" && data.actions.length > 0 && <section aria-label="Kohët e citimeve" className="space-y-2 rounded-md border p-4">
         {data.can_manage && (!data.timing || data.timing.status === "FAILED") && <>
           <Button variant="outline" disabled={busy || !data.timing_configured || data.analysis.language !== "sq"} onClick={() => void requestTimes()}>{busy ? "Duke nisur…" : data.timing?.status === "FAILED" ? "Riprovo gjetjen e kohëve" : "Gjej kohët e citimeve"}</Button>
