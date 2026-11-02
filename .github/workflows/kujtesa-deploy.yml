@@ -37,8 +37,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $python = 'C:/Users/Administrator/AppData/Local/Programs/Python/Python313/python.exe'
           @'
-          import json,subprocess
+          import base64,json,subprocess
           from pathlib import Path
+          from nacl.public import PrivateKey
+          key=Path('C:/PrimeFlowData/Kujtesa/deploy-sealed.key')
+          if not key.exists():
+              with key.open('xb') as f: f.write(bytes(PrivateKey.generate()))
+          print('DEPLOY_PUBLIC_KEY',base64.b64encode(bytes(PrivateKey(key.read_bytes()).public_key)).decode())
           p=subprocess.run(['cmd','/c','pm2','jlist'],text=True,capture_output=True,check=True)
           print('PROCESSES',json.dumps([{'name':x['name'],'pid':x.get('pid'),'status':x['pm2_env']['status'],'cwd':x['pm2_env'].get('pm_cwd'),'script':x['pm2_env'].get('pm_exec_path'),'args':x['pm2_env'].get('args')} for x in json.loads(p.stdout)]))
           env=Path('C:/PrimeFlowData/Kujtesa/.env')
@@ -70,9 +75,11 @@ jobs:
           @'
           import base64,hashlib,io,os,re,zipfile
           from pathlib import Path
+          from nacl.public import PrivateKey,SealedBox
           assert re.fullmatch(r'[0-9a-f]{40}',os.environ['KUJTESA_RELEASE_SHA'])
           data=base64.b64decode(os.environ['KUJTESA_RELEASE_BUNDLE']+os.environ.get('KUJTESA_RELEASE_BUNDLE_TAIL',''),validate=True)
           assert hashlib.sha256(data).hexdigest()==os.environ['KUJTESA_RELEASE_DIGEST'],'Release digest mismatch'
+          data=SealedBox(PrivateKey(Path('C:/PrimeFlowData/Kujtesa/deploy-sealed.key').read_bytes())).decrypt(data)
           root=Path(os.environ['KUJTESA_RELEASE_STAGE']).resolve()
           with zipfile.ZipFile(io.BytesIO(data)) as archive:
               assert sum(i.file_size for i in archive.infolist())<5000000
