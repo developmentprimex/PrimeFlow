@@ -9,9 +9,9 @@ const projectId = "66666666-6666-4666-8666-666666666666"
 const user = { id: owner, full_name: "Test owner", email: "owner@example.com", role: "STAFF", is_active: true, department_id: department }
 const action = { id: actionId, segment_index: 0, title: "Dërgo raportin", description: "Përgatit raportin.", evidence: "Do ta dërgoj raportin.", assignee_text: null, deadline_text: null, suggested_assignee_id: null, suggested_due_date: null, created_task_id: null, confirmed_at: null }
 
-async function shell(page: Page, configured = true) {
+async function shell(page: Page, configured = true, canManage = true) {
   const protocols: { language: string; status: string; error: string | null }[] = []
-  let state: Record<string, unknown> = { configured, can_manage: true, timing_configured: true, timing: null, analysis: null, actions: [], segments: [] }
+  let state: Record<string, unknown> = { configured, can_manage: canManage, timing_configured: true, timing: null, analysis: null, actions: [], segments: [] }
   let savedTask: Record<string, unknown> = { id: taskId, department_id: department, title: action.title, description: action.description, status: "TODO", priority: "NORMAL", assigned_to: null, assignees: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
   const writes: { url: string; body: Record<string, unknown> }[] = []
   await page.addInitScript(({ user }) => {
@@ -34,7 +34,9 @@ async function shell(page: Page, configured = true) {
       return route.fulfill({ json: { protocols } })
     }
     if (/\/protocols\/(en|de)\/download$/.test(path)) return route.fulfill({
-      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', body: Buffer.from('PK-test-document'),
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      headers: { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent('Takimi i parë_PROTOCOL_02.11.2026_TO.docx')}`, 'Access-Control-Expose-Headers': 'Content-Disposition' },
+      body: Buffer.from('PK-test-document'),
     })
     if (path.endsWith('/citation-times')) {
       writes.push({ url: path, body: {} })
@@ -106,7 +108,7 @@ test('citation timing requires a click and survives reload without reprocessing'
 })
 
 test('protocol downloads directly in the selected language and reuses saved results', async ({ page }) => {
-  const harness = await shell(page)
+  const harness = await shell(page, true, false)
   harness.ready()
   await page.reload()
   const panel = page.getByRole('region', { name: 'Protokolli i takimit', exact: true })
@@ -114,7 +116,7 @@ test('protocol downloads directly in the selected language and reuses saved resu
   await expect(panel.getByRole('button', { name: 'Deutsch (DE)', exact: true })).toHaveAttribute('aria-pressed', 'true')
   const downloaded = page.waitForEvent('download')
   await panel.getByRole('button', { name: 'Gjenero dhe shkarko Word', exact: true }).click()
-  expect((await downloaded).suggestedFilename()).toBe(`PRIMEX-Protocol-${id}-DE.docx`)
+  expect((await downloaded).suggestedFilename()).toBe('Takimi i parë_PROTOCOL_02.11.2026_TO.docx')
   expect(harness.writes.filter(w => w.url.endsWith('/protocols')).map(w => w.body)).toEqual([{ language: 'de' }])
   await expect(panel.locator('textarea,[contenteditable=true]')).toHaveCount(0)
   await page.reload()
@@ -125,7 +127,7 @@ test('protocol downloads directly in the selected language and reuses saved resu
   expect(harness.writes.filter(w => w.url.endsWith('/protocols'))).toHaveLength(1)
   const regenerated = page.waitForEvent('download')
   await panel.getByRole('button', { name: 'Rigjenero', exact: true }).click()
-  expect((await regenerated).suggestedFilename()).toBe(`PRIMEX-Protocol-${id}-DE.docx`)
+  expect((await regenerated).suggestedFilename()).toBe('Takimi i parë_PROTOCOL_02.11.2026_TO.docx')
   expect(harness.writes.filter(w => w.url.endsWith('/protocols')).map(w => w.body)).toEqual([
     { language: 'de' }, { language: 'de', regenerate: true },
   ])
@@ -133,7 +135,7 @@ test('protocol downloads directly in the selected language and reuses saved resu
   await expect(panel.getByRole('button', { name: 'Deutsch (DE)', exact: true })).toHaveAttribute('aria-pressed', 'false')
   const english = page.waitForEvent('download')
   await panel.getByRole('button', { name: 'Gjenero dhe shkarko Word', exact: true }).click()
-  expect((await english).suggestedFilename()).toBe(`PRIMEX-Protocol-${id}-EN.docx`)
+  expect((await english).suggestedFilename()).toBe('Takimi i parë_PROTOCOL_02.11.2026_TO.docx')
 })
 
 test("configuration and consent guard processing; proposals require review and persist after reload", async ({ page }) => {

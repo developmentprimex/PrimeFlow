@@ -2,9 +2,16 @@
 
 Recording details offer English / Deutsch and Generate and download Word after
 analysis is READY. Editing happens in the downloaded DOCX, not in the application.
-Generation is explicit and owner-only. Downloads follow the existing recording
+Generation and regeneration are explicit and available to every authenticated
+active account with recording access. Downloads follow the existing recording
 read policy (currently all authenticated active accounts). Deleted recordings
 cannot be downloaded or processed.
+
+Download names use `Meeting title_PROTOCOL_DD.MM.YYYY_INITIALS.docx`: the linked
+meeting title (or recording title), download date in APP_TIMEZONE, and
+the currently downloading user's initials. The API sends both an ASCII fallback
+and UTF-8 Content-Disposition filename; the browser uses that name for new and
+cached documents. No regeneration is needed just to update a download name.
 
 The source EN/DE templates are included in `backend/app/templates/meeting-protocol`.
 They were copied from the user's FINAL meeting protocol templates on Z:. Runtime
@@ -16,7 +23,7 @@ Rows expand with content; the table header repeats across pages.
 The existing recording analysis worker processes durable protocol jobs before
 each analysis tick. Each language has one cached DOCX in PostgreSQL. Repeated
 requests/downloads reuse it. Failed jobs preserve source snapshots, paid response
-checkpoints and completed content. Owners can explicitly choose Rigjenero for the
+checkpoints and completed content. Any authorized viewer can choose Rigjenero for the
 selected language (`POST` with `regenerate: true`). This refreshes the source and
 clears that language's document, generated content and checkpoints so current
 generation rules apply. Requests during processing reuse the active job. Ordinary

@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button"
 type Language = "en" | "de"
 type Protocol = { language: Language; status: "QUEUED" | "GENERATING" | "READY" | "FAILED"; error: string | null }
 
-export function RecordingProtocolPanel({ recordingId, canManage, configured }: {
-  recordingId: string; canManage: boolean; configured: boolean
+export function RecordingProtocolPanel({ recordingId, configured }: {
+  recordingId: string; configured: boolean
 }) {
   const { apiFetch } = useAuth()
   const [language, setLanguage] = React.useState<Language>("en")
@@ -54,12 +54,19 @@ export function RecordingProtocolPanel({ recordingId, canManage, configured }: {
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
-    anchor.download = `PRIMEX-Protocol-${recordingId}-${selected.toUpperCase()}.docx`
+    const disposition = response.headers.get("Content-Disposition") || ""
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+    const plainName = disposition.match(/filename="([^"]+)"/i)?.[1]
+    let filename = plainName || "PROTOCOL.docx"
+    if (encodedName) {
+      try { filename = decodeURIComponent(encodedName) } catch { /* Use the plain filename if encoding is invalid. */ }
+    }
+    anchor.download = filename
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()
     window.setTimeout(() => URL.revokeObjectURL(url), 60000)
-  }, [apiFetch, base, recordingId])
+  }, [apiFetch, base])
 
   React.useEffect(() => {
     if (!autoDownload.current || downloading.current) return
@@ -104,19 +111,18 @@ export function RecordingProtocolPanel({ recordingId, canManage, configured }: {
           </Button>)}
         </div>
       </fieldset>
-      {(canManage || current?.status === "READY") && <Button className="h-10 px-5 shadow-sm"
+      <Button className="h-10 px-5 shadow-sm"
         disabled={!loaded || busy || processing || (current?.status !== "READY" && !configured)} onClick={() => void start()}>
         <Download aria-hidden="true" />
         {busy ? "Duke përpunuar…" : processing ? "Duke gjeneruar…" : current?.status === "READY" ? "Shkarko Word" : current?.status === "FAILED" ? "Riprovo dhe shkarko Word" : "Gjenero dhe shkarko Word"}
-      </Button>}
-      {canManage && current?.status === "READY" && <Button variant="outline" className="h-10"
+      </Button>
+      {current?.status === "READY" && <Button variant="outline" className="h-10"
         disabled={busy || !configured} onClick={() => void start(true)}>
         <RefreshCw aria-hidden="true" />Rigjenero
       </Button>}
       </div>
     </div>
     {processing && <p role="status" className="text-sm text-muted-foreground">Po përgatitet për shkarkim…</p>}
-    {!canManage && !current && <p className="text-sm text-muted-foreground">Autori i regjistrimit mund ta gjenerojë protokollin.</p>}
     {(error || current?.error) && <p role="alert" className="text-sm text-destructive">{error || current?.error}</p>}
   </section>
 }

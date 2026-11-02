@@ -51,10 +51,10 @@ def read_scope(user):
     return True
 
 
-async def load_recording(db, recording_id, user, *, write=False):
+async def load_recording(db, recording_id, user, *, write=False, lock=False):
     stmt = select(Recording).where(Recording.id == recording_id, Recording.deleted_at.is_(None))
     stmt = stmt.where(Recording.created_by == user.id if write else read_scope(user))
-    if write:
+    if write or lock:
         stmt = stmt.with_for_update()
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is None:

@@ -4,8 +4,10 @@ import json
 import unittest
 import uuid
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from urllib.parse import unquote
 from zipfile import ZipFile
 from lxml import etree as ET
 
@@ -28,6 +30,33 @@ def source():
 
 
 class ProtocolProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cached_download_names_follow_the_downloading_user(self):
+        from app.api.routers.recording_protocol import download_protocol
+        row = SimpleNamespace(id=uuid.uuid4(), meeting_id=uuid.uuid4(), title='Recording title',
+            recording_started_at=datetime(2026, 10, 28, 7, 22, tzinfo=timezone.utc))
+        job = SimpleNamespace(status='READY', document=b'PK-saved-document')
+        db = AsyncMock()
+        db.get.return_value = job
+        db.scalar.return_value = 'Takimi i parë'
+        with patch('app.api.routers.recording_protocol.load_recording', new=AsyncMock(return_value=row)), \
+                patch('app.api.routers.recording_protocol.audit'), \
+                patch('app.api.routers.recording_protocol.datetime') as clock:
+            clock.now.return_value = datetime(2026, 11, 2, 10, 0, tzinfo=timezone.utc)
+            for full_name, initials in [('Rinesa Ahmedi', 'RA'), ('Test Owner', 'TO')]:
+                response = await download_protocol(row.id, 'en', db, SimpleNamespace(full_name=full_name))
+                self.assertEqual(response.body, job.document)
+                self.assertIn(f'Takimi i parë_PROTOCOL_02.11.2026_{initials}.docx',
+                    unquote(response.headers['Content-Disposition']))
+
+    def test_download_filename_uses_download_date_and_current_user_initials(self):
+        from app.api.routers.recording_protocol import protocol_filename
+        downloaded_at = datetime(2026, 11, 2, 10, 0, tzinfo=timezone.utc)
+        self.assertEqual(protocol_filename('TAK INT ME KA - FRG/ASC REPORT', downloaded_at, 'Rinesa Ahmedi'),
+            'TAK INT ME KA - FRG-ASC REPORT_PROTOCOL_02.11.2026_RA.docx')
+        self.assertEqual(protocol_filename('Takimi i parë', downloaded_at, 'Ëndrra Çela'),
+            'Takimi i parë_PROTOCOL_02.11.2026_ËÇ.docx')
+        self.assertNotIn('\r', protocol_filename('Takim\r\n"/test', downloaded_at, 'Test User'))
+
     def test_evidence_and_party_guards(self):
         from app.services.recording_protocol import validate_content
         self.assertEqual(validate_content(sample(), QUOTE), sample())
@@ -128,7 +157,8 @@ class ProtocolApiTests(unittest.TestCase):
         sid = self.saved()
         self.seed(sid)
         path = f'/api/meeting-recordings/{sid}/protocols'
-        self.assertEqual(self.client.post(path, headers=self.auth('participant'), json={'language': 'en'}).status_code, 404)
+        self.assertEqual(self.client.post(path, headers=self.auth('participant'), json={'language': 'en'}).status_code, 202)
+        self.assertIn(self.client.post(path, json={'language': 'en'}).status_code, (401, 403))
         self.assertEqual(self.client.get(path, headers=self.auth('other')).status_code, 200)
         self.assertIn(self.client.get(path).status_code, (401, 403))
         self.assertEqual(self.client.post(path, headers=self.auth(), json={'language': 'sq'}).status_code, 422)
@@ -204,7 +234,7 @@ class ProtocolApiTests(unittest.TestCase):
                     await db.commit()
             asyncio.run(change_source())
             payload = {'language': 'en', 'regenerate': True}
-            self.assertEqual(self.client.post(path, headers=self.auth('participant'), json=payload).status_code, 404)
+            self.assertEqual(self.client.post(path, headers=self.auth('other'), json=payload).status_code, 202)
             self.assertEqual(self.client.post(path, headers=self.auth(), json=payload).json()['status'], 'QUEUED')
             # A double-click must reuse the queued job rather than reset it again.
             self.assertEqual(self.client.post(path, headers=self.auth(), json=payload).json()['status'], 'QUEUED')

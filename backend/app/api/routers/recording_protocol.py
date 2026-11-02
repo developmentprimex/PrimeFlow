@@ -1,5 +1,9 @@
 """Explicit generation and authenticated cached downloads; no document editor."""
 import uuid
+import re
+import unicodedata
+from datetime import datetime, timezone
+from urllib.parse import quote
 from typing import Literal
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -12,9 +16,20 @@ from app.config import settings
 from app.db import get_db
 from app.models.recording_analysis import RecordingAnalysis, RecordingTranscript, RecordingAction
 from app.models.recording_protocol import RecordingProtocol
+from app.models.meeting import Meeting
 
 router = APIRouter()
 Language = Literal['en', 'de']
+
+
+def protocol_filename(title, downloaded_at, full_name):
+    def clean(value):
+        value = ''.join(char for char in value if not unicodedata.category(char).startswith('C'))
+        return re.sub(r'\s+', ' ', re.sub(r'[<>:"/\\|?*]', '-', value)).strip(' ._-')
+    meeting = clean(title or '')[:120].rstrip(' ._-') or 'Takimi'
+    initials = ''.join(word[0] for word in re.findall(r'[^\W\d_]+', full_name or '', re.UNICODE)).upper()[:10] or 'USER'
+    date = downloaded_at.astimezone(ZoneInfo(settings.APP_TIMEZONE)).strftime('%d.%m.%Y')
+    return f'{meeting}_PROTOCOL_{date}_{initials}.docx'
 
 
 class Start(BaseModel):
@@ -41,7 +56,7 @@ async def list_protocols(recording_id: uuid.UUID, db: AsyncSession = Depends(get
 async def start_protocol(recording_id: uuid.UUID, payload: Start,
         db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     # Recording lock serializes concurrent requests, including a first insert.
-    row = await load_recording(db, recording_id, user, write=True)
+    row = await load_recording(db, recording_id, user, lock=True)
     job = await db.get(RecordingProtocol, (row.id, payload.language))
     if job and (job.status in ('QUEUED', 'GENERATING') or
             (job.status == 'READY' and not payload.regenerate)):
@@ -89,8 +104,11 @@ async def download_protocol(recording_id: uuid.UUID, language: Language,
     if not job or job.status != 'READY' or not job.document:
         raise HTTPException(409, 'Protokolli ende nuk është gati për shkarkim.')
     document = job.document
+    meeting_title = await db.scalar(select(Meeting.title).where(Meeting.id == row.meeting_id)) if row.meeting_id else None
+    filename = protocol_filename(meeting_title or row.title, datetime.now(timezone.utc), user.full_name)
+    fallback = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
     audit(db, user, row, 'recording_protocol_downloaded', language=language)
     await db.commit()
     return Response(document, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        headers={'Content-Disposition': f'attachment; filename="PRIMEX-Protocol-{row.id}-{language.upper()}.docx"',
+        headers={'Content-Disposition': f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(filename, safe="")}',
             'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})

@@ -167,7 +167,7 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
         {data.analysis?.summary && <div className="space-y-3"><h3 className="flex items-center gap-2 font-semibold"><FileText aria-hidden="true" className="size-4 text-muted-foreground" />Përmbledhja</h3><RecordingSummaryContent text={data.analysis.summary} /></div>}
         {(data.analysis?.decisions?.length ?? 0) > 0 && <div className="space-y-3 border-t pt-4"><h3 className="font-semibold">Vendimet</h3><ul className="list-disc space-y-2 pl-5 text-sm leading-7 marker:text-muted-foreground">{data.analysis!.decisions.map((d, i) => <li key={i}><RecordingSummaryContent text={d} /></li>)}</ul></div>}
       </section>}
-      {data.analysis?.status === "READY" && <RecordingProtocolPanel recordingId={recordingId} canManage={data.can_manage} configured={data.configured} />}
+      {data.analysis?.status === "READY" && <RecordingProtocolPanel recordingId={recordingId} configured={data.configured} />}
       {data.analysis?.status === "READY" && data.actions.length > 0 && <section aria-label="Kohët e citimeve" className="space-y-2 rounded-md border p-4">
         {data.can_manage && (!data.timing || data.timing.status === "FAILED") && <>
           <Button className="h-10 px-5 shadow-sm" disabled={busy || !data.timing_configured || data.analysis.language !== "sq"} onClick={() => void requestTimes()}><Clock3 aria-hidden="true" />{busy ? "Duke nisur…" : data.timing?.status === "FAILED" ? "Riprovo gjetjen e kohëve" : "Gjej kohët e citimeve"}</Button>
