@@ -1,4 +1,5 @@
 name: Kujtesa Independent Deploy
+run-name: Kujtesa ${{ inputs.sha || 'health-check' }}
 on:
   workflow_dispatch:
     inputs:
