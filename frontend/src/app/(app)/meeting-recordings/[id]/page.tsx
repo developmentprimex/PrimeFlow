@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, ListTodo } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth"
@@ -52,7 +52,12 @@ export default function RecordingDetailPage() {
       <p>{row.description}</p><p className="text-sm text-muted-foreground">{new Date(row.created_at).toLocaleString("sq-AL")} · {row.recorded_by_name} · {RECORDING_STATUS[row.status]}</p>
       {row.meeting_title && <p className="text-sm">Takimi: {row.meeting_title}</p>}
       {row.is_partial && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Pjesë e rikuperuar nga një regjistrim i ndërprerë. Fundi i takimit mund të mungojë.</p>}
-      <p className="text-sm">{recordingTime(row.duration_seconds)} · {recordingSize(row.size_bytes)} · {row.mime_type} · {row.video_width} × {row.video_height}</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-sm">{recordingTime(row.duration_seconds)} · {recordingSize(row.size_bytes)} · {row.mime_type} · {row.video_width} × {row.video_height}</p>
+        {row.status === "READY" && <Button asChild className="shadow-sm">
+          <a href="#recording-tasks"><ListTodo aria-hidden="true" />Shiko detyrat</a>
+        </Button>}
+      </div>
       {authorized && row.status === "READY" && row.media_available !== false && <>
         <video ref={videoRef} key={id} className="aspect-video w-full rounded-md bg-black" src={`/api/meeting-recordings/${id}/stream`} controls preload="metadata" playsInline onError={() => setError("Videoja nuk mund të hapet. Rifreskoni faqen për të rinovuar autorizimin.")} />
         <Button asChild><a href={`/api/meeting-recordings/${id}/download`} download>Shkarko regjistrimin</a></Button>

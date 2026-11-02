@@ -1,10 +1,10 @@
 "use client"
 
 import * as React from "react"
+import { Download } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { recordingJson } from "@/lib/recording-outbox"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 
 type Language = "en" | "de"
 type Protocol = { language: Language; status: "QUEUED" | "GENERATING" | "READY" | "FAILED"; error: string | null }
@@ -89,21 +89,28 @@ export function RecordingProtocolPanel({ recordingId, canManage, configured }: {
   }
 
   return <section aria-label="Protokolli i takimit" className="space-y-3 rounded-md border p-4">
-    <h3 className="font-semibold">Protokolli i takimit</h3>
-    <p className="text-sm text-muted-foreground">Shkarko protokollin sipas template-it PRIMEX. Ndryshimet i bën direkt në Word-in e shkarkuar.</p>
-    <div className="flex flex-wrap items-end gap-3">
-      <div className="space-y-1"><Label htmlFor="protocol-language">Gjuha e protokollit</Label>
-        <select id="protocol-language" value={language} disabled={busy} onChange={e => { setLanguage(e.target.value as Language); setError("") }} className="h-9 w-44 rounded-md border border-input bg-background px-3 text-sm">
-          <option value="en">English</option><option value="de">Deutsch</option>
-        </select>
-      </div>
-      {(canManage || current?.status === "READY") && <Button variant="outline"
+    <div className="flex flex-wrap items-center gap-3">
+      <h3 className="font-semibold">Protokolli i takimit</h3>
+      <div className="flex flex-wrap items-center gap-3">
+      <fieldset className="flex flex-wrap items-center gap-2" disabled={busy}>
+        <legend className="sr-only">Gjuha e protokollit</legend>
+        <div className="inline-flex items-center gap-1 rounded-md border bg-muted p-1">
+          {([['en', 'English (EN)'], ['de', 'Deutsch (DE)']] as const).map(([value, label]) => <Button
+            key={value} type="button" variant="ghost" size="sm" aria-pressed={language === value}
+            onClick={() => { setLanguage(value); setError("") }}
+            className={`h-8 px-3 ${language === value ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            {label}
+          </Button>)}
+        </div>
+      </fieldset>
+      {(canManage || current?.status === "READY") && <Button className="h-10 px-5 shadow-sm"
         disabled={!loaded || busy || processing || (current?.status !== "READY" && !configured)} onClick={() => void start()}>
+        <Download aria-hidden="true" />
         {busy ? "Duke përpunuar…" : processing ? "Duke gjeneruar…" : current?.status === "READY" ? "Shkarko Word" : current?.status === "FAILED" ? "Riprovo dhe shkarko Word" : "Gjenero dhe shkarko Word"}
       </Button>}
+      </div>
     </div>
-    {processing && <p role="status" className="text-sm">Protokolli po përgatitet. Shkarkimi nis kur të jetë gati. Nëse mbyll faqen, mund ta shkarkosh kur të kthehesh.</p>}
-    {current?.status === "READY" && <p role="status" className="text-sm text-muted-foreground">Protokolli është gati. Shkarkimet e përsëritura përdorin dokumentin e ruajtur.</p>}
+    {processing && <p role="status" className="text-sm text-muted-foreground">Po përgatitet për shkarkim…</p>}
     {!canManage && !current && <p className="text-sm text-muted-foreground">Autori i regjistrimit mund ta gjenerojë protokollin.</p>}
     {(error || current?.error) && <p role="alert" className="text-sm text-destructive">{error || current?.error}</p>}
   </section>

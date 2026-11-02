@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { ChevronDown, Clock3, FileText, ListTodo, Pencil, Plus } from "lucide-react"
 import Link from "next/link"
 import { MarkedTaskBlock } from "@/lib/note-markup"
 import type { Task } from "@/lib/types"
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { RecordingTaskDialog } from "./task-dialog"
 import { RecordingProtocolPanel } from "./protocol-panel"
+import { RecordingSummaryContent } from "./summary-content"
 import { transcriptParagraphs } from "@/lib/recording-transcript"
 import { Label } from "@/components/ui/label"
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "@/components/ui/table"
@@ -59,19 +61,19 @@ function ActionReview({ action, number, recordingId, people, departments, canMan
   const due = savedTask ? savedTask.due_date : action.suggested_due_date
   const taskStatus = savedTask ? ({ TODO: "Për t’u bërë", IN_PROGRESS: "Në progres", WAITING_CLIENT: "WFE", WAITING_CONFIRMATION: "Në konfirmim", DONE: "E përfunduar" }[savedTask.status || "TODO"] || savedTask.status) : createdId ? "E krijuar" : action.confirmed_at ? "E fshirë" : "Propozim AI"
   return <><TableRow className="align-top">
-    <TableCell className="py-4 text-muted-foreground">{number}</TableCell>
-    <TableCell className="min-w-72 whitespace-normal py-4">
+    <TableCell className="font-bold tabular-nums text-muted-foreground">{number}</TableCell>
+    <TableCell className="whitespace-normal">
       <MarkedTaskBlock content={taskContent} headingLevel={4} />
-      <details className="mt-2 text-xs text-muted-foreground"><summary className="cursor-pointer">Nga biseda</summary><blockquote className="mt-2 border-l-2 pl-2">{action.evidence}</blockquote></details>
+      <details className="mt-3 text-xs text-muted-foreground"><summary className="w-fit cursor-pointer rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Nga biseda</summary><blockquote className="mt-2 rounded-r-md border-l-2 bg-muted/40 px-3 py-2 text-sm leading-6">{action.evidence}</blockquote></details>
       {timing?.start != null ? <button type="button" disabled={!onSeek} className="mt-2 text-xs text-primary underline disabled:opacity-50" onClick={() => onSeek?.(timing.start!)}>▶ Rreth {recordingTime(timing.start)}</button> : timing || timingStatus === "READY" ? <p className="mt-2 text-xs text-muted-foreground">Koha nuk u përcaktua për këtë citim.</p> : null}
     </TableCell>
-    <TableCell className="max-w-48 whitespace-normal py-4">{responsible}</TableCell>
-    <TableCell className="py-4">{due ? new Date(due).toLocaleDateString("sq-AL") : action.deadline_text || "—"}</TableCell>
-    <TableCell className="py-4"><span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${createdId ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>{taskStatus}</span></TableCell>
-    <TableCell className="py-4">
-    {createdId ? <Button variant="outline" size="sm" disabled={loadingTask} onClick={() => void openCreated()}>{loadingTask ? "Duke ngarkuar…" : "Edito detyrë"}</Button>
+    <TableCell className={`whitespace-normal ${responsible === "Pa përgjegjës" ? "text-muted-foreground" : "font-medium"}`}>{responsible}</TableCell>
+    <TableCell className="tabular-nums text-muted-foreground">{due ? new Date(due).toLocaleDateString("sq-AL") : action.deadline_text || "—"}</TableCell>
+    <TableCell><span className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs font-medium ${createdId ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"}`}><span aria-hidden="true" className="size-1.5 rounded-full bg-current" />{taskStatus}</span></TableCell>
+    <TableCell className="text-center">
+    {createdId ? <Button variant="outline" size="sm" className="h-7 text-xs" disabled={loadingTask} onClick={() => void openCreated()}><Pencil aria-hidden="true" />{loadingTask ? "Duke ngarkuar…" : "Edito detyrë"}</Button>
       : action.confirmed_at ? <p className="text-sm">Detyra e konfirmuar është fshirë nga Tasks.</p>
-      : canManage ? <Button size="sm" onClick={() => setOpen(true)}>Krijo detyrë</Button>
+      : canManage ? <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setOpen(true)}><Plus aria-hidden="true" />Krijo detyrë</Button>
       : <p className="text-sm">Autori i regjistrimit mund ta konfirmojë detyrën.</p>}
     {savedTask?.ga_note_origin_id && <Link className="mt-2 block text-sm underline" href="/ga-ka-notes">Hap në PX Notes</Link>}
     {editError && <p role="alert" className="mt-2 max-w-48 whitespace-normal text-sm text-destructive">{editError}</p>}
@@ -87,6 +89,7 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
   const [data, setData] = React.useState<Analysis | null>(null)
   const [language, setLanguage] = React.useState("sq")
   const [consent, setConsent] = React.useState(false)
+  const [transcriptOpen, setTranscriptOpen] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState("")
   const [people, setPeople] = React.useState<RecordingPerson[]>([])
@@ -137,11 +140,15 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
       {!data.configured && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Shërbimi AI nuk është konfiguruar. Administratori duhet të vendosë OPENAI_API_KEY në server dhe të nisë worker-in e përpunimit.</p>}
       {data.analysis && <div role="status" className="space-y-2">
         <p>{STATUS[data.analysis.status]} · {data.analysis.segments_done}/{data.analysis.total_segments} pjesë</p>
-        <progress className="w-full" max={data.analysis.total_segments} value={data.analysis.segments_done} aria-label="Progresi i transkriptimit" />
+        {processing && <progress className="w-full" max={data.analysis.total_segments} value={data.analysis.segments_done} aria-label="Progresi i transkriptimit" />}
         {processing && <p className="text-sm text-muted-foreground">Mund ta mbyllësh faqen. Përpunimi vazhdon në server; rifresko për të parë progresin.</p>}
         {data.analysis.error_message && <p role="alert" className="text-sm text-destructive">{data.analysis.error_message}</p>}
       </div>}
-      {data.segments.length > 0 && <section aria-label="Transkripti" className="space-y-4 rounded-md border p-4">
+      {data.segments.length > 0 && <div className="space-y-3">
+        <Button variant="outline" aria-expanded={transcriptOpen} aria-controls="recording-transcript" onClick={() => setTranscriptOpen(open => !open)}>
+          <FileText aria-hidden="true" />{transcriptOpen ? "Fshih transkriptin" : "Shiko transkriptin"}<ChevronDown aria-hidden="true" className={transcriptOpen ? "rotate-180" : ""} />
+        </Button>
+        {transcriptOpen && <section id="recording-transcript" aria-label="Transkripti" className="max-h-[32rem] space-y-4 overflow-y-auto rounded-md border bg-muted/20 p-4" tabIndex={0}>
         <h3 className="font-semibold">Transkripti ({data.segments.length} pjesë)</h3>
         {data.segments.map(segment => <div key={segment.index} className="space-y-3">
           <p className="text-xs text-muted-foreground">{recordingTime(segment.start_seconds)} – {recordingTime(segment.start_seconds + segment.duration_seconds)}</p>
@@ -149,28 +156,32 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
           {!segment.text && <p className="text-sm text-muted-foreground">Nuk u dallua të folur në këtë pjesë.</p>}
         </div>)}
       </section>}
+      </div>}
       {data.can_manage && (!data.analysis || data.analysis.status === "FAILED") && <div className="space-y-3 rounded-md border p-4">
         <div className="max-w-xs"><Label htmlFor="transcript-language">Gjuha e bisedës</Label><select id="transcript-language" className={selectClass} value={language} disabled={Boolean(data.analysis)} onChange={e => setLanguage(e.target.value)}><option value="sq">Shqip</option><option value="en">English</option><option value="de">Deutsch</option><option value="auto">Zbulo automatikisht / e përzier</option></select></div>
-        <p className="text-sm">Audioja ndahet në pjesë dhe dërgohet te OpenAI për transkriptim; teksti përdoret për përmbledhjen në shqip dhe propozimet. Rezultatet AI duhen kontrolluar. Detyrat krijohen vetëm pasi t’i konfirmosh.</p>
+        <p className="text-sm text-muted-foreground">Audioja përpunohet nga OpenAI. Kontrollo rezultatet para se të krijosh detyrat.</p>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />Kam autorizimin për këtë përpunim të audios dhe të dhënave të pjesëmarrësve.</label>
         <Button disabled={!data.configured || !consent || busy} onClick={() => void start()}>{busy ? "Duke nisur…" : data.analysis ? "Riprovo përpunimin" : "Transkripto dhe përmblidh"}</Button>
       </div>}
-      {data.analysis?.summary && <section className="space-y-2"><h3 className="font-semibold">Përmbledhja</h3><p className="whitespace-pre-wrap text-sm">{data.analysis.summary}</p></section>}
-      {(data.analysis?.decisions?.length ?? 0) > 0 && <section className="space-y-2"><h3 className="font-semibold">Vendimet</h3><ul className="list-disc space-y-1 pl-5 text-sm">{data.analysis!.decisions.map((d, i) => <li key={i}>{d}</li>)}</ul></section>}
+      {(data.analysis?.summary || (data.analysis?.decisions?.length ?? 0) > 0) && <section aria-label="Përmbledhja e takimit" className="space-y-5 rounded-lg border bg-muted/20 p-5">
+        {data.analysis?.summary && <div className="space-y-3"><h3 className="flex items-center gap-2 font-semibold"><FileText aria-hidden="true" className="size-4 text-muted-foreground" />Përmbledhja</h3><RecordingSummaryContent text={data.analysis.summary} /></div>}
+        {(data.analysis?.decisions?.length ?? 0) > 0 && <div className="space-y-3 border-t pt-4"><h3 className="font-semibold">Vendimet</h3><ul className="list-disc space-y-2 pl-5 text-sm leading-7 marker:text-muted-foreground">{data.analysis!.decisions.map((d, i) => <li key={i}><RecordingSummaryContent text={d} /></li>)}</ul></div>}
+      </section>}
       {data.analysis?.status === "READY" && <RecordingProtocolPanel recordingId={recordingId} canManage={data.can_manage} configured={data.configured} />}
       {data.analysis?.status === "READY" && data.actions.length > 0 && <section aria-label="Kohët e citimeve" className="space-y-2 rounded-md border p-4">
         {data.can_manage && (!data.timing || data.timing.status === "FAILED") && <>
-          <Button variant="outline" disabled={busy || !data.timing_configured || data.analysis.language !== "sq"} onClick={() => void requestTimes()}>{busy ? "Duke nisur…" : data.timing?.status === "FAILED" ? "Riprovo gjetjen e kohëve" : "Gjej kohët e citimeve"}</Button>
-          <p className="text-sm text-muted-foreground">Nis vetëm kur e kërkon. Përpunimi mund të zgjasë; kohët ruhen për përdorimet e ardhshme.</p>
+          <Button className="h-10 px-5 shadow-sm" disabled={busy || !data.timing_configured || data.analysis.language !== "sq"} onClick={() => void requestTimes()}><Clock3 aria-hidden="true" />{busy ? "Duke nisur…" : data.timing?.status === "FAILED" ? "Riprovo gjetjen e kohëve" : "Gjej kohët e citimeve"}</Button>
           {!data.timing_configured && <p className="text-sm text-muted-foreground">Gjetja e kohëve nuk është aktivizuar ende.</p>}
           {data.analysis.language !== "sq" && <p className="text-sm text-muted-foreground">Aktualisht mbështeten regjistrimet në shqip.</p>}
         </>}
-        {timingProcessing && <p role="status">{data.timing?.status === "QUEUED" ? "Në radhë për gjetjen e kohëve…" : `Duke gjetur kohët… ${data.timing?.completed ?? 0}/${data.timing?.total ?? 0} pjesë` } Mund ta mbyllësh faqen dhe të kthehesh më vonë.</p>}
-        {data.timing?.status === "READY" && <p role="status" className="text-sm">Kohët u përpunuan. Kliko kohën pranë citimit për ta dëgjuar. Kohët janë të përafërta.</p>}
+        {timingProcessing && <p role="status">{data.timing?.status === "QUEUED" ? "Në radhë për gjetjen e kohëve…" : `Duke gjetur kohët… ${data.timing?.completed ?? 0}/${data.timing?.total ?? 0} pjesë` }</p>}
+        {data.timing?.status === "READY" && <p role="status" className="text-sm text-muted-foreground">Kliko kohën pranë citimit për ta dëgjuar (e përafërt).</p>}
         {data.timing?.error && <p role="alert" className="text-sm text-destructive">{data.timing.error}</p>}
       </section>}
-      {data.actions.length > 0 && <section className="space-y-3"><h3 className="font-semibold">Detyrat e propozuara ({data.actions.length})</h3><div className="overflow-hidden rounded-md border"><Table aria-label="Detyrat e regjistrimit" className="min-w-[900px]"><TableHeader className="bg-muted/50"><TableRow><TableHead>NR</TableHead><TableHead className="w-[42%]">Detyra</TableHead><TableHead>Përgjegjësi</TableHead><TableHead>Afati</TableHead><TableHead>Statusi</TableHead><TableHead>Veprime</TableHead></TableRow></TableHeader><TableBody>{data.actions.map((action, index) => <ActionReview key={`${action.id}-${people.length > 0}`} action={action} number={index + 1} recordingId={recordingId} people={people} departments={departments} canManage={data.can_manage} onCreated={load} timing={data.timing?.results?.[action.id]} timingStatus={data.timing?.status} onSeek={onSeek} />)}</TableBody></Table></div></section>}
+      <div id="recording-tasks" tabIndex={-1} className="scroll-mt-24">
+      {data.actions.length > 0 && <section className="space-y-4"><h3 className="flex items-center gap-2 font-semibold"><ListTodo aria-hidden="true" className="size-4 text-muted-foreground" />Detyrat e propozuara <span className="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{data.actions.length}</span></h3><div className="overflow-hidden rounded-md border-2 border-slate-700 bg-background"><Table aria-label="Detyrat e regjistrimit" className="min-w-[960px] table-fixed border-collapse [&_td]:border [&_td]:border-slate-600 [&_td]:p-2 [&_td]:align-bottom [&_th]:border [&_th]:border-slate-600 [&_th]:px-2 [&_th]:align-bottom"><TableHeader className="bg-background [&_th]:h-10 [&_th]:font-medium [&_th]:uppercase"><TableRow><TableHead className="w-10">NR</TableHead><TableHead className="w-[44%]">Detyra</TableHead><TableHead className="w-[18%]">Përgjegjësi</TableHead><TableHead className="w-28">Afati</TableHead><TableHead className="w-32">Statusi</TableHead><TableHead className="w-40 text-center">Veprime</TableHead></TableRow></TableHeader><TableBody>{data.actions.map((action, index) => <ActionReview key={`${action.id}-${people.length > 0}`} action={action} number={index + 1} recordingId={recordingId} people={people} departments={departments} canManage={data.can_manage} onCreated={load} timing={data.timing?.results?.[action.id]} timingStatus={data.timing?.status} onSeek={onSeek} />)}</TableBody></Table></div></section>}
       {data.analysis?.status === "READY" && !data.actions.length && <p className="text-sm">Nuk u gjetën veprime të konfirmuara për t’u kthyer në detyra.</p>}
+      </div>
 
     </>}
   </CardContent></Card>

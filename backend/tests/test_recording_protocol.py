@@ -57,6 +57,10 @@ class ProtocolProviderTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('02.11.2026', text)
                 self.assertNotIn(QUOTE, text)
                 self.assertIn('Nicht festgelegt' if language == 'de' else 'Not specified', text)
+                settings = ET.fromstring(output.read('word/settings.xml'))
+                self.assertEqual(settings.find('w:view', NS).get('{'+NS['w']+'}val'), 'print')
+                self.assertIn(b'primex_logo.png', output.read('word/header1.xml'))
+                self.assertEqual(output.read('word/media/image1.png'), template.read('word/media/image1.png'))
                 self.assertEqual(ET.tostring(root.find('.//w:sectPr', NS)),
                     ET.tostring(ET.fromstring(template.read('word/document.xml')).find('.//w:sectPr', NS)))
 
