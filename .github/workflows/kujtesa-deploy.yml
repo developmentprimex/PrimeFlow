@@ -56,6 +56,17 @@ jobs:
                       except ValueError:v=v.strip().strip("'")
                       values[k]=v
           print('FAMILY_CONFIG',json.dumps({'exists':env.exists(),'keys':sorted(values),'enabled':values.get('KUJTESA_ENABLED'),'reminders_enabled':values.get('REMINDERS_ENABLED'),'voice_enabled':values.get('KUJTESA_HOST_ENABLED'),'voice_worker':values.get('KUJTESA_HOST_WORKER'),'api_url':values.get('PRIMEFLOW_API_URL')}))
+          from datetime import datetime,timezone
+          owner=Path('C:/PrimeFlowData/Kujtesa/external-owner.json')
+          heartbeat=Path('C:/PrimeFlowData/Kujtesa/.kujtesa-worker-status.json')
+          if owner.exists() and heartbeat.exists():
+              release=json.loads(owner.read_text(encoding='utf-8'))
+              status=json.loads(heartbeat.read_text(encoding='utf-8'))
+              age=(datetime.now(timezone.utc)-datetime.fromisoformat(status['last_seen_at'])).total_seconds()
+              workers=[x for x in json.loads(p.stdout) if x['name']=='primeflow-kujtesa']
+              ready=len(workers)==1 and workers[0]['pm2_env']['status']=='online' and status.get('build')==release['sha'] and workers[0]['pid'] in (status.get('pid'),status.get('supervisor_pid')) and 0<=age<45
+              print('LIVE_FAMILY',json.dumps({'ready':ready,'repository':release['repository'],'sha':release['sha'],'heartbeat_age_seconds':round(age,1),'process_count':len(workers),'reminders_enabled':status.get('reminders_enabled'),'release':release['release']}))
+              if not ready: raise SystemExit('Independent family heartbeat is not healthy')
           '@ | & $python -
           if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect family process.' }
       - name: Deploy only the independent Kujtesa release
