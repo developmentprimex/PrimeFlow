@@ -39,7 +39,7 @@ function TurnRow({ turn }: { turn: Turn }) {
         {turn.notes && <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{turn.notes}</span>}
       </span>
       <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-        {turn.status === "SKIPPED" ? "nuk raportoi" : (
+        {turn.status === "SKIPPED" ? "nuk raportoi" : turn.status === "TIMEOUT" ? "koha përfundoi · kërkon sqarim" : turn.status === "DEFERRED" ? "në pritje të kyçjes" : (
           <>
             {clock(turn.started_at)}–{turn.status === "ACTIVE" ? <span style={{ color: ACCENT }}>tani</span> : clock(turn.ended_at)}
             {minutes !== null && <span className="ml-2">{minutes} min</span>}
@@ -148,6 +148,9 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
   const invitations = detail.events.filter((e) => ["BRIEF", "GA_CALL", "GA_FALLBACK", "NOTE"].includes(e.kind))
   const done = detail.mentions.filter((m) => m.kind === "DONE")
   const strikes = detail.mentions.filter((m) => m.kind === "STRIKE")
+  const replyTimes = detail.events.filter(e => e.kind === "PERFORMANCE" && e.data.kind === "generated_audio")
+    .map(e => Number(e.data.duration_ms)).filter(Number.isFinite).sort((a, b) => a - b)
+  const unclear = detail.events.filter(e => e.kind === "DISCUSSION" && e.data.unclear === true)
   return (
     <article>
       <button type="button" onClick={onBack} className="mb-4 text-sm text-muted-foreground underline-offset-4 hover:underline md:hidden">
@@ -163,6 +166,17 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
       {!!detail.discord_reports?.length && <DiscordReports reports={detail.discord_reports} />}
 
       {detail.status !== "DISCORD_REPORT" && <>
+      {canManage && replyTimes.length > 0 && <p className="mt-3 text-xs text-muted-foreground">
+        Pritja deri te audio e gjeneruar: mesatarisht {(replyTimes.reduce((a, b) => a + b, 0) / replyTimes.length / 1000).toFixed(1)} s
+        {" · "}95% brenda {(replyTimes[Math.ceil(replyTimes.length * 0.95) - 1] / 1000).toFixed(1)} s
+        {" · "}{replyTimes.length} matje. Koha e transmetimit dhe riprodhimit shtohet më pas.
+      </p>}
+      {unclear.length > 0 && <div className="mt-3 text-sm text-muted-foreground">
+        <p>{unclear.length} raportime kërkojnë sqarim pas takimit:</p>
+        <ul className="mt-1 list-disc pl-5">{unclear.map((event, i) => <li key={i}>
+          {event.initials && `${event.initials}: `}{String(event.data.task_title ?? "Raportim i paqartë")}
+        </li>)}</ul>
+      </div>}
       <Section title="Përmbledhja">
         {detail.summary ? <Summary text={detail.summary} /> : (
           <p className="text-sm text-muted-foreground">

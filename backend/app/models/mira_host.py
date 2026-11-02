@@ -50,7 +50,7 @@ class Mira1HTurn(Base):
     meeting_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('mira_1h_meetings.id', ondelete='CASCADE'), index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     order_idx: Mapped[int] = mapped_column(Integer)
-    # WAITING -> ACTIVE -> DONE, or SKIPPED.
+    # WAITING -> ACTIVE -> DONE, DEFERRED (absent), TIMEOUT, or SKIPPED.
     status: Mapped[str] = mapped_column(String(20), default='WAITING')
     invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

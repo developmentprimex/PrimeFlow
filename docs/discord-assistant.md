@@ -736,3 +736,38 @@ only a five-minute current-time window is eligible, with no past-slot backfill.
 Before each due slot, the worker verifies the four personal channels and restores
 the AI Agent bot's access if a channel privacy repair removed it. HTTP delivery
 failures include the recipient, status and Discord error in the slot log.
+
+## Mira Host conversation and delivery
+
+Work meetings use `gpt-realtime-2.1`, voice `marin`, and low reasoning effort.
+The model is validated by backend settings and written explicitly by the deployment
+configuration script. Mira's settings page reports the backend model, voice and
+prompt version; an existing session retains the configuration it started with.
+The voice worker reports ready only after both Discord and Realtime are connected.
+
+The host exposes tools for the current phase only. Staff discussion follows current
+tasks, earlier unfinished tasks, then blocked tasks where applicable. Facts are saved
+per person/task, separately from the task status. Each open task must have discussion
+evidence or an explicit unclear flag before its turn can finish normally. One short
+clarification is requested for unclear speech; missing facts must not be invented.
+The configured person budget defaults to two minutes, with a warning 15 seconds
+before the limit and at most 30 seconds for wrapping up. Overruns are labelled
+`TIMEOUT`; absent people are deferred and invited again, never counted as reported.
+
+Task creation from PX Notes requires a prepared proposal, its complete spoken
+playback and a later affirmative utterance from an identified GA participant.
+Unknown/mixed speakers cannot authorize writes. Audio attribution follows uploaded
+audio offsets; it does not assume that the loudest packet at event-arrival time
+belongs to the person who answered. The original note content is retained in full.
+Done/Strike announcements are marked read only after matching, successful audio
+playback. Interrupted announcements remain eligible for a later reading.
+
+Transcript lines have stable IDs, are uploaded in batches and are deduplicated on
+retry. Pending lines and timing samples are spooled under the ignored directory
+`backend/.mira-host-recovery/`; preserve this writable directory across restarts.
+Recovery runs on the next controller tick. No database migration is needed.
+Managers can inspect generated-audio latency in meeting details. This measures
+uploaded end-of-speech to first generated audio, including endpointing and tool
+waits; Discord delivery/playback time is additional. Tool durations are also stored
+as PERFORMANCE events. Tests use synthetic audio and mocks; a real Albanian voice
+check after deployment is needed to assess pacing and pronunciation.

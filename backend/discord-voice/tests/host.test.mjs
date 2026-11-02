@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
-import {FRAME_BYTES,Mixer,Playback,createOpusEncoder,toDiscord,toRealtime,int16FromBase64,int16ToBase64} from '../host-audio.mjs';
+import {FRAME_BYTES,Mixer,SpeakerTimeline,Playback,createOpusEncoder,toDiscord,toRealtime,int16FromBase64,int16ToBase64} from '../host-audio.mjs';
 import {createOpusDecoder} from '../opus.mjs';
 import {BARGE_IN_MS,SAY_WAIT_MS,createHost,decodeCommand} from '../host-worker.mjs';
 
@@ -64,14 +64,15 @@ test('commands are validated',()=>{
   assert.equal(decodeCommand('{"type":"say","text":"hi"}').type,'say');
 });
 
-function fakes(){
+function fakes({realtimeReady=true,voiceReady=false,toolsets={}}={}){
   const sent=[],events=[];
+  const streams=new Map();
   class FakeSocket{constructor(url,protocols){this.url=url;this.protocols=protocols;this.readyState=1;FakeSocket.last=this;}
     send(data){sent.push(JSON.parse(data));} close(){}}
   const connection=new EventEmitter();
-  Object.assign(connection,{receiver:{speaking:new EventEmitter(),subscribe:()=>new EventEmitter()},
+  Object.assign(connection,{receiver:{speaking:new EventEmitter(),subscribe:id=>{const stream=new EventEmitter();streams.set(id,stream);return stream;}},
     prepareAudioPacket(){},dispatchAudio(){},setSpeaking(){},destroy(){},rejoin(){return true;}});
-  const voice={joinVoiceChannel:()=>connection,entersState:()=>new Promise(()=>{}),VoiceConnectionStatus:{Ready:'ready'},
+  const voice={joinVoiceChannel:()=>connection,entersState:()=>voiceReady?Promise.resolve():new Promise(()=>{}),VoiceConnectionStatus:{Ready:'ready'},
     EndBehaviorType:{AfterSilence:1}};
   let dispatch;
   const gatewayFactory=options=>{dispatch=options.onDispatch;return {userId:'9',raw(){},close(){}};};
@@ -83,14 +84,142 @@ function fakes(){
     for(const [id,timer] of [...clock.timers].sort((a,b)=>a[1].at-b[1].at))
       if(timer.at<=clock.at&&clock.timers.delete(id))timer.fn();
   };
-  const host=createHost({emit:m=>events.push(m),voice,makeDecoder:()=>({decode:()=>Buffer.alloc(0)}),
+  const host=createHost({emit:m=>events.push(m),voice,makeDecoder:()=>({decode:packet=>packet}),
     makeEncoder:()=>({encode:f=>f.subarray(0,3),delete(){}}),WebSocketImpl:FakeSocket,gatewayFactory,
     now:()=>clock.at,setTimer,clearTimer:id=>clock.timers.delete(id)});
-  host.start({guild_id:'1',channel_id:'2',token:'t',client_secret:'ek_1',model:'gpt-realtime'});
-  return {host,sent,events,advance,socket:FakeSocket.last,dispatch:(...a)=>dispatch(...a)};
+  host.start({guild_id:'1',channel_id:'2',token:'t',client_secret:'ek_1',model:'gpt-realtime',toolsets});
+  if(realtimeReady)host._onRealtime({type:'session.created'});
+  return {host,sent,events,advance,connection,streams,socket:FakeSocket.last,dispatch:(...a)=>dispatch(...a)};
 }
 
 const speech=()=>Int16Array.from({length:240},(_,i)=>i%2?2000:-2000);
+
+test('phase-specific tools wait for Realtime readiness and change at handoff',()=>{
+  const tools=[{type:'function',name:'record_task_discussion',parameters:{type:'object'}}];
+  const {host,sent}=fakes({realtimeReady:false,toolsets:{STAFF_PHASE:tools,ENDING:[]}});
+  host.configure('STAFF_PHASE');
+  assert.equal(sent.length,0);
+  host._onRealtime({type:'session.created'});
+  assert.deepEqual(sent.find(e=>e.type==='session.update').session.tools,tools);
+  host.configure('ENDING');
+  assert.deepEqual(sent.at(-1).session.tools,[]);
+});
+
+test('latency is recorded once per staff utterance across tool continuations',()=>{
+  const {host,events,advance}=fakes();
+  host._onRealtime({type:'input_audio_buffer.speech_started',audio_start_ms:0});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',audio_end_ms:100,item_id:'speech1'});
+  for(const responseId of ['answer','continuation']){
+    host._onRealtime({type:'response.created',response:{id:responseId}});
+    advance(250);
+    host._onRealtime({type:'response.output_audio.delta',response_id:responseId,item_id:responseId,delta:int16ToBase64(speech())});
+    host._onRealtime({type:'response.done',response:{id:responseId,status:'completed'}});
+  }
+  const metrics=events.filter(e=>e.type==='metric');
+  assert.equal(metrics.length,1);
+  assert.equal(metrics[0].duration_ms,250);
+  assert.equal(metrics[0].kind,'generated_audio');
+});
+
+test('speaker provenance follows uploaded audio time despite delayed VAD events',()=>{
+  const timeline=new SpeakerTimeline();
+  timeline.add(100,new Map([['11',480000]]));
+  timeline.add(100,new Map([['22',480000]]));
+  assert.equal(timeline.speaker(0,100),'11');
+  assert.equal(timeline.speaker(100,200),'22');
+  assert.equal(timeline.speaker(0,200),null);
+});
+
+test('quiet background hiss cannot become a trusted voice confirmation',()=>{
+  const timeline=new SpeakerTimeline();
+  timeline.add(100,new Map([['11',240000]]));
+  assert.equal(timeline.speaker(0,100),null);
+  timeline.add(100,new Map([['11',480000]]));
+  assert.equal(timeline.speaker(100,200),'11');
+});
+
+test('slow responses remain in latency metrics even after voice authorization expires',()=>{
+  const {host,events,advance}=fakes();
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',audio_end_ms:100,item_id:'slow-speech'});
+  advance(16000);
+  host._onRealtime({type:'response.created',response:{id:'slow-answer'}});
+  advance(250);
+  host._onRealtime({type:'response.output_audio.delta',response_id:'slow-answer',item_id:'slow-item',delta:int16ToBase64(speech())});
+  assert.equal(events.find(e=>e.type==='metric').duration_ms,16250);
+});
+
+test('confirmation tool waits for the exact attributed utterance transcript',async()=>{
+  const {host,events,dispatch,advance,connection,streams}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  host.say('SISTEMI: Faza GA');
+  host._onRealtime({type:'response.done',response:{id:'opening',status:'completed'}});
+  connection.receiver.speaking.emit('start','11');
+  streams.get('11').emit('data',toDiscord(new Int16Array(2400).fill(2000)).pcm);
+  advance(100);
+  host._onRealtime({type:'input_audio_buffer.speech_started',audio_start_ms:0,item_id:'yes'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',audio_end_ms:100,item_id:'yes'});
+  host._onRealtime({type:'response.created',response:{id:'r-confirm'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'r-confirm',item:{type:'function_call',name:'create_task_from_note',call_id:'confirm',arguments:'{}'}});
+  assert.equal(events.filter(e=>e.type==='tool_call').length,0);
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'yes',transcript:'Po, krijoje.'});
+  const tool=events.find(e=>e.type==='tool_call');
+  assert.equal(tool.speaker_id,'11');assert.equal(tool.speech_id,'yes');assert.equal(tool.speech_text,'Po, krijoje.');
+  assert.ok(tool.speech_started_at);
+  host.stop();
+});
+
+test('a slow Realtime handshake retains the opening instruction',()=>{
+  const {host,sent,socket}=fakes({realtimeReady:false});
+  socket.readyState=0;
+  host.say('SISTEMI: fillo takimin');
+  assert.equal(sent.length,0);
+  socket.readyState=1;
+  host._onRealtime({type:'session.created'});
+  assert.equal(sent.filter(m=>m.type==='conversation.item.create').length,1);
+  assert.equal(sent.filter(m=>m.type==='response.create').length,1);
+});
+
+test('mixed voices cannot be attributed as a trusted confirmation',()=>{
+  const mixer=new Mixer(),timeline=new SpeakerTimeline();
+  mixer.push('11',new Int16Array(240).fill(2000));
+  mixer.push('22',new Int16Array(240).fill(1900));
+  mixer.pull(240);timeline.add(10,mixer.lastEnergy);
+  assert.equal(timeline.speaker(0,10),null);
+  mixer.push('11',new Int16Array(240).fill(2000));
+  mixer.pull(240);timeline.add(10,mixer.lastEnergy);
+  assert.equal(timeline.speaker(10,20),'11');
+});
+
+for(const status of ['completed','cancelled','wrong_text','dispatch_failed'])test(`progress is acknowledged only after ${status} audio drains`,async()=>{
+  const {host,events,dispatch,advance,connection}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});
+  await Promise.resolve();
+  host._onRealtime({type:'response.created',response:{id:'lookup'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'lookup',item:{type:'function_call',name:'list_new_done_and_strikes',call_id:'progress',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'lookup',status:'completed'}});
+  host.toolResult('progress',{progress_token:'batch-1',read_aloud:'EF: e kreu ofertën.',sipas_personave:[{person:'EF',done:['Oferta']} ]});
+  host._onRealtime({type:'response.created',response:{id:'spoken'}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'spoken',item_id:'audio',delta:int16ToBase64(new Int16Array(480))});
+  host._onRealtime({type:'response.output_audio_transcript.done',response_id:'spoken',transcript:status==='wrong_text'?'Fillojmë me stafin.':'EF: e kreu ofertën.'});
+  host._onRealtime({type:'response.done',response:{id:'spoken',status:status==='cancelled'?'cancelled':'completed'}});
+  assert.equal(events.filter(e=>e.type==='progress_played').length,0);
+  if(status==='dispatch_failed')connection.dispatchAudio=()=>false;
+  advance(40);
+  assert.equal(events.filter(e=>e.type==='progress_played').length,status==='completed'?1:0);
+  advance(40);
+  assert.equal(events.filter(e=>e.type==='progress_played').length,status==='completed'?1:0);
+  host.stop();
+});
+
+test('ready requires both the Discord voice and Realtime handshakes',async()=>{
+  const {host,events,dispatch}=fakes({realtimeReady:false,voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});
+  await Promise.resolve();
+  assert.equal(events.some(e=>e.type==='ready'),false);
+  host._onRealtime({type:'session.created'});
+  assert.equal(events.filter(e=>e.type==='ready').length,1);
+  host.stop();
+});
 
 function speaking(host){
   host._onRealtime({type:'response.created',response:{id:'r1'}});

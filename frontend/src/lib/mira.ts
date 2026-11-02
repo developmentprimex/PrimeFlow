@@ -22,7 +22,7 @@ export type Turn = {
   user_id: string
   name: string
   initials: string
-  status: "WAITING" | "ACTIVE" | "DONE" | "SKIPPED"
+  status: "WAITING" | "ACTIVE" | "DONE" | "SKIPPED" | "DEFERRED" | "TIMEOUT"
   order: number
   invited_at: string | null
   started_at: string | null
@@ -128,6 +128,9 @@ export type KnowledgeItem = {
 export type GaParticipant = { name: string; fallback?: string | null }
 
 export type HostStatus = {
+  model?: string
+  voice?: string
+  prompt_version?: string
   enabled: boolean
   enabled_until: string | null
   ga_participants: GaParticipant[]
