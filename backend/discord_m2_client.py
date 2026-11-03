@@ -62,6 +62,12 @@ def prompt(job):
 
 def controls(job):
     view = discord.ui.View(timeout=None)
+    def finish():
+        blocked = job.get('platform_status') in {'Detyra nuk është më aktive në PrimeFlow.',
+            'Përgjegjësit e detyrës ndryshuan në PrimeFlow.'}
+        if not blocked:
+            view.add_item(discord.ui.Button(label='Koment', custom_id=f"pf:m2:note:{job['id']}"))
+        return view
     open_task = discord.ui.Button(label='Hap detyrën', custom_id=f"pf:m2:open:{job['id']}")
     if job.get('platform_status') and not job.get('task_actionable'):
         if job['kind'] == 'unfinished' and job['platform_status'] == 'Detyra u përfundua në PrimeFlow.':
@@ -69,9 +75,9 @@ def controls(job):
                 custom_id=f"pf:m2:done:{job['id']}", disabled=True, row=0))
             open_task.row = 0
             view.add_item(open_task)
-            return view
+            return finish()
         view.add_item(open_task)
-        return view
+        return finish()
     if job['kind'] == 'unfinished':
         open_task.label = 'Hape'
         view.add_item(open_task)
@@ -82,16 +88,13 @@ def controls(job):
             custom_id=f"pf:m2a:request:{job['id']}", disabled=pending))
         view.add_item(discord.ui.Button(label='Vazhdon në PM', style=discord.ButtonStyle.primary,
             custom_id=f"pf:m2:continue:{job['id']}", disabled=job.get('continuation', {}).get('choice') == 'PO'))
-        return view
+        return finish()
     if job['kind'] == 'continuation' and job.get('postponement', {}).get('status') == 'APPROVED':
         view.add_item(open_task)
-        return view
+        return finish()
     if job['kind'] in {'delivery', 'continuation'}:
         view.add_item(discord.ui.Button(label='Po, vazhdon' if job['kind'] == 'continuation' else 'Po, e dorëzova', style=discord.ButtonStyle.success,
             custom_id=f"pf:m2:reply:{job['id']}:PO"))
-        if job.get('choice') == 'PO':
-            view.add_item(discord.ui.Button(label='Ndrysho komentin' if job.get('comment') else 'Shto koment (opsional)',
-                style=discord.ButtonStyle.secondary, custom_id=f"pf:m2:comment:{job['id']}"))
         view.add_item(discord.ui.Button(label='Jo — shëno pse', style=discord.ButtonStyle.secondary,
             custom_id=f"pf:m2:reply:{job['id']}:JO"))
         if job['kind'] == 'continuation':
@@ -103,7 +106,7 @@ def controls(job):
             custom_id=f"pf:m2:reason:{job['id']}",
             options=[discord.SelectOption(label=reason['label'][:100], value=reason['value']) for reason in job['reasons']]))
     view.add_item(open_task)
-    return view
+    return finish()
 
 
 def report_content(job, message):
@@ -134,6 +137,23 @@ async def save_reply(bot, interaction, job, *, reason=None, comment='', choice=N
         logging.getLogger(__name__).warning('M2 answer saved, message refresh failed: %s', job['id'])
         await interaction.followup.send('U ruajt në PrimeFlow, por pyetja nuk u rifreskua. Provo përsëri.', ephemeral=True)
     return latest
+
+
+class CommentOnlyModal(discord.ui.Modal):
+    def __init__(self, bot, job):
+        super().__init__(title='Shto koment · M2', timeout=900)
+        self.bot, self.job = bot, job
+        self.comment = discord.ui.TextInput(label='Komenti', style=discord.TextStyle.paragraph,
+            required=True, max_length=4000)
+        self.add_item(self.comment)
+
+    async def on_submit(self, interaction):
+        await interaction.response.defer()
+        try:
+            await self.bot.bridge(f"/bot/m2/{self.job['id']}/comment", {**actor(interaction),
+                'comment': str(self.comment), 'request_id': str(interaction.id)})
+        except Exception as exc:
+            await interaction.followup.send(self.bot.error_message(exc), ephemeral=True)
 
 
 class ReplyModal(discord.ui.Modal):
@@ -168,6 +188,9 @@ async def handle(bot, interaction):
         job = await load()
     else:
         job, deferred = await prepare_modal(interaction, load)
+    if parts[2] == 'note':
+        await open_modal(interaction, CommentOnlyModal(bot, job), deferred=deferred)
+        return
     if parts[2] in {'done', 'continue'}:
         if job['kind'] != 'unfinished':
             raise ValueError('Ky veprim vlen vetëm për detyrën AM të pambyllur.')

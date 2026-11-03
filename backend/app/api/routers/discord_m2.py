@@ -238,6 +238,45 @@ class Answer(Actor):
     expected_answered_at: datetime | None = None
 
 
+class Comment(Actor):
+    comment: str = Field(min_length=1, max_length=4000)
+    request_id: str = Field(pattern=r'^\d{1,32}$')
+
+
+@router.post('/{question_id}/comment')
+async def add_comment(question_id: uuid.UUID, payload: Comment, db: AsyncSession = Depends(get_db)):
+    question, _, user = await own_question(db, question_id, payload)
+    comment = payload.comment.strip()
+    if not comment:
+        raise HTTPException(422, 'Shkruaj komentin.')
+    report = await reports.locked_report(db, question.day)
+    duplicate = (await db.execute(select(AuditLog.id).where(AuditLog.entity_type == 'task',
+        AuditLog.entity_id == question.task_id, AuditLog.actor_user_id == user.id,
+        AuditLog.action == 'task.discord_m2_comment', AuditLog.after['request_id'].astext == payload.request_id))).first()
+    if duplicate:
+        return {'ok': True}
+    body = f'M2 {question.day:%d.%m.%Y} — Koment\n{comment}'
+    existing = (await db.execute(select(TaskUserComment).where(TaskUserComment.task_id == question.task_id,
+        TaskUserComment.user_id == user.id).with_for_update())).scalar_one_or_none()
+    if existing:
+        existing.comment = '\n\n'.join(part for part in (existing.comment, body) if part)
+    else:
+        db.add(TaskUserComment(task_id=question.task_id, user_id=user.id, comment=body))
+    prefix = {'unfinished': 'unfinished_comment', 'progress': 'progress_comment',
+        'postponed': 'postponed_comment', 'delivery': 'delivery', 'continuation': 'pm_comment'}[question.kind]
+    key = f'{prefix}:{question.task_id}'
+    answers = dict(report.manual_answers or {})
+    answers[key] = '\n'.join(part for part in (answers.get(key, ''), f'{user.full_name or user.username}: {comment}') if part)
+    report.manual_answers, report.updated_by = answers, user.id
+    report.status, report.last_error = 'DRAFT', None
+    add_audit_log(db=db, actor_user_id=user.id, entity_type='task', entity_id=question.task_id,
+        action='task.discord_m2_comment', after={'question_id': str(question.id), 'request_id': payload.request_id,
+            'day': question.day.isoformat(), 'kind': question.kind, 'comment': comment})
+    # This is a note, not an answer: preserve choice, reason and answered_at.
+    await db.commit()
+    return {'ok': True}
+
+
 async def update_report_answers(db, report, question):
     pairs = (await db.execute(select(Question, User).join(DiscordLink, DiscordLink.id == Question.link_id)
         .join(User, User.id == DiscordLink.user_id).where(Question.day == question.day,
@@ -247,6 +286,13 @@ async def update_report_answers(db, report, question):
     answers = dict(report.manual_answers or {})
     comment = '\n'.join(f'{user.full_name or user.username}: {q.comment or "Dorëzuar"}' for q, user in pairs)
     if question.kind != 'postponed':
+        # Standalone notes survive a later Po/Jo answer on the same question.
+        notes = (await db.execute(select(AuditLog, User).join(User, User.id == AuditLog.actor_user_id).where(
+            AuditLog.entity_type == 'task', AuditLog.entity_id == question.task_id,
+            AuditLog.action == 'task.discord_m2_comment', AuditLog.after['day'].astext == question.day.isoformat(),
+            AuditLog.after['kind'].astext == question.kind).order_by(AuditLog.created_at, AuditLog.id))).all()
+        comment = '\n'.join(part for part in (comment, *[
+            f"{person.full_name or person.username}: {note.after['comment']}" for note, person in notes]) if part)
         prefix = {'unfinished': 'unfinished_comment', 'progress': 'progress_comment', 'delivery': 'delivery', 'continuation': 'pm_comment'}[question.kind]
         answers[f'{prefix}:{question.task_id}'] = comment
     if question.kind == 'continuation':

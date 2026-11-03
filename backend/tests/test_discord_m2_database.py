@@ -106,6 +106,46 @@ class M2DatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             return await api.answer(uuid.UUID(qid), api.Answer(**self.actor.model_dump(), **fields), db)
 
+    async def test_delivery_comment_does_not_confirm_delivery_and_survives_yes(self):
+        self.data = {'delivery': [{'task_id': str(self.task_id), 'title': 'System task', 'status': 'TODO'}]}
+        qid = uuid.UUID((await self.claim())[0]['id'])
+        async with self.sessions() as db:
+            await api.add_comment(qid, api.Comment(**self.actor.model_dump(), comment='Koment për sistemoren', request_id='98765'), db)
+            question = await db.get(Question, qid)
+            self.assertIsNone(question.choice)
+            self.assertIsNone(question.answered_at)
+            report = (await db.execute(select(M2ReportingPointsReport))).scalar_one()
+            self.assertNotIn(f'delivery_choice:{self.task_id}', report.manual_answers)
+        await self.reply(str(qid), choice='PO')
+        async with self.sessions() as db:
+            report = (await db.execute(select(M2ReportingPointsReport))).scalar_one()
+            self.assertIn('Koment për sistemoren', report.manual_answers[f'delivery:{self.task_id}'])
+            self.assertEqual(report.manual_answers[f'delivery_choice:{self.task_id}'], 'PO')
+
+    async def test_standalone_comment_saves_once_without_answering_or_changing_task(self):
+        qid = uuid.UUID((await self.claim())[0]['id'])
+        value = api.Comment(**self.actor.model_dump(), comment='Koment për AM', request_id='12345')
+        async with self.sessions() as db:
+            task = await db.get(Task, self.task_id)
+            before = (task.status, task.finish_period, task.start_date, task.due_date)
+            await api.add_comment(qid, value, db)
+            await api.add_comment(qid, value, db)
+            question = await db.get(Question, qid)
+            self.assertIsNone(question.choice)
+            self.assertIsNone(question.answered_at)
+            self.assertIsNone(question.reason_code)
+            self.assertEqual((task.status, task.finish_period, task.start_date, task.due_date), before)
+            personal = (await db.execute(select(TaskUserComment))).scalar_one().comment
+            self.assertIn('Existing task comment', personal)
+            self.assertEqual(personal.count('Koment për AM'), 1)
+            report = (await db.execute(select(M2ReportingPointsReport))).scalar_one()
+            self.assertEqual(report.manual_answers[f'unfinished_comment:{self.task_id}'].count('Koment për AM'), 1)
+        await self.reply(str(qid), reason_code='OTHER', comment='Përgjigjja tjetër')
+        async with self.sessions() as db:
+            report = (await db.execute(select(M2ReportingPointsReport))).scalar_one()
+            self.assertIn('Koment për AM', report.manual_answers[f'unfinished_comment:{self.task_id}'])
+            self.assertIn('Përgjigjja tjetër', report.manual_answers[f'unfinished_comment:{self.task_id}'])
+
     async def test_unfinished_continues_in_pm_once_and_keeps_task_planning(self):
         qid = (await self.claim())[0]['id']
         async with self.sessions() as db:

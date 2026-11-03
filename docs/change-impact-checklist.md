@@ -72,6 +72,8 @@ konfirmohen në kod për ndryshimin konkret.
   detyrë/person/ditë. Vazhdimi AM→PM nuk ndryshon periudhën apo datat e taskut;
   ruhet në pyetjen PM dhe shfaqet edhe në M2 PIKAT/email/eksport. Mbyllja kalon
   përmes komandës normale të taskut; shtyrja përmes konfirmimit të Diellzës.
+  Butoni i veçantë Koment ruan shënimin te komenti personal dhe te fusha M2,
+  pa plotësuar Po/Jo, arsye apo datën e përgjigjes; ruhet edhe pas përgjigjes së mëvonshme.
 - Common View dhe SHTYPI përdorin burim të përbashkët të dhënash, por kanë
   paraqitje të veçanta. Një ndryshim në JSX/CSS të Common View nuk ndryshon
   automatikisht HTML-in, emailin apo bashkëngjitjet e SHTYPI.
