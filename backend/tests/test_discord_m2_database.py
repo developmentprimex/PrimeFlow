@@ -106,6 +106,65 @@ class M2DatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             return await api.answer(uuid.UUID(qid), api.Answer(**self.actor.model_dump(), **fields), db)
 
+    async def test_unfinished_continues_in_pm_once_and_keeps_task_planning(self):
+        qid = (await self.claim())[0]['id']
+        async with self.sessions() as db:
+            task = await db.get(Task, self.task_id)
+            before = (task.status, task.finish_period, task.start_date, task.due_date)
+            result = await api.continue_unfinished(uuid.UUID(qid), self.actor, db)
+            self.assertEqual(result['continuation']['choice'], 'PO')
+            related_id = result['continuation']['id']
+            self.assertIsNone(result['continuation']['message_id'])
+        async with self.sessions() as db:
+            repeated = await api.continue_unfinished(uuid.UUID(qid), self.actor, db)
+            self.assertEqual(repeated['continuation']['id'], related_id)
+            task = await db.get(Task, self.task_id)
+            self.assertEqual((task.status, task.finish_period, task.start_date, task.due_date), before)
+            self.assertEqual((await db.execute(select(func.count()).select_from(Question))).scalar_one(), 2)
+            comment = (await db.execute(select(TaskUserComment))).scalar_one().comment
+            self.assertEqual(comment.count('Vazhdon në PM: PO'), 1)
+            report = (await db.execute(select(M2ReportingPointsReport))).scalar_one()
+            self.assertEqual(report.manual_answers[f'pm_choice:{self.task_id}'], 'PO')
+            self.assertEqual([row['task_id'] for row in report.data['pm_continuation']], [str(self.task_id)])
+            # The report/email builder keeps the explicit AM choice, but never duplicates it.
+            data = await api.reports.with_am_continuations(db, copy.deepcopy(self.data), self.day)
+            await api.reports.with_am_continuations(db, data, self.day)
+            self.assertEqual(len(data['pm_continuation']), 1)
+
+    async def test_unfinished_continue_reuses_the_existing_pm_question(self):
+        row = self.data['unfinished_priority'][0]
+        self.data['pm_continuation'] = [row]
+        jobs = await self.claim()
+        source = next(job for job in jobs if job['kind'] == 'unfinished')
+        related = next(job for job in jobs if job['kind'] == 'continuation')
+        async with self.sessions() as db:
+            q = await db.get(Question, uuid.UUID(related['id']))
+            q.message_id = '999'
+            await db.commit()
+            result = await api.continue_unfinished(uuid.UUID(source['id']), self.actor, db)
+            self.assertEqual(result['continuation']['id'], related['id'])
+            self.assertEqual(result['continuation']['message_id'], '999')
+            self.assertEqual(result['continuation']['choice'], 'PO')
+
+    async def test_unfinished_continue_rejects_other_people_and_closed_tasks(self):
+        qid = uuid.UUID((await self.claim())[0]['id'])
+        other = api.Actor(discord_user_id='44', guild_id='22', channel_id='55')
+        async with self.sessions() as db:
+            with self.assertRaises(HTTPException) as error:
+                await api.continue_unfinished(qid, other, db)
+            self.assertEqual(error.exception.status_code, 403)
+        async with self.sessions() as db:
+            # Prepare an already-closed fixture; exercise the action's guard,
+            # not unrelated ORM completion hooks in this minimal schema.
+            await db.execute(text('UPDATE tasks SET status = :status WHERE id = :id'),
+                {'status': 'DONE', 'id': self.task_id})
+            await db.commit()
+            with self.assertRaises(HTTPException) as error:
+                await api.continue_unfinished(qid, self.actor, db)
+            self.assertEqual(error.exception.status_code, 409)
+            await db.rollback()
+            self.assertEqual((await db.execute(select(func.count()).select_from(Question))).scalar_one(), 1)
+
     async def test_claim_is_durable_and_concurrent_replies_append_once(self):
         jobs = await self.claim()
         self.assertEqual(len(jobs), 1)

@@ -1,5 +1,6 @@
 """M2 schedule, classification, validation, and Discord reply controls."""
 import asyncio
+import json
 import importlib.util
 import os
 import unittest
@@ -110,6 +111,38 @@ class M2RulesTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec('discord'), 'discord.py is optional')
 class M2DiscordTests(unittest.TestCase):
+    def test_unfinished_actions_save_without_new_messages(self):
+        import discord_m2_client as client
+        async def check():
+            job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': 'unfinished',
+                   'discord_user_id': '3', 'snapshot': {'title': 'AM task'}, 'reasons': []}
+            for action in ('done', 'continue'):
+                latest = ({**job, 'platform_status': 'Detyra u përfundua në PrimeFlow.'} if action == 'done'
+                          else {**job, 'continuation': {'answered': True, 'choice': 'PO'}})
+                interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3),
+                    data={'custom_id': f"pf:m2:{action}:{job['id']}"},
+                    response=SimpleNamespace(defer=AsyncMock()),
+                    message=SimpleNamespace(id=99, edit=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
+                bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(side_effect=[job, latest]),
+                    current_detail=AsyncMock(return_value={'fingerprint': 'current'}),
+                    apply=AsyncMock(return_value={'status': 'DONE'}))
+                await client.handle(bot, interaction)
+                interaction.response.defer.assert_awaited_once_with()
+                interaction.message.edit.assert_awaited_once()
+                interaction.followup.send.assert_not_awaited()
+                if action == 'done':
+                    self.assertEqual(bot.apply.call_args.args[3][0]['tool'], 'update_task')
+                    self.assertEqual(json.loads(bot.apply.call_args.args[3][0]['arguments_json']), {'status': 'DONE'})
+                    closed = interaction.message.edit.call_args.kwargs['view'].children
+                    self.assertEqual([button.label for button in closed], ['Mbyllur', 'Hap detyrën'])
+                    self.assertTrue(closed[0].disabled)
+                    self.assertEqual({button.row for button in closed}, {0})
+                else:
+                    self.assertTrue(bot.bridge.call_args.args[0].endswith('/continue-pm'))
+                    self.assertIn('✅ **Vazhdon në PM**', interaction.message.edit.call_args.kwargs['content'])
+                    bot.apply.assert_not_awaited()
+        asyncio.run(check())
+
     def test_yes_saves_without_opening_optional_comment(self):
         import discord_m2_client as client
         async def check():
@@ -194,12 +227,16 @@ class M2DiscordTests(unittest.TestCase):
                                     'start_date': '2026-10-27', 'old_due_date': '2026-10-26', 'due_date': '2026-10-28'},
                        'reasons': [{'value': code, 'label': label} for code, label in service.REASON_LABELS.items()]}
                 view = client.controls(job)
-                self.assertEqual(view.children[-2].custom_id, f"pf:m2:open:{job['id']}")
-                self.assertIsNone(view.children[-2].url)
-                self.assertEqual(view.children[-1].custom_id, 'pf:reports:m2:0')
+                opened = next(item for item in view.children if item.custom_id == f"pf:m2:open:{job['id']}")
+                self.assertIsNone(opened.url)
+                self.assertNotIn('pf:reports:m2:0', [item.custom_id for item in view.children])
                 self.assertTrue(view.is_persistent())
                 if kind in {'delivery', 'continuation'}:
-                    self.assertEqual(len(view.children), 5 if kind == 'continuation' else 4)
+                    self.assertEqual(len(view.children), 4 if kind == 'continuation' else 3)
+                elif kind == 'unfinished':
+                    self.assertEqual([item.label for item in view.children],
+                        ['Hape', 'Mbylle', 'Shtyje', 'Vazhdon në PM'])
+                    self.assertIn('A vazhdon me këtë detyrë në PM?', client.prompt(job))
                 else:
                     self.assertEqual({option.value for option in view.children[0].options}, set(service.REASON_LABELS))
                 if kind == 'postponed':
@@ -213,7 +250,7 @@ class M2DiscordTests(unittest.TestCase):
             job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': 'continuation'}
             for state in ({'platform_status': 'Saved'}, {'postponement': {'status': 'APPROVED'}}):
                 view = client.controls(job | state)
-                self.assertEqual(len(view.children), 2)
+                self.assertEqual(len(view.children), 1)
                 self.assertEqual(view.children[0].custom_id, f"pf:m2:open:{job['id']}")
                 self.assertIsNone(view.children[0].url)
         asyncio.run(check())

@@ -73,7 +73,7 @@ class Proposal(Actor):
 @router.post('/questions/{question_id}')
 async def propose(question_id: uuid.UUID, value: Proposal, db: AsyncSession = Depends(get_db)):
     question, link, user = await own_question(db, question_id, value)
-    if question.kind != 'continuation':
+    if question.kind not in {'continuation', 'unfinished'}:
         raise HTTPException(422, 'Kërkesa duhet të bëhet nga pyetja e detyrës PM.')
     return await create_proposal(db, value, link, user, question.task_id, question)
 
@@ -117,8 +117,14 @@ async def create_proposal(db, value, link, user, task_id, question=None, *, comm
                                           for field in ('start_date', 'due_date')):
         raise HTTPException(409, 'Datat ndryshuan ndërkohë. Hape përsëri formularin.')
     from app.services.m2_reporting_points import select_task_sections
-    if question and not select_task_sections([task], [], question.day)['pm_continuation']:
-        raise HTTPException(409, 'Detyra nuk është më në planin PM të sotëm.')
+    if question:
+        if question.kind == 'unfinished':
+            from app.api.routers.discord_m2 import data_with_moves
+            data = await data_with_moves(db, question.day)
+            if not any(row['task_id'] == str(task_id) for row in data.get('unfinished_priority', [])):
+                raise HTTPException(409, 'Detyra nuk është më në listën AM të pambyllur.')
+        elif not select_task_sections([task], [], question.day)['pm_continuation']:
+            raise HTTPException(409, 'Detyra nuk është më në planin PM të sotëm.')
     approver, _ = await reviewer(db, link.guild_id)
     dates = {field: getattr(value, field) for field in ('start_date', 'due_date') if field in value.model_fields_set}
     proposed = rules.proposed_dates(task, value.change_kind, dates, value.reason_code, value.comment)

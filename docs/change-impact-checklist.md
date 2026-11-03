@@ -68,6 +68,10 @@ konfirmohen në kod për ndryshimin konkret.
 - Taskat përdoren edhe nga M1/M2/M3 dhe PIKAT PËR RAP. Mos i përjashto këto
   vetëm sepse ndryshimi fillon në My View ose Common View. Përfshirja e taskut
   varet nga kategoria, data, personi dhe filtrat e raportit.
+- M2 në Discord lidh kartën AM të pambyllur me përgjigjen PM për të njëjtën
+  detyrë/person/ditë. Vazhdimi AM→PM nuk ndryshon periudhën apo datat e taskut;
+  ruhet në pyetjen PM dhe shfaqet edhe në M2 PIKAT/email/eksport. Mbyllja kalon
+  përmes komandës normale të taskut; shtyrja përmes konfirmimit të Diellzës.
 - Common View dhe SHTYPI përdorin burim të përbashkët të dhënash, por kanë
   paraqitje të veçanta. Një ndryshim në JSX/CSS të Common View nuk ndryshon
   automatikisht HTML-in, emailin apo bashkëngjitjet e SHTYPI.

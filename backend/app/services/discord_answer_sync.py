@@ -57,6 +57,7 @@ async def m2_payload(db, question, link):
     result = question_payload(question, link)
     task = await db.get(Task, question.task_id)
     status = ''
+    actionable = False
     if not task or not task.is_active:
         status = 'Detyra nuk është më aktive në PrimeFlow.'
     else:
@@ -67,6 +68,7 @@ async def m2_payload(db, question, link):
         elif str(getattr(task.status, 'value', task.status)) == 'DONE':
             status = 'Detyra u përfundua në PrimeFlow.'
         elif question.kind in {'unfinished', 'progress', 'postponed'}:
+            actionable = question.kind == 'unfinished'
             state = (await db.execute(select(TaskDailyRlzState).where(TaskDailyRlzState.task_id == task.id,
                 TaskDailyRlzState.user_id == link.user_id, TaskDailyRlzState.day_date == question.day))).scalar_one_or_none()
             stamp = max(value for value in (question.sent_at, question.answered_at) if value) if question.sent_at else question.answered_at
@@ -78,7 +80,14 @@ async def m2_payload(db, question, link):
                 status = 'Datat ndryshuan në PrimeFlow; kjo pyetje nuk është më aktive.'
     if status:
         result['platform_status'] = status
-    if question.kind == 'continuation':
+    if question.kind == 'unfinished':
+        result['task_actionable'] = actionable
+        related = (await db.execute(select(DiscordM2Question).where(
+            DiscordM2Question.link_id == question.link_id, DiscordM2Question.day == question.day,
+            DiscordM2Question.task_id == question.task_id, DiscordM2Question.kind == 'continuation'))).scalar_one_or_none()
+        if related:
+            result['continuation'] = question_payload(related, link)
+    if question.kind in {'continuation', 'unfinished'}:
         request = (await db.execute(select(DiscordM2Postponement).where(DiscordM2Postponement.question_id == question.id)
             .order_by(DiscordM2Postponement.created_at.desc()).limit(1))).scalar_one_or_none()
         if request:
@@ -104,7 +113,8 @@ async def make_job(db, kind, source, link):
     payload = await m2_payload(db, source, link) if kind == 'm2' else await meeting_payload(db, source, link)
     if payload is None:
         return None
-    changed_on_platform = bool(payload.get('platform_status')) if kind == 'm2' else bool(payload.get('status'))
+    changed_on_platform = bool(payload.get('platform_status') or payload.get('continuation') or payload.get('postponement')
+        or payload.get('kind') == 'unfinished') if kind == 'm2' else bool(payload.get('status'))
     # Leave unanswered task cards/wizards alone until a platform change matters.
     if not changed_on_platform and not source.sync_hash:
         return None

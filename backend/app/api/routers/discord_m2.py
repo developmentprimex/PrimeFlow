@@ -189,6 +189,36 @@ async def open_question(question_id: uuid.UUID, actor: Actor, db: AsyncSession =
     return result
 
 
+@router.post('/{question_id}/continue-pm')
+async def continue_unfinished(question_id: uuid.UUID, actor: Actor, db: AsyncSession = Depends(get_db)):
+    source, link, _ = await own_question(db, question_id, actor)
+    if source.kind != 'unfinished':
+        raise HTTPException(422, 'Ky veprim vlen vetëm për detyrën AM të pambyllur.')
+    # Lock order matches ordinary M2 answers; no task fields are changed here.
+    await reports.locked_report(db, source.day)
+    data = await data_with_moves(db, source.day)
+    current = next((row for row in data.get('unfinished_priority', [])
+                    if row['task_id'] == str(source.task_id)), None)
+    if current is None:
+        raise HTTPException(409, 'Detyra nuk është më në listën AM të pambyllur.')
+    key = service.context_key('continuation', current)
+    question = (await db.execute(select(Question).where(Question.link_id == link.id,
+        Question.day == source.day, Question.kind == 'continuation', Question.context_key == key))).scalar_one_or_none()
+    if question is None:
+        question = Question(link_id=link.id, task_id=source.task_id, day=source.day,
+            kind='continuation', context_key=key, snapshot={**current, 'continued_from_am': True},
+            lease_until=datetime.now(timezone.utc))
+        db.add(question)
+        await db.flush()
+    elif not reports.select_task_sections([await db.get(Task, source.task_id)], [], source.day)['pm_continuation']:
+        question.snapshot = {**question.snapshot, 'continued_from_am': True}
+    effective = question_payload(question, link)
+    await answer(question.id, Answer(**actor.model_dump(), choice='PO',
+        comment=effective.get('comment', '') if effective.get('choice') == 'PO' else '',
+        expected_answered_at=effective.get('answered_at')), db)
+    return await open_question(source.id, actor, db)
+
+
 class Receipt(Actor):
     message_id: str = Field(pattern=r'^\d{1,32}$')
 
@@ -238,7 +268,7 @@ async def update_report_answers(db, report, question):
 
 @router.post('/{question_id}/answer')
 async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Depends(get_db)):
-    question, _, user = await own_question(db, question_id, payload)
+    question, link, user = await own_question(db, question_id, payload)
     task = await task_owned(db, user.id, question.task_id)
     if question.kind != 'delivery' and str(getattr(task.status, 'value', task.status)) == 'DONE':
         raise HTTPException(409, 'Detyra është përfunduar ndërkohë.')
@@ -268,6 +298,14 @@ async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Dep
         section = 'delivery' if question.kind == 'delivery' else 'pm_continuation'
         current = next(iter(reports.select_task_sections([task], [], question.day)[section]), None)
         data = dict(report.data or {})
+        if current is None and question.kind == 'continuation' and question.snapshot.get('continued_from_am'):
+            data = await data_with_moves(db, question.day)
+            source = (await db.execute(select(Question.id).where(Question.link_id == link.id,
+                Question.day == question.day, Question.task_id == question.task_id,
+                Question.kind == 'unfinished'))).first()
+            if source:
+                current = next((row for row in data.get('unfinished_priority', [])
+                                if row['task_id'] == str(question.task_id)), None)
     else:
         data = await data_with_moves(db, question.day)
         current = next((row for kind, row in service.question_rows(data)
@@ -295,8 +333,10 @@ async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Dep
     else:
         db.add(TaskUserComment(task_id=question.task_id, user_id=user.id, comment=body))
     await db.flush()
-    if question.kind not in {'delivery', 'continuation'}:
+    if question.kind not in {'delivery', 'continuation'} or question.snapshot.get('continued_from_am'):
         data = await data_with_moves(db, question.day)
+        if question.snapshot.get('continued_from_am'):
+            data = await reports.with_am_continuations(db, data, question.day)
         report.data, report.generated_at = data, datetime.now(timezone.utc)
     report.updated_by = user.id
     report.status, report.last_error = 'DRAFT', None
