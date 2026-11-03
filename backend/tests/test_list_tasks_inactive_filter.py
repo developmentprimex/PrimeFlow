@@ -1,4 +1,6 @@
 import unittest
+import uuid
+from types import SimpleNamespace
 
 from app.api.routers.tasks import list_tasks
 
@@ -25,7 +27,7 @@ class FakeAsyncSession:
 class TestListTasksInactiveFilter(unittest.IsolatedAsyncioTestCase):
     async def test_default_filters_inactive(self) -> None:
         db = FakeAsyncSession()
-        await list_tasks(db=db, user=object())
+        await list_tasks(db=db, user=SimpleNamespace(id=uuid.uuid4()), ga_note_origin_ids=None, plan_note_origin_ids=None)
         self.assertTrue(db.executed, "Expected at least one statement to be executed")
         where = getattr(db.executed[0], "whereclause", None)
         self.assertIsNotNone(where, "Expected a WHERE clause when include_inactive is default/False")
@@ -33,10 +35,11 @@ class TestListTasksInactiveFilter(unittest.IsolatedAsyncioTestCase):
 
     async def test_include_inactive_true_skips_filter(self) -> None:
         db = FakeAsyncSession()
-        await list_tasks(db=db, user=object(), include_inactive=True)
+        await list_tasks(db=db, user=SimpleNamespace(id=uuid.uuid4()), include_inactive=True, ga_note_origin_ids=None, plan_note_origin_ids=None)
         self.assertTrue(db.executed, "Expected at least one statement to be executed")
         where = getattr(db.executed[0], "whereclause", None)
-        self.assertIsNone(where, "Expected no WHERE clause when include_inactive=True and no other filters")
+        self.assertNotIn("tasks.is_active", str(where))
+        self.assertIn("departments", str(where), "Household staff exclusion also applies to inactive tasks")
 
 
 if __name__ == "__main__":

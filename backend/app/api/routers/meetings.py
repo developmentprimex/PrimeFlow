@@ -318,7 +318,7 @@ async def create_meeting(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Select at least one person for the meeting",
         )
-    users_stmt = select(User).where(User.id.in_(participant_ids))
+    users_stmt = select(User).where(User.work_staff_filter()).where(User.id.in_(participant_ids))
     existing_users = (await db.execute(users_stmt)).scalars().all()
     existing_user_ids = {u.id for u in existing_users}
     invalid_ids = set(participant_ids) - existing_user_ids

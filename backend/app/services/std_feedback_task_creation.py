@@ -184,7 +184,7 @@ async def create_ticket_task_bundle(
         raise ValueError("Select a project configured for STD tickets")
 
     users = (
-        await db.execute(select(User).where(User.id.in_(unique_assignee_ids), User.is_active.is_(True)))
+        await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(unique_assignee_ids), User.is_active.is_(True)))
     ).scalars().all()
     if len(users) != len(unique_assignee_ids):
         raise ValueError("One or more assigned users do not exist or are inactive")

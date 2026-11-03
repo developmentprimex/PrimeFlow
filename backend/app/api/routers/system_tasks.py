@@ -141,7 +141,7 @@ async def _validate_replacement_users(
         )
 
     replacement_users = (
-        await db.execute(select(User).where(User.id.in_(replacement_user_ids)))
+        await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(replacement_user_ids)))
     ).scalars().all()
     if len(replacement_users) != len(replacement_user_ids):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Replacement user not found")
@@ -155,7 +155,7 @@ async def _validate_replacement_users(
 async def _validate_alignment_user_ids(db: AsyncSession, user_ids: list[uuid.UUID]) -> list[uuid.UUID]:
     if not user_ids:
         return []
-    users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
     if len(users) != len(set(user_ids)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alignment user not found")
     for u in users:
@@ -173,7 +173,7 @@ async def _validate_slot_user_ids(
     if not slots:
         return
     expected = {slot.primary_user_id for slot in slots}
-    users = (await db.execute(select(User.id).where(User.id.in_(expected)))).scalars().all()
+    users = (await db.execute(select(User.id).where(User.work_staff_filter()).where(User.id.in_(expected)))).scalars().all()
     if len(set(users)) != len(expected):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee slot user not found")
 
@@ -185,7 +185,7 @@ async def _assignees_for_tasks(
         return {}
     rows = (
         await db.execute(
-            select(TaskAssignee.task_id, User)
+            select(TaskAssignee.task_id, User).where(User.work_staff_filter())
             .join(User, TaskAssignee.user_id == User.id)
             .where(TaskAssignee.task_id.in_(task_ids))
             .order_by(User.full_name)
@@ -456,13 +456,13 @@ async def _template_to_out(
     department_ids_set: set[uuid.UUID] = set()
     if template.assignee_ids:
         assignee_users = (
-            await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(template.assignee_ids)))
         ).scalars().all()
         assignees_list = [_user_to_assignee(user) for user in assignee_users]
         department_ids_set = {user.department_id for user in assignee_users if user.department_id is not None}
     elif template.default_assignee_id:
         assignee_user = (
-            await db.execute(select(User).where(User.id == template.default_assignee_id))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id == template.default_assignee_id))
         ).scalar_one_or_none()
         if assignee_user:
             assignees_list = [_user_to_assignee(assignee_user)]
@@ -521,7 +521,7 @@ async def _template_definition_to_out(
     slots = await _slots_for_template(db, template.id)
     assignee_ids = template.assignee_ids or ([template.default_assignee_id] if template.default_assignee_id else [])
     assignee_users = (
-        (await db.execute(select(User).where(User.id.in_(assignee_ids)))).scalars().all()
+        (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(assignee_ids)))).scalars().all()
         if assignee_ids
         else []
     )
@@ -651,7 +651,7 @@ async def _meeting_system_task_rows(
         return []
 
     stmt = (
-        select(Task)
+        select(Task).where(Task.work_staff_filter())
         .options(noload(Task.assignees))
         .where(Task.system_template_origin_id == template.id)
         .where(Task.meeting_system_task_kind == EXTERNAL_MEETING_TASK_KIND)
@@ -754,7 +754,7 @@ async def list_system_tasks(
     tasks: list[Task] = []
     if range_clauses:
         task_stmt = (
-            select(Task)
+            select(Task).where(Task.work_staff_filter())
             # Assignees are loaded explicitly below; disabling implicit relationship loading
             # avoids async lazy-loads that can raise MissingGreenlet in production.
             .options(noload(Task.assignees))
@@ -804,7 +804,7 @@ async def list_system_tasks(
             SQLDate,
         )
         overdue_stmt = (
-            select(Task, SystemTaskTemplate, overdue_local_date.label("task_date"))
+            select(Task, SystemTaskTemplate, overdue_local_date.label("task_date")).where(Task.work_staff_filter())
             .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
             .options(noload(Task.assignees))
             .where(Task.system_template_origin_id.in_(all_template_ids))
@@ -862,7 +862,7 @@ async def list_system_tasks(
     ]
     if fallback_ids:
         fallback_users = (
-            await db.execute(select(User).where(User.id.in_(fallback_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(fallback_ids)))
         ).scalars().all()
         fallback_map = {user.id: user for user in fallback_users}
         for task in filtered_tasks:
@@ -1049,7 +1049,7 @@ async def list_system_task_templates(
             assignee_user_ids.add(template.default_assignee_id)
 
     assignee_users = (
-        (await db.execute(select(User).where(User.id.in_(assignee_user_ids)))).scalars().all()
+        (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(assignee_user_ids)))).scalars().all()
         if assignee_user_ids
         else []
     )
@@ -1138,7 +1138,7 @@ async def set_system_task_occurrence_status(
     if tmpl is None:
         # Some clients might send a task ID instead of a template ID.
         task = (
-            await db.execute(select(Task).where(Task.id == payload.template_id))
+            await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.id == payload.template_id))
         ).scalar_one_or_none()
         if task and task.system_template_origin_id:
             tmpl = (
@@ -1167,7 +1167,7 @@ async def set_system_task_occurrence_status(
     task_local_date = cast(func.timezone(tmpl.timezone or settings.APP_TIMEZONE, Task.origin_run_at), SQLDate)
     task = (
         await db.execute(
-            select(Task)
+            select(Task).where(Task.work_staff_filter())
             .where(Task.system_template_origin_id == tmpl.id)
             .where(Task.assigned_to == user.id)
             .where(task_local_date == payload.occurrence_date)
@@ -1178,7 +1178,7 @@ async def set_system_task_occurrence_status(
         fallback_date = previous_occurrence_date(tmpl, payload.occurrence_date)
         task = (
             await db.execute(
-                select(Task)
+                select(Task).where(Task.work_staff_filter())
                 .where(Task.system_template_origin_id == tmpl.id)
                 .where(Task.assigned_to == user.id)
                 .where(task_local_date == fallback_date)
@@ -1282,7 +1282,7 @@ async def override_system_task_occurrence_date(
     task_local_date = cast(func.timezone(tmpl.timezone or settings.APP_TIMEZONE, Task.origin_run_at), SQLDate)
     task = (
         await db.execute(
-            select(Task)
+            select(Task).where(Task.work_staff_filter())
             .where(Task.system_template_origin_id == tmpl.id)
             .where(Task.assigned_to == user.id)
             .where(task_local_date == payload.source_occurrence_date)
@@ -1293,7 +1293,7 @@ async def override_system_task_occurrence_date(
     if task is None and user.role in (UserRole.ADMIN, UserRole.MANAGER):
         task = (
             await db.execute(
-                select(Task)
+                select(Task).where(Task.work_staff_filter())
                 .where(Task.system_template_origin_id == tmpl.id)
                 .where(task_local_date == payload.source_occurrence_date)
                 .order_by(Task.created_at.desc())
@@ -1357,7 +1357,7 @@ async def override_system_task_occurrence_date(
 
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        assigned_user = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [tmpl.id])
@@ -1438,7 +1438,7 @@ async def create_system_task_template(
     assignee_users: list[User] | None = None
     if assignee_ids is not None:
         assignee_users = (
-            await db.execute(select(User).where(User.id.in_(assignee_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(assignee_ids)))
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
@@ -1786,7 +1786,7 @@ async def update_system_task_template(
     assignee_users: list[User] | None = None
     if assignee_ids is not None:
         assignee_users = (
-            await db.execute(select(User).where(User.id.in_(assignee_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(assignee_ids)))
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")

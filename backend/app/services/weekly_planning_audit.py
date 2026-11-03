@@ -855,7 +855,7 @@ async def _planner_occurrences(
     task_ids = sorted({item["task_id"] for item in raw if item.get("task_id")}, key=str)
     task_map: dict[uuid.UUID, Task] = {}
     if task_ids:
-        tasks = (await db.execute(select(Task).where(Task.id.in_(task_ids)))).scalars().all()
+        tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.id.in_(task_ids)))).scalars().all()
         task_map = {task.id: task for task in tasks}
     project_ids = sorted({item["project_id"] for item in raw if item.get("project_id")}, key=str)
     project_map: dict[uuid.UUID, Project] = {}
@@ -1013,7 +1013,7 @@ async def build_weekly_planning_audit(
         generated = generated.replace(tzinfo=tz)
 
     users = (await db.execute(
-        select(User).where(User.is_active.is_(True)).order_by(User.full_name, User.id)
+        select(User).where(User.work_staff_filter()).where(User.is_active.is_(True)).order_by(User.full_name, User.id)
     )).scalars().all()
     excluded_accounts = settings.WEEKLY_PLANNING_AUDIT_EXCLUDED_ACCOUNTS.split(",")
     users = [user for user in users if is_reportable_person(user, excluded_accounts)]

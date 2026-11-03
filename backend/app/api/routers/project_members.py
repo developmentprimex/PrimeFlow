@@ -55,7 +55,7 @@ async def list_project_members_batch(
         return []
     rows = (
         await db.execute(
-            select(ProjectMember.project_id, User)
+            select(ProjectMember.project_id, User).where(User.work_staff_filter())
             .options(
                 load_only(
                     User.id,
@@ -93,7 +93,7 @@ async def list_project_members(
 
     members = (
         await db.execute(
-            select(User)
+            select(User).where(User.work_staff_filter())
             .options(
                 load_only(
                     User.id,
@@ -129,7 +129,7 @@ async def add_project_members(
     if not payload.user_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_ids required")
 
-    rows = (await db.execute(select(User).where(User.id.in_(payload.user_ids)))).scalars().all()
+    rows = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(payload.user_ids)))).scalars().all()
     if len(rows) != len(set(payload.user_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid users")
 

@@ -413,7 +413,7 @@ async def _validate_waiting_confirmation_assignee(
             detail="Confirmation assignee is required when status is WAITING_CONFIRMATION",
         )
     confirmation_user = (
-        await db.execute(select(User).where(User.id == confirmation_assignee_id))
+        await db.execute(select(User).where(User.work_staff_filter()).where(User.id == confirmation_assignee_id))
     ).scalar_one_or_none()
     if confirmation_user is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
@@ -517,7 +517,7 @@ async def _assignees_for_tasks(
                 User.email,
                 User.username,
                 User.full_name,
-            )
+            ).where(User.work_staff_filter())
             .join(User, effective_assignees.c.user_id == User.id)
             .order_by(User.full_name)
         )
@@ -575,7 +575,7 @@ async def _task_list_metadata(
             User.username.label("username"),
             User.full_name.label("full_name"),
             null().label("comment"),
-        )
+        ).where(User.work_staff_filter())
         .join(User, effective_assignees.c.user_id == User.id)
     )
     comment_rows = select(
@@ -644,7 +644,7 @@ async def _assignees_for_fast_task_groups(
                 User.email,
                 User.username,
                 User.full_name,
-            )
+            ).where(User.work_staff_filter())
             .join(TaskAssignee, TaskAssignee.task_id == Task.id)
             .join(User, TaskAssignee.user_id == User.id)
             .where(Task.fast_task_group_id.in_(group_ids))
@@ -1068,7 +1068,7 @@ async def _validate_pcm_control_origin(
     ko_user_id = parse_ko_user_id(internal_notes)
     if ko_user_id is not None:
         ko_user = (
-            await db.execute(select(User).where(User.id == ko_user_id, User.is_active.is_(True)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id == ko_user_id, User.is_active.is_(True)))
         ).scalar_one_or_none()
         if ko_user is None:
             raise HTTPException(
@@ -1199,7 +1199,7 @@ async def _create_pcm_control_for_product(
 async def _users_by_usernames(db: AsyncSession, usernames: set[str]) -> list[User]:
     if not usernames:
         return []
-    rows = (await db.execute(select(User).where(User.username.in_(sorted(usernames))))).scalars().all()
+    rows = (await db.execute(select(User).where(User.work_staff_filter()).where(User.username.in_(sorted(usernames))))).scalars().all()
     return rows
 
 
@@ -1474,7 +1474,7 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[TaskOut]:
-    stmt = select(Task)
+    stmt = select(Task).where(Task.work_staff_filter())
     project: Project | None = None
     is_mst_tt_project = False
     if project_id is not None:
@@ -2117,7 +2117,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
 
     if assignee_ids is not None:
         assignee_users = (
-            await db.execute(select(User).where(User.id.in_(assignee_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(assignee_ids)))
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
@@ -2165,7 +2165,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
         await _validate_waiting_confirmation_assignee(db, confirmation_assignee_id)
     elif confirmation_assignee_id is not None:
         confirmation_user = (
-            await db.execute(select(User).where(User.id == confirmation_assignee_id))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id == confirmation_assignee_id))
         ).scalar_one_or_none()
         if confirmation_user is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
@@ -2194,7 +2194,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
             assignee_dept_map = {}
         else:
             ko_user = (
-                await db.execute(select(User).where(User.id == ko_user_id, User.is_active.is_(True)))
+                await db.execute(select(User).where(User.work_staff_filter()).where(User.id == ko_user_id, User.is_active.is_(True)))
             ).scalar_one()
             assignee_ids = [ko_user_id]
             assignee_users = [ko_user]
@@ -2933,7 +2933,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         owner_ids.update(value for value in (task.assigned_to, payload.assigned_to) if value)
         department_ids = {task.department_id, payload.department_id}
         if owner_ids:
-            department_ids.update((await db.execute(select(User.department_id).where(User.id.in_(owner_ids)))).scalars().all())
+            department_ids.update((await db.execute(select(User.department_id).where(User.work_staff_filter()).where(User.id.in_(owner_ids)))).scalars().all())
         await ensure_daily_baselines_for_departments(
             db=db, department_ids=department_ids, day=_realization_today(), actor=user,
         )
@@ -3040,7 +3040,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     affected_departments = {task.department_id}
     if affected_user_ids:
         affected_departments.update((await db.execute(
-            select(User.department_id).where(User.id.in_(affected_user_ids))
+            select(User.department_id).where(User.work_staff_filter()).where(User.id.in_(affected_user_ids))
         )).scalars().all())
     if prepared_date_departments is None:
         await ensure_daily_baselines_for_departments(
@@ -3182,7 +3182,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     if confirmation_set:
         if payload.confirmation_assignee_id is not None:
             confirmation_user = (
-                await db.execute(select(User).where(User.id == payload.confirmation_assignee_id))
+                await db.execute(select(User).where(User.work_staff_filter()).where(User.id == payload.confirmation_assignee_id))
             ).scalar_one_or_none()
             if confirmation_user is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
@@ -3213,7 +3213,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
                 uid for uid in payload.assignees if not (uid in seen or seen.add(uid))
             ]
             assignee_users = (
-                await db.execute(select(User).where(User.id.in_(fast_group_desired_assignee_ids)))
+                await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(fast_group_desired_assignee_ids)))
             ).scalars().all()
             if len(assignee_users) != len(fast_group_desired_assignee_ids):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
@@ -3231,7 +3231,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             seen: set[uuid.UUID] = set()
             assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
             assignee_users = (
-                await db.execute(select(User).where(User.id.in_(assignee_ids)))
+                await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(assignee_ids)))
             ).scalars().all()
             if len(assignee_users) != len(assignee_ids):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
@@ -3263,7 +3263,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             await _replace_task_assignees(db, task, [])
             assignee_users = []
         elif payload.assigned_to != task.assigned_to:
-            assigned_user = (await db.execute(select(User).where(User.id == payload.assigned_to))).scalar_one_or_none()
+            assigned_user = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id == payload.assigned_to))).scalar_one_or_none()
             if assigned_user is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
             if not allow_cross_department and assigned_user.department_id != task.department_id:
@@ -3745,7 +3745,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
 
                 # Validate added users exist and department rules.
                 add_users = (
-                    await db.execute(select(User).where(User.id.in_(to_add)))
+                    await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(to_add)))
                 ).scalars().all()
                 if len(add_users) != len(to_add):
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")

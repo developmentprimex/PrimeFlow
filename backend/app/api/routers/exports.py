@@ -150,11 +150,11 @@ GA_EMAIL = "ga@primexeu.com"
 
 
 async def _resolve_ga_user(db: AsyncSession) -> User | None:
-    stmt = select(User).where(func.lower(User.username) == GA_USERNAME)
+    stmt = select(User).where(User.work_staff_filter()).where(func.lower(User.username) == GA_USERNAME)
     ga_user = (await db.execute(stmt)).scalar_one_or_none()
     if ga_user:
         return ga_user
-    stmt = select(User).where(func.lower(User.email) == GA_EMAIL)
+    stmt = select(User).where(User.work_staff_filter()).where(func.lower(User.email) == GA_EMAIL)
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
@@ -937,7 +937,7 @@ async def _assignees_for_tasks(db: AsyncSession, task_ids: list[uuid.UUID]) -> d
         return {}
     rows = (
         await db.execute(
-            select(TaskAssignee.task_id, User)
+            select(TaskAssignee.task_id, User).where(User.work_staff_filter())
             .join(User, TaskAssignee.user_id == User.id)
             .where(TaskAssignee.task_id.in_(task_ids))
         )
@@ -962,7 +962,7 @@ async def _query_tasks(
     planned_from: date | None,
     planned_to: date | None,
 ) -> list[Task]:
-    stmt = select(Task)
+    stmt = select(Task).where(Task.work_staff_filter())
 
     is_admin = _has_global_report_scope(user)
 
@@ -1022,7 +1022,7 @@ async def _maps(db: AsyncSession, tasks: list[Task]) -> tuple[dict[uuid.UUID, st
         statuses = (await db.execute(select(TaskStatus).where(TaskStatus.id.in_(status_ids)))).scalars().all()
         status_map = {s.id: s.name for s in statuses}
     if user_ids:
-        users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+        users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
         user_map = {u.id: (u.full_name or u.username) for u in users}
     return status_map, user_map
 
@@ -1861,7 +1861,7 @@ async def export_fast_tasks_xlsx(
             status_name = status_row.name
 
     stmt = (
-        select(Task, Department, assigned_user, created_user)
+        select(Task, Department, assigned_user, created_user).where(Task.work_staff_filter())
         .outerjoin(Department, Task.department_id == Department.id)
         .outerjoin(assigned_user, Task.assigned_to == assigned_user.id)
         .outerjoin(created_user, Task.created_by == created_user.id)
@@ -2108,7 +2108,7 @@ async def preview_fast_tasks(
             status_name = status_row.name
 
     stmt = (
-        select(Task, Department, assigned_user, created_user)
+        select(Task, Department, assigned_user, created_user).where(Task.work_staff_filter())
         .outerjoin(Department, Task.department_id == Department.id)
         .outerjoin(assigned_user, Task.assigned_to == assigned_user.id)
         .outerjoin(created_user, Task.created_by == created_user.id)
@@ -2728,7 +2728,7 @@ async def import_open_tasks_baseline(
 
     task_ids = {task_id for _, task_id in row_task_pairs}
     accessible_tasks = (
-        await db.execute(select(Task).where(Task.id.in_(task_ids)))
+        await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.id.in_(task_ids)))
     ).scalars().all()
     accessible_task_map = {task.id: task for task in accessible_tasks}
     role_value = getattr(user.role, "value", str(user.role)).upper()
@@ -2842,7 +2842,7 @@ async def export_open_tasks_xlsx(
     next_week_end = next_week_start + timedelta(days=4)
 
     task_stmt = (
-        select(Task)
+        select(Task).where(Task.work_staff_filter())
         .outerjoin(Project, Task.project_id == Project.id)
         .where(Task.is_active.is_(True))
         .where(func.upper(Task.status) != TaskStatusEnum.DONE.value)
@@ -2927,7 +2927,7 @@ async def export_open_tasks_xlsx(
     if assignee_user_ids:
         user_map = {
             assignee.id: assignee
-            for assignee in (await db.execute(select(User).where(User.id.in_(assignee_user_ids)))).scalars().all()
+            for assignee in (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(assignee_user_ids)))).scalars().all()
         }
 
     baseline_map: dict[uuid.UUID, OpenTaskPlanningBaseline] = {}
@@ -3955,7 +3955,7 @@ async def export_checklist_xlsx(
             ensure_department_access(user, project.department_id)
     elif checklist.task_id is not None:
         task = (
-            await db.execute(select(Task).where(Task.id == checklist.task_id))
+            await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.id == checklist.task_id))
         ).scalar_one_or_none()
         if task is not None and task.department_id is not None:
             ensure_department_access(user, task.department_id)
@@ -4005,7 +4005,7 @@ async def export_checklist_xlsx(
         if item_ids:
             assignees = (
                 await db.execute(
-                    select(ChecklistItemAssignee.checklist_item_id, User.full_name, User.username)
+                    select(ChecklistItemAssignee.checklist_item_id, User.full_name, User.username).where(User.work_staff_filter())
                     .join(User, User.id == ChecklistItemAssignee.user_id)
                     .where(ChecklistItemAssignee.checklist_item_id.in_(item_ids))
                 )
@@ -4212,7 +4212,7 @@ async def _daily_report_rows_for_user(
     day_end = day_start + timedelta(days=1)
 
     task_stmt = (
-        select(Task)
+        select(Task).where(Task.work_staff_filter())
         .outerjoin(Project, Task.project_id == Project.id)
         .where(Task.is_active.is_(True))
         .where(Task.system_template_origin_id.is_(None))
@@ -4324,7 +4324,7 @@ async def _daily_report_rows_for_user(
 
     system_today_rows = (
         await db.execute(
-            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date")).where(Task.work_staff_filter())
             .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
             .where(Task.assigned_to == user_id)
             .where(Task.system_template_origin_id.is_not(None))
@@ -4337,7 +4337,7 @@ async def _daily_report_rows_for_user(
 
     system_acted_today_rows = (
         await db.execute(
-            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date")).where(Task.work_staff_filter())
             .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
             .where(Task.assigned_to == user_id)
             .where(Task.system_template_origin_id.is_not(None))
@@ -4357,7 +4357,7 @@ async def _daily_report_rows_for_user(
             Task.system_template_origin_id.label("template_id"),
             Task.system_task_slot_id.label("slot_id"),
             func.max(local_occurrence_date).label("latest_date"),
-        )
+        ).where(Task.work_staff_filter())
         .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
         .where(Task.assigned_to == user_id)
         .where(Task.system_template_origin_id.is_not(None))
@@ -4369,7 +4369,7 @@ async def _daily_report_rows_for_user(
 
     system_overdue_rows = (
         await db.execute(
-            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date")).where(Task.work_staff_filter())
             .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
             .join(
                 latest_occurrence,
@@ -4396,7 +4396,7 @@ async def _daily_report_rows_for_user(
     alignment_user_ids = {uid for ids in alignment_users_map.values() for uid in ids}
     alignment_user_map: dict[uuid.UUID, str] = {}
     if alignment_user_ids:
-        users = (await db.execute(select(User).where(User.id.in_(alignment_user_ids)))).scalars().all()
+        users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(alignment_user_ids)))).scalars().all()
         for u in users:
             label = u.full_name or u.username or ""
             alignment_user_map[u.id] = _initials(label)
@@ -4645,7 +4645,7 @@ async def export_daily_report_xlsx(
     if not all_users:
         target_user_id = user_id or user.id
         target_user = (
-            await db.execute(select(User).where(User.id == target_user_id))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id == target_user_id))
         ).scalar_one_or_none()
         if target_user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -4661,7 +4661,7 @@ async def export_daily_report_xlsx(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id is required")
         users_for_export = (
             await db.execute(
-                select(User)
+                select(User).where(User.work_staff_filter())
                 .where(User.department_id == department_id)
                 .order_by(User.full_name, User.username)
             )
@@ -5040,7 +5040,7 @@ async def export_system_task_templates_xlsx(
     template_assignee_department_map: dict[uuid.UUID, uuid.UUID | None] = {}
     if template_assignee_user_ids:
         template_assignee_users = (
-            await db.execute(select(User).where(User.id.in_(template_assignee_user_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(template_assignee_user_ids)))
         ).scalars().all()
         template_assignee_initials_map = {
             u.id: _initials(u.full_name or u.username or "") for u in template_assignee_users
@@ -5075,7 +5075,7 @@ async def export_system_task_templates_xlsx(
     alignment_user_map: dict[uuid.UUID, str] = {}
     if alignment_user_ids:
         alignment_users = (
-            await db.execute(select(User).where(User.id.in_(alignment_user_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(alignment_user_ids)))
         ).scalars().all()
         alignment_user_map = {
             u.id: _initials(u.full_name or u.username or "") for u in alignment_users
@@ -5313,7 +5313,7 @@ async def export_system_tasks_xlsx(
     template_assignee_department_map: dict[uuid.UUID, uuid.UUID | None] = {}
     if template_assignee_user_ids:
         template_assignee_users = (
-            await db.execute(select(User).where(User.id.in_(template_assignee_user_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(template_assignee_user_ids)))
         ).scalars().all()
         template_assignee_initials_map = {
             u.id: _initials(u.full_name or u.username or "") for u in template_assignee_users
@@ -5322,7 +5322,7 @@ async def export_system_tasks_xlsx(
 
     template_ids = [t.id for t in templates]
     task_stmt = (
-        select(Task, SystemTaskTemplate)
+        select(Task, SystemTaskTemplate).where(Task.work_staff_filter())
         .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
         .where(Task.system_template_origin_id.in_(template_ids))
     )
@@ -5352,7 +5352,7 @@ async def export_system_tasks_xlsx(
     if task_ids:
         assignee_rows = (
             await db.execute(
-                select(TaskAssignee.task_id, User)
+                select(TaskAssignee.task_id, User).where(User.work_staff_filter())
                 .join(User, TaskAssignee.user_id == User.id)
                 .where(TaskAssignee.task_id.in_(task_ids))
             )
@@ -5370,7 +5370,7 @@ async def export_system_tasks_xlsx(
     fallback_map: dict[uuid.UUID, str] = {}
     if fallback_ids:
         fallback_users = (
-            await db.execute(select(User).where(User.id.in_(fallback_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(fallback_ids)))
         ).scalars().all()
         fallback_map = {u.id: (u.full_name or u.username or "") for u in fallback_users}
 
@@ -5415,7 +5415,7 @@ async def export_system_tasks_xlsx(
     alignment_user_map: dict[uuid.UUID, str] = {}
     if alignment_user_ids:
         alignment_users = (
-            await db.execute(select(User).where(User.id.in_(alignment_user_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(alignment_user_ids)))
         ).scalars().all()
         alignment_user_map = {
             u.id: _initials(u.full_name or u.username or "") for u in alignment_users
@@ -5669,7 +5669,7 @@ async def preview_system_tasks(
     template_assignee_department_map: dict[uuid.UUID, uuid.UUID | None] = {}
     if template_assignee_user_ids:
         template_assignee_users = (
-            await db.execute(select(User).where(User.id.in_(template_assignee_user_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(template_assignee_user_ids)))
         ).scalars().all()
         template_assignee_initials_map = {
             u.id: _initials(u.full_name or u.username or "") for u in template_assignee_users
@@ -5678,7 +5678,7 @@ async def preview_system_tasks(
 
     template_ids = [t.id for t in templates]
     task_stmt = (
-        select(Task, SystemTaskTemplate)
+        select(Task, SystemTaskTemplate).where(Task.work_staff_filter())
         .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
         .where(Task.system_template_origin_id.in_(template_ids))
     )
@@ -5708,7 +5708,7 @@ async def preview_system_tasks(
     if task_ids:
         assignee_rows = (
             await db.execute(
-                select(TaskAssignee.task_id, User)
+                select(TaskAssignee.task_id, User).where(User.work_staff_filter())
                 .join(User, TaskAssignee.user_id == User.id)
                 .where(TaskAssignee.task_id.in_(task_ids))
             )
@@ -5726,7 +5726,7 @@ async def preview_system_tasks(
     fallback_map: dict[uuid.UUID, str] = {}
     if fallback_ids:
         fallback_users = (
-            await db.execute(select(User).where(User.id.in_(fallback_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(fallback_ids)))
         ).scalars().all()
         fallback_map = {u.id: (u.full_name or u.username or "") for u in fallback_users}
 
@@ -5771,7 +5771,7 @@ async def preview_system_tasks(
     alignment_user_map: dict[uuid.UUID, str] = {}
     if alignment_user_ids:
         alignment_users = (
-            await db.execute(select(User).where(User.id.in_(alignment_user_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(alignment_user_ids)))
         ).scalars().all()
         alignment_user_map = {
             u.id: _initials(u.full_name or u.username or "") for u in alignment_users
@@ -5873,7 +5873,7 @@ async def export_common_xlsx(
     entries_stmt = select(CommonEntry)
     if user.department_id is not None:
         dept_user_ids = (
-            await db.execute(select(User.id).where(User.department_id == user.department_id))
+            await db.execute(select(User.id).where(User.work_staff_filter()).where(User.department_id == user.department_id))
         ).scalars().all()
         if dept_user_ids:
             entries_stmt = entries_stmt.where(
@@ -5898,7 +5898,7 @@ async def export_common_xlsx(
 
     tasks: list[Task] = []
     if user.department_id is not None or user.role != UserRole.STAFF:
-        tasks_stmt = select(Task)
+        tasks_stmt = select(Task).where(Task.work_staff_filter())
         if user.department_id is not None:
             tasks_stmt = tasks_stmt.where(Task.department_id == user.department_id)
         tasks_stmt = tasks_stmt.where(
@@ -5962,7 +5962,7 @@ async def export_common_xlsx(
             user_ids.add(meeting.created_by)
 
     if user_ids:
-        users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+        users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
     else:
         users = []
     user_map = {u.id: (u.full_name or u.username or "") for u in users}
@@ -7233,7 +7233,7 @@ async def export_ga_notes_xlsx(
     if note_ids:
         tasks = (
             await db.execute(
-                select(Task)
+                select(Task).where(Task.work_staff_filter())
                 .options(selectinload(Task.assignees))
                 .where(Task.ga_note_origin_id.in_(note_ids))
             )
@@ -7249,7 +7249,7 @@ async def export_ga_notes_xlsx(
     assignees_map = {}
     if assignee_user_ids:
         assignee_users = (
-            await db.execute(select(User).where(User.id.in_(assignee_user_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(assignee_user_ids)))
         ).scalars().all()
         assignees_map = {u.id: u for u in assignee_users}
 
@@ -7276,7 +7276,7 @@ async def export_ga_notes_xlsx(
     
     users_map = {}
     if user_ids:
-        users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+        users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
         users_map = {u.id: u for u in users}
     
     departments_map = {}

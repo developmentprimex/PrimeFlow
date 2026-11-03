@@ -257,7 +257,7 @@ async def build_px_jav_weekly_report(
     if note_ids:
         tasks = (
             await db.execute(
-                select(Task)
+                select(Task).where(Task.work_staff_filter())
                 .where(Task.plan_note_origin_id.in_(note_ids))
                 .order_by(Task.created_at, Task.id)
             )
@@ -280,7 +280,7 @@ async def build_px_jav_weekly_report(
     if user_ids:
         users = {
             user.id: user
-            for user in (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+            for user in (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
         }
 
     department_ids = {note.department_id for note in notes if note.department_id}

@@ -206,14 +206,14 @@ async def backfill_saved_note_authors(db: AsyncSession, row: M1ReportingPointsRe
     user_ids = {user_id for user_id in creators.values() if user_id is not None}
     users = {}
     if user_ids:
-        for user in (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all():
+        for user in (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all():
             users[user.id] = user.full_name or user.username or user.email
     row.data = add_saved_note_authors(data, {key: users.get(user_id) for key, user_id in creators.items()})
     return True
 
 
 async def prepare_task_context(db: AsyncSession, tasks: list) -> tuple[list, list, dict, dict]:
-    users = (await db.execute(select(User))).scalars().all()
+    users = (await db.execute(select(User).where(User.work_staff_filter()))).scalars().all()
     departments = dict((await db.execute(select(Department.id, Department.code))).all())
     assignees = {}
     if tasks:

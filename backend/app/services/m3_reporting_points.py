@@ -223,7 +223,7 @@ async def build_task_data(db: AsyncSession, day: date, *, section_selector=selec
     if not selected:
         return sections
     users = {user.id: user.full_name or user.username or user.email
-             for user in (await db.execute(select(User))).scalars().all()}
+             for user in (await db.execute(select(User).where(User.work_staff_filter()))).scalars().all()}
     department_codes = {item.id: item.code for item in (await db.execute(select(Department))).scalars().all()}
     projects = {item.id: item.title for item in (await db.execute(select(Project).where(
         Project.id.in_({task.project_id for task in tasks if task.id in selected and task.project_id})
@@ -271,7 +271,7 @@ async def build_task_data(db: AsyncSession, day: date, *, section_selector=selec
 
 
 async def build_realization_capture(db: AsyncSession, day: date) -> dict:
-    users = list((await db.execute(select(User).where(User.is_active.is_(True),
+    users = list((await db.execute(select(User).where(User.work_staff_filter()).where(User.is_active.is_(True),
         User.department_id.is_not(None)))).scalars().all())
     department_by_id = {item.id: item for item in (await db.execute(select(Department))).scalars().all()}
     people, missing, departments = [], [], []
@@ -408,7 +408,7 @@ async def with_current_task_explanations(db: AsyncSession, payload: dict, sectio
         states[state.task_id].append(state)
     user_ids = {state.user_id for items in states.values() for state in items}
     users = {user.id: user.full_name or user.username or user.email
-             for user in (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()} if user_ids else {}
+             for user in (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()} if user_ids else {}
     updated = [{**row, **daily_explanation_values(states[uuid.UUID(row["task_id"])], users)}
                if row.get("task_id") else row for row in rows]
     return {**payload, "data": {**payload["data"], section: updated}}

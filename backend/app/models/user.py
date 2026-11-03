@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func, Integer
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func, Integer, or_, select
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,4 +35,20 @@ class User(Base):
     # Most user lookups only need department_id. The authentication dependency
     # opts into the joined Department for the one request path that reads it.
     department = relationship("Department", lazy="noload")
+
+    @classmethod
+    def work_staff_filter(cls):
+        """Household department accounts are active logins, not company staff.
+
+        Apply explicitly to work rosters/assignments. Authentication, account
+        administration and GA PERSONAL membership must still find these users.
+        Keep unassigned company accounts and all work roles eligible.
+        """
+        from app.models.department import Department
+
+        household_departments = select(Department.id).where(or_(
+            func.upper(func.trim(Department.code)) == "GAP",
+            func.upper(func.trim(Department.name)) == "GA PERSONAL",
+        ))
+        return or_(cls.department_id.is_(None), cls.department_id.not_in(household_departments))
 

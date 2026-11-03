@@ -32,7 +32,7 @@ async def repetitive_task_report_rows(db: AsyncSession) -> list[list[str]]:
     # Generated system instances are represented by their template above.
     # Completed ordinary tasks remain included; removed assignee copies do not.
     tasks = (await db.execute(
-        select(Task).where(
+        select(Task).where(Task.work_staff_filter()).where(
             Task.is_repetitive.is_(True),
             Task.is_active.is_(True),
             Task.system_template_origin_id.is_(None),
@@ -70,7 +70,7 @@ async def repetitive_task_report_rows(db: AsyncSession) -> list[list[str]]:
             task_people[task.id] = {task.assigned_to} if task.assigned_to else set()
 
     people_ids = set().union(*template_people.values(), *task_people.values())
-    users = (await db.execute(select(User).where(User.id.in_(people_ids)))).scalars().all() if people_ids else []
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(people_ids)))).scalars().all() if people_ids else []
     user_map = {item.id: item for item in users}
     department_ids = {item.department_id for item in [*templates, *tasks, *users] if item.department_id}
     departments = (await db.execute(

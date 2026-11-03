@@ -19,7 +19,9 @@ async def manual_participant_ids(db: AsyncSession, meeting_ids: list[uuid.UUID])
         return {}
     rows = (
         await db.execute(
-            select(MeetingParticipant.meeting_id, MeetingParticipant.user_id).where(
+            select(MeetingParticipant.meeting_id, MeetingParticipant.user_id)
+            .join(User, User.id == MeetingParticipant.user_id)
+            .where(User.work_staff_filter()).where(
                 MeetingParticipant.meeting_id.in_(meeting_ids),
                 MeetingParticipant.assignment_source == MANUAL_ASSIGNMENT_SOURCE,
             )
@@ -43,7 +45,7 @@ async def replace_manual_participants(
         valid_ids = set(
             (
                 await db.execute(
-                    select(User.id).where(User.id.in_(unique_ids), User.is_active.is_(True))
+                    select(User.id).where(User.work_staff_filter()).where(User.id.in_(unique_ids), User.is_active.is_(True))
                 )
             ).scalars().all()
         )

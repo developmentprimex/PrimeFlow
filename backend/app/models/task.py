@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, event, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, event, func, and_, or_, select
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -119,6 +119,26 @@ class Task(Base):
     # this relationship unloaded prevents a second, duplicate SELECT on every
     # ordinary Task query.
     assignees = relationship("TaskAssignee", backref="task", lazy="noload", passive_deletes=True)
+
+    @classmethod
+    def work_staff_filter(cls):
+        """Hide household-only assignments; retain shared company work."""
+        from app.models.user import User
+        from app.models.task_assignee import TaskAssignee
+
+        household = select(User.id).where(~User.work_staff_filter()).correlate(None)
+        staff = select(User.id).where(User.work_staff_filter()).correlate(None)
+        household_links = select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(household)).correlate(None)
+        staff_links = select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(staff)).correlate(None)
+        household_owned = or_(
+            and_(cls.assigned_to.is_not(None), cls.assigned_to.in_(household)),
+            cls.id.in_(household_links),
+        )
+        staff_owned = or_(
+            and_(cls.assigned_to.is_not(None), cls.assigned_to.in_(staff)),
+            cls.id.in_(staff_links),
+        )
+        return or_(~household_owned, staff_owned)
 
 
 @event.listens_for(Task, "before_insert")

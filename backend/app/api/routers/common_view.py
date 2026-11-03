@@ -73,7 +73,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "22"
+COMMON_VIEW_CACHE_VERSION = "23"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -397,8 +397,8 @@ async def _compute_etag(
             Task.is_active.is_(True),
             common_view_task_date_window_filter(week_start, week_end),
         ]
-        active_task_ids = select(Task.id).where(*task_filters)
-        task_project_ids = select(Task.project_id).where(*task_filters)
+        active_task_ids = select(Task.id).where(Task.work_staff_filter()).where(*task_filters)
+        task_project_ids = select(Task.project_id).where(Task.work_staff_filter()).where(*task_filters)
         project_filters = [Project.id.in_(task_project_ids)]
         active_task_assignee_count = (
             select(func.count())
@@ -558,7 +558,7 @@ async def get_common_view(
     needs_users = any(name in requested for name in ["users", "entries", "tasks", "meetings", "system_tasks"])
     if needs_users:
         ts = _time_start()
-        users_stmt = select(User).where(User.is_active.is_(True))
+        users_stmt = select(User).where(User.work_staff_filter()).where(User.is_active.is_(True))
         users = (await db.execute(users_stmt.order_by(User.full_name))).scalars().all()
         users_map = {u.id: u for u in users}
         _time_end("users", ts)
@@ -756,7 +756,7 @@ async def get_common_view(
         _time_end("entries", ts)
     if "tasks" in requested:
         ts = _time_start()
-        stmt = select(Task).where(Task.is_active.is_(True))
+        stmt = select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True))
         if department_id:
             stmt = stmt.outerjoin(Project, Task.project_id == Project.id).where(
                 or_(Task.department_id == department_id, Project.department_id == department_id)
@@ -785,7 +785,7 @@ async def get_common_view(
             }
         assignee_rows = (
             await db.execute(
-                select(TaskAssignee.task_id, User)
+                select(TaskAssignee.task_id, User).where(User.work_staff_filter())
                 .join(User, TaskAssignee.user_id == User.id)
                 .where(TaskAssignee.task_id.in_(task_ids))
             )

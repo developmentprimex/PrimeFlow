@@ -126,7 +126,7 @@ async def _resolve_daily_report_scope(
         current_user_id=current_user.id,
     )
     target_user = (
-        await db.execute(select(User).where(User.id == target_user_id))
+        await db.execute(select(User).where(User.work_staff_filter()).where(User.id == target_user_id))
     ).scalar_one_or_none()
     if target_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -152,7 +152,7 @@ async def _assignees_for_tasks(db: AsyncSession, task_ids: list[uuid.UUID]) -> d
         return {}
     rows = (
         await db.execute(
-            select(TaskAssignee.task_id, User)
+            select(TaskAssignee.task_id, User).where(User.work_staff_filter())
             .join(User, TaskAssignee.user_id == User.id)
             .where(TaskAssignee.task_id.in_(task_ids))
             .order_by(User.full_name)
@@ -329,7 +329,7 @@ async def daily_report(
     day_end = day_start + timedelta(days=1)
 
     task_stmt = (
-        select(Task)
+        select(Task).where(Task.work_staff_filter())
         .outerjoin(Project, Task.project_id == Project.id)
         .where(Task.is_active.is_(True))
         .where(Task.system_template_origin_id.is_(None))
@@ -508,7 +508,7 @@ async def daily_report(
 
     system_today_rows = (
         await db.execute(
-            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date")).where(Task.work_staff_filter())
             .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
             .where(Task.assigned_to == user_id)
             .where(Task.system_template_origin_id.is_not(None))
@@ -522,7 +522,7 @@ async def daily_report(
     day_start_utc, day_end_utc = _tirana_day_utc_bounds(day)
     system_acted_today_rows = (
         await db.execute(
-            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date")).where(Task.work_staff_filter())
             .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
             .where(Task.assigned_to == user_id)
             .where(Task.system_template_origin_id.is_not(None))
@@ -542,7 +542,7 @@ async def daily_report(
             Task.system_template_origin_id.label("template_id"),
             Task.system_task_slot_id.label("slot_id"),
             func.max(local_occurrence_date).label("latest_date"),
-        )
+        ).where(Task.work_staff_filter())
         .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
         .where(Task.assigned_to == user_id)
         .where(Task.system_template_origin_id.is_not(None))
@@ -554,7 +554,7 @@ async def daily_report(
 
     system_overdue_rows = (
         await db.execute(
-            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date")).where(Task.work_staff_filter())
             .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
             .join(
                 latest_occurrence,
@@ -857,7 +857,7 @@ async def daily_ga_table(
         ).scalar_one_or_none()
 
     task_stmt = (
-        select(Task)
+        select(Task).where(Task.work_staff_filter())
         .where(Task.completed_at.is_(None))
         .where(Task.is_active.is_(True))
         .where(Task.system_template_origin_id.is_(None))

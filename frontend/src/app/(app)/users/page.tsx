@@ -23,10 +23,13 @@ export default function UsersPage() {
   const isAdmin = user?.role === "ADMIN"
 
   const load = React.useCallback(async () => {
-    const suffix = showInactive ? "?include_inactive=true" : ""
+    const params = new URLSearchParams()
+    if (showInactive) params.set("include_inactive", "true")
+    if (isAdmin) params.set("include_household", "true")
+    const suffix = params.size ? `?${params}` : ""
     const res = await apiFetch(`/users${suffix}`)
     if (res.ok) setUsers((await res.json()) as User[])
-  }, [apiFetch, showInactive])
+  }, [apiFetch, showInactive, isAdmin])
 
   React.useEffect(() => {
     void load()

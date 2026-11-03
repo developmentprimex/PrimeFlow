@@ -8,6 +8,12 @@ module membership. Revision `0172_ga_personal_department`
 and the normal seed preserve this department without creating a public work project
 for household tasks. No household user accounts are created by this change.
 
+Accounts assigned to this department are excluded from company staff rosters,
+work task/meeting assignment, planners, realization and reports, including the
+1H missing-task lists. They remain active for login and private module membership.
+Only the administrator's Users page requests `include_household=true` to manage
+these accounts. Work membership follows the department, not initials or names.
+
 An operator can assign a verified existing account as administrator of this module
 using `scripts/set_ga_personal_admin.py --person <key> --user-id <verified-uuid>`.
 This previews the target; `--apply --expected-host <host> --expected-database <db>`

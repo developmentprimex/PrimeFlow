@@ -208,7 +208,7 @@ async def reconcile_ga_note_task_assignees(
     users: list[User] = []
     if desired_ids:
         users = (
-            await db.execute(select(User).where(User.id.in_(desired_ids), User.is_active.is_(True)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(desired_ids), User.is_active.is_(True)))
         ).scalars().all()
         if len(users) != len(desired_ids):
             raise ValueError("One or more assigned users do not exist or are inactive")
@@ -313,7 +313,7 @@ async def reconcile_plan_note_task_assignees(
     users: list[User] = []
     if desired_ids:
         users = (
-            await db.execute(select(User).where(User.id.in_(desired_ids), User.is_active.is_(True)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(desired_ids), User.is_active.is_(True)))
         ).scalars().all()
         if len(users) != len(desired_ids):
             raise ValueError("One or more assigned users do not exist or are inactive")

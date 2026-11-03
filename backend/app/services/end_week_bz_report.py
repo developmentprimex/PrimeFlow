@@ -153,7 +153,7 @@ def normalize_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, 
 
 
 async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) -> tuple[list[dict[str, str]], dict[str, Any]]:
-    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignees = await _effective_task_assignee_ids(db, tasks)
     await apply_weekly_planner_task_order(db, tasks, assignees)
@@ -196,7 +196,7 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
     participant_ids = {participant.user_id for meeting in meetings for participant in (meeting.participants or [])}
     participant_names: dict[Any, str] = {}
     if participant_ids:
-        users = (await db.execute(select(User).where(User.id.in_(participant_ids)))).scalars().all()
+        users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(participant_ids)))).scalars().all()
         participant_names = {user.id: user.full_name or user.username or user.email for user in users}
 
     personal_lines: list[str] = []

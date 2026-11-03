@@ -44,7 +44,7 @@ def _summary(people: list[dict[str, Any]]) -> dict[str, Any]:
 
 async def _build_authoritative_report(db: AsyncSession, *, day: date, variant: str) -> dict[str, Any]:
     """Adapt the live Daily Realization domain for delivery without recalculation."""
-    users = (await db.execute(select(User).where(
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(
         User.is_active.is_(True), User.department_id.is_not(None), User.role == UserRole.STAFF,
     ).order_by(User.department_id, User.full_name, User.email))).scalars().all()
     users_by_id = {user.id: user for user in users}
