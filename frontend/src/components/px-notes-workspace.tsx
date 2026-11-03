@@ -164,6 +164,7 @@ type GaAssigneeTaskState = {
   finishPeriod: TaskFinishPeriod | null
   oneHReportSlot: OneHReportSlot | null
   oneHMarker: OneHMarker | null
+  oneHMarkerByGa?: boolean
   oneHMarkerComment: string
   isDeadlineImportant: boolean
 }
@@ -185,6 +186,29 @@ type NoteTaskInfo = {
   taskUpdatedAt?: string | null
   assigneeStates: Record<string, GaAssigneeTaskState>
 }
+const noteDisplayMarkers = (note: GaNote, taskInfo?: NoteTaskInfo) => {
+  if (taskInfo?.taskId || note.is_converted_to_task) {
+    return Object.entries(taskInfo?.assigneeStates ?? {}).flatMap(([assigneeId, state]) => {
+      if (!state.oneHMarker) return []
+      const person = taskInfo?.assignees.find((assignee) => assignee.id === assigneeId)
+      return [{
+        key: assigneeId,
+        marker: state.oneHMarker,
+        byGa: Boolean(state.oneHMarkerByGa),
+        comment: state.oneHMarkerComment,
+        person: person?.full_name || person?.username || person?.email || "Unknown",
+      }]
+    })
+  }
+  return note.one_h_marker ? [{
+    key: "note",
+    marker: note.one_h_marker as OneHMarker,
+    byGa: Boolean(note.one_h_marker_by_ga),
+    comment: note.one_h_marker_comment || "",
+    person: "",
+  }] : []
+}
+
 type CommonLeaveItem = {
   entryId?: string
   person: string
@@ -1760,6 +1784,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 ? t.one_h_report_slot as OneHReportSlot
                 : null,
               oneHMarker: (t.one_h_marker as OneHMarker | null) || null,
+              oneHMarkerByGa: Boolean(t.one_h_marker_by_ga),
               oneHMarkerComment: t.one_h_marker_comment || "",
               isDeadlineImportant: Boolean(t.is_deadline_important),
             },
@@ -3206,11 +3231,11 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       return EMAIL_MARKER_RE.test(note.content || "")
     }
     const matchesOneHMarkerFilter = (note: GaNote) => {
-      const marker = note.one_h_marker || null
+      const markers = noteDisplayMarkers(note, noteTaskInfo.get(note.id))
       if (oneHMarkerFilter === "all") return true
-      if (oneHMarkerFilter === "with") return marker !== null
-      if (oneHMarkerFilter === "none") return marker === null
-      return marker === oneHMarkerFilter
+      if (oneHMarkerFilter === "with") return markers.length > 0
+      if (oneHMarkerFilter === "none") return markers.length === 0
+      return markers.some(({ marker }) => marker === oneHMarkerFilter)
     }
     const matchesSearchQuery = (note: GaNote) => {
       if (!normalizedSearchQuery) return true
@@ -4648,6 +4673,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
                     const noteProject = note.project_id ? projectMap.get(note.project_id) : null
                     const taskInfo = noteTaskInfo.get(note.id)
+                    const displayMarkers = noteDisplayMarkers(note, taskInfo)
                     const taskDepartment = taskInfo?.taskDepartmentId
                       ? departmentMap.get(taskInfo.taskDepartmentId)
                       : null
@@ -4778,16 +4804,18 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                     ) : null}
                                   </span>
                                 ) : null}
-                                {note.one_h_marker ? (
+                                {displayMarkers.map((symbol) => (
                                   <button
+                                    key={symbol.key}
                                     type="button"
                                     className="inline-flex min-h-6 shrink-0 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-red-600 [text-shadow:0_0_0_currentColor]"
-                                    title={note.one_h_marker_comment || "Note symbol"}
-                                    onClick={() => { if (note.one_h_marker_comment) window.prompt("Symbol comment (copy with Ctrl+C):", note.one_h_marker_comment) }}
+                                    title={[symbol.person, symbol.comment].filter(Boolean).join(": ") || "Note symbol"}
+                                    aria-label={[symbol.person, oneHMarkerLabel(symbol.marker, symbol.byGa)].filter(Boolean).join(": ")}
+                                    onClick={() => { if (symbol.comment) window.prompt("Symbol comment (copy with Ctrl+C):", symbol.comment) }}
                                   >
-                                    {oneHMarkerLabel(note.one_h_marker, note.one_h_marker_by_ga)}
+                                    {oneHMarkerLabel(symbol.marker, symbol.byGa)}
                                   </button>
-                                ) : null}
+                                ))}
                                 {isKnowledgeNote(note) ? (
                                   <Link
                                     href={`${KNOWLEDGE_CONFIG[note.knowledge_type || "PROMPT"].route}?view=notes`}
@@ -4799,7 +4827,12 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                 ) : null}
                                 {miraCollapsed ? null : (
                                   <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
-                                    {note.one_h_marker ? <TaskMarkerComment comment={note.one_h_marker_comment} /> : null}
+                                    {displayMarkers.map((symbol) => symbol.comment ? (
+                                      <span key={symbol.key}>
+                                        {displayMarkers.length > 1 && symbol.person ? <span className="font-semibold">{symbol.person}: </span> : null}
+                                        <TaskMarkerComment comment={symbol.comment} />
+                                      </span>
+                                    ) : null)}
                                     {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                   </span>
                                 )}

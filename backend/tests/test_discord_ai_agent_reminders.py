@@ -17,7 +17,7 @@ class InvitationTests(unittest.IsolatedAsyncioTestCase):
     def test_only_exact_weekday_windows_in_local_time(self):
         tz=ZoneInfo(CONFIG['timezone'])
         for slot in CONFIG['times']:
-            hour,minute=map(int,slot.split(':'));at=datetime(2026,10,29,hour,minute,tzinfo=tz)
+            hour,minute=map(int,slot.split(':'));at=datetime(2026,10,29,hour,minute,tzinfo=tz)-timedelta(minutes=1)
             self.assertTrue(service.due(at.astimezone(timezone.utc),slot,CONFIG))
             self.assertTrue(service.due(at+timedelta(minutes=4,seconds=59),slot,CONFIG))
             self.assertFalse(service.due(at-timedelta(seconds=1),slot,CONFIG))
@@ -28,7 +28,7 @@ class InvitationTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(service.due(at.replace(hour=hour,minute=minute),excluded,CONFIG))
         self.assertFalse(service.due(at,slot,{**CONFIG,'enabled':False}))
         # The same local 08:05 follows DST rather than a fixed UTC time.
-        self.assertTrue(service.due(datetime(2026,7,1,6,5,tzinfo=timezone.utc),'08:05',CONFIG))
+        self.assertTrue(service.due(datetime(2026,7,1,6,4,tzinfo=timezone.utc),'08:05',CONFIG))
         self.assertFalse(service.due(datetime(2026,7,1,7,5,tzinfo=timezone.utc),'08:05',CONFIG))
 
     def job(self):

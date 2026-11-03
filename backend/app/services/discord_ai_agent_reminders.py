@@ -14,7 +14,7 @@ def due(at, slot, config):
         return False
     local=at.astimezone(ZoneInfo(config['timezone']))
     hour,minute=map(int,slot.split(':'))
-    scheduled=local.replace(hour=hour,minute=minute,second=0,microsecond=0)
+    scheduled=local.replace(hour=hour,minute=minute,second=0,microsecond=0)-timedelta(minutes=1)
     return local.weekday()<5 and timedelta(0)<=local-scheduled<timedelta(minutes=5)
 
 

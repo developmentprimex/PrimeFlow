@@ -25,7 +25,8 @@ def plan(*actions):
 
 class ScheduleTests(unittest.TestCase):
     def test_exact_agreed_times(self):
-        expected = {"10:00": ["10:00"], "11:00": ["11:00"], "11:50": [],
+        expected = {"09:59": ["10:00"], "10:00": ["10:00"], "10:59": ["11:00"],
+                    "11:00": ["11:00"], "11:50": [], "14:19": ["14:20"],
                     "14:20": ["14:20"], "16:00": [], "16:05": []}
         for at, buckets in expected.items():
             hour, minute = map(int, at.split(":"))
@@ -38,9 +39,10 @@ class ScheduleTests(unittest.TestCase):
                     self.assertEqual(tools.due_buckets(NOW.replace(hour=hour,minute=minute,second=second)),[])
 
     def test_no_early_or_stale_or_weekend_reminders(self):
-        for now in (NOW, NOW.replace(hour=10, minute=5), NOW.replace(day=17, hour=10, minute=0)):
+        for now in (NOW, NOW.replace(hour=9, minute=58, second=59),
+                    NOW.replace(hour=10, minute=4), NOW.replace(day=17, hour=10, minute=0)):
             self.assertEqual(tools.due_buckets(now), [])
-        self.assertEqual(tools.due_buckets(NOW.replace(hour=10, minute=4, second=59)), ["10:00"])
+        self.assertEqual(tools.due_buckets(NOW.replace(hour=10, minute=3, second=59)), ["10:00"])
 
     def test_explicit_date_slot_overrides_base_slot(self):
         task = {"id": TASK_ID, "status": "IN_PROGRESS", "one_h_report_slot": "10:00", "finish_period": "PM"}

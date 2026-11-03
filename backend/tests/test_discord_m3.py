@@ -277,17 +277,43 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(modal.dates), {'start_date', 'due_date'})
         self.assertTrue(modal.comment.required)
 
-    async def test_yes_is_saved_even_if_optional_comment_modal_is_closed(self):
+    async def test_yes_saves_silently_for_delivery_and_tomorrow_cards(self):
         import discord_m3_client as client
-        job = self.job('delivery')
+        for kind in ('delivery', 'tomorrow', 'tomorrow_task'):
+            with self.subTest(kind=kind):
+                job = self.job(kind)
+                interaction = Mock()
+                interaction.guild_id, interaction.channel_id, interaction.user.id = 22, 33, 11
+                interaction.data = {'custom_id': f"pf:m3:PO:{job['id']}"}
+                interaction.response.defer = AsyncMock()
+                interaction.response.send_modal = AsyncMock()
+                interaction.edit_original_response = AsyncMock()
+                interaction.followup.send = AsyncMock()
+                bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job))
+                with patch.object(client, 'save', AsyncMock(return_value=job)) as save, \
+                     patch.object(client, 'prepare_modal', AsyncMock()) as prepare, \
+                     patch.object(client, 'open_modal', AsyncMock()) as open_form:
+                    await client.handle(bot, interaction)
+                self.assertEqual(save.call_args.args[3], 'PO')
+                interaction.response.defer.assert_awaited_once_with()
+                prepare.assert_not_awaited()
+                open_form.assert_not_awaited()
+                interaction.response.send_modal.assert_not_awaited()
+                interaction.edit_original_response.assert_not_awaited()
+                interaction.followup.send.assert_not_awaited()
+
+    async def test_comment_button_still_opens_optional_form(self):
+        import discord_m3_client as client
+        job = self.job('tomorrow_task')
         interaction = Mock()
         interaction.guild_id, interaction.channel_id, interaction.user.id = 22, 33, 11
-        interaction.data = {'custom_id': f"pf:m3:PO:{job['id']}"}
+        interaction.data = {'custom_id': f"pf:m3:yescomment:{job['id']}"}
         interaction.response.send_modal = AsyncMock()
         bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job))
         with patch.object(client, 'save', AsyncMock(return_value=job)) as save:
             await client.handle(bot, interaction)
-        self.assertEqual(save.call_args.args[3], 'PO')
+        save.assert_not_awaited()
+        self.assertEqual(interaction.response.send_modal.call_args.args[0].action, 'PO')
         self.assertFalse(interaction.response.send_modal.call_args.args[0].comment.required)
 
     async def test_held_meeting_saves_with_one_click(self):

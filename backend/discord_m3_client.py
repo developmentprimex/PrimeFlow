@@ -180,7 +180,6 @@ class AnswerModal(discord.ui.Modal):
     def __init__(self, bot, job, action, source_message=None):
         super().__init__(title=('M3 · ' + job['snapshot']['title'])[:45], timeout=900)
         self.bot, self.job, self.action, self.source_message = bot, job, action, source_message
-        self.initial_save = None
         self.dates = {}
         if action == 'postpone':
             for field, label in (('start_date', 'Start'), ('due_date', 'Due')):
@@ -200,11 +199,6 @@ class AnswerModal(discord.ui.Modal):
     async def on_submit(self, interaction):
         await interaction.response.defer()
         try:
-            if self.initial_save is not None:
-                latest = await asyncio.shield(self.initial_save)
-                if isinstance(latest, Exception):
-                    raise latest
-                self.job = latest
             fields = {}
             if self.action == 'postpone':
                 fields = {field: form_date(str(item), self.job['live_dates'].get(field)) for field, item in self.dates.items()}
@@ -226,7 +220,7 @@ async def handle(bot, interaction):
         return await bot.bridge(f'/bot/m3/{qid}/open', actor(interaction))
 
     deferred = False
-    acknowledged = action in {'open', 'detail', 'return', 'page', 'task', 'slot', 'pickslot', 'held', 'question'}
+    acknowledged = action in {'PO', 'open', 'detail', 'return', 'page', 'task', 'slot', 'pickslot', 'held', 'question'}
     if acknowledged:
         if action == 'task':
             await interaction.response.defer(ephemeral=True, thinking=True)
@@ -272,21 +266,9 @@ async def handle(bot, interaction):
     elif action == 'held':
         await save(bot, interaction, job, 'held')
     elif action == 'PO' and job['kind'] in {'tomorrow', 'tomorrow_task'}:
-        if not deferred:
-            await interaction.response.defer()
         await save(bot, interaction, job, 'PO', job.get('comment', ''))
-        if deferred:
-            await interaction.edit_original_response(content='Përgjigjja u ruajt.', view=None)
     elif action == 'PO':
-        # As in M2, yes is saved immediately; the comment form is optional.
-        modal = AnswerModal(bot, job, 'PO', getattr(interaction, 'message', None))
-        modal.initial_save = asyncio.get_running_loop().create_future()
-        await open_modal(interaction, modal, deferred=deferred)
-        try:
-            modal.initial_save.set_result(await save(bot, interaction, job, 'PO', job.get('comment', '') if job.get('answer', {}).get('action') == 'PO' else ''))
-        except Exception as exc:
-            modal.initial_save.set_result(exc)
-            raise
+        await save(bot, interaction, job, 'PO', job.get('comment', '') if job.get('answer', {}).get('action') == 'PO' else '')
     else:
         await open_modal(interaction, AnswerModal(bot, job, 'PO' if action == 'yescomment' else action,
             getattr(interaction, 'message', None)), deferred=deferred)

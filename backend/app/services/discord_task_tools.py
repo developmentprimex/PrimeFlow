@@ -22,8 +22,10 @@ REMINDERS = (
 def due_buckets(now: datetime) -> list[str]:
     if now.weekday() >= 5:
         return []
+    # Keep the report's slot identity, but invite staff one minute before it.
     return [bucket for bucket, at in REMINDERS
-            if timedelta(0) <= now - datetime.combine(now.date(), at, now.tzinfo) < timedelta(minutes=5)]
+            if timedelta(0) <= now - (datetime.combine(now.date(), at, now.tzinfo)
+                - timedelta(minutes=1)) < timedelta(minutes=5)]
 
 
 def in_bucket(task: dict, bucket: str, overrides: dict[str, str], *, include_done: bool = False) -> bool:
