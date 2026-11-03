@@ -28,7 +28,7 @@ export function DailyTaskTable({ rows, workspace, busy, selectedPerson, onEdit, 
 }) {
   let index = 0
   const sections = [
-    { key: "events", label: "Ngjarjet", tasks: rows.filter(isGaEvent) },
+    { key: "events", label: groups.events, tasks: rows.filter(isGaEvent) },
     ...Object.entries(groups).filter(([group]) => group !== "events").map(([group, label]) => ({ key: group, label, tasks: rows.filter((row) => !isGaEvent(row) && row.snapshot.reminder_group === group) })),
   ].filter((section) => section.tasks.length)
   return <div className="min-w-0 space-y-3" data-testid="ga-day-table">
@@ -44,7 +44,7 @@ export function DailyTaskTable({ rows, workspace, busy, selectedPerson, onEdit, 
             const owners = row.snapshot.assignees.filter((key) => selectedPerson === "all" || key === selectedPerson).map((key) => ({ key, name: workspace.members.find((member) => member.person_key === key)?.name || key }))
             return <tr key={row.id} className={`align-middle hover:bg-muted/20 ${isEvent ? "bg-sky-50/35 dark:bg-sky-950/10" : ""}`}>
               <td className="border-b border-r bg-muted/30 px-2 py-3 text-center text-xs tabular-nums text-muted-foreground">{index}</td>
-              <th scope="row" className="border-b px-3 py-3 text-left"><div className="space-y-1"><p className="font-semibold leading-snug"><span title={row.snapshot.title}>{row.snapshot.short_code || row.snapshot.title}</span></p>{isEvent && <span className="inline-flex rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Ngjarje</span>}</div></th>
+              <th scope="row" className="border-b px-3 py-3 text-left"><div className="space-y-1"><p className="font-semibold leading-snug"><span title={row.snapshot.title}>{row.snapshot.short_code || row.snapshot.title}</span></p>{isEvent && <span className="inline-flex rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Event</span>}</div></th>
               <td className="border-b px-3 py-3 font-medium tabular-nums">{row.due_at ? localTime(row.due_at) : <span className="text-muted-foreground">Pa orar</span>}</td>
               <td className="border-b px-3 py-3"><div className="flex flex-wrap gap-1.5" aria-label={statuses[row.status]}>{owners.length ? owners.map(({ key, name }) => <span key={key} role="img" aria-label={`${name} · ${statuses[row.status]}`} title={`${name} · ${statuses[row.status]}`} className={`inline-flex h-10 w-10 items-center justify-center rounded-full border-2 text-[13px] font-bold leading-none ${statusColors[row.status]}`}><span className={personTextColors[key]}>{personInitials[key]}</span></span>) : <span role="img" aria-label={statuses[row.status]} title={statuses[row.status]} className={`inline-flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-semibold ${statusColors[row.status]}`}>—</span>}</div></td>
               <td className="border-b px-3 py-2"><div className="flex flex-wrap gap-1.5">

@@ -406,6 +406,34 @@ test("completing one person's occurrence preserves the other and the mobile layo
   await page.screenshot({ path: "test-results/ga-personal-mobile.png", fullPage: true })
 })
 
+for (const view of ["today", "week"] as const) {
+  test(`events filter includes legacy volleyball and explicit events in the ${view} view`, async ({ page }) => {
+    const state = await shell(page, { view })
+    state.rows[0].snapshot.title = "Volejboll — Mrika"
+    state.rows.push({ ...state.rows[0], id: "explicit-event", template_id: "explicit-event",
+      snapshot: { ...state.rows[0].snapshot, title: "Event familjar", reminder_group: "events" } })
+    await page.reload()
+    if (view === "today") await page.getByRole("button", { name: "Detyrat e ditës", exact: true }).click()
+    const table = page.getByRole("table")
+    const group = page.getByLabel("Filtro grupin", { exact: true })
+    await group.selectOption("events")
+    await expect(table.getByText(/^Eventet\s*2 detyra$/)).toBeVisible()
+    await expect(table.getByText("Volejboll — Mrika", { exact: true })).toBeVisible()
+    await expect(table.getByText("Event familjar", { exact: true })).toBeVisible()
+    await expect(table.getByText("Detyra e personit të dytë", { exact: true })).toHaveCount(0)
+    await expect(table).not.toContainText("Ngjarj")
+    await group.selectOption("daily_upkeep")
+    await expect(table.getByText("Detyra e personit të dytë", { exact: true })).toBeVisible()
+    await expect(table.getByText("Volejboll — Mrika", { exact: true })).toHaveCount(0)
+    await expect(table.getByText("Event familjar", { exact: true })).toHaveCount(0)
+    await group.selectOption("all")
+    await expect(table.getByText("Volejboll — Mrika", { exact: true })).toBeVisible()
+    await expect(table.getByText("Event familjar", { exact: true })).toBeVisible()
+    expect(state.writes).toEqual([])
+    await page.screenshot({ path: `test-results/ga-personal-events-${view}.png`, fullPage: true })
+  })
+}
+
 test("weekly KPIs precede all filters and codes survive older occurrence snapshots", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
   const state = await shell(page, { view: "week" })

@@ -46,7 +46,7 @@ export function WeekTable({ rows, start, workspace, busy, selectedPerson, onOpen
   const rowNumbers = new Map(tasks.map(({ id }, index) => [id, index + 1]))
   const today = localToday()
   const sections = [
-    { key: "events", label: "Ngjarjet", tasks: tasks.filter((task) => task.isEvent) },
+    { key: "events", label: groups.events, tasks: tasks.filter((task) => task.isEvent) },
     ...Object.entries(groups).map(([group, label]) => ({ key: group, label, tasks: tasks.filter((task) => task.group === group && !task.isEvent) })),
   ].filter((section) => section.tasks.length)
   return <div className="min-w-0 space-y-3" data-testid="ga-week-table">
@@ -69,7 +69,7 @@ export function WeekTable({ rows, start, workspace, busy, selectedPerson, onOpen
           const editable = entries.filter(canEditTime)
           return <tr key={id} className={`border-b last:border-0 ${isEvent ? "bg-sky-50/35 dark:bg-sky-950/10" : ""}`}>
         <td className="sticky left-0 z-10 border-b border-r border-slate-300 bg-muted px-2 py-3 text-center text-xs font-semibold tabular-nums text-muted-foreground dark:border-slate-600">{rowNumbers.get(id)}</td>
-        <th scope="row" className="sticky left-9 z-10 border-b border-slate-300 dark:border-slate-600 bg-card px-2 py-2 text-left align-middle text-[11px]"><div className="flex flex-col items-start gap-1"><TaskTitle label={code} titles={titles} />{isEvent && <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Ngjarje</span>}</div></th>
+        <th scope="row" className="sticky left-9 z-10 border-b border-slate-300 dark:border-slate-600 bg-card px-2 py-2 text-left align-middle text-[11px]"><div className="flex flex-col items-start gap-1"><TaskTitle label={code} titles={titles} />{isEvent && <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Event</span>}</div></th>
         <td className="relative border-b border-l border-slate-300 px-1 py-6 align-middle text-center tabular-nums dark:border-slate-600">
           <span className={`flex flex-col items-center gap-1 text-sm font-semibold ${times.length ? "text-foreground" : "text-muted-foreground/40"}`}>{times.length ? times.map((time) => <span key={time}>{time}</span>) : <span aria-label="Pa orar">—</span>}</span>
           {editable.length > 0 && <button type="button" disabled={busy} onClick={() => onEditTime(editable)} aria-label={`Cakto orën: ${code}`} title="Shto ose ndrysho orën" className="absolute inset-0 transition-colors hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50 dark:hover:bg-blue-950/20"><span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded border border-blue-200 bg-blue-50 text-blue-700 shadow-xs dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300"><Plus className="h-3.5 w-3.5" aria-hidden="true" /></span></button>}
