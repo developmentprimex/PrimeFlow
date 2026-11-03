@@ -99,6 +99,9 @@ konfirmohen në kod për ndryshimin konkret.
   Përjashtimet e detyrave nga leximi i Host nuk duhet të ndryshojnë raportet e
   përgjithshme. Hyrja para takimit dhe fillimi zyrtar i stafit/pranisë janë hapa
   të veçantë; kontrollo edhe nisjen manuale dhe rishikimin PM në 11:50.
+  Në 16:00 radha dhe njoftimi paraprak i Host përfshijnë edhe përgjegjësit që
+  kanë vetëm BLL. Pas rilidhjes kontrollo rikthimin e radhëve të papërfunduara
+  dhe ruajtjen e raportimeve/fakteve të mëparshme, përfshirë rishikimin PM.
 - Kur një kategori ka fushë gri në Excel, kjo pasqyron kontrollin e dakorduar
   për atë kategori. Nuk provon mungesën e çdo varësie të ardhshme: për një fushë
   ose sjellje të re, ndiq implementimin dhe rishiko hartën.
