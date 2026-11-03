@@ -11,9 +11,19 @@ konfirmohen në kod për ndryshimin konkret.
 2. Ndiq fushën ose sjelljen nga formulari dhe API-ja te listat, paraqitjet,
    gjeneruesit e raporteve dhe eksportet që e përdorin. Lista më poshtë është
    kontroll i ndikimit, jo kërkesë që çdo faqe të ketë të njëjtën paraqitje.
-3. Nëse ka faqe të lidhura jashtë kërkesës dhe shtrirja nuk është miratuar,
-   emërtoji dhe pyet: **“Dëshiron ta zbatojmë edhe në [faqet], apo t'i lëmë vetëm
-   për kontroll?”** Mos pyet përsëri për punë tashmë të autorizuar.
+3. Për çdo ndryshim funksional ose vizual, njofto përdoruesin për faqet dhe
+   raportet e tjera të prekura pas analizës në kod, para përgjigjes përfundimtare.
+   Kjo përfshin ngjyra, CSS, filtra, etiketa dhe printim. Nëse shtrirja në këto
+   vende nuk është miratuar tashmë, emërtoji dhe pyet një herë:
+   **“Ky ndryshim prek edhe [faqet]. Dëshiron ta zbatojmë edhe atje, apo t'i lëmë
+   vetëm për kontroll?”** Mos e hiq pyetjen duke e quajtur ndryshimin “lokal”.
+   Përmendja e Common View ose një faqeje tjetër të vetme nuk do të thotë
+   automatikisht se vendet e lidhura përjashtohen. Nëse përdoruesi e kufizon
+   shprehimisht punën ose e ka miratuar tashmë shtrirjen, respekto vendimin pa
+   pyetur përsëri, por prapë trego ndikimin. Nëse nuk ka ndikim tjetër të
+   identifikuar, thuaje shkurt pa pyetje shtesë. Përfundo punën e pavarur të
+   autorizuar ndërsa pret përgjigjen për pjesën shtesë. Leximi ose përditësimi i
+   këtij dokumenti nuk e zëvendëson këtë komunikim me përdoruesin.
 4. Për “vetëm kontroll”, verifiko sjelljen dhe raporto mospërputhjet pa bërë
    ndryshime shtesë. Dallo verifikimin në kod nga prova reale në UI/API.
 5. Përmbylle me një listë të shkurtër: implementuar, kontrolluar, mbetet për
@@ -21,6 +31,11 @@ konfirmohen në kod për ndryshimin konkret.
 6. Kur zbulohet një përdorues i ri i të dhënës ose ndryshon arkitektura,
    përditëso rreshtin përkatës këtu. Excel-i është kopje për kontroll manual;
    dokumenti në repository mban udhëzimin e qëndrueshëm.
+
+Shembull: kur kërkohet ndryshimi i ngjyrës së BLL në Common View, kontrollo
+1H SHTYPI Today/Tomorrow dhe raportet që shfaqin BLL. Nëse edhe ato paraqitje
+preken, tregoji dhe pyet për shtrirjen. Stilet e veçanta nuk e heqin këtë
+detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Emërtimet e grupuara
 
@@ -79,6 +94,10 @@ konfirmohen në kod për ndryshimin konkret.
 - Common View dhe SHTYPI përdorin burim të përbashkët të dhënash, por kanë
   paraqitje të veçanta. Një ndryshim në JSX/CSS të Common View nuk ndryshon
   automatikisht HTML-in, emailin apo bashkëngjitjet e SHTYPI.
+  Ngjyrat BLL dhe COM në Common View kanë stile lokale për pamjen ditore/javore;
+  COM përdor `TaskMarkerComment` edhe në faqe të tjera, ndaj ndryshimet lokale
+  kalojnë përmes klasës `common-marker-comment`. Printimi i ditës së ardhshme
+  nga Common View ka stil të veçantë `.print-marker-comment`.
 - SHTYPI Today dhe Tomorrow ndajnë komponentin dhe gjeneruesin bazë, por kanë
   dallime në data, gjenerim dhe historik. 1H Reports ka gjenerues tjetër.
 - PX Notes dhe PX JAV lidhen me taskat përmes origjinës së Note dhe paketave
