@@ -63,6 +63,9 @@ class InteractionDeadlineTests(unittest.IsolatedAsyncioTestCase):
                         # M2 Yes saves directly; its separate comment button opens the form.
                         job['choice'] = 'PO'
                         custom_id = f"pf:m2:comment:{job['id']}"
+                    elif prefix == 'm3' and choice == 'PO':
+                        # M3 Yes also saves directly; only its comment button opens a form.
+                        custom_id = f"pf:m3:yescomment:{job['id']}"
                     else:
                         custom_id = f"pf:m2:reply:{job['id']}:{choice}" if prefix == 'm2' else f"pf:m3:{choice}:{job['id']}"
                     interaction = self.interaction(custom_id)
@@ -92,11 +95,7 @@ class InteractionDeadlineTests(unittest.IsolatedAsyncioTestCase):
                         modal = click.response.send_modal.call_args.args[0]
                         self.assertIs(modal.source_message, interaction.message)
                         if choice == 'PO':
-                            if prefix == 'm3':
-                                save.assert_awaited_once()
-                                self.assertIs(modal.initial_save.result(), job)
-                            else:
-                                save.assert_not_awaited()
+                            save.assert_not_awaited()
                             self.assertFalse(modal.comment.required)
                         else:
                             save.assert_not_awaited()
