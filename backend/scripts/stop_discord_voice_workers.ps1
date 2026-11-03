@@ -12,14 +12,22 @@ function Test-PrimeFlowVoiceWorker {
     return $false
 }
 
+function Test-PrimeFlowVoiceSupervisor {
+    param([string]$Pm2Path)
+    # Windows PowerShell turns native stderr into a terminating error under
+    # ErrorActionPreference=Stop, even with *> $null. A missing PM2 app is
+    # expected after an interrupted deploy; let cmd handle the redirection.
+    & $env:ComSpec /d /c "`"$Pm2Path`" describe primeflow-discord >NUL 2>&1"
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Stop-PrimeFlowVoiceWorkers {
     $voiceDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\discord-voice'))
     if (-not (Test-Path -LiteralPath (Join-Path $voiceDirectory 'worker.mjs'))) {
         throw 'PrimeFlow voice directory could not be verified.'
     }
     $pm2 = (Get-Command pm2.cmd -ErrorAction Stop).Source
-    & $pm2 describe primeflow-discord *> $null
-    if ($LASTEXITCODE -eq 0) {
+    if (Test-PrimeFlowVoiceSupervisor -Pm2Path $pm2) {
         & $pm2 stop primeflow-discord | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Could not stop the Mira voice supervisor.' }
         Start-Sleep -Seconds 2

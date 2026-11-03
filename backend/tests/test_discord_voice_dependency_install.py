@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 
@@ -10,6 +11,22 @@ SCRIPT = ROOT / 'backend/scripts/stop_discord_voice_workers.ps1'
 
 
 class VoiceDependencyInstallTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Deployment runs on Windows')
+    def test_missing_pm2_app_does_not_abort_cleanup_under_stop_preference(self):
+        with tempfile.TemporaryDirectory(prefix='pm2 probe with spaces ') as directory:
+            pm2 = Path(directory) / 'pm2.cmd'
+            quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+            for exit_code in [1, 0]:
+                with self.subTest(exit_code=exit_code):
+                    pm2.write_text(f'@echo off\necho PM2 status >&2\nexit /b {exit_code}\n')
+                    command = f'. {quote(SCRIPT)}; Test-PrimeFlowVoiceSupervisor -Pm2Path {quote(pm2)}; Write-Output cleanup-continued'
+                    result = subprocess.run(['powershell.exe', '-NoProfile', '-Command', command],
+                                            capture_output=True, text=True, timeout=30,
+                                            creationflags=subprocess.CREATE_NO_WINDOW)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.split(), [str(exit_code == 0), 'cleanup-continued'])
+                    self.assertEqual(result.stderr, '')
+
     def test_deploy_releases_voice_library_before_locked_install_and_restarts_the_bot(self):
         workflow = (ROOT / '.github/workflows/deploy.yml').read_text(encoding='utf-8')
         release = workflow.index('- name: Release Mira Voice Dependencies')
