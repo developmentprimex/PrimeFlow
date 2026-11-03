@@ -78,6 +78,16 @@ test("missing system audio waits for explicit continuation", async () => {
   assert.equal(captures[0].state, "recording")
 })
 
+test("project association reaches creation for automatic and explicit start", async () => {
+  for (const system of [true, false]) {
+    const { recorder, requests } = harness({ system })
+    await recorder.prepare("", "monitor", { ...details, projectId: "project-id" })
+    if (!system) await recorder.start(details.title, details.meetingId, details.description, "project-id")
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].body.project_id, "project-id")
+  }
+})
+
 for (const options of [{ state: "error" }, { state: "idle" }, { locked: true }]) {
   test(`failed or cancelled sharing never starts a session: ${JSON.stringify(options)}`, async () => {
     const { recorder, requests } = harness(options)

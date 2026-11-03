@@ -9,6 +9,7 @@ class RecordingCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
     meeting_id: UUID | None = None
+    project_id: UUID | None = None
     capture_source_type: Literal["monitor", "window", "browser", "unknown"]
     mime_type: Literal["video/webm", "video/mp4"]
     has_microphone_audio: bool = False
@@ -25,6 +26,7 @@ class RecordingCreate(BaseModel):
 
 class RecordingUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
+    project_id: UUID | None = None
 
     @field_validator("title")
     @classmethod
@@ -43,6 +45,7 @@ class RecordingOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     meeting_id: UUID | None
+    project_id: UUID | None = None
     created_by: UUID
     title: str
     description: str | None
@@ -65,4 +68,5 @@ class RecordingOut(BaseModel):
     error_message: str | None
     recorded_by_name: str | None = None
     meeting_title: str | None = None
+    project_title: str | None = None
     media_available: bool | None = None

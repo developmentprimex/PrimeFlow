@@ -42,7 +42,7 @@ def prepare_database(*, full_schema=False):
         else:
             Department.__table__.create(connection)
             User.__table__.create(connection)
-            connection.execute(sa.text("CREATE TABLE projects (id UUID PRIMARY KEY)"))
+            connection.execute(sa.text("CREATE TABLE projects (id UUID PRIMARY KEY, title VARCHAR(200), is_template BOOLEAN NOT NULL DEFAULT false)"))
             Meeting.__table__.create(connection)
             MeetingParticipant.__table__.create(connection)
             AuditLog.__table__.create(connection)
@@ -82,6 +82,15 @@ def prepare_database(*, full_schema=False):
                 protocol.upgrade()
                 protocol.downgrade()
                 protocol.upgrade()
+    project_path = Path(__file__).resolve().parents[1] / 'alembic/versions/0182_recording_project.py'
+    spec = importlib.util.spec_from_file_location('recording_project_migration', project_path)
+    project_migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(project_migration)
+    with engine.begin() as connection:
+        with Operations.context(MigrationContext.configure(connection)):
+            project_migration.upgrade()
+            project_migration.downgrade()
+            project_migration.upgrade()
     with Session(engine) as db:
         department = Department(name="Recorder test", code="REC")
         db.add(department); db.flush()
