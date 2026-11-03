@@ -99,11 +99,37 @@ test('existing Notes are read immediately without another tool or permission pau
   host._onRealtime({type:'response.created',response:{id:'notes'}});
   host._onRealtime({type:'response.output_item.done',response_id:'notes',item:{type:'function_call',name:'list_new_px_notes',call_id:'notes-read',arguments:'{}'}});
   host._onRealtime({type:'response.done',response:{id:'notes',status:'completed'}});
-  const reading='Shënimi 1: fë gë, kontrollo ofertën. A duhet kthyer në detyrë dhe për kë?';
-  host.toolResult('notes-read',{notes:[{note_id:'n1',text:'FG, kontrollo ofertën.'}],current_note_id:'n1',read_aloud:reading});
+  const reading='Shënimi 1: fë gë, kontrollo ofertën. Shënimi 2: Dërgo raportin.';
+  host.toolResult('notes-read',{notes:[{note_id:'n1'},{note_id:'n2'}],read_aloud:reading,next_step:'list_new_done_and_strikes'});
   const request=sent.filter(e=>e.type==='response.create').at(-1);
   assert.ok(request?.response.instructions?.includes(reading));
   assert.equal(request.response.tool_choice,'none');
+  host.stop();
+});
+
+for(const status of ['completed','cancelled','wrong_text','dispatch_failed'])test(`notes continue without a user reply only after successful ${status} playback`,async()=>{
+  const {host,sent,events,dispatch,advance,connection}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});
+  await Promise.resolve();
+  host._onRealtime({type:'response.created',response:{id:'lookup'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'lookup',item:{type:'function_call',name:'list_new_px_notes',call_id:'notes',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'lookup',status:'completed'}});
+  const reading='Shënimi 1: Oferta. Shënimi 2: Raporti.';
+  host.toolResult('notes',{notes:[{note_id:'n1'},{note_id:'n2'}],read_aloud:reading,next_step:'list_new_done_and_strikes'});
+  const before=sent.filter(e=>e.type==='response.create').length;
+  host._onRealtime({type:'response.created',response:{id:'spoken'}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'spoken',item_id:'audio',delta:int16ToBase64(new Int16Array(480))});
+  host._onRealtime({type:'response.output_audio_transcript.done',response_id:'spoken',transcript:status==='wrong_text'?'Fillojmë.':reading});
+  host._onRealtime({type:'response.done',response:{id:'spoken',status:status==='cancelled'?'cancelled':'completed'}});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,before);
+  if(status==='dispatch_failed')connection.dispatchAudio=()=>false;
+  advance(40);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,before+(status==='completed'?1:0));
+  assert.equal(events.filter(e=>e.type==='note_played').length,status==='completed'?1:0);
+  if(status==='completed'){
+    advance(1000);
+    assert.equal(sent.filter(e=>e.type==='response.create').length,before+1);
+  }
   host.stop();
 });
 

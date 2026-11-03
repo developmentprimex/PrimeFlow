@@ -1131,7 +1131,7 @@ class Discussion(Args):
 
 TOOLS = {
     "list_ga_tasks": (NoArgs, "Detyrat e hapura me simbolin GA (detyrat nga stafi për GA), sipas personave. Thirre në fillim të fazës GA."),
-    "list_new_px_notes": (NoArgs, "PROAKTIVE: merr PX Notes të hapura në fazën GA, pa pyetur nëse ka notes ose nëse duhet t'i lexosh. Lexo read_aloud menjëherë; pastaj trajto notes një nga një."),
+    "list_new_px_notes": (NoArgs, "Përmend shkurt PX Notes përmes read_aloud, të gjitha në një kalim, pa pyetje për krijim detyrash ose aprovim. Pastaj vazhdo menjëherë me list_new_done_and_strikes, pa pritur përgjigje."),
     "prepare_task_from_note": (CreateTask, "Përgatit propozimin e saktë për një PX Note. Lexo personin, detyrën dhe afatin; prit konfirmim të ri nga GA. Nuk krijon detyrë."),
     "create_task_from_note": (ConfirmTask, "Krijo vetëm propozimin që GA konfirmoi qartë në një përgjigje të re, pas prepare_task_from_note. Mos e thirr për të njëjtën përgjigje ose për jo/kalo."),
     "record_task_discussion": (Discussion, "Ruaj në heshtje vetëm faktet që sapo u thanë për detyrën/personin aktual. Nuk ndryshon detyrën. Përdori që të mos pyesësh përsëri."),
@@ -1155,7 +1155,7 @@ TOOLS = {
 def tool_definitions(phase: str | None = None) -> list[dict]:
     shared = {"find_user", "search_knowledge", "add_meeting_note", "save_px_note", "wait_for_user"}
     phases = {
-        "GA_PHASE": shared | {"list_ga_tasks", "list_new_px_notes", "prepare_task_from_note", "create_task_from_note", "list_new_done_and_strikes", "end_ga_phase"},
+        "GA_PHASE": shared | {"list_ga_tasks", "list_new_px_notes", "list_new_done_and_strikes", "end_ga_phase"},
         "STAFF_PHASE": shared | {"get_person_brief", "record_task_discussion", "end_person_turn", "call_next_person"},
         "PM_REVIEW": shared | {"get_person_brief", "end_person_turn"},
         "ENDING": {"wait_for_user"},
@@ -1264,14 +1264,15 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
         notes = await open_notes(db)
         codes = [initials(data.name(uid)) for uid in data.users]
         for note in notes:
-            note["suggested_people"] = note_people(data, note["text"])
-            note["read_aloud"] = albanian_speech(note["text"], codes)
+            mention = note["text"].split("\n", 1)[0].strip()
+            if len(mention) > 180:
+                mention = mention[:177].rsplit(" ", 1)[0] + "…"
+            note["read_aloud"] = albanian_speech(mention, codes)
         return {"total": len(notes), "notes": notes,
-                "current_note_id": notes[0]["note_id"] if notes else None,
-                "read_aloud": (f"Shënimi {notes[0]['number']}: {notes[0]['read_aloud']} "
-                               "A duhet kthyer në detyrë dhe për kë?") if notes else "",
-                "next_step": "discuss_notes" if notes else "list_new_done_and_strikes",
-                "udhezim": "Lexo shënimin e parë menjëherë, pastaj pyet vetëm për veprimin. Pas tij lexo shënimin tjetër pa leje shtesë."
+                "read_aloud": " ".join(f"Shënimi {n['number']}: {n['read_aloud']}" for n in notes),
+                "next_step": "list_new_done_and_strikes",
+                "udhezim": "Përmendi shkurt të gjitha shënimet përmes read_aloud dhe vazhdo menjëherë me list_new_done_and_strikes. "
+                           "Pa pyetje, aprovim ose krijim detyrash; me kthimin e notes në detyra merret stafi në PrimeFlow."
                            if notes else "Nuk ka shënime të hapura. Vazhdo menjëherë me list_new_done_and_strikes, pa pyetje ose pritje."}
     if name == "list_new_done_and_strikes":
         since = await progress_since(db, meeting)

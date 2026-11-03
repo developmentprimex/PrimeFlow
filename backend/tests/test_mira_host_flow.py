@@ -4,6 +4,7 @@ import unittest
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+from fastapi import HTTPException
 
 from tests.test_mira_host_bot import session, BRIEF
 from tests.test_mira_host_service import DAY, IDS, payload, item
@@ -41,7 +42,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['current']['id'], str(late.id))
         self.assertEqual(result['deferred'], [])
 
-    async def test_existing_notes_supply_the_first_reading_without_a_permission_question(self):
+    async def test_notes_are_mentioned_together_then_continue_without_approval(self):
         notes = [{'note_id': 'n1', 'number': 1, 'text': 'FG: kontrollo ofertën.'},
                  {'note_id': 'n2', 'number': 2, 'text': 'Dërgo raportin.'}]
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='GA_PHASE')
@@ -49,9 +50,29 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(service, 'open_notes', AsyncMock(return_value=notes)):
             result = await service.run_tool(SimpleNamespace(), meeting, 'list_new_px_notes', {})
         self.assertIn('fë gë: kontrollo ofertën.', result.get('read_aloud', ''))
-        self.assertNotIn('Dërgo raportin.', result['read_aloud'])
-        self.assertEqual(result.get('current_note_id'), 'n1')
+        self.assertIn('Dërgo raportin.', result['read_aloud'])
+        self.assertNotIn('?', result['read_aloud'])
+        self.assertEqual(result['next_step'], 'list_new_done_and_strikes')
         self.assertEqual(result['notes'][0]['text'], notes[0]['text'])
+
+    async def test_long_notes_only_mention_the_heading_and_keep_the_source_text(self):
+        text = 'Oferta ' * 50 + '\nDetajet për stafin.'
+        notes = [{'note_id': 'n1', 'number': 1, 'text': text}]
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='GA_PHASE')
+        with patch.object(service, 'common_payload', AsyncMock(return_value=payload([]))), \
+             patch.object(service, 'open_notes', AsyncMock(return_value=notes)):
+            result = await service.run_tool(SimpleNamespace(), meeting, 'list_new_px_notes', {})
+        self.assertLessEqual(len(result['notes'][0]['read_aloud']), 180)
+        self.assertNotIn('Detajet për stafin.', result['read_aloud'])
+        self.assertEqual(result['notes'][0]['text'], text)
+
+    async def test_note_conversion_is_rejected_in_every_meeting_phase(self):
+        for phase in ('GA_PHASE', 'STAFF_PHASE'):
+            for tool in ('prepare_task_from_note', 'create_task_from_note'):
+                with self.subTest(phase=phase, tool=tool):
+                    with self.assertRaises(HTTPException) as raised:
+                        await service.run_tool(SimpleNamespace(), Mira1HMeeting(status=phase), tool, {})
+                    self.assertEqual(raised.exception.status_code, 409)
 
     async def test_no_notes_continues_to_progress_without_asking_for_notes(self):
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='GA_PHASE')

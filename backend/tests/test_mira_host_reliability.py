@@ -154,23 +154,22 @@ class WriteGuards(unittest.IsolatedAsyncioTestCase):
         db = SimpleNamespace(get=get, add=add, commit=AsyncMock(), execute=AsyncMock(return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: list(events.values())))))
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='GA_PHASE')
         actor = SimpleNamespace(id=uuid.UUID(IDS['DV']))
-        with patch.object(service, 'common_payload', AsyncMock(return_value=payload([]))), \
-             patch.object(service, 'user_for_discord', AsyncMock(return_value=actor)), \
-             patch.object(service, 'get_settings', AsyncMock(return_value=SimpleNamespace(ga_participants=None))), \
-             patch.object(service, 'acting_user', AsyncMock(return_value=actor)), \
+        data = service.SlotData(payload([]), DAY)
+        with patch.object(service, 'acting_user', AsyncMock(return_value=actor)), \
              patch('app.services.discord_task_tools.user_api', user_api):
-            proposal = await service.run_tool(db, meeting, 'prepare_task_from_note',
-                {'note_id': str(note.id), 'assignees': ['EF'], 'due_date': DAY.isoformat(), 'deadline': False},
-                speaker_id='11', speech_id='first')
-            args = {'proposal_id': proposal['proposal_id']}
-            denied = await service.run_tool(db, meeting, 'create_task_from_note', args, speaker_id='11', speech_id='first')
-            unread = await service.run_tool(db, meeting, 'create_task_from_note', args, speaker_id='11', speech_id='second',
+            # Historical proposal guards remain valid even though the host no longer exposes conversion tools.
+            proposal = await service.prepare_task_proposal(db, meeting, data,
+                service.CreateTask(note_id=str(note.id), assignees=['EF'], due_date=DAY.isoformat(), deadline=False),
+                speech_id='first', actor=actor)
+            proposal_id = proposal['proposal_id']
+            denied = await service.confirm_task_proposal(db, meeting, data, proposal_id, actor=actor, speech_id='first')
+            unread = await service.confirm_task_proposal(db, meeting, data, proposal_id, actor=actor, speech_id='second',
                 speech_text='Po, krijoje', speech_started_at=service.now().isoformat())
             self.assertFalse(unread['success'])
             await service.acknowledge_proposal(db, meeting, uuid.UUID(proposal['proposal_id']), service.now().isoformat())
-            first = await service.run_tool(db, meeting, 'create_task_from_note', args, speaker_id='11', speech_id='third',
+            first = await service.confirm_task_proposal(db, meeting, data, proposal_id, actor=actor, speech_id='third',
                 speech_text='Po, krijoje', speech_started_at=(service.now()+timedelta(milliseconds=1)).isoformat())
-            repeat = await service.run_tool(db, meeting, 'create_task_from_note', args, speaker_id='11', speech_id='second')
+            repeat = await service.confirm_task_proposal(db, meeting, data, proposal_id, actor=actor, speech_id='second')
         self.assertFalse(denied['success'])
         self.assertTrue(first['success'])
         self.assertEqual(repeat, first)

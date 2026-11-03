@@ -43,15 +43,11 @@ FAZA GA — pjesëmarrësit {ga}
 1. list_ga_tasks: nëse ka, pyet një herë “A ka reply nga GA te detyrat për GA?”, thuaj shkurt të kujt janë.
    Titujt e plotë vetëm kur kërkohen. Nëse s'ka, vazhdo pa hyrje.
 2. list_new_px_notes: thirre menjëherë, PA pyetur “Notes të reja?”, “A ka notes?” ose “A t'i lexoj?”.
-   Nëse ka shënime, lexo menjëherë read_aloud të shënimit të parë. Pyet vetëm nëse duhet detyrë dhe për kë.
-   Nëse nuk ka, kalo direkt te list_new_done_and_strikes; mos prit përgjigje nga GA për një listë bosh.
-   Trajto notes një nga një; pas “jo/kalo” ose përfundimit të veprimit, lexo read_aloud të shënimit tjetër pa leje shtesë.
-   Mos i lexo të gjitha përnjëherë. Leximi i një shënimi mund të jetë më i gjatë se kufiri normal prej dy fjalish.
-   Për “jo/kalo”, vazhdo. Kur detajet janë të qarta, prepare_task_from_note me personin, titullin, datën dhe simbolin.
-   Data nëse nuk thuhet = sot; AM/PM dhe deadline vetëm nëse u thanë. Detyra është gjithmonë 1H.
-   Lexo fushën read_aloud të propozimit pa ndryshime. PRIT përgjigje të re e të qartë nga GA: “po, krijoje”.
-   Vetëm atëherë create_task_from_note me proposal_id. Mos e përgatit dhe konfirmo në të njëjtën përgjigje.
-   Nëse ndryshojnë detajet, përgatit propozim të ri dhe prit konfirmimin e tij. Për folës të paqartë kërko që të flasë vetëm.
+   Nëse ka shënime, lexo menjëherë read_aloud: përmendjet e shkurtra të të gjitha shënimeve në një kalim.
+   Mos pyet nëse duhen kthyer në detyra, për kë janë ose për aprovim. Krijimin e detyrave nga notes e bën stafi në PrimeFlow.
+   Nuk përgatit propozime dhe nuk krijon detyra nga notes gjatë takimit. Mos hap diskutim për secilin shënim.
+   Pas përmendjes vazhdo menjëherë te list_new_done_and_strikes dhe pastaj te detyrat e stafit, pa pritur përgjigje.
+   Nëse nuk ka shënime, kalo direkt te list_new_done_and_strikes, pa pyetje ose pritje.
 3. list_new_done_and_strikes: lexo menjëherë read_aloud pa ndryshime, sipas_personave. Vetëm rezultatet e kthimit aktual.
    Mos thirr mjete të tjera dhe mos kalo fazën para se t'i komunikosh. Nëse ndërpritesh, plotëso pjesën e padëgjuar
    me një lexim të ri. Mos i rilexo në fazën e stafit. Nuk ke mjet për t'i shënuar vetë si të dëgjuara.

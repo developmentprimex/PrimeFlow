@@ -198,7 +198,8 @@ class PacingTests(unittest.IsolatedAsyncioTestCase):
     def test_each_phase_exposes_only_its_tools(self):
         ga = {t['name'] for t in service.tool_definitions('GA_PHASE')}
         staff = {t['name'] for t in service.tool_definitions('STAFF_PHASE')}
-        self.assertIn('create_task_from_note', ga)
+        self.assertNotIn('prepare_task_from_note', ga)
+        self.assertNotIn('create_task_from_note', ga)
         self.assertNotIn('create_task_from_note', staff)
         self.assertIn('record_task_discussion', staff)
         self.assertNotIn('end_person_turn', ga)

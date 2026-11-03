@@ -72,15 +72,19 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   }
   function acknowledgePlayback(){
     if(closed||responseActive||playback.playing)return;
+    let continueAfterNotes=false;
     for(const [id,d] of deliveries){
       if(!d.done)continue;
       if(d.audio&&!d.failed){
         if(d.transcript)emit({type:'transcript',role:'mira',text:d.transcript.trim()});
-        for(const [token,delivery] of d.tokens)if(delivery.text&&normalized(d.transcript).includes(normalized(delivery.text)))
+        for(const [token,delivery] of d.tokens)if(delivery.text&&normalized(d.transcript).includes(normalized(delivery.text))){
           emit({type:delivery.kind+'_played',token,played_at:new Date().toISOString()});
+          if(delivery.kind==='note'&&delivery.nextStep)continueAfterNotes=true;
+        }
       }
       deliveries.delete(id);
     }
+    if(continueAfterNotes){continuationPending=true;maybeContinue();}
   }
   function fail(reason,extra={}){if(closed)return;emit({type:'interrupted',reason,...extra});stop();}
   function emitTool(message,source){
@@ -428,8 +432,8 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
       if(!pendingCalls.delete(callId))return;
       if(output?.progress_token&&output?.sipas_personave?.length)pendingProgress.set(output.progress_token,{kind:'progress',text:output.read_aloud});
       if(output?.proposal_id&&output?.requires_confirmation)pendingProgress.set(output.proposal_id,{kind:'proposal',text:output.read_aloud});
-      if(output?.current_note_id&&output?.notes?.length&&output?.read_aloud)
-        pendingProgress.set('notes:'+callId,{kind:'note',text:output.read_aloud});
+      if(output?.notes?.length&&output?.read_aloud)
+        pendingProgress.set('notes:'+callId,{kind:'note',text:output.read_aloud,nextStep:output.next_step});
       rt({type:'conversation.item.create',item:{type:'function_call_output',call_id:callId,output:JSON.stringify(output??{})}});
       continuationPending=true;continuationMayWait=Boolean(output?.prit);
       maybeContinue();
