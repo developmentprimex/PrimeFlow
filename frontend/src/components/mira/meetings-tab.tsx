@@ -39,7 +39,7 @@ function TurnRow({ turn }: { turn: Turn }) {
         {turn.notes && <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{turn.notes}</span>}
       </span>
       <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-        {turn.status === "SKIPPED" ? "nuk raportoi" : (
+        {turn.status === "SKIPPED" ? "nuk raportoi" : turn.status === "TIMEOUT" ? "koha përfundoi · kërkon sqarim" : turn.status === "DEFERRED" ? "në pritje të kyçjes" : (
           <>
             {clock(turn.started_at)}–{turn.status === "ACTIVE" ? <span style={{ color: ACCENT }}>tani</span> : clock(turn.ended_at)}
             {minutes !== null && <span className="ml-2">{minutes} min</span>}
@@ -148,12 +148,18 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
   const invitations = detail.events.filter((e) => ["BRIEF", "GA_CALL", "GA_FALLBACK", "NOTE"].includes(e.kind))
   const done = detail.mentions.filter((m) => m.kind === "DONE")
   const strikes = detail.mentions.filter((m) => m.kind === "STRIKE")
+  const replyTimes = detail.events.filter(e => e.kind === "PERFORMANCE" && e.data.kind === "generated_audio")
+    .map(e => Number(e.data.duration_ms)).filter(Number.isFinite).sort((a, b) => a - b)
+  const unclear = detail.events.filter(e => e.kind === "DISCUSSION" && e.data.unclear === true)
   return (
     <article>
       <button type="button" onClick={onBack} className="mb-4 text-sm text-muted-foreground underline-offset-4 hover:underline md:hidden">
         Kthehu te lista
       </button>
-      <h2 className="text-lg font-semibold">1H {detail.slot} · {dayLabel(detail.date)}</h2>
+      <h2 className="text-lg font-semibold">{detail.is_test && "🧪 TEST · "}1H {detail.slot} · {dayLabel(detail.date)}</h2>
+      {detail.is_test && <p className="mt-2 text-sm text-muted-foreground">
+        Provë zanore për këtë slot. Takimi real mbetet i pandryshuar; krijimet e detyrave dhe PX Notes janë të simuluara.
+      </p>}
       <p className="mt-1 text-sm text-muted-foreground">
         {STATUS_LABELS[detail.status]}{detail.status !== "DISCORD_REPORT" && <> · filloi {clock(detail.started_at)}, stafi {clock(detail.staff_started_at)}, mbaroi {clock(detail.ended_at)}</>}
         {detail.duration_minutes !== null && ` · ${detail.duration_minutes} min`}
@@ -163,6 +169,17 @@ function Detail({ detail, onBack, onResummarize, canManage }: {
       {!!detail.discord_reports?.length && <DiscordReports reports={detail.discord_reports} />}
 
       {detail.status !== "DISCORD_REPORT" && <>
+      {canManage && replyTimes.length > 0 && <p className="mt-3 text-xs text-muted-foreground">
+        Pritja deri te audio e gjeneruar: mesatarisht {(replyTimes.reduce((a, b) => a + b, 0) / replyTimes.length / 1000).toFixed(1)} s
+        {" · "}95% brenda {(replyTimes[Math.ceil(replyTimes.length * 0.95) - 1] / 1000).toFixed(1)} s
+        {" · "}{replyTimes.length} matje. Koha e transmetimit dhe riprodhimit shtohet më pas.
+      </p>}
+      {unclear.length > 0 && <div className="mt-3 text-sm text-muted-foreground">
+        <p>{unclear.length} raportime kërkojnë sqarim pas takimit:</p>
+        <ul className="mt-1 list-disc pl-5">{unclear.map((event, i) => <li key={i}>
+          {event.initials && `${event.initials}: `}{String(event.data.task_title ?? "Raportim i paqartë")}
+        </li>)}</ul>
+      </div>}
       <Section title="Përmbledhja">
         {detail.summary ? <Summary text={detail.summary} /> : (
           <p className="text-sm text-muted-foreground">
@@ -304,6 +321,7 @@ export function MeetingsTab({ canManage }: { canManage: boolean }) {
                   className={cn("flex w-full items-baseline gap-3 rounded-md px-3 py-2.5 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
                     selected === row.id ? "bg-muted" : "hover:bg-muted/60")}>
                   <span className="w-12 shrink-0 font-semibold tabular-nums">{row.slot}</span>
+                  {row.is_test && <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">TEST</span>}
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
                     {row.status === "DISCORD_REPORT" ? "Raportimet e stafit" : row.people.length ? row.people.map((p) => p.initials).join(" → ") : "pa staf"}
                   </span>

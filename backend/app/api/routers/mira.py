@@ -110,7 +110,7 @@ async def status(db: AsyncSession = Depends(get_db), user=Depends(get_current_us
 async def save_settings(payload: SettingsIn, db: AsyncSession = Depends(get_db), user=Depends(require_manager_or_admin)):
     row = await host.get_settings(db, lock=True)
     row.ga_participants = [p.model_dump(exclude_none=True) for p in payload.ga_participants]
-    row.protocol_text = payload.protocol_text.strip()
+    row.protocol_text = host.effective_protocol(payload.protocol_text)
     row.target_minutes_per_person = payload.target_minutes_per_person
     row.knowledge_char_budget = payload.knowledge_char_budget
     await db.commit()

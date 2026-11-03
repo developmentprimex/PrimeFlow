@@ -47,6 +47,9 @@ export function SettingsTab({ canManage, status, onChange }: { canManage: boolea
     <div className="w-full py-5">
       <section className="rounded-lg border p-4">
         <h3 className="text-sm font-semibold">Mira si mbajtëse e 1H (test)</h3>
+        {status.model && <p className="mt-1 text-xs text-muted-foreground">
+          Modeli: {status.model} · Zëri: {status.voice} · Prompt: {status.prompt_version}
+        </p>}
         {!status.configured && (
           <p className="mt-1 text-sm text-muted-foreground">
             Boti “Mira Host” nuk është konfiguruar në server (MIRA_HOST_ENABLED dhe MIRA_HOST_BOT_TOKEN).
@@ -116,11 +119,13 @@ export function SettingsTab({ canManage, status, onChange }: { canManage: boolea
             <Label htmlFor="minutes" className="text-sm font-semibold">Minuta për person</Label>
             <Input id="minutes" type="number" min={1} max={30} className="mt-1 h-9 w-28" value={form.target_minutes_per_person}
               onChange={(e) => setForm({ ...form, target_minutes_per_person: Number(e.target.value) || 1 })} />
+            <p className="mt-1 max-w-64 text-xs text-muted-foreground">Paralajmërim 15 sekonda para fundit; deri në 30 sekonda për mbyllje. Çështjet e hapura mbeten për sqarim.</p>
           </div>
           <div>
             <Label htmlFor="budget" className="text-sm font-semibold">Knowledge në kontekst (shenja)</Label>
             <Input id="budget" type="number" min={2000} max={120000} step={1000} className="mt-1 h-9 w-36" value={form.knowledge_char_budget}
               onChange={(e) => setForm({ ...form, knowledge_char_budget: Number(e.target.value) || 2000 })} />
+            <p className="mt-1 max-w-64 text-xs text-muted-foreground">Në hyrje përdoren deri në 8 000 shenja; pjesa tjetër kërkohet sipas nevojës.</p>
           </div>
         </div>
         {canManage && <Button onClick={save}>Ruaj cilësimet</Button>}

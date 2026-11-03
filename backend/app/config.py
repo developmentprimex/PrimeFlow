@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 from pydantic import AwareDatetime
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -173,7 +174,7 @@ class Settings(BaseSettings):
     MIRA_HOST_ENABLED: bool = False
     MIRA_HOST_BOT_TOKEN: str | None = None
     # Host-only model, independent of the other voice assistant features.
-    MIRA_HOST_MODEL: str = "gpt-realtime-2.1"
+    MIRA_HOST_MODEL: Literal["gpt-realtime-2.1"] = "gpt-realtime-2.1"
     # Private family bot; enabled separately and only started by manual command.
     KUJTESA_HOST_ENABLED: bool = False
     KUJTESA_HOST_MODEL: str = "gpt-realtime-2.1-mini"

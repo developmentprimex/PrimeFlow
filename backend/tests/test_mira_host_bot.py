@@ -29,8 +29,37 @@ def bot(responses):
 
 def session(guild=None):
     return {'slot': '11:00', 'meeting': 'm1', 'guild': guild or SimpleNamespace(get_member=Mock(return_value=None)),
-            'voice': SimpleNamespace(id=5), 'process': SimpleNamespace(send=AsyncMock()), 'lines': [], 'target': 4,
-            'ending': False, 'closed': asyncio.Event(), 'ready': asyncio.Event(), 'upcoming': None}
+            'voice': SimpleNamespace(id=5), 'process': SimpleNamespace(send=AsyncMock(), close=AsyncMock()), 'lines': [], 'target': 4,
+            'ending': False, 'closed': asyncio.Event(), 'ready': asyncio.Event(), 'upcoming': None, 'current_turn': {'id': 't1'}}
+
+
+class TranscriptDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_all_batches_are_uploaded_without_losing_the_tail(self):
+        received = []
+        async def bridge(path, payload):
+            received.extend(payload['lines'])
+            return {'ok': True}
+        host = mira_host.MiraHost(SimpleNamespace(bridge=bridge))
+        state = session()
+        state['lines'] = [{'text': str(i)} for i in range(450)]
+        await host.flush_lines(state)
+        self.assertEqual([r['text'] for r in received], [str(i) for i in range(450)])
+        self.assertEqual(state['lines'], [])
+
+    async def test_upload_failure_retains_only_unsent_lines_before_new_arrivals(self):
+        received = []
+        state = session()
+        state['lines'] = [{'text': str(i)} for i in range(205)]
+        async def bridge(path, payload):
+            if received:
+                state['lines'].append({'text': 'new'})
+                raise ValueError('offline')
+            received.extend(payload['lines'])
+            return {'ok': True}
+        host = mira_host.MiraHost(SimpleNamespace(bridge=bridge))
+        await host.flush_lines(state)
+        self.assertEqual(len(received), 200)
+        self.assertEqual([r['text'] for r in state['lines']], [str(i) for i in range(200, 205)] + ['new'])
 
 
 class ControllerTests(unittest.IsolatedAsyncioTestCase):
@@ -214,12 +243,13 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
                                            'upcoming': {'id': 't3', 'name': 'Endrit Hoxha', 'discord': TARGET}}})
         host = mira_host.MiraHost(fake)
         state = session()
-        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c1', 'arguments': '{"summary":"EF kreu PDF-të"}'})
-        self.assertEqual(calls[0], ('/bot/mira-host/meetings/m1/turns/next', {'summary': 'EF kreu PDF-të'}))
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c1', 'arguments': '{"summary":"EF kreu PDF-të","turn_id":"t1"}'})
+        self.assertEqual(calls[0], ('/bot/mira-host/meetings/m1/turns/next', {'summary': 'EF kreu PDF-të', 'expected_turn_id': 't1', 'outcome': 'DONE'}))
         result = state['process'].send.await_args.args[0]
         self.assertEqual(result['call_id'], 'c1')
         self.assertEqual(result['output']['RADHA']['initials'], 'RA')
         self.assertIn('M2/3', result['output']['RADHA']['detyrat_e_slotit'])
+        await asyncio.gather(*list(state.get('notification_tasks', set())))
         fake.private_channel.assert_awaited()  # RA was not in the voice channel, so she is called
         self.assertEqual(state['upcoming']['id'], 't3')
 
@@ -227,7 +257,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         fake, _ = bot({'/turns/next': {'current': None, 'upcoming': None}})
         host = mira_host.MiraHost(fake)
         state = session()
-        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c1', 'arguments': '{}'})
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c1', 'arguments': '{"turn_id":"t1"}'})
         self.assertTrue(state['ending'])
         self.assertTrue(state['process'].send.await_args.args[0]['output']['FUNDI'])
 
@@ -236,15 +266,15 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         fake, _ = bot({'/turns/next': {'current': None, 'upcoming': None, 'pm_review': pm}})
         host = mira_host.MiraHost(fake)
         state = {**session(), 'slot': '11:50', 'pm_reviewed': False}
-        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c1', 'arguments': '{}'})
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c1', 'arguments': '{"turn_id":"t1"}'})
         self.assertEqual(state['process'].send.await_args.args[0]['output']['PM_RISHIKIMI'], pm)
         self.assertFalse(state['ending'])
-        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c2', 'arguments': '{}'})
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c2', 'arguments': '{"turn_id":"PM_RISHIKIMI"}'})
         self.assertTrue(state['process'].send.await_args.args[0]['output']['FUNDI'])
         self.assertTrue(state['ending'])
 
     async def test_staff_starts_when_ga_is_done_but_not_before_the_hour(self):
-        fake, calls = bot({'/staff': {'turns': [{'id': 't1'}]},
+        fake, calls = bot({'/staff': {'turns': [{'id': 't1', 'user_id': 'staff-user'}]},
                            '/turns/next': {'current': {'id': 't1', 'name': 'Rinesa Ahmeti', 'initials': 'RA', 'discord': None,
                                                        'brief': BRIEF}, 'upcoming': None}})
         host = mira_host.MiraHost(fake)

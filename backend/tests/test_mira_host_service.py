@@ -100,7 +100,7 @@ class SlotDataTests(unittest.TestCase):
         ]), DAY)
         self.assertEqual([p['person'] for p in data.ga_flagged()], ['RA', 'EF'])
         self.assertEqual(data.pm_open()[0]['initials'], 'EF')
-        self.assertEqual(data.pm_open()[0]['detyrat_pm'], ['PM PUNE (e verdhë)'])
+        self.assertEqual(data.pm_open()[0]['detyrat_pm'], ['pë më PUNE (e verdhë)'])
         progress = {'done': [{'spoken': 'A', 'owners': ['EF']}],
                     'strikes': [{'spoken': 'B', 'owners': ['RA'], 'points': [{'text': 'p1'}]}]}
         self.assertEqual([g['person'] for g in host.by_person(data, progress)], ['RA', 'EF'])
@@ -239,6 +239,8 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         db = SimpleNamespace(execute=AsyncMock(side_effect=[
             Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[strike])))),
             Mock(all=Mock(return_value=[(uuid.UUID(task_id), 40), (uuid.UUID(untouched), 0)])),
+            Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[SimpleNamespace(data={
+                'task_id': task_id, 'finish_at': 'nesër'})])))),
         ]))
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
         with patch.object(host, 'progress_since', AsyncMock(return_value=since)):
@@ -246,6 +248,7 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(brief['progress_since'], since.isoformat())
         self.assertEqual(brief['progress_percentages'], {task_id: 40, untouched: 0})
         self.assertEqual([s['task_id'] for s in brief['new_progress']['strikes']], [task_id])
+        self.assertEqual(brief['discussion'][task_id]['finish_at'], 'nesër')
 
     async def test_done_reported_in_an_earlier_1h_is_not_repeated(self):
         done_id, new_id = str(uuid.uuid4()), str(uuid.uuid4())
@@ -303,6 +306,7 @@ class CreateTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((body['is_1h_report'], body['one_h_report_slot'], body['finish_period'], body['one_h_marker']),
                          (True, '11:50', 'PM', 'M2_M3'))
         self.assertEqual(body['title'], 'Thirr klientin per oferten')
+        self.assertEqual(body['description'], 'Thirr klientin per oferten\nDetaje')
         self.assertEqual(body['assignees'], [IDS['EF']])
         self.assertTrue(body['is_deadline_important'])
 

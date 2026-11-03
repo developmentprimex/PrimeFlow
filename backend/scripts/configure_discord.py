@@ -12,7 +12,7 @@ KEYS = (
     "DISCORD_BRIDGE_SECRET", "DISCORD_CATEGORY_ID", "DISCORD_MESSAGE_CONTENT_ENABLED",
     "DISCORD_AI_MODEL", "DISCORD_AI_TIMEOUT_SECONDS", "DISCORD_AGENT_MODEL",
     "DISCORD_MEETING_VOICE_CHANNEL_ID", "DISCORD_MEETING_NOTES_ENABLED", "DISCORD_VOICE_NODE_BINARY",
-    "MIRA_MEMORY_ENABLED", "MIRA_HOST_ENABLED", "MIRA_HOST_BOT_TOKEN",
+    "MIRA_MEMORY_ENABLED", "MIRA_HOST_ENABLED", "MIRA_HOST_BOT_TOKEN", "MIRA_HOST_MODEL",
     "DISCORD_AI_AGENT_VOICE_CHANNEL_ID", "DISCORD_AI_AGENT_BOT_USER_ID",
     "DISCORD_MEETING_CONTROL_CHANNEL_ID",
     "MIRA_NOTES_OPENAI_API_KEY", "MIRA_HOST_OPENAI_API_KEY", "KUJTESA_OPENAI_API_KEY",
@@ -67,6 +67,8 @@ def build_config(env: dict | os._Environ) -> dict[str, str]:
     if host_enabled and not values["MIRA_HOST_OPENAI_API_KEY"]:
         raise ValueError("MIRA_HOST_ENABLED requires MIRA_HOST_OPENAI_API_KEY.")
     values["MIRA_HOST_ENABLED"] = str(host_enabled).lower()
+    # Keep deployments consistent with the approved work meeting model.
+    values["MIRA_HOST_MODEL"] = "gpt-realtime-2.1"
     values["GA_PERSONAL_ENABLED"] = str(boolean(values["GA_PERSONAL_ENABLED"] or "false", "GA_PERSONAL_ENABLED")).lower()
     values["KUJTESA_HOST_ENABLED"] = str(boolean(values["KUJTESA_HOST_ENABLED"] or "false", "KUJTESA_HOST_ENABLED")).lower()
     if values["KUJTESA_HOST_ENABLED"] == "true" and not values["KUJTESA_OPENAI_API_KEY"]:

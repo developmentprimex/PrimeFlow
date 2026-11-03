@@ -43,7 +43,7 @@ export function int16ToBase64(samples){
 // Mixes every speaker into one 24 kHz stream. Realtime's VAD needs a
 // continuous stream, so silence is sent while nobody talks.
 export class Mixer{
-  constructor({maxBufferedMs=2000}={}){this.queues=new Map();this.energy=new Map();this.max=maxBufferedMs*24;}
+  constructor({maxBufferedMs=2000}={}){this.queues=new Map();this.energy=new Map();this.lastEnergy=new Map();this.max=maxBufferedMs*24;}
   push(id,samples){
     let queue=this.queues.get(id);
     if(!queue){queue=[];this.queues.set(id,queue);}
@@ -55,15 +55,17 @@ export class Mixer{
   }
   pull(count){
     const out=new Int32Array(count);
+    this.lastEnergy.clear();
     for(const [id,queue] of this.queues){
-      let written=0;
+      let written=0,energy=0;
       while(written<count&&queue.length){
         const chunk=queue[0],take=Math.min(chunk.length,count-written);
-        for(let i=0;i<take;i++)out[written+i]+=chunk[i];
+        for(let i=0;i<take;i++){out[written+i]+=chunk[i];energy+=Math.abs(chunk[i]);}
         written+=take;
         if(take===chunk.length)queue.shift();else queue[0]=chunk.subarray(take);
       }
       if(!queue.length)this.queues.delete(id);
+      this.lastEnergy.set(id,energy);
     }
     const mixed=new Int16Array(count);
     for(let i=0;i<count;i++)mixed[i]=Math.max(-32768,Math.min(32767,out[i]));
@@ -77,6 +79,30 @@ export class Mixer{
     return best;
   }
   clear(){this.queues.clear();this.energy.clear();}
+}
+
+// Match delayed server VAD offsets to the audio actually uploaded, rather than packet arrival time.
+export class SpeakerTimeline{
+  constructor({minLevel=150}={}){this.frames=[];this.end=0;this.minLevel=minLevel;}
+  add(duration,energy){
+    this.frames.push({start:this.end,end:this.end+duration,energy:new Map(energy)});this.end+=duration;
+    while(this.frames.length&&this.frames[0].end<this.end-90000)this.frames.shift();
+  }
+  speaker(start,end){
+    if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||start<(this.frames[0]?.start??0))return null;
+    const totals=new Map();
+    for(const frame of this.frames){
+      const overlap=Math.max(0,Math.min(end,frame.end)-Math.max(start,frame.start))/(frame.end-frame.start);
+      for(const [id,value] of frame.energy){
+        // Hiss must not become a trusted voice confirmation, even if ASR invents a word.
+        if(value<(frame.end-frame.start)*24*this.minLevel)continue;
+        totals.set(id,(totals.get(id)||0)+value*overlap);
+      }
+    }
+    let best=null,max=0,total=0;
+    for(const [id,value] of totals){total+=value;if(value>max){max=value;best=id;}}
+    return total>0&&max/total>=0.85?best:null;
+  }
 }
 
 // opusscript's JS wrapper writes outside its buffers (see opus.mjs); the native

@@ -1,5 +1,6 @@
 """Bridge for Mira Host (the speaking 1H bot). Only the Discord worker calls these."""
 import uuid
+from typing import Literal
 from datetime import date
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
@@ -26,30 +27,59 @@ class Enable(Caller):
     until: str | None = Field(default=None, max_length=5)
 
 
+class Stop(Caller):
+    test_only: bool = False
+
+
 class Start(CommandContext):
     slot: str = Field(pattern=r"^\d{2}:\d{2}$")
     # Present only for an explicit slash command, never for a scheduled start.
     discord_user_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
+    test_mode: bool = False
+    test_meeting_id: uuid.UUID | None = None
 
 
 class NextTurn(BaseModel):
     summary: str | None = Field(default=None, max_length=1500)
+    expected_turn_id: uuid.UUID | None = None
+    outcome: str = Field(default="DONE", pattern="^(DONE|DEFERRED|TIMEOUT)$")
+    available_user_ids: list[uuid.UUID] | None = Field(default=None, max_length=200)
 
 
 class Invited(BaseModel):
     turn_id: uuid.UUID
 
 
+class Metric(BaseModel):
+    id: uuid.UUID
+    kind: Literal['generated_audio', 'tool']
+    duration_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+    tool: str | None = Field(default=None, max_length=80)
+
+
 class Lines(BaseModel):
     lines: list[dict] = Field(max_length=200)
+    metrics: list[Metric] = Field(default_factory=list, max_length=200)
 
 
 class Finish(BaseModel):
     reason: str = Field(default="completed", max_length=100)
 
 
+class ProgressAck(BaseModel):
+    token: uuid.UUID
+
+
+class ProposalAck(ProgressAck):
+    played_at: str = Field(max_length=50)
+
+
 class ToolCall(BaseModel):
     arguments: dict = Field(default_factory=dict)
+    speaker_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
+    speech_id: str | None = Field(default=None, max_length=200)
+    speech_text: str | None = Field(default=None, max_length=4000)
+    speech_started_at: str | None = Field(default=None, max_length=50)
 
 
 async def manager(db: AsyncSession, caller: Caller):
@@ -85,11 +115,19 @@ async def enable(payload: Enable, db: AsyncSession = Depends(get_db)):
     return host.settings_view(row)
 
 
+@router.post('/authorize')
+async def authorize(payload: Caller, db: AsyncSession = Depends(get_db)):
+    """Authorize a manual takeover before interrupting a rehearsal."""
+    await command_user(db, payload)
+    return {"ok": True}
+
+
 @router.post('/disable')
-async def disable(payload: Caller, db: AsyncSession = Depends(get_db)):
+async def disable(payload: Stop, db: AsyncSession = Depends(get_db)):
     await command_user(db, payload)
     row = await host.get_settings(db, lock=True)
-    row.enabled_until = None
+    if not getattr(payload, 'test_only', False):
+        row.enabled_until = None
     await db.commit()
     return host.settings_view(row)
 
@@ -108,6 +146,10 @@ async def tick(db: AsyncSession = Depends(get_db)):
 
 @router.post('/session/start')
 async def start(payload: Start, db: AsyncSession = Depends(get_db)):
+    if payload.test_mode and not payload.discord_user_id:
+        raise HTTPException(422, "Test mode niset vetëm me komandën manuale /mira hyr.")
+    if payload.test_meeting_id and not payload.test_mode:
+        raise HTTPException(422, "Vetëm testet mund të ripërdorin ID të testimit.")
     if payload.discord_user_id:
         await command_user(db, Caller(discord_user_id=payload.discord_user_id,
             guild_id=payload.guild_id, channel_id=payload.channel_id))
@@ -118,7 +160,8 @@ async def start(payload: Start, db: AsyncSession = Depends(get_db)):
         raise HTTPException(409, "Mira nuk është nisur si mbajtëse takimesh.")
     if not (settings.MIRA_HOST_OPENAI_API_KEY or '').strip():
         raise HTTPException(503, "MIRA_HOST_OPENAI_API_KEY mungon.")
-    meeting = await host.start_meeting(db, payload.slot)
+    extra = {'test_meeting_id': payload.test_meeting_id} if payload.test_meeting_id else {}
+    meeting = await host.start_meeting(db, payload.slot, test_mode=payload.test_mode, **extra)
     await db.commit()
     try:
         session = await host.realtime_session(db, meeting)
@@ -145,7 +188,8 @@ async def staff(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 @router.post('/meetings/{meeting_id}/turns/next')
 async def next_turn(meeting_id: uuid.UUID, payload: NextTurn, db: AsyncSession = Depends(get_db)):
     meeting = await host.meeting_for(db, meeting_id, lock=True)
-    result = await host.next_turn(db, meeting, payload.summary)
+    result = await host.next_turn(db, meeting, payload.summary, expected_turn_id=payload.expected_turn_id,
+                                 outcome=payload.outcome, available_user_ids=payload.available_user_ids)
     await db.commit()
     return result
 
@@ -158,19 +202,29 @@ async def invited(meeting_id: uuid.UUID, payload: Invited, db: AsyncSession = De
     return {"ok": True}
 
 
+@router.post('/meetings/{meeting_id}/turns/current')
+async def current_turn(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
+    result = await host.current_turn_state(db, meeting)
+    await db.commit()
+    return result
+
+
 @router.post('/meetings/{meeting_id}/transcript')
 async def transcript(meeting_id: uuid.UUID, payload: Lines, db: AsyncSession = Depends(get_db)):
     meeting = await host.meeting_for(db, meeting_id, lock=True)
     await host.append_transcript(db, meeting, payload.lines)
+    await host.append_metrics(db, meeting, [item.model_dump(mode='json') for item in payload.metrics])
     await db.commit()
     return {"ok": True}
 
 
 @router.post('/meetings/{meeting_id}/tools/{name}')
 async def tool(meeting_id: uuid.UUID, name: str, payload: ToolCall, db: AsyncSession = Depends(get_db)):
-    meeting = await host.meeting_for(db, meeting_id)
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
     try:
-        result = await host.run_tool(db, meeting, name, payload.arguments)
+        result = await host.run_tool(db, meeting, name, payload.arguments, speaker_id=payload.speaker_id, speech_id=payload.speech_id,
+                                     speech_text=payload.speech_text, speech_started_at=payload.speech_started_at)
     except ValidationError:
         result = {"error": "Argumentet nuk janë të vlefshme."}
     await db.commit()
@@ -186,3 +240,19 @@ async def finish(meeting_id: uuid.UUID, payload: Finish, background: BackgroundT
     if meeting.summary_status == "PENDING":
         background.add_task(host.summarize, meeting.id)
     return host.meeting_row(meeting)
+
+
+@router.post('/meetings/{meeting_id}/progress/ack')
+async def progress_ack(meeting_id: uuid.UUID, payload: ProgressAck, db: AsyncSession = Depends(get_db)):
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
+    result = await host.acknowledge_progress(db, meeting, payload.token)
+    await db.commit()
+    return result
+
+
+@router.post('/meetings/{meeting_id}/proposal/ack')
+async def proposal_ack(meeting_id: uuid.UUID, payload: ProposalAck, db: AsyncSession = Depends(get_db)):
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
+    result = await host.acknowledge_proposal(db, meeting, payload.token, payload.played_at)
+    await db.commit()
+    return result
