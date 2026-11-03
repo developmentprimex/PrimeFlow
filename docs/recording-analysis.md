@@ -1,5 +1,12 @@
 # Transcription, summary and reviewed Tasks
 
+As of 2026-11-03, every authenticated user with access to a recording can start
+or retry its transcription and summary, after acknowledging audio processing.
+The analysis API exposes `can_start_analysis` separately from `can_manage`.
+Starts lock the recording row so concurrent requests reuse the same job.
+Task confirmation and citation timing retain their existing owner permissions.
+This supersedes the owner-only analysis-start descriptions below.
+
 ## On-demand citation times
 
 The owner can explicitly click **Gjej kohët e citimeve** after an Albanian

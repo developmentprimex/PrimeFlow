@@ -21,7 +21,7 @@ export type RecordingAction = { id: string; segment_index: number; title: string
 type Segment = { index: number; start_seconds: number; duration_seconds: number; text: string }
 type CitationTime = { start: number | null; end: number | null; approximate: boolean }
 type Timing = { status: string; completed?: number; total?: number; error?: string | null; results?: Record<string, CitationTime> }
-type Analysis = { timing_configured?: boolean; timing?: Timing | null; configured: boolean; can_manage: boolean; analysis: null | { status: string; language: string; total_segments: number; segments_done: number; summary: string | null; error_message: string | null; decisions: string[] }; segments: Segment[]; actions: RecordingAction[] }
+type Analysis = { timing_configured?: boolean; timing?: Timing | null; configured: boolean; can_manage: boolean; can_start_analysis: boolean; analysis: null | { status: string; language: string; total_segments: number; segments_done: number; summary: string | null; error_message: string | null; decisions: string[] }; segments: Segment[]; actions: RecordingAction[] }
 export type RecordingPerson = { id: string; full_name: string; department_id: string | null; role?: "ADMIN" | "MANAGER" | "STAFF" }
 export type RecordingDepartment = { id: string; name: string }
 const STATUS: Record<string, string> = { QUEUED: "Në pritje të përpunimit", TRANSCRIBING: "Duke transkriptuar", SUMMARIZING: "Duke përgatitur përmbledhjen dhe propozimet", READY: "Përpunimi përfundoi", FAILED: "Përpunimi dështoi" }
@@ -157,7 +157,7 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
         </div>)}
       </section>}
       </div>}
-      {data.can_manage && (!data.analysis || data.analysis.status === "FAILED") && <div className="space-y-3 rounded-md border p-4">
+      {data.can_start_analysis && (!data.analysis || data.analysis.status === "FAILED") && <div className="space-y-3 rounded-md border p-4">
         <div className="max-w-xs"><Label htmlFor="transcript-language">Gjuha e bisedës</Label><select id="transcript-language" className={selectClass} value={language} disabled={Boolean(data.analysis)} onChange={e => setLanguage(e.target.value)}><option value="sq">Shqip</option><option value="en">English</option><option value="de">Deutsch</option><option value="auto">Zbulo automatikisht / e përzier</option></select></div>
         <p className="text-sm text-muted-foreground">Audioja përpunohet nga OpenAI. Kontrollo rezultatet para se të krijosh detyrat.</p>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />Kam autorizimin për këtë përpunim të audios dhe të dhënave të pjesëmarrësve.</label>

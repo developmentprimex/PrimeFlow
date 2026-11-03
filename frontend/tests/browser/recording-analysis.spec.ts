@@ -11,7 +11,7 @@ const action = { id: actionId, segment_index: 0, title: "Dërgo raportin", descr
 
 async function shell(page: Page, configured = true, canManage = true) {
   const protocols: { language: string; status: string; error: string | null }[] = []
-  let state: Record<string, unknown> = { configured, can_manage: canManage, timing_configured: true, timing: null, analysis: null, actions: [], segments: [] }
+  let state: Record<string, unknown> = { configured, can_manage: canManage, can_start_analysis: true, timing_configured: true, timing: null, analysis: null, actions: [], segments: [] }
   let savedTask: Record<string, unknown> = { id: taskId, department_id: department, title: action.title, description: action.description, status: "TODO", priority: "NORMAL", assigned_to: null, assignees: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
   const writes: { url: string; body: Record<string, unknown> }[] = []
   await page.addInitScript(({ user }) => {
@@ -82,6 +82,24 @@ async function shell(page: Page, configured = true, canManage = true) {
   await expect(page.getByText("Transkripti, përmbledhja dhe detyrat", { exact: true })).toBeVisible()
   return { writes, timesReady: () => { state = { ...state, timing: { status: 'READY', results: { [actionId]: { start: 7.83, end: 11.65, approximate: true } } } } }, ready: () => { state = { ...state, analysis: { status: "READY", language: "sq", total_segments: 1, segments_done: 1, summary: "U diskutua raporti i takimit.", error_message: null, decisions: [] }, actions: [action], segments: [{ index: 0, start_seconds: 0, duration_seconds: 28, text: `Hapja e takimit. ${action.evidence}` }] } } }
 }
+
+test('any viewer can start processing with consent and read the results', async ({ page }) => {
+  const harness = await shell(page, true, false)
+  const start = page.getByRole('button', { name: 'Transkripto dhe përmblidh', exact: true })
+  await expect(start).toBeDisabled()
+  await page.getByRole('checkbox', { name: /Kam autorizimin/ }).check()
+  await start.click()
+  await expect(page.getByText(/Në pritje të përpunimit/)).toBeVisible()
+  expect(harness.writes).toHaveLength(1)
+  harness.ready()
+  await page.reload()
+  await page.getByRole('button', { name: 'Shiko transkriptin', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Transkripti', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Përmbledhja e takimit', exact: true })).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Detyrat e regjistrimit', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Krijo detyrë', exact: true })).toHaveCount(0)
+  expect(harness.writes).toHaveLength(1)
+})
 
 test('citation timing requires a click and survives reload without reprocessing', async ({ page }) => {
   const harness = await shell(page)

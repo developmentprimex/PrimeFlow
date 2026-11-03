@@ -60,7 +60,7 @@ async def get_analysis(recording_id: uuid.UUID, db: AsyncSession = Depends(get_d
     if job:
         audit(db, user, row, 'recording_analysis_viewed')
         await db.commit()
-    return {'configured': available(), 'can_manage': row.created_by == user.id,
+    return {'configured': available(), 'can_manage': row.created_by == user.id, 'can_start_analysis': True,
         'timing_configured': bool(settings.RECORDING_TIMING_ENABLED and settings.RECORDING_TIMING_PYTHON),
         'timing': job.timing if job else None,
         'analysis': {**{key: getattr(job, key) for key in ('status', 'language', 'total_segments', 'segments_done', 'summary', 'error_message', 'updated_at')},
@@ -74,7 +74,9 @@ async def get_analysis(recording_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
 @router.post('/{recording_id}/analysis', status_code=202)
 async def start_analysis(recording_id: uuid.UUID, payload: AnalysisStart, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    row = await load_recording(db, recording_id, user, write=True)
+    # Any authorized viewer may start/retry; serialize requests on the recording
+    # so simultaneous clicks still produce a single durable analysis job.
+    row = await load_recording(db, recording_id, user, lock=True)
     if row.status != 'READY':
         raise HTTPException(409, 'Regjistrimi ende nuk është ruajtur.')
     if not available():

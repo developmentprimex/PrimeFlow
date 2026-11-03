@@ -148,8 +148,18 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(self.get(sid, 'other').status_code, 200)
         self.assertEqual(self.get(sid, 'participant').status_code, 200)
         for who in ['other', 'participant', 'manager']:
+            sid = self.saved()
+            self.assertTrue(self.get(sid, who).json()['can_start_analysis'])
             response = self.client.post(f'/api/meeting-recordings/{sid}/analysis', headers=self.auth(who), json={'consent_acknowledged': True})
-            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response.status_code, 202, response.text)
+            self.assertFalse(self.get(sid, who).json()['can_manage'])
+            # Repeated starts by another viewer reuse the existing job.
+            self.assertEqual(self.start(sid).status_code, 202)
+            from app.models.recording_analysis import RecordingAnalysis
+            async def requester():
+                async with self.session() as db:
+                    return str((await db.get(RecordingAnalysis, uuid.UUID(sid))).requested_by)
+            self.assertEqual(asyncio.run(requester()), self.fixture[who]['id'])
         self.assertEqual(self.client.post(f'/api/meeting-recordings/{sid}/analysis', headers=self.auth(), json={'consent_acknowledged': False}).status_code, 422)
         with patch.object(self.settings, 'OPENAI_API_KEY', None):
             self.assertFalse(self.get(sid).json()['configured'])
