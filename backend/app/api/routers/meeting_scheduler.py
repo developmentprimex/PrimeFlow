@@ -67,7 +67,7 @@ async def _request_out(db: AsyncSession, row: MeetingScheduleRequest) -> Meeting
     participant_ids = await _participant_ids(db, row.id)
     approval_rows = (
         await db.execute(
-            select(MeetingScheduleApproval, User)
+            select(MeetingScheduleApproval, User).where(User.work_staff_filter())
             .join(User, MeetingScheduleApproval.approved_by_user_id == User.id)
             .where(MeetingScheduleApproval.request_id == row.id)
             .order_by(MeetingScheduleApproval.created_at)
@@ -148,7 +148,7 @@ async def _with_microsoft_validation(
             }
         )
     emails = list(
-        (await db.execute(select(User.email).where(User.id.in_(payload.participant_ids)))).scalars().all()
+        (await db.execute(select(User.email).where(User.work_staff_filter()).where(User.id.in_(payload.participant_ids)))).scalars().all()
     )
     if payload.meeting_type == "external":
         emails.append(settings.MS_ORGANIZER_EMAIL)
@@ -269,7 +269,7 @@ async def create_request(
     approvers = list(
         (
             await db.execute(
-                select(User).where(
+                select(User).where(User.work_staff_filter()).where(
                     User.is_active.is_(True),
                     User.role.in_([UserRole.ADMIN, UserRole.MANAGER]),
                     User.id != user.id,
@@ -402,7 +402,7 @@ async def _provision_external_calendar_event(
         row.last_error = "Administratori duhet ta lidhë calendar-in info@primexeu.com para krijimit të takimit."
         return
     participants = (
-        await db.execute(select(User).where(User.id.in_(participant_ids)))
+        await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(participant_ids)))
     ).scalars().all()
     attendee_map = {
         user.email.casefold(): {"email": user.email, "name": user.full_name}

@@ -145,7 +145,7 @@ async def load_active_users_and_common_leave(
 ) -> tuple[list[User], dict[uuid.UUID, CommonLeaveCoverage]]:
     active_users = list((
         await db.execute(
-            select(User)
+            select(User).where(User.work_staff_filter())
             .where(
                 User.department_id == department_id,
                 User.is_active.is_(True),

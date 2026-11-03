@@ -1643,7 +1643,7 @@ async def create_checklist_item(
     # Add assignees
     if create_payload.assignee_user_ids:
         users = (
-            await db.execute(select(User).where(User.id.in_(create_payload.assignee_user_ids)))
+            await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(create_payload.assignee_user_ids)))
         ).scalars().all()
         user_ids = {u.id for u in users}
         for user_id in create_payload.assignee_user_ids:
@@ -1837,7 +1837,7 @@ async def update_checklist_item(
         # Add new assignees
         if payload.assignee_user_ids:
             users = (
-                await db.execute(select(User).where(User.id.in_(payload.assignee_user_ids)))
+                await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(payload.assignee_user_ids)))
             ).scalars().all()
             user_ids = {u.id for u in users}
             for user_id in payload.assignee_user_ids:

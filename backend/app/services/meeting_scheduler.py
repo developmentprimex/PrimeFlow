@@ -226,7 +226,7 @@ async def validate_meeting_schedule(
     starts_at = payload.starts_at.astimezone(timezone.utc)
     ends_at = payload.ends_at.astimezone(timezone.utc)
 
-    users = (await db.execute(select(User).where(User.id.in_(payload.participant_ids)))).scalars().all()
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(payload.participant_ids)))).scalars().all()
     valid_user_ids = {user.id for user in users if user.is_active}
     missing_users = set(payload.participant_ids) - valid_user_ids
     if missing_users:

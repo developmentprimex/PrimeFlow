@@ -4,7 +4,7 @@ import {
   setDepartmentBootstrapCache,
 } from "./department-bootstrap-cache"
 
-const USERS_LOOKUP_CACHE_KEY = "users-lookup"
+const USERS_LOOKUP_CACHE_KEY = "work-users-lookup-v2"
 const TTL_MS = 5 * 60 * 1000 // 5 minutes
 
 type ApiFetch = (url: string) => Promise<Response>

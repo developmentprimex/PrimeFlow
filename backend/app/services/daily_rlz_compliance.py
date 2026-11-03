@@ -349,7 +349,7 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
 
 async def build_daily_rlz_control(db: AsyncSession, *, day: date, department_id: uuid.UUID | None = None,
                                   user_id: uuid.UUID | None = None) -> dict:
-    stmt = select(User).where(User.is_active.is_(True), User.department_id.is_not(None), User.role == UserRole.STAFF)
+    stmt = select(User).where(User.work_staff_filter()).where(User.is_active.is_(True), User.department_id.is_not(None), User.role == UserRole.STAFF)
     if department_id:
         stmt = stmt.where(User.department_id == department_id)
     if user_id:

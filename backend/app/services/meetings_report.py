@@ -548,7 +548,7 @@ def _is_report_all_participant(user: User) -> bool:
 
 
 async def _all_participant_user_ids(db: AsyncSession) -> set[Any]:
-    users = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.is_active.is_(True)))).scalars().all()
     return {user.id for user in users if _is_report_all_participant(user)}
 
 
@@ -567,7 +567,7 @@ async def _assignee_names(db: AsyncSession, tasks: list[Task]) -> dict[Any, str]
         user_ids.update(assignee_user_ids)
     if not user_ids:
         return {}
-    users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
     return {user.id: user.full_name or user.email for user in users}
 
 
@@ -624,7 +624,7 @@ async def apply_weekly_planner_task_order(
         for user_id in ({task.assigned_to} if task.assigned_to else set()) | assignee_ids_by_task.get(task.id, set())
     }
     users = (
-        await db.execute(select(User).where(User.id.in_(user_ids)))
+        await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))
     ).scalars().all() if user_ids else []
     users_by_id = {user.id: user for user in users}
 
@@ -676,7 +676,7 @@ async def weekly_planner_user_sort_keys(
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
-    users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
     result: dict[Any, tuple[int, str, int, int, str]] = {}
     for user in users:
         department_code = _weekly_planner_department_code(user.department_id, codes)
@@ -691,7 +691,7 @@ async def weekly_planner_user_sort_keys(
 
 
 async def _users_by_initials(db: AsyncSession, initials: str) -> list[User]:
-    users = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.is_active.is_(True)))).scalars().all()
     target = initials.upper()
     return [
         user for user in users
@@ -1233,7 +1233,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     completed_day_end = (local_day_start + timedelta(days=1)).astimezone(timezone.utc)
 
     task_stmt = (
-        select(Task)
+        select(Task).where(Task.work_staff_filter())
         .where(Task.is_active.is_(True))
         .where(
             or_(
@@ -1248,7 +1248,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     # archived after completion without widening any other M3 section.
     completed_tasks = (
         await db.execute(
-            select(Task).where(
+            select(Task).where(Task.work_staff_filter()).where(
                 Task.completed_at >= completed_day_start,
                 Task.completed_at < completed_day_end,
             )
@@ -1284,7 +1284,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     }
     user_department_codes = {
         user_id: _m3_department_code_label(department_id, department_codes)
-        for user_id, department_id in (await db.execute(select(User.id, User.department_id))).all()
+        for user_id, department_id in (await db.execute(select(User.id, User.department_id).where(User.work_staff_filter()))).all()
     }
     await apply_weekly_planner_task_order(db, report_tasks, assignee_ids_by_task, department_codes)
 
@@ -2219,7 +2219,7 @@ async def _bz_alignment_lines(
         if template.default_assignee_id:
             user_ids.add(template.default_assignee_id)
 
-    users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
     users_map = {user.id: user for user in users}
     department_codes = {
         department_id: code
@@ -2319,7 +2319,7 @@ async def _bz_template_metadata(db: AsyncSession) -> dict[str, tuple[str, str]]:
         if list(template.assignee_ids or []) or template.default_assignee_id
     }
     users = (
-        await db.execute(select(User).where(User.id.in_(user_ids)))
+        await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))
     ).scalars().all() if user_ids else []
     users_by_id = {user.id: user for user in users}
     department_codes = {

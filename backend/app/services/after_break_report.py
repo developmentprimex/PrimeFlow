@@ -418,7 +418,7 @@ async def build_unfinished_priority_task_rows(
     db: AsyncSession, report_day: date, *, include_task_id: bool = False,
 ) -> list[list[str]]:
     """Load unfinished morning work at the configured M2 send cutoff."""
-    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
@@ -467,7 +467,7 @@ async def apply_waiting_client_task_table(
     db: AsyncSession, sections: list[dict[str, str]], report_day: date
 ) -> list[dict[str, str]]:
     """Refresh DT WFE in existing M2 drafts without replacing manual sections."""
-    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     department_codes = {
@@ -579,7 +579,7 @@ async def _new_system_task_rows(
             user_ids.add(template.default_assignee_id)
     users_map: dict[Any, User] = {}
     if user_ids:
-        users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+        users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()
         users_map = {user.id: user for user in users}
 
     rows: list[list[str]] = []
@@ -674,7 +674,7 @@ async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, s
     done_task_ids = set(
         (
             await db.execute(
-                select(Task.id).where(
+                select(Task.id).where(Task.work_staff_filter()).where(
                     Task.id.in_(task_ids),
                     Task.status == TaskStatus.DONE,
                 )
@@ -915,7 +915,7 @@ async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
     linked_note_ids = set(
         (
             await db.execute(
-                select(Task.ga_note_origin_id)
+                select(Task.ga_note_origin_id).where(Task.work_staff_filter())
                 .where(Task.ga_note_origin_id.in_(note_ids))
                 .where(Task.is_active.is_(True))
             )
@@ -933,7 +933,7 @@ async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
     author_ids = {note.created_by for note in open_notes if note.created_by}
     names: dict[Any, str] = {}
     if author_ids:
-        users = (await db.execute(select(User).where(User.id.in_(author_ids)))).scalars().all()
+        users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(author_ids)))).scalars().all()
         names = {user.id: user.full_name or user.username or user.email for user in users}
 
     ordered = sorted(open_notes, key=lambda note: note.created_at or note.updated_at)
@@ -950,7 +950,7 @@ async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
 
 
 async def build_after_break_report_sections(db: AsyncSession, report_day: date) -> tuple[list[dict[str, str]], dict[str, Any]]:
-    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     department_codes = {
@@ -1007,7 +1007,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         if task.confirmation_assignee_id and task.confirmation_assignee_id not in names
     }
     if confirmation_ids:
-        confirmation_users = (await db.execute(select(User).where(User.id.in_(confirmation_ids)))).scalars().all()
+        confirmation_users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(confirmation_ids)))).scalars().all()
         names.update({user.id: user.full_name or user.username or user.email for user in confirmation_users})
 
     section_1 = [

@@ -146,7 +146,7 @@ async def _system_task_user_maps(
     if not user_ids:
         return {}, {}
     rows = (
-        await db.execute(select(User.id, User.department_id, User.email).where(User.id.in_(user_ids)))
+        await db.execute(select(User.id, User.department_id, User.email).where(User.work_staff_filter()).where(User.id.in_(user_ids)))
     ).all()
     return (
         {user_id: department_id for user_id, department_id, _ in rows},
@@ -328,6 +328,8 @@ async def generate_system_task_instances(
         range_start = start
         slots_by_occurrence: dict[datetime, list[SystemTaskTemplateAssigneeSlot]] = {}
         for slot in template_slots:
+            if slot.primary_user_id not in department_map:
+                continue
             next_run = slot.next_run_at or first_run_at(template, now_utc)
             while True:
                 occurrence_day = next_run.astimezone(tz).date()
@@ -472,12 +474,12 @@ async def reconcile_system_task_assignments_for_day(
     counts = {"reassigned": 0, "deactivated": 0, "reactivated": 0, "created": 0, "skipped": 0}
     for (_, origin_run_at), (template, task_slots) in grouped.items():
         task_slots.sort(key=lambda pair: (pair[1].created_at, pair[1].id))
-        slots = [slot for _, slot in task_slots]
+        slots = [slot for _, slot in task_slots if slot.primary_user_id in department_map]
         occurrence_day = origin_run_at.astimezone(template_tz(template)).date()
         expected: dict[uuid.UUID, uuid.UUID] = {
             slot.id: slot.primary_user_id
             for slot in slots
-            if not _assignee_on_full_day_leave(
+            if slot.primary_user_id in department_map and not _assignee_on_full_day_leave(
                 slot.primary_user_id, occurrence_day, leave_by_user, all_users_ranges
             )
         }
@@ -489,7 +491,7 @@ async def reconcile_system_task_assignments_for_day(
             all_users_ranges=all_users_ranges,
             user_email_map=user_email_map,
         )
-        if replacement_id is not None and source_slot is not None:
+        if replacement_id in department_map and source_slot is not None:
             expected[source_slot.id] = replacement_id
 
         for task, slot in task_slots:

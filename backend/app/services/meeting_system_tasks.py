@@ -244,7 +244,7 @@ async def _ensure_slot(
 async def _fixed_assignee_ids(db: AsyncSession) -> list[uuid.UUID]:
     rows = (
         await db.execute(
-            select(User.id, User.full_name)
+            select(User.id, User.full_name).where(User.work_staff_filter())
             .where(User.full_name.in_(EXTERNAL_MEETING_ASSIGNEE_NAMES))
             .order_by(User.full_name.asc())
         )
@@ -260,7 +260,7 @@ async def _fixed_assignee_ids(db: AsyncSession) -> list[uuid.UUID]:
 async def _graphic_design_assignee_ids(db: AsyncSession) -> list[uuid.UUID]:
     rows = (
         await db.execute(
-            select(User.id)
+            select(User.id).where(User.work_staff_filter())
             .join(Department, Department.id == User.department_id)
             .where(User.is_active.is_(True))
             .where(
@@ -278,7 +278,7 @@ async def _graphic_design_assignee_ids(db: AsyncSession) -> list[uuid.UUID]:
 async def _user_department_map(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, uuid.UUID | None]:
     if not user_ids:
         return {}
-    rows = (await db.execute(select(User.id, User.department_id).where(User.id.in_(user_ids)))).all()
+    rows = (await db.execute(select(User.id, User.department_id).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).all()
     return {user_id: department_id for user_id, department_id in rows}
 
 
@@ -325,6 +325,8 @@ async def _reconcile_external_meeting_task_kind(
     if template is None:
         return 0
     department_map = await _user_department_map(db, participant_ids)
+    participant_ids = [user_id for user_id in participant_ids if user_id in department_map]
+    participant_id_set = set(participant_ids)
     created_or_reactivated = 0
 
     current_tasks: dict[uuid.UUID, Task] = {}
@@ -760,6 +762,8 @@ async def _reconcile_tak_int_one_h_task_kind(
     department_map = await _user_department_map(db, participant_ids)
     changed = 0
     for user_id in participant_ids:
+        if user_id not in department_map:
+            continue
         existing = current_by_user.get(user_id)
         if existing is not None:
             if existing.status == TaskStatus.DONE:

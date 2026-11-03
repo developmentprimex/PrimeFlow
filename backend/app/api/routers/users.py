@@ -36,10 +36,16 @@ USER_OUT_COLUMNS = (
 async def list_users(
     include_inactive: bool = False,
     include_all_departments: bool = False,
+    include_household: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[UserOut]:
     stmt = select(User).options(load_only(*USER_OUT_COLUMNS))
+    if include_household:
+        if user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    else:
+        stmt = stmt.where(User.work_staff_filter())
     if not include_inactive:
         stmt = stmt.where(User.is_active.is_(True))
     users = (await db.execute(stmt.order_by(User.created_at))).scalars().all()
@@ -65,7 +71,7 @@ async def list_users_lookup(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[UserLookup]:
-    stmt = select(User).options(
+    stmt = select(User).where(User.work_staff_filter()).options(
         load_only(
             User.id,
             User.email,

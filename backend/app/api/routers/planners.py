@@ -339,7 +339,7 @@ async def _assignees_for_tasks(
     fallback_assignees = select(
         Task.id.label("task_id"),
         Task.assigned_to.label("user_id"),
-    ).where(
+    ).where(Task.work_staff_filter()).where(
         Task.id.in_(task_ids),
         Task.assigned_to.is_not(None),
         ~has_explicit_assignee,
@@ -353,7 +353,7 @@ async def _assignees_for_tasks(
                 User.email,
                 User.username,
                 User.full_name,
-            )
+            ).where(User.work_staff_filter())
             .join(User, effective_assignees.c.user_id == User.id)
             .order_by(User.full_name)
         )
@@ -532,7 +532,7 @@ async def _load_pv_fest_blocks_for_snapshot(
     week_end: date,
 ) -> list[dict]:
     users_in_department = (
-        await db.execute(select(User.id).where(User.department_id == department_id, User.is_active == True))
+        await db.execute(select(User.id).where(User.work_staff_filter()).where(User.department_id == department_id, User.is_active == True))
     ).scalars().all()
     if not users_in_department:
         return []
@@ -1084,7 +1084,7 @@ async def _load_task_priority_map(
         return {}
     rows = (
         await db.execute(
-            select(Task.id, Task.priority).where(Task.id.in_(list(task_ids)))
+            select(Task.id, Task.priority).where(Task.work_staff_filter()).where(Task.id.in_(list(task_ids)))
         )
     ).all()
     return {task_id: priority for task_id, priority in rows if priority is not None}
@@ -1334,7 +1334,7 @@ async def weekly_planner(
     project_map = {p.id: p for p in projects}
 
     # Get all active tasks (including completed ones so they can show through completion day)
-    task_stmt = select(Task).where(Task.is_active == True)
+    task_stmt = select(Task).where(Task.work_staff_filter()).where(Task.is_active == True)
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
 
@@ -1414,7 +1414,7 @@ async def weekly_planner(
     if system_template_ids:
         sys_tasks = (
             await db.execute(
-                select(Task.id, Task.system_template_origin_id, Task.assigned_to)
+                select(Task.id, Task.system_template_origin_id, Task.assigned_to).where(Task.work_staff_filter())
                 .where(Task.system_template_origin_id.in_(system_template_ids))
             )
         ).all()
@@ -1557,7 +1557,7 @@ async def monthly_planner(
             ).scalars().all()
         )
 
-    stmt = select(Task).where(
+    stmt = select(Task).where(Task.work_staff_filter()).where(
         planned_date.is_not(None),
         planned_date >= month_start,
         planned_date <= month_end,
@@ -1587,13 +1587,13 @@ async def monthly_planner(
     if department_id is not None:
         base_filters.append(Task.department_id == department_id)
 
-    month_completed_query = select(func.count(Task.id)).where(
+    month_completed_query = select(func.count(Task.id)).where(Task.work_staff_filter()).where(
         *base_filters,
         planned_date >= month_start,
         planned_date <= month_end,
         Task.completed_at.is_not(None),
     )
-    prev_completed_query = select(func.count(Task.id)).where(
+    prev_completed_query = select(func.count(Task.id)).where(Task.work_staff_filter()).where(
         *base_filters,
         planned_date >= prev_start,
         planned_date <= prev_end,
@@ -1870,7 +1870,7 @@ async def weekly_table_planner(
     departments = (await db.execute(dept_stmt.order_by(Department.name))).scalars().all()
     
     # Get all users - filter by department if a specific department is selected
-    users_stmt = select(User).where(User.is_active == True)
+    users_stmt = select(User).where(User.work_staff_filter()).where(User.is_active == True)
     if department_id is not None:
         users_stmt = users_stmt.where(User.department_id == department_id)
     all_users = (await db.execute(users_stmt.order_by(User.full_name))).scalars().all()
@@ -1883,7 +1883,7 @@ async def weekly_table_planner(
     
     # Get active tasks (including completed ones so they can show through completion day).
     # We don't filter by department here because we show tasks by assignee department.
-    task_stmt = select(Task).where(
+    task_stmt = select(Task).where(Task.work_staff_filter()).where(
         Task.is_active == True,
         Task.system_template_origin_id.is_(None),
     )
@@ -2354,7 +2354,7 @@ async def weekly_table_planner(
     if origin_task_ids:
         origin_rows = (
             await db.execute(
-                select(Task.id, Task.daily_products, Task.internal_notes).where(Task.id.in_(list(origin_task_ids)))
+                select(Task.id, Task.daily_products, Task.internal_notes).where(Task.work_staff_filter()).where(Task.id.in_(list(origin_task_ids)))
             )
         ).all()
         origin_total_by_id: dict[uuid.UUID, int] = {}
@@ -2493,7 +2493,7 @@ async def weekly_table_planner(
     if system_template_ids:
         sys_tasks = (
             await db.execute(
-                select(Task.id, Task.system_template_origin_id, Task.assigned_to)
+                select(Task.id, Task.system_template_origin_id, Task.assigned_to).where(Task.work_staff_filter())
                 .where(Task.system_template_origin_id.in_(system_template_ids))
             )
         ).all()
@@ -2612,7 +2612,7 @@ async def weekly_table_planner(
             )
             weekly_system_rows = (
                 await db.execute(
-                    select(Task, SystemTaskTemplate, system_task_local_day.label("local_day"))
+                    select(Task, SystemTaskTemplate, system_task_local_day.label("local_day")).where(Task.work_staff_filter())
                     .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
                     .where(Task.assigned_to.in_(dept_user_ids))
                     .where(Task.system_template_origin_id.is_not(None))
@@ -3271,7 +3271,7 @@ async def update_weekly_table_user_order(
 
     users = (
         await db.execute(
-            select(User)
+            select(User).where(User.work_staff_filter())
             .where(User.department_id == payload.department_id)
             .where(User.is_active == True)
         )
@@ -3319,7 +3319,7 @@ async def update_weekly_table_user_visibility(
 
     target = (
         await db.execute(
-            select(User)
+            select(User).where(User.work_staff_filter())
             .where(User.id == payload.user_id)
             .where(User.department_id == payload.department_id)
             .where(User.is_active.is_(True))

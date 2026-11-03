@@ -506,7 +506,7 @@ async def apply_ga_hv_dv_tasks_table(
     report_day: date,
 ) -> list[dict[str, str]]:
     """Refresh the auto-filled GA/HV/DV table in an existing M1 draft."""
-    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     department_codes = {
@@ -652,7 +652,7 @@ async def _day_context_section(
 async def build_morning_report_sections(
     db: AsyncSession, report_day: date
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
-    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     report_categories = [
         CommonCategory.delays,
         CommonCategory.absences,
@@ -674,7 +674,7 @@ async def build_morning_report_sections(
         if user_id and user_id not in names
     }
     if entry_user_ids:
-        users = (await db.execute(select(User).where(User.id.in_(entry_user_ids)))).scalars().all()
+        users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(entry_user_ids)))).scalars().all()
         names.update({user.id: user.full_name or user.username or user.email for user in users})
 
     department_codes = {
@@ -683,7 +683,7 @@ async def build_morning_report_sections(
     }
     user_department_codes = {
         user_id: department_codes.get(department_id, "-") or "-"
-        for user_id, department_id in (await db.execute(select(User.id, User.department_id))).all()
+        for user_id, department_id in (await db.execute(select(User.id, User.department_id).where(User.work_staff_filter()))).all()
     }
     leave_user_ids = {
         entry.assigned_to_user_id or entry.created_by_user_id

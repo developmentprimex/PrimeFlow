@@ -195,7 +195,7 @@ async def list_leave_blocks(
     if department_id is not None:
         users_in_department = (
             await db.execute(
-                select(User.id).where(User.department_id == department_id, User.is_active == True)
+                select(User.id).where(User.work_staff_filter()).where(User.department_id == department_id, User.is_active == True)
             )
         ).scalars().all()
         if not users_in_department:
@@ -244,7 +244,7 @@ async def create_entry(
     # Validate assigned user if provided
     assigned_to_user_id = payload.assigned_to_user_id
     if assigned_to_user_id is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == assigned_to_user_id))).scalar_one_or_none()
+        assigned_user = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id == assigned_to_user_id))).scalar_one_or_none()
         if assigned_user is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
     
@@ -326,7 +326,7 @@ async def assign_entry(
 
     created_notifications: list[Notification] = []
     if payload.assigned_to_user_id is not None:
-        target = (await db.execute(select(User).where(User.id == payload.assigned_to_user_id))).scalar_one_or_none()
+        target = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id == payload.assigned_to_user_id))).scalar_one_or_none()
         if target:
             created_notifications.append(
                 add_notification(
@@ -403,7 +403,7 @@ async def approve_entry(
 
         assigned_to = payload.assigned_to_user_id or entry.assigned_to_user_id
         if assigned_to is not None:
-            assigned_user = (await db.execute(select(User).where(User.id == assigned_to))).scalar_one_or_none()
+            assigned_user = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id == assigned_to))).scalar_one_or_none()
             if assigned_user is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
             if assigned_user.department_id != board.department_id:
