@@ -16,7 +16,7 @@ from app.models.enums import UserRole
 
 class ManualStartTests(unittest.IsolatedAsyncioTestCase):
     async def test_staff_in_shared_control_can_start_without_enabling_schedule(self):
-        meeting=SimpleNamespace(id=uuid.uuid4())
+        meeting=SimpleNamespace(id=uuid.uuid4(),meeting_date=datetime.now().date(),slot='14:20')
         user=SimpleNamespace(id=uuid.uuid4(),role=UserRole.STAFF,is_active=True)
         row=SimpleNamespace(enabled_until=None,target_minutes_per_person=4)
         db=SimpleNamespace(commit=AsyncMock())
@@ -63,9 +63,9 @@ class ManualStartTests(unittest.IsolatedAsyncioTestCase):
                     await api.command_user(SimpleNamespace(),api.Caller(discord_user_id='11',**context))
                 self.assertEqual(error.exception.status_code,403)
 
-    async def test_linked_manager_can_start_now_without_enabling_daily_schedule(self):
-        at = datetime(2026, 10, 29, 9, 15, tzinfo=ZoneInfo('Europe/Budapest'))
-        meeting = SimpleNamespace(id=uuid.uuid4())
+    async def test_manual_entry_starts_the_opening_now_but_keeps_the_official_staff_time(self):
+        at = datetime(2026, 10, 29, 10, 57, tzinfo=ZoneInfo('Europe/Budapest'))
+        meeting = SimpleNamespace(id=uuid.uuid4(),meeting_date=at.date(),slot='11:00')
         row = SimpleNamespace(enabled_until=None, target_minutes_per_person=4)
         db = SimpleNamespace(commit=AsyncMock())
         manager = SimpleNamespace(role=UserRole.MANAGER)
@@ -79,7 +79,7 @@ class ManualStartTests(unittest.IsolatedAsyncioTestCase):
              patch.object(api.settings, 'MIRA_HOST_OPENAI_API_KEY', 'host-test'), \
              patch.object(api.settings, 'MIRA_HOST_BOT_TOKEN', 'test-token'):
             result = await api.start(api.Start(slot='11:00', discord_user_id='11'), db)
-        self.assertEqual(result['starts_at'], at.isoformat())
+        self.assertEqual(result['starts_at'], at.replace(hour=11,minute=0).isoformat())
         self.assertIsNone(row.enabled_until)
         self.assertEqual(result['meeting']['id'], str(meeting.id))
 

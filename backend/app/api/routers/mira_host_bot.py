@@ -50,6 +50,13 @@ class Invited(BaseModel):
     turn_id: uuid.UUID
 
 
+class PmTurn(BaseModel):
+    expected_turn_id: str | None = Field(default=None, max_length=50)
+    outcome: Literal["DONE", "DEFERRED", "TIMEOUT"] = "DONE"
+    summary: str | None = Field(default=None, max_length=1500)
+    available_discord_ids: list[str] | None = Field(default=None, max_length=200)
+
+
 class Metric(BaseModel):
     id: uuid.UUID
     kind: Literal['generated_audio', 'tool']
@@ -72,6 +79,11 @@ class ProgressAck(BaseModel):
 
 class ProposalAck(ProgressAck):
     played_at: str = Field(max_length=50)
+
+
+class NotificationResult(BaseModel):
+    key: str = Field(min_length=1, max_length=200)
+    delivered: bool
 
 
 class ToolCall(BaseModel):
@@ -170,9 +182,15 @@ async def start(payload: Start, db: AsyncSession = Depends(get_db)):
         await host.finish_meeting(db, meeting, f"realtime:{exc.detail}")
         await db.commit()
         raise
+    if session.get("runtime"):
+        from sqlalchemy.dialects.postgresql import insert
+        from app.models.mira_host import Mira1HEvent
+        await db.execute(insert(Mira1HEvent).values(id=uuid.uuid4(), key=f"runtime:{meeting.id}:{meeting.join_attempts}",
+            meeting_id=meeting.id, meeting_date=meeting.meeting_date, slot=meeting.slot, kind="RUNTIME",
+            sent_at=host.now(), data=session["runtime"]).on_conflict_do_nothing(index_elements=["key"]))
     await db.commit()
     return {"meeting": host.meeting_row(meeting), **session,
-            "starts_at": (host.now() if payload.discord_user_id else
+            "starts_at": (host.now() if payload.test_mode else
                           host.slot_at(meeting.meeting_date, meeting.slot)).isoformat(),
             "target_minutes": row.target_minutes_per_person}
 
@@ -256,3 +274,45 @@ async def proposal_ack(meeting_id: uuid.UUID, payload: ProposalAck, db: AsyncSes
     result = await host.acknowledge_proposal(db, meeting, payload.token, payload.played_at)
     await db.commit()
     return result
+
+
+@router.post('/meetings/{meeting_id}/notes/ack')
+async def notes_ack(meeting_id: uuid.UUID, payload: ProgressAck, db: AsyncSession = Depends(get_db)):
+    from app.services.mira_host_runtime import acknowledge_notes
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
+    result = await acknowledge_notes(db, meeting, payload.token)
+    await db.commit()
+    return result
+
+
+@router.post('/meetings/{meeting_id}/announcements/defer')
+async def announcement_defer(meeting_id: uuid.UUID, payload: ProgressAck, db: AsyncSession = Depends(get_db)):
+    from app.services.mira_host_runtime import defer_announcement
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
+    result = await defer_announcement(db, meeting, payload.token)
+    await db.commit()
+    return result
+
+
+@router.post('/notifications/result')
+async def notification_result(payload: NotificationResult, db: AsyncSession = Depends(get_db)):
+    from app.services.mira_host_runtime import notification_result as record
+    result = await record(db, payload.key, payload.delivered, at=host.now())
+    await db.commit()
+    return result
+
+
+@router.post('/meetings/{meeting_id}/pm/next')
+async def pm_next(meeting_id: uuid.UUID, payload: PmTurn, db: AsyncSession = Depends(get_db)):
+    from app.services.mira_host_runtime import next_pm_turn
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
+    result = await next_pm_turn(db, meeting, **payload.model_dump())
+    await db.commit()
+    return result
+
+
+@router.post('/meetings/{meeting_id}/pm/current')
+async def pm_current(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    from app.services.mira_host_runtime import pm_event, pm_state
+    meeting = await host.meeting_for(db, meeting_id, lock=True)
+    return pm_state(await pm_event(db, meeting))

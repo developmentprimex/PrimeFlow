@@ -145,8 +145,9 @@ class CredentialIsolationTests(unittest.IsolatedAsyncioTestCase):
         db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=lambda: [])), commit=AsyncMock())
         with self.provider(lambda request: httpx.Response(200), MIRA_HOST_OPENAI_API_KEY=None), \
                 patch.object(host, 'get_settings', AsyncMock(return_value=row)), \
+                patch('app.services.mira_host_runtime.stop_requests', AsyncMock(return_value=[])), \
                 patch.object(host, 'common_payload', AsyncMock(side_effect=AssertionError('must not prepare invitations'))):
-            self.assertEqual(await host.tick(db, at), {'enabled': False, 'jobs': []})
+            self.assertEqual(await host.tick(db, at), {'enabled': False, 'jobs': [], 'stop_meetings': []})
 
     async def test_host_realtime_uses_host_key_and_fails_closed(self):
         seen = []
@@ -168,7 +169,7 @@ class CredentialIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_host_background_summary_and_turn_notes_use_host_key(self):
         seen = []
-        turn = SimpleNamespace(id=uuid.uuid4(), started_at=datetime(2026, 10, 29, 10, tzinfo=timezone.utc),
+        turn = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), status='DONE', started_at=datetime(2026, 10, 29, 10, tzinfo=timezone.utc),
                                ended_at=None, notes=None)
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=date(2026, 10, 29), slot='11:00',
             summary_status='PENDING', host_transcript=[{'speaker': 'Ana', 'at': turn.started_at.isoformat(), 'text': 'Po.'}])
@@ -184,6 +185,7 @@ class CredentialIsolationTests(unittest.IsolatedAsyncioTestCase):
         with self.provider(transport), patch('app.db.SessionLocal', return_value=Session()), \
                 patch.object(host, 'meeting_for', AsyncMock(return_value=meeting)), \
                 patch.object(host, 'turns_view', AsyncMock(return_value=[])), \
+                patch.object(host, 'discussion_context', AsyncMock(return_value={})), \
                 patch.object(host, 'meeting_events', AsyncMock(return_value=[])):
             await host.summarize(meeting.id)
         self.assertEqual(meeting.summary_status, 'READY')

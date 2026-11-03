@@ -274,47 +274,38 @@ def strike_interval_end(day: date, slot: str) -> datetime:
     return datetime.combine(day, end, tzinfo=report_timezone())
 
 
-async def _text_overrides_for_1h_interval(
-    data: dict,
-    day: date,
-    slot: str,
-    *,
-    interval_end: datetime,
-) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
+async def report_task_snapshot(data: dict, *, interval_end: datetime, db=None) -> dict:
+    """Shared authoritative task/note text and events for report rendering and Mira Host."""
     titles, descriptions = _report_task_text(data)
     task_ids = set(titles) | set(descriptions)
     if not task_ids:
-        return {}, {}
-    # Load the current task/note text and its strike history in one statement.
-    # Common View is fetched through a separate HTTP request and can cross a
-    # task-save commit boundary. Using its text together with newer strike
-    # events made a fresh report temporarily suppress blue/green strikes until
-    # a later regeneration happened to receive matching snapshots.
-    async with SessionLocal() as db:
-        rows = (await db.execute(
-            select(
-                Task.id,
-                Task.title,
-                Task.description,
-                Task.system_template_origin_id,
-                Task.system_task_slot_id,
-                GaNote.content,
-                PlanNote.content,
-                TaskStrikeEvent,
-            )
-            .outerjoin(GaNote, Task.ga_note_origin_id == GaNote.id)
-            .outerjoin(PlanNote, Task.plan_note_origin_id == PlanNote.id)
-            .outerjoin(
-                TaskStrikeEvent,
-                and_(
-                    TaskStrikeEvent.task_id == Task.id,
-                    TaskStrikeEvent.occurred_at <= interval_end,
-                ),
-            )
-            .where(Task.id.in_(task_ids))
-            .order_by(Task.id, TaskStrikeEvent.occurred_at, TaskStrikeEvent.id)
-        )).all()
-
+        return {"titles": {}, "descriptions": {}, "events": {}}
+    if db is None:
+        async with SessionLocal() as session:
+            return await report_task_snapshot(data, interval_end=interval_end, db=session)
+    rows = (await db.execute(
+        select(
+            Task.id,
+            Task.title,
+            Task.description,
+            Task.system_template_origin_id,
+            Task.system_task_slot_id,
+            GaNote.content,
+            PlanNote.content,
+            TaskStrikeEvent,
+        )
+        .outerjoin(GaNote, Task.ga_note_origin_id == GaNote.id)
+        .outerjoin(PlanNote, Task.plan_note_origin_id == PlanNote.id)
+        .outerjoin(
+            TaskStrikeEvent,
+            and_(
+                TaskStrikeEvent.task_id == Task.id,
+                TaskStrikeEvent.occurred_at <= interval_end,
+            ),
+        )
+        .where(Task.id.in_(task_ids))
+        .order_by(Task.id, TaskStrikeEvent.occurred_at, TaskStrikeEvent.id)
+    )).all()
     by_task: dict[uuid.UUID, list[TaskStrikeEvent]] = {}
     current_titles: dict[uuid.UUID, str] = {}
     current_descriptions: dict[uuid.UUID, str | None] = {}
@@ -345,7 +336,18 @@ async def _text_overrides_for_1h_interval(
     descriptions.update({
         task_id: value for task_id, value in current_descriptions.items() if task_id in descriptions
     })
-    interval_start = strike_interval_start(day, slot)
+    return {"titles": titles, "descriptions": descriptions, "events": by_task}
+
+
+async def _text_overrides_for_1h_interval(
+    data: dict, day: date, slot: str, *, interval_end: datetime,
+) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
+    snapshot = await report_task_snapshot(data, interval_end=interval_end)
+    return report_text_overrides(snapshot, interval_start=strike_interval_start(day, slot), interval_end=interval_end)
+
+
+def report_text_overrides(snapshot, *, interval_start, interval_end):
+    titles, descriptions, by_task = snapshot["titles"], snapshot["descriptions"], snapshot["events"]
     title_overrides = {
         str(task_id): render_text_for_interval(
             title,

@@ -262,14 +262,22 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(state['process'].send.await_args.args[0]['output']['FUNDI'])
 
     async def test_at_1150_the_last_turn_leads_to_the_pm_review_and_then_the_end(self):
-        pm = [{'person': 'Elsa Ferati', 'initials': 'EF', 'detyrat_pm': ['oferta (e verdhë)']}]
-        fake, _ = bot({'/turns/next': {'current': None, 'upcoming': None, 'pm_review': pm}})
+        person = {'id': 'PM_elsa', 'user_id': 'elsa', 'person': 'Elsa Ferati', 'name': 'Elsa Ferati',
+                  'initials': 'EF', 'detyrat_pm': ['oferta (e verdhë)']}
+        pm = [person]
+        async def bridge(path, body):
+            if path.endswith('/turns/next'):
+                return {'current': None, 'upcoming': None, 'pm_review': pm}
+            if path.endswith('/pm/next'):
+                return {'current': person if body['expected_turn_id'] is None else None, 'turns': pm, 'deferred': []}
+            return {}
+        fake = SimpleNamespace(bridge=bridge)
         host = mira_host.MiraHost(fake)
         state = {**session(), 'slot': '11:50', 'pm_reviewed': False}
         await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c1', 'arguments': '{"turn_id":"t1"}'})
         self.assertEqual(state['process'].send.await_args.args[0]['output']['PM_RISHIKIMI'], pm)
         self.assertFalse(state['ending'])
-        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c2', 'arguments': '{"turn_id":"PM_RISHIKIMI"}'})
+        await host.tool(state, {'type': 'tool_call', 'name': 'end_person_turn', 'call_id': 'c2', 'arguments': '{"turn_id":"PM_elsa"}'})
         self.assertTrue(state['process'].send.await_args.args[0]['output']['FUNDI'])
         self.assertTrue(state['ending'])
 

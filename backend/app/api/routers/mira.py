@@ -124,8 +124,12 @@ async def switch_host(payload: HostSwitch, db: AsyncSession = Depends(get_db), u
     row = await host.get_settings(db, lock=True)
     row.enabled_until = host.enable_until(host.now(), payload.until) if payload.enabled else None
     row.enabled_by_user_id = user.id if payload.enabled else row.enabled_by_user_id
+    stopping = 0
+    if not payload.enabled:
+        from app.services.mira_host_runtime import request_stop
+        stopping = await request_stop(db, user.id)
     await db.commit()
-    return host.settings_view(row)
+    return {**host.settings_view(row), "stop_requested": bool(stopping)}
 
 
 @router.get('/knowledge')

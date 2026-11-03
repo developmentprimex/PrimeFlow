@@ -65,11 +65,11 @@ export function SettingsTab({ canManage, status, onChange }: { canManage: boolea
         )}
         {canManage && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {status.enabled ? (
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => call("/mira/host", { method: "POST", body: JSON.stringify({ enabled: false }) }, "Mira u ndal.")}>
+            {status.enabled || (status.live && !status.stop_requested) ? (
+              <Button size="sm" variant="outline" disabled={busy || status.stop_requested} onClick={() => call("/mira/host", { method: "POST", body: JSON.stringify({ enabled: false }) }, "Ndalimi i Mira-s u kërkua.")}>
                 Ndalo
               </Button>
-            ) : (
+            ) : status.stop_requested ? <span className="text-sm text-muted-foreground">Mira po ndalet…</span> : (
               <>
                 <Input aria-label="Deri në orë" placeholder="deri në orë, p.sh. 12:00" value={until} maxLength={5}
                   onChange={(e) => setUntil(e.target.value)} className="h-9 w-48" />

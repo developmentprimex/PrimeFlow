@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Literal
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -187,6 +187,7 @@ class Settings(BaseSettings):
     MIRA_HOST_SPEED: float = 1.05
     # minimal/low/medium/high/xhigh; higher answers better but later. Empty = the model's default.
     MIRA_HOST_REASONING_EFFORT: str = "low"
+    MIRA_HOST_MISSING_STAFF_GRACE_SECONDS: int = Field(default=20, ge=5, le=120)
     DISCORD_AI_TIMEOUT_SECONDS: int = 45
     DISCORD_AGENT_MODEL: str = "gpt-6-luna"
     SKILLS_AI_MODEL: str = "gpt-5.4-nano"

@@ -51,7 +51,7 @@ export function MiraPage() {
         </div>
         {status && (
           <p className="text-sm text-muted-foreground">
-            {status.live ? (
+            {status.stop_requested ? "Mira po ndalet…" : status.live ? (
               <span style={{ color: ACCENT }}>{status.live.is_test ? "● TEST · Mira po provon 1H " : "● Mira po e mban 1H "}{status.live.slot}</span>
             ) : status.enabled ? `Mira i mban takimet deri në ${clock(status.enabled_until)}` : "Mira vetëm dëgjon (nuk i mban takimet)"}
           </p>

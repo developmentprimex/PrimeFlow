@@ -15,6 +15,111 @@ import mira_host as controller
 
 
 class FlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_person_refresh_bypasses_the_common_view_cache(self):
+        meeting=Mira1HMeeting(id=uuid.uuid4(),meeting_date=DAY,slot='11:00',status='STAFF_PHASE')
+        with patch.object(service,'common_payload',AsyncMock(return_value=payload([]))) as source, \
+             patch.object(service,'person_context',AsyncMock(return_value={'user_id':IDS['EF']})):
+            await service.run_tool(SimpleNamespace(),meeting,'get_person_brief',{'person':'EF'})
+        self.assertTrue(source.await_args.kwargs['fresh'])
+
+    async def test_recorded_discussion_is_preserved_in_the_current_turn_context(self):
+        facts={'task_id':'task','turn_id':'turn','progress':'Nuk kam filluar; isha me raportin tjetër.'}
+        host=controller.MiraHost(SimpleNamespace(bridge=AsyncMock(return_value={'success':True,'discussion':facts})))
+        state={**session(),'current_turn':{'id':'turn','brief':BRIEF.copy()}}
+        out=await host._tool(state,{'name':'record_task_discussion','arguments':'{}'})
+        self.assertTrue(out['success'])
+        self.assertEqual(state['current_turn']['brief']['discussion']['task'],facts)
+
+    async def test_saved_haxhere_turns_are_skipped_without_announcing_absence(self):
+        for old_status in ('WAITING','ACTIVE','DEFERRED'):
+            with self.subTest(old_status=old_status):
+                source=payload([]);source['users'][0]['full_name']='Haxhere Spahiu'
+                turns=[SimpleNamespace(id=uuid.uuid4(),user_id=uuid.UUID(IDS[key]),status=old_status if key=='EF' else 'WAITING',
+                         invited_at=None,started_at=None,ended_at=None,notes='') for key in ('EF','RA')]
+                db=SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(scalars=lambda:SimpleNamespace(all=lambda:turns))),flush=AsyncMock())
+                meeting=Mira1HMeeting(id=uuid.uuid4(),meeting_date=DAY,slot='11:00',status='STAFF_PHASE')
+                async def view(*args):
+                    return [{'id':str(turns[1].id),'user_id':IDS['RA'],'name':'Rinesa','status':turns[1].status}]
+                with patch.object(service,'common_payload',AsyncMock(return_value=source)), \
+                     patch.object(service,'turns_view',view),patch.object(service,'person_context',AsyncMock(return_value=BRIEF)):
+                    out=await service.next_turn(db,meeting,None,available_user_ids=[turns[1].user_id])
+                self.assertEqual(turns[0].status,'SKIPPED')
+                self.assertEqual(out['current']['user_id'],IDS['RA'])
+                self.assertEqual(out['skipped'],[]);self.assertEqual(out['deferred'],[])
+
+    async def test_refresh_recomputes_todo_question_for_the_same_person(self):
+        task={'task_id':'a','title':'OFERTA','status':'IN_PROGRESS','period':'AM'}
+        refreshed={**BRIEF,'user_id':IDS['EF'],'current':[{**task,'status':'TODO'}]}
+        host=controller.MiraHost(SimpleNamespace(bridge=AsyncMock(return_value=refreshed)))
+        state={**session(),'current_turn':{'id':'turn','user_id':IDS['EF'],'name':'Elsa','initials':'EF',
+                                         'brief':{**BRIEF,'current':[task]}}}
+        out=await host._tool(state,{'name':'get_person_brief','arguments':'{"person":"EF"}'})
+        self.assertTrue(out['RADHA']['aktual_dhe_paraprak_todo'])
+        self.assertEqual(state['current_turn']['brief'],refreshed)
+
+    async def test_refresh_that_arrives_after_a_handoff_cannot_replace_the_new_person(self):
+        state=session()
+        async def bridge(*args):
+            state['current_turn']={'id':'new','user_id':IDS['RA']}
+            return {**BRIEF,'user_id':IDS['EF']}
+        host=controller.MiraHost(SimpleNamespace(bridge=bridge))
+        out=await host._tool(state,{'name':'get_person_brief','arguments':'{"person":"EF"}'})
+        self.assertTrue(out['stale_turn'])
+        self.assertNotIn('brief',state['current_turn'])
+
+    async def test_delayed_opening_request_does_not_restart_ga_after_staff_has_started(self):
+        bridge=AsyncMock()
+        host=controller.MiraHost(SimpleNamespace(bridge=bridge))
+        state={**session(),'staff_started':True,'ga_checks':{},'ga_results':{}}
+        out=await host._tool(state,{'name':'list_new_done_and_strikes','arguments':'{}'})
+        self.assertTrue(out['deferred']);bridge.assert_not_awaited()
+        async def late(*args):
+            state['staff_started']=True
+            return {'progress_token':'late','read_aloud':'Progresi i vjetër.'}
+        state.update(staff_started=False,ga_checks={'list_new_px_notes':'DONE'})
+        host.bot.bridge=late
+        out=await host._tool(state,{'name':'list_new_done_and_strikes','arguments':'{}'})
+        self.assertTrue(out['deferred'])
+        self.assertEqual(state['announcement_deferrals'],{'late'})
+        self.assertNotIn('list_new_done_and_strikes',state['ga_results'])
+
+    def test_continuation_question_uses_todo_status_in_both_slots(self):
+        current={'task_id':'current','title':'OFERTA','status':'TODO','period':'AM'}
+        previous={'task_id':'previous','title':'RAPORTI','status':'TODO','period':'AM'}
+        blocked={'task_id':'blocked','title':'BLLOK','status':'DONE','period':'PM'}
+        base={**BRIEF,'current':[current],'previous_open':[previous],'blocked':[blocked]}
+        cases=[
+            ('both slots todo',{},True),
+            ('current percentage does not override todo',{'progress_percentages':{'current':20}},True),
+            ('previous percentage does not override todo',{'progress_percentages':{'previous':20}},True),
+            ('current strike does not override todo',{'new_progress':{'strikes':[{'task_id':'current','title':'OFERTA','points':[{'text':'Drafti'}]}]}},True),
+            ('previous strike does not override todo',{'new_progress':{'strikes':[{'task_id':'previous','title':'RAPORTI','points':[{'text':'Drafti'}]}]}},True),
+            ('current in progress without other evidence',{'current':[{**current,'status':'IN_PROGRESS'}]},False),
+            ('previous in progress without other evidence',{'previous_open':[{**previous,'status':'IN_PROGRESS'}]},False),
+            ('previous waiting client',{'previous_open':[{**previous,'status':'WAITING_CLIENT'}]},False),
+            ('current completed',{'current':[{**current,'status':'DONE'}]},False),
+            ('previous completed outside the spoken plan',{'continuation_check_tasks':[current,{**previous,'status':'DONE'}],
+                                                           'previous_open':[]},False),
+            ('old completion does not override current todo',{'new_progress':{'done':[{'task_id':'previous','title':'RAPORTI'}]}},True),
+            ('unrelated completed task',{'new_progress':{'done':[{'task_id':'other','title':'TJETER'}]}},True),
+            ('no eligible tasks',{'current':[],'previous_open':[]},False),
+        ]
+        for label,changes,expected in cases:
+            with self.subTest(label=label):
+                out=controller.turn_brief({'id':'turn','name':'Elsa','initials':'EF','brief':{**base,**changes}})
+                self.assertEqual(out['aktual_dhe_paraprak_todo'],expected)
+                self.assertEqual(out['pyetja_vazhdimit'],'Me çka ke vazhduar?' if expected else None)
+
+    async def test_handoff_asks_what_the_person_worked_on_when_tasks_are_todo(self):
+        task={'task_id':'current','title':'OFERTA','status':'TODO','period':'AM'}
+        current={'id':'turn','name':'Elsa','initials':'EF','discord':None,'brief':{**BRIEF,'current':[task]}}
+        host=controller.MiraHost(SimpleNamespace(bridge=AsyncMock(return_value={'current':current})))
+        out=await host.advance(session(),None,announce=False)
+        self.assertTrue(out['RADHA']['aktual_dhe_paraprak_todo'])
+        self.assertIn('Me çka ke vazhduar?',out['udhezim'])
+        self.assertIn("s'e ka sqaruar ende",out['udhezim'])
+        self.assertIn('vetëm një herë për personin',out['udhezim'])
+
     def test_speech_formatting_leaves_words_and_source_codes_intact(self):
         self.assertEqual(speech_text('FG: PDF OFERTA EF', ['EF']), 'fë gë: pë dë fë OFERTA e fë')
         self.assertEqual(speech_text('OFERTA GENT PROJEKTI'), 'OFERTA GENT PROJEKTI')
@@ -48,7 +153,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='GA_PHASE')
         with patch.object(service, 'common_payload', AsyncMock(return_value=payload([]))), \
              patch.object(service, 'open_notes', AsyncMock(return_value=notes)):
-            result = await service.run_tool(SimpleNamespace(), meeting, 'list_new_px_notes', {})
+            result = await service.run_tool(SimpleNamespace(add=Mock()), meeting, 'list_new_px_notes', {})
         self.assertIn('fë gë: kontrollo ofertën.', result.get('read_aloud', ''))
         self.assertIn('Dërgo raportin.', result['read_aloud'])
         self.assertNotIn('?', result['read_aloud'])
@@ -61,7 +166,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='GA_PHASE')
         with patch.object(service, 'common_payload', AsyncMock(return_value=payload([]))), \
              patch.object(service, 'open_notes', AsyncMock(return_value=notes)):
-            result = await service.run_tool(SimpleNamespace(), meeting, 'list_new_px_notes', {})
+            result = await service.run_tool(SimpleNamespace(add=Mock()), meeting, 'list_new_px_notes', {})
         self.assertLessEqual(len(result['notes'][0]['read_aloud']), 180)
         self.assertNotIn('Detajet për stafin.', result['read_aloud'])
         self.assertEqual(result['notes'][0]['text'], text)
@@ -143,7 +248,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_remaining_staff_absent_does_not_wait_a_full_minute(self):
         host = controller.MiraHost(SimpleNamespace())
         state = {**session(), 'current_turn': None, 'deferred': [{'id': 'absent', 'user_id': IDS['EF'], 'name': 'Elsa'}],
-                 'missing_since': controller.datetime.now(controller.tz()) - timedelta(seconds=6)}
+                 'missing_since': controller.datetime.now(controller.tz()) - timedelta(seconds=controller.settings.MIRA_HOST_MISSING_STAFF_GRACE_SECONDS + 1)}
         with patch.object(host, 'say', AsyncMock()) as say:
             await host.watch_turn(state)
         self.assertTrue(state['ending'])

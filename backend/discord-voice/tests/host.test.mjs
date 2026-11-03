@@ -54,7 +54,7 @@ test('playback frames 20 ms of audio and an interruption drops the rest at once'
   playback.flush();
   assert.equal(playback.frames.length,4);
   playback.next();playback.next();
-  assert.deepEqual(playback.clear(),{item:'item1',playedMs:40,dropped:2});
+  assert.deepEqual(playback.clear(),{item:'item1',playedMs:40,dropped:2,items:[{item:'item1',playedMs:40}]});
   assert.equal(playback.playing,false);
 });
 
@@ -64,7 +64,7 @@ test('commands are validated',()=>{
   assert.equal(decodeCommand('{"type":"say","text":"hi"}').type,'say');
 });
 
-function fakes({realtimeReady=true,voiceReady=false,toolsets={}}={}){
+function fakes({realtimeReady=true,voiceReady=false,toolsets={},instructions_by_phase={},makeDecoder=()=>({decode:packet=>packet})}={}){
   const sent=[],events=[];
   const streams=new Map();
   class FakeSocket{constructor(url,protocols){this.url=url;this.protocols=protocols;this.readyState=1;FakeSocket.last=this;}
@@ -84,10 +84,10 @@ function fakes({realtimeReady=true,voiceReady=false,toolsets={}}={}){
     for(const [id,timer] of [...clock.timers].sort((a,b)=>a[1].at-b[1].at))
       if(timer.at<=clock.at&&clock.timers.delete(id))timer.fn();
   };
-  const host=createHost({emit:m=>events.push(m),voice,makeDecoder:()=>({decode:packet=>packet}),
+  const host=createHost({emit:m=>events.push(m),voice,makeDecoder,
     makeEncoder:()=>({encode:f=>f.subarray(0,3),delete(){}}),WebSocketImpl:FakeSocket,gatewayFactory,
     now:()=>clock.at,setTimer,clearTimer:id=>clock.timers.delete(id)});
-  host.start({guild_id:'1',channel_id:'2',token:'t',client_secret:'ek_1',model:'gpt-realtime',toolsets});
+  host.start({guild_id:'1',channel_id:'2',token:'t',client_secret:'ek_1',model:'gpt-realtime',toolsets,instructions_by_phase});
   if(realtimeReady)host._onRealtime({type:'session.created'});
   return {host,sent,events,advance,connection,streams,socket:FakeSocket.last,dispatch:(...a)=>dispatch(...a)};
 }
@@ -107,7 +107,7 @@ test('existing Notes are read immediately without another tool or permission pau
   host.stop();
 });
 
-for(const status of ['completed','cancelled','wrong_text','dispatch_failed'])test(`notes continue without a user reply only after successful ${status} playback`,async()=>{
+for(const status of ['completed','cancelled','wrong_text','dispatch_failed'])test(`notes ${status} playback continues or retries without silence`,async()=>{
   const {host,sent,events,dispatch,advance,connection}=fakes({voiceReady:true});
   dispatch('GUILD_CREATE',{id:'1'});
   await Promise.resolve();
@@ -124,7 +124,8 @@ for(const status of ['completed','cancelled','wrong_text','dispatch_failed'])tes
   assert.equal(sent.filter(e=>e.type==='response.create').length,before);
   if(status==='dispatch_failed')connection.dispatchAudio=()=>false;
   advance(40);
-  assert.equal(sent.filter(e=>e.type==='response.create').length,before+(status==='completed'?1:0));
+  assert.equal(sent.filter(e=>e.type==='response.create').length,before+1);
+  assert.equal(sent.filter(e=>e.type==='response.create').at(-1).response.tool_choice,status==='completed'?undefined:'none');
   assert.equal(events.filter(e=>e.type==='note_played').length,status==='completed'?1:0);
   if(status==='completed'){
     advance(1000);
@@ -602,7 +603,7 @@ test('transcripts carry the loudest speaker of the utterance',()=>{
   host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'u1'});
   host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'u1'});
   host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'u1',transcript:' Po, e kreva. '});
-  assert.deepEqual(events.at(-1),{type:'transcript',role:'staff',speaker_id:null,text:'Po, e kreva.'});
+  assert.deepEqual(events.at(-1),{type:'transcript',role:'staff',speaker_id:null,speech_id:'u1',turn_id:null,started_at:null,ended_at:null,text:'Po, e kreva.'});
 });
 
 test('Mira stays deaf while she waits in the channel and starts listening with her first instruction',()=>{
@@ -610,4 +611,286 @@ test('Mira stays deaf while she waits in the channel and starts listening with h
   assert.equal(host._listening,false);
   host.say('SISTEMI: Faza GA');
   assert.equal(host._listening,true);
+});
+
+test('playback truncation retains the actual item for every queued frame',()=>{
+  const p=new Playback(frame=>frame.subarray(0,3));
+  p.push('a',new Int16Array(960));p.push('b',new Int16Array(960));
+  p.next();
+  assert.deepEqual(p.clear().items,[{item:'a',playedMs:20},{item:'b',playedMs:0}]);
+});
+
+test('speech beginning before first generated audio still interrupts the response',()=>{
+  const {host,sent,advance}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'thinking'}});
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'answer'});
+  advance(300);host._heard(speech());advance(150);
+  host._onRealtime({type:'response.output_audio.delta',response_id:'thinking',item_id:'audio',delta:int16ToBase64(new Int16Array(4800))});
+  assert.ok(sent.some(e=>e.type==='response.cancel'));
+  assert.equal(host._playback.playing,false);
+  host.stop();
+});
+
+test('short explicit pause stops playback and holds queued continuation until resume',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: Fillimi',{respond:false});speaking(host);
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'pause'});
+  host._heard(speech());advance(100);
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'pause'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'pause',transcript:'Mira prit'});
+  assert.equal(host._playback.playing,false);
+  host._onRealtime({type:'response.done',response:{id:'r1',status:'cancelled'}});
+  host.say('SISTEMI: Vazhdo kur të jetë gati');advance(2000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'resume'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'resume'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'resume',transcript:'Vazhdo'});
+  advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host.stop();
+});
+
+test('note ordinal wording is accepted and continues without retrying the reading',async()=>{
+  const {host,sent,events,dispatch,advance}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  host._onRealtime({type:'response.created',response:{id:'lookup'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'lookup',item:{type:'function_call',name:'list_new_px_notes',call_id:'n',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'lookup',status:'completed'}});
+  host.toolResult('n',{notes:[{note_id:'one'}],notes_token:'batch',read_aloud:'Shënimi 1: Dërgo raportin.',next_step:'list_new_done_and_strikes'});
+  host._onRealtime({type:'response.created',response:{id:'read'}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'read',item_id:'audio',delta:int16ToBase64(new Int16Array(480))});
+  host._onRealtime({type:'response.output_audio_transcript.done',response_id:'read',transcript:'Shënimi i parë: Dërgo raportin.'});
+  host._onRealtime({type:'response.done',response:{id:'read',status:'completed'}});advance(40);
+  assert.equal(events.filter(e=>e.type==='note_played'&&e.token==='batch').length,1);
+  assert.equal(sent.filter(e=>e.type==='response.create').at(-1).response.tool_choice,undefined);
+  host.stop();
+});
+
+test('short progress parts share a voice turn and only missing parts retry',async()=>{
+  const {host,sent,events,dispatch,advance}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  host._onRealtime({type:'response.created',response:{id:'lookup'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'lookup',item:{type:'function_call',name:'list_new_done_and_strikes',call_id:'p',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'lookup',status:'completed'}});
+  host.toolResult('p',{announcements:[{token:'a',read_aloud:'Elsa e kreu ofertën.'},{token:'b',read_aloud:'Rinesa e kreu raportin.'}]});
+  assert.ok(sent.at(-1).response.instructions.includes('Elsa'));
+  assert.ok(sent.at(-1).response.instructions.includes('Rinesa'));
+  function played(id,text){
+    host._onRealtime({type:'response.created',response:{id}});
+    host._onRealtime({type:'response.output_audio.delta',response_id:id,item_id:id,delta:int16ToBase64(new Int16Array(480))});
+    host._onRealtime({type:'response.output_audio_transcript.done',response_id:id,transcript:text});
+    host._onRealtime({type:'response.done',response:{id,status:'completed'}});advance(40);
+  }
+  played('first','Elsa e kreu ofertën.');
+  assert.deepEqual(events.filter(e=>e.type==='progress_played').map(e=>e.token),['a']);
+  assert.ok(sent.at(-1).response.instructions.includes('Rinesa'));
+  played('bad','Fillojmë.');
+  assert.equal(events.filter(e=>e.type==='announcement_deferred'&&e.token==='b').length,1);
+  assert.equal(events.filter(e=>e.type==='progress_played'&&e.token==='b').length,0);
+  assert.equal(sent.at(-1).response.tool_choice,undefined);
+  host.stop();
+});
+
+test('persistent decode errors recover once then signal health; valid audio clears the failure',async()=>{
+  let creates=0,valid=false;
+  const {host,events,dispatch,connection,streams,advance}=fakes({voiceReady:true,makeDecoder:()=>{
+    creates++;return {decode(packet){if(!valid)throw Error('bad');return packet;},delete(){}};
+  }});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  connection.receiver.speaking.emit('start','11');
+  for(let i=0;i<200;i++){streams.get('11').emit('data',Buffer.from([1]));advance(20);}
+  assert.equal(creates,2);
+  assert.equal(events.filter(e=>e.type==='audio_health'&&e.status==='failed').length,1);
+  valid=true;streams.get('11').emit('data',toDiscord(new Int16Array(240).fill(2000)).pcm);
+  assert.equal(events.filter(e=>e.type==='audio_health'&&e.status==='recovered').length,1);
+  host.stop();
+});
+
+test('phase instructions update with tools and delayed speech retains its original turn',async()=>{
+  const {host,sent,events,dispatch,connection,streams,advance}=fakes({voiceReady:true,
+    toolsets:{STAFF_PHASE:[],PM_REVIEW:[]},instructions_by_phase:{STAFF_PHASE:'Stafi',PM_REVIEW:'PM'}});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  host.configure('STAFF_PHASE','11','old-turn');host.say('SISTEMI: RADHA',{respond:false});
+  connection.receiver.speaking.emit('start','11');
+  streams.get('11').emit('data',toDiscord(new Int16Array(2400).fill(2000)).pcm);advance(100);
+  host._onRealtime({type:'input_audio_buffer.speech_started',audio_start_ms:0,item_id:'late'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',audio_end_ms:100,item_id:'late'});
+  host.configure('PM_REVIEW','22','new-turn');
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'late',transcript:'Oferta u dërgua'});
+  assert.equal(sent.filter(e=>e.type==='session.update').at(-1).session.instructions,'PM');
+  const line=events.find(e=>e.type==='transcript');
+  assert.equal(line.turn_id,'old-turn');assert.equal(line.speaker_id,'11');assert.ok(line.started_at);assert.ok(line.ended_at);
+  host.stop();
+});
+
+test('late VAD start is assigned to the turn active when its audio was uploaded',async()=>{
+  const {host,events,dispatch,connection,streams,advance}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  host.configure('STAFF_PHASE','11','old-turn');host.say('SISTEMI: RADHA',{respond:false});
+  connection.receiver.speaking.emit('start','11');
+  streams.get('11').emit('data',toDiscord(new Int16Array(2400).fill(2000)).pcm);advance(100);
+  host.configure('STAFF_PHASE','22','new-turn');
+  host._onRealtime({type:'input_audio_buffer.speech_started',audio_start_ms:0,item_id:'late'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',audio_end_ms:100,item_id:'late'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'late',transcript:'Oferta u dërgua'});
+  assert.equal(events.find(e=>e.type==='transcript').turn_id,'old-turn');
+  host.stop();
+});
+
+test('interruption before response.created cancels the late response request',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: Pyetja');
+  const request=sent.find(e=>e.type==='response.create');
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'staff'});
+  advance(300);host._heard(speech());advance(150);
+  host._onRealtime({type:'response.created',response:{id:'late',metadata:request.response.metadata}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'late',item_id:'audio',delta:int16ToBase64(new Int16Array(4800))});
+  assert.ok(sent.some(e=>e.type==='response.cancel'&&e.response_id==='late'));
+  assert.equal(host._playback.playing,false);
+  host.stop();
+});
+
+test('a slow GA lookup finishing after staff handoff is deferred without reading stale data',()=>{
+  const {host,sent,events}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'lookup'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'lookup',item:{type:'function_call',name:'list_new_done_and_strikes',call_id:'p',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'lookup',status:'completed'}});
+  host.configure('STAFF_PHASE','11','t1');
+  host.say('SISTEMI: RADHA e stafit');
+  assert.ok(sent.some(e=>e.type==='response.create'));
+  const before=sent.filter(e=>e.type==='response.create').length;
+  host.toolResult('p',{announcements:[{token:'stale',read_aloud:'Progresi i vjetër.'}]});
+  assert.equal(events.filter(e=>e.type==='announcement_deferred'&&e.token==='stale').length,1);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,before);
+  assert.equal(sent.filter(e=>e.type==='response.create').at(-1).response.tool_choice,undefined);
+  host.stop();
+});
+
+test('official staff handoff stops opening audio even without an announcement token',()=>{
+  const {host,sent,events}=fakes();
+  host.say('SISTEMI: Hyrja e takimit');
+  host._onRealtime({type:'response.created',response:{id:'opening'}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'opening',item_id:'opening-audio',delta:int16ToBase64(new Int16Array(4800))});
+  assert.equal(host._playback.playing,true);
+  host.configure('STAFF_PHASE','11','first-turn');
+  assert.equal(host._playback.playing,false);
+  assert.ok(sent.some(e=>e.type==='response.cancel'));
+  assert.equal(events.filter(e=>e.type==='announcement_deferred').length,0);
+  host.stop();
+});
+
+test('changing staff person stops the previous persons audio and late frames',()=>{
+  const {host,sent}=fakes();
+  host.configure('STAFF_PHASE','11','first');
+  host.say('SISTEMI: RADHA e parë');
+  host._onRealtime({type:'response.created',response:{id:'first-answer'}});
+  const frame={type:'response.output_audio.delta',response_id:'first-answer',item_id:'first-audio',delta:int16ToBase64(new Int16Array(4800))};
+  host._onRealtime(frame);assert.equal(host._playback.playing,true);
+  host.configure('STAFF_PHASE','22','second');
+  assert.equal(host._playback.playing,false);
+  host._onRealtime(frame);assert.equal(host._playback.playing,false);
+  assert.ok(sent.some(e=>e.type==='response.cancel'));
+  host.stop();
+});
+
+test('an old turns delayed pause transcript does not interrupt the new person',async()=>{
+  const {host,events,dispatch,connection,streams,advance}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  host.configure('STAFF_PHASE','11','old');host.say('SISTEMI: RADHA',{respond:false});
+  connection.receiver.speaking.emit('start','11');
+  streams.get('11').emit('data',toDiscord(new Int16Array(2400).fill(2000)).pcm);advance(100);
+  host._onRealtime({type:'input_audio_buffer.speech_started',audio_start_ms:0,item_id:'late'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',audio_end_ms:100,item_id:'late'});
+  host.configure('STAFF_PHASE','22','new');host.say('SISTEMI: RADHA e re');
+  host._onRealtime({type:'response.created',response:{id:'new-answer'}});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'late',transcript:'prit'});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'new-answer',item_id:'new-audio',delta:int16ToBase64(new Int16Array(4800))});
+  assert.equal(host._playback.playing,true);
+  assert.equal(events.find(e=>e.type==='transcript'&&e.text==='prit').turn_id,'old');
+  host.stop();
+});
+
+test('an old turns delayed resume does not override the current persons explicit pause',()=>{
+  const {host,sent}=fakes();
+  host.configure('STAFF_PHASE','11','old');
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'old-speech'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'old-speech'});
+  host.configure('STAFF_PHASE','22','new');
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'current-speech'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'current-speech'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'current-speech',transcript:'prit'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'old-speech',transcript:'vazhdo'});
+  host.say('SISTEMI: Pyetja e radhës');
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host.stop();
+});
+
+test('a delayed opening pause cannot silence the goodbye even though both phases have no turn id',()=>{
+  const {host}=fakes();
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'opening-speech'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'opening-speech'});
+  host.configure('ENDING');host.say('SISTEMI: Mbyll shkurt');
+  host._onRealtime({type:'response.created',response:{id:'goodbye'}});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'opening-speech',transcript:'prit'});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'goodbye',item_id:'goodbye-audio',delta:int16ToBase64(new Int16Array(4800))});
+  assert.equal(host._playback.playing,true);
+  host.stop();
+});
+
+test('the initial opening still honors a current pause with timestamped input audio',async()=>{
+  const {host,sent,dispatch,connection,streams,advance}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  host.say('SISTEMI: Hyrja',{respond:false});
+  connection.receiver.speaking.emit('start','11');
+  streams.get('11').emit('data',toDiscord(new Int16Array(2400).fill(2000)).pcm);advance(100);
+  host._onRealtime({type:'input_audio_buffer.speech_started',audio_start_ms:0,item_id:'pause'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',audio_end_ms:100,item_id:'pause'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'pause',transcript:'prit'});
+  host.say('SISTEMI: Notes e reja');
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host.stop();
+});
+
+test('a lookup for an old staff turn does not block the new staff prompt',()=>{
+  const {host,sent}=fakes();
+  host.configure('STAFF_PHASE','11','old');
+  host._onRealtime({type:'response.created',response:{id:'lookup'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'lookup',item:{type:'function_call',name:'get_person_brief',call_id:'brief',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'lookup',status:'completed'}});
+  host.configure('STAFF_PHASE','22','new');host.say('SISTEMI: RADHA e re');
+  const count=sent.filter(e=>e.type==='response.create').length;
+  assert.equal(count,1);
+  host.toolResult('brief',{person:'Old person',current:[]});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,count);
+  host.stop();
+});
+
+test('a write in flight keeps its actual result across a staff handoff',()=>{
+  const {host,sent}=fakes();
+  host.configure('STAFF_PHASE','11','old');
+  host._onRealtime({type:'response.created',response:{id:'writing'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'writing',item:{type:'function_call',name:'record_task_discussion',call_id:'write',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'writing',status:'completed'}});
+  host.configure('STAFF_PHASE','22','new');host.say('SISTEMI: RADHA e re');
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host.toolResult('write',{success:true,discussion:{progress:'Oferta u dërgua'}});
+  const result=sent.find(e=>e.item?.type==='function_call_output'&&e.item.call_id==='write');
+  assert.equal(JSON.parse(result.item.output).success,true);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host.stop();
+});
+
+test('decoder creation recovering on the next speech clears the previous health failure',async()=>{
+  let attempts=0;
+  const {host,events,dispatch,connection,streams}=fakes({voiceReady:true,makeDecoder:()=>{
+    if(++attempts===1)throw Error('temporary decoder allocation failure');
+    return {decode:packet=>packet,delete(){}};
+  }});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  connection.receiver.speaking.emit('start','11');
+  assert.equal(events.filter(e=>e.type==='audio_health'&&e.status==='failed').length,1);
+  connection.receiver.speaking.emit('start','11');
+  streams.get('11').emit('data',toDiscord(new Int16Array(240).fill(2000)).pcm);
+  assert.equal(events.filter(e=>e.type==='audio_health'&&e.status==='recovered').length,1);
+  host.stop();
 });

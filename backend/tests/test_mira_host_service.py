@@ -32,7 +32,82 @@ def payload(items, absent=()):
             'items': {'oneH': items, 'absent': [{'userId': IDS[k], 'date': DAY.isoformat(), 'fullDay': True} for k in absent]}}
 
 
+def report_rows(data, events=()):
+    """The authoritative text/event snapshot consumed by both report and voice code."""
+    rows, seen = [], set()
+    for values in data.payload['items'].values():
+        for row in values:
+            tid = row.get('task_id')
+            if not tid or tid in seen:
+                continue
+            seen.add(tid)
+            matching = [e for e in events if str(e.task_id) == tid] or [None]
+            for event in matching:
+                if event is not None and not hasattr(event, 'id'):
+                    event.id = uuid.uuid4()
+                rows.append((uuid.UUID(tid), row['title'], row.get('description'), None, None, None, None, event))
+    return rows
+
+
 class SlotDataTests(unittest.TestCase):
+    def test_completed_previous_work_counts_as_evidence_without_being_asked_again(self):
+        current=item('EF','11:00','OFERTA',rank=0,status='TODO')
+        previous=item('EF','10:00','RAPORTI',rank=0,status='DONE',completed_at=datetime(2026,10,21,9,30,tzinfo=TZ).isoformat())
+        data=host.SlotData(payload([current,previous]),DAY)
+        brief=host.person_brief(data,'11:00',IDS['EF'])
+        self.assertEqual(brief['previous_open'],[])
+        self.assertEqual({t['task_id'] for t in brief['continuation_check_tasks']},{current['task_id'],previous['task_id']})
+
+    def test_1150_todo_check_uses_only_the_immediately_previous_slot(self):
+        older=item('EF','10:00','E HERSHME',rank=0,status='IN_PROGRESS')
+        previous=item('EF','11:00','PARAPRAK',rank=0,status='TODO')
+        current=item('EF','11:50','AKTUAL',rank=0,status='TODO')
+        brief=host.person_brief(host.SlotData(payload([older,previous,current]),DAY),'11:50',IDS['EF'])
+        self.assertEqual({t['task_id'] for t in brief['continuation_check_tasks']},{previous['task_id'],current['task_id']})
+        self.assertIn(older['task_id'],{t['task_id'] for t in brief['previous_open']})
+
+    def test_haxhere_finance_tasks_are_excluded_from_all_hosted_meeting_sections(self):
+        for name in ('Haxhere Spahiu','Haxhere Sopa','Haxherë Spahiu'):
+            with self.subTest(name=name):
+                source=payload([item('EF',slot,'FINANCA',rank=0,finish_period='PM',one_h_marker='FLAG')
+                                for slot in host.SLOTS]+[item('RA','11:00','PUNE STAFI',rank=1)])
+                original_tasks=list(source['items']['oneH'])
+                for user in source['users']:
+                    if user['id']==IDS['EF']:user['full_name']=name
+                for row in source['items']['oneH']:
+                    if row['user_id']==IDS['EF']:row['assignees']=[name]
+                source['items']['blocked']=[{**item('EF',None,'BLLOK FINANCA',rank=0),'assignees':[name]}]
+                data=host.SlotData(source,DAY)
+                self.assertEqual(data.order(),[IDS['RA']])
+                self.assertEqual(data.ga_flagged(),[])
+                self.assertEqual(data.pm_open(),[])
+                for slot in host.SLOTS:
+                    brief=host.person_brief(data,slot,IDS['EF'])
+                    for section in ('current','previous_open','blocked'):self.assertEqual(brief[section],[])
+                self.assertEqual(source['items']['oneH'],original_tasks)
+                self.assertEqual(len(source['items']['oneH']),6)
+
+    def test_exclusion_uses_the_owner_not_the_department_or_a_name_inside_the_task(self):
+        source=payload([item('RA','11:00','Dergo raportin te Haxhere',rank=0)])
+        source['users'][0]['full_name']='Haxhere Spahiu'
+        for user in source['users']:
+            if user['id'] in (IDS['EF'],IDS['RA']):user['department_id']='finance'
+        data=host.SlotData(source,DAY)
+        self.assertEqual(data.participants('11:00'),[IDS['RA']])
+        self.assertEqual(len(data.user_tasks('11:00',IDS['RA'])),1)
+
+    def test_shared_and_name_only_haxhere_rows_cannot_leak_through_another_bucket(self):
+        shared=item('RA','11:00','FINANCA E PERBASHKET',rank=0,assignees=['Rinesa Ahmeti','Haxhere Spahiu'])
+        source=payload([shared])
+        source['users'][0]['full_name']='Haxhere Spahiu'
+        duplicate={**shared,'assignees':['Rinesa Ahmeti']}
+        source['items']['blocked']=[duplicate]
+        source['items']['oneH'].append({'task_id':str(uuid.uuid4()),'date':DAY.isoformat(),
+            'one_h_report_slot':'11:00','owner':'Haxhere Spahiu','title':'FINANCA PA USER ID','status':'TODO'})
+        data=host.SlotData(source,DAY)
+        self.assertEqual(data.slots['11:00'],[])
+        self.assertEqual(data.blocked,[])
+
     def test_current_task_is_not_asked_again_as_an_earlier_task(self):
         shared = str(uuid.uuid4())
         data = host.SlotData(payload([
@@ -133,6 +208,7 @@ class TickTests(unittest.IsolatedAsyncioTestCase):
         self.data = payload([item('EF', '10:00', 'A', rank=0), item('RA', '11:00', 'B', rank=0)])
         targets = {uid: {'discord_user_id': str(n), 'guild_id': '1', 'channel_id': str(100 + n)} for n, uid in enumerate(IDS.values())}
         self.patches = [patch.object(host, 'get_settings', AsyncMock(return_value=self.row)),
+                        patch('app.services.mira_host_runtime.stop_requests', AsyncMock(return_value=[])),
                         patch.object(settings, 'MIRA_HOST_OPENAI_API_KEY', 'host-test'),
                         patch.object(host, 'common_payload', AsyncMock(return_value=self.data)),
                         patch.object(host, 'claim_event', AsyncMock(return_value=True)),
@@ -195,14 +271,13 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
     async def test_blocked_only_strike_is_staff_evidence_without_becoming_a_ga_announcement(self):
         task_id = str(uuid.uuid4())
         source = payload([])
-        source['items']['blocked'] = [item('EF', None, 'BLLOK RAPORTI', rank=0, task_id=task_id)]
+        source['items']['blocked'] = [item('EF', None, 'BLLOK RAPORTI', rank=0, task_id=task_id, description='[[done]]Tabela[[/done]]')]
         data = host.SlotData(source, DAY)
         strike = SimpleNamespace(task_id=uuid.UUID(task_id), point_key='p1', action='STRUCK',
                                  point_text='Tabela', occurred_at=datetime(2026, 10, 21, 15, 30, tzinfo=TZ))
-        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(
-            scalars=Mock(return_value=Mock(all=Mock(return_value=[strike]))))))
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(all=Mock(return_value=report_rows(data, [strike])))))
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='16:00')
-        self.assertEqual(await host.new_progress(db, meeting, data), {'done': [], 'strikes': []})
+        self.assertEqual((await host.new_progress(db, meeting, data))['strikes'], [])
         evidence = await host.new_progress(db, meeting, data, [IDS['EF']], for_brief=True)
         self.assertEqual([(t['task_id'], t['points'][0]['text']) for t in evidence['strikes']],
                          [(task_id, 'Tabela')])
@@ -210,34 +285,33 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
     async def test_staff_evidence_keeps_announced_strikes_separate_for_same_named_tasks(self):
         first, second = str(uuid.uuid4()), str(uuid.uuid4())
         data = host.SlotData(payload([
-            item('EF', '11:00', 'OFERTA', rank=0, task_id=first),
-            item('EF', '11:00', 'OFERTA', rank=1, task_id=second),
+            item('EF', '11:00', 'OFERTA', rank=0, task_id=first, description='[[done]]Klienti A[[/done]]'),
+            item('EF', '11:00', 'OFERTA', rank=1, task_id=second, description='[[done]]Klienti B[[/done]]'),
         ]), DAY)
         events = [SimpleNamespace(task_id=uuid.UUID(tid), point_key='p1', action='STRUCK',
                                   point_text=text, occurred_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ))
                   for tid, text in ((first, 'Klienti A'), (second, 'Klienti B'))]
-        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(
-            scalars=Mock(return_value=Mock(all=Mock(return_value=events))))))
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(all=Mock(return_value=report_rows(data, events)))))
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
         seen = {(first, 'STRIKE', 'p1'), (second, 'STRIKE', 'p1')}
         with patch.object(host, 'mentioned', AsyncMock(return_value=seen)):
             announcements = await host.new_progress(db, meeting, data)
             evidence = await host.new_progress(db, meeting, data, for_brief=True)
-        self.assertEqual(announcements['strikes'], [])
+        self.assertEqual(len(announcements['strikes']), 2)
         self.assertEqual([(t['task_id'], t['points'][0]['text']) for t in evidence['strikes']],
                          [(first, 'Klienti A'), (second, 'Klienti B')])
 
     async def test_person_context_keeps_recorded_percentage_and_window_evidence(self):
         task_id, untouched = str(uuid.uuid4()), str(uuid.uuid4())
         data = host.SlotData(payload([
-            item('EF', '11:00', 'OFERTA', rank=0, task_id=task_id),
+            item('EF', '11:00', 'OFERTA', rank=0, task_id=task_id, description='[[done]]Drafti[[/done]]'),
             item('EF', '11:00', 'RAPORTI', rank=1, task_id=untouched, status='TODO'),
         ]), DAY)
         since = datetime(2026, 10, 21, 10, tzinfo=TZ)
         strike = SimpleNamespace(task_id=uuid.UUID(task_id), point_key='p1', action='STRUCK',
                                  point_text='Drafti', occurred_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ))
         db = SimpleNamespace(execute=AsyncMock(side_effect=[
-            Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[strike])))),
+            Mock(all=Mock(return_value=report_rows(data, [strike]))),
             Mock(all=Mock(return_value=[(uuid.UUID(task_id), 40), (uuid.UUID(untouched), 0)])),
             Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[SimpleNamespace(data={
                 'task_id': task_id, 'finish_at': 'nesër'})])))),
@@ -254,11 +328,11 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         done_id, new_id = str(uuid.uuid4()), str(uuid.uuid4())
         data = host.SlotData(payload([
             item('EF', '10:00', 'OLD', rank=0, status='DONE', task_id=done_id, completed_at=datetime(2026, 10, 21, 9, tzinfo=TZ).isoformat()),
-            item('RA', '10:00', 'NEW', rank=1, status='DONE', task_id=new_id, completed_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ).isoformat()),
+            item('RA', '10:00', 'NEW', rank=1, status='DONE', task_id=new_id, completed_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ).isoformat(), description='[[done]]Me u nxerr transkripta 10:54 20.10[[/done]]'),
         ]), DAY)
         strike = SimpleNamespace(task_id=uuid.UUID(new_id), point_key='k1', action='STRUCK',
                                  point_text='Me u nxerr transkripta 10:54 20.10', occurred_at=datetime(2026, 10, 21, 9, tzinfo=timezone.utc))
-        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[strike]))))))
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(all=Mock(return_value=report_rows(data, [strike])))))
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
         with patch.object(host, 'mentioned', AsyncMock(return_value={(done_id, 'DONE', '')})):
             progress = await host.new_progress(db, meeting, data)
@@ -270,14 +344,14 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
             item('EF', '11:00', 'BEFORE 10', rank=0, status='DONE', completed_at=datetime(2026, 10, 21, 9, 40, tzinfo=TZ).isoformat()),
             item('RA', '16:00', 'AT 10:30', rank=1, status='DONE', completed_at=datetime(2026, 10, 21, 10, 30, tzinfo=TZ).isoformat()),
         ]), DAY)
-        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[]))))))
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(all=Mock(return_value=report_rows(data)))))
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
         with patch.object(host, 'mentioned', AsyncMock(return_value=set())):
             progress = await host.new_progress(db, meeting, data, since=datetime(2026, 10, 21, 10, tzinfo=TZ))
         # Like the 11:00 1H report: 10:00-11:00 only, from any slot.
         self.assertEqual([d['title'] for d in progress['done']], ['RA: AT 10:30'])
 
-    async def test_the_window_follows_the_1h_report_and_closes_the_gap_after_miras_last_reading(self):
+    async def test_previous_meeting_read_time_does_not_widen_the_report_window(self):
         def db(read_at):
             return SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=read_at))))
         at = lambda h, m: datetime(2026, 10, 21, h, m, tzinfo=TZ)
@@ -285,8 +359,8 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await host.progress_since(db(None), first), at(8, 0))
         later = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:50')
         self.assertEqual(await host.progress_since(db(None), later), at(11, 0))
-        # Mira read the 11:00 progress at 10:58; what was done 10:58-11:00 is still new at 11:50.
-        self.assertEqual(await host.progress_since(db(at(10, 58)), later), at(10, 58))
+        # A previous meeting cannot widen this slot's fixed report interval.
+        self.assertEqual(await host.progress_since(db(at(10, 58)), later), at(11, 0))
 
 
 class CreateTaskTests(unittest.IsolatedAsyncioTestCase):
@@ -365,15 +439,15 @@ class SpokenTitleTests(unittest.TestCase):
 
 class SharedTaskTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_task_shared_by_two_people_is_reported_once(self):
-        first, second = str(uuid.uuid4()), str(uuid.uuid4())
+        first = second = str(uuid.uuid4())
         done_at = datetime(2026, 10, 21, 10, 30, tzinfo=TZ).isoformat()
         data = host.SlotData(payload([
-            item('EF', '10:00', 'ASISTENTI PER TAK', rank=0, status='DONE', task_id=first, completed_at=done_at),
-            item('RA', '10:00', 'ASISTENTI PER TAK', rank=1, status='DONE', task_id=second, completed_at=done_at),
+            item('EF', '10:00', 'ASISTENTI PER TAK', rank=0, status='DONE', task_id=first, completed_at=done_at, description='[[done]]Sekuenca vetem kur duhet[[/done]]'),
+            item('RA', '10:00', 'ASISTENTI PER TAK', rank=1, status='DONE', task_id=second, completed_at=done_at, description='[[done]]Sekuenca vetem kur duhet[[/done]]'),
         ]), DAY)
         strikes = [SimpleNamespace(task_id=uuid.UUID(t), point_key=f'k{t}', action='STRUCK', point_text='Sekuenca vetem kur duhet',
                                    occurred_at=datetime(2026, 10, 21, 9, tzinfo=timezone.utc)) for t in (first, second)]
-        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=strikes))))))
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(all=Mock(return_value=report_rows(data, strikes)))))
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00')
         with patch.object(host, 'mentioned', AsyncMock(return_value=set())):
             progress = await host.new_progress(db, meeting, data)

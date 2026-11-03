@@ -60,6 +60,7 @@ konfirmohen në kod për ndryshimin konkret.
 | Planifikim | Weekly Planner, Monthly Planner, PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, Realization, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Realization dhe Reviews | My View, Department Views, Finance View, Realization, Reviews, Common View, Weekly Planner, Kontrolli ditor RLZ, M3 PIKAT |
 | Regjistrime dhe Mira | Regjistrimet, Mira, Meetings, PX Notes, Task Details |
+| Mira Host / takimet 1H | Mira (nisje/ndalim/status), Discord 1H (hyrja, prania, radha, audioja), PX Notes, Common View, 1H SHTYPI Today, 1H Reports (Done dhe strike), Task Details |
 | Raporte / email / eksporte | Reports, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, PX JAV Kontrolli, Weekly Planning Check, Kontrolli ditor RLZ, Print Preview, Print, Email, Exports, History |
 | Përdorues dhe përgjegjës | Users, My View, Department Views, Finance View, Projects, PX Notes, PX JAV, Common View, Weekly Planner, Monthly Planner, Meeting Scheduler, Reports |
 
@@ -91,6 +92,12 @@ konfirmohen në kod për ndryshimin konkret.
   ka kopje të ngrirë në 16:00; ruaj historikun dhe dallimin para/pas cutoff-it.
 - Notes nga Mira kanë rregulla të veçanta dukshmërie në raporte. Mos supozo se
   çdo Note duhet të dalë në çdo raport; dallo regjistrimin nga tasku i krijuar.
+- Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
+  1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
+  Përmendja e një PX Note nga Host nuk e bën atë Note të krijuar nga Mira.
+  Përjashtimet e detyrave nga leximi i Host nuk duhet të ndryshojnë raportet e
+  përgjithshme. Hyrja para takimit dhe fillimi zyrtar i stafit/pranisë janë hapa
+  të veçantë; kontrollo edhe nisjen manuale dhe rishikimin PM në 11:50.
 - Kur një kategori ka fushë gri në Excel, kjo pasqyron kontrollin e dakorduar
   për atë kategori. Nuk provon mungesën e çdo varësie të ardhshme: për një fushë
   ose sjellje të re, ndiq implementimin dhe rishiko hartën.

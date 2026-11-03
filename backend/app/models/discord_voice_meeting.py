@@ -78,5 +78,5 @@ from app.models.mira_host import Mira1HEvent  # noqa: E402
 # endpoints can mark it without a stored column.
 GaNote.from_mira = column_property(or_(
     exists().where(DiscordVoiceMeeting.saved_note_id == GaNote.id),
-    exists().where(Mira1HEvent.note_id == GaNote.id),
+    exists().where(Mira1HEvent.note_id == GaNote.id, Mira1HEvent.kind.in_(("PX_NOTE", "SUMMARY_NOTE"))),
 ))
