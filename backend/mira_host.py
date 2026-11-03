@@ -97,7 +97,7 @@ def turn_brief(current: dict) -> dict:
         "aktual_dhe_paraprak_todo": all_todo,
         "pyetja_vazhdimit": "Me çka ke vazhduar?" if all_todo else None,
         "detyrat_e_slotit": task_lines(brief["current"]),
-        "te_gjitha_kryer": bool(brief.get("all_done")),
+        "te_gjitha_kryer": bool(discussion) and all(task["kryer"] for task in discussion),
         "slotet_paraprake": brief.get("previous_slot"),
         "nga_slotet_paraprake_ne_proces_ose_pa_progres": task_lines(brief["previous_open"]),
         "progres_i_ri": {"done": [d.get("spoken") or d["title"] for d in progress.get("done", [])],
@@ -409,7 +409,7 @@ class MiraHost:
                    "failed": asyncio.Event(), "closed": asyncio.Event(), "attempt": 0, "turn_started": None,
                    "turn_nudged": False, "upcoming": None, "finished": False, "ending": False, "meeting": None,
                    "process": None, "reason": "completed", "ga_done": asyncio.Event(), "staff_started": False,
-                   "starts_at": None, "pm_reviewed": False, "manual_by": manual_by,
+                   "starts_at": None, "pm_reviewed": False, "pm_pending": False, "manual_by": manual_by,
                    "ga_checks": {}, "ga_results": {},
                    "command_context": command_context, "test_mode": test_mode}
         if start_generation is None or start_generation == self.start_generation:
@@ -467,7 +467,7 @@ class MiraHost:
                     break
                 with suppress(asyncio.TimeoutError):
                     await asyncio.wait_for(session["closed"].wait(), 5)
-                await self.flush_lines(session)
+                self.schedule_upload(session)
             if not session["closed"].is_set() and not session["ending"]:
                 session["reason"] = "timeout"
         except Exception as exc:
@@ -485,15 +485,20 @@ class MiraHost:
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(session["closed"].wait(),
                                        min(1 if until else 5, max(0.001, (at - datetime.now(tz())).total_seconds())))
-            # Uploads must not hold the official staff clock behind a slow API call.
-            upload = session.get("timed_upload")
-            if not upload or upload.done():
-                async def flush():
-                    try:
-                        await self.flush_lines(session)
-                    except Exception as exc:
-                        log.warning("MIRA_HOST timed upload deferred error=%s", type(exc).__name__)
-                session["timed_upload"] = asyncio.create_task(flush())
+            self.schedule_upload(session)
+
+    def schedule_upload(self, session):
+        """One bounded upload job; presence checks and deadlines never await it."""
+        upload = session.get("timed_upload")
+        if session["closed"].is_set() or (upload and not upload.done()):
+            return
+        async def flush():
+            try:
+                await asyncio.wait_for(self.flush_lines(session), WRITE_TIMEOUT_SECONDS)
+            except Exception as exc:
+                self.persist_transcript(session)
+                log.warning("MIRA_HOST timed upload deferred error=%s", type(exc).__name__)
+        session["timed_upload"] = asyncio.create_task(flush())
 
     async def start_staff(self, session, *, announce: bool) -> dict:
         async with session.setdefault("staff_lock", asyncio.Lock()):
@@ -540,6 +545,11 @@ class MiraHost:
 
     async def watch_turn(self, session):
         """Invite the next person shortly before the current one ends, and nudge a long turn once."""
+        if session.get("pm_pending") and not session.get("ending"):
+            async with session.setdefault("transition_lock", asyncio.Lock()):
+                if session.get("pm_pending"):
+                    await self._advance_pm(session, None, announce=True, outcome="DONE")
+            return
         if session.get("deferred") and not (session.get("current_turn") or session.get("pm_current")) and not session.get("ending"):
             self.invite_deferred(session)
             available = self.available_people(session)
@@ -653,7 +663,7 @@ class MiraHost:
             return await self._advance(session, summary, announce=announce, outcome=outcome)
 
     async def _advance(self, session, summary: str | None, *, announce: bool, outcome: str) -> dict:
-        if session.get("pm_reviewed"):
+        if session.get("pm_reviewed") or session.get("pm_pending"):
             return await self._advance_pm(session, summary, announce=announce, outcome=outcome)
         expected = (session.get("current_turn") or {}).get("id")
         payload = {"summary": summary, "expected_turn_id": expected, "outcome": outcome}
@@ -706,8 +716,8 @@ class MiraHost:
             self.invite_deferred(session)
             output = {"prit": True, "mungojne": [t.get("name") for t in session["deferred"]],
                       "udhezim": "Prit personat që mungojnë; mos i shëno si të raportuar."}
-        elif not current and result.get("pm_review") and not session.get("pm_reviewed"):
-            session["pm_reviewed"] = True
+        elif not current and (result.get("pm_review") or session.get("pm_pending")) and not session.get("pm_reviewed"):
+            session["pm_pending"] = True
             return await self._advance_pm(session, None, announce=announce, outcome="DONE")
         elif not current:
             session["ending"] = True
@@ -722,11 +732,13 @@ class MiraHost:
                     f"🎙️ **1H {session['slot']}** – radha jote tani. Kyçu: "
                     f"{self.join_url(settings.DISCORD_GUILD_ID, session['voice'])}"))
             brief = turn_brief(current)
+            first_open = next((task for task in brief["plan_discutimi"] if not task["kryer"]), None)
+            group = first_open["grupi"] if first_open else "AKTUAL"
             opening = (f"{current['name']}: të gjitha detyrat e slotit aktual dhe atij paraprak janë To Do. "
                        "Nëse personi s'e ka sqaruar ende çfarë ka punuar, pyet shkurt 'Me çka ke vazhduar?' vetëm një herë për personin. "
                        "Mungesa e përditësimit nuk provon se s'ka punuar. Pastaj sqaro detyrat sipas plan_discutimi. "
                        if brief["aktual_dhe_paraprak_todo"] else
-                       f"{current['name']}: hyr direkt te detyra e parë AKTUAL në plan_discutimi. ")
+                       f"{current['name']}: hyr direkt te detyra e parë {group} në plan_discutimi. ")
             output = {"RADHA": brief,
                       "udhezim": opening +
                                  "Pyet shkurt vetëm çka mungon për progresin, vazhdimin ose përfundimin; "
@@ -760,6 +772,9 @@ class MiraHost:
             if (expected and (result.get("current") or {}).get("id") == expected) or (
                     not expected and not result.get("current") and not result.get("initialized")):
                 raise ValueError("Kalimi PM nuk u konfirmua; radha mbetet e njëjtë.") from None
+        if not result.get("current") and any(turn.get("status") == "WAITING" for turn in result.get("turns", [])):
+            raise ValueError("Kalimi PM nuk u konfirmua; ende ka persona në pritje.")
+        session["pm_reviewed"], session["pm_pending"] = True, False
         current = session["pm_current"] = result.get("current")
         session["pm_turns"], session["deferred"] = result.get("turns", []), result.get("deferred", [])
         session["turn_started"], session["turn_nudged"] = (datetime.now(tz()) if current else None), False
@@ -1024,12 +1039,14 @@ class MiraHost:
                     if metrics:
                         payload["metrics"] = metrics[:200]
                     await self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/transcript", payload)
-                except Exception:
+                except (Exception, asyncio.CancelledError) as exc:
                     session["lines"] = lines + session["lines"]
                     session["metrics"] = metrics + session["metrics"]
                     session["uploading_lines"] = []
                     session["uploading_metrics"] = []
                     self.persist_transcript(session)
+                    if isinstance(exc, asyncio.CancelledError):
+                        raise
                     return
                 lines = lines[200:]
                 metrics = metrics[200:]

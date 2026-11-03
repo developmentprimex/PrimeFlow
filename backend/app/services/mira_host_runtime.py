@@ -112,9 +112,16 @@ async def next_pm_turn(db, meeting, *, expected_turn_id, outcome="DONE", summary
         queue = [{**p, "id": "PM_" + p["user_id"], "name": p["person"], "status": "WAITING",
                   "discord": targets.get(p["user_id"])} for p in people]
         event = Mira1HEvent(id=uuid.uuid4(), key=f"pm:{meeting.id}", meeting_id=meeting.id,
-            meeting_date=meeting.meeting_date, slot=meeting.slot, kind="PM_REVIEW", data={"queue": queue})
+            meeting_date=meeting.meeting_date, slot=meeting.slot, kind="PM_REVIEW",
+            data={"queue": queue, "join_attempt": meeting.join_attempts or 1})
         db.add(event)
     queue = [dict(p) for p in event.data.get("queue", [])]
+    attempt = meeting.join_attempts or 1
+    if attempt > event.data.get("join_attempt", 1):
+        for person in queue:
+            if person["status"] == "SKIPPED" and not host.excluded_host_name(person.get("name") or person.get("person")):
+                person.update(status="WAITING", ended_at=None)
+        event.data = {**event.data, "join_attempt": attempt}
     excluded_active = {p["id"] for p in queue if host.excluded_host_name(p.get("name") or p.get("person")) and p["status"] == "ACTIVE"}
     for person in queue:
         if host.excluded_host_name(person.get("name") or person.get("person")) and person["status"] in {"ACTIVE", "WAITING", "DEFERRED"}:

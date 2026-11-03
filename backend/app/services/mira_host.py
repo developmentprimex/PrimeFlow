@@ -214,7 +214,10 @@ class SlotData:
     def participants(self, slot: str) -> list[str]:
         """People with 1H tasks in the slot, in the order their first task appears (Common View order)."""
         order = []
-        for item in self.slots.get(slot, []):
+        tasks = list(self.slots.get(slot, []))
+        if slot == BLOCKED_SLOT:
+            tasks += [item for item in self.blocked if str(item.get("status") or "TODO").upper() not in {"DONE", "COMPLETED"}]
+        for item in tasks:
             for uid in self.owners(item):
                 name = self.users.get(uid, {}).get("full_name")
                 if uid not in order and initials(name) not in NO_TURN_INITIALS and self.available(uid):
@@ -413,6 +416,9 @@ def brief_message(brief: dict, protocol: str) -> str:
         label = "slotet paraprake" if "," in (brief["previous_slot"] or "") else "sloti paraprak"
         lines += ["", f"**Nga {label} {brief['previous_slot']} (në proces / pa progres):**"]
         lines += [f"{n}. {task_text(t)}" for n, t in enumerate(brief["previous_open"], 1)]
+    if brief.get("blocked"):
+        lines += ["", "**Detyrat e bllokuara për raportim:**"]
+        lines += [f"{n}. {task_text(t)}" for n, t in enumerate(brief["blocked"], 1)]
     lines += ["", "Mira do të të thërrasë kur të vijë radha jote."]
     return "\n".join(lines)[:1990]
 
@@ -636,8 +642,16 @@ async def begin_staff(db: AsyncSession, meeting: Mira1HMeeting) -> list[dict]:
     require_staff_start(meeting)
     if meeting.status != "STAFF_PHASE":
         data = SlotData(await common_payload(db, meeting.meeting_date, fresh=True), meeting.meeting_date)
-        existing = {str(t.user_id) for t in (await db.execute(select(Mira1HTurn).where(Mira1HTurn.meeting_id == meeting.id))).scalars()}
-        for index, uid in enumerate(data.participants(meeting.slot)):
+        turns = list((await db.execute(select(Mira1HTurn).where(Mira1HTurn.meeting_id == meeting.id))).scalars())
+        existing = {str(t.user_id) for t in turns}
+        participants = data.participants(meeting.slot)
+        if (meeting.join_attempts or 0) > 1:
+            for turn in turns:
+                # Only unfinished reporting was marked SKIPPED by finish_meeting.
+                # DONE/TIMEOUT and excluded or unavailable people retain their state.
+                if turn.status == "SKIPPED" and str(turn.user_id) in participants:
+                    turn.status, turn.ended_at, turn.invited_at = "WAITING", None, None
+        for index, uid in enumerate(participants):
             if uid not in existing:
                 db.add(Mira1HTurn(meeting_id=meeting.id, user_id=uuid.UUID(uid), order_idx=index, status="WAITING", notes=""))
         meeting.status, meeting.staff_started_at = "STAFF_PHASE", now()
