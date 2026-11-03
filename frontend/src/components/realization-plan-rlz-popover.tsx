@@ -2,20 +2,10 @@
 
 import { CellPopover } from "@/components/cell-popover"
 import { firstLineTitle } from "@/components/realization-deadline-tasks"
-import type { DailyRealizationMetrics, RealizationItem, RealizationItemKind } from "@/lib/types"
+import type { DailyRealizationMetrics, RealizationItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-const groups: { kind: RealizationItemKind; label: string; className: string }[] = [
-  { kind: "COMPLETED", label: "Të kryera nga plani", className: "border-emerald-200 bg-emerald-50 text-emerald-800" },
-  { kind: "EXTRA_COMPLETED", label: "Ekstra të kryera", className: "border-blue-200 bg-blue-50 text-blue-800" },
-  { kind: "WFE", label: "WFE (90%)", className: "border-purple-200 bg-purple-50 text-purple-800" },
-  { kind: "EXTRA_WFE", label: "Ekstra WFE (90%)", className: "border-purple-200 bg-purple-50 text-purple-800" },
-  { kind: "IN_PROGRESS", label: "Në progres", className: "border-amber-200 bg-amber-50 text-amber-800" },
-  { kind: "POSTPONED", label: "Të shtyra", className: "border-violet-200 bg-violet-50 text-violet-800" },
-  { kind: "NO_PROGRESS", label: "Pa progres", className: "border-pink-300 bg-pink-100 text-pink-900" },
-  { kind: "EXTRA_OPEN", label: "Ekstra me deadline të humbur", className: "border-red-300 bg-red-50 text-red-800" },
-  { kind: "REASSIGNED_OUT", label: "Kaluar te dikush tjetër", className: "border-slate-200 bg-slate-50 text-slate-700" },
-]
+import { realizationTaskGroups as groups } from "@/lib/realization-task-groups"
 
 function number(value: number) {
   return String(Math.round(value * 100) / 100)
@@ -38,7 +28,7 @@ function ItemRow({ item }: { item: RealizationItem }) {
     {multiDay ? <span className="shrink-0 whitespace-nowrap text-[10px] text-slate-500" title="Detyrë shumëditore: çdo ditë pune peshon një pjesë të detyrës">1/{Math.round(1 / item.share)} në ditë</span> : null}
     {extraWeight ? <span className="shrink-0 whitespace-nowrap text-[10px] text-slate-500" title="Ekstra peshon sa një detyrë mesatare e planit të kësaj dite">peshë {number(item.share)}</span> : null}
     {item.credit ? <span className="shrink-0 whitespace-nowrap text-[10px] font-bold tabular-nums text-emerald-700">+{number(item.credit)}</span> : null}
-    {item.approved ? <span className="shrink-0 whitespace-nowrap text-[10px] text-violet-700">aprovuar</span> : null}
+    {item.approved || item.confirmation?.confirmed ? <span className="shrink-0 whitespace-nowrap text-[10px] text-violet-700">konfirmuar ? pa penalizim</span> : null}
     {penalty ? <span className="shrink-0 whitespace-nowrap text-[10px] font-bold text-rose-700">{penalty}</span> : null}
   </li>
 }

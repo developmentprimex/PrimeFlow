@@ -108,22 +108,34 @@ per employee. Managers and administrators can filter all departments or one
 department, and all employees or one employee. The realization percentage counts
 all completed work, including extras, against the baseline planned count, capped at
 100% before subtracting a postponement penalty. Each unfinished postponed planned
-task deducts `25 / planned_count` percentage points (approved and unapproved alike).
+task deducts `25 / planned_count` percentage points unless its postponement or daily penalty has been confirmed by Laurent Hoxha or Diellza Veliu. Deadline penalties use their existing higher weights; confirmed task/day evidence waives those too.
 The final percentage is `max(0, min(100, completed_total / planned_count * 100)
-- postponed_planned_count / planned_count * 25)`, rounded to one decimal.
+- unconfirmed_penalty_points / planned_count)`, rounded to one decimal.
 For example, five planned tasks, three completed planned tasks, two completed
-extras, and two postponed planned tasks yield 90%, not 100%. Completed tasks no
+extras, and two unconfirmed postponed planned tasks yield 90%. Confirming both removes those penalties and yields 100%. Completed tasks no
 longer carry this penalty, even if they were postponed earlier in the week.
 With no planned work, extras form the denominator and there is no plan penalty. Extras that remain
 open do not add completion credit. Snapshot task facts and daily timeline entries
 are deduplicated by task identity. Totals sum employee obligations, so shared
 assignments contribute once per employee; they are not unique department tasks.
 
-The Daily staff table uses compact grouped cells instead of one column for every
-counter. `Plan` is always the immutable initial plan. `Realizimi` combines total
-completed, in progress, postponed, and no-progress counts. `Ekstra` shows
-completed/total plus its open states; completed extras still contribute to total
-completed work and realization while never increasing the initial-plan number.
+The Daily staff table lists tasks in separate columns using the exact categories
+of the Plan RLZ popover. Columns without tasks among the filtered people are
+hidden. Each penalized task has a confirmation action for Laurent Hoxha or
+Diellza Veliu only, enforced by the API as well as the UI. The daily table fits
+the page width with relative column sizes and compact comment/review controls.
+Clicking a postponed or penalized task opens its original and new Start/Due,
+dated postponement history, actor, reason and comment. Confirmation and revocation
+are available inside that dialog, with no inline confirmation buttons.
+Historical Start dates are recovered from audit events for the selected day.
+Confirming removes its
+penalty without completion credit or a change to the task status or plan weight.
+Confirmations are per task/person/day, audited, revocable, and require renewed
+confirmation after the evidence changes. Approved postponements also carry no
+penalty in raw Plan RLZ. Weekly daily percentages and daily control reports read
+the same live metrics; the Excel export includes a `Konfirmimet RLZ` evidence
+sheet. Historical close-event snapshots remain unchanged; later decisions make
+the live close state stale.
 Quantity and deadline cells use completed/total with the remaining difference.
 The manager comment is edited in the evaluation modal and only a short saved
 preview remains in the table.

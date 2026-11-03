@@ -267,6 +267,7 @@ class RealizationManagerReviewOut(RealizationSchema):
     period_id: uuid.UUID
     user_id: uuid.UUID
     can_edit: bool
+    can_confirm_tasks: bool = False
     planning: RealizationManagerReviewItem | None
     realization: RealizationManagerReviewItem | None
     history: list[RealizationManagerReviewItem] = Field(default_factory=list)
@@ -438,6 +439,13 @@ class RealizationDailyOut(RealizationSchema):
     people: list[RealizationPersonWorkflowOut] = Field(default_factory=list)
     department_result: RealizationDepartmentResultOut | None = None
     live: dict | None = None
+
+
+class RealizationTaskConfirmationRequest(RealizationSchema):
+    user_id: uuid.UUID
+    day: date
+    confirmed: bool
+    evidence_key: str = Field(min_length=64, max_length=64)
 
 
 class DailyPlanAdjustmentDecision(RealizationSchema):

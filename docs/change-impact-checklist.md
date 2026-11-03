@@ -82,6 +82,19 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Realization ditor shfaq detyrat sipas të njëjtave kategori si hover-i i Plan RLZ;
+  kolonat pa detyra në personat e filtruar fshihen. Gjerësitë janë relative dhe
+  komenti/vlerësimi përdorin pamje kompakte vetëm në këtë tabelë. Klikimi i
+  detyrës hap datat Start/Due para dhe pas shtyrjes, autorin, arsyen dhe komentin;
+  butoni i konfirmimit është brenda dritares. Datat Start rindërtohen nga auditimi
+  për ditën e zgjedhur përmes API-së së historikut, pa rishkruar datat e detyrës.
+  Konfirmimet për person/detyrë/ditë
+  ruhen te `realization_task_confirmations`, me autorin, kohën dhe evidencën.
+  Vetëm Laurent Hoxha dhe Diellza Veliu konfirmojnë ose heqin konfirmimin në API.
+  Konfirmimi heq penalizimin, pa ndryshuar statusin, kreditet apo peshën e planit;
+  ndryshimi i evidencës kërkon konfirmim të ri. Kontrollo edhe përqindjet ditore
+  dhe javore, Kontrollin ditor RLZ, gjendjen pas mbylljes dhe Excel-in (fleta
+  `Konfirmimet RLZ`). Aprovimi ekzistues i shtyrjes gjithashtu heq penalizimin.
 - Taskat përdoren edhe nga M1/M2/M3 dhe PIKAT PËR RAP. Mos i përjashto këto
   vetëm sepse ndryshimi fillon në My View ose Common View. Përfshirja e taskut
   varet nga kategoria, data, personi dhe filtrat e raportit.

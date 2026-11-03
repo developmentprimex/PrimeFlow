@@ -159,7 +159,7 @@ class TestRealizationExcel(unittest.TestCase):
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
         self.assertEqual(
             workbook.sheetnames,
-            ["Përmbledhje", "Development", "Evidenca", "Udhëzuesi", "Udhëzuesi i Vlerësimit", "Komentet ditore", "Diamantat"],
+            ["Përmbledhje", "Development", "Evidenca", "Udhëzuesi", "Udhëzuesi i Vlerësimit", "Komentet ditore", "Diamantat", "Konfirmimet RLZ"],
         )
         values = " ".join(
             str(cell.value or "")
@@ -402,3 +402,22 @@ def test_export_without_awards_keeps_an_empty_diamond_details_sheet():
     assert book["Diamantat"].max_row == 4
     assert book["Diamantat"].auto_filter.ref == "A4:I4"
     assert book["Përmbledhje"].max_column == 13
+
+
+def test_export_records_task_confirmation_and_preserves_daily_percent():
+    person = {"user_name": "Person", "facts_json": {"weekly_progress_percent": 50,
+        "daily_timeline": [{"date": "2026-10-12", "daily_progress_percent": 50, "tasks": [{
+            "title": "=Task", "classification": "NO_PROGRESS",
+            "penalty_confirmation": {"confirmed": True, "decided_by_name": "Diellza Veliu", "decided_at": "2026-10-12T13:00:00Z"},
+        }]}]}}
+    book = load_workbook(io.BytesIO(build_realization_workbook(
+        week_start="2026-10-12", week_end="2026-10-16",
+        departments=[{"name": "DEV", "report_mode": "LIVE_DAILY", "people": [person]}],
+    )))
+    sheet = book["Konfirmimet RLZ"]
+    assert sheet["C5"].value == "2026-10-12"
+    assert sheet["D5"].value == "=Task" and sheet["D5"].data_type == "s"
+    assert sheet["F5"].value == "Konfirmuar · pa penalizim"
+    assert sheet["G5"].value == "Diellza Veliu"
+    row = next(row for row in book["DEV"].iter_rows() if row[0].value == "Snapshot ditor — 2026-10-12")
+    assert row[1].value == 0.5

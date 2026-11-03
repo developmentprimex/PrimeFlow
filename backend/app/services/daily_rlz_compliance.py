@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.realization import RealizationDailyCloseEvent, RealizationPeriod
 from app.models.daily_plan_adjustment import DailyPlanAdjustment
+from app.models.realization_task_confirmation import RealizationTaskConfirmation
 from app.models.audit_log import AuditLog
 from app.models.task import Task
 from app.models.system_task_template import SystemTaskTemplate
@@ -303,6 +304,12 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
                         slot_changed.get(task.id)):
             if changed and (latest_change is None or changed > latest_change):
                 latest_change = changed
+    confirmation_changed = (await db.execute(select(func.max(RealizationTaskConfirmation.decided_at)).where(
+        RealizationTaskConfirmation.user_id == user_id,
+        RealizationTaskConfirmation.day_date == day,
+    ))).scalar_one_or_none()
+    if confirmation_changed and (latest_change is None or confirmation_changed > latest_change):
+        latest_change = confirmation_changed
     latest_close = (await db.execute(
         select(RealizationDailyCloseEvent).join(RealizationPeriod, RealizationPeriod.id == RealizationDailyCloseEvent.period_id).where(
             RealizationDailyCloseEvent.user_id == user_id, RealizationPeriod.period_type == "DAILY",

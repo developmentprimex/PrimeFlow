@@ -13,7 +13,11 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
 from app.models.department import Department
+from app.models.audit_log import AuditLog
 from app.models.daily_plan_adjustment import DailyPlanAdjustment
+from app.models.realization_task_confirmation import RealizationTaskConfirmation
+from app.services.realization_task_confirmation import can_confirm_realization_task
+from app.services.realization_task_dates import start_dates_for_day
 from app.models.enums import (
     RealizationDailyCloseAction,
     RealizationLevel,
@@ -61,6 +65,7 @@ from app.schemas.realization import (
     RealizationDailyCloseRequest,
     RealizationDailyReopenRequest,
     DailyPlanAdjustmentDecision,
+    RealizationTaskConfirmationRequest,
     RealizationObservationCreate,
     RealizationObservationOut,
     RealizationObservationVerify,
@@ -2121,6 +2126,7 @@ async def get_daily_realization(
         db, department_id=department_id, day=day,
         user_id=user_id, exceptions_only=exceptions_only,
     )
+    response.live["can_confirm_tasks"] = can_confirm_realization_task(user)
     live_by_user = {
         str(person.get("user_id")): person
         for person in (response.live or {}).get("people", [])
@@ -2316,8 +2322,59 @@ async def get_daily_task_timeline(
                 for item in task["timeline"]:
                     actor = item.get("actor_user_id")
                     item["actor_name"] = names.get(uuid.UUID(actor)) if actor else None
-                return {"day": day.isoformat(), "user_id": str(user_id), "task": task}
+                source_task = await db.get(Task, task_id)
+                start_events = (await db.execute(select(AuditLog).where(
+                    AuditLog.entity_type == "task", AuditLog.entity_id == task_id,
+                    AuditLog.action == "task.start_date_changed",
+                ).order_by(AuditLog.created_at, AuditLog.id))).scalars().all()
+                task.update(start_dates_for_day(events=start_events, day=day,
+                    current_start=local_day(source_task.start_date) if source_task else None))
+                confirmation_item = next((item for item in person["metrics"].get("realization_items", []) if item["task_id"] == str(task_id)), None)
+                return {"day": day.isoformat(), "user_id": str(user_id), "task": task, "confirmation_item": confirmation_item}
     raise HTTPException(status_code=404, detail="Task is not part of this person's Daily Realization")
+
+
+@router.post("/daily/tasks/{task_id}/confirmation")
+async def confirm_daily_realization_task(
+    task_id: uuid.UUID,
+    payload: RealizationTaskConfirmationRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    if not can_confirm_realization_task(user):
+        raise HTTPException(403, "Vetëm Laurent Hoxha ose Diellza Veliu mund të konfirmojnë detyrat.")
+    if payload.day > datetime.now(ZoneInfo("Europe/Tirane")).date():
+        raise HTTPException(422, "Nuk mund të konfirmohet një ditë e ardhshme.")
+    # Serialize decisions for the same person, including the initial insert.
+    subject = (await db.execute(select(User).where(User.id == payload.user_id).with_for_update())).scalar_one_or_none()
+    if subject is None or subject.department_id is None:
+        raise HTTPException(404, "Punonjësi nuk u gjet.")
+    live = await build_live_daily_realization(db, department_id=subject.department_id, day=payload.day, user_id=subject.id)
+    item = next((item for person in live["people"] for item in person["metrics"].get("realization_items", []) if item["task_id"] == str(task_id)), None)
+    if item is None or not item.get("unconfirmed_penalty"):
+        raise HTTPException(409, "Detyra nuk ka penalizim për konfirmim në këtë ditë.")
+    if payload.evidence_key != item.get("confirmation_evidence_key"):
+        raise HTTPException(409, "Detyra ka ndryshuar. Rifresko para konfirmimit.")
+    decision = (await db.execute(select(RealizationTaskConfirmation).where(
+        RealizationTaskConfirmation.task_id == task_id,
+        RealizationTaskConfirmation.user_id == payload.user_id,
+        RealizationTaskConfirmation.day_date == payload.day,
+    ).with_for_update())).scalar_one_or_none()
+    before = {"confirmed": decision.confirmed, "evidence_key": decision.evidence_key} if decision else None
+    if decision is None:
+        decision = RealizationTaskConfirmation(task_id=task_id, user_id=payload.user_id, day_date=payload.day)
+        db.add(decision)
+    decision.confirmed = payload.confirmed
+    decision.evidence_key = payload.evidence_key
+    decision.decided_by = user.id
+    decision.decided_at = datetime.now(timezone.utc)
+    await db.flush()
+    add_audit_log(db=db, actor_user_id=user.id, entity_type="realization_task_confirmation", entity_id=decision.id,
+                  action="confirm" if payload.confirmed else "revoke", before=before,
+                  after={"task_id": str(task_id), "user_id": str(payload.user_id), "day": payload.day.isoformat(),
+                         "confirmed": payload.confirmed, "evidence_key": payload.evidence_key})
+    await db.commit()
+    return {"confirmed": decision.confirmed, "decided_by_name": user.full_name, "decided_at": decision.decided_at.isoformat()}
 
 
 @router.post("/daily/tasks/{task_id}/adjustment")
@@ -2327,8 +2384,8 @@ async def decide_daily_plan_adjustment(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    if user.role not in {UserRole.ADMIN, UserRole.MANAGER}:
-        raise HTTPException(status_code=403, detail="Only manager/admin can decide plan adjustments")
+    if not can_confirm_realization_task(user):
+        raise HTTPException(status_code=403, detail="Vetëm Laurent Hoxha ose Diellza Veliu mund të konfirmojnë shtyrjet.")
     normalized = payload.status.strip().upper()
     if normalized not in {"APPROVED", "REJECTED"}:
         raise HTTPException(status_code=422, detail="status must be APPROVED or REJECTED")
@@ -2340,7 +2397,7 @@ async def decide_daily_plan_adjustment(
     if adjustment is None:
         raise HTTPException(status_code=404, detail="Daily plan adjustment not found")
     subject = await db.get(User, payload.user_id)
-    if subject is None or (user.role == UserRole.MANAGER and subject.department_id != user.department_id):
+    if subject is None:
         raise HTTPException(status_code=403, detail="Forbidden")
     before = {"status": adjustment.status}
     adjustment.status = normalized
@@ -3562,6 +3619,7 @@ async def get_manager_review(
             period_id=period.id,
             user_id=subject_user_id,
             can_edit=can_edit,
+            can_confirm_tasks=can_confirm_realization_task(user),
         )
     )
 
@@ -3629,7 +3687,8 @@ async def put_manager_review(
     await db.commit()
     return RealizationManagerReviewOut.model_validate(
         await build_manager_review_response(
-            db, period_id=period.id, user_id=subject_user_id, can_edit=can_edit
+            db, period_id=period.id, user_id=subject_user_id, can_edit=can_edit,
+            can_confirm_tasks=can_confirm_realization_task(user),
         )
     )
 
@@ -3676,7 +3735,8 @@ async def delete_manager_review(
     await db.commit()
     return RealizationManagerReviewOut.model_validate(
         await build_manager_review_response(
-            db, period_id=period.id, user_id=subject_user_id, can_edit=can_edit
+            db, period_id=period.id, user_id=subject_user_id, can_edit=can_edit,
+            can_confirm_tasks=can_confirm_realization_task(user),
         )
     )
 

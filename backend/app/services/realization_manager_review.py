@@ -62,6 +62,7 @@ async def build_manager_review_response(
     period_id: uuid.UUID,
     user_id: uuid.UUID,
     can_edit: bool,
+    can_confirm_tasks: bool = False,
 ) -> dict:
     rows = await manager_review_rows(db, period_id=period_id, user_id=user_id)
     creator_ids = {row.created_by for row in rows if row.created_by}
@@ -114,6 +115,7 @@ async def build_manager_review_response(
         "period_id": period_id,
         "user_id": user_id,
         "can_edit": can_edit,
+        "can_confirm_tasks": can_confirm_tasks,
         "planning": active.get("PLANNING"),
         "realization": active.get("REALIZATION"),
         "history": list(reversed(history)),

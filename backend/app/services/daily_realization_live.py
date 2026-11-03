@@ -13,6 +13,8 @@ from app.config import settings
 from app.models.attendance_log import AttendanceLog
 from app.models.audit_log import AuditLog
 from app.models.daily_plan_adjustment import DailyPlanAdjustment
+from app.models.realization_task_confirmation import RealizationTaskConfirmation
+from app.services.realization_task_confirmation import task_confirmation_evidence
 from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.models.project import Project
 from app.models.realization import RealizationDailyCloseEvent, RealizationPeriod
@@ -432,7 +434,10 @@ async def build_live_daily_realization(
     adjustments = {(row.user_id, row.audit_event_id): row for row in (await db.execute(select(DailyPlanAdjustment).where(
         DailyPlanAdjustment.user_id.in_(person_ids), DailyPlanAdjustment.day_date == day,
     ))).scalars().all()} if person_ids else {}
-    decision_user_ids = {row.decided_by for row in adjustments.values() if row.decided_by}
+    confirmations = {(row.user_id, row.task_id): row for row in (await db.execute(select(RealizationTaskConfirmation).where(
+        RealizationTaskConfirmation.user_id.in_(person_ids), RealizationTaskConfirmation.day_date == day,
+    ))).scalars().all()} if person_ids else {}
+    decision_user_ids = {row.decided_by for row in [*adjustments.values(), *confirmations.values()] if row.decided_by}
     if decision_user_ids:
         users.update({
             row.id: row
@@ -666,6 +671,16 @@ async def build_live_daily_realization(
                 if decision_item:
                     row["timeline"].append(decision_item)
             row["timeline"].sort(key=lambda item: (item.get("timestamp") is not None, item.get("timestamp") or "", item["id"]))
+            row["confirmation_evidence_key"] = task_confirmation_evidence(row)
+            confirmation = confirmations.get((person_id, task_id))
+            confirmed = bool(confirmation and confirmation.confirmed and confirmation.evidence_key == row["confirmation_evidence_key"])
+            row["penalty_confirmation"] = {
+                "confirmed": confirmed,
+                "decided_by_name": users[confirmation.decided_by].full_name if confirmation and confirmation.decided_by in users else None,
+                "decided_at": confirmation.decided_at.isoformat() if confirmation else None,
+            }
+            if confirmation:
+                row["last_change"] = max(row["last_change"] or "", confirmation.decided_at.isoformat())
             metric_rows.append(row)
             if not exceptions_only or classification in EXCEPTION_CLASSIFICATIONS or issues:
                 rows.append(row)

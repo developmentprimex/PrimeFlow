@@ -278,6 +278,9 @@ def build_weekly_task_metrics(
             no_progress=key in planned_no_progress,
         )
         for key in pending_planned - wfe_keys
+        if not (states[key].get("penalty_confirmation") or {}).get("confirmed")
+        and states[key].get("adjustment_status") != "APPROVED"
+        and _classification(states[key]) != "POSTPONED_APPROVED"
     ) + sum(
         extra_task_penalty(
             postponed=key in additional_postponed,
@@ -286,6 +289,7 @@ def build_weekly_task_metrics(
             completed=False,
         )
         for key in additional_keys - additional_completed - wfe_keys
+        if not (states[key].get("penalty_confirmation") or {}).get("confirmed")
     )
     metrics["weekly_wfe_count"] = len(wfe_keys)
     metrics["weekly_penalty_points"] = penalty_points

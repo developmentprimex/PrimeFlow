@@ -69,7 +69,7 @@ def test_postponed_plan_penalty(planned, completed, extras, postponed, expected)
     # Remaining plan tasks are untouched and deduct 25 each, like postponed ones.
     tasks = [
         task(f"P{i}", "planned_owner", "completed" if i < completed else
-             "postponed_approved" if i < completed + postponed else "no_progress")
+             "postponed_unapproved" if i < completed + postponed else "no_progress")
         for i in range(planned)
     ] + [task(f"E{i}", "additional_owner", "additional_completed") for i in range(extras)]
     metrics = build_weekly_task_metrics(tasks, [])

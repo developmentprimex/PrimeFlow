@@ -203,6 +203,10 @@ def _realization_item(row: Mapping[str, object], *, extra_weight: float) -> dict
             postponed=postponed, deadline=deadline, critical=critical, completed=completed,
             no_progress=classification == "NO_PROGRESS",
         )
+    unconfirmed_penalty = penalty
+    confirmed = bool((row.get("penalty_confirmation") or {}).get("confirmed"))
+    if confirmed or classification == "POSTPONED_APPROVED":
+        penalty = 0.0
     return {
         "task_id": str(row["task_id"]) if row.get("task_id") else None,
         "title": str(row.get("title") or "Pa titull"),
@@ -211,6 +215,9 @@ def _realization_item(row: Mapping[str, object], *, extra_weight: float) -> dict
         "share": round(share, 4),
         "credit": round(credit, 4),
         "penalty": penalty,
+        "unconfirmed_penalty": unconfirmed_penalty,
+        "confirmation": row.get("penalty_confirmation"),
+        "confirmation_evidence_key": row.get("confirmation_evidence_key"),
         "approved": classification == "POSTPONED_APPROVED",
         "deadline": deadline,
         "critical": critical,
@@ -306,7 +313,7 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, o
         "adjusted_realization_plan_weight": adjusted_plan_weight,
         "adjusted_realization_penalty_points": adjusted_penalty_points,
         "realization_items": [
-            item for item in realization_items if item["kind"] != "EXTRA_OPEN" or item["penalty"]
+            item for item in realization_items if item["kind"] != "EXTRA_OPEN" or item["unconfirmed_penalty"]
         ],
         "deadline_tasks": sort_deadline_cards(deadline_cards),
         "deadlines_today_count": len(deadline_rows),

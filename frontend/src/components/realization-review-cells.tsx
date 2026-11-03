@@ -115,8 +115,8 @@ function ManualQuestion({ number, label, draft, disabled, onChange, onSaveCommen
   </tr>
 }
 
-export function RealizationReviewCells({ periodId, userId, userName, result: initialResult, scope = "weekly", locked = false, compactTable = false, onSaved, onPrepareResult, refreshKey, commentCell }: {
-  periodId: string; userId: string; userName: string; result?: RealizationPersonResult; scope?: "daily" | "weekly"; locked?: boolean; compactTable?: boolean; onSaved?: () => void; onPrepareResult?: () => Promise<void>; refreshKey?: unknown
+export function RealizationReviewCells({ periodId, userId, userName, result: initialResult, scope = "weekly", locked = false, compactTable = false, fitCell = false, onSaved, onPrepareResult, refreshKey, commentCell }: {
+  periodId: string; userId: string; userName: string; result?: RealizationPersonResult; scope?: "daily" | "weekly"; locked?: boolean; compactTable?: boolean; fitCell?: boolean; onSaved?: () => void; onPrepareResult?: () => Promise<void>; refreshKey?: unknown
   commentCell?: React.ReactNode
 }) {
   const { apiFetch } = useAuth()
@@ -344,9 +344,9 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
 
   return <>
     {compactTable ? <td className="p-1" onClick={(event) => event.stopPropagation()}>
-      <Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between gap-2 px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5 shrink-0" /></Button>
+      <Button type="button" variant="outline" size="sm" className={cn("h-8 w-full justify-between gap-1 px-1.5", fitCell ? "min-w-0 whitespace-normal text-[11px]" : "min-w-32 text-[13px]")} onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5 shrink-0" /></Button>
       <p className={cn("mt-0.5 line-clamp-1 text-[11px]", savedComment ? "text-slate-500" : "text-slate-400")}>{savedComment || "Pa koment"}</p>
-    </td> : <><td className="p-1" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between gap-2 px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5 shrink-0" /></Button></td>
+    </td> : <><td className="p-1" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" size="sm" className={cn("h-8 w-full justify-between gap-1 px-1.5", fitCell ? "min-w-0 whitespace-normal text-[11px]" : "min-w-32 text-[13px]")} onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5 shrink-0" /></Button></td>
     {commentCell ?? <td className="p-1" onClick={(event) => event.stopPropagation()}>
       <div className="flex min-w-64 flex-col items-stretch gap-1">
         <Textarea aria-label={`Komenti i përgjegjësit për ${userName}`} className="min-h-20 w-full resize-y bg-white px-2 py-1.5 text-[13px] leading-5" rows={3} maxLength={4000} value={comment} disabled={!canEdit || saving} onChange={(event) => setComment(event.target.value)} placeholder="Shkruaj komentin e përgjegjësit…" />
@@ -416,7 +416,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
                   {scope === "weekly" && question.key === "approved_postponement" && weeklyPostponements(result).length > 0 ? (
                     <tr className="border-b border-slate-200 bg-blue-50/30">
                       <td colSpan={4} className="p-3">
-                        <RealizationWeeklyPostponements result={result} canEdit={canEdit} busy={saving || preparing} onDecide={approvePostponement} />
+                        <RealizationWeeklyPostponements result={result} canEdit={canEdit && Boolean(data?.can_confirm_tasks)} busy={saving || preparing} onDecide={approvePostponement} />
                       </td>
                     </tr>
                   ) : null}

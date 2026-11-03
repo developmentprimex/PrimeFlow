@@ -136,6 +136,7 @@ def test_get_from_daily_period_reads_review_from_resolved_weekly_period():
         period_id=weekly_id,
         user_id=user_id,
         can_edit=True,
+        can_confirm_tasks=False,
     )
 
 

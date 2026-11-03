@@ -907,6 +907,7 @@ export interface RealizationManagerReviewResponse {
   period_id: string
   user_id: string
   can_edit: boolean
+  can_confirm_tasks?: boolean
   planning: RealizationManagerReviewItem | null
   realization: RealizationManagerReviewItem | null
   history: RealizationManagerReviewItem[]
@@ -945,6 +946,9 @@ export interface RealizationItem {
   share: number
   credit: number
   penalty: number
+  unconfirmed_penalty?: number
+  confirmation?: { confirmed: boolean; decided_by_name?: string | null; decided_at?: string | null } | null
+  confirmation_evidence_key?: string | null
   approved: boolean
   deadline: boolean
   critical: boolean
@@ -1019,6 +1023,8 @@ export interface DailyRealizationManagerDecision {
 }
 
 export interface DailyRealizationTask {
+  original_start_date?: string | null
+  start_date_on_day?: string | null
   quantity?: { source: "title" | "products"; planned: number; completed: number; delta: number } | null
   task_id: string
   match_key: string
@@ -1077,6 +1083,7 @@ export interface DailyRealizationPerson {
 }
 
 export interface DailyRealizationLive {
+  can_confirm_tasks?: boolean
   day: string
   department_id: string
   timezone: string

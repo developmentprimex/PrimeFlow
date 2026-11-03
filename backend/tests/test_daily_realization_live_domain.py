@@ -291,8 +291,8 @@ def test_adjusted_metric_excludes_only_approved_scope_change():
         + [{"classification": "NO_PROGRESS", "in_original_plan": True}]
     )
     metrics = calculate_daily_metrics(rows)
-    # 70 - (2 * 25 postponed + 25 untouched) / 10; adjusted drops the approved ones: 87.5 - 25 / 8.
-    assert metrics["raw_plan_realization"] == 62.5
+    # Confirmed postponements carry no penalty; adjusted also removes their scope.
+    assert metrics["raw_plan_realization"] == 67.5
     assert metrics["adjusted_denominator"] == 8
     assert metrics["adjusted_plan_realization"] == 84.4
 
@@ -715,10 +715,10 @@ def test_realization_items_explain_the_percent():
     items = {item["task_id"]: item for item in metrics["realization_items"]}
     assert set(items) == {"a", "b", "c"}
     assert items["a"]["kind"] == "COMPLETED" and items["a"]["credit"] == 1
-    assert items["b"]["kind"] == "POSTPONED" and items["b"]["penalty"] == 20 and items["b"]["approved"]
+    assert items["b"]["kind"] == "POSTPONED" and items["b"]["penalty"] == 0 and items["b"]["approved"]
     assert items["c"]["kind"] == "EXTRA_COMPLETED"
-    # Base 2 / 2 = 100, penalty 20 / 2 = 10; adjusted drops the approved postponement.
-    assert metrics["raw_plan_realization"] == 90.0
+    # Base 2 / 2 = 100; confirmed postponements carry no penalty.
+    assert metrics["raw_plan_realization"] == 100.0
     assert metrics["adjusted_plan_realization"] == 100.0
 
 

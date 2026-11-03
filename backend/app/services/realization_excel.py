@@ -1236,6 +1236,36 @@ def build_realization_workbook(
     diamonds_sheet.freeze_panes = "C5"
     diamonds_sheet.auto_filter.ref = f"A4:I{max(4, diamond_row - 1)}"
 
+    confirmations_sheet = workbook.create_sheet(_sheet_name("Konfirmimet RLZ", set(workbook.sheetnames)))
+    confirmation_headers = ["Departamenti", "Punonjësi", "Data", "Detyra", "Statusi", "Konfirmimi", "Konfirmuar nga", "Koha"]
+    _title(confirmations_sheet, "KONFIRMIMET E DETYRAVE PA PENALIZIM", f"{week_start} — {week_end}", len(confirmation_headers))
+    for column, label in enumerate(confirmation_headers, 1):
+        _header(confirmations_sheet.cell(4, column, label))
+    confirmation_row = 5
+    for department in departments:
+        for person in department.get("people") or []:
+            for day in (person.get("facts_json") or {}).get("daily_timeline") or []:
+                for task in day.get("tasks") or []:
+                    confirmation = task.get("penalty_confirmation") or {}
+                    adjustment = task.get("manager_decision") or {}
+                    if confirmation.get("decided_at"):
+                        state = "Konfirmuar · pa penalizim" if confirmation.get("confirmed") else "Hequr / evidenca ndryshoi"
+                        evidence = confirmation
+                    elif task.get("adjustment_status") == "APPROVED":
+                        state, evidence = "Shtyrje e aprovuar · pa penalizim", adjustment
+                    else:
+                        continue
+                    values = [department["name"], person["user_name"], day.get("date"), _clean_task_title(task.get("title")),
+                              task.get("classification"), state, evidence.get("decided_by_name") or "", evidence.get("decided_at") or ""]
+                    for column, value in enumerate(values, 1):
+                        cell = confirmations_sheet.cell(confirmation_row, column, value)
+                        cell.alignment = Alignment(vertical="top", wrap_text=True)
+                    confirmation_row += 1
+    for column, width in enumerate([24, 26, 15, 65, 30, 40, 26, 30], 1):
+        confirmations_sheet.column_dimensions[get_column_letter(column)].width = width
+    confirmations_sheet.freeze_panes = "D5"
+    confirmations_sheet.auto_filter.ref = f"A4:H{max(4, confirmation_row - 1)}"
+
     for ws in workbook.worksheets:
         # Treat user comments as text, including comments beginning with '='.
         for row in ws.iter_rows():
