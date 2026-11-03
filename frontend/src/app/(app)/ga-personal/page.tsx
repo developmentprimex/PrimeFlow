@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { dayLabel, Definition, emptyDefinition, frequencies, GaOccurrence, GaStatus, GaTemplate, groups, ImportPreview, localToday, moveDay, PersonKey, statuses } from "@/lib/ga-personal"
+import { isGaEvent } from "@/lib/ga-personal-week"
 
 const fieldClass = "w-full rounded-md border bg-background px-3 py-2 text-sm"
 
@@ -141,7 +142,7 @@ export default function GaPersonalPage() {
   const datedRows = displayOccurrences.filter((o) => tab === "week" ? o.period_key === weekendKey || (o.local_date >= monday.toISOString().slice(0, 10) && o.local_date <= new Date(monday.getTime() + 6 * 86400000).toISOString().slice(0, 10))
     : o.local_date === day || (o.period_key === weekendKey && new Date(`${day}T12:00:00Z`).getUTCDay() % 6 === 0))
   const personRows = datedRows.filter((o) => person === "all" || o.snapshot.assignees.includes(person as PersonKey))
-  const visible = personRows.filter((o) => (groupFilter === "all" || o.snapshot.reminder_group === groupFilter)
+  const visible = personRows.filter((o) => (groupFilter === "all" || (isGaEvent(o) ? "events" : o.snapshot.reminder_group) === groupFilter)
     && (statusFilter === "all" || (statusFilter === "done" ? o.status === "done" : statusFilter === "open" ? !["done", "cancelled"].includes(o.status) : o.status === statusFilter))
     && `${o.snapshot.short_code || ""} ${o.snapshot.title}`.toLowerCase().includes(search.toLowerCase()))
   const done = personRows.filter((row) => row.status === "done").length
