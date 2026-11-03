@@ -19,7 +19,7 @@ class VoiceDependencyInstallTests(unittest.TestCase):
             for exit_code in [1, 0]:
                 with self.subTest(exit_code=exit_code):
                     pm2.write_text(f'@echo off\necho PM2 status >&2\nexit /b {exit_code}\n')
-                    command = f'. {quote(SCRIPT)}; Test-PrimeFlowVoiceSupervisor -Pm2Path {quote(pm2)}; Write-Output cleanup-continued'
+                    command = f'. {quote(SCRIPT)}; Test-PrimeFlowVoiceSupervisor -Pm2Path {quote(pm2)}; Write-Output cleanup-continued; if (Test-Path variable:LASTEXITCODE) {{ exit $LASTEXITCODE }}'
                     result = subprocess.run(['powershell.exe', '-NoProfile', '-Command', command],
                                             capture_output=True, text=True, timeout=30,
                                             creationflags=subprocess.CREATE_NO_WINDOW)

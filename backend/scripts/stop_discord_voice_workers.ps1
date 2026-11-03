@@ -18,7 +18,11 @@ function Test-PrimeFlowVoiceSupervisor {
     # ErrorActionPreference=Stop, even with *> $null. A missing PM2 app is
     # expected after an interrupted deploy; let cmd handle the redirection.
     & $env:ComSpec /d /c "`"$Pm2Path`" describe primeflow-discord >NUL 2>&1"
-    return ($LASTEXITCODE -eq 0)
+    $exists = ($LASTEXITCODE -eq 0)
+    # Actions appends `exit $LASTEXITCODE` to PowerShell steps. The probe's
+    # expected nonzero result must not mark the completed cleanup as failed.
+    $global:LASTEXITCODE = 0
+    return $exists
 }
 
 function Stop-PrimeFlowVoiceWorkers {
