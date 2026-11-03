@@ -2,7 +2,7 @@
 import asyncio
 import uuid
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -18,6 +18,192 @@ from app.config import Settings
 
 
 class PacingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_watcher_recovers_transient_api_failures_but_bounds_persistent_failure(self):
+        original_wait_for=asyncio.wait_for
+        async def fast_wait(coro,timeout):
+            if timeout==5:
+                coro.close()
+                return None
+            return await original_wait_for(coro,timeout)
+        for persistent in (False,True):
+            with self.subTest(persistent=persistent):
+                host=controller.MiraHost(SimpleNamespace())
+                watched=[];finished=[]
+                async def connect(state,*args,**kwargs):
+                    state.update(meeting='m1',staff_started=True)
+                    return {'starts_at':controller.datetime.now(controller.tz()).isoformat()}
+                async def watch(state):
+                    watched.append(True)
+                    if persistent or len(watched)<3:raise TimeoutError()
+                    state['closed'].set()
+                async def finish(state):finished.append(state['reason'])
+                with patch.object(host,'connect',connect),patch.object(host,'watch_turn',watch), \
+                     patch.object(host,'wait_until',AsyncMock()),patch.object(host,'say',AsyncMock()), \
+                     patch.object(host,'flush_lines',AsyncMock()),patch.object(host,'finish',finish), \
+                     patch.object(controller.asyncio,'wait_for',fast_wait):
+                    await host.run('11:00',SimpleNamespace(),SimpleNamespace())
+                self.assertEqual(len(watched),3)
+                self.assertEqual(finished,['error:TimeoutError' if persistent else 'completed'])
+
+    async def test_audio_failure_of_another_person_does_not_interrupt_the_current_report(self):
+        host=controller.MiraHost(SimpleNamespace())
+        state={**session(),'current_turn':{'id':'current','discord':{'discord_user_id':'11'}}}
+        with patch.object(host,'say',AsyncMock()) as say:
+            await host.on_worker(state,{'type':'audio_health','speaker_id':'22','status':'failed'})
+            say.assert_not_awaited()
+            await host.on_worker(state,{'type':'audio_health','speaker_id':'11','status':'failed'})
+            first=state['audio_failures']['11']
+            await host.on_worker(state,{'type':'audio_health','speaker_id':'11','status':'failed'})
+            self.assertEqual(state['audio_failures']['11'],first)
+            say.assert_awaited_once()
+
+    async def test_preexisting_audio_failure_gives_the_new_turn_its_own_reconnection_grace(self):
+        host=controller.MiraHost(SimpleNamespace())
+        state={**session(),'turn_started':controller.datetime.now(controller.tz()),'turn_nudged':False,
+               'current_turn':{'id':'new','discord':{'discord_user_id':'11'}},
+               'audio_failures':{'11':controller.datetime.now(controller.tz())-timedelta(minutes=2)}}
+        with patch.object(host,'in_voice',return_value=True),patch.object(host,'advance',AsyncMock()) as advance, \
+             patch.object(host,'say',AsyncMock()) as say:
+            await host.watch_turn(state)
+            advance.assert_not_awaited();say.assert_awaited_once()
+            state['turn_started']-=timedelta(seconds=31)
+            await host.watch_turn(state)
+            self.assertEqual(advance.await_args.kwargs['outcome'],'TIMEOUT')
+            say.assert_awaited_once()
+
+    async def test_watcher_losing_a_race_to_the_tool_handoff_does_not_abort_the_meeting(self):
+        host=controller.MiraHost(SimpleNamespace())
+        finished=[]
+        async def connect(state,*args,**kwargs):
+            state.update(meeting='m1',staff_started=True)
+            return {'starts_at':controller.datetime.now(controller.tz()).isoformat()}
+        async def watch(state):
+            state['closed'].set()
+            raise ValueError('Radha ka ndryshuar; mos e përfundo personin e ri.')
+        async def finish(state):finished.append(state['reason'])
+        with patch.object(host,'connect',connect),patch.object(host,'watch_turn',watch), \
+             patch.object(host,'wait_until',AsyncMock()),patch.object(host,'say',AsyncMock()), \
+             patch.object(host,'flush_lines',AsyncMock()),patch.object(host,'finish',finish):
+            await host.run('11:00',SimpleNamespace(),SimpleNamespace())
+        self.assertEqual(finished,['completed'])
+
+    async def test_official_timer_does_not_wait_for_a_blocked_transcript_upload(self):
+        host=controller.MiraHost(SimpleNamespace())
+        state=session()
+        release=asyncio.Event()
+        async def slow(_):await release.wait()
+        with patch.object(host,'flush_lines',slow):
+            await asyncio.wait_for(host.wait_until(state,controller.datetime.now(controller.tz())+timedelta(milliseconds=20)),0.2)
+            await asyncio.sleep(0)
+            release.set()
+            await state['timed_upload']
+
+    async def test_failed_initial_handoff_resumes_server_state_without_ending_the_first_person(self):
+        current={'id':'first','user_id':IDS['EF'],'name':'Elsa','initials':'EF','discord':None,'brief':BRIEF}
+        bridge=AsyncMock(side_effect=[{'turns':[current]},TimeoutError(),TimeoutError(),
+                                     {'turns':[current]},{'current':current,'upcoming':None,'deferred':[]}])
+        host=controller.MiraHost(SimpleNamespace(bridge=bridge))
+        state={**session(),'current_turn':None,'staff_started':False}
+        with self.assertRaises(TimeoutError):await host.start_staff(state,announce=False)
+        self.assertFalse(state['staff_started'])
+        out=await host.start_staff(state,announce=False)
+        self.assertTrue(state['staff_started'])
+        self.assertEqual(out['RADHA']['turn_id'],'first')
+        self.assertEqual(sum(call.args[0].endswith('/turns/next') for call in bridge.await_args_list),1)
+
+    async def test_official_clock_retries_a_transient_staff_initialization_error(self):
+        host=controller.MiraHost(SimpleNamespace())
+        async def connect(state,*args,**kwargs):
+            state['meeting']='m1'
+            return {'starts_at':controller.datetime.now(controller.tz()).isoformat()}
+        calls=[]
+        async def start(state,*,announce):
+            calls.append(announce)
+            if len(calls)==1:raise TimeoutError()
+            state['staff_started']=True;state['closed'].set()
+        with patch.object(host,'connect',connect),patch.object(host,'wait_until',AsyncMock()), \
+             patch.object(host,'start_staff',start),patch.object(host,'finish',AsyncMock()),patch.object(host,'say',AsyncMock()):
+            await host.run('11:00',SimpleNamespace(),SimpleNamespace())
+        self.assertEqual(calls,[True,True])
+
+    async def test_official_clock_starts_staff_even_when_opening_is_still_pending(self):
+        official=service.slot_at(DAY,'11:00')
+        clock=official-timedelta(minutes=3)
+        host=controller.MiraHost(SimpleNamespace())
+        waits=[]
+        class Clock(datetime):
+            @classmethod
+            def now(cls,zone=None):return clock
+        async def connect(state,*args,**kwargs):
+            state['meeting']='m1'
+            return {'starts_at':official.isoformat()}
+        async def wait(state,at,**kwargs):
+            nonlocal clock
+            waits.append(at)
+            clock=max(clock,at)
+        async def start(state,*,announce):
+            self.assertEqual(clock,official)
+            self.assertFalse(state['ga_done'].is_set())
+            self.assertFalse(state['staff_started'])
+            self.assertTrue(announce)
+            state['staff_started']=True
+            state['closed'].set()
+        with patch.object(controller,'datetime',Clock),patch.object(host,'connect',connect), \
+             patch.object(host,'wait_until',wait),patch.object(host,'say',AsyncMock()) as say, \
+             patch.object(host,'start_staff',start),patch.object(host,'finish',AsyncMock()):
+            await host.run('11:00',SimpleNamespace(),SimpleNamespace(),manual_by='11')
+        self.assertEqual(waits,[official-timedelta(minutes=3),official])
+        self.assertIn('list_new_px_notes',say.await_args.args[1])
+
+    async def test_staff_presence_is_read_at_the_slot_and_never_during_early_entry(self):
+        official=service.slot_at(DAY,'11:00')
+        clock=official-timedelta(minutes=3)
+        class Clock(datetime):
+            @classmethod
+            def now(cls,zone=None):return clock
+        turns=[{'id':IDS[key],'user_id':IDS[key],'name':key,'discord':{'discord_user_id':str(i)}}
+               for i,key in enumerate(('EF','RA'),1)]
+        current={**turns[0],'initials':'EF','brief':BRIEF}
+        bridge=AsyncMock(side_effect=[{'turns':turns},{'current':current,'skipped':[turns[1]],'deferred':[turns[1]]}])
+        host=controller.MiraHost(SimpleNamespace(bridge=bridge))
+        state={**session(),'staff_started':False,'starts_at':official}
+        present=set()
+        with patch.object(controller,'datetime',Clock), \
+             patch.object(host,'in_voice',side_effect=lambda guild,voice,uid:uid in present) as presence, \
+             patch.object(host,'invite_deferred'):
+            out=await host.start_staff(state,announce=False)
+            self.assertTrue(out['prit'])
+            bridge.assert_not_awaited();presence.assert_not_called()
+            clock=official
+            present.add('1')
+            out=await host.start_staff(state,announce=False)
+        self.assertEqual(bridge.await_args.args[1]['available_user_ids'],[IDS['EF']])
+        self.assertEqual(out['RADHA']['turn_id'],IDS['EF'])
+        self.assertEqual(out['mungojne'],['RA'])
+
+    async def test_server_rejects_early_staff_start_and_absence_transition(self):
+        official=service.slot_at(DAY,'11:00')
+        db=SimpleNamespace(execute=AsyncMock())
+        meeting=Mira1HMeeting(id=uuid.uuid4(),meeting_date=DAY,slot='11:00',status='GA_PHASE')
+        with patch.object(service,'now',return_value=official-timedelta(seconds=1)):
+            with self.assertRaises(HTTPException) as caught:
+                await service.begin_staff(db,meeting)
+            self.assertEqual(caught.exception.status_code,409)
+            self.assertEqual(meeting.status,'GA_PHASE')
+            meeting.status='STAFF_PHASE'
+            with self.assertRaises(HTTPException):
+                await service.next_turn(db,meeting,None,available_user_ids=[])
+        db.execute.assert_not_awaited()
+
+    async def test_server_accepts_the_exact_staff_start_and_test_rehearsals(self):
+        official=service.slot_at(DAY,'11:00')
+        for at,is_test in ((official,False),(official-timedelta(minutes=3),True)):
+            with self.subTest(at=at,is_test=is_test):
+                meeting=Mira1HMeeting(meeting_date=DAY,slot='11:00',status='STAFF_PHASE',is_test=is_test)
+                with patch.object(service,'now',return_value=at), \
+                     patch.object(service,'turns_view',AsyncMock(return_value=[])):
+                    self.assertEqual(await service.begin_staff(SimpleNamespace(),meeting),[])
+
     async def test_discord_invitation_does_not_block_the_tool_continuation(self):
         async def slow(*args):
             await asyncio.Event().wait()

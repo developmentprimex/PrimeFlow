@@ -129,6 +129,7 @@ export type KnowledgeItem = {
 export type GaParticipant = { name: string; fallback?: string | null }
 
 export type HostStatus = {
+  stop_requested?: boolean
   model?: string
   voice?: string
   prompt_version?: string

@@ -338,14 +338,14 @@ def count_struck_points_for_day(
     return completed
 
 
-def render_text_for_interval(
+def _render_text_for_interval(
     text: str | None,
     events: Iterable[TaskStrikeEvent],
     *,
     interval_start: datetime,
     interval_end: datetime,
     field_name: str = "DESCRIPTION",
-) -> tuple[str, str]:
+) -> tuple[str, str, list[dict]]:
     """Return plain and colour-marked text for a 1H report interval.
 
     Open points are always shown. Current-day strikes from this reporting
@@ -388,6 +388,7 @@ def render_text_for_interval(
     heading, points, current_done = _text_points(text, field_name=field_name)
     plain_parts = [heading] if heading else []
     marked_parts = [heading] if heading else []
+    blue_points = []
     for point in points:
         # The current note text is authoritative. Historical events must never
         # re-strike a point that is presently open (including legacy malformed
@@ -404,6 +405,9 @@ def render_text_for_interval(
                 interval_start=interval_start,
                 interval_end=interval_end,
             )
+            if colour == "blue":
+                blue_points.append({"key": point.key, "text": strike_text,
+                    "occurred_at": strike_timestamp_datetime(point.text, report_at=interval_end), "actor_user_id": None})
             plain_parts.append(point.text)
             marked_parts.append(
                 f"[[done:{colour}]]{strike_text}[[/done]]"
@@ -415,6 +419,9 @@ def render_text_for_interval(
                 event.occurred_at, interval_start=interval_start, interval_end=interval_end
             )
             strike_text, timestamp = split_strike_timestamp(point.text)
+            if colour == "blue":
+                blue_points.append({"key": point.key, "text": strike_text, "occurred_at": event.occurred_at,
+                    "actor_user_id": getattr(event, "actor_user_id", None)})
             plain_parts.append(point.text)
             marked_parts.append(
                 f"[[done:{colour}]]{strike_text}[[/done]]"
@@ -423,7 +430,19 @@ def render_text_for_interval(
             continue
         plain_parts.append(point.text)
         marked_parts.append(point.text)
-    return "\n".join(plain_parts), "\n".join(marked_parts)
+    return "\n".join(plain_parts), "\n".join(marked_parts), blue_points
+
+
+def render_text_for_interval(text, events, *, interval_start, interval_end, field_name="DESCRIPTION") -> tuple[str, str]:
+    plain, marked, _ = _render_text_for_interval(text, events, interval_start=interval_start,
+        interval_end=interval_end, field_name=field_name)
+    return plain, marked
+
+
+def struck_points_for_interval(text, events, *, interval_start, interval_end, field_name="DESCRIPTION") -> list[dict]:
+    """Exactly the blue points displayed/counted by the 1H report, with time and attribution."""
+    return _render_text_for_interval(text, events, interval_start=interval_start,
+        interval_end=interval_end, field_name=field_name)[2]
 
 
 def render_description_for_interval(

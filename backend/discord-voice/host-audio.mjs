@@ -132,29 +132,34 @@ export function createOpusEncoder({loader=()=>require('opusscript/build/opusscri
 // Mira's voice waits here as 20 ms Opus frames. clear() is the interruption:
 // everything not yet sent is dropped at once and the played time is reported.
 export class Playback{
-  constructor(encode){this.encode=encode;this.frames=[];this.carry=Buffer.alloc(0);this.last=0;this.item=null;this.playedMs=0;}
+  constructor(encode){this.encode=encode;this.frames=[];this.carry=Buffer.alloc(0);this.last=0;this.item=null;this.inputItem=null;this.played=new Map();}
   push(itemId,samples){
-    if(this.item!==itemId){this.item=itemId;this.playedMs=0;}
+    if(this.inputItem!==itemId){this.flush();this.inputItem=itemId;this.last=0;}
+    if(this.item===null)this.item=itemId;
     const {pcm,last}=toDiscord(samples,this.last);this.last=last;
     let data=this.carry.length?Buffer.concat([this.carry,pcm]):pcm,offset=0;
-    while(data.length-offset>=FRAME_BYTES){this.frames.push(this.encode(data.subarray(offset,offset+FRAME_BYTES)));offset+=FRAME_BYTES;}
+    while(data.length-offset>=FRAME_BYTES){this.frames.push({item:itemId,packet:this.encode(data.subarray(offset,offset+FRAME_BYTES))});offset+=FRAME_BYTES;}
     this.carry=Buffer.from(data.subarray(offset));
   }
   // The tail of an answer is padded to a whole frame so the last word is heard.
   flush(){
     if(!this.carry.length)return;
     const frame=Buffer.alloc(FRAME_BYTES);this.carry.copy(frame);this.carry=Buffer.alloc(0);
-    this.frames.push(this.encode(frame));
+    this.frames.push({item:this.inputItem,packet:this.encode(frame)});
   }
   next(){
     const frame=this.frames.shift();
-    if(frame)this.playedMs+=20;
-    return frame;
+    if(!frame)return;
+    this.item=frame.item;this.played.set(frame.item,(this.played.get(frame.item)||0)+20);
+    return frame.packet;
   }
+  get playedMs(){return this.played.get(this.item)||0;}
   get playing(){return this.frames.length>0;}
   clear(){
-    const result={item:this.item,playedMs:this.playedMs,dropped:this.frames.length};
-    this.frames=[];this.carry=Buffer.alloc(0);this.last=0;
+    const ids=[...new Set([...this.frames.map(f=>f.item),...(this.carry.length?[this.inputItem]:[])])];
+    const items=ids.map(item=>({item,playedMs:this.played.get(item)||0}));
+    const result={item:items[0]?.item??this.item,playedMs:items[0]?.playedMs??this.playedMs,dropped:this.frames.length+(this.carry.length?1:0),items};
+    this.frames=[];this.carry=Buffer.alloc(0);this.last=0;this.item=null;this.inputItem=null;this.played.clear();
     return result;
   }
 }

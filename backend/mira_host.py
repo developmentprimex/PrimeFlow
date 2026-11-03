@@ -33,10 +33,8 @@ CONNECT_ATTEMPTS = 3
 LOOKUP_TIMEOUT_SECONDS = 8
 WRITE_TIMEOUT_SECONDS = 12
 WORKER_SHUTDOWN_SECONDS = 3
-MISSING_STAFF_GRACE_SECONDS = 5
 LOOKUP_TOOLS = {"list_ga_tasks", "list_new_px_notes", "list_new_done_and_strikes", "get_person_brief", "find_user", "search_knowledge"}
-# GA goes first (GA tasks, notes, done/strike); the staff starts when GA is done, at most this long after the hour.
-GA_OVERRUN_MINUTES = 8
+# Notes and progress are read before the slot; staff starts at its official time.
 SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
 log = logging.getLogger("primeflow.discord.mira_host")
 RECOVERY_DIR = Path(__file__).with_name(".mira-host-recovery")
@@ -69,6 +67,8 @@ def turn_brief(current: dict) -> dict:
                for t in progress.get("strikes", []) if t.get("task_id")}
     done = {t["task_id"] for t in progress.get("done", []) if t.get("task_id")}
     percentages = brief.get("progress_percentages") or {}
+    followup_tasks = brief.get("continuation_check_tasks", [*brief.get("current", []), *brief.get("previous_open", [])])
+    all_todo = bool(followup_tasks) and all(task["status"] == "TODO" for task in followup_tasks)
     discussion, seen = [], set()
     for group, label in (("current", "AKTUAL"), ("previous_open", "PARAPRAK"), ("blocked", "BLLOK")):
         for task in brief.get(group, []):
@@ -86,12 +86,16 @@ def turn_brief(current: dict) -> dict:
                 "ka_progres_te_regjistruar": bool(points or task_id in done or task["status"] == "DONE"
                                                  or (percentage is not None and percentage > 0)),
                 "diskutuar": (brief.get("discussion") or {}).get(task_id, {}),
+                "pershkrimi": task.get("description"), "komenti_simbolit": task.get("symbol_comment"),
+                "simboli": task.get("symbol"), "afati": task.get("due"), "deadline": bool(task.get("deadline")),
             })
     result = {
         "turn_id": current.get("id"),
         "person": current["name"], "initials": current["initials"],
         "initials_read_aloud": speech_text(current["initials"], [current["initials"]]),
         "plan_discutimi": discussion, "progres_nga": brief.get("progress_since"),
+        "aktual_dhe_paraprak_todo": all_todo,
+        "pyetja_vazhdimit": "Me çka ke vazhduar?" if all_todo else None,
         "detyrat_e_slotit": task_lines(brief["current"]),
         "te_gjitha_kryer": bool(brief.get("all_done")),
         "slotet_paraprake": brief.get("previous_slot"),
@@ -183,6 +187,7 @@ class MiraHost:
         self.retiring_tasks = set()
         self.retiring_meetings = set()
         self.recovery_task = None
+        self.notification_receipts = set()
 
     # ------------------------------------------------------------ Discord helpers
 
@@ -315,15 +320,21 @@ class MiraHost:
                         log.warning("MIRA_HOST transcript recovery failed: %s", type(task.exception()).__name__)
                 self.recovery_task.add_done_callback(recovered)
             result = await self.bot.bridge(PREFIX + "/tick", {})
+            if self.session and self.session.get("meeting") in result.get("stop_meetings", []):
+                await self.stop("stopped_by_command")
             guild = self.bot.get_guild(int(settings.DISCORD_GUILD_ID))
             voice = self.voice_channel(guild) if guild else None
             link = self.join_url(settings.DISCORD_GUILD_ID, voice)
             for job in result["jobs"]:
                 try:
+                    key = job.get("notification_key")
+                    if key and key in self.notification_receipts:
+                        await self.bot.bridge(PREFIX + "/notifications/result", {"key": key, "delivered": True})
+                        continue
                     if job["kind"] == "brief":
                         await self.notify(job, job["text"])
                     elif job["kind"] == "ga_call":
-                        await self.notify(job, f"📞 **1H {job['slot']}** – kyçu tani. Mira fillon me detyrat për GA, Notes dhe Done/Strikes. {link}")
+                        await self.notify(job, f"📞 **1H {job['slot']}** – kyçu tani. Mira përmend Notes e reja, pastaj Done/Strikes nga raporti i slotit dhe vazhdon me stafin. {link}")
                     elif job["kind"] == "ga_fallback":
                         if guild and not self.in_voice(guild, voice, job["primary_discord_user_id"]):
                             await self.notify(job, f"📞 **1H {job['slot']}** – mungon kolegia jote GA, të lutem kyçu në vend të saj. {link}")
@@ -333,8 +344,14 @@ class MiraHost:
                         if not self.running():
                             talk_at = datetime.fromisoformat(job["talk_at"]) if job.get("talk_at") else None
                             self.task = asyncio.create_task(self.run(job["slot"], guild, voice, talk_at))
+                    if key:
+                        self.notification_receipts.add(key)
+                        await self.bot.bridge(PREFIX + "/notifications/result", {"key": key, "delivered": True})
                 except Exception as exc:
                     log.warning("MIRA_HOST job %s failed: %s", job.get("kind"), type(exc).__name__)
+                    if job.get("notification_key") and job["notification_key"] not in self.notification_receipts:
+                        with suppress(Exception):
+                            await self.bot.bridge(PREFIX + "/notifications/result", {"key": job["notification_key"], "delivered": False})
         finally:
             self.ticking = False
 
@@ -366,7 +383,8 @@ class MiraHost:
             process = HostProcess(lambda message, number=attempt: self.on_worker(session, message, number))
             session["process"] = process
             await process.start(guild_id=str(guild.id), channel_id=str(voice.id), token=settings.MIRA_HOST_BOT_TOKEN,
-                                client_secret=started["client_secret"], model=started["model"], toolsets=started.get("toolsets", {}))
+                                client_secret=started["client_secret"], model=started["model"], toolsets=started.get("toolsets", {}),
+                                instructions_by_phase=started.get("instructions_by_phase", {}))
             waiters = [asyncio.create_task(session["ready"].wait()), asyncio.create_task(session["failed"].wait()),
                        asyncio.create_task(session["closed"].wait())]
             await asyncio.wait(waiters, timeout=70, return_when=asyncio.FIRST_COMPLETED)
@@ -392,6 +410,7 @@ class MiraHost:
                    "turn_nudged": False, "upcoming": None, "finished": False, "ending": False, "meeting": None,
                    "process": None, "reason": "completed", "ga_done": asyncio.Event(), "staff_started": False,
                    "starts_at": None, "pm_reviewed": False, "manual_by": manual_by,
+                   "ga_checks": {}, "ga_results": {},
                    "command_context": command_context, "test_mode": test_mode}
         if start_generation is None or start_generation == self.start_generation:
             self.session = session
@@ -411,17 +430,39 @@ class MiraHost:
             await self.wait_until(session, talk_at or datetime.now(tz()))
             if session["closed"].is_set():
                 raise ValueError("stopped")
-            manual_instruction = "Takimi u nis me komandë tani; mos prit orën e slotit. " if manual_by else ""
-            await self.say(session, f"SISTEMI: {manual_instruction}Je në kanalin e 1H {slot}. Faza GA: përshëndet me një fjalë dhe fillo me list_ga_tasks.")
+            await self.say(session, f"SISTEMI: Je në kanalin e 1H {slot}. Përshëndet shkurt dhe fillo menjëherë me list_new_px_notes. Pastaj Strike dhe Done nga raporti i këtij sloti, edhe para fillimit zyrtar; pa pyetje për aprovim. Detyrat e stafit dhe kontrolli kush mungon fillojnë vetëm në starts_at sipas sistemit.")
             deadline = datetime.now(tz()) + timedelta(minutes=MAX_MEETING_MINUTES)
-            # The staff starts at the hour once GA is done (end_ga_phase); a long GA part is cut after the overrun.
+            # Do not classify staff joining at the official time as absent during the early opening.
+            # The clock, rather than a model tool call or unfinished opening, controls the handoff.
             await self.wait_until(session, starts_at)
-            await self.wait_until(session, starts_at + timedelta(minutes=GA_OVERRUN_MINUTES), until=session["ga_done"])
             if not session["closed"].is_set() and not session["staff_started"]:
-                await self.start_staff(session, announce=True)
+                for attempt in range(CONNECT_ATTEMPTS):
+                    try:
+                        await self.start_staff(session, announce=True)
+                        break
+                    except (asyncio.TimeoutError, ValueError):
+                        if attempt == CONNECT_ATTEMPTS - 1:
+                            raise
+                        log.warning("MIRA_HOST staff initialization retry=%s", attempt + 1)
+                        await self.wait_until(session, datetime.now(tz()) + timedelta(seconds=1))
+                        if session["closed"].is_set():
+                            break
             # Staff turns run through tool calls; this loop only watches time.
             while not session["closed"].is_set() and datetime.now(tz()) < deadline:
-                await self.watch_turn(session)
+                try:
+                    await self.watch_turn(session)
+                    session["watch_failures"] = 0
+                except (asyncio.TimeoutError, ValueError) as exc:
+                    if isinstance(exc, ValueError) and not str(exc).startswith(("Radha ka ndryshuar", "Radha PM ka ndryshuar",
+                            "Kalimi nuk u konfirmua", "Kalimi PM nuk u konfirmua")):
+                        raise
+                    if isinstance(exc, ValueError) and str(exc).startswith(("Radha ka ndryshuar", "Radha PM ka ndryshuar")):
+                        log.info("MIRA_HOST watcher handoff superseded")
+                    else:
+                        session["watch_failures"] = session.get("watch_failures", 0) + 1
+                        if session["watch_failures"] >= CONNECT_ATTEMPTS:
+                            raise
+                        log.warning("MIRA_HOST watcher transition deferred attempt=%s", session["watch_failures"])
                 if session["ending"] and session.get("ending_at") and datetime.now(tz()) > session["ending_at"]:
                     break
                 with suppress(asyncio.TimeoutError):
@@ -443,11 +484,21 @@ class MiraHost:
         while not session["closed"].is_set() and datetime.now(tz()) < at and not (until and until.is_set()):
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(session["closed"].wait(),
-                                       min(1 if until else 5, max(0.2, (at - datetime.now(tz())).total_seconds())))
-            await self.flush_lines(session)
+                                       min(1 if until else 5, max(0.001, (at - datetime.now(tz())).total_seconds())))
+            # Uploads must not hold the official staff clock behind a slow API call.
+            upload = session.get("timed_upload")
+            if not upload or upload.done():
+                async def flush():
+                    try:
+                        await self.flush_lines(session)
+                    except Exception as exc:
+                        log.warning("MIRA_HOST timed upload deferred error=%s", type(exc).__name__)
+                session["timed_upload"] = asyncio.create_task(flush())
 
     async def start_staff(self, session, *, announce: bool) -> dict:
         async with session.setdefault("staff_lock", asyncio.Lock()):
+            if not session.get("test_mode") and session.get("starts_at") and datetime.now(tz()) < session["starts_at"]:
+                return {"prit": True, "udhezim": "Hyrja përfundoi. Prit në heshtje fillimin zyrtar; mos kontrollo mungesat dhe mos thirr stafin ende."}
             if session.get("staff_started"):
                 current = session.get("current_turn")
                 return {"RADHA": turn_brief(current)} if current else {"prit": True}
@@ -458,30 +509,48 @@ class MiraHost:
         turns = (await asyncio.wait_for(
             self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/staff", {}),
             timeout=LOOKUP_TIMEOUT_SECONDS))["turns"]
-        session["staff_started"] = True
         session["turns"] = turns
-        if turns:
-            return await self.advance(session, None, announce=announce)
+        if turns or session["slot"] == "11:50":
+            try:
+                if session.get("staff_start_uncertain"):
+                    snapshot = await asyncio.wait_for(
+                        self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/turns/current", {}), LOOKUP_TIMEOUT_SECONDS)
+                    if snapshot.get("current") or not snapshot.get("upcoming"):
+                        output = await self.present_turn(session, snapshot, announce=announce)
+                    else:
+                        session["current_turn"] = None
+                        output = await self.advance(session, None, announce=announce)
+                else:
+                    output = await self.advance(session, None, announce=announce)
+            except Exception:
+                session["staff_start_uncertain"] = True
+                raise
+            session["staff_started"] = True
+            session.pop("staff_start_uncertain", None)
+            return output
+        session["staff_started"] = True
         session["ending"] = True
         session["ending_at"] = datetime.now(tz()) + timedelta(seconds=60)
         output = {"FUNDI": True, "udhezim": "Askush nuk ka detyra 1H në këtë slot. Falënderoji me një fjali dhe mbyll."}
+        if session.get("process"):
+            await session["process"].send({"type": "configure", "phase": "ENDING", "turn_id": None, "speaker_id": None})
         if announce:
             await self.say(session, "SISTEMI: " + json.dumps(output, ensure_ascii=False))
         return output
 
     async def watch_turn(self, session):
         """Invite the next person shortly before the current one ends, and nudge a long turn once."""
-        if session.get("deferred") and not session.get("current_turn") and not session.get("ending"):
+        if session.get("deferred") and not (session.get("current_turn") or session.get("pm_current")) and not session.get("ending"):
             self.invite_deferred(session)
             available = self.available_people(session)
             if any(t.get("user_id") in available for t in session["deferred"]):
                 await self.advance(session, None, announce=True)
-            elif (datetime.now(tz()) - session["missing_since"]).total_seconds() >= MISSING_STAFF_GRACE_SECONDS:
+            elif (datetime.now(tz()) - session["missing_since"]).total_seconds() >= settings.MIRA_HOST_MISSING_STAFF_GRACE_SECONDS:
                 session["reason"], session["ending"] = "missing_staff", True
                 session["ending_at"] = datetime.now(tz()) + timedelta(seconds=15)
                 await self.say(session, "SISTEMI: Personat e mbetur mungojnë. Mbyll shkurt; mos thuaj se kanë raportuar.")
             return
-        current = session.get("current_turn") or {}
+        current = session.get("current_turn") or session.get("pm_current") or {}
         target = current.get("discord")
         if not session.get("test_mode") and target and not self.in_voice(session["guild"], session["voice"], target["discord_user_id"]):
             await self.advance(session, None, announce=True, outcome="DEFERRED", expected_turn_id=current["id"])
@@ -491,18 +560,35 @@ class MiraHost:
         started = session.get("turn_started")
         if not started:
             return
+        failed_at = (session.get("audio_failures") or {}).get((target or {}).get("discord_user_id"))
+        if failed_at:
+            await self.warn_audio(session, current)
+            if (datetime.now(tz()) - max(failed_at, started)).total_seconds() >= 30:
+                await self.advance(session, "Raportimi u ndërpre nga problem teknik i audios; kërkon sqarim pas takimit.",
+                    announce=True, outcome="TIMEOUT", expected_turn_id=current["id"])
+            return
         elapsed = (datetime.now(tz()) - started).total_seconds() / 60
+        minutes = min(session["target"], 2) if session.get("pm_current") else session["target"]
         if session.get("upcoming") and elapsed >= max(1, session["target"] - 1):
             if not session["upcoming"].get("invited"):
                 self.background_notification(session, lambda upcoming=session["upcoming"]: self.invite_upcoming(session, upcoming))
-        if elapsed >= session["target"] + 0.5 and current.get("id"):
+        if elapsed >= minutes + 0.5 and current.get("id"):
             await self.advance(session, "Koha përfundoi; çështjet e hapura kërkojnë sqarim pas takimit.",
                                announce=True, outcome="TIMEOUT", expected_turn_id=current["id"])
             return
-        if not session["turn_nudged"] and elapsed >= max(0.25, session["target"] - 0.25):
+        if not session["turn_nudged"] and elapsed >= max(0.25, minutes - 0.25):
             session["turn_nudged"] = True
             await self.say(session, "SISTEMI: Mbeten 15 sekonda për këtë person. Pyet vetëm çështjen kryesore të hapur; "
                            "çështjet e gjata lëri për pas takimit. Pastaj thirr end_person_turn me turn_id aktual.")
+
+    async def warn_audio(self, session, current):
+        speaker_id = (current.get("discord") or {}).get("discord_user_id")
+        key = (current.get("id"), speaker_id)
+        warned = session.setdefault("audio_warned", set())
+        if not speaker_id or key in warned:
+            return
+        warned.add(key)
+        await self.say(session, "SISTEMI: Ka problem teknik me marrjen e zërit të personit aktual. Kërko shkurt të rilidhet mikrofoni; mos e quaj mungesë raportimi.")
 
     def background_notification(self, session, operation):
         if session["closed"].is_set() or session.get("test_mode"):
@@ -555,17 +641,20 @@ class MiraHost:
         return upcoming["name"]
 
     def available_people(self, session):
-        return [t["user_id"] for t in session.get("turns", []) if t.get("discord") and
+        turns = session.get("pm_turns", []) if session.get("pm_reviewed") else session.get("turns", [])
+        return [t["user_id"] for t in turns if t.get("discord") and
                 self.in_voice(session["guild"], session["voice"], t["discord"]["discord_user_id"])]
 
     async def advance(self, session, summary: str | None, *, announce: bool, outcome: str = "DONE", expected_turn_id: str | None = None) -> dict:
         async with session.setdefault("transition_lock", asyncio.Lock()):
-            active_id = (session.get("current_turn") or {}).get("id") or ("PM_RISHIKIMI" if session.get("pm_reviewed") else None)
+            active_id = (session.get("current_turn") or session.get("pm_current") or {}).get("id")
             if expected_turn_id is not None and expected_turn_id != active_id:
                 raise ValueError("Radha ka ndryshuar; mos e përfundo personin e ri.")
             return await self._advance(session, summary, announce=announce, outcome=outcome)
 
     async def _advance(self, session, summary: str | None, *, announce: bool, outcome: str) -> dict:
+        if session.get("pm_reviewed"):
+            return await self._advance_pm(session, summary, announce=announce, outcome=outcome)
         expected = (session.get("current_turn") or {}).get("id")
         payload = {"summary": summary, "expected_turn_id": expected, "outcome": outcome}
         if "turns" in session and not session.get("test_mode"):
@@ -592,6 +681,10 @@ class MiraHost:
                 if same_active or (not result.get("current") and result.get("upcoming")):
                     raise ValueError("Kalimi nuk u konfirmua; radha aktuale mbetet e njëjtë. Mos e shëno si të përfunduar.") from None
                 result["ended"] = next((turn for turn in result.get("turns", []) if turn["id"] == expected), None)
+        return await self.present_turn(session, result, announce=announce)
+
+    async def present_turn(self, session, result, *, announce):
+        """Adopt a confirmed server state without advancing another person."""
         current, upcoming = result.get("current"), result.get("upcoming")
         absent = list(result.get("skipped", []))
         previous_deferred = {turn["id"] for turn in session.get("deferred", [])}
@@ -614,12 +707,8 @@ class MiraHost:
             output = {"prit": True, "mungojne": [t.get("name") for t in session["deferred"]],
                       "udhezim": "Prit personat që mungojnë; mos i shëno si të raportuar."}
         elif not current and result.get("pm_review") and not session.get("pm_reviewed"):
-            # 11:50: after the last person, everyone's open PM tasks; end_person_turn again ends the meeting.
             session["pm_reviewed"] = True
-            output = {"PM_RISHIKIMI": result["pm_review"],
-                      "turn_id": "PM_RISHIKIMI",
-                      "udhezim": "Raportimi i stafit u mbyll. Bëj rishikimin PM me radhë; mos i quaj radhët me timeout të raportuara. "
-                                 "Kur mbaron thirr end_person_turn."}
+            return await self._advance_pm(session, None, announce=announce, outcome="DONE")
         elif not current:
             session["ending"] = True
             session["ending_at"] = datetime.now(tz()) + timedelta(seconds=40)
@@ -632,8 +721,14 @@ class MiraHost:
                 self.background_notification(session, lambda: self.notify(current["discord"],
                     f"🎙️ **1H {session['slot']}** – radha jote tani. Kyçu: "
                     f"{self.join_url(settings.DISCORD_GUILD_ID, session['voice'])}"))
-            output = {"RADHA": turn_brief(current),
-                      "udhezim": f"{current['name']}: hyr direkt te detyra e parë AKTUAL në plan_discutimi. "
+            brief = turn_brief(current)
+            opening = (f"{current['name']}: të gjitha detyrat e slotit aktual dhe atij paraprak janë To Do. "
+                       "Nëse personi s'e ka sqaruar ende çfarë ka punuar, pyet shkurt 'Me çka ke vazhduar?' vetëm një herë për personin. "
+                       "Mungesa e përditësimit nuk provon se s'ka punuar. Pastaj sqaro detyrat sipas plan_discutimi. "
+                       if brief["aktual_dhe_paraprak_todo"] else
+                       f"{current['name']}: hyr direkt te detyra e parë AKTUAL në plan_discutimi. ")
+            output = {"RADHA": brief,
+                      "udhezim": opening +
                                  "Pyet shkurt vetëm çka mungon për progresin, vazhdimin ose përfundimin; "
                                  "pastaj trajto PARAPRAK dhe BLLOK. Mos përsërit përgjigjet apo hyrjet."}
         if absent:
@@ -643,10 +738,49 @@ class MiraHost:
         phase = "ENDING" if session.get("ending") else "PM_REVIEW" if session.get("pm_reviewed") else "STAFF_PHASE"
         if session.get("process"):
             await session["process"].send({"type": "configure", "phase": phase,
+                "turn_id": (current or {}).get("id"),
                 "speaker_id": session.get("manual_by") if session.get("test_mode") else
                     ((current or {}).get("discord") or {}).get("discord_user_id")})
         if announce:
             await self.say(session, "SISTEMI: Vazhdo sipas radhës aktuale. " + json.dumps(output, ensure_ascii=False))
+        return output
+
+    async def _advance_pm(self, session, summary, *, announce, outcome):
+        expected = (session.get("pm_current") or {}).get("id")
+        payload = {"expected_turn_id": expected, "outcome": outcome, "summary": summary}
+        members = getattr(session["voice"], "members", None)
+        if members is not None and not session.get("test_mode"):
+            payload["available_discord_ids"] = [str(member.id) for member in members]
+        try:
+            result = await asyncio.wait_for(self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/pm/next", payload), LOOKUP_TIMEOUT_SECONDS)
+        except (asyncio.TimeoutError, ValueError) as exc:
+            if isinstance(exc, ValueError) and not str(exc).startswith("Radha PM ka ndryshuar"):
+                raise
+            result = await asyncio.wait_for(self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/pm/current", {}), LOOKUP_TIMEOUT_SECONDS)
+            if (expected and (result.get("current") or {}).get("id") == expected) or (
+                    not expected and not result.get("current") and not result.get("initialized")):
+                raise ValueError("Kalimi PM nuk u konfirmua; radha mbetet e njëjtë.") from None
+        current = session["pm_current"] = result.get("current")
+        session["pm_turns"], session["deferred"] = result.get("turns", []), result.get("deferred", [])
+        session["turn_started"], session["turn_nudged"] = (datetime.now(tz()) if current else None), False
+        if (result.get("ended") or {}).get("status") == "TIMEOUT":
+            session.setdefault("incomplete_turns", []).append(result["ended"]["id"])
+        if current:
+            session.pop("missing_since", None)
+            output = {"PM_RISHIKIMI": [current], "turn_id": current["id"],
+                "udhezim": "Pyet vetëm personin PM aktual për vazhdimin ose shtyrjet. Ruaj record_pm_review dhe pastaj end_person_turn me këtë turn_id."}
+        elif session["deferred"]:
+            session.setdefault("missing_since", datetime.now(tz()))
+            self.invite_deferred(session)
+            output = {"prit": True, "udhezim": "Personat e mbetur PM mungojnë; prit kthimin e tyre ose udhëzimin e sistemit."}
+        else:
+            session["ending"], session["ending_at"] = True, datetime.now(tz()) + timedelta(seconds=40)
+            output = {"FUNDI": True, "udhezim": "Mbyll shkurt. Mos i quaj radhët me timeout ose probleme teknike të raportuara."}
+        await session["process"].send({"type": "configure", "phase": "ENDING" if session.get("ending") else "PM_REVIEW",
+            "turn_id": (current or {}).get("id"), "speaker_id": session.get("manual_by") if session.get("test_mode") else
+                ((current or {}).get("discord") or {}).get("discord_user_id")})
+        if announce:
+            await self.say(session, "SISTEMI: " + json.dumps(output, ensure_ascii=False))
         return output
 
     async def say(self, session, text: str):
@@ -669,7 +803,15 @@ class MiraHost:
             if message.get("role") != "mira":
                 member = session["guild"].get_member(int(message["speaker_id"])) if str(message.get("speaker_id") or "").isdigit() else None
                 speaker = member.display_name if member else "Stafi"
-            session["lines"].append({"id": str(uuid.uuid4()), "at": datetime.now(tz()).isoformat(), "role": message.get("role"),
+            try:
+                spoken_at = datetime.fromisoformat(message.get("started_at") or "")
+                if spoken_at.tzinfo is None:
+                    raise ValueError("missing_timezone")
+            except (ValueError, TypeError):
+                spoken_at = datetime.now(tz())
+            session["lines"].append({"id": str(uuid.uuid4()), "at": spoken_at.isoformat(), "role": message.get("role"),
+                                     "speech_id": message.get("speech_id"), "turn_id": message.get("turn_id"),
+                                     "started_at": message.get("started_at"), "ended_at": message.get("ended_at"),
                                      "speaker": speaker, "text": message.get("text", "")})
             self.persist_transcript(session)
             if session["ending"] and message.get("role") == "mira":
@@ -682,10 +824,40 @@ class MiraHost:
                 self.add_metric(session, "generated_audio", message["duration_ms"])
         elif kind == "progress_played":
             session.setdefault("progress_acks", set()).add(message.get("token"))
-            if not session.get("ending") and not session["closed"].is_set():
+            self.persist_transcript(session)
+            pending = session.setdefault("pending_progress", set())
+            pending.discard(message.get("token"))
+            session.setdefault("ga_checks", {})["list_new_done_and_strikes"] = "PENDING" if pending else "DONE"
+            if not pending and not session.get("ending") and not session["closed"].is_set():
                 instruction = "Vazhdo me RADHA aktuale, pa e përsëritur progresin." if session.get("staff_started") else \
                               "Njoftimi i progresit u dëgjua i plotë. Thirr end_ga_phase dhe ndiq rezultatin."
                 await self.say(session, "SISTEMI: " + instruction)
+        elif kind == "note_played":
+            session.setdefault("notes_acks", set()).add(message.get("token"))
+            self.persist_transcript(session)
+            session.setdefault("ga_checks", {})["list_new_px_notes"] = "DONE"
+        elif kind == "announcement_deferred":
+            token = message.get("token")
+            session.setdefault("announcement_deferrals", set()).add(token)
+            self.persist_transcript(session)
+            stage = "list_new_px_notes" if message.get("kind") == "note" else "list_new_done_and_strikes"
+            pending = session.setdefault("pending_progress", set())
+            pending.discard(token)
+            session.setdefault("ga_checks", {})[stage] = "PENDING" if pending and stage.endswith("strikes") else "DEFERRED"
+        elif kind == "audio_health":
+            failures = session.setdefault("audio_failures", {})
+            speaker_id = message.get("speaker_id")
+            if message.get("status") == "failed":
+                failures.setdefault(speaker_id, datetime.now(tz()))
+                current = session.get("current_turn") or session.get("pm_current") or {}
+                if (current.get("discord") or {}).get("discord_user_id") == speaker_id:
+                    await self.warn_audio(session, current)
+            else:
+                since = failures.pop(speaker_id, None)
+                session["audio_warned"] = {key for key in session.get("audio_warned", set()) if key[1] != speaker_id}
+                current = session.get("current_turn") or session.get("pm_current") or {}
+                if since and session.get("turn_started") and (current.get("discord") or {}).get("discord_user_id") == speaker_id:
+                    session["turn_started"] += datetime.now(tz()) - max(since, session["turn_started"])
         elif kind == "proposal_played":
             session.setdefault("proposal_acks", {})[message.get("token")] = message.get("played_at")
         elif kind in ("interrupted", "process_exit", "stopped"):
@@ -708,7 +880,7 @@ class MiraHost:
             results = session.setdefault("tool_results", {})
             effects = session.setdefault("speech_effects", {})
             effect_key = None
-            if message.get("speech_id") and message.get("name") in {"save_px_note", "add_meeting_note", "record_task_discussion"}:
+            if message.get("speech_id") and message.get("name") in {"save_px_note", "add_meeting_note", "record_task_discussion", "record_pm_review"}:
                 try:
                     effect_key = (message["speech_id"], message["name"],
                                   json.dumps(json.loads(message.get("arguments") or "{}"), sort_keys=True, ensure_ascii=False))
@@ -733,25 +905,30 @@ class MiraHost:
 
     async def _tool(self, session, message: dict):
         name, call_id = message.get("name"), message.get("call_id")
+        lookup_turn = (session.get("current_turn") or {}).get("id")
         try:
             arguments = json.loads(message.get("arguments") or "{}")
         except ValueError:
             arguments = {}
         try:
             if name == "end_person_turn":
-                expected = (session.get("current_turn") or {}).get("id") or ("PM_RISHIKIMI" if session.get("pm_reviewed") else None)
+                expected = (session.get("current_turn") or session.get("pm_current") or {}).get("id")
                 if not expected or arguments.get("turn_id") != expected:
                     raise ValueError("Radha ka ndryshuar; përdor turn_id nga RADHA aktuale.")
                 output = await self.advance(session, arguments.get("summary"), announce=False, expected_turn_id=expected)
             elif name == "end_ga_phase":
+                if "ga_checks" in session and not session.get("staff_started"):
+                    needed = next((step for step in ("list_new_px_notes", "list_new_done_and_strikes")
+                        if session["ga_checks"].get(step) not in ("DONE", "DEFERRED")), None)
+                    if needed:
+                        return {"next_step": needed, "udhezim": f"Faza GA ende nuk përfundoi. Vazhdo me {needed}; mos kërko aprovim. Nëse leximi po luhet, prit përfundimin e tij."}
                 session["ga_done"].set()
                 if session["staff_started"]:
                     output = {"ok": True}
                 elif session.get("starts_at") and datetime.now(tz()) >= session["starts_at"]:
                     output = await self.start_staff(session, announce=False)
                 else:
-                    output = {"prit": True, "udhezim": f"Stafi fillon në {session['slot']}. Thuaj 'Fillojmë në "
-                              f"{session['slot']}.' dhe hesht deri te mesazhi i radhës."}
+                    output = {"prit": True, "udhezim": "Hyrja përfundoi. Prit në heshtje fillimin zyrtar; mos kontrollo mungesat dhe mos thirr stafin ende."}
             elif name == "call_next_person":
                 upcoming = session.get("upcoming")
                 if upcoming and not upcoming.get("invited"):
@@ -760,12 +937,47 @@ class MiraHost:
                 else:
                     output = {"ok": True, "shenim": "Nuk ka person tjetër ose është ftuar tashmë."}
             else:
+                if session.get("staff_started") and name in {"list_ga_tasks", "list_new_px_notes", "list_new_done_and_strikes"}:
+                    return {"deferred": True, "udhezim": "Hyrja përfundoi; vazhdo vetëm me RADHA aktuale, pa rilexuar notes ose progresin."}
+                if name == "list_new_done_and_strikes" and "ga_checks" in session and session["ga_checks"].get("list_new_px_notes") not in ("DONE", "DEFERRED"):
+                    return {"next_step":"list_new_px_notes", "udhezim":"Fillimisht përmend notes e reja. Pastaj lexo progresin e raportit të këtij sloti, pa kërkuar aprovim."}
+                if name in session.get("ga_results", {}):
+                    completed = session.get("ga_checks", {}).get(name) in ("DONE", "DEFERRED")
+                    steps = ("list_ga_tasks", "list_new_px_notes", "list_new_done_and_strikes", "end_ga_phase")
+                    return {"already_completed": completed, "pending_playback": not completed,
+                            "next_step": steps[steps.index(name)+1] if completed else None,
+                            "udhezim": "Mos e përsërit leximin. Vazhdo me next_step pas audios; pa pyetje për aprovim."}
                 if name == "create_task_from_note":
                     await self.flush_proposal_acks(session)
                 source = {key: message.get(key) for key in ("speaker_id", "speech_id", "speech_text", "speech_started_at")}
                 output = await asyncio.wait_for(
                     self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/tools/{name}", {"arguments": arguments, **source}),
                     timeout=LOOKUP_TIMEOUT_SECONDS if name in LOOKUP_TOOLS else WRITE_TIMEOUT_SECONDS)
+                if session.get("staff_started") and name in {"list_ga_tasks", "list_new_px_notes", "list_new_done_and_strikes"}:
+                    tokens = [p["token"] for p in output.get("announcements", [])]
+                    tokens += [output[key] for key in ("notes_token", "progress_token") if output.get(key)]
+                    session.setdefault("announcement_deferrals", set()).update(tokens)
+                    self.persist_transcript(session)
+                    return {"deferred": True, "udhezim": "Hyrja përfundoi; vazhdo vetëm me RADHA aktuale."}
+                if name == "get_person_brief" and not output.get("error") and not session.get("pm_reviewed"):
+                    current = session.get("current_turn") or {}
+                    if current.get("id") != lookup_turn:
+                        return {"stale_turn": True, "udhezim": "Radha ndryshoi gjatë leximit. Ndiq vetëm RADHA aktuale."}
+                    if output.get("user_id") and output["user_id"] == current.get("user_id"):
+                        current["brief"] = output
+                        output = {"RADHA": turn_brief(current), "udhezim": "Përdor gjendjen e rifreskuar të personit aktual; mos përsërit pyetje të sqaruara."}
+                if name == "record_task_discussion" and output.get("success"):
+                    current = session.get("current_turn") or {}
+                    facts = output.get("discussion") or {}
+                    if current.get("id") == lookup_turn and facts.get("task_id"):
+                        current.setdefault("brief", {}).setdefault("discussion", {})[facts["task_id"]] = facts
+                if name in ("list_ga_tasks", "list_new_px_notes", "list_new_done_and_strikes") and "ga_checks" in session:
+                    pending = bool(output.get("read_aloud"))
+                    session["ga_checks"][name] = "DEFERRED" if output.get("error") else "PENDING" if pending else "DONE"
+                    session.setdefault("ga_results", {})[name] = output
+                    if name == "list_new_done_and_strikes":
+                        session["pending_progress"] = {part["token"] for part in output.get("announcements", [])} or (
+                            {output["progress_token"]} if pending and output.get("progress_token") else set())
         except asyncio.TimeoutError:
             lookup = name in LOOKUP_TOOLS
             log.warning("MIRA_HOST tool_timeout tool=%s", name)
@@ -774,6 +986,8 @@ class MiraHost:
                       "udhezim": "Kjo nuk është përgjigje bosh. Për shkrime rezultati është i panjohur; mos i përsërit automatikisht."}
         except Exception as exc:
             output = {"error": str(exc)[:300] if isinstance(exc, ValueError) else "Veprimi dështoi."}
+        if output.get("error") and name in ("list_ga_tasks", "list_new_px_notes", "list_new_done_and_strikes") and "ga_checks" in session:
+            session["ga_checks"][name] = "DEFERRED"
         return output
 
     def add_metric(self, session, kind, duration_ms, tool=None):
@@ -787,6 +1001,13 @@ class MiraHost:
                 return
             self.persist_transcript(session)
             await self.flush_proposal_acks(session)
+            for bucket, route in (("notes_acks", "notes/ack"), ("announcement_deferrals", "announcements/defer")):
+                for token in list(session.get(bucket, set())):
+                    try:
+                        await self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/{route}", {"token": token})
+                        session[bucket].discard(token)
+                    except Exception:
+                        pass
             for token in list(session.get("progress_acks", set())):
                 try:
                     await self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/progress/ack", {"token": token})
@@ -828,6 +1049,8 @@ class MiraHost:
             temporary = target.with_suffix(".tmp")
             record = {"meeting": meeting_id, "lines": [*session.get("uploading_lines", []), *session.get("lines", [])],
                       "metrics": [*session.get("uploading_metrics", []), *session.get("metrics", [])],
+                      "acknowledgements": {bucket: list(session.get(bucket, set())) for bucket in
+                          ("notes_acks", "progress_acks", "announcement_deferrals")},
                       "finish_reason": session.get("reason") if session.get("finished") else None}
             temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
             temporary.replace(target)
@@ -851,6 +1074,10 @@ class MiraHost:
                     await self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/transcript", {"lines": lines[:200], "metrics": metrics[:200]})
                     lines = lines[200:]
                     metrics = metrics[200:]
+                acks = record.get("acknowledgements") or {}
+                for bucket, route in (("notes_acks", "notes/ack"), ("progress_acks", "progress/ack"), ("announcement_deferrals", "announcements/defer")):
+                    for token in acks.get(bucket, []):
+                        await self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/{route}", {"token": token})
                 await self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/finish",
                     {"reason": record.get("finish_reason") or "interrupted:process_exit"})
                 path.unlink()
@@ -877,11 +1104,14 @@ class MiraHost:
             await asyncio.gather(*notifications, return_exceptions=True)
         if session.get("process"):
             await session["process"].close()
+        if session.get("timed_upload"):
+            await session["timed_upload"]
         await self.flush_lines(session)
         if session.get("meeting"):
             try:
                 await self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/finish", {"reason": session["reason"]})
-                if not session["lines"] and not session.get("metrics"):
+                if not session["lines"] and not session.get("metrics") and not any(session.get(bucket) for bucket in
+                        ("notes_acks", "progress_acks", "announcement_deferrals")):
                     with suppress(OSError, ValueError):
                         (RECOVERY_DIR / (str(uuid.UUID(session["meeting"])) + ".json")).unlink(missing_ok=True)
             except Exception:
@@ -904,6 +1134,8 @@ class MiraHost:
         if session and not session["closed"].is_set():
             session["reason"] = reason
             session["closed"].set()
+            if session.get("process"):
+                await session["process"].close()
         if self.task:
             with suppress(Exception):
                 await asyncio.wait_for(asyncio.shield(self.task), 15)
