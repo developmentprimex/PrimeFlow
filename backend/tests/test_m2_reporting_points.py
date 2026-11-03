@@ -415,8 +415,10 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         assert [item["task_id"] for item in data["postponed_am"]] == [str(original.id), str(regular.id)]
         key = f"postponed_comment:{regular.id}"
         row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data=data, status="DRAFT")
+        db = AsyncMock()
+        db.execute.return_value = MagicMock()
         with patch.object(api, "_by_id", new=AsyncMock(return_value=row)), patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log"):
-            result = await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={key: "Vetem tabela e re"}), AsyncMock(), SimpleNamespace(id=uuid.uuid4()))
+            result = await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={key: "Vetem tabela e re"}), db, SimpleNamespace(id=uuid.uuid4()))
         html = service.render_html(result)
         assert service.AUTO_TITLES["postponed"] in html
         assert service.AUTO_TITLES["postponed_am"] in html
@@ -481,8 +483,10 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         data = service.select_task_sections([item], [event(item)], DAY)
         key = f"postponed_comment:{item.id}"
         row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={"reorganization": "Po"}, data=data, status="DRAFT")
+        db = AsyncMock()
+        db.execute.return_value = MagicMock()
         with patch.object(api, "_by_id", new=AsyncMock(return_value=row)), patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log"):
-            result = await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={key: "Koment manual <test>"}), AsyncMock(), SimpleNamespace(id=uuid.uuid4()))
+            result = await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={key: "Koment manual <test>"}), db, SimpleNamespace(id=uuid.uuid4()))
         assert result["manual_answers"] == {"reorganization": "Po", key: "Koment manual <test>"}
         assert "Koment manual &lt;test&gt;" in service.render_html(result)
         attachments = service.report_attachments(result)
@@ -504,6 +508,7 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={"reorganization": "Po"},
                                       data={"delivery": [{"task_id": task_id}]}, status="DRAFT")
         db = AsyncMock()
+        db.execute.return_value = MagicMock()
         with patch.object(api, "_by_id", new=AsyncMock(return_value=row)), patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log"):
             result = await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={f"delivery:{task_id}": "Dorëzuar"}), db, SimpleNamespace(id=uuid.uuid4()))
             assert result["manual_answers"] == {"reorganization": "Po", f"delivery:{task_id}": "Dorëzuar"}

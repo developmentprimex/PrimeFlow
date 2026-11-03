@@ -118,6 +118,20 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
     data = await m3.build_task_data(db, day, section_selector=sections)
     # Keep the shared morning table's priority order after common enrichment.
     data["unfinished_priority"].sort(key=lambda row: order[row["task_id"]])
+    return await with_am_continuations(db, data, day)
+
+
+async def with_am_continuations(db, data, day):
+    # An AM employee can explicitly continue an unfinished task into PM without
+    # editing its planning period. Keep that answer visible in M2/email/export.
+    from app.models.discord_m2_question import DiscordM2Question
+    continued = {str(question.task_id) for question in (await db.execute(select(DiscordM2Question).where(
+        DiscordM2Question.day == day, DiscordM2Question.kind == 'continuation',
+        DiscordM2Question.answered_at.is_not(None)))).scalars()
+        if question.snapshot.get('continued_from_am')}
+    included = {row['task_id'] for row in data.get('pm_continuation', [])}
+    data.setdefault('pm_continuation', []).extend(dict(row) for row in data.get('unfinished_priority', [])
+        if row['task_id'] in continued and row['task_id'] not in included)
     return data
 
 

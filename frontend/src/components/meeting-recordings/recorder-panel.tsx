@@ -2,57 +2,131 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Mic, Monitor, Pause, Play, Square, Video } from "lucide-react"
+import { ChevronDown, Mic, Monitor, Pause, Play, Square, Video } from "lucide-react"
 import { useAuth } from "@/lib/auth"
-import type { Meeting } from "@/lib/types"
+import type { Department, Meeting, Project } from "@/lib/types"
+import { recordingJson } from "@/lib/recording-outbox"
+import { RecordingProjectOptions } from "./project-options"
+import { RecordingMeetingOptions } from "./meeting-options"
 import { recordingSize, recordingTime } from "@/lib/recording-types"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Command, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { useRecorder } from "./recorder-provider"
 
 export function RecorderPanel() {
   const recorder = useRecorder()
-  const { apiFetch, user } = useAuth()
+  const { apiFetch } = useAuth()
   const [title, setTitle] = React.useState("Regjistrim i ri")
   const [description, setDescription] = React.useState("")
+  const [projectId, setProjectId] = React.useState("")
+  const [projects, setProjects] = React.useState<Project[]>([])
+  const [departments, setDepartments] = React.useState<Department[]>([])
+  const [projectError, setProjectError] = React.useState("")
   const [meetingId, setMeetingId] = React.useState("")
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
+  const [meetingError, setMeetingError] = React.useState("")
+  const [meetingSearch, setMeetingSearch] = React.useState("")
+  const [meetingOpen, setMeetingOpen] = React.useState(false)
+  const meetingPickerRef = React.useRef<HTMLDivElement>(null)
+  const meetingTriggerRef = React.useRef<HTMLButtonElement>(null)
+  React.useEffect(() => {
+    if (!meetingOpen) return
+    const closeOutside = (event: PointerEvent) => {
+      if (!meetingPickerRef.current?.contains(event.target as Node)) setMeetingOpen(false)
+    }
+    document.addEventListener("pointerdown", closeOutside)
+    return () => document.removeEventListener("pointerdown", closeOutside)
+  }, [meetingOpen])
   const [devices, setDevices] = React.useState<MediaDeviceInfo[]>([])
   const [device, setDevice] = React.useState("default")
   const [source, setSource] = React.useState("monitor")
   const [consent, setConsent] = React.useState(false)
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get("meeting_id")) setMeetingId(params.get("meeting_id")!)
-    if (params.get("title")) setTitle(params.get("title")!.slice(0, 200))
+    const timer = window.setTimeout(() => {
+      if (params.get("project_id")) setProjectId(params.get("project_id")!)
+      if (params.get("meeting_id")) setMeetingId(params.get("meeting_id")!)
+      if (params.get("title")) setTitle(params.get("title")!.slice(0, 200))
+    }, 0)
     void navigator.mediaDevices?.enumerateDevices().then(all => setDevices(all.filter(d => d.kind === "audioinput"))).catch(() => {})
+    return () => window.clearTimeout(timer)
   }, [])
   React.useEffect(() => {
     if (recorder.state === "prepared") void navigator.mediaDevices.enumerateDevices().then(all => setDevices(all.filter(d => d.kind === "audioinput"))).catch(() => {})
   }, [recorder.state])
   React.useEffect(() => {
     let active = true
-    void apiFetch("/meetings?include_all_departments=true").then(async response => {
-      if (!response.ok) return
-      const all: Meeting[] = await response.json()
-      if (active) setMeetings(all.filter(m => ["ADMIN", "MANAGER"].includes(user?.role || "") || m.created_by === user?.id || m.participant_ids?.includes(user?.id || "")))
-    }).catch(() => {})
+    void apiFetch("/meetings?include_all_departments=true").then(recordingJson).then((all: Meeting[]) => {
+      if (active) { setMeetings(all); setMeetingError("") }
+    }).catch(() => { if (active) setMeetingError("Takimet nuk u ngarkuan. Rifreskoni faqen.") })
     return () => { active = false }
-  }, [apiFetch, user])
+  }, [apiFetch])
+  React.useEffect(() => {
+    let active = true
+    void Promise.all([
+      apiFetch("/projects").then(recordingJson) as Promise<Project[]>,
+      apiFetch("/departments").then(recordingJson) as Promise<Department[]>,
+    ]).then(([items, departments]) => {
+      if (active) { setProjects(items); setDepartments(departments); setProjectError("") }
+    }).catch(() => { if (active) setProjectError("Projektet nuk u ngarkuan. Rifreskoni faqen.") })
+    return () => { active = false }
+  }, [apiFetch])
   const active = ["recording", "paused", "stopping"].includes(recorder.state)
   const locked = active || recorder.busy || recorder.saving || recorder.state === "selecting" || !!recorder.manifest
   const percent = recorder.manifest?.bytes ? Math.floor(recorder.manifest.uploadedBytes / recorder.manifest.bytes * 100) : 0
-  const prepare = () => { void recorder.prepare(device === "none" ? false : device === "default" ? "" : device, source, { title: title.trim(), meetingId, description }) }
+  const normalizeSearch = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase().trim()
+  const searchTerms = normalizeSearch(meetingSearch).split(/\s+/).filter(Boolean)
+  const departmentNames = new Map(departments.map(department => [department.id, `${department.name} ${department.code}`]))
+  const filteredMeetings = meetings.filter(meeting => {
+    const date = meeting.starts_at ? new Date(meeting.starts_at) : null
+    const validDate = date && Number.isFinite(date.getTime())
+    const searchable = normalizeSearch([
+      meeting.title, departmentNames.get(meeting.department_id) || "Pa departament",
+      validDate ? date.toLocaleDateString("en-GB").replaceAll("/", ".") : "Pa datë",
+      validDate ? date.toLocaleDateString("en-GB") : "",
+      validDate ? date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "",
+    ].join(" "))
+    return searchTerms.every(term => searchable.includes(term))
+  })
+  const prepare = () => { void recorder.prepare(device === "none" ? false : device === "default" ? "" : device, source, { title: title.trim(), meetingId, description, projectId }) }
+  const selectMeeting = (id: string) => {
+    setMeetingId(id)
+    setMeetingOpen(false)
+    meetingTriggerRef.current?.focus()
+  }
   return <Card>
     <CardHeader><CardTitle className="flex items-center gap-2"><Video className="size-5" /> Regjistrim i ri</CardTitle></CardHeader>
     <CardContent className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2"><Label htmlFor="recording-title">Titulli</Label><Input id="recording-title" maxLength={200} value={title} disabled={locked} onChange={e => setTitle(e.target.value)} /></div>
-        <div className="space-y-2"><Label htmlFor="recording-meeting">Takimi (opsional)</Label><select id="recording-meeting" className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={meetingId} disabled={locked} onChange={e => setMeetingId(e.target.value)}>
-          <option value="">Pa takim të lidhur</option>{meetings.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
-        </select></div>
+        <div className="min-w-0 space-y-2"><Label htmlFor="recording-meeting">Takimi (opsional)</Label>
+          <div ref={meetingPickerRef} className="relative" onBlur={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMeetingOpen(false)
+          }} onKeyDown={event => {
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMeetingOpen(false); meetingTriggerRef.current?.focus() }
+          }}>
+            <Button ref={meetingTriggerRef} id="recording-meeting" type="button" variant="outline" className="w-full min-w-0 justify-between font-normal" disabled={locked} aria-expanded={meetingOpen && !locked} aria-controls={meetingOpen ? "recording-meeting-picker" : undefined} onClick={() => { setMeetingSearch(""); setMeetingOpen(open => !open) }} onKeyDown={event => {
+              if (event.key === "ArrowDown") { event.preventDefault(); setMeetingSearch(""); setMeetingOpen(true) }
+            }}><span className="truncate">{meetings.find(meeting => meeting.id === meetingId)?.title || "Pa takim të lidhur"}</span><ChevronDown className="size-4 shrink-0 opacity-50" /></Button>
+            {meetingOpen && !locked && <div id="recording-meeting-picker" className="absolute top-full right-0 left-0 z-[120] mt-1 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
+              <Command shouldFilter={false}>
+                <CommandInput autoFocus aria-label="Kërko takime" placeholder="Kërko me titull, departament, datë ose orë…" value={meetingSearch} onValueChange={setMeetingSearch} />
+                <div aria-hidden="true" className="grid grid-cols-[minmax(0,1fr)_6rem_3.5rem] gap-3 border-b px-3 py-2 text-xs font-semibold text-muted-foreground"><span>Takimi</span><span className="text-right">Data</span><span className="text-right">Ora</span></div>
+                <CommandList className="max-h-72" aria-label="Takimet">
+                  <CommandItem value="none" onSelect={() => selectMeeting("")}>Pa takim të lidhur</CommandItem>
+                  <RecordingMeetingOptions meetings={filteredMeetings} departments={departments} onSelect={selectMeeting} />
+                  {!filteredMeetings.length && <p role="status" className="px-2 py-4 text-center text-sm text-muted-foreground">Nuk u gjet asnjë takim.</p>}
+                </CommandList>
+              </Command>
+            </div>}
+          </div>
+          {meetingError && <p role="alert" className="text-sm text-destructive">{meetingError}</p>}</div>
+        <div className="space-y-2"><Label htmlFor="recording-project">Projekti (opsional)</Label><select id="recording-project" className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={projectId} disabled={locked} onChange={e => setProjectId(e.target.value)}>
+          <option value="">Pa projekt të lidhur</option><RecordingProjectOptions projects={projects} departments={departments} />
+        </select>{projectError && <p role="alert" className="text-sm text-destructive">{projectError}</p>}</div>
         <div className="space-y-2"><Label htmlFor="recording-source">Burimi</Label><select id="recording-source" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={source} onChange={e => setSource(e.target.value)}>
           <option value="monitor">Ekrani i plotë</option><option value="window">Dritare</option><option value="browser">Skedë e shfletuesit</option>
         </select></div>
@@ -81,7 +155,7 @@ export function RecorderPanel() {
         {["recording", "paused"].includes(recorder.state) && !recorder.screenSharing && <Button variant="outline" disabled={recorder.selectingScreen} onClick={() => void recorder.shareScreen(source)}><Monitor className="mr-2 size-4" />Ndaj ekranin përsëri</Button>}
         {!active && recorder.state !== "prepared" && <Button disabled={!consent || !title.trim() || locked || !recorder.available} onClick={prepare}><Monitor className="mr-2 size-4" /> Zgjidh ekranin</Button>}
         {recorder.state === "prepared" && <>
-          <Button disabled={!consent || !title.trim() || recorder.busy} onClick={() => void recorder.start(title.trim(), meetingId, description)}><Play className="mr-2 size-4" />{recorder.info.system ? "Fillo regjistrimin" : "Vazhdo pa audio sistemi"}</Button>
+          <Button disabled={!consent || !title.trim() || recorder.busy} onClick={() => void recorder.start(title.trim(), meetingId, description, projectId)}><Play className="mr-2 size-4" />{recorder.info.system ? "Fillo regjistrimin" : "Vazhdo pa audio sistemi"}</Button>
           <Button variant="outline" disabled={recorder.busy} onClick={() => { recorder.cancel(); prepare() }}>Ndrysho burimin</Button>
           <Button variant="outline" disabled={recorder.busy} onClick={recorder.cancel}>Anulo</Button>
         </>}

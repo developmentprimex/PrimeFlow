@@ -2,7 +2,7 @@ import asyncio
 import os
 import unittest
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 os.environ.setdefault('DATABASE_URL', 'postgresql+asyncpg://test:test@127.0.0.1/test')
@@ -218,6 +218,27 @@ class ApprovalDatabaseTests(unittest.IsolatedAsyncioTestCase):
             return await api.propose_task(self.task_id, api.Proposal(**self.actor.model_dump(), request_id=request_id,
                 change_kind='due', due_date=task.due_date + timedelta(days=1),
                 reason_code='OTHER', comment='General task postponement'), db)
+
+    async def test_unfinished_am_question_uses_the_same_diellza_approval(self):
+        from app.api.routers import discord_m2 as questions
+        async with self.sessions() as db:
+            task = await db.get(Task, self.task_id)
+            task.finish_period = 'AM'
+            await db.commit()
+        self.data = {'unfinished_priority': [{'task_id': str(self.task_id), 'title': 'AM task', 'status': 'TODO'}]}
+        async with self.sessions() as db:
+            source = (await questions.collect_questions(db, now=datetime.now(timezone.utc), only_user_id=self.uid,
+                manual=True))['jobs']
+            self.qid = next(job['id'] for job in source if job['kind'] == 'unfinished')
+            before = (await db.get(Task, self.task_id)).due_date
+        request = await self.request()
+        self.assertEqual(request['question_id'], self.qid)
+        self.assertEqual(request['status'], 'PENDING')
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Task, self.task_id)).due_date, before)
+            jobs = (await api.claim_notifications(db))['jobs']
+            review = next(job for job in jobs if job['role'] == 'review')
+            self.assertEqual(review['discord_user_id'], '44')
 
     async def test_general_am_task_approval_has_no_question_or_collection_time_dependency(self):
         request = await self.general_request()

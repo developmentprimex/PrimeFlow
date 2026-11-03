@@ -1,4 +1,5 @@
 export type MeetingRecording = {
+  project_id?: string | null; project_title?: string | null
   id: string; meeting_id: string | null; created_by: string; title: string; description: string | null
   capture_source_type: string; status: "CREATED" | "RECORDING" | "UPLOADING" | "FINALIZING" | "READY" | "FAILED"
   recording_started_at: string; recording_stopped_at: string | null; duration_seconds: number | null

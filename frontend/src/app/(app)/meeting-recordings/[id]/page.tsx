@@ -50,6 +50,7 @@ export default function RecordingDetailPage() {
     {!row && !error && <p role="status">Duke ngarkuar…</p>}
     {row && <Card><CardHeader><CardTitle>{row.title}</CardTitle></CardHeader><CardContent className="space-y-4">
       <p>{row.description}</p><p className="text-sm text-muted-foreground">{new Date(row.created_at).toLocaleString("sq-AL")} · {row.recorded_by_name} · {RECORDING_STATUS[row.status]}</p>
+      {row.project_id && <p className="text-sm">Projekti: <Link className="underline" href={`/projects/${row.project_id}`}>{row.project_title || row.project_id}</Link></p>}
       {row.meeting_title && <p className="text-sm">Takimi: {row.meeting_title}</p>}
       {row.is_partial && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Pjesë e rikuperuar nga një regjistrim i ndërprerë. Fundi i takimit mund të mungojë.</p>}
       <div className="flex flex-wrap items-center gap-3">

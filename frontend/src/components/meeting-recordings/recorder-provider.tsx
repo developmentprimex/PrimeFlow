@@ -16,8 +16,8 @@ type View = {
 }
 type RecorderContextValue = View & {
   shareScreen: (source?: string) => Promise<void>
-  prepare: (device: string | false, source: string, recording: { title: string; meetingId: string; description: string }) => Promise<void>
-  start: (title: string, meetingId: string, description: string) => Promise<void>
+  prepare: (device: string | false, source: string, recording: { title: string; meetingId: string; description: string; projectId?: string }) => Promise<void>
+  start: (title: string, meetingId: string, description: string, projectId?: string) => Promise<void>
   cancel: () => void; stop: () => void; pause: () => void; resume: () => void
   toggle: (input: "microphone" | "system") => void
   retry: (id?: string, partial?: boolean) => Promise<void>; discard: (id: string) => Promise<void>
@@ -143,7 +143,7 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
 
-  const prepare = async (device: string | false, source: string, recording: { title: string; meetingId: string; description: string }) => {
+  const prepare = async (device: string | false, source: string, recording: { title: string; meetingId: string; description: string; projectId?: string }) => {
     const r = runtime.current
     if (!r || r.starting || r.id || r.finishing) return
     setView(v => ({ ...v, error: null, savedId: null, backpressure: false }))
@@ -162,10 +162,10 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     } catch (error) { setView(v => ({ ...v, error: error instanceof Error ? error.message : String(error) })) }
     finally { r.starting = false }
     if (runtime.current === r && r.capture.state === "prepared" && r.capture.info.system) {
-      await start(recording.title, recording.meetingId, recording.description)
+      await start(recording.title, recording.meetingId, recording.description, recording.projectId)
     }
   }
-  const start = async (title: string, meetingId: string, description: string) => {
+  const start = async (title: string, meetingId: string, description: string, projectId?: string) => {
     const r = runtime.current
     if (!r || !user || r.starting || r.id || r.capture.state !== "prepared") return
     r.starting = true
@@ -173,7 +173,7 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     try {
       const session = await recordingJson(await api.current("/meeting-recordings", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-          title, description: description || null, meeting_id: meetingId || null, capture_source_type: r.capture.info.source,
+          title, description: description || null, meeting_id: meetingId || null, project_id: projectId || null, capture_source_type: r.capture.info.source,
           mime_type: r.capture.info.mime.split(";")[0], has_microphone_audio: r.capture.info.microphone,
           has_system_audio: r.capture.info.system, consent_acknowledged: true,
         }), signal: AbortSignal.timeout(30_000),

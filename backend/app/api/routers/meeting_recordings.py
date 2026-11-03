@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Requ
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, http_bearer
@@ -17,9 +17,10 @@ from app.auth.security import ALGORITHM, decode_token, require_token_type
 from app.config import settings
 from app.db import get_db
 from app.models.enums import UserRole
-from app.models.meeting import Meeting, MeetingParticipant
+from app.models.meeting import Meeting
 from app.models.meeting_recording import MeetingRecording as Recording, MeetingRecordingChunk as Chunk
 from app.models.user import User
+from app.models.project import Project
 from app.schemas.meeting_recording import RecordingComplete, RecordingCreate, RecordingOut, RecordingUpdate
 from app.services.audit import add_audit_log
 from app.services.meeting_recording_storage import LocalMeetingStorage, StorageBusy, StorageError, durable_replace
@@ -29,20 +30,6 @@ router = APIRouter()
 
 def storage():
     return LocalMeetingStorage(settings.MEETING_RECORDINGS_ROOT)
-
-
-def management(user):
-    # The existing meeting RBAC permits both roles across departments.
-    return user.role in (UserRole.ADMIN, UserRole.MANAGER)
-
-
-def meeting_scope(user):
-    participant = exists(select(MeetingParticipant.id).where(
-        MeetingParticipant.meeting_id == Meeting.id,
-        MeetingParticipant.user_id == user.id,
-        MeetingParticipant.assignment_source == "manual",
-    ))
-    return or_(Meeting.created_by == user.id, participant)
 
 
 def read_scope(user):
@@ -74,6 +61,13 @@ async def recording_output(row):
     return result
 
 
+async def validate_project(db, project_id):
+    if project_id is not None and await db.scalar(select(Project.id).where(
+        Project.id == project_id, Project.is_template.is_(False)
+    )) is None:
+        raise HTTPException(404, "Project not found")
+
+
 @router.post("", response_model=RecordingOut, status_code=201)
 async def create_recording(payload: RecordingCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     try:
@@ -87,12 +81,12 @@ async def create_recording(payload: RecordingCreate, db: AsyncSession = Depends(
     if count >= settings.MEETING_RECORDINGS_MAX_OPEN_SESSIONS:
         raise HTTPException(409, "Recover or abandon an unfinished recording first")
     if payload.meeting_id:
+        # Shared meetings may be linked by every authenticated active user.
         stmt = select(Meeting).where(Meeting.id == payload.meeting_id)
-        if not management(user):
-            stmt = stmt.where(meeting_scope(user))
         if (await db.execute(stmt)).scalar_one_or_none() is None:
-            raise HTTPException(404, "Meeting not found or recording access denied")
+            raise HTTPException(404, "Meeting not found")
     now, recording_id = datetime.now(timezone.utc), uuid.uuid4()
+    await validate_project(db, payload.project_id)
     row = Recording(id=recording_id, created_by=user.id, **payload.model_dump(exclude={"consent_acknowledged"}),
                     storage_key=f"{now:%Y/%m}/{recording_id}", status="CREATED")
     db.add(row)
@@ -105,11 +99,12 @@ async def create_recording(payload: RecordingCreate, db: AsyncSession = Depends(
 @router.get("", response_model=list[RecordingOut])
 async def list_recordings(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                           db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    rows = (await db.execute(select(Recording, User.full_name, Meeting.title)
+    rows = (await db.execute(select(Recording, User.full_name, Meeting.title, Project.title)
                             .join(User, Recording.created_by == User.id)
                             .outerjoin(Meeting, Recording.meeting_id == Meeting.id)
+                            .outerjoin(Project, Recording.project_id == Project.id)
                             .where(read_scope(user), Recording.deleted_at.is_(None)).order_by(Recording.created_at.desc()).offset(offset).limit(limit))).all()
-    return [(await recording_output(row)).model_copy(update={"recorded_by_name": name, "meeting_title": title}) for row, name, title in rows]
+    return [(await recording_output(row)).model_copy(update={"recorded_by_name": name, "meeting_title": title, "project_title": project_title}) for row, name, title, project_title in rows]
 
 
 @router.get("/{recording_id}", response_model=RecordingOut)
@@ -118,6 +113,7 @@ async def get_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(get_
     result = await recording_output(row)
     result.recorded_by_name = await db.scalar(select(User.full_name).where(User.id == row.created_by))
     result.meeting_title = await db.scalar(select(Meeting.title).where(Meeting.id == row.meeting_id)) if row.meeting_id else None
+    result.project_title = await db.scalar(select(Project.title).where(Project.id == row.project_id)) if row.project_id else None
     return result
 
 
@@ -130,6 +126,14 @@ async def update_recording(recording_id: uuid.UUID, payload: RecordingUpdate,
         raise HTTPException(404, "Recording not found")
     # Every authenticated active account may rename shared recordings.
     previous_title = row.title
+    if "project_id" in payload.model_fields_set:
+        await validate_project(db, payload.project_id)
+        previous_project_id = row.project_id
+        row.project_id = payload.project_id
+        if previous_project_id != row.project_id:
+            audit(db, user, row, "recording_project_updated",
+                  previous_project_id=str(previous_project_id) if previous_project_id else None,
+                  project_id=str(row.project_id) if row.project_id else None)
     row.title = payload.title
     audit(db, user, row, "recording_title_updated", previous_title=previous_title, title=row.title)
     await db.commit()

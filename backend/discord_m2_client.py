@@ -16,7 +16,7 @@ def actor(interaction):
 
 def prompt(job):
     row = job['snapshot']
-    if job.get('platform_status'):
+    if job.get('platform_status') and not job.get('task_actionable'):
         choice = ''
         if job.get('platform_answered') and job.get('choice'):
             choice = ('Vazhdon në PM: ' if job['kind'] == 'continuation' else 'Dorëzuar: ') + job['choice'] + '\n'
@@ -35,6 +35,15 @@ def prompt(job):
             text += '\n' + STATUS_LABELS[job['postponement']['status']]
         return text[:1900]
     text = f"<@{job['discord_user_id']}> **M2 · {KINDS[job['kind']]}**\n{row['title']}"
+    if job['kind'] == 'unfinished':
+        text += '\n\nA vazhdon me këtë detyrë në PM?'
+        related = job.get('continuation', {})
+        if related.get('answered'):
+            text += '\n✅ **Vazhdon në PM**' if related.get('choice') == 'PO' else '\n⏸ **Nuk vazhdon në PM**'
+        if job.get('postponement'):
+            from app.services.discord_m2_postponements import STATUS_LABELS
+            text += '\n' + STATUS_LABELS[job['postponement']['status']]
+        return text[:1900]
     if job['kind'] == 'postponed':
         text += f"\n**{MOVEMENTS.get(row.get('postponement_kind'), 'Shtyrje')}**"
         for field, label in (('start', 'Start'), ('due', 'Due')):
@@ -53,16 +62,30 @@ def prompt(job):
 
 def controls(job):
     view = discord.ui.View(timeout=None)
-    def finish():
-        view.add_item(discord.ui.Button(label='Raporti M2', custom_id='pf:reports:m2:0', row=4))
-        return view
     open_task = discord.ui.Button(label='Hap detyrën', custom_id=f"pf:m2:open:{job['id']}")
-    if job.get('platform_status'):
+    if job.get('platform_status') and not job.get('task_actionable'):
+        if job['kind'] == 'unfinished' and job['platform_status'] == 'Detyra u përfundua në PrimeFlow.':
+            view.add_item(discord.ui.Button(label='Mbyllur', style=discord.ButtonStyle.success,
+                custom_id=f"pf:m2:done:{job['id']}", disabled=True, row=0))
+            open_task.row = 0
+            view.add_item(open_task)
+            return view
         view.add_item(open_task)
-        return finish()
+        return view
+    if job['kind'] == 'unfinished':
+        open_task.label = 'Hape'
+        view.add_item(open_task)
+        view.add_item(discord.ui.Button(label='Mbylle', style=discord.ButtonStyle.success,
+            custom_id=f"pf:m2:done:{job['id']}"))
+        pending = job.get('postponement', {}).get('status') == 'PENDING'
+        view.add_item(discord.ui.Button(label='Në pritje të konfirmimit' if pending else 'Shtyje',
+            custom_id=f"pf:m2a:request:{job['id']}", disabled=pending))
+        view.add_item(discord.ui.Button(label='Vazhdon në PM', style=discord.ButtonStyle.primary,
+            custom_id=f"pf:m2:continue:{job['id']}", disabled=job.get('continuation', {}).get('choice') == 'PO'))
+        return view
     if job['kind'] == 'continuation' and job.get('postponement', {}).get('status') == 'APPROVED':
         view.add_item(open_task)
-        return finish()
+        return view
     if job['kind'] in {'delivery', 'continuation'}:
         view.add_item(discord.ui.Button(label='Po, vazhdon' if job['kind'] == 'continuation' else 'Po, e dorëzova', style=discord.ButtonStyle.success,
             custom_id=f"pf:m2:reply:{job['id']}:PO"))
@@ -80,7 +103,7 @@ def controls(job):
             custom_id=f"pf:m2:reason:{job['id']}",
             options=[discord.SelectOption(label=reason['label'][:100], value=reason['value']) for reason in job['reasons']]))
     view.add_item(open_task)
-    return finish()
+    return view
 
 
 def report_content(job, message):
@@ -140,11 +163,41 @@ async def handle(bot, interaction):
         return await bot.bridge(f'/bot/m2/{parts[3]}/open', actor(interaction))
 
     deferred = False
-    if direct_yes or parts[2] in {'open', 'detail', 'return', 'question'}:
+    if direct_yes or parts[2] in {'open', 'detail', 'return', 'question', 'done', 'continue'}:
         await interaction.response.defer()
         job = await load()
     else:
         job, deferred = await prepare_modal(interaction, load)
+    if parts[2] in {'done', 'continue'}:
+        if job['kind'] != 'unfinished':
+            raise ValueError('Ky veprim vlen vetëm për detyrën AM të pambyllur.')
+        notice = None
+        if parts[2] == 'continue':
+            latest = await bot.bridge(f"/bot/m2/{job['id']}/continue-pm", actor(interaction))
+        else:
+            detail = await bot.current_detail(interaction, job['task_id'])
+            result = await bot.apply(interaction, job['task_id'], detail['fingerprint'],
+                [task_ui.action('update_task', {'status': 'DONE'})], 'M2: Mbylle detyrën AM.')
+            latest = await bot.bridge(f"/bot/m2/{job['id']}/open", actor(interaction))
+            if result['status'] != 'DONE':
+                notice = result['message']
+        content = prompt(latest)
+        if notice:
+            content = content[:1500] + '\n\n⚠ ' + notice[:400]
+        await interaction.message.edit(content=content, embeds=[], view=controls(latest),
+            suppress=True, allowed_mentions=discord.AllowedMentions.none())
+        related = latest.get('continuation', {})
+        if related.get('message_id') and str(related['message_id']) != str(interaction.message.id):
+            try:
+                channel = await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+                message = await channel.fetch_message(int(related['message_id']))
+                fresh = await bot.bridge(f"/bot/m2/{related['id']}/open", actor(interaction))
+                await message.edit(content=prompt(fresh), embeds=[], view=controls(fresh),
+                    suppress=True, allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('M2 related card refresh deferred: %s', job['id'])
+        return
     if parts[2] == 'question':
         await interaction.edit_original_response(content=prompt(job), embeds=[], view=controls(job),
             allowed_mentions=discord.AllowedMentions.none())
