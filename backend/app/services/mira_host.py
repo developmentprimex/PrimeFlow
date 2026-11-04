@@ -62,7 +62,7 @@ MARKERS = {
     "F": "F", "BZ1N1": "BZ1N1",
 }
 KNOWLEDGE_CATEGORIES = ("STRUKTURA", "RREGULLORE", "DEFINIME", "PROCESE", "TJETER")
-PROMPT_VERSION = "2026-11-04.4"
+PROMPT_VERSION = "2026-11-04.5"
 
 
 def effective_protocol(value: str | None) -> str:
