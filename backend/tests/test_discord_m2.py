@@ -145,36 +145,76 @@ class M2DiscordTests(unittest.TestCase):
             interaction.followup.send.assert_not_awaited()
         asyncio.run(check())
 
-    def test_unfinished_actions_save_without_new_messages(self):
+    def test_unfinished_close_saves_without_new_messages(self):
         import discord_m2_client as client
         async def check():
             job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': 'unfinished',
                    'discord_user_id': '3', 'snapshot': {'title': 'AM task'}, 'reasons': []}
-            for action in ('done', 'continue'):
-                latest = ({**job, 'platform_status': 'Detyra u përfundua në PrimeFlow.'} if action == 'done'
-                          else {**job, 'continuation': {'answered': True, 'choice': 'PO'}})
-                interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3),
-                    data={'custom_id': f"pf:m2:{action}:{job['id']}"},
-                    response=SimpleNamespace(defer=AsyncMock()),
-                    message=SimpleNamespace(id=99, edit=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
-                bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(side_effect=[job, latest]),
-                    current_detail=AsyncMock(return_value={'fingerprint': 'current'}),
-                    apply=AsyncMock(return_value={'status': 'DONE'}))
-                await client.handle(bot, interaction)
-                interaction.response.defer.assert_awaited_once_with()
-                interaction.message.edit.assert_awaited_once()
-                interaction.followup.send.assert_not_awaited()
-                if action == 'done':
-                    self.assertEqual(bot.apply.call_args.args[3][0]['tool'], 'update_task')
-                    self.assertEqual(json.loads(bot.apply.call_args.args[3][0]['arguments_json']), {'status': 'DONE'})
-                    closed = interaction.message.edit.call_args.kwargs['view'].children
-                    self.assertEqual([button.label for button in closed], ['Mbyllur', 'Hap detyrën', 'Koment'])
-                    self.assertTrue(closed[0].disabled)
-                    self.assertEqual(closed[0].row, closed[1].row)
-                else:
-                    self.assertTrue(bot.bridge.call_args.args[0].endswith('/continue-pm'))
-                    self.assertIn('✅ **Vazhdon në PM**', interaction.message.edit.call_args.kwargs['content'])
-                    bot.apply.assert_not_awaited()
+            latest = {**job, 'platform_status': 'Detyra u përfundua në PrimeFlow.'}
+            interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3),
+                data={'custom_id': f"pf:m2:done:{job['id']}"},
+                response=SimpleNamespace(defer=AsyncMock()),
+                message=SimpleNamespace(id=99, edit=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
+            bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(side_effect=[job, latest]),
+                current_detail=AsyncMock(return_value={'fingerprint': 'current'}),
+                apply=AsyncMock(return_value={'status': 'DONE'}))
+            await client.handle(bot, interaction)
+            interaction.response.defer.assert_awaited_once_with()
+            interaction.message.edit.assert_awaited_once()
+            interaction.followup.send.assert_not_awaited()
+            self.assertEqual(bot.apply.call_args.args[3][0]['tool'], 'update_task')
+            self.assertEqual(json.loads(bot.apply.call_args.args[3][0]['arguments_json']), {'status': 'DONE'})
+            closed = interaction.message.edit.call_args.kwargs['view'].children
+            self.assertEqual([button.label for button in closed], ['Mbyllur', 'Hap detyrën', 'Koment'])
+            self.assertTrue(closed[0].disabled)
+            self.assertEqual(closed[0].row, closed[1].row)
+        asyncio.run(check())
+
+    def test_unfinished_continue_requires_a_comment_before_saving(self):
+        import discord_m2_client as client
+        async def check():
+            job = {'id': str(uuid.uuid4()), 'task_id': str(uuid.uuid4()), 'kind': 'unfinished',
+                'discord_user_id': '3', 'snapshot': {'title': 'AM task'}, 'reasons': []}
+            message = SimpleNamespace(id=99, edit=AsyncMock())
+            interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3), message=message,
+                data={'custom_id': f"pf:m2:continue:{job['id']}"},
+                response=SimpleNamespace(defer=AsyncMock(), send_modal=AsyncMock()))
+            bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(return_value=job), error_message=str)
+            await client.handle(bot, interaction)
+            modal = interaction.response.send_modal.call_args.args[0]
+            self.assertIsInstance(modal, client.ContinuePMModal)
+            self.assertTrue(modal.comment.required)
+            self.assertEqual(bot.bridge.await_count, 1)  # Opening/cancelling never saves PO.
+            message.edit.assert_not_awaited()
+            modal.comment._value = 'Nuk e preka në AM, po përfundoja detyrën tjetër.'
+            latest = {**job, 'continuation': {'answered': True, 'choice': 'PO'}}
+            bot.bridge.return_value = latest
+            submitted = SimpleNamespace(id=77, guild_id=1, channel_id=2, user=SimpleNamespace(id=3),
+                response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
+            await modal.on_submit(submitted)
+            path, payload = bot.bridge.call_args.args
+            self.assertTrue(path.endswith('/continue-pm'))
+            self.assertEqual(payload['comment'], str(modal.comment))
+            self.assertEqual(payload['request_id'], '77')
+            self.assertIsNone(payload['expected_answered_at'])
+            self.assertIn('✅ **Vazhdon në PM**', message.edit.call_args.kwargs['content'])
+            submitted.followup.send.assert_not_awaited()
+        asyncio.run(check())
+
+    def test_unfinished_continue_does_not_mark_card_saved_on_api_failure(self):
+        import discord_m2_client as client
+        async def check():
+            message = SimpleNamespace(edit=AsyncMock())
+            job = {'id': str(uuid.uuid4()), 'continuation': {'answered_at': 'previous'}}
+            bot = SimpleNamespace(bridge=AsyncMock(side_effect=ValueError('Shkruaj komentin.')), error_message=str)
+            modal = client.ContinuePMModal(bot, job, message)
+            modal.comment._value = '   '
+            interaction = SimpleNamespace(id=77, guild_id=1, channel_id=2, user=SimpleNamespace(id=3),
+                response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
+            await modal.on_submit(interaction)
+            self.assertEqual(bot.bridge.call_args.args[1]['expected_answered_at'], 'previous')
+            message.edit.assert_not_awaited()
+            interaction.followup.send.assert_awaited_once()
         asyncio.run(check())
 
     def test_yes_saves_without_opening_optional_comment(self):

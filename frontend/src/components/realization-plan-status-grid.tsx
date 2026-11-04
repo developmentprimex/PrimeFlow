@@ -17,36 +17,37 @@ const legendItems = [
   { label: "Deadline important i pambyllur (alarm)", className: "bg-red-600" },
 ]
 
-export function RealizationStatusLegend() {
+export function RealizationStatusLegend({ deadlineLabel }: { deadlineLabel?: string } = {}) {
   return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-600" aria-label="Legjenda e ngjyrave">
-    {legendItems.map((item) => <span key={item.label} className="inline-flex items-center gap-1 whitespace-nowrap"><span className={`h-2.5 w-2.5 rounded-sm ${item.className}`} aria-hidden="true" />{item.label}</span>)}
+    {legendItems.map((item) => <span key={item.label} className="inline-flex items-center gap-1 whitespace-nowrap"><span className={`h-2.5 w-2.5 rounded-sm ${item.className}`} aria-hidden="true" />{item.className === "bg-red-600" && deadlineLabel ? deadlineLabel : item.label}</span>)}
   </div>
 }
 
-export function RealizationPlanStatusGrid({ completed, progress, postponed, noProgress, onSelect, columns = 4 }: {
+export function RealizationPlanStatusGrid({ completed, progress, postponed, noProgress, onSelect, columns = 4, combinePostponed = false }: {
   completed: number
   progress: number
   postponed: number
   noProgress: number
   onSelect?: (status: RealizationStatusKey) => void
   columns?: 2 | 4
+  combinePostponed?: boolean
 }) {
   const items = [
     { key: "completed" as const, label: "Kryer", value: completed, className: "border-emerald-200 bg-emerald-50 text-emerald-800" },
     { key: "progress" as const, label: "Progres", value: progress, className: "border-amber-200 bg-amber-50 text-amber-800" },
     { key: "postponed" as const, label: "Shtyrë", value: postponed, className: "border-violet-200 bg-violet-50 text-violet-800" },
-    { key: "no-progress" as const, label: "Pa progres", value: noProgress, className: "border-pink-300 bg-pink-100 text-pink-900" },
-  ]
-  return <div className={`mt-1 grid gap-1 ${columns === 2 ? "grid-cols-2" : "grid-cols-4"}`}>
+    { key: "no-progress" as const, label: "Pa progres", value: noProgress + (combinePostponed ? postponed : 0), className: "border-pink-300 bg-pink-100 text-pink-900" },
+  ].filter(item => !combinePostponed || item.key !== "postponed")
+  return <div className={`mt-1 grid gap-1 ${combinePostponed ? "grid-cols-3" : columns === 2 ? "grid-cols-2" : "grid-cols-4"}`}>
     {items.map((item) => {
       const className = `flex min-w-0 items-center justify-center gap-1 rounded border px-1 py-0.5 ${item.className}${onSelect ? " hover:brightness-95" : ""}`
-      const content = <strong className="text-base leading-5 tabular-nums" title={item.label} aria-label={`${item.label}: ${item.value}`}>{item.value}</strong>
+      const content = <><strong className="text-base leading-5 tabular-nums" title={item.label} aria-label={`${item.label}: ${item.value}`}>{item.value}</strong>{combinePostponed && item.key === "no-progress" && postponed > 0 ? <span className="shrink-0 whitespace-nowrap text-[10px] font-bold text-violet-800">· {postponed} shtyrë</span> : null}</>
       return onSelect ? <button type="button" key={item.key} className={className} onClick={() => onSelect(item.key)}>{content}</button> : <div key={item.key} className={className}>{content}</div>
     })}
   </div>
 }
 
-export function RealizationDeadlineStatusGrid({ completed, progress, postponed, noProgress, critical }: {
+export function RealizationDeadlineStatusGrid({ completed, progress, postponed, noProgress, critical, combinePostponed = false }: {
   completed: number
   progress: number
   postponed: number
@@ -54,6 +55,7 @@ export function RealizationDeadlineStatusGrid({ completed, progress, postponed, 
   // The red badge only says how many deadlines were important, never which
   // state they ended in. Marking that box answers it without an extra click.
   critical?: { completed: number; progress: number; postponed: number; noProgress: number }
+  combinePostponed?: boolean
 }) {
   const items = [
     // An important deadline that was met is reassuring; one left open is an
@@ -61,9 +63,9 @@ export function RealizationDeadlineStatusGrid({ completed, progress, postponed, 
     { label: "Kryer", value: completed, critical: critical?.completed ?? 0, alarming: false, className: "border-emerald-200 bg-emerald-50 text-emerald-800" },
     { label: "Në progres", value: progress, critical: critical?.progress ?? 0, alarming: true, className: "border-amber-200 bg-amber-50 text-amber-800" },
     { label: "Shtyrë", value: postponed, critical: critical?.postponed ?? 0, alarming: true, className: "border-violet-200 bg-violet-50 text-violet-800" },
-    { label: "Pa progres", value: noProgress, critical: critical?.noProgress ?? 0, alarming: true, className: "border-pink-300 bg-pink-100 text-pink-900" },
-  ]
-  return <div className="mt-1 grid grid-cols-4 gap-1">
+    { label: "Pa progres", value: noProgress + (combinePostponed ? postponed : 0), critical: (critical?.noProgress ?? 0) + (combinePostponed ? critical?.postponed ?? 0 : 0), alarming: true, className: "border-pink-300 bg-pink-100 text-pink-900" },
+  ].filter(item => !combinePostponed || item.label !== "Shtyrë")
+  return <div className={`mt-1 grid gap-1 ${combinePostponed ? "grid-cols-3" : "grid-cols-4"}`}>
     {items.map((item) => {
       const alarm = item.critical > 0 && item.alarming
       return <div
@@ -76,6 +78,7 @@ export function RealizationDeadlineStatusGrid({ completed, progress, postponed, 
             : `${item.label}: ${item.value}`}
       >
         <strong className="text-sm leading-5 tabular-nums" aria-label={`${item.label}: ${item.value}`}>{item.value}</strong>
+        {combinePostponed && item.label === "Pa progres" && postponed > 0 ? <span className="shrink-0 whitespace-nowrap text-[10px] font-bold">· {postponed} shtyrë</span> : null}
         {item.critical ? <span
           className={`self-start text-[10px] font-black leading-none tabular-nums ${alarm ? "text-white" : "text-red-700"}`}
           aria-label={alarm ? `alarm: ${item.critical} me deadline important` : `${item.critical} me deadline important`}

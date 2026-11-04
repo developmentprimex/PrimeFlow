@@ -87,7 +87,7 @@ test("the deadline popover shows a single task with its separate postponement hi
 })
 
 test("the weekly table uses unique deadline counts in its All row", () => {
-  const popovers = [], grids = []
+  const popovers = [], grids = [], planGrids = []
   const empty = () => null
   const { WeeklyRealizationTable } = load("../src/app/(app)/realization/components/WeeklyRealizationTable.tsx", {
     "@/components/realization-review-cells": { RealizationReviewCells: empty },
@@ -96,7 +96,7 @@ test("the weekly table uses unique deadline counts in its All row", () => {
     "@/components/realization-quantity": { RealizationQuantityDelta: empty, RealizationQuantitySummary: empty },
     "@/components/realization-plan-summary": { RealizationPlanSummary: empty },
     "@/components/realization-plan-status-grid": {
-      RealizationPlanStatusGrid: empty, RealizationExtraStatusGrid: empty, RealizationStatusLegend: empty,
+      RealizationPlanStatusGrid: props => { planGrids.push(props); return null }, RealizationExtraStatusGrid: empty, RealizationStatusLegend: empty,
       RealizationDeadlineStatusGrid: props => { grids.push(props); return null },
       metricBand: "", metricCell: "", metricHeadline: "",
     },
@@ -125,5 +125,7 @@ test("the weekly table uses unique deadline counts in its All row", () => {
   assert.equal(popovers[0].tasks.length, 1)
   assert.equal(popovers[0].tasks[0].person, "Elsa, Rinesa")
   assert.equal(grids[0].postponed, 1)
+  assert.ok(grids.every(grid => grid.combinePostponed))
+  assert.ok(planGrids.every(grid => grid.combinePostponed))
   assert.equal(grids[0].completed + grids[0].progress + grids[0].postponed + grids[0].noProgress, 1)
 })

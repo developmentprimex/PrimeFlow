@@ -105,7 +105,7 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
 
   const planCell = (value: ReturnType<typeof weeklyMetrics> | typeof total) => <>
     <p className={cn(metricHeadline, "font-semibold text-slate-900")}><span className="tabular-nums">Plan {value.planned}</span> <span className="text-slate-400">+</span> <span className="tabular-nums text-blue-800">Ekstra {value.extra}</span> <span className="text-slate-400">=</span> <span className="text-base font-bold tabular-nums">{value.planned + value.extra} total</span></p>
-    <RealizationPlanStatusGrid completed={value.completed} progress={value.progress} postponed={value.postponed} noProgress={value.noProgress} />
+    <RealizationPlanStatusGrid completed={value.completed} progress={value.progress} postponed={value.postponed} noProgress={value.noProgress} combinePostponed />
   </>
   const extraCell = (value: ReturnType<typeof weeklyMetrics> | typeof total) => <>
     <p className={cn(metricHeadline, "justify-center gap-1 font-semibold text-blue-900")}>
@@ -127,7 +127,7 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
         <p><span className="text-base tabular-nums text-emerald-700">{value.deadlinesCompleted}/{value.deadlines}</span></p>
         {value.criticalDeadlines ? <span className="rounded border border-red-600 bg-red-200 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-red-950" title={criticalDeadlineSummary(value.deadlineTasks)}>{value.criticalDeadlinesCompleted}/{value.criticalDeadlines}</span> : null}
       </div>
-      <RealizationDeadlineStatusGrid completed={value.deadlinesCompleted} progress={value.deadlinesInProgress} postponed={value.deadlinesPostponed} noProgress={value.deadlinesNoProgress} critical={criticalDeadlineCounts(value.deadlineTasks)} />
+      <RealizationDeadlineStatusGrid completed={value.deadlinesCompleted} progress={value.deadlinesInProgress} postponed={value.deadlinesPostponed} noProgress={value.deadlinesNoProgress} critical={criticalDeadlineCounts(value.deadlineTasks)} combinePostponed />
     </RealizationDeadlineTasksPopover>
   }
   const percentCell = (percent: number) => <><p className={cn(metricHeadline, "justify-center text-base font-bold tabular-nums", percent >= 100 ? "text-emerald-700" : percent >= 50 ? "text-amber-700" : "text-rose-700")}>{percent}%</p><div className="mx-auto mt-1 h-1.5 w-16 overflow-hidden rounded-full bg-slate-200"><div className={cn("h-full rounded-full", percent >= 100 ? "bg-emerald-500" : percent >= 50 ? "bg-amber-500" : "bg-rose-500")} style={{ width: `${percent}%` }} /></div></>

@@ -5,6 +5,7 @@ import * as React from "react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import { realizationTaskGroups } from "@/lib/realization-task-groups"
+import { dailyRealizationColumnKind, dailyRealizationTableItems } from "@/lib/realization-table-items"
 import { RealizationTaskDetails } from "@/components/realization-task-details"
 import { RealizationTaskList } from "@/components/realization-task-list"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,14 +14,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { RealizationReviewCells } from "@/components/realization-review-cells"
 import { RealizationDailyPersonComment } from "@/components/realization-daily-person-comment"
 import { RealizationQuantityDelta } from "@/components/realization-quantity"
-import { RealizationDeadlineStatusGrid, RealizationStatusLegend, metricBand, metricCell, metricHeadline } from "@/components/realization-plan-status-grid"
-import { RealizationDeadlineTasksPopover, criticalDeadlineCounts, criticalDeadlineSummary, deadlineAlarmCount } from "@/components/realization-deadline-tasks"
+import { RealizationStatusLegend, metricBand, metricCell, metricHeadline } from "@/components/realization-plan-status-grid"
 import { RealizationPlanRlzPopover } from "@/components/realization-plan-rlz-popover"
 import { realizationDepartmentTag } from "@/lib/department-name"
 import type { DailyRealizationPerson, Department, RealizationItem, RealizationPersonResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-export function DailyStaffTable({ people, filterPeople, departments, departmentId, personFilter, onDepartmentFilter, onPersonFilter, periodIds, results, sort, onSort, onSelect, onSelectDeadline, reviewVersion, onReviewSaved, onPrepareResult, day, canConfirm = false }: {
+export function DailyStaffTable({ people, filterPeople, departments, departmentId, personFilter, onDepartmentFilter, onPersonFilter, periodIds, results, sort, onSort, onSelect, reviewVersion, onReviewSaved, onPrepareResult, day, canConfirm = false }: {
   canConfirm?: boolean
   day: string
   people: DailyRealizationPerson[]; departments: Department[]; periodIds: Record<string, string>
@@ -30,13 +30,13 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
   sort: string; onSort: (value: string) => void; onSelect: (userId: string) => void; reviewVersion: number
   onReviewSaved: () => void | Promise<void>
   onPrepareResult: (departmentId: string, userId: string) => Promise<void>
-  onSelectDeadline: (userId: string, state: "all" | "completed" | "not-completed" | "critical-all" | "critical-completed" | "critical-not-completed") => void
 }) {
   const { apiFetch } = useAuth()
   const [saving, setSaving] = React.useState(false)
   const [selectedTask, setSelectedTask] = React.useState<{ person: DailyRealizationPerson; item: RealizationItem } | null>(null)
   const savingRef = React.useRef(false)
-  const groups = realizationTaskGroups.filter(group => people.some(person => person.metrics.realization_items?.some(item => item.kind === group.kind)))
+  const tableRows = people.map(person => ({ person, items: dailyRealizationTableItems(person.metrics, person.tasks) }))
+  const groups = realizationTaskGroups.filter(group => tableRows.some(row => row.items.some(item => dailyRealizationColumnKind(item.kind) === group.kind)))
   const confirm = async (person: DailyRealizationPerson, item: RealizationItem, confirmed: boolean) => {
     if (!canConfirm || savingRef.current || !item.task_id || !item.confirmation_evidence_key) return
     savingRef.current = true
@@ -60,16 +60,10 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
       setSaving(false)
     }
   }
-  const deadlineTotals = people.reduce((totals, person) => ({
-    completed: totals.completed + person.metrics.deadlines_completed_count,
-    total: totals.total + person.metrics.deadlines_today_count,
-    criticalCompleted: totals.criticalCompleted + person.metrics.critical_deadlines_completed_count,
-    criticalTotal: totals.criticalTotal + person.metrics.critical_deadlines_today_count,
-  }), { completed: 0, total: 0, criticalCompleted: 0, criticalTotal: 0 })
 
   return <Card className="gap-0 rounded-md py-0 shadow-sm">
     <CardHeader className="flex-row items-center justify-between border-b px-3 py-2">
-      <div className="flex min-w-0 items-center gap-4"><CardTitle className="text-xs uppercase tracking-wider">Stafi</CardTitle><RealizationStatusLegend /></div>
+      <div className="flex min-w-0 items-center gap-4"><CardTitle className="text-xs uppercase tracking-wider">Stafi</CardTitle><RealizationStatusLegend deadlineLabel="Due date / Deadline i pambyllur" /></div>
       <Select value={sort} onValueChange={onSort}>
         <SelectTrigger className="h-8 w-52 text-xs"><ArrowDownUp className="h-4 w-4" /><SelectValue /></SelectTrigger>
         <SelectContent>
@@ -83,23 +77,15 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
       <Table style={{ width: "100%" }} className="table-fixed text-[11px] [&_th]:whitespace-normal [&_th]:break-words [&_td]:whitespace-normal [&_td]:break-words [&_[data-slot=button]]:min-w-0 [&_[data-slot=button]]:whitespace-normal [&_[data-slot=button]]:text-[11px] [&_th]:border [&_th]:border-slate-200 [&_th]:px-2 [&_th]:py-1.5 [&_td]:border [&_td]:border-slate-200 [&_td]:px-2 [&_td]:py-1">
         <colgroup>
           <col style={{ width: "3%" }} /><col style={{ width: "9%" }} /><col style={{ width: "3%" }} />
-          {groups.map(group => <col key={group.kind} style={{ width: `${45 / Math.max(1, groups.length)}%` }} />)}
-          <col style={{ width: "5%" }} /><col style={{ width: "9%" }} /><col style={{ width: "5%" }} /><col style={{ width: "8%" }} /><col style={{ width: "13%" }} />
+          {groups.map(group => <col key={group.kind} style={{ width: `${54 / Math.max(1, groups.length)}%` }} />)}
+          <col style={{ width: "5%" }} /><col style={{ width: "5%" }} /><col style={{ width: "8%" }} /><col style={{ width: "13%" }} />
         </colgroup>
         <TableHeader className="sticky top-0 z-20 bg-slate-100">
           <TableRow className="bg-white">
             <TableHead className="w-11" />
             <TableHead><Select value={personFilter} onValueChange={onPersonFilter}><SelectTrigger size="sm" aria-label="Filtro personin" className="w-full min-w-0 gap-1 bg-white px-2 text-[11px] [&_[data-slot=select-value]]:min-w-0"><SelectValue placeholder="Të gjithë" /></SelectTrigger><SelectContent><SelectItem value="ALL">Të gjithë</SelectItem>{[...new Map(filterPeople.map(person => [person.user_id, person])).values()].sort((a, b) => a.user_name.localeCompare(b.user_name)).map(person => <SelectItem key={person.user_id} value={person.user_id}>{person.user_name}</SelectItem>)}</SelectContent></Select></TableHead>
             <TableHead><Select value={departmentId} onValueChange={onDepartmentFilter}><SelectTrigger size="sm" aria-label="Filtro departamentin" className="w-full min-w-0 gap-1 bg-white px-1 text-[11px] [&_[data-slot=select-value]]:min-w-0"><SelectValue placeholder="DEP" /></SelectTrigger><SelectContent><SelectItem value="ALL">Të gjitha</SelectItem>{departments.map(department => <SelectItem key={department.id} value={department.id}>{realizationDepartmentTag(department)}</SelectItem>)}</SelectContent></Select></TableHead>
-            <TableHead colSpan={groups.length + 1} />
-            <TableHead className="bg-orange-50 px-2 text-[10px] normal-case">
-              <div className="flex items-center justify-between gap-1 flex-wrap">
-                <span className="font-semibold text-slate-600">Due date</span>
-                <span className="font-bold tabular-nums text-emerald-700">{deadlineTotals.completed}/{deadlineTotals.total}</span>
-              </div>
-              {deadlineTotals.criticalTotal > 0 ? <div className="mt-0.5 flex items-center justify-between gap-1 flex-wrap text-red-700"><span>Deadline important</span><span className="font-bold tabular-nums">{deadlineTotals.criticalCompleted}/{deadlineTotals.criticalTotal}</span></div> : null}
-            </TableHead>
-            <TableHead colSpan={3} />
+            <TableHead colSpan={groups.length + 4} />
           </TableRow>
           <TableRow>
             <TableHead className="w-11 text-center text-[11px] uppercase">Nr.</TableHead>
@@ -107,14 +93,13 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
             <TableHead className="text-center text-[11px] uppercase">DEP</TableHead>
             {groups.map(group => <TableHead key={group.kind} className={cn("text-[11px] uppercase", group.className)}>{group.label}</TableHead>)}
             <TableHead className="bg-teal-100 text-[11px] uppercase">Kryer / Totali</TableHead>
-            <TableHead className="bg-orange-100 text-[11px] uppercase">Due date / Deadline Kryer/Totali</TableHead>
             <TableHead className="text-center text-[11px] uppercase">Plan RLZ</TableHead>
             <TableHead className="text-[11px] uppercase">Vlerësimi</TableHead>
             <TableHead className="text-[11px] uppercase">Koment ditor</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {people.map((person, index) => {
+          {tableRows.map(({ person, items: tableItems }, index) => {
             const metrics = person.metrics
             const realization = metrics.raw_plan_realization == null ? null : Math.min(100, metrics.raw_plan_realization)
             const department = departments.find(item => item.id === person.department_id)
@@ -124,7 +109,7 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
                 <TableCell className="text-center tabular-nums text-slate-500">{index + 1}</TableCell>
                 <TableCell><span className="block whitespace-normal text-[12px] font-bold leading-5 text-slate-800">{person.user_name}</span></TableCell>
                 <TableCell className="text-center text-xs font-bold uppercase text-slate-600" title={department?.name}>{realizationDepartmentTag(department)}</TableCell>
-                <TableCell colSpan={groups.length + 4} className="bg-slate-100/80 text-center"><span className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-700">{statusLabel}</span></TableCell>
+                <TableCell colSpan={groups.length + 3} className="bg-slate-100/80 text-center"><span className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-700">{statusLabel}</span></TableCell>
                 <TableCell><RealizationDailyPersonComment compact periodId={periodIds[person.department_id] || ""} userId={person.user_id} userName={person.user_name} day={day} /></TableCell>
               </TableRow>
             }
@@ -135,25 +120,16 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
               </TableCell>
               <TableCell className="text-center text-xs font-bold uppercase text-slate-600" title={department?.name}>{realizationDepartmentTag(department)}</TableCell>
               {groups.map(group => {
-                const items = (metrics.realization_items ?? []).filter(item => item.kind === group.kind)
+                const items = tableItems.filter(item => dailyRealizationColumnKind(item.kind) === group.kind)
                 return <TableCell key={group.kind} className={cn("align-top", group.className)}>
                   {items.length ? <p className="pt-1 text-[10px] font-semibold">{items.length} detyra</p> : null}
-                  <RealizationTaskList items={items} onSelect={item => setSelectedTask({ person, item })} />
+                  <RealizationTaskList items={items} deadlines={metrics.deadline_tasks} onSelect={item => setSelectedTask({ person, item })} />
                 </TableCell>
               })}
               <TableCell className={cn(metricCell, "bg-teal-50/60", metrics.quantity_task_count > 0 && metrics.quantity_delta < 0 && "bg-rose-50/60")}>
                 {metrics.quantity_task_count
                   ? <><p className={cn(metricHeadline, "font-semibold")}><span className="text-xl font-bold tabular-nums">{metrics.quantity_completed_count}/{metrics.quantity_planned_count}</span></p><div className={cn(metricBand, "text-base font-bold")}><RealizationQuantityDelta value={metrics.quantity_delta} /></div></>
                   : <p className={cn(metricHeadline, "text-slate-400")}>Pa sasi</p>}
-              </TableCell>
-              <TableCell className={cn(metricCell, "[&_strong]:text-[11px] [&_.grid]:gap-0.5 [&_.grid>div]:px-0 [&_.grid>div]:flex-wrap", "bg-orange-50/70", metrics.deadlines_no_progress_count > 0 && "bg-pink-50/80", deadlineAlarmCount(metrics.deadline_tasks ?? []) > 0 && "!border-2 !border-red-600")}>
-                <div className={cn(metricHeadline, "justify-between gap-2")}>
-                  <button type="button" className="font-semibold hover:underline" title={metrics.critical_deadlines_today_count > 0 ? `${metrics.critical_deadlines_today_count} deadline me prioritet` : "Shfaq detyrat që kishin deadline këtë ditë"} onClick={() => onSelectDeadline(person.user_id, "all")}><span className="text-base tabular-nums text-emerald-700">{metrics.deadlines_completed_count}/{metrics.deadlines_today_count}</span></button>
-                  {metrics.critical_deadlines_today_count > 0 ? <button type="button" className="rounded border border-red-600 bg-red-200 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-red-950 hover:underline" title={criticalDeadlineSummary(metrics.deadline_tasks ?? [])} onClick={() => onSelectDeadline(person.user_id, "critical-all")}>{metrics.critical_deadlines_completed_count}/{metrics.critical_deadlines_today_count}</button> : null}
-                </div>
-                <RealizationDeadlineTasksPopover tasks={metrics.deadline_tasks ?? []} title={`Afatet e ditës · ${person.user_name}`}>
-                  <RealizationDeadlineStatusGrid completed={metrics.deadlines_completed_count} progress={metrics.deadlines_in_progress_count} postponed={metrics.deadlines_postponed_count} noProgress={metrics.deadlines_no_progress_count} critical={criticalDeadlineCounts(metrics.deadline_tasks ?? [])} />
-                </RealizationDeadlineTasksPopover>
               </TableCell>
               <TableCell className={cn(metricCell, "text-center")}>
                 <RealizationPlanRlzPopover metrics={metrics} title={`Plan RLZ · ${person.user_name}`}>
@@ -169,13 +145,13 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
               />
             </TableRow>
           })}
-          {!people.length && <TableRow><TableCell colSpan={groups.length + 8} className="text-center text-slate-500">Nuk ka aktivitet për këtë ditë.</TableCell></TableRow>}
+          {!people.length && <TableRow><TableCell colSpan={groups.length + 7} className="text-center text-slate-500">Nuk ka aktivitet për këtë ditë.</TableCell></TableRow>}
         </TableBody>
       </Table>
       <div className="grid gap-px border-t bg-slate-200 text-[11px] text-slate-500 md:grid-cols-3">
-        <p className="bg-white px-3 py-2"><b className="text-slate-700">Detyrat:</b> kolonat ndjekin klasifikimin e Plan RLZ. Laurent Hoxha dhe Diellza Veliu mund të konfirmojnë detyrat për të hequr penalizimin. Konfirmimi ruan statusin e detyrës.</p>
+        <p className="bg-white px-3 py-2"><b className="text-slate-700">Detyrat:</b> Pa progres përfshin edhe detyrat e shtyra, me shënimin Shtyrë pranë titullit. Kliko detyrën për detajet dhe konfirmimin.</p>
         <p className="bg-white px-3 py-2"><b className="text-slate-700">Sasia:</b> kryer / planifikuar. Diferenca tregon mungesën ose tejkalimin e produkteve/pikëve.</p>
-        <p className="bg-white px-3 py-2"><b className="text-slate-700">Deadline:</b> kryer / gjithsej. Kutia me unazë të kuqe mban sipër numrin e kuq të atyre që janë deadline important. Kliko kutitë për të parë cilat detyra kishin afat dhe çfarë ndodhi me secilën.</p>
+        <p className="bg-white px-3 py-2"><b className="text-slate-700">Afatet:</b> titulli i kuq tregon afat të pambyllur. Kliko titullin për detajet.</p>
       </div>
     </CardContent>
     <RealizationTaskDetails selection={selectedTask} day={day} canConfirm={canConfirm} busy={saving} onClose={() => setSelectedTask(null)} onConfirm={confirmed => { if (selectedTask) void confirm(selectedTask.person, selectedTask.item, confirmed) }} />

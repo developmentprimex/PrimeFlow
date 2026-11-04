@@ -90,14 +90,19 @@ të lidhur me `/lidh`, dërgon pyetje me përmendje për detyrat e caktuara atij
 
 - Detyrat AM/AM-PM të pakryera me Due Date sot, përfshirë 08:00 dhe Deadline,
   duke përdorur pikërisht përzgjedhjen e raportit M2.
+  **Vazhdon në PM** hap formularin me koment të detyrueshëm për punën e pakryer
+  në AM. Dërgimi ruan bashkë komentin te detyra AM në M2 PIKAT PËR RAPORTIM
+  dhe PO/komentin te vazhdimi PM, përfshirë emailin/eksportet. Anulimi nuk ruan
+  PO. Komenti personal shtohet një herë; datat, periudha dhe arsyeja RLZ ruhen.
+  Te kartat që janë tashmë **M2 · PM**, **Po, vazhdon** ruhet direkt pa formular;
+  komenti mbetet veprim më vete.
 - Shtyrjet SOT/SOT ose Deadline dhe shtyrjet e sotme para pauzës. Pyetja dallon
   Start + Due, vetëm Start dhe vetëm Due, dhe tregon datat para/pas ndryshimit.
   Një shtyrje që ka tashmë arsyen dhe komentin për ndryshimin nuk pyetet përsëri.
   Nëse e njëjta shtyrje është në të dyja tabelat, dërgohet vetëm një pyetje.
 - Progresi për detyrat e hapura AM/AM-PM me F, GA ose personale me GA.
 - Dorëzimi për secilën detyrë M2 ose M2/3: PO/JO; JO kërkon koment.
-  PO ruhet me një klikim dhe hap direkt formularin e komentit opsional.
-  Mbyllja pa koment nuk e anulon PO; komenti mund të ndryshohet edhe më vonë.
+  PO ruhet me një klikim; komenti mund të shtohet veçmas nga **Koment**.
   Ruajtja përditëson të njëjtën pyetje në Discord pa mesazhe të reja konfirmimi.
   Teksti i komentit ruhet në PrimeFlow dhe nuk afishohet poshtë pyetjes në Discord.
 

@@ -175,6 +175,49 @@ class ReplyModal(discord.ui.Modal):
             await interaction.followup.send(self.bot.error_message(exc), ephemeral=True)
 
 
+async def refresh_unfinished(bot, interaction, latest, message, *, notice=None):
+    content = prompt(latest)
+    if notice:
+        content = content[:1500] + '\n\n⚠ ' + notice[:400]
+    await message.edit(content=content, embeds=[], view=controls(latest),
+        suppress=True, allowed_mentions=discord.AllowedMentions.none())
+    related = latest.get('continuation', {})
+    if related.get('message_id') and str(related['message_id']) != str(message.id):
+        try:
+            channel = await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
+            pm_message = await channel.fetch_message(int(related['message_id']))
+            fresh = await bot.bridge(f"/bot/m2/{related['id']}/open", actor(interaction))
+            await pm_message.edit(content=prompt(fresh), embeds=[], view=controls(fresh),
+                suppress=True, allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('M2 related card refresh deferred: %s', latest['id'])
+
+
+class ContinuePMModal(discord.ui.Modal):
+    def __init__(self, bot, job, source_message):
+        super().__init__(title='Vazhdon në PM · Komenti AM', timeout=900)
+        self.bot, self.job, self.source_message = bot, job, source_message
+        self.comment = discord.ui.TextInput(label='Pse nuk u krye në AM?',
+            placeholder='Shpjego çfarë ndodhi në AM dhe çfarë do të vazhdosh në PM.',
+            style=discord.TextStyle.paragraph, required=True, max_length=4000)
+        self.add_item(self.comment)
+
+    async def on_submit(self, interaction):
+        await interaction.response.defer()
+        try:
+            latest = await self.bot.bridge(f"/bot/m2/{self.job['id']}/continue-pm", {**actor(interaction),
+                'comment': str(self.comment), 'request_id': str(interaction.id),
+                'expected_answered_at': self.job.get('continuation', {}).get('answered_at')})
+        except Exception as exc:
+            await interaction.followup.send(self.bot.error_message(exc), ephemeral=True)
+            return
+        try:
+            await refresh_unfinished(self.bot, interaction, latest, self.source_message)
+        except Exception:
+            await interaction.followup.send('Komenti dhe vazhdimi u ruajtën në M2, por karta nuk u rifreskua.', ephemeral=True)
+
+
 async def handle(bot, interaction):
     parts = interaction.data['custom_id'].split(':')
     direct_yes = parts[2] == 'reply' and parts[4] == 'PO'
@@ -183,7 +226,7 @@ async def handle(bot, interaction):
         return await bot.bridge(f'/bot/m2/{parts[3]}/open', actor(interaction))
 
     deferred = False
-    if direct_yes or parts[2] in {'open', 'detail', 'return', 'question', 'done', 'continue'}:
+    if direct_yes or parts[2] in {'open', 'detail', 'return', 'question', 'done'}:
         await interaction.response.defer()
         job = await load()
     else:
@@ -194,32 +237,17 @@ async def handle(bot, interaction):
     if parts[2] in {'done', 'continue'}:
         if job['kind'] != 'unfinished':
             raise ValueError('Ky veprim vlen vetëm për detyrën AM të pambyllur.')
-        notice = None
         if parts[2] == 'continue':
-            latest = await bot.bridge(f"/bot/m2/{job['id']}/continue-pm", actor(interaction))
-        else:
-            detail = await bot.current_detail(interaction, job['task_id'])
-            result = await bot.apply(interaction, job['task_id'], detail['fingerprint'],
-                [task_ui.action('update_task', {'status': 'DONE'})], 'M2: Mbylle detyrën AM.')
-            latest = await bot.bridge(f"/bot/m2/{job['id']}/open", actor(interaction))
-            if result['status'] != 'DONE':
-                notice = result['message']
-        content = prompt(latest)
-        if notice:
-            content = content[:1500] + '\n\n⚠ ' + notice[:400]
-        await interaction.message.edit(content=content, embeds=[], view=controls(latest),
-            suppress=True, allowed_mentions=discord.AllowedMentions.none())
-        related = latest.get('continuation', {})
-        if related.get('message_id') and str(related['message_id']) != str(interaction.message.id):
-            try:
-                channel = await bot.private_channel(interaction.guild_id, interaction.channel_id, interaction.user.id)
-                message = await channel.fetch_message(int(related['message_id']))
-                fresh = await bot.bridge(f"/bot/m2/{related['id']}/open", actor(interaction))
-                await message.edit(content=prompt(fresh), embeds=[], view=controls(fresh),
-                    suppress=True, allowed_mentions=discord.AllowedMentions.none())
-            except Exception:
-                import logging
-                logging.getLogger(__name__).warning('M2 related card refresh deferred: %s', job['id'])
+            await open_modal(interaction, ContinuePMModal(bot, job, interaction.message), deferred=deferred)
+            return
+        notice = None
+        detail = await bot.current_detail(interaction, job['task_id'])
+        result = await bot.apply(interaction, job['task_id'], detail['fingerprint'],
+            [task_ui.action('update_task', {'status': 'DONE'})], 'M2: Mbylle detyrën AM.')
+        latest = await bot.bridge(f"/bot/m2/{job['id']}/open", actor(interaction))
+        if result['status'] != 'DONE':
+            notice = result['message']
+        await refresh_unfinished(bot, interaction, latest, interaction.message, notice=notice)
         return
     if parts[2] == 'question':
         await interaction.edit_original_response(content=prompt(job), embeds=[], view=controls(job),

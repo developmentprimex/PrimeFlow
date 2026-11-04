@@ -189,13 +189,25 @@ async def open_question(question_id: uuid.UUID, actor: Actor, db: AsyncSession =
     return result
 
 
+class Comment(Actor):
+    comment: str = Field(min_length=1, max_length=4000)
+    request_id: str = Field(pattern=r'^\d{1,32}$')
+
+
+class ContinuePM(Comment):
+    expected_answered_at: datetime | None = None
+
+
 @router.post('/{question_id}/continue-pm')
-async def continue_unfinished(question_id: uuid.UUID, actor: Actor, db: AsyncSession = Depends(get_db)):
-    source, link, _ = await own_question(db, question_id, actor)
+async def continue_unfinished(question_id: uuid.UUID, payload: ContinuePM, db: AsyncSession = Depends(get_db)):
+    source, link, user = await own_question(db, question_id, payload)
     if source.kind != 'unfinished':
         raise HTTPException(422, 'Ky veprim vlen vetëm për detyrën AM të pambyllur.')
+    comment = payload.comment.strip()
+    if not comment:
+        raise HTTPException(422, 'Shpjego pse detyra nuk u krye në AM para se të vazhdosh në PM.')
     # Lock order matches ordinary M2 answers; no task fields are changed here.
-    await reports.locked_report(db, source.day)
+    report = await reports.locked_report(db, source.day)
     data = await data_with_moves(db, source.day)
     current = next((row for row in data.get('unfinished_priority', [])
                     if row['task_id'] == str(source.task_id)), None)
@@ -213,10 +225,16 @@ async def continue_unfinished(question_id: uuid.UUID, actor: Actor, db: AsyncSes
     elif not reports.select_task_sections([await db.get(Task, source.task_id)], [], source.day)['pm_continuation']:
         question.snapshot = {**question.snapshot, 'continued_from_am': True}
     effective = question_payload(question, link)
-    await answer(question.id, Answer(**actor.model_dump(), choice='PO',
-        comment=effective.get('comment', '') if effective.get('choice') == 'PO' else '',
-        expected_answered_at=effective.get('answered_at')), db)
-    return await open_question(source.id, actor, db)
+    # The AM explanation and PM choice commit together. Keep the AM note separate
+    # from a reason/realization answer and append the personal comment only once,
+    # through the ordinary PM answer below.
+    await record_report_comment(db, report, source, user, payload, comment)
+    expected = (payload.expected_answered_at if 'expected_answered_at' in payload.model_fields_set
+                else effective.get('answered_at'))
+    await answer(question.id, Answer(**{key: getattr(payload, key) for key in Actor.model_fields},
+        choice='PO', comment=comment, expected_answered_at=expected), db)
+    await db.commit()  # Also persist an AM note if the PM answer was already identical.
+    return await open_question(source.id, payload, db)
 
 
 class Receipt(Actor):
@@ -238,11 +256,6 @@ class Answer(Actor):
     expected_answered_at: datetime | None = None
 
 
-class Comment(Actor):
-    comment: str = Field(min_length=1, max_length=4000)
-    request_id: str = Field(pattern=r'^\d{1,32}$')
-
-
 @router.post('/{question_id}/comment')
 async def add_comment(question_id: uuid.UUID, payload: Comment, db: AsyncSession = Depends(get_db)):
     question, _, user = await own_question(db, question_id, payload)
@@ -262,6 +275,18 @@ async def add_comment(question_id: uuid.UUID, payload: Comment, db: AsyncSession
         existing.comment = '\n\n'.join(part for part in (existing.comment, body) if part)
     else:
         db.add(TaskUserComment(task_id=question.task_id, user_id=user.id, comment=body))
+    await record_report_comment(db, report, question, user, payload, comment)
+    # This is a note, not an answer: preserve choice, reason and answered_at.
+    await db.commit()
+    return {'ok': True}
+
+
+async def record_report_comment(db, report, question, user, payload, comment):
+    duplicate = (await db.execute(select(AuditLog.id).where(AuditLog.entity_type == 'task',
+        AuditLog.entity_id == question.task_id, AuditLog.actor_user_id == user.id,
+        AuditLog.action == 'task.discord_m2_comment', AuditLog.after['request_id'].astext == payload.request_id))).first()
+    if duplicate:
+        return
     prefix = {'unfinished': 'unfinished_comment', 'progress': 'progress_comment',
         'postponed': 'postponed_comment', 'delivery': 'delivery', 'continuation': 'pm_comment'}[question.kind]
     key = f'{prefix}:{question.task_id}'
@@ -272,9 +297,6 @@ async def add_comment(question_id: uuid.UUID, payload: Comment, db: AsyncSession
     add_audit_log(db=db, actor_user_id=user.id, entity_type='task', entity_id=question.task_id,
         action='task.discord_m2_comment', after={'question_id': str(question.id), 'request_id': payload.request_id,
             'day': question.day.isoformat(), 'kind': question.kind, 'comment': comment})
-    # This is a note, not an answer: preserve choice, reason and answered_at.
-    await db.commit()
-    return {'ok': True}
 
 
 async def update_report_answers(db, report, question):

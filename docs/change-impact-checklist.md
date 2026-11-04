@@ -83,6 +83,18 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Tabela Stafi në Realization ditor shfaq Due date / Deadline brenda listave të
+  detyrave, pa kolonë afatesh: listat shfaqin vetëm titullin e detyrës; afatet e
+  pambyllura kanë titull të kuq, pa etiketa, sfond apo vijë shtesë. `realization-table-items.ts`
+  ruan edhe afatet që mungojnë te `realization_items`, duke i vendosur te statusi
+  përkatës; ekstra të hapura shfaqen te Në progres / Të shtyra / Pa progres.
+  Tabela ditore bashkon POSTPONED dhe NO_PROGRESS në kolonën Pa progres, duke
+  ruajtur llojin origjinal dhe shënimin e theksuar `Shtyrë:` përpara titullit,
+  të rreshtuar horizontalisht që shënimi të mos bjerë poshtë titullit. Tabela javore i
+  bashkon numërimet e këtyre statuseve te plani dhe afatet me `combinePostponed`;
+  shënimi shtyrë tregon nëngrupin. Kjo është paraqitje, pa ndryshuar metrikat,
+  penalizimet apo konfirmimet. Hover-i Plan RLZ, detajet ditore dhe Excel-i
+  ruajnë ndarjen origjinale; mos ndrysho `realizationTaskGroups` për bashkimin.
 - Realization ditor shfaq detyrat sipas të njëjtave kategori si hover-i i Plan RLZ;
   kolonat pa detyra në personat e filtruar fshihen. Gjerësitë janë relative dhe
   komenti/vlerësimi përdorin pamje kompakte vetëm në këtë tabelë. Klikimi i
@@ -103,6 +115,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   detyrë/person/ditë. Vazhdimi AM→PM nuk ndryshon periudhën apo datat e taskut;
   ruhet në pyetjen PM dhe shfaqet edhe në M2 PIKAT/email/eksport. Mbyllja kalon
   përmes komandës normale të taskut; shtyrja përmes konfirmimit të Diellzës.
+  Butoni AM “Vazhdon në PM” kërkon koment të detyrueshëm para ruajtjes. Komenti
+  ruhet bashkë me PO në një transaksion, te `unfinished_comment` (detyra AM)
+  dhe `pm_comment` (vazhdimi PM), si dhe një herë te komenti personal i detyrës.
+  Anulimi ose komenti bosh nuk konfirmon vazhdimin; shënimi AM nuk plotëson
+  automatikisht arsyen apo gjendjen ditore RLZ. Kontrollo formularët e vjetër,
+  ridërgimin pa dublime dhe email/eksportin e të dy seksioneve në M2 PIKAT.
   Butoni i veçantë Koment ruan shënimin te komenti personal dhe te fusha M2,
   pa plotësuar Po/Jo, arsye apo datën e përgjigjes; ruhet edhe pas përgjigjes së mëvonshme.
 - Common View dhe SHTYPI përdorin burim të përbashkët të dhënash, por kanë
