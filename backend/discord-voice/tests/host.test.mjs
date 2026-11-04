@@ -94,6 +94,123 @@ function fakes({realtimeReady=true,voiceReady=false,toolsets={},instructions_by_
 
 const speech=()=>Int16Array.from({length:240},(_,i)=>i%2?2000:-2000);
 
+function finishOpening(host){
+  host._onRealtime({type:'response.created',response:{id:'opening-end'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'opening-end',item:{type:'function_call',name:'end_ga_phase',call_id:'end-opening',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'opening-end',status:'completed'}});
+  host.toolResult('end-opening',{prit:true,silent:true,wait_for_staff:true});
+}
+
+test('the controller can hold an empty opening before its lookup result without another voice turn',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: Hyrja',{respond:false});
+  host._onRealtime({type:'response.created',response:{id:'progress-lookup'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'progress-lookup',item:{type:'function_call',name:'list_new_done_and_strikes',call_id:'progress',arguments:'{}'}});
+  host.configure('GA_PHASE',null,null,true);
+  host.toolResult('progress',{read_aloud:'',announcements:[]});
+  host._onRealtime({type:'response.done',response:{id:'progress-lookup',status:'cancelled'}});
+  advance(20000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host.configure('STAFF_PHASE','11','first');host.say('SISTEMI: RADHA Elsa');
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host.stop();
+});
+
+test('completed opening waits silently and refuses automatic off-topic responses until staff starts',()=>{
+  const {host,sent,events,advance}=fakes();
+  host.say('SISTEMI: Hyrja',{respond:false});
+  finishOpening(host);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'side'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'side'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'side',transcript:'Çfarë janë dividendët?'});
+  host._onRealtime({type:'response.created',response:{id:'off-topic'}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'off-topic',item_id:'stray',delta:int16ToBase64(new Int16Array(480))});
+  host._onRealtime({type:'response.output_item.done',response_id:'off-topic',item:{type:'function_call',name:'search_knowledge',call_id:'stray-tool',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'off-topic',status:'completed'}});
+  advance(10000);advance(10000);
+  assert.equal(host._playback.playing,false);
+  assert.ok(sent.some(e=>e.type==='response.cancel'&&e.response_id==='off-topic'));
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  assert.equal(events.filter(e=>e.type==='tool_call'&&e.call_id==='stray-tool').length,0);
+  assert.equal(events.filter(e=>e.type==='interrupted').length,0);
+  host.configure('STAFF_PHASE','11','first');
+  host.say('SISTEMI: RADHA Elsa');
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host.stop();
+});
+
+test('a late opening wait cannot silence the staff phase or replace its current turn',()=>{
+  const {host,sent}=fakes();
+  host._onRealtime({type:'response.created',response:{id:'opening-end'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'opening-end',item:{type:'function_call',name:'end_ga_phase',call_id:'end-opening',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'opening-end',status:'completed'}});
+  host.configure('STAFF_PHASE','11','first');
+  host.toolResult('end-opening',{prit:true,silent:true,wait_for_staff:true});
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  const output=sent.filter(e=>e.type==='conversation.item.create'&&e.item.call_id==='end-opening').at(-1).item.output;
+  assert.equal(JSON.parse(output).wait_for_staff,undefined);
+  host.stop();
+});
+
+test('a fast opening completion drops queued waiting narration and cannot trigger recovery speech',()=>{
+  const {host,sent,events,advance}=fakes();
+  host.say('SISTEMI: Hyrja',{respond:false});
+  host._onRealtime({type:'response.created',response:{id:'opening-end'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'opening-end',item:{type:'function_call',name:'end_ga_phase',call_id:'end-opening',arguments:'{}'}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'opening-end',item_id:'waiting-audio',delta:int16ToBase64(new Int16Array(480))});
+  assert.equal(host._playback.playing,true);
+  host.toolResult('end-opening',{prit:true,silent:true,wait_for_staff:true});
+  assert.equal(host._playback.playing,false);
+  host._onRealtime({type:'response.done',response:{id:'opening-end',status:'cancelled'}});
+  advance(20000);advance(20000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  assert.equal(events.filter(e=>e.type==='interrupted').length,0);
+  host.configure('ENDING');host.say('SISTEMI: Takimi u ndal');
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host.stop();
+});
+
+test('empty categories are read and acknowledged even without notes or person rows',async()=>{
+  const {host,sent,events,dispatch,advance}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});
+  await Promise.resolve();
+  const lookup=(id,name,output)=>{
+    host._onRealtime({type:'response.created',response:{id}});
+    host._onRealtime({type:'response.output_item.done',response_id:id,item:{type:'function_call',name,call_id:id,arguments:'{}'}});
+    host._onRealtime({type:'response.done',response:{id,status:'completed'}});
+    host.toolResult(id,output);
+  };
+  const play=(id,text)=>{
+    host._onRealtime({type:'response.created',response:{id}});
+    host._onRealtime({type:'response.output_audio.delta',response_id:id,item_id:id+'-audio',delta:int16ToBase64(new Int16Array(480))});
+    host._onRealtime({type:'response.output_audio_transcript.done',response_id:id,transcript:text});
+    host._onRealtime({type:'response.done',response:{id,status:'completed'}});
+    advance(40);
+  };
+  const notes='Notes të reja nuk ka.';
+  lookup('notes','list_new_px_notes',{notes:[],notes_token:'empty-notes',read_aloud:notes,next_step:'list_new_done_and_strikes'});
+  assert.ok(sent.filter(e=>e.type==='response.create').at(-1).response.instructions?.includes(notes));
+  assert.equal(events.filter(e=>e.type==='note_played').length,0);
+  play('notes-audio',notes);
+  assert.ok(events.some(e=>e.type==='note_played'&&e.token==='empty-notes'));
+  // Complete the following model turn with the progress lookup.
+  lookup('progress','list_new_done_and_strikes',{sipas_personave:[],announcements:[
+    {token:'empty-done',read_aloud:'Done të reja nuk ka.'},
+    {token:'empty-strikes',read_aloud:'Strikes të reja nuk ka.'},
+  ]});
+  const progress='Done të reja nuk ka. Strikes të reja nuk ka.';
+  assert.ok(sent.filter(e=>e.type==='response.create').at(-1).response.instructions?.includes(progress));
+  assert.equal(events.filter(e=>e.type==='progress_played').length,0);
+  play('progress-audio',progress);
+  assert.deepEqual(events.filter(e=>e.type==='progress_played').map(e=>e.token),['empty-done','empty-strikes']);
+  host.configure('GA_PHASE',null,null,true);
+  const replies=sent.filter(e=>e.type==='response.create').length;
+  advance(20000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,replies);
+  host.stop();
+});
+
 test('existing Notes are read immediately without another tool or permission pause',()=>{
   const {host,sent}=fakes();
   host._onRealtime({type:'response.created',response:{id:'notes'}});
@@ -237,7 +354,8 @@ test('an empty response to a manual request is retried with a bound',()=>{
   assert.equal(sent.filter(e=>e.type==='response.create').length,2);
 });
 
-test('a clear active-person answer is resumed if the model silently ignores it, even with late ASR',async()=>{
+for(const answer of ['Duhet me prit furnitorin; e mbyll deri në njëmbëdhjetë.','Sot.','Nesër.','Aha.'])
+test(`an attributed answer is recovered if silently ignored, including short deadlines but excluding filler: ${answer}`,async()=>{
   const {host,events,sent,dispatch,advance,connection,streams}=fakes({voiceReady:true});
   dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
   host.configure('STAFF_PHASE','11');
@@ -250,10 +368,12 @@ test('a clear active-person answer is resumed if the model silently ignores it, 
   host._onRealtime({type:'response.created',response:{id:'ignored'}});
   host._onRealtime({type:'response.output_item.done',item:{type:'function_call',call_id:'wait',name:'wait_for_user',arguments:'{}'}});
   host._onRealtime({type:'response.done',response:{id:'ignored',status:'completed'}});
-  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'answer',transcript:'Duhet me prit furnitorin; e mbyll deri në njëmbëdhjetë.'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'answer',transcript:answer});
   advance(1000);
-  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
-  assert.ok(events.some(e=>e.event==='response_recovery'&&e.reason==='ignored_staff_answer'));
+  const shouldRecover=answer!=='Aha.';
+  assert.equal(sent.filter(e=>e.type==='response.create').length,shouldRecover?1:0);
+  assert.equal(events.some(e=>e.event==='response_recovery'&&e.reason==='ignored_staff_answer'),shouldRecover);
+  host.stop();
 });
 
 test('partial audio from repeatedly failed responses does not reset the recovery limit',()=>{
@@ -682,6 +802,33 @@ test('note ordinal wording is accepted and continues without retrying the readin
   host._onRealtime({type:'response.done',response:{id:'read',status:'completed'}});advance(40);
   assert.equal(events.filter(e=>e.type==='note_played'&&e.token==='batch').length,1);
   assert.equal(sent.filter(e=>e.type==='response.create').at(-1).response.tool_choice,undefined);
+  host.stop();
+});
+
+for(const [kind,transcript,accepted] of [
+  ['note','Notes të reja: Progresi 12.5%.',true],
+  ['progress','Elsa: Progresi 12,5%.',true],
+  ['progress','Elsa: Progresi 12.6%.',false],
+  ['note','Notes të reja: Progresi 12.5.',false],
+])test(`percentage delivery accepts equivalent transcription but requires the same value and unit: ${kind} ${transcript}`,async()=>{
+  const {host,sent,events,dispatch,advance}=fakes({voiceReady:true});
+  dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
+  const name=kind==='note'?'list_new_px_notes':'list_new_done_and_strikes';
+  const text=(kind==='note'?'Notes të reja: ':'Elsa: ')+'Progresi 12 presje 5 për qind.';
+  host._onRealtime({type:'response.created',response:{id:'lookup'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'lookup',item:{type:'function_call',name,call_id:'lookup',arguments:'{}'}});
+  host._onRealtime({type:'response.done',response:{id:'lookup',status:'completed'}});
+  host.toolResult('lookup',kind==='note'?{notes_token:'batch',read_aloud:text,next_step:'list_new_done_and_strikes'}:
+    {announcements:[{token:'batch',read_aloud:text}]});
+  const requests=sent.filter(e=>e.type==='response.create').length;
+  host._onRealtime({type:'response.created',response:{id:'read'}});
+  host._onRealtime({type:'response.output_audio.delta',response_id:'read',item_id:'audio',delta:int16ToBase64(new Int16Array(480))});
+  host._onRealtime({type:'response.output_audio_transcript.done',response_id:'read',transcript});
+  host._onRealtime({type:'response.done',response:{id:'read',status:'completed'}});advance(40);
+  assert.equal(events.filter(e=>e.type===kind+'_played'&&e.token==='batch').length,accepted?1:0);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,requests+(kind==='note'||!accepted?1:0));
+  if(kind==='note'||!accepted)
+    assert.equal(sent.filter(e=>e.type==='response.create').at(-1).response.tool_choice,accepted?undefined:'none');
   host.stop();
 });
 
