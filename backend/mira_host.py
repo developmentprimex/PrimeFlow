@@ -372,6 +372,7 @@ class MiraHost:
                 payload.update(session.get('command_context') or {})
             started = prepared if prepared is not None and attempt == 1 else await self.bot.bridge(PREFIX + "/session/start", payload)
             session["meeting"] = started["meeting"]["id"]
+            session["join_attempt"] = started.get("join_attempt")
             session["test_mode"] = bool(started["meeting"].get("is_test", session.get("test_mode", False)))
             # A stop may arrive while the API prepares the session. Preserve its ID
             # for cleanup, but never start a voice worker after that cancellation.
@@ -716,7 +717,7 @@ class MiraHost:
             self.invite_deferred(session)
             output = {"prit": True, "mungojne": [t.get("name") for t in session["deferred"]],
                       "udhezim": "Prit personat që mungojnë; mos i shëno si të raportuar."}
-        elif not current and (result.get("pm_review") or session.get("pm_pending")) and not session.get("pm_reviewed"):
+        elif not current and ("pm_review" in result or session.get("pm_pending")) and not session.get("pm_reviewed"):
             session["pm_pending"] = True
             return await self._advance_pm(session, None, announce=announce, outcome="DONE")
         elif not current:
@@ -1069,6 +1070,8 @@ class MiraHost:
                       "acknowledgements": {bucket: list(session.get(bucket, set())) for bucket in
                           ("notes_acks", "progress_acks", "announcement_deferrals")},
                       "finish_reason": session.get("reason") if session.get("finished") else None}
+            if session.get("join_attempt") is not None:
+                record["join_attempt"] = session["join_attempt"]
             temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
             temporary.replace(target)
         except OSError:
@@ -1096,7 +1099,8 @@ class MiraHost:
                     for token in acks.get(bucket, []):
                         await self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/{route}", {"token": token})
                 await self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/finish",
-                    {"reason": record.get("finish_reason") or "interrupted:process_exit"})
+                    {"reason": record.get("finish_reason") or "interrupted:process_exit",
+                     **({"expected_join_attempt": record["join_attempt"]} if record.get("join_attempt") is not None else {})})
                 path.unlink()
             except Exception as exc:
                 log.warning("MIRA_HOST transcript recovery deferred file=%s error=%s", path.name, type(exc).__name__)
@@ -1114,6 +1118,7 @@ class MiraHost:
             return
         session["finished"] = True
         session["closed"].set()
+        self.persist_transcript(session)
         notifications = list(session.get("notification_tasks", set()))
         for task in notifications:
             task.cancel()
@@ -1122,11 +1127,18 @@ class MiraHost:
         if session.get("process"):
             await session["process"].close()
         if session.get("timed_upload"):
-            await session["timed_upload"]
-        await self.flush_lines(session)
+            session["timed_upload"].cancel()
+            await asyncio.gather(session["timed_upload"], return_exceptions=True)
+        try:
+            await asyncio.wait_for(self.flush_lines(session), WRITE_TIMEOUT_SECONDS)
+        except Exception as exc:
+            self.persist_transcript(session)
+            log.warning("MIRA_HOST final upload deferred error=%s", type(exc).__name__)
         if session.get("meeting"):
             try:
-                await self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/finish", {"reason": session["reason"]})
+                await asyncio.wait_for(self.bot.bridge(PREFIX + f"/meetings/{session['meeting']}/finish",
+                    {"reason": session["reason"], **({"expected_join_attempt": session["join_attempt"]}
+                     if session.get("join_attempt") is not None else {})}), WRITE_TIMEOUT_SECONDS)
                 if not session["lines"] and not session.get("metrics") and not any(session.get(bucket) for bucket in
                         ("notes_acks", "progress_acks", "announcement_deferrals")):
                     with suppress(OSError, ValueError):

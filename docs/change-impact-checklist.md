@@ -1,6 +1,6 @@
 # Harta e ndikimit të ndryshimeve
 
-Përditësuar: 03.11.2026. Kjo hartë ruan vendet që duhen marrë parasysh kur
+Përditësuar: 04.11.2026. Kjo hartë ruan vendet që duhen marrë parasysh kur
 ndryshon një funksion i projektit. Shërben si pikënisje për kontroll; varësitë
 konfirmohen në kod për ndryshimin konkret.
 
@@ -134,6 +134,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Në 16:00 radha dhe njoftimi paraprak i Host përfshijnë edhe përgjegjësit që
   kanë vetëm BLL. Pas rilidhjes kontrollo rikthimin e radhëve të papërfunduara
   dhe ruajtjen e raportimeve/fakteve të mëparshme, përfshirë rishikimin PM.
+- Në 11:50 radha e Host përfshin edhe përgjegjësit që kanë vetëm detyra të
+  pambyllura nga slotet e mëparshme, pas personave të slotit aktual. Kontrollo
+  edhe ftesën paraprake dhe shmangien e dublimeve/mungesave. Nisja PM duhet të
+  kontrollojë burimin e freskët dhe radhën e ruajtur edhe kur snapshot-i i stafit
+  nuk ka detyra PM. Mbyllja dhe skedarët e rikuperimit të Host mbajnë tentativën
+  e lidhjes (`join_attempt`); një kërkesë e vjetër nuk duhet të mbyllë rinisjen.
+  Përmbledhjet dhe shënimet për person krijohen në sfond dhe shfaqen te Mira / PX
+  Notes: kontrollo veçmas nëse një rezultat i vonuar i gjenerimit mbishkruan një
+  transkript më të ri ose përmbledhjen pas rinisjes. Kjo varësi kërkon kontroll
+  edhe kur takimi vetë është rikuperuar me sukses.
 - Kur një kategori ka fushë gri në Excel, kjo pasqyron kontrollin e dakorduar
   për atë kategori. Nuk provon mungesën e çdo varësie të ardhshme: për një fushë
   ose sjellje të re, ndiq implementimin dhe rishiko hartën.

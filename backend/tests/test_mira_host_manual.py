@@ -16,7 +16,7 @@ from app.models.enums import UserRole
 
 class ManualStartTests(unittest.IsolatedAsyncioTestCase):
     async def test_staff_in_shared_control_can_start_without_enabling_schedule(self):
-        meeting=SimpleNamespace(id=uuid.uuid4(),meeting_date=datetime.now().date(),slot='14:20')
+        meeting=SimpleNamespace(id=uuid.uuid4(),meeting_date=datetime.now().date(),slot='14:20',join_attempts=1)
         user=SimpleNamespace(id=uuid.uuid4(),role=UserRole.STAFF,is_active=True)
         row=SimpleNamespace(enabled_until=None,target_minutes_per_person=4)
         db=SimpleNamespace(commit=AsyncMock())
@@ -33,6 +33,7 @@ class ManualStartTests(unittest.IsolatedAsyncioTestCase):
              patch.object(api.host,'meeting_row',return_value={'id':str(meeting.id)}):
             result=await api.start(api.Start(slot='14:20',discord_user_id='11',guild_id='123',channel_id='77'),db)
         self.assertEqual(result['meeting']['id'],str(meeting.id))
+        self.assertEqual(result['join_attempt'], 1)
         self.assertIsNone(row.enabled_until)
         identify.assert_awaited_once()
         self.assertEqual(identify.await_args.args[1].channel_id,'77')
@@ -65,7 +66,7 @@ class ManualStartTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_manual_entry_starts_the_opening_now_but_keeps_the_official_staff_time(self):
         at = datetime(2026, 10, 29, 10, 57, tzinfo=ZoneInfo('Europe/Budapest'))
-        meeting = SimpleNamespace(id=uuid.uuid4(),meeting_date=at.date(),slot='11:00')
+        meeting = SimpleNamespace(id=uuid.uuid4(),meeting_date=at.date(),slot='11:00',join_attempts=1)
         row = SimpleNamespace(enabled_until=None, target_minutes_per_person=4)
         db = SimpleNamespace(commit=AsyncMock())
         manager = SimpleNamespace(role=UserRole.MANAGER)

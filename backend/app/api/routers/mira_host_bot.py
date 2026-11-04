@@ -71,6 +71,7 @@ class Lines(BaseModel):
 
 class Finish(BaseModel):
     reason: str = Field(default="completed", max_length=100)
+    expected_join_attempt: int | None = Field(default=None, ge=1)
 
 
 class ProgressAck(BaseModel):
@@ -190,6 +191,7 @@ async def start(payload: Start, db: AsyncSession = Depends(get_db)):
             sent_at=host.now(), data=session["runtime"]).on_conflict_do_nothing(index_elements=["key"]))
     await db.commit()
     return {"meeting": host.meeting_row(meeting), **session,
+            "join_attempt": meeting.join_attempts,
             "starts_at": (host.now() if payload.test_mode else
                           host.slot_at(meeting.meeting_date, meeting.slot)).isoformat(),
             "target_minutes": row.target_minutes_per_person}
@@ -252,6 +254,11 @@ async def tool(meeting_id: uuid.UUID, name: str, payload: ToolCall, db: AsyncSes
 @router.post('/meetings/{meeting_id}/finish')
 async def finish(meeting_id: uuid.UUID, payload: Finish, background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     meeting = await host.meeting_for(db, meeting_id, lock=True)
+    if payload.expected_join_attempt is not None and payload.expected_join_attempt != meeting.join_attempts:
+        # A delayed shutdown/recovery belongs to the earlier connection. Keep its
+        # recovered transcript, but never close or summarize the new live attempt.
+        await db.commit()
+        return {**host.meeting_row(meeting), "superseded": True}
     if meeting.status not in ("DONE", "ABORTED"):
         await host.finish_meeting(db, meeting, payload.reason)
     await db.commit()

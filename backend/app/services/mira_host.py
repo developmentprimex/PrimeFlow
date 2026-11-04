@@ -59,7 +59,7 @@ MARKERS = {
     "F": "F", "BZ1N1": "BZ1N1",
 }
 KNOWLEDGE_CATEGORIES = ("STRUKTURA", "RREGULLORE", "DEFINIME", "PROCESE", "TJETER")
-PROMPT_VERSION = "2026-11-03.6"
+PROMPT_VERSION = "2026-11-04.1"
 
 
 def effective_protocol(value: str | None) -> str:
@@ -212,9 +212,12 @@ class SlotData:
             (user.get("full_name") or "").strip().casefold() not in self.unavailable_names
 
     def participants(self, slot: str) -> list[str]:
-        """People with 1H tasks in the slot, in the order their first task appears (Common View order)."""
+        """Current-slot staff, followed by owners of work explicitly reviewed in this slot."""
         order = []
         tasks = list(self.slots.get(slot, []))
+        if slot in ALL_EARLIER_SLOTS:
+            tasks += [item for earlier in SLOTS[:SLOTS.index(slot)] for item in self.slots[earlier]
+                      if str(item.get("status") or "TODO").upper() in {"TODO", "IN_PROGRESS"}]
         if slot == BLOCKED_SLOT:
             tasks += [item for item in self.blocked if str(item.get("status") or "TODO").upper() not in {"DONE", "COMPLETED"}]
         for item in tasks:

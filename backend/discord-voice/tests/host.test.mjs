@@ -650,6 +650,25 @@ test('short explicit pause stops playback and holds queued continuation until re
   host.stop();
 });
 
+test('a model-recognized user pause also holds later system instructions until resume',()=>{
+  const {host,sent,advance}=fakes();
+  host.say('SISTEMI: RADHA',{respond:false});
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'pause'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'pause'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'pause',transcript:'Ma jep një minutë të lutem'});
+  host._onRealtime({type:'response.created',response:{id:'pause-reply'}});
+  host._onRealtime({type:'response.output_item.done',response_id:'pause-reply',item:{type:'function_call',call_id:'wait',name:'wait_for_user',arguments:'{"reason":"user_pause"}'}});
+  host._onRealtime({type:'response.done',response:{id:'pause-reply',status:'completed'}});
+  host.say('SISTEMI: Mbeten 15 sekonda');advance(2000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,0);
+  host._onRealtime({type:'input_audio_buffer.speech_started',item_id:'resume'});
+  host._onRealtime({type:'input_audio_buffer.speech_stopped',item_id:'resume'});
+  host._onRealtime({type:'conversation.item.input_audio_transcription.completed',item_id:'resume',transcript:'Vazhdo'});
+  advance(1000);
+  assert.equal(sent.filter(e=>e.type==='response.create').length,1);
+  host.stop();
+});
+
 test('note ordinal wording is accepted and continues without retrying the reading',async()=>{
   const {host,sent,events,dispatch,advance}=fakes({voiceReady:true});
   dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();

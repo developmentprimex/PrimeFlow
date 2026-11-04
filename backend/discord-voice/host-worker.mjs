@@ -341,6 +341,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
           if(d){
             d.silent=true;d.intentionalWait=reason==='user_pause';
             if(d.speech){d.speech.needsReply=false;d.speech.silenced=!d.audio;d.speech.silenceReason=reason;}
+            if(d.intentionalWait&&currentSpeech(d.speech))userPaused=true;
           }
           // Mira chose silence: answer here and do not ask for another response.
           rt({type:'conversation.item.create',item:{type:'function_call_output',call_id:message.item.call_id,output:'{"ok":true}'}});
