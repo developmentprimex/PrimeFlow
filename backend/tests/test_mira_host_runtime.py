@@ -181,39 +181,39 @@ class PmTests(unittest.IsolatedAsyncioTestCase):
     async def test_saved_haxhere_pm_turn_is_not_invited_or_reported_as_missing(self):
         m,event=self.state()
         event.data['queue'][0].update(name='Haxhere Spahiu',person='Haxhere Spahiu',status='WAITING')
-        self.assertEqual([p['user_id'] for p in runtime.pm_state(event)['turns']],[IDS['RA']])
+        self.assertEqual([p['user_id'] for p in runtime.pm_state(event)['turns']],[IDS['EP']])
         with patch.object(runtime,'pm_event',AsyncMock(return_value=event)):
             out=await runtime.next_pm_turn(SimpleNamespace(),m,expected_turn_id=None,available_discord_ids=['12'])
-        self.assertEqual(out['current']['user_id'],IDS['RA'])
+        self.assertEqual(out['current']['user_id'],IDS['EP'])
         self.assertEqual(event.data['queue'][0]['status'],'SKIPPED')
         self.assertEqual(out['skipped'],[]);self.assertEqual(out['deferred'],[])
 
     def state(self):
         m=meeting()
         queue=[{'id':'PM_'+IDS[k], 'user_id':IDS[k], 'person':k,'name':k,
-                'status':'ACTIVE' if i==0 else 'WAITING', 'discord':{'discord_user_id':str(i+11)}} for i,k in enumerate(('EF','RA'))]
+                'status':'ACTIVE' if i==0 else 'WAITING', 'discord':{'discord_user_id':str(i+11)}} for i,k in enumerate(('DV','EP'))]
         return m, Mira1HEvent(id=uuid.uuid4(),meeting_id=m.id,kind='PM_REVIEW',data={'queue':queue})
 
     async def test_pm_requires_a_report_and_moves_one_person_at_a_time(self):
         m,event=self.state();db=SimpleNamespace()
         with patch.object(runtime,'pm_event',AsyncMock(return_value=event)):
             with self.assertRaises(HTTPException):
-                await runtime.next_pm_turn(db,m,expected_turn_id='PM_'+IDS['EF'])
-            out=await runtime.record_pm_review(db,m,service.PmDiscussion(turn_id='PM_'+IDS['EF'],continuation='E vazhdoj pas pushimit'),SimpleNamespace(id=uuid.UUID(IDS['EF'])))
+                await runtime.next_pm_turn(db,m,expected_turn_id='PM_'+IDS['DV'])
+            out=await runtime.record_pm_review(db,m,service.PmDiscussion(turn_id='PM_'+IDS['DV'],continuation='E vazhdoj pas pushimit'),SimpleNamespace(id=uuid.UUID(IDS['DV'])))
             self.assertTrue(out['success'])
-            next_person=await runtime.next_pm_turn(db,m,expected_turn_id='PM_'+IDS['EF'])
-            self.assertEqual(next_person['current']['user_id'],IDS['RA'])
+            next_person=await runtime.next_pm_turn(db,m,expected_turn_id='PM_'+IDS['DV'])
+            self.assertEqual(next_person['current']['user_id'],IDS['EP'])
             with self.assertRaises(HTTPException):
-                await runtime.next_pm_turn(db,m,expected_turn_id='PM_'+IDS['EF'])
-            await runtime.record_pm_review(db,m,service.PmDiscussion(turn_id='PM_'+IDS['RA'],postponement='Nesër; pres furnitorin'),SimpleNamespace(id=uuid.UUID(IDS['RA'])))
-            done=await runtime.next_pm_turn(db,m,expected_turn_id='PM_'+IDS['RA'])
+                await runtime.next_pm_turn(db,m,expected_turn_id='PM_'+IDS['DV'])
+            await runtime.record_pm_review(db,m,service.PmDiscussion(turn_id='PM_'+IDS['EP'],postponement='Nesër; pres furnitorin'),SimpleNamespace(id=uuid.UUID(IDS['EP'])))
+            done=await runtime.next_pm_turn(db,m,expected_turn_id='PM_'+IDS['EP'])
         self.assertIsNone(done['current'])
         self.assertTrue(all(p['status']=='DONE' for p in event.data['queue']))
 
     async def test_pm_refuses_another_speakers_facts(self):
         m,event=self.state()
         with patch.object(runtime,'pm_event',AsyncMock(return_value=event)):
-            out=await runtime.record_pm_review(SimpleNamespace(),m,service.PmDiscussion(turn_id='PM_'+IDS['EF'],continuation='Gati'),SimpleNamespace(id=uuid.UUID(IDS['RA'])))
+            out=await runtime.record_pm_review(SimpleNamespace(),m,service.PmDiscussion(turn_id='PM_'+IDS['DV'],continuation='Gati'),SimpleNamespace(id=uuid.UUID(IDS['EP'])))
         self.assertFalse(out['success'])
         self.assertNotIn('discussion',event.data['queue'][0])
 
@@ -231,16 +231,16 @@ class PmTests(unittest.IsolatedAsyncioTestCase):
             for p in event.data['queue']:p['status']='WAITING'
             with patch.object(runtime,'pm_event',AsyncMock(return_value=event)):
                 out=await runtime.next_pm_turn(SimpleNamespace(),m,expected_turn_id=None,available_discord_ids=['12'])
-            self.assertEqual(out['current']['user_id'],IDS['EF'] if test else IDS['RA'])
+            self.assertEqual(out['current']['user_id'],IDS['DV'] if test else IDS['EP'])
             self.assertEqual(len(out['deferred']),0 if test else 1)
 
     async def test_pm_lookup_recovery_cannot_consume_the_next_person(self):
-        current={'id':'PM_'+IDS['RA'],'person':'RA','discord':None}
+        current={'id':'PM_'+IDS['EP'],'person':'EP','discord':None}
         bridge=AsyncMock(side_effect=[TimeoutError(),{'current':current,'turns':[current],'deferred':[]}])
         host=controller.MiraHost(SimpleNamespace(bridge=bridge))
-        state={**session(),'current_turn':None,'pm_reviewed':True,'pm_current':{'id':'PM_'+IDS['EF']}}
-        out=await host.advance(state,None,announce=False,expected_turn_id='PM_'+IDS['EF'])
-        self.assertEqual(out['turn_id'],'PM_'+IDS['RA'])
+        state={**session(),'current_turn':None,'pm_reviewed':True,'pm_current':{'id':'PM_'+IDS['DV']}}
+        out=await host.advance(state,None,announce=False,expected_turn_id='PM_'+IDS['DV'])
+        self.assertEqual(out['turn_id'],'PM_'+IDS['EP'])
         self.assertEqual(bridge.await_count,2)
         self.assertTrue(bridge.await_args.args[0].endswith('/pm/current'))
 

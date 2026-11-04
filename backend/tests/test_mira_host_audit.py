@@ -20,22 +20,22 @@ import mira_host as controller
 class QueueTests(unittest.IsolatedAsyncioTestCase):
     def test_1150_includes_owners_of_unfinished_earlier_work_without_current_tasks(self):
         data = service.SlotData(payload([
-            item('EF', '10:00', 'Earlier unfinished', status='TODO', rank=0),
+            item('OH', '10:00', 'Earlier unfinished', status='TODO', rank=0),
             item('RA', '11:00', 'Earlier completed', status='DONE', rank=0),
-            item('EH', '11:50', 'Current work', rank=0),
+            item('EP', '11:50', 'Current work', rank=0),
         ]), DAY)
-        self.assertEqual(data.participants('11:50'), [IDS['EH'], IDS['EF']])
+        self.assertEqual(data.participants('11:50'), [IDS['EP'], IDS['OH']])
         self.assertEqual(data.participants('11:00'), [])
 
     def test_1150_preserves_deduplication_absence_and_excluded_staff(self):
         source = payload([
-            item('EH', '11:50', 'Current', rank=0),
-            item('EH', '10:00', 'Also earlier', rank=0),
-            item('EF', '10:00', 'Absent', rank=1),
+            item('EP', '11:50', 'Current', rank=0),
+            item('EP', '10:00', 'Also earlier', rank=0),
+            item('OH', '10:00', 'Absent', rank=1),
             item('RA', '11:00', 'Excluded', rank=0),
-        ], absent=('EF',))
+        ], absent=('OH',))
         next(u for u in source['users'] if u['id'] == IDS['RA'])['full_name'] = 'Haxhere Spahiu'
-        self.assertEqual(service.SlotData(source, DAY).participants('11:50'), [IDS['EH']])
+        self.assertEqual(service.SlotData(source, DAY).participants('11:50'), [IDS['EP']])
 
     async def test_pm_initializes_from_fresh_data_even_when_staff_snapshot_is_empty(self):
         person = {'id': 'PM_person', 'user_id': IDS['EF'], 'name': 'Elsa', 'discord': None}

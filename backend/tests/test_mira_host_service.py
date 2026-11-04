@@ -170,11 +170,11 @@ class SlotDataTests(unittest.TestCase):
     def test_ga_tasks_pm_review_and_progress_follow_the_common_view_order(self):
         data = host.SlotData(payload([
             item('RA', '10:00', 'PER GA', rank=0, one_h_marker='FLAG'),
-            item('EF', '11:00', 'PM PUNE', rank=0, finish_period='PM'),
+            item('OH', '11:00', 'PM PUNE', rank=0, finish_period='PM'),
             item('EF', '11:00', 'PER GA EDHE', rank=1, one_h_marker='FLAG'),
         ]), DAY)
         self.assertEqual([p['person'] for p in data.ga_flagged()], ['RA', 'EF'])
-        self.assertEqual(data.pm_open()[0]['initials'], 'EF')
+        self.assertEqual(data.pm_open()[0]['initials'], 'OH')
         self.assertEqual(data.pm_open()[0]['detyrat_pm'], ['pë më PUNE (e verdhë)'])
         progress = {'done': [{'spoken': 'A', 'owners': ['EF']}],
                     'strikes': [{'spoken': 'B', 'owners': ['RA'], 'points': [{'text': 'p1'}]}]}

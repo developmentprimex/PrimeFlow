@@ -132,6 +132,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   çdo Note duhet të dalë në çdo raport; dallo regjistrimin nga tasku i krijuar.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
+  Radha e raportimit ka përjashtime sipas slotit: LH, EH, EF dhe RA nuk marrin
+  radhë në 11:50 dhe 16:00, përfshirë rishikimin PM në 11:50. Kontrollo ftesat,
+  praninë, radhët e ruajtura/rinisjen dhe listën te Mira → Takimet; personat e
+  përjashtuar nuk duhen shpallur mungesë. Ky rregull nuk filtron detyrat në
+  Common View, SHTYPI ose 1H Reports dhe nuk ndryshon slotet e tjera.
+  `turns_view` përdoret edhe nga përmbledhjet/Mira Notes dhe dërgimi në PX Notes;
+  atje ruhen faktet dhe shënimet historike me `include_slot_excluded=True`,
+  pa i rifutur personat në radhën ose statuset e raportimit.
   Hyrja zanore është Notes të reja → Done → Strikes; për kategori bosh lexohet
   shkurt se nuk ka të reja. Edhe këto fjali kërkojnë konfirmim audio, pa krijuar
   përmendje për detyra ose Notes që mungojnë. Ky rend i audios nuk ndryshon

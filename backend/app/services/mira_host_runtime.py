@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.models.mira_host import Mira1HEvent, Mira1HMeeting, Mira1HTurn
 from app.models.ga_note import GaNote
+from app.models.user import User
 
 
 async def request_stop(db, user_id):
@@ -73,8 +74,9 @@ async def notification_result(db, key, delivered, *, at):
 
 
 def pm_state(event):
-    from app.services.mira_host import excluded_host_name
-    queue = [p for p in event.data.get("queue", []) if not excluded_host_name(p.get("name") or p.get("person"))] if event else []
+    from app.services.mira_host import excluded_host_turn, PM_REVIEW_SLOT
+    queue = [p for p in event.data.get("queue", [])
+             if not excluded_host_turn(PM_REVIEW_SLOT, p.get("name") or p.get("person"))] if event else []
     return {"initialized": event is not None, "current": next((p for p in queue if p["status"] == "ACTIVE"), None),
             "deferred": [p for p in queue if p["status"] == "DEFERRED"], "turns": queue}
 
@@ -102,9 +104,9 @@ async def next_pm_turn(db, meeting, *, expected_turn_id, outcome="DONE", summary
     if event is None:
         if expected_turn_id:
             raise HTTPException(409, "Radha PM ka ndryshuar.")
-        unfinished = (await db.execute(select(Mira1HTurn.id).where(Mira1HTurn.meeting_id == meeting.id,
-            Mira1HTurn.status.in_(("ACTIVE", "WAITING", "DEFERRED"))).limit(1))).scalar_one_or_none()
-        if unfinished:
+        unfinished = (await db.execute(select(Mira1HTurn.id, User.full_name).join(User, User.id == Mira1HTurn.user_id)
+            .where(Mira1HTurn.meeting_id == meeting.id, Mira1HTurn.status.in_(("ACTIVE", "WAITING", "DEFERRED"))))).all()
+        if any(not host.excluded_host_turn(meeting.slot, name) for _, name in unfinished):
             raise HTTPException(409, "Raportimi i stafit ende nuk përfundoi.")
         data = host.SlotData(await host.common_payload(db, meeting.meeting_date, fresh=True), meeting.meeting_date)
         people = data.pm_open()
@@ -119,12 +121,12 @@ async def next_pm_turn(db, meeting, *, expected_turn_id, outcome="DONE", summary
     attempt = meeting.join_attempts or 1
     if attempt > event.data.get("join_attempt", 1):
         for person in queue:
-            if person["status"] == "SKIPPED" and not host.excluded_host_name(person.get("name") or person.get("person")):
+            if person["status"] == "SKIPPED" and not host.excluded_host_turn(meeting.slot, person.get("name") or person.get("person")):
                 person.update(status="WAITING", ended_at=None)
         event.data = {**event.data, "join_attempt": attempt}
-    excluded_active = {p["id"] for p in queue if host.excluded_host_name(p.get("name") or p.get("person")) and p["status"] == "ACTIVE"}
+    excluded_active = {p["id"] for p in queue if host.excluded_host_turn(meeting.slot, p.get("name") or p.get("person")) and p["status"] == "ACTIVE"}
     for person in queue:
-        if host.excluded_host_name(person.get("name") or person.get("person")) and person["status"] in {"ACTIVE", "WAITING", "DEFERRED"}:
+        if host.excluded_host_turn(meeting.slot, person.get("name") or person.get("person")) and person["status"] in {"ACTIVE", "WAITING", "DEFERRED"}:
             person.update(status="SKIPPED", ended_at=at)
     active = next((p for p in queue if p["status"] == "ACTIVE"), None)
     if not active and expected_turn_id in excluded_active:

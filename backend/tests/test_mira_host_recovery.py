@@ -52,17 +52,17 @@ class RestartTests(unittest.IsolatedAsyncioTestCase):
         meeting=Mira1HMeeting(id=uuid.uuid4(),meeting_date=DAY,slot='11:50',status='STAFF_PHASE',join_attempts=1)
         queue=[{'id':'PM_'+IDS[key],'user_id':IDS[key],'name':NAMES[key],'person':NAMES[key],
                 'status':status,'discussion':{'continuation':'Fakt i ruajtur'}}
-               for key,status in (('EF','ACTIVE'),('RA','DONE'),('EH','WAITING'),('EP','TIMEOUT'),('OH','SKIPPED'))]
+               for key,status in (('DV','ACTIVE'),('EP','DONE'),('OH','WAITING'),('RA','TIMEOUT'),('EF','SKIPPED'))]
         queue[-1].update(name='Haxhere Spahiu',person='Haxhere Spahiu')
         event=Mira1HEvent(id=uuid.uuid4(),kind='PM_REVIEW',data={'queue':queue,'join_attempt':1})
         await runtime.finish_pm(SimpleNamespace(execute=AsyncMock(return_value=result(event))),meeting,service.now())
         meeting.join_attempts=2
         with patch.object(runtime,'pm_event',AsyncMock(return_value=event)):
             out=await runtime.next_pm_turn(SimpleNamespace(),meeting,expected_turn_id=None)
-            self.assertEqual(out['current']['user_id'],IDS['EF'])
+            self.assertEqual(out['current']['user_id'],IDS['DV'])
             self.assertEqual(out['current']['discussion']['continuation'],'Fakt i ruajtur')
-            out=await runtime.next_pm_turn(SimpleNamespace(),meeting,expected_turn_id='PM_'+IDS['EF'])
-        self.assertEqual(out['current']['user_id'],IDS['EH'])
+            out=await runtime.next_pm_turn(SimpleNamespace(),meeting,expected_turn_id='PM_'+IDS['DV'])
+        self.assertEqual(out['current']['user_id'],IDS['OH'])
         self.assertEqual([p['status'] for p in event.data['queue']],['DONE','DONE','ACTIVE','TIMEOUT','SKIPPED'])
         self.assertEqual(event.data['join_attempt'],2)
 
@@ -150,14 +150,14 @@ class BlockedAndUploadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(watched),2)
 
     def test_blocked_only_staff_join_the_1600_queue_after_slot_staff_with_all_exclusions(self):
-        source=payload([item('RA','16:00','AKTUAL',rank=0)],absent=('DV',))
-        source['items']['blocked']=[item(key,None,'BLLOK',rank=i) for i,key in enumerate(('EF','RA','GA','OH','DV'))]
+        source=payload([item('EP','16:00','AKTUAL',rank=0)],absent=('DV',))
+        source['items']['blocked']=[item(key,None,'BLLOK',rank=i) for i,key in enumerate(('OH','EP','GA','RA','DV'))]
         source['items']['blocked'].append(item('EH',None,'BLLOK DONE',rank=9,status='DONE',completed_at=service.now().isoformat()))
-        next(u for u in source['users'] if u['id']==IDS['OH'])['full_name']='Haxhere Spahiu'
+        next(u for u in source['users'] if u['id']==IDS['RA'])['full_name']='Haxhere Spahiu'
         data=service.SlotData(source,DAY)
-        self.assertEqual(data.participants('16:00'),[IDS['RA'],IDS['EF']])
+        self.assertEqual(data.participants('16:00'),[IDS['EP'],IDS['OH']])
         self.assertEqual(data.participants('14:20'),[])
-        brief=service.person_brief(data,'16:00',IDS['EF'])
+        brief=service.person_brief(data,'16:00',IDS['OH'])
         out=controller.turn_brief({'id':'t','name':'Elsa','initials':'EF','brief':brief})
         self.assertEqual(out['plan_discutimi'][0]['grupi'],'BLLOK')
         self.assertFalse(out['te_gjitha_kryer'])

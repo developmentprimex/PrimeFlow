@@ -44,6 +44,9 @@ SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
 NO_PRE_BRIEF = {"10:00"}
 # Staff report to GA/KA in the 1H; they never get a reporting turn themselves.
 NO_TURN_INITIALS = {"GA", "KA"}
+# Development does not report in these two hosted slots (including the PM review).
+NO_DEVELOPMENT_TURN_SLOTS = {"11:50", "16:00"}
+NO_DEVELOPMENT_TURN_INITIALS = {"LH", "EH", "EF", "RA"}
 DEFAULT_GA_PARTICIPANTS = [
     {"name": "Diellza Veliu"},
     {"name": "Gane Arifaj"},
@@ -160,6 +163,11 @@ def excluded_host_name(name: str | None) -> bool:
     return bool(normalized) and normalized[0] == "haxhere"
 
 
+def excluded_host_turn(slot: str, name: str | None) -> bool:
+    return excluded_host_name(name) or (slot in NO_DEVELOPMENT_TURN_SLOTS
+        and initials(name) in NO_DEVELOPMENT_TURN_INITIALS)
+
+
 class SlotData:
     """Tasks per slot in Common View order, with people resolved to users."""
 
@@ -223,7 +231,8 @@ class SlotData:
         for item in tasks:
             for uid in self.owners(item):
                 name = self.users.get(uid, {}).get("full_name")
-                if uid not in order and initials(name) not in NO_TURN_INITIALS and self.available(uid):
+                if uid not in order and initials(name) not in NO_TURN_INITIALS and self.available(uid) \
+                        and not excluded_host_turn(slot, name):
                     order.append(uid)
         return order
 
@@ -264,6 +273,8 @@ class SlotData:
         """Unfinished PM tasks of today's 1H, per person in order (the 11:50 review)."""
         result = []
         for uid in self.order():
+            if excluded_host_turn(PM_REVIEW_SLOT, self.name(uid)):
+                continue
             tasks = []
             for slot in SLOTS:
                 for item in self.user_tasks(slot, uid, open_only=True):
@@ -662,10 +673,12 @@ async def begin_staff(db: AsyncSession, meeting: Mira1HMeeting) -> list[dict]:
     return await turns_view(db, meeting)
 
 
-async def turns_view(db: AsyncSession, meeting: Mira1HMeeting) -> list[dict]:
+async def turns_view(db: AsyncSession, meeting: Mira1HMeeting, *, include_slot_excluded: bool = False) -> list[dict]:
     rows = (await db.execute(select(Mira1HTurn, User.full_name).join(User, User.id == Mira1HTurn.user_id)
         .where(Mira1HTurn.meeting_id == meeting.id).order_by(Mira1HTurn.order_idx))).all()
-    rows = [(turn, name) for turn, name in rows if not excluded_host_name(name)]
+    # Slot policy controls reporting/status, while saved notes retain past facts.
+    rows = [(turn, name) for turn, name in rows if not (
+        excluded_host_name(name) if include_slot_excluded else excluded_host_turn(meeting.slot, name))]
     targets = await discord_targets(db, [str(t.user_id) for t, _ in rows])
     return [{"id": str(t.id), "user_id": str(t.user_id), "name": name, "initials": initials(name), "status": t.status,
              "order": t.order_idx, "invited_at": t.invited_at.isoformat() if t.invited_at else None,
@@ -689,9 +702,10 @@ async def next_turn(db: AsyncSession, meeting: Mira1HMeeting, summary: str | Non
     if expected_turn_id is not None and all(str(turn.id) != str(expected_turn_id) for turn in turns):
         raise HTTPException(409, "Radha ka ndryshuar; mos e përfundo personin e ri.")
     data = SlotData(await common_payload(db, meeting.meeting_date), meeting.meeting_date)
-    excluded_active = {str(t.id) for t in turns if str(t.user_id) in data.excluded_user_ids and t.status == "ACTIVE"}
+    excluded_ids = data.excluded_user_ids | {uid for uid in data.users if excluded_host_turn(meeting.slot, data.name(uid))}
+    excluded_active = {str(t.id) for t in turns if str(t.user_id) in excluded_ids and t.status == "ACTIVE"}
     for turn in turns:
-        if str(turn.user_id) in data.excluded_user_ids and turn.status in {"ACTIVE", "WAITING", "DEFERRED"}:
+        if str(turn.user_id) in excluded_ids and turn.status in {"ACTIVE", "WAITING", "DEFERRED"}:
             turn.status, turn.ended_at = "SKIPPED", at
     active = next((t for t in turns if t.status == "ACTIVE"), None)
     if not active and str(expected_turn_id) in excluded_active:
@@ -820,7 +834,7 @@ async def summarize(meeting_id: uuid.UUID) -> None:
         meeting = await meeting_for(db, meeting_id)
         if meeting.summary_status != "PENDING":
             return
-        turns = await turns_view(db, meeting)
+        turns = await turns_view(db, meeting, include_slot_excluded=True)
         segments = [{"segment": i, "speaker": line["speaker"], "time": line["at"][11:16], "text": line["text"]}
                     for i, line in enumerate(meeting.host_transcript or [])]
         title = f"1H {meeting.slot} · {meeting.meeting_date:%d.%m.%Y}"
@@ -1731,7 +1745,7 @@ async def note_transcript(db: AsyncSession, note_id: uuid.UUID) -> dict:
 
 
 async def _meeting_note_content(db: AsyncSession, meeting: Mira1HMeeting) -> str:
-    people = [turn for turn in await turns_view(db, meeting) if turn["notes"]]
+    people = [turn for turn in await turns_view(db, meeting, include_slot_excluded=True) if turn["notes"]]
     return (meeting.summary or "") + (
         "\n\n**Për secilin:**\n" + "\n".join(f"- {turn['initials']}: {turn['notes']}" for turn in people)
         if people else ""
