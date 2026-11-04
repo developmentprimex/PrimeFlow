@@ -155,6 +155,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   e ruajtura mbeten burimi origjinal dhe që konfirmimi i audios përputhet me
   tekstin e përgatitur. Pyetjet e stafit/PM nuk duhet të rilexojnë lista ose
   etiketa teknike dhe kufiri i kohës nuk duhet të përdoret si minimum raportimi.
+  Pas përgjigjes mjafton “Në rregull”/“Dakord” dhe direkt pyetja tjetër, pa
+  njoftime kujtese ose ruajtjeje. Kontrollo udhëzimin bazë dhe rikuperimin zanor
+  të worker-it, si në test ashtu edhe në takim real.
   Përmendja e një PX Note nga Host nuk e bën atë Note të krijuar nga Mira.
   Përjashtimet e detyrave nga leximi i Host nuk duhet të ndryshojnë raportet e
   përgjithshme. Hyrja para takimit dhe fillimi zyrtar i stafit/pranisë janë hapa
