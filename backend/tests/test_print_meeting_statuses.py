@@ -72,21 +72,22 @@ def test_exports_keep_status_cancellation_mark_and_order():
     sections = [(date(2026, 10, 28), "SOT", rows)]
     _, content, _ = _excel_table_attachment([], [], date(2026, 10, 28), meeting_sections=sections)
     sheet = load_workbook(BytesIO(content)).active
-    title_cells = [row[6] for row in sheet if str(row[6].value or "").startswith(tuple(f"{i}. " for i in range(1, 7)))]
+    title_cells = [row[5] for row in sheet if str(row[5].value or "").startswith(tuple(f"{i}. " for i in range(1, 7)))]
     assert [str(cell.value).split(". ", 1)[1] for cell in title_cells] == [
         f"{prefix}{'[MANUAL] ' if bucket == 'internal' else ''}{bucket} 2026-10-28 {name}"
         for bucket in ("external", "internal")
-        for prefix, name in (("", "pending"), ("[Mbajtur] ", "held"), ("", "canceled"))
+        for prefix, name in (("", "pending"), ("", "held"), ("", "canceled"))
     ]
     assert [cell.font.strike is True for cell in title_cells] == [False, False, True] * 2
     _, content, _ = _docx_table_attachment([], date(2026, 10, 28), meeting_sections=sections)
     document = Document(BytesIO(content))
-    meeting_rows = [row for table in document.tables for row in table.rows if "2026-10-28" in row.cells[-1].text]
+    meeting_rows = [row for table in document.tables for row in table.rows if len(row.cells) == 6 and "2026-10-28" in row.cells[4].text]
     assert len(meeting_rows) == 6
-    assert "[Mbajtur]" in meeting_rows[1].cells[-1].text
+    assert "Mbajtur" in meeting_rows[1].cells[1].text
     assert "Anuluar X" in meeting_rows[2].cells[1].text
-    assert "Anuluar" not in meeting_rows[2].cells[-1].text
-    assert all(run.font.strike for run in meeting_rows[2].cells[-1].paragraphs[0].runs)
+    assert "Anuluar" not in meeting_rows[2].cells[4].text
+    assert "Mbajtur" not in meeting_rows[1].cells[4].text
+    assert all(run.font.strike for run in meeting_rows[2].cells[4].paragraphs[0].runs)
 
 
 def test_common_view_captures_status_per_occurrence_for_recurring_and_one_off_meetings(monkeypatch):

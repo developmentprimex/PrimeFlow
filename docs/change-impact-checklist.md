@@ -132,9 +132,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   në SHTYPI (HTML/Excel/Word/PNG), raportet M1/M2/M3 dhe tabela ditore e
   departamenteve kanë kolona `PREJ` dhe `DERI`, me vijë ndarëse; pa orë mbarimi,
   `DERI` mbetet `-`. Snapshot-et historike ruajnë përmbajtjen që kishin në gjenerim.
-  Në SHTYPI, etiketat CAL/MANUAL dhe Mbajtur vendosen te celula e emrit të
-  takimit në HTML, Excel, Word dhe PNG. Anuluar mbetet nën orën te PREJ;
-  DERI mban vetëm orën e mbarimit.
+  Në SHTYPI, etiketat CAL/MANUAL vendosen te celula e emrit të takimit në HTML,
+  Excel, Word dhe PNG. Mbajtur/Anuluar vendosen nën orën te PREJ; DERI mban
+  vetëm orën e mbarimit. USER është kolona e fundit pas titullit. Tabela ditore në
+  Department Views/My View e ka Personat në fund.
 - Shënimet e takimeve (`meeting_notes`) dalin te PX Notes vetëm kur dërgohen
   ose bashkohen; statusi i tyre lexohet nga taskat e Note-s PX (`ga_note_origin_id`).
   Ngjyrat e statusit duhet të mbeten të njëjta me PX Notes. Regjistrimi i lidhur

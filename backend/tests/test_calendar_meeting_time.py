@@ -63,10 +63,11 @@ def test_old_day_offset_is_omitted_and_missing_end_is_not_invented():
     assert meeting_time_columns("10:00") == ("10:00", "-")
 
 
-def test_shtypi_html_excel_and_word_use_distinct_time_columns():
+@pytest.mark.parametrize("status,status_label", [("held", "Mbajtur"), ("canceled", "Anuluar X")])
+def test_shtypi_html_excel_and_word_use_distinct_time_columns(status, status_label):
     day = date(2026, 11, 4)
     items = [{"title": "Night meeting", "time": "23:00 - 01:00 (+1d)", "calendarImported": True,
-              "assignees": ["Laurent Hoxha"], "recurrence_type": "none", "occurrenceStatus": "canceled"}]
+              "assignees": ["Laurent Hoxha"], "recurrence_type": "none", "occurrenceStatus": status}]
     sections = [(day, "SOT", [("TAK EXT", items, False)])]
     html = _dated_meetings_html(sections)
     assert ">PREJ</th>" in html and ">DERI</th>" in html
@@ -74,18 +75,20 @@ def test_shtypi_html_excel_and_word_use_distinct_time_columns():
     assert "+1d" not in html and "23:00 - 01:00" not in html
     from_cell = html.split('data-meeting-time="true"', 1)[1].split("</td>", 1)[0]
     title_cell = html.split('data-meeting-cell="true"', 1)[1].split("</td>", 1)[0]
-    assert "CAL" not in from_cell and "Anuluar" in from_cell
-    assert "CAL" in title_cell and "Anuluar" not in title_cell
+    assert "CAL" not in from_cell and status_label in from_cell
+    assert "CAL" in title_cell and status_label not in title_cell
+    assert html.index('data-meeting-cell="true"') < html.index('data-meeting-users="true"')
+    assert html.index(">TAKIMET</th>") < html.index(">USER</th>")
 
     _, content, _ = _excel_table_attachment([], [], day, meeting_sections=sections)
     sheet = load_workbook(BytesIO(content)).active
     row = next(row for row in sheet.iter_rows() if any("Night meeting" in str(cell.value) for cell in row))
-    assert [row[index].value for index in (0, 2, 3, 4)] == ["TAK EXT", "23:00\nAnuluar X", "01:00", "LH"]
-    assert row[6].value == "1. [CAL] Night meeting"
+    assert [row[index].value for index in (0, 2, 3, 7)] == ["TAK EXT", f"23:00\n{status_label}", "01:00", "LH"]
+    assert row[5].value == "1. [CAL] Night meeting"
     assert row[2].border.right.style and row[3].border.left.style
 
     _, content, _ = _docx_table_attachment([], day, meeting_sections=sections)
     document = Document(BytesIO(content))
     row = next(row for table in document.tables for row in table.rows if any("Night meeting" in cell.text for cell in row.cells))
-    assert [cell.text for cell in row.cells[:4]] == ["TAK EXT", "23:00\nAnuluar X", "01:00", "LH"]
-    assert row.cells[5].text == "1. [CAL] Night meeting"
+    assert [row.cells[index].text for index in (0, 1, 2, 5)] == ["TAK EXT", f"23:00\n{status_label}", "01:00", "LH"]
+    assert row.cells[4].text == "1. [CAL] Night meeting"

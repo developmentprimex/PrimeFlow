@@ -1623,14 +1623,14 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
     }
     assert set(time_cells) == {"10:00", "10:30", "11:00"}
     assert time_cells["10:00"].fill.fgColor.rgb.endswith("CCEFF1")
-    assert sheet.cell(time_cells["10:00"].row, 7).font.bold
-    assert not sheet.cell(time_cells["10:30"].row, 7).font.bold
-    assert sheet.cell(time_cells["10:30"].row, 7).value == "2. [CAL] Linked calendar internal"
-    assert sheet.cell(time_cells["10:30"].row, 6).value == "PAS"
+    assert sheet.cell(time_cells["10:00"].row, 6).font.bold
+    assert not sheet.cell(time_cells["10:30"].row, 6).font.bold
+    assert sheet.cell(time_cells["10:30"].row, 6).value == "2. [CAL] Linked calendar internal"
+    assert sheet.cell(time_cells["10:30"].row, 5).value == "PAS"
     assert time_cells["10:30"].fill.fgColor.rgb.endswith("CCEFF1")
     assert time_cells["10:30"].font.color.rgb.endswith("64748B")
-    assert sheet.cell(time_cells["10:30"].row, 5).value == "AK/DV"
-    assert sheet.cell(time_cells["10:30"].row, 5).font.color.rgb.endswith("64748B")
+    assert sheet.cell(time_cells["10:30"].row, 8).value == "AK/DV"
+    assert sheet.cell(time_cells["10:30"].row, 8).font.color.rgb.endswith("64748B")
     assert time_cells["10:30"].border.top.style == "thick"
     assert time_cells["10:30"].border.top.color.rgb.endswith("111827")
     assert time_cells["11:00"].fill.fgColor.rgb.endswith("FFF4CC")
@@ -1736,8 +1736,8 @@ def test_word_export_preserves_task_markers_and_unavailable_meeting_users() -> N
     )
     document = Document(BytesIO(content))
     meeting_row = next(row for table in document.tables for row in table.rows if any("Internal meeting" in cell.text for cell in row.cells))
-    assert meeting_row.cells[4].text == "PARA"
-    assert meeting_row.cells[5].text == "1. Internal meeting"
+    assert meeting_row.cells[3].text == "PARA"
+    assert meeting_row.cells[4].text == "1. Internal meeting"
     cells = [cell for table in document.tables for row in table.rows for cell in row.cells]
     task_cell = next(cell for cell in cells if "Task with marker" in cell.text)
     marker_run = next(run for paragraph in task_cell.paragraphs for run in paragraph.runs if "[?]" in run.text)

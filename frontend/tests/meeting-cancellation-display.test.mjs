@@ -45,11 +45,11 @@ test("daily report retains external meeting and labels only canceled occurrences
   })
   const meetings = ["external", "held"].map((id) => ({
     id, title: id, meeting_type: "external", starts_at: "2026-10-22T09:00:00",
-    calendar_imported: true, ends_at: "2026-10-22T10:30:00",
+    calendar_imported: true, ends_at: "2026-10-22T10:30:00", participant_ids: ["lh"],
     recurrence_type: "weekly", recurrence_days_of_week: [3],
   }))
   const render = (day) => renderToStaticMarkup(React.createElement(DailyReportMeetingsTable, {
-    meetings, users: [], reportDateIso: day,
+    meetings, users: [{ id: "lh", full_name: "Laurent Hoxha" }], reportDateIso: day,
   }))
   const canceledDay = render("2026-10-22")
   assert.match(canceledDay, /external/)
@@ -57,6 +57,8 @@ test("daily report retains external meeting and labels only canceled occurrences
   assert.match(canceledDay, />Prej<\/th>/)
   assert.match(canceledDay, />Deri<\/th>/)
   assert.match(canceledDay, />09:00<\/td><td[^>]*>10:30<\/td>/)
+  assert.match(canceledDay, />Deri<\/th><th[^>]*>Personat<\/th><\/tr>/)
+  assert.match(canceledDay, />Laurent Hoxha<\/td><\/tr>/)
   assert.equal((canceledDay.match(/ANULUAR/g) || []).length, 1)
   assert.doesNotMatch(render("2026-10-29"), /ANULUAR/)
 })

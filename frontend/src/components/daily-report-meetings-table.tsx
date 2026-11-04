@@ -89,22 +89,22 @@ export function DailyReportMeetingsTable({
             <col className="w-[42px]" />
             <col className="w-[80px]" />
             <col className="w-[260px]" />
-            <col />
             <col className="w-[120px]" />
             <col className="w-[110px]" />
             <col className="w-[90px]" />
             <col className="w-[90px]" />
+            <col />
           </colgroup>
           <thead className="bg-slate-50 text-slate-700">
             <tr>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Nr</th>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Lloji</th>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Emri</th>
-              <th className="border border-slate-200 px-2 py-2 text-left uppercase">Personat</th>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Kur</th>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Data</th>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Prej</th>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Deri</th>
+              <th className="border border-slate-200 px-2 py-2 text-left uppercase">Personat</th>
             </tr>
           </thead>
           <tbody>
@@ -135,9 +135,6 @@ export function DailyReportMeetingsTable({
                       {canceledMeetings.has(meeting.id) ? <MeetingCanceledBadge /> : null}
                     </td>
                     <td className="border border-slate-200 px-2 py-2 align-top text-slate-700">
-                      {persons.length ? persons.join(", ") : "-"}
-                    </td>
-                    <td className="border border-slate-200 px-2 py-2 align-top text-slate-700">
                       {reportDate?.toLocaleDateString("en-US", { weekday: "long" }) || "-"}
                     </td>
                     <td className="border border-slate-200 px-2 py-2 align-top text-slate-700">
@@ -148,6 +145,9 @@ export function DailyReportMeetingsTable({
                     </td>
                     <td className="border border-slate-200 px-2 py-2 align-top font-medium text-slate-900">
                       {time.to}
+                    </td>
+                    <td className="border border-slate-200 px-2 py-2 align-top text-slate-700">
+                      {persons.length ? persons.join(", ") : "-"}
                     </td>
                   </tr>
                 )
