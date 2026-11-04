@@ -134,6 +134,14 @@ async def update_recording(recording_id: uuid.UUID, payload: RecordingUpdate,
             audit(db, user, row, "recording_project_updated",
                   previous_project_id=str(previous_project_id) if previous_project_id else None,
                   project_id=str(row.project_id) if row.project_id else None)
+    if "meeting_id" in payload.model_fields_set:
+        if payload.meeting_id is not None and await db.get(Meeting, payload.meeting_id) is None:
+            raise HTTPException(404, "Meeting not found")
+        if row.meeting_id != payload.meeting_id:
+            audit(db, user, row, "recording_meeting_updated",
+                  previous_meeting_id=str(row.meeting_id) if row.meeting_id else None,
+                  meeting_id=str(payload.meeting_id) if payload.meeting_id else None)
+            row.meeting_id = payload.meeting_id
     row.title = payload.title
     audit(db, user, row, "recording_title_updated", previous_title=previous_title, title=row.title)
     await db.commit()

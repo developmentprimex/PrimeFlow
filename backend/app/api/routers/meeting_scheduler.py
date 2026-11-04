@@ -93,6 +93,7 @@ async def _request_out(db: AsyncSession, row: MeetingScheduleRequest) -> Meeting
         project_id=row.project_id,
         standard_id=row.standard_id,
         participant_ids=participant_ids,
+        is_training=bool(getattr(row, "is_training", False)),
         status=row.status,
         approval_count=len(approval_rows),
         approvals=[
@@ -368,6 +369,7 @@ async def _provision_request(
         meeting_url=teams_url,
         microsoft_event_id=microsoft_event_id,
         meeting_type=row.meeting_type,
+        is_training=bool(getattr(row, "is_training", False)),
         department_id=row.department_id,
         project_id=row.project_id,
         created_by=row.created_by_user_id,

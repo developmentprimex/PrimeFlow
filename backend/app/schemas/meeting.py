@@ -25,6 +25,7 @@ class MeetingOut(BaseModel):
     recurrence_days_of_month: list[int] | None = None
     external_agent_test_task_requested: bool = False
     external_pim_image_test_task_requested: bool = False
+    is_training: bool = False
     department_id: uuid.UUID
     project_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None

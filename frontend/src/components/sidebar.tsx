@@ -41,6 +41,8 @@ import {
   BookA,
   Scale,
   GraduationCap,
+  CalendarCheck,
+  NotebookPen,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -75,7 +77,6 @@ type NavGroup = {
 }
 
 const primaryItems: NavItem[] = [
-  { href: "/meeting-recordings", label: "Regjistrimet", icon: Video },
   { 
     href: "/dashboard", 
     label: "Dashboard", 
@@ -107,6 +108,12 @@ const primaryItems: NavItem[] = [
     label: "WFC",
     icon: Clock3,
   },
+]
+
+// Takimet group, shown right below WFC: meeting notes and the recordings.
+const meetingItems: NavItem[] = [
+  { href: "/meetings", label: "Shënimet e takimeve", icon: NotebookPen },
+  { href: "/meeting-recordings", label: "Regjistrimet", icon: Video },
 ]
 
 const gaReportItems: NavItem[] = [
@@ -437,6 +444,12 @@ export function Sidebar({ role }: { role: UserRole }) {
   )
   const [openGroupId, setOpenGroupId] = React.useState<string | null>(null)
   const [openSubgroupId, setOpenSubgroupId] = React.useState<string | null>(null)
+  const meetingsActive = meetingItems.some(isItemActive)
+  const [meetingsOpen, setMeetingsOpen] = React.useState(meetingsActive)
+
+  React.useEffect(() => {
+    if (meetingsActive) setMeetingsOpen(true)
+  }, [meetingsActive])
 
   React.useEffect(() => {
     if (activeGroupId) setOpenGroupId(activeGroupId)
@@ -541,6 +554,34 @@ export function Sidebar({ role }: { role: UserRole }) {
           .flatMap((item) => isGaUser && item.href === "/admin-tasks" ? [item, ...gaReportItems] : [item])
           .filter(canViewItem)
           .map((item) => renderNavItem(item))}
+
+        <div>
+          <button
+            type="button"
+            aria-expanded={meetingsOpen}
+            aria-controls="sidebar-group-meetings-notes"
+            onClick={() => setMeetingsOpen((current) => !current)}
+            className={cn(
+              "group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-semibold transition-colors",
+              "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              meetingsActive ? "text-sidebar-accent-foreground" : "text-muted-foreground"
+            )}
+          >
+            <CalendarCheck
+              className={cn(
+                "h-4 w-4 shrink-0 transition-colors",
+                meetingsActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate">Takimet</span>
+            <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform duration-200", meetingsOpen && "rotate-180")} />
+          </button>
+          {meetingsOpen && (
+            <div id="sidebar-group-meetings-notes" className="mt-1 space-y-1">
+              {meetingItems.filter(canViewItem).map((item) => renderNavItem(item, true))}
+            </div>
+          )}
+        </div>
 
         <div className="my-2 border-t border-sidebar-border" />
 

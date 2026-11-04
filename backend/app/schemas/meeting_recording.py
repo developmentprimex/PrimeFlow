@@ -27,6 +27,8 @@ class RecordingCreate(BaseModel):
 class RecordingUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     project_id: UUID | None = None
+    # Takimet: link an existing recording to its meeting (sent only when changed).
+    meeting_id: UUID | None = None
 
     @field_validator("title")
     @classmethod

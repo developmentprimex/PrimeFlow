@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -46,6 +46,7 @@ class MeetingScheduleRequest(Base):
     department_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("departments.id"), nullable=False, index=True
     )
+    is_training: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), index=True
     )

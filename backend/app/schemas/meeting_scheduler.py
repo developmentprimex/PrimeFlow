@@ -42,6 +42,7 @@ class MeetingScheduleRequestBase(BaseModel):
     project_id: uuid.UUID | None = None
     standard_id: uuid.UUID | None = None
     participant_ids: list[uuid.UUID] = Field(min_length=1)
+    is_training: bool = False
 
     @model_validator(mode="after")
     def validate_window(self):

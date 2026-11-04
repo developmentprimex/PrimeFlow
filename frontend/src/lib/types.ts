@@ -771,6 +771,7 @@ export interface Meeting {
   recurrence_days_of_month?: number[] | null
   external_agent_test_task_requested?: boolean
   external_pim_image_test_task_requested?: boolean
+  is_training?: boolean
   department_id: string
   project_id?: string | null
   created_by?: string | null

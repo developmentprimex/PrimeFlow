@@ -241,6 +241,8 @@ export default function MeetingSchedulerPage() {
   const [meetingType, setMeetingType] = React.useState<"internal" | "external">(
     "external",
   );
+  // Takimet: a training is scheduled as TAK INT and grouped under "Trajnime".
+  const [isTraining, setIsTraining] = React.useState(false);
   const [standardId, setStandardId] = React.useState("");
   const [selectedDate, setSelectedDate] = React.useState(isoDate(new Date()));
   const [selectedTime, setSelectedTime] = React.useState("09:00");
@@ -341,8 +343,9 @@ export default function MeetingSchedulerPage() {
     const start = localDateTime(selectedDate, selectedTime);
     const end = new Date(start.getTime() + duration * 60_000);
     return {
-      title: meetingType === "external" ? "Kontroll TAK EXT" : "Kontroll TAK INT",
+      title: meetingType === "external" ? "Kontroll TAK EXT" : isTraining ? "Trajnim" : "Kontroll TAK INT",
       meeting_type: meetingType,
+      is_training: meetingType === "internal" && isTraining,
       starts_at: start.toISOString(),
       ends_at: end.toISOString(),
       platform: meetingType === "external" ? "Teams" : null,
@@ -355,6 +358,7 @@ export default function MeetingSchedulerPage() {
   }, [
     departmentId,
     duration,
+    isTraining,
     meetingType,
     participantIds,
     selectedDate,
@@ -655,6 +659,7 @@ export default function MeetingSchedulerPage() {
                       (item) => item.meeting_type === nextType,
                     );
                     setMeetingType(nextType);
+                    if (nextType === "external") setIsTraining(false);
                     setStandardId(matching?.id || "");
                     setDuration(
                       matching?.default_duration_minutes ||
@@ -671,6 +676,19 @@ export default function MeetingSchedulerPage() {
                     <SelectItem value="internal">TAK INT</SelectItem>
                   </SelectContent>
                 </Select>
+                {meetingType === "internal" && (
+                  <label className="mt-2 flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={isTraining}
+                      onChange={(event) => {
+                        setIsTraining(event.target.checked);
+                        setValidation(null);
+                      }}
+                    />
+                    Trajnim
+                  </label>
+                )}
               </div>
               <div>
                 <Label>Departamenti</Label>

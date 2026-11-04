@@ -57,6 +57,9 @@ async def get_analysis(recording_id: uuid.UUID, db: AsyncSession = Depends(get_d
     job = await db.get(Analysis, row.id)
     segments = (await db.execute(select(Transcript).where(Transcript.recording_id == row.id).order_by(Transcript.index))).scalars().all() if job else []
     actions = (await db.execute(select(Action).where(Action.recording_id == row.id).order_by(Action.segment_index, Action.id))).scalars().all() if job else []
+    from app.models.meeting_note import MeetingNote
+    kept_notes = dict((await db.execute(select(MeetingNote.recording_action_id, MeetingNote.id).where(
+        MeetingNote.recording_action_id.in_([a.id for a in actions])))).all()) if actions else {}
     if job:
         audit(db, user, row, 'recording_analysis_viewed')
         await db.commit()
@@ -68,8 +71,10 @@ async def get_analysis(recording_id: uuid.UUID, db: AsyncSession = Depends(get_d
             'decisions': job.decisions if job.decisions is not None else [d for s in segments for d in (s.notes or {}).get('decisions', [])]} if job else None,
         'segments': [{'index': s.index, 'start_seconds': s.start_seconds, 'duration_seconds': s.duration_seconds,
                       'text': s.text} for s in segments],
-        'actions': [{key: getattr(a, key) for key in ('id', 'segment_index', 'title', 'description', 'evidence', 'assignee_text', 'deadline_text',
-            'suggested_assignee_id', 'suggested_due_date', 'created_task_id', 'confirmed_at')} for a in actions]}
+        'meeting_id': getattr(row, 'meeting_id', None),
+        'actions': [{**{key: getattr(a, key) for key in ('id', 'segment_index', 'title', 'description', 'evidence', 'assignee_text', 'deadline_text',
+            'suggested_assignee_id', 'suggested_due_date', 'created_task_id', 'confirmed_at', 'dismissed_at')},
+            'meeting_note_id': kept_notes.get(a.id)} for a in actions]}
 
 
 @router.post('/{recording_id}/analysis', status_code=202)
@@ -153,8 +158,25 @@ async def confirm_task(recording_id: uuid.UUID, action_id: uuid.UUID, payload: T
     title_lines[0] = title_lines[0].upper()
     title = '\n'.join(title_lines)
     note = await create_recording_note(db, proposal.id, payload, user, title)
+    meeting_note = None
+    if getattr(row, 'meeting_id', None) is not None:
+        # Takimet: the confirmed task also shows in its meeting session as a
+        # recording note linked to the same PX note, so its status reads back.
+        from app.models.meeting_note import MeetingNote
+        from app.api.routers.meeting_notes import _action_seconds, _local_date
+        meeting_note = (await db.execute(select(MeetingNote).where(MeetingNote.recording_action_id == proposal.id))).scalars().first()
+        if meeting_note is None:
+            meeting_note = MeetingNote(meeting_id=row.meeting_id, occurrence_date=_local_date(row.recording_started_at),
+                kind='NOTE', content=title, source='RECORDING', recording_id=row.id, recording_action_id=proposal.id,
+                recording_seconds=_action_seconds(await db.get(Analysis, row.id), proposal.id),
+                assignee_user_id=payload.assigned_to, due_date=payload.due_date.date() if payload.due_date else None,
+                created_by=user.id)
+            db.add(meeting_note)
     def attach(task):
         note.content = task.title
+        if meeting_note is not None:
+            meeting_note.ga_note_id = note.id
+        proposal.dismissed_at = None
         proposal.created_task_id, proposal.confirmed_by = task.id, user.id
         proposal.confirmed_at = datetime.now(timezone.utc)
         audit(db, user, row, 'recording_task_confirmed', action_id=str(proposal.id), task_id=str(task.id))

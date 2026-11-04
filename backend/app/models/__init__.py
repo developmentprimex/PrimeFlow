@@ -47,6 +47,7 @@ from app.models.today_print_report_settings import TodayPrintReportSettings
 from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
+from app.models.meeting_note import MeetingNote, MeetingNoteAttachment
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
 from app.models.one_h_print_report_snapshot import OneHPrintReportSnapshot
@@ -162,6 +163,8 @@ __all__ = [
     "MorningReportDraft",
     "MorningReportSettings",
     "MeetingOccurrenceStatus",
+    "MeetingNote",
+    "MeetingNoteAttachment",
     "MicrosoftToken",
     "Notification",
     "OneHPrintReportSnapshot",

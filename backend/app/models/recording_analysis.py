@@ -56,3 +56,5 @@ class RecordingAction(Base):
     created_task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('tasks.id', ondelete='SET NULL'))
     confirmed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('users.id'))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Reviewer chose "Injoro" in the recording review; never deletes the proposal.
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

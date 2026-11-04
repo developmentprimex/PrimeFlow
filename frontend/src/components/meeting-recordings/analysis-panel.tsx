@@ -17,18 +17,39 @@ import { transcriptParagraphs } from "@/lib/recording-transcript"
 import { Label } from "@/components/ui/label"
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "@/components/ui/table"
 
-export type RecordingAction = { id: string; segment_index: number; title: string; description: string; evidence: string; assignee_text: string | null; deadline_text: string | null; suggested_assignee_id: string | null; suggested_due_date: string | null; created_task_id: string | null; confirmed_at: string | null }
+export type RecordingAction = { id: string; segment_index: number; title: string; description: string; evidence: string; assignee_text: string | null; deadline_text: string | null; suggested_assignee_id: string | null; suggested_due_date: string | null; created_task_id: string | null; confirmed_at: string | null; dismissed_at?: string | null; meeting_note_id?: string | null }
 type Segment = { index: number; start_seconds: number; duration_seconds: number; text: string }
 type CitationTime = { start: number | null; end: number | null; approximate: boolean }
 type Timing = { status: string; completed?: number; total?: number; error?: string | null; results?: Record<string, CitationTime> }
-type Analysis = { timing_configured?: boolean; timing?: Timing | null; configured: boolean; can_manage: boolean; can_start_analysis: boolean; analysis: null | { status: string; language: string; total_segments: number; segments_done: number; summary: string | null; error_message: string | null; decisions: string[] }; segments: Segment[]; actions: RecordingAction[] }
+type Analysis = { timing_configured?: boolean; timing?: Timing | null; configured: boolean; can_manage: boolean; can_start_analysis: boolean; analysis: null | { status: string; language: string; total_segments: number; segments_done: number; summary: string | null; error_message: string | null; decisions: string[] }; segments: Segment[]; actions: RecordingAction[]; meeting_id?: string | null }
 export type RecordingPerson = { id: string; full_name: string; department_id: string | null; role?: "ADMIN" | "MANAGER" | "STAFF" }
 export type RecordingDepartment = { id: string; name: string }
 const STATUS: Record<string, string> = { QUEUED: "Në pritje të përpunimit", TRANSCRIBING: "Duke transkriptuar", SUMMARIZING: "Duke përgatitur përmbledhjen dhe propozimet", READY: "Përpunimi përfundoi", FAILED: "Përpunimi dështoi" }
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
 
-function ActionReview({ action, number, recordingId, people, departments, canManage, onCreated, timing, timingStatus, onSeek }: { timing?: CitationTime; timingStatus?: string; onSeek?: (seconds: number) => void; action: RecordingAction; number: number; recordingId: string; people: RecordingPerson[]; departments: RecordingDepartment[]; canManage: boolean; onCreated: () => Promise<void> }) {
+function ActionReview({ action, number, recordingId, meetingId, people, departments, canManage, onCreated, timing, timingStatus, onSeek }: { timing?: CitationTime; timingStatus?: string; onSeek?: (seconds: number) => void; action: RecordingAction; number: number; recordingId: string; meetingId?: string | null; people: RecordingPerson[]; departments: RecordingDepartment[]; canManage: boolean; onCreated: () => Promise<void> }) {
   const { apiFetch } = useAuth()
+  // Takimet: keep a proposal as a meeting note or ignore it, without a task.
+  const [noteId, setNoteId] = React.useState<string | null>(action.meeting_note_id || null)
+  const [dismissed, setDismissed] = React.useState(Boolean(action.dismissed_at))
+  const [reviewBusy, setReviewBusy] = React.useState(false)
+  const keepAsNote = async () => {
+    setReviewBusy(true); setEditError("")
+    try {
+      const note = await recordingJson(await apiFetch(`/meeting-notes/recordings/${recordingId}/actions/${action.id}/note`, { method: "POST" })) as { id: string }
+      setNoteId(note.id); setDismissed(false)
+    } catch (error) { setEditError(error instanceof Error ? error.message : String(error)) }
+    finally { setReviewBusy(false) }
+  }
+  const setDismiss = async (value: boolean) => {
+    setReviewBusy(true); setEditError("")
+    try {
+      await recordingJson(await apiFetch(`/meeting-notes/recordings/${recordingId}/actions/${action.id}/dismiss`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dismissed: value }) }))
+      setDismissed(value)
+      if (!value) setNoteId(null)
+    } catch (error) { setEditError(error instanceof Error ? error.message : String(error)) }
+    finally { setReviewBusy(false) }
+  }
   const [open, setOpen] = React.useState(false)
   const [createdId, setCreatedId] = React.useState<string | null>(action.created_task_id)
   const [editor, setEditor] = React.useState<{ task: Task; people: RecordingPerson[]; departments: RecordingDepartment[] } | null>(null)
@@ -59,7 +80,7 @@ function ActionReview({ action, number, recordingId, people, departments, canMan
   const description = (savedTask ? savedTask.description || "" : action.description).split(/\n\s*Burimi: regjistrimi /)[0].replace(/<br\s*\/?\s*>/gi, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ")
   const taskContent = savedTask ? [savedTask.title, !savedTask.title.includes("\n") ? description : ""].filter(Boolean).join("\n") : [action.title.toLocaleUpperCase("sq-AL"), action.description].filter(Boolean).join("\n")
   const due = savedTask ? savedTask.due_date : action.suggested_due_date
-  const taskStatus = savedTask ? ({ TODO: "Për t’u bërë", IN_PROGRESS: "Në progres", WAITING_CLIENT: "WFE", WAITING_CONFIRMATION: "Në konfirmim", DONE: "E përfunduar" }[savedTask.status || "TODO"] || savedTask.status) : createdId ? "E krijuar" : action.confirmed_at ? "E fshirë" : "Propozim AI"
+  const taskStatus = savedTask ? ({ TODO: "Për t’u bërë", IN_PROGRESS: "Në progres", WAITING_CLIENT: "WFE", WAITING_CONFIRMATION: "Në konfirmim", DONE: "E përfunduar" }[savedTask.status || "TODO"] || savedTask.status) : createdId ? "E krijuar" : action.confirmed_at ? "E fshirë" : noteId ? "Shënim te takimi" : dismissed ? "Injoruar" : "Propozim AI"
   return <><TableRow className="align-top">
     <TableCell className="font-bold tabular-nums text-muted-foreground">{number}</TableCell>
     <TableCell className="whitespace-normal">
@@ -73,8 +94,13 @@ function ActionReview({ action, number, recordingId, people, departments, canMan
     <TableCell className="text-center">
     {createdId ? <Button variant="outline" size="sm" className="h-7 text-xs" disabled={loadingTask} onClick={() => void openCreated()}><Pencil aria-hidden="true" />{loadingTask ? "Duke ngarkuar…" : "Edito detyrë"}</Button>
       : action.confirmed_at ? <p className="text-sm">Detyra e konfirmuar është fshirë nga Tasks.</p>
-      : canManage ? <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setOpen(true)}><Plus aria-hidden="true" />Krijo detyrë</Button>
-      : <p className="text-sm">Autori i regjistrimit mund ta konfirmojë detyrën.</p>}
+      : noteId ? <div className="space-y-1"><p className="text-sm text-violet-800">Shënim te takimi ✓</p><button type="button" className="text-xs text-muted-foreground underline" disabled={reviewBusy} onClick={() => void setDismiss(false)}>Zhbëj</button></div>
+      : dismissed ? <div className="space-y-1"><p className="text-sm text-muted-foreground">Injoruar</p><button type="button" className="text-xs underline" disabled={reviewBusy} onClick={() => void setDismiss(false)}>Zhbëj</button></div>
+      : <div className="flex flex-wrap justify-center gap-1.5">
+        {canManage ? <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setOpen(true)}><Plus aria-hidden="true" />Detyrë</Button> : <p className="text-sm">Autori i regjistrimit mund ta konfirmojë detyrën.</p>}
+        {meetingId && <Button variant="outline" size="sm" className="h-7 text-xs" disabled={reviewBusy} onClick={() => void keepAsNote()}>Shënim</Button>}
+        {canManage && <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" disabled={reviewBusy} onClick={() => void setDismiss(true)}>Injoro</Button>}
+      </div>}
     {savedTask?.ga_note_origin_id && <Link className="mt-2 block text-sm underline" href="/ga-ka-notes">Hap në PX Notes</Link>}
     {editError && <p role="alert" className="mt-2 max-w-48 whitespace-normal text-sm text-destructive">{editError}</p>}
     </TableCell>
@@ -179,7 +205,7 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
         {data.timing?.error && <p role="alert" className="text-sm text-destructive">{data.timing.error}</p>}
       </section>}
       <div id="recording-tasks" tabIndex={-1} className="scroll-mt-24">
-      {data.actions.length > 0 && <section className="space-y-4"><h3 className="flex items-center gap-2 font-semibold"><ListTodo aria-hidden="true" className="size-4 text-muted-foreground" />Detyrat e propozuara <span className="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{data.actions.length}</span></h3><div className="overflow-hidden rounded-md border-2 border-slate-700 bg-background"><Table aria-label="Detyrat e regjistrimit" className="min-w-[960px] table-fixed border-collapse [&_td]:border [&_td]:border-slate-600 [&_td]:p-2 [&_td]:align-bottom [&_th]:border [&_th]:border-slate-600 [&_th]:px-2 [&_th]:align-bottom"><TableHeader className="bg-background [&_th]:h-10 [&_th]:font-medium [&_th]:uppercase"><TableRow><TableHead className="w-10">NR</TableHead><TableHead className="w-[44%]">Detyra</TableHead><TableHead className="w-[18%]">Përgjegjësi</TableHead><TableHead className="w-28">Afati</TableHead><TableHead className="w-32">Statusi</TableHead><TableHead className="w-40 text-center">Veprime</TableHead></TableRow></TableHeader><TableBody>{data.actions.map((action, index) => <ActionReview key={`${action.id}-${people.length > 0}`} action={action} number={index + 1} recordingId={recordingId} people={people} departments={departments} canManage={data.can_manage} onCreated={load} timing={data.timing?.results?.[action.id]} timingStatus={data.timing?.status} onSeek={onSeek} />)}</TableBody></Table></div></section>}
+      {data.actions.length > 0 && <section className="space-y-4"><h3 className="flex items-center gap-2 font-semibold"><ListTodo aria-hidden="true" className="size-4 text-muted-foreground" />Detyrat e propozuara <span className="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{data.actions.length}</span></h3><div className="overflow-hidden rounded-md border-2 border-slate-700 bg-background"><Table aria-label="Detyrat e regjistrimit" className="min-w-[960px] table-fixed border-collapse [&_td]:border [&_td]:border-slate-600 [&_td]:p-2 [&_td]:align-bottom [&_th]:border [&_th]:border-slate-600 [&_th]:px-2 [&_th]:align-bottom"><TableHeader className="bg-background [&_th]:h-10 [&_th]:font-medium [&_th]:uppercase"><TableRow><TableHead className="w-10">NR</TableHead><TableHead className="w-[44%]">Detyra</TableHead><TableHead className="w-[18%]">Përgjegjësi</TableHead><TableHead className="w-28">Afati</TableHead><TableHead className="w-32">Statusi</TableHead><TableHead className="w-40 text-center">Veprime</TableHead></TableRow></TableHeader><TableBody>{data.actions.map((action, index) => <ActionReview key={`${action.id}-${people.length > 0}`} action={action} number={index + 1} recordingId={recordingId} meetingId={data.meeting_id} people={people} departments={departments} canManage={data.can_manage} onCreated={load} timing={data.timing?.results?.[action.id]} timingStatus={data.timing?.status} onSeek={onSeek} />)}</TableBody></Table></div></section>}
       {data.analysis?.status === "READY" && !data.actions.length && <p className="text-sm">Nuk u gjetën veprime të konfirmuara për t’u kthyer në detyra.</p>}
       </div>
 

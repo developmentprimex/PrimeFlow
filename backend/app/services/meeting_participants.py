@@ -156,6 +156,7 @@ def meeting_to_out(
         recurrence_days_of_month=meeting.recurrence_days_of_month,
         external_agent_test_task_requested=meeting.external_agent_test_task_requested,
         external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
+        is_training=bool(getattr(meeting, "is_training", False)),
         department_id=meeting.department_id,
         project_id=meeting.project_id,
         created_by=meeting.created_by,

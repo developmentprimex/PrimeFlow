@@ -75,6 +75,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | Planifikim | Weekly Planner, Monthly Planner, PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, Realization, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Realization dhe Reviews | My View, Department Views, Finance View, Realization, Reviews, Common View, Weekly Planner, Kontrolli ditor RLZ, M3 PIKAT |
 | Regjistrime dhe Mira | Regjistrimet, Mira, Meetings, PX Notes, Task Details |
+| Takimet (shënimet e takimeve) | Takimet, Takimi (seancat), Historia e klientit, Regjistrimet (Shënim / Injoro / screenshot), PX Notes (Dërgo / Bashko në PX), Meeting Scheduler (Trajnim), Sidebar |
 | Mira Host / takimet 1H | Mira (nisje/ndalim/status), Discord 1H (hyrja, prania, radha, audioja), PX Notes, Common View, 1H SHTYPI Today, 1H Reports (Done dhe strike), Task Details |
 | Raporte / email / eksporte | Reports, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, PX JAV Kontrolli, Weekly Planning Check, Kontrolli ditor RLZ, Print Preview, Print, Email, Exports, History |
 | Përdorues dhe përgjegjës | Users, My View, Department Views, Finance View, Projects, PX Notes, PX JAV, Common View, Weekly Planner, Monthly Planner, Meeting Scheduler, Reports |
@@ -119,6 +120,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   statuse sipas datës dhe taska PARA/PAS ose përgatitjeje. Kontrollo këto lidhje
   edhe kur ndryshon ose anulohet takimi. 1H Reports preket nga taskat përkatëse,
   pa qenë domosdoshmërisht një tabelë e plotë takimesh.
+- Shënimet e takimeve (`meeting_notes`) dalin te PX Notes vetëm kur dërgohen
+  ose bashkohen; statusi i tyre lexohet nga taskat e Note-s PX (`ga_note_origin_id`).
+  Ngjyrat e statusit duhet të mbeten të njëjta me PX Notes. Regjistrimi i lidhur
+  me takim krijon shënim takimi edhe kur konfirmohet detyra nga propozimi AI.
 - Shtyrja, mbyllja, strike-et dhe ndryshimet e afateve mund të ndikojnë te
   Realization, bazat e planit, numërimet dhe raportet, përveç paraqitjes së taskut.
 - Kopjet historike/snapshot-et nuk krahasohen si të dhëna live. SHTYPI Today
@@ -173,6 +178,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | 1H Reports | <code>frontend/src/app/(app)/admin/1h-reports/page.tsx</code>, <code>backend/app/services/primeflow_report.py</code> |
 | PX Notes dhe PX JAV | <code>frontend/src/components/px-notes-workspace.tsx</code>, <code>frontend/src/app/(app)/next-week-plan/page.tsx</code>, <code>backend/app/api/routers/ga_notes.py</code>, <code>backend/app/api/routers/plan_notes.py</code>, <code>backend/app/services/ga_note_task_instances.py</code> |
 | Takimet | <code>backend/app/api/routers/meetings.py</code>, <code>backend/app/services/meeting_occurrence.py</code>, <code>backend/app/services/meeting_system_tasks.py</code>, <code>backend/app/services/meeting_cancellation.py</code>, <code>frontend/src/components/daily-report-meetings-table.tsx</code> |
+| Takimet / shënimet | <code>backend/app/api/routers/meeting_notes.py</code>, <code>backend/app/models/meeting_note.py</code>, <code>frontend/src/app/(app)/meetings/</code>, <code>frontend/src/components/meeting-notes/</code>, <code>frontend/src/lib/meeting-notes.ts</code> |
 | Projektet | <code>backend/app/api/routers/projects.py</code>, <code>frontend/src/app/(app)/projects/[id]/page.tsx</code>, <code>frontend/src/app/(app)/projects/{dev,pcm,design}/[id]/page.tsx</code> |
 | M1 / M2 / M3 | <code>backend/app/services/morning_report.py</code>, <code>backend/app/services/after_break_report.py</code>, <code>backend/app/services/meetings_report.py</code> dhe faqet përkatëse në frontend |
 | PIKAT PËR RAP | <code>backend/app/services/m1_reporting_points.py</code>, <code>backend/app/services/m2_reporting_points.py</code>, <code>backend/app/services/m3_reporting_points.py</code>, <code>frontend/src/components/m*-reporting-points-view.tsx</code> |

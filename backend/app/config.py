@@ -131,6 +131,7 @@ class Settings(BaseSettings):
     PLAN_NOTES_UPLOAD_DIR: str = "uploads/plan_notes"
     GA_NOTES_MAX_FILES: int = 20
     GA_NOTES_MAX_FILE_MB: int = 25
+    MEETING_NOTES_UPLOAD_DIR: str = "uploads/meeting-notes"
 
     OPENAI_API_KEY: str | None = None
     # Dedicated roles fail closed; they never borrow the general AI credential.

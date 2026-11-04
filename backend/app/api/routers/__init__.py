@@ -19,6 +19,7 @@ from app.api.routers.internal_notes import router as internal_notes_router
 from app.api.routers.microsoft import router as microsoft_router
 from app.api.routers.meetings import router as meetings_router
 from app.api.routers.meeting_recordings import router as meeting_recordings_router
+from app.api.routers.meeting_notes import router as meeting_notes_router
 from app.api.routers.recording_analysis import router as recording_analysis_router
 from app.api.routers.meeting_scheduler import router as meeting_scheduler_router
 from app.api.routers.notifications import router as notifications_router
@@ -96,6 +97,7 @@ api_router.include_router(internal_notes_router, prefix="/internal-notes", tags=
 api_router.include_router(microsoft_router, prefix="/microsoft", tags=["microsoft"])
 api_router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
 api_router.include_router(meeting_recordings_router, prefix="/meeting-recordings", tags=["meeting-recordings"])
+api_router.include_router(meeting_notes_router, prefix="/meeting-notes", tags=["meeting-notes"])
 api_router.include_router(recording_analysis_router, prefix="/meeting-recordings", tags=["meeting-recordings"])
 from app.api.routers.recording_protocol import router as recording_protocol_router
 api_router.include_router(recording_protocol_router, prefix="/meeting-recordings", tags=["meeting-recordings"])

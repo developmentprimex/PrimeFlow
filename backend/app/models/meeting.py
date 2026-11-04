@@ -32,6 +32,8 @@ class Meeting(Base):
     recurrence_days_of_month: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)
     external_agent_test_task_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     external_pim_image_test_task_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Training sessions keep meeting_type internal/external; Takimet groups them as "Trajnime".
+    is_training: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     department_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"), index=True)
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id"), index=True
