@@ -154,7 +154,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(service, 'common_payload', AsyncMock(return_value=payload([]))), \
              patch.object(service, 'open_notes', AsyncMock(return_value=notes)):
             result = await service.run_tool(SimpleNamespace(add=Mock()), meeting, 'list_new_px_notes', {})
-        self.assertIn('fë gë: kontrollo ofertën.', result.get('read_aloud', ''))
+        self.assertIn('fë gë: kontrollo ofertën', result.get('read_aloud', ''))
         self.assertIn('Dërgo raportin.', result['read_aloud'])
         self.assertNotIn('?', result['read_aloud'])
         self.assertEqual(result['next_step'], 'list_new_done_and_strikes')
@@ -183,8 +183,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='GA_PHASE')
         with patch.object(service, 'common_payload', AsyncMock(return_value=payload([]))), \
              patch.object(service, 'open_notes', AsyncMock(return_value=[])):
-            result = await service.run_tool(SimpleNamespace(), meeting, 'list_new_px_notes', {})
-        self.assertFalse(result.get('read_aloud'))
+            result = await service.run_tool(SimpleNamespace(add=lambda _: None), meeting, 'list_new_px_notes', {})
+        self.assertEqual(result.get('read_aloud'), 'Notes të reja nuk ka.')
         self.assertEqual(result.get('next_step'), 'list_new_done_and_strikes')
 
     def test_task_reading_spells_known_codes_without_changing_the_source_title(self):

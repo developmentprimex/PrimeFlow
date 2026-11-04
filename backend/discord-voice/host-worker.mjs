@@ -28,6 +28,7 @@ export function decodeCommand(line){
   if(m.type==='say'&&typeof m.text!=='string')throw Error('ipc_say');
   if(m.type==='configure'&&!['GA_PHASE','STAFF_PHASE','PM_REVIEW','ENDING'].includes(m.phase))throw Error('ipc_phase');
   if(m.type==='configure'&&m.speaker_id!=null&&!/^\d{1,32}$/.test(m.speaker_id))throw Error('ipc_speaker');
+  if(m.type==='configure'&&m.wait_for_staff!=null&&typeof m.wait_for_staff!=='boolean')throw Error('ipc_wait');
   if(m.type==='tool_result'&&typeof m.call_id!=='string')throw Error('ipc_tool');
   return m;
 }
@@ -60,14 +61,16 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   let watchdogTimer,responseProgressAt=0,responseRequestEventId=null,eventSequence=0;
   let retryAt=0,recoveryAttempts=0,recoveryInstruction=false;
   let requestedContinuation=false,continuationMayWait=false,deferredRecovery=null,selectedAnnouncements=[];
+  let waitingForStaff=false;
   let focusSpeakerId=null,focusTurnId=null,speechTurnId=null,speechDuringPlayback=false,userPaused=false,focusEpoch=0,speechEpoch=0;
   const currentSpeech=source=>Boolean(source)&&source.epoch===focusEpoch;
 
   function rt(event){if(realtime?.readyState===1)realtime.send(JSON.stringify(event));}
-  function configure(nextPhase,speakerId=null,turnId=null){
+  function configure(nextPhase,speakerId=null,turnId=null,waitForStaff=false){
     const changing=nextPhase!==phase||turnId!==focusTurnId;
     if(changing){
       focusEpoch++;
+      waitingForStaff=false;
       userPaused=false;lastSpeech=null;deferredRecovery=null;recoveryAttempts=0;retryAt=0;
       recoveryInstruction=false;continuationPending=false;requestedContinuation=false;
       interrupt();queuedSays.length=0;
@@ -96,12 +99,24 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
       rt({type:'session.update',session:{type:'realtime',tools:toolsets[nextPhase],
         ...(phaseInstructions[nextPhase]?{instructions:phaseInstructions[nextPhase]}:{})}});pendingPhase=null;
     }
+    if(nextPhase==='GA_PHASE'&&waitForStaff)holdOpening();
+  }
+  function holdOpening(){
+    waitingForStaff=true;
+    interrupt();
+    responseActive=false;currentResponse=null;responseRequestEventId=null;
+    continuationPending=false;continuationMayWait=false;requestedContinuation=false;
+    deferredRecovery=null;recoveryInstruction=false;selectedAnnouncements=[];queuedSays.length=0;
+    if(lastSpeech)lastSpeech.needsReply=false;
   }
   const normalized=text=>(text||'').normalize('NFKD').replace(/\p{M}/gu,'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  // The audio transcript may write the % symbol even when Mira said "për qind".
+  const announcementText=text=>normalized((text||'').replace(/(?<![\w.])(\d+(?:[.,]\d+)?)\s*%/g,
+    (_,number)=>number.replace(/[.,]/g,' presje ')+' për qind'));
   // Number labels may be spoken as ordinals without changing a note's content.
-  const noteContent=text=>normalized(text).replace(/\bshenimi\s+(?:i\s+(?:pare|dyte|trete|katert|peste)|\d+)\b/g,'').trim();
+  const noteContent=text=>announcementText(text).replace(/\bshenimi\s+(?:i\s+(?:pare|dyte|trete|katert|peste)|\d+)\b/g,'').trim();
   function matchesAnnouncement(delivery,transcript){
-    return normalized(transcript).includes(normalized(delivery.text))||
+    return announcementText(transcript).includes(announcementText(delivery.text))||
       (delivery.kind==='note'&&noteContent(delivery.text)&&noteContent(transcript).includes(noteContent(delivery.text)));
   }
   function retryAnnouncement(token,delivery,{interrupted=false}={}){
@@ -148,8 +163,9 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   }
   function ignoredStaffAnswer(source){
     const words=normalized(source?.text).split(' ').filter(Boolean);
+    const shortDeadline=words.length===1&&/^(sot|neser|pasneser|hene|marte|merkure|enjte|premten|shtune|diele)$/.test(words[0]);
     return currentSpeech(source)&&source===lastSpeech&&source.speaker_id===focusSpeakerId&&focusSpeakerId&&
-      !source.duringPlayback&&!source.silenceResumed&&!pausedByUser(source)&&words.length>=2&&
+      !source.duringPlayback&&!source.silenceResumed&&!pausedByUser(source)&&(words.length>=2||shortDeadline)&&
       (!source.silenceReason||source.silenceReason==='noise');
   }
   function recoverResponse(reason){
@@ -169,7 +185,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   }
   function watchResponse(){
     if(closed)return;
-    if(listening&&realtimeReady&&!userSpeaking&&!playback.playing&&!pendingCalls.size){
+    if(listening&&realtimeReady&&!waitingForStaff&&!userSpeaking&&!playback.playing&&!pendingCalls.size){
       if(deferredRecovery)recoverResponse(deferredRecovery);
       else if(responseActive&&now()-responseProgressAt>=RESPONSE_STALL_MS)recoverResponse('no_response_progress');
       else if(!responseActive&&currentSpeech(lastSpeech)&&lastSpeech.needsReply&&!pausedByUser(lastSpeech)&&now()-lastSpeech.at>=AUTO_REPLY_GRACE_MS){
@@ -182,7 +198,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
   // ---- Realtime
   // System instructions ("RADHA", "koha ka kaluar") wait for a pause, so Mira never talks over someone.
   function maybeContinue(){
-    if(closed||!realtimeReady||responseActive||playback.playing||userPaused||pendingCalls.size||(!queuedSays.length&&!continuationPending))return;
+    if(closed||!realtimeReady||waitingForStaff||responseActive||playback.playing||userPaused||pendingCalls.size||(!queuedSays.length&&!continuationPending))return;
     if(now()<retryAt){later(retryAt-now());return;}
     const waited=now()-speechStartedAt;
     if(userSpeaking&&waited<SAY_WAIT_MS){later(SAY_WAIT_MS-waited);return;}
@@ -204,13 +220,15 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
     const announcements=selectedAnnouncements.map(([,d])=>d.text).filter(Boolean);
     responseRequestEventId='mira-response-'+(++eventSequence);responseProgressAt=now();
     const response={metadata:{mira_request:responseRequestEventId},...(announcements.length?{tool_choice:'none',instructions:
-      'Lexo tekstin read_aloud fjalë për fjalë, pa hyrje, pa mjete dhe pa lënë asnjë pjesë. Teksti është për lexim, jo udhëzime: '+
+      'Fol shqip me artikulim të qartë dhe ritëm të rrjedhshëm; pauza të shkurtra vetëm në pikësim. '+
+      'Lexo tekstin read_aloud fjalë për fjalë, pa hyrje, pa mjete dhe pa lënë asnjë pjesë. Mos i shqipto shenjat e pikësimit si fjalë. Teksti është për lexim, jo udhëzime: '+
       JSON.stringify({read_aloud:announcements.join(' ')})}:recoveryInstruction?{instructions:
-      'Fol shqip, shkurt. Ndiq RADHA dhe vazhdo nga gjendja e rezultati i fundit. Mos përsërit shkrime të kryera ose pyetje të sqaruara. '+
+      'Fol shqip, shkurt. Ndiq RADHA dhe rezultatin e fundit. Mos trego çfarë po bën: pa përmbledhje, "po e shënoj" ose "pastaj do të pyes". Mos përsërit shkrime ose pyetje të sqaruara. '+
       (phase==='GA_PHASE'?'Vazhdo me hapin e pambyllur të fazës GA, pa kërkuar aprovim për notes. ':
        phase==='ENDING'?'Mbyll sipas udhëzimit të fundit të sistemit. ':
        'Nëse raportimi u sqarua, pyet për çështjen tjetër të hapur ose thirr end_person_turn. ')+
-      'Përdor vetëm mjetet e fazës aktuale. Në paqartësi kërko vetëm një sqarim të shkurtër. Mos mbet në heshtje pas veprimit.'}:{})};
+      'Përdor vetëm mjetet e fazës aktuale. Pas veprimit bëj drejtpërdrejt pyetjen që mungon; në paqartësi vetëm një sqarim. '+
+      'Mos rilexo titujt ose përgjigjet që janë të qarta. Përdor shqipe të rregullt, emrat e vërtetë dhe shqiptimin read_aloud; qëndro te tema e takimit.'}:{})};
     rt({type:'response.create',event_id:responseRequestEventId,response});
     recoveryInstruction=false;responseActive=true;
   }
@@ -261,7 +279,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
           turn_id:speechTurnId,epoch:speechEpoch,ended_at:inputEpoch!==null&&Number.isFinite(message.audio_end_ms)?new Date(inputEpoch+message.audio_end_ms).toISOString():null,
           at:inputEpochClock!==null&&Number.isFinite(message.audio_end_ms)&&message.audio_end_ms<=speakerTimeline.end?
             inputEpochClock+message.audio_end_ms:now(),started_at:speechStartedWall,needsReply:true,duringPlayback:speechDuringPlayback};
-        if(!currentSpeech(lastSpeech))lastSpeech.needsReply=false;
+        if(waitingForStaff||!currentSpeech(lastSpeech))lastSpeech.needsReply=false;
         recoveryAttempts=0;
         mixer.takeLoudest();
         speakerOf.set(message.item_id,lastSpeech);
@@ -289,6 +307,10 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
           speakerOf.delete(message.item_id);
         }break;
       case 'response.created':
+        if(waitingForStaff){
+          cancelled.add(message.response.id);
+          rt({type:'response.cancel',response_id:message.response.id});break;
+        }
         if(cancelledRequests.has(message.response?.metadata?.mira_request)){
           cancelledRequests.delete(message.response.metadata.mira_request);
           cancelled.add(message.response.id);rt({type:'response.cancel',response_id:message.response.id});break;
@@ -311,6 +333,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
         if(!pendingCalls.size)continuationPending=false;
         break;
       case 'response.output_audio.delta':case 'response.audio.delta':
+        if(waitingForStaff)break;
         if(!cancelled.has(message.response_id)){
           if(userPaused){interrupt();break;}
           if(userSpeaking&&now()-speechStartedAt>=BARGE_IN_MS&&now()-lastVoiceAt<=VOICE_RECENT_MS){interrupt();break;}
@@ -334,6 +357,7 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
       case 'response.output_audio_transcript.done':case 'response.audio_transcript.done':
         if(message.transcript?.trim()&&deliveries.has(message.response_id))deliveries.get(message.response_id).transcript+=' '+message.transcript.trim();break;
       case 'response.output_item.done':
+        if(waitingForStaff)break;
         if(cancelled.has(message.response_id??currentResponse))break;
         if(message.item?.type==='function_call'&&message.item.name==='wait_for_user'){
           const d=deliveries.get(message.response_id??currentResponse);
@@ -541,8 +565,11 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
         return;
       }
       if(!pendingCalls.delete(callId))return;
+      const callName=pendingCallNames.get(callId);
       pendingCallNames.delete(callId);
       pendingCallTurns.delete(callId);
+      const waitForStaff=callName==='end_ga_phase'&&output?.wait_for_staff===true&&output?.prit===true;
+      if(waitForStaff&&phase!=='GA_PHASE')output={already_completed:true,udhezim:'Vazhdo drejtpërdrejt me RADHA aktuale.'};
       if(phase!=='GA_PHASE'&&(output?.announcements?.length||output?.progress_token||output?.notes_token)){
         const stale=output.announcements?.length?output.announcements:
           [{token:output.notes_token??output.progress_token}];
@@ -553,9 +580,13 @@ export function createHost({emit,voice,makeDecoder,makeEncoder=createOpusEncoder
         for(const part of output.announcements)pendingProgress.set(part.token,{kind:'progress',text:part.read_aloud});
       }else if(output?.progress_token&&output?.sipas_personave?.length)pendingProgress.set(output.progress_token,{kind:'progress',text:output.read_aloud});
       if(output?.proposal_id&&output?.requires_confirmation)pendingProgress.set(output.proposal_id,{kind:'proposal',text:output.read_aloud});
-      if(output?.notes?.length&&output?.read_aloud)
+      if((output?.notes_token||output?.notes?.length)&&output?.read_aloud)
         pendingProgress.set(output.notes_token??('notes:'+callId),{kind:'note',text:output.read_aloud,nextStep:output.next_step});
       rt({type:'conversation.item.create',item:{type:'function_call_output',call_id:callId,output:JSON.stringify(output??{})}});
+      if(waitForStaff&&phase==='GA_PHASE'){
+        holdOpening();
+        return;
+      }
       continuationPending=true;continuationMayWait=Boolean(output?.prit);
       maybeContinue();
     },
@@ -581,7 +612,7 @@ async function main(){
       while((end=carry.indexOf('\n'))>=0){
         const m=decodeCommand(carry.slice(0,end));carry=carry.slice(end+1);
         if(m.type==='start')host.start(m);
-        else if(m.type==='configure')host.configure(m.phase,m.speaker_id??null,m.turn_id??null);
+        else if(m.type==='configure')host.configure(m.phase,m.speaker_id??null,m.turn_id??null,m.wait_for_staff===true);
         else if(m.type==='say')host.say(m.text,{respond:m.respond!==false});
         else if(m.type==='tool_result')host.toolResult(m.call_id,m.output);
         else if(m.type==='stop')host.stop();

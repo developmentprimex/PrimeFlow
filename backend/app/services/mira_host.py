@@ -59,7 +59,7 @@ MARKERS = {
     "F": "F", "BZ1N1": "BZ1N1",
 }
 KNOWLEDGE_CATEGORIES = ("STRUKTURA", "RREGULLORE", "DEFINIME", "PROCESE", "TJETER")
-PROMPT_VERSION = "2026-11-04.1"
+PROMPT_VERSION = "2026-11-04.4"
 
 
 def effective_protocol(value: str | None) -> str:
@@ -341,8 +341,8 @@ def task_line(item: dict) -> dict:
     }
 
 
-STATUS_LABELS = {"TODO": "pa progres (To Do)", "IN_PROGRESS": "në proces", "DONE": "kryer",
-                 "WAITING_CLIENT": "WFE", "WAITING_CONFIRMATION": "në pritje konfirmimi"}
+STATUS_LABELS = {"TODO": "pa progres të regjistruar", "IN_PROGRESS": "në proces", "DONE": "kryer",
+                 "WAITING_CLIENT": "në pritje të klientit", "WAITING_CONFIRMATION": "në pritje të konfirmimit"}
 # The colours of 1H SHTYPI; the questions in the 1H follow them.
 STATUS_COLORS = {"TODO": "rozë", "IN_PROGRESS": "e verdhë", "DONE": "e gjelbër"}
 # At 11:50 the open tasks of every earlier slot are asked, not only the last one.
@@ -1146,7 +1146,7 @@ class Discussion(Args):
     progress: str | None = Field(default=None, max_length=1000)
     blocker: str | None = Field(default=None, max_length=500)
     resume_at: str | None = Field(default=None, max_length=200)
-    finish_at: str | None = Field(default=None, max_length=200)
+    finish_at: str | None = Field(default=None, max_length=200, description="Afati i kryerjes vetëm siç u tha nga personi, edhe 'gjatë javës' ose 'nuk e di ende'. Mos shpik ditë/orë dhe mos e ngatërro me rifillimin e punës.")
     unclear: bool | None = Field(default=None, description="true kur as pas një sqarimi nuk pati raportim të kuptueshëm; mos shpik progres ose afat")
 
 
@@ -1159,17 +1159,17 @@ class PmDiscussion(Args):
 
 TOOLS = {
     "list_ga_tasks": (NoArgs, "Detyrat e hapura për GA, sipas personave. Vetëm kur kërkohen shprehimisht; hyrja automatike është notes, pastaj Done/Strike dhe stafi."),
-    "list_new_px_notes": (NoArgs, "Përmend shkurt PX Notes përmes read_aloud, të gjitha në një kalim, pa pyetje për krijim detyrash ose aprovim. Pastaj vazhdo menjëherë me list_new_done_and_strikes, pa pritur përgjigje."),
+    "list_new_px_notes": (NoArgs, "Lexo vetëm read_aloud me hyrjen 'Notes të reja: …', pa përshëndetje, agjendë ose njoftim veprimi. Pastaj list_new_done_and_strikes, pa pyetje ose pritje."),
     "prepare_task_from_note": (CreateTask, "Përgatit propozimin e saktë për një PX Note. Lexo personin, detyrën dhe afatin; prit konfirmim të ri nga GA. Nuk krijon detyrë."),
     "create_task_from_note": (ConfirmTask, "Krijo vetëm propozimin që GA konfirmoi qartë në një përgjigje të re, pas prepare_task_from_note. Mos e thirr për të njëjtën përgjigje ose për jo/kalo."),
     "record_task_discussion": (Discussion, "Ruaj në heshtje vetëm faktet që sapo u thanë për detyrën/personin aktual. Nuk ndryshon detyrën. Përdori që të mos pyesësh përsëri."),
     "record_pm_review": (PmDiscussion, "Ruaj vazhdimin ose shtyrjen që sapo raportoi personi PM aktual, pastaj end_person_turn. unclear=true vetëm pas një sqarimi të pasuksesshëm. Nuk ndryshon detyrat."),
-    "list_new_done_and_strikes": (NoArgs, "Pas notes, merr strike-t blu dhe Done të intervalit të raportit 1H të slotit aktual, edhe para fillimit zyrtar. Lexo kush, cila detyrë dhe sa strike përmes read_aloud, pa lexuar orët ose intervalin; pastaj stafi vetëm në orën zyrtare, pa aprovim."),
+    "list_new_done_and_strikes": (NoArgs, "Pas notes, lexo vetëm read_aloud: Done, pastaj Strikes të intervalit 1H. Për kategori bosh thuaj shkurt se nuk ka të reja. Pa hyrje, orë ose komente për procesin. Stafin e hap sistemi në orën zyrtare."),
     # Answered by the bot: staff starts at the official slot time; early GA completion waits silently.
-    "end_ga_phase": (NoArgs, "Thirre pas notes dhe leximit Strike/Done të këtij raporti, pa pyetur për aprovim. Para orës zyrtare prit në heshtje; stafi dhe kontrolli i mungesave hapen vetëm në fillimin zyrtar."),
+    "end_ga_phase": (NoArgs, "Thirre në heshtje pas notes, Done dhe Strikes. Kur rezultati kërkon pritje, mos fol më. Mos njofto përfundimin e hyrjes ose pritjen e stafit; sistemi hap radhën zyrtare."),
     "get_person_brief": (Person, "Detyrat e një personi për slotin aktual, të paplotësuarat nga sloti paraprak dhe progresi i ri."),
     "find_user": (Person, "Gjej përdoruesin sipas emrit ose inicialeve."),
-    "search_knowledge": (Query, "Kërko në Knowledge të Mira-s (struktura e Primex, rregulloret, definimet) kur pyetja s'mbulohet nga konteksti."),
+    "search_knowledge": (Query, "Kërko vetëm sqarime për detyrat ose rregullat e këtij takimi në Knowledge të Primex. Pyetjet e përgjithshme jashtë temës nuk kërkojnë përgjigje."),
     "add_meeting_note": (Note, "Ruaj një vendim ose shënim të rëndësishëm të takimit (vetëm në shënimet e takimit)."),
     "save_px_note": (PxNote, "Ruaj një shënim të ri në PX Notes kur dikush të thotë 'shënoje/vendose në PX Notes'. "
                              "Thirre menjëherë, pa ia lexuar prapa."),
@@ -1319,9 +1319,18 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
         for note in notes[:5]:
             mention = note["text"].split("\n", 1)[0].strip()
             mention = " ".join(mention.split()[:18])
+            if not mention:
+                continue
             if len(mention) > 180:
                 mention = mention[:177].rsplit(" ", 1)[0] + "…"
-            note["read_aloud"] = " ".join(albanian_speech(mention, codes).split()[:28])
+            # Shorten source words, not expanded pronunciations ("API", "50%"),
+            # so the final acronym or numeric unit is never read halfway.
+            source_words = mention.split()
+            spoken = albanian_speech(mention, codes)
+            while len(spoken.split()) > 28 and len(source_words) > 1:
+                source_words.pop()
+                spoken = albanian_speech(" ".join(source_words), codes)
+            note["read_aloud"] = spoken
             words = len(note["read_aloud"].split()) + 2
             if selected and spoken_words + words > 60:
                 break
@@ -1330,17 +1339,17 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
         has_more = len(notes) > len(selected)
         token = uuid.uuid4()
         result = {"total": len(notes), "notes": selected, "has_more": has_more,
-                "notes_token": str(token) if selected else None,
-                "read_aloud": " ".join(f"Shënimi {n['number']}: {n['read_aloud']}" for n in selected) +
-                              (" Ka edhe shënime të tjera në PX Notes." if has_more else ""),
+                "notes_token": str(token),
+                "read_aloud": ("Notes të reja: " + "; ".join(n['read_aloud'].rstrip('.') for n in selected) + "." if selected else
+                               "Notes të reja: ka shënime pa tekst të lexueshëm." if notes else "Notes të reja nuk ka.") +
+                              (" Të tjerat në PX Notes." if has_more and selected else ""),
                 "next_step": "list_new_done_and_strikes",
                 "udhezim": "Përmendi shkurt të gjitha shënimet përmes read_aloud dhe vazhdo menjëherë me list_new_done_and_strikes. "
                            "Pa pyetje, aprovim ose krijim detyrash; me kthimin e notes në detyra merret stafi në PrimeFlow."
-                           if notes else "Nuk ka shënime të hapura. Vazhdo menjëherë me list_new_done_and_strikes, pa pyetje ose pritje."}
-        if selected:
-            db.add(Mira1HEvent(id=token, meeting_id=meeting.id, meeting_date=meeting.meeting_date, slot=meeting.slot,
-                kind="NOTES_PENDING", sent_at=now(), data={"fetched_at": now().isoformat(),
-                    "note_ids": [n["note_id"] for n in selected]}))
+                           if notes else "Lexo read_aloud dhe vazhdo menjëherë me list_new_done_and_strikes, pa pyetje ose pritje."}
+        db.add(Mira1HEvent(id=token, meeting_id=meeting.id, meeting_date=meeting.meeting_date, slot=meeting.slot,
+            kind="NOTES_PENDING", sent_at=now(), data={"fetched_at": now().isoformat(),
+                "note_ids": [n["note_id"] for n in selected]}))
         return result
     if name == "list_new_done_and_strikes":
         since = await progress_since(db, meeting)
@@ -1357,18 +1366,20 @@ async def run_tool(db: AsyncSession, meeting: Mira1HMeeting, name: str, raw: dic
             announcements.append({"token": str(event.id), "read_aloud": albanian_speech(text, codes)})
         def people(line):
             return ", ".join(line.get("people") or line["owners"])
-        for line in progress.get("strikes", []):
+        for index, line in enumerate(progress.get("done", [])):
+            add_part(("Done: " if index == 0 else "") + people(line) + ": " + line["spoken"] + ".",
+                     [m for m in progress.get("mentions", []) if m["task_id"] == line["task_id"] and m["kind"] == "DONE"])
+        if not progress.get("done"):
+            add_part("Done të reja nuk ka.", [])
+        for index, line in enumerate(progress.get("strikes", [])):
             actors = list(dict.fromkeys(p["by"] for p in line["points"] if p.get("by")))
             by = "; nga " + ", ".join(actors) if actors and all(p.get("by") for p in line["points"]) and set(actors) != set(line.get("people") or []) else ""
-            add_part(people(line) + ": " + str(len(line["points"])) + " strike te " + line["spoken"] + by + ".",
+            add_part(("Strikes: " if index == 0 else "") + people(line) + ": " + str(len(line["points"])) + " strike te " + line["spoken"] + by + ".",
                 [m for m in progress.get("mentions", []) if m["task_id"] == line["task_id"] and m["kind"] == "STRIKE"])
-        for line in progress.get("done", []):
-            add_part(people(line) + ": e kryer " + line["spoken"] + ".",
-                     [m for m in progress.get("mentions", []) if m["task_id"] == line["task_id"] and m["kind"] == "DONE"])
-        if not announcements:
-            add_part("", [])
+        if not progress.get("strikes"):
+            add_part("Strikes të reja nuk ka.", [])
         return {"sipas_personave": groups, "progress_token": announcements[0]["token"],
-                "next_step":"end_ga_phase", "udhezim":"Pas pjesëve të konfirmuara vazhdo menjëherë me end_ga_phase. Nëse lista është bosh, kalo direkt pa lexuar zero ose pyetur për aprovim.",
+                "next_step":"end_ga_phase", "udhezim":"Lexo read_aloud edhe për kategoritë pa të reja. Pas pjesëve të konfirmuara vazhdo menjëherë me end_ga_phase, pa pyetur për aprovim.",
                 **{key:progress[key] for key in ("source","interval_start","interval_end","strike_count","done_count","report_strike_total") if key in progress},
                 "announcements": [part for part in announcements if part["read_aloud"]],
                 "read_aloud": " ".join(part["read_aloud"] for part in announcements)}

@@ -277,11 +277,11 @@ class DataTests(unittest.IsolatedAsyncioTestCase):
             m=meeting();m.status='GA_PHASE'
             out=await service.run_tool(SimpleNamespace(add=events.append),m,'list_new_done_and_strikes',{})
         self.assertEqual(len(out['announcements']),2)
-        self.assertEqual([len(e.data['mentions']) for e in events],[4,1])
+        self.assertEqual([len(e.data['mentions']) for e in events],[1,4])
         self.assertEqual(len({part['token'] for part in out['announcements']}),2)
-        self.assertEqual({m['point_key'] for m in events[0].data['mentions']},{'0','1','2','3'})
-        self.assertIn('4 strike',out['announcements'][0]['read_aloud'])
-        self.assertIn('e kryer',out['announcements'][1]['read_aloud'])
+        self.assertEqual({m['point_key'] for m in events[1].data['mentions']},{'0','1','2','3'})
+        self.assertIn('4 strike',out['announcements'][1]['read_aloud'])
+        self.assertTrue(out['announcements'][0]['read_aloud'].startswith('Done: '))
 
     async def test_same_title_does_not_merge_distinct_tasks_or_read_receipts(self):
         done_at=datetime(2026,10,21,10,30,tzinfo=TZ).isoformat()

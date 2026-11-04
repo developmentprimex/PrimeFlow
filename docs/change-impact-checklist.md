@@ -127,6 +127,21 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   çdo Note duhet të dalë në çdo raport; dallo regjistrimin nga tasku i krijuar.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
+  Hyrja zanore është Notes të reja → Done → Strikes; për kategori bosh lexohet
+  shkurt se nuk ka të reja. Edhe këto fjali kërkojnë konfirmim audio, pa krijuar
+  përmendje për detyra ose Notes që mungojnë. Ky rend i audios nuk ndryshon
+  gjeneruesit e raporteve. Afati pyetet vetëm kur mungon; përgjigjja e shkurtër
+  ruhet siç u tha, pa diktuar zotime ose data. Pas konfirmimit të pjesës së fundit,
+  kontrolluesi mund të kalojë në pritje të heshtur me `wait_for_staff` para orës
+  zyrtare, pa një përgjigje tjetër të modelit. Kontrollo që audioja, reagimet
+  automatike dhe rikuperimi i përgjigjes të mos e thyejnë këtë pritje, ndërsa
+  konfigurimi i stafit/mbylljes dhe rezultatet e vonuara ruajnë fazën e saktë.
+  `mira_host_speech` përgatit vetëm shqiptimin e Host (titujt, hyrjen dhe kodet):
+  shkurtesat teknike dhe përqindjet lexohen shqip; adresat, skedarët dhe versionet
+  ruhen si identifikues. Verifiko që titujt, argumentet e shkrimit dhe përmendjet
+  e ruajtura mbeten burimi origjinal dhe që konfirmimi i audios përputhet me
+  tekstin e përgatitur. Pyetjet e stafit/PM nuk duhet të rilexojnë lista ose
+  etiketa teknike dhe kufiri i kohës nuk duhet të përdoret si minimum raportimi.
   Përmendja e një PX Note nga Host nuk e bën atë Note të krijuar nga Mira.
   Përjashtimet e detyrave nga leximi i Host nuk duhet të ndryshojnë raportet e
   përgjithshme. Hyrja para takimit dhe fillimi zyrtar i stafit/pranisë janë hapa

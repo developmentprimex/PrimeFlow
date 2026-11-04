@@ -141,7 +141,8 @@ class ReportParity(unittest.IsolatedAsyncioTestCase):
                 db.add=Mock()
                 with patch.object(host,'common_payload',AsyncMock(return_value=payload([task]))):
                     out=await host.run_tool(db,meeting,'list_new_done_and_strikes',{})
-                self.assertIn('e kryer OFERTA',out['read_aloud'])
+                self.assertIn('Done: ',out['read_aloud'])
+                self.assertIn('OFERTA',out['read_aloud'])
                 self.assertIn(NAMES['EF'],out['read_aloud'])
                 self.assertNotRegex(out['read_aloud'],r'\d{1,2}:\d{2}')
                 self.assertNotIn('koha',out['read_aloud'])

@@ -441,7 +441,7 @@ class MiraHost:
             await self.wait_until(session, talk_at or datetime.now(tz()))
             if session["closed"].is_set():
                 raise ValueError("stopped")
-            await self.say(session, f"SISTEMI: Je në kanalin e 1H {slot}. Përshëndet shkurt dhe fillo menjëherë me list_new_px_notes. Pastaj Strike dhe Done nga raporti i këtij sloti, edhe para fillimit zyrtar; pa pyetje për aprovim. Detyrat e stafit dhe kontrolli kush mungon fillojnë vetëm në starts_at sipas sistemit.")
+            await self.say(session, f"SISTEMI: 1H {slot}. Thirr menjëherë list_new_px_notes pa folur përpara. Lexo vetëm read_aloud: Notes të reja, pastaj Done dhe Strikes nga raporti. Për kategoritë bosh thuaj shkurt se nuk ka të reja. Pa përshëndetje, agjendë ose komente për veprimet. Pas end_ga_phase prit pa audio; stafin e hap sistemi në starts_at.")
             deadline = datetime.now(tz()) + timedelta(minutes=MAX_MEETING_MINUTES)
             # Do not classify staff joining at the official time as absent during the early opening.
             # The clock, rather than a model tool call or unfinished opening, controls the handoff.
@@ -518,11 +518,23 @@ class MiraHost:
     async def start_staff(self, session, *, announce: bool) -> dict:
         async with session.setdefault("staff_lock", asyncio.Lock()):
             if not session.get("test_mode") and session.get("starts_at") and datetime.now(tz()) < session["starts_at"]:
-                return {"prit": True, "udhezim": "Hyrja përfundoi. Prit në heshtje fillimin zyrtar; mos kontrollo mungesat dhe mos thirr stafin ende."}
+                return {"prit": True, "silent": True, "wait_for_staff": True}
             if session.get("staff_started"):
                 current = session.get("current_turn")
                 return {"RADHA": turn_brief(current)} if current else {"prit": True}
             return await self._start_staff(session, announce=announce)
+
+    async def hold_completed_opening(self, session) -> bool:
+        """No model turn is needed to explain that an early opening is finished."""
+        if session.get("staff_started") or session.get("ending") or not session.get("starts_at") or datetime.now(tz()) >= session["starts_at"]:
+            return False
+        if any(session.get("ga_checks", {}).get(step) != "DONE" for step in
+               ("list_new_px_notes", "list_new_done_and_strikes")):
+            return False
+        session.setdefault("ga_done", asyncio.Event()).set()
+        if session.get("process"):
+            await session["process"].send({"type": "configure", "phase": "GA_PHASE", "wait_for_staff": True})
+        return True
 
     async def _start_staff(self, session, *, announce: bool) -> dict:
         """Freeze the reporting order and hand Mira the first person (or the end, when nobody has 1H tasks)."""
@@ -866,6 +878,8 @@ class MiraHost:
             pending.discard(message.get("token"))
             session.setdefault("ga_checks", {})["list_new_done_and_strikes"] = "PENDING" if pending else "DONE"
             if not pending and not session.get("ending") and not session["closed"].is_set():
+                if await self.hold_completed_opening(session):
+                    return
                 instruction = "Vazhdo me RADHA aktuale, pa e përsëritur progresin." if session.get("staff_started") else \
                               "Njoftimi i progresit u dëgjua i plotë. Thirr end_ga_phase dhe ndiq rezultatin."
                 await self.say(session, "SISTEMI: " + instruction)
@@ -966,7 +980,7 @@ class MiraHost:
                 elif session.get("starts_at") and datetime.now(tz()) >= session["starts_at"]:
                     output = await self.start_staff(session, announce=False)
                 else:
-                    output = {"prit": True, "udhezim": "Hyrja përfundoi. Prit në heshtje fillimin zyrtar; mos kontrollo mungesat dhe mos thirr stafin ende."}
+                    output = {"prit": True, "silent": True, "wait_for_staff": True}
             elif name == "call_next_person":
                 upcoming = session.get("upcoming")
                 if upcoming and not upcoming.get("invited"):
@@ -1016,6 +1030,8 @@ class MiraHost:
                     if name == "list_new_done_and_strikes":
                         session["pending_progress"] = {part["token"] for part in output.get("announcements", [])} or (
                             {output["progress_token"]} if pending and output.get("progress_token") else set())
+                        if not pending and not output.get("error"):
+                            await self.hold_completed_opening(session)
         except asyncio.TimeoutError:
             lookup = name in LOOKUP_TOOLS
             log.warning("MIRA_HOST tool_timeout tool=%s", name)
