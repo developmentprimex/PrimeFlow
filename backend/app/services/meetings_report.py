@@ -26,6 +26,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.services.daily_realization_events import postponement_explanation_from_events
 from app.models.user import User
+from app.services.calendar_meeting_time import calendar_meeting_time_range, meeting_time_columns
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.daily_report_logic import business_days_between, planned_range_for_daily_report
 from app.services.daily_rlz_compliance import REASON_LABELS
@@ -1901,7 +1902,7 @@ def _meeting_lines(
         return ["(Asnje takim)"]
 
     return [
-        f"- {_local_time(meeting.starts_at)}: "
+        f"- {calendar_meeting_time_range(meeting, report_timezone()) or _local_time(meeting.starts_at)}: "
         f"{_meeting_title_with_highlight(meeting, _linked_external_meeting(meeting, external_by_id))}"
         for meeting in sorted(meetings, key=_meeting_clock_sort_key)
     ]
@@ -2018,14 +2019,14 @@ def _meeting_status_checkbox_table(
     status_by_meeting: dict[Any, str],
     external_by_id: dict[str, Meeting] | None = None,
 ) -> list[str]:
-    border = "+----+-------+----------+------------------------------------------------------------------+"
+    border = "+----+-------+-------+----------+------------------------------------------------------------------+"
     rows = [
         border,
-        f"| {'NR':<2} | {'KOHA':<5} | {'MBAJTUR?':<8} | {'TITULLI':<64} |",
+        f"| {'NR':<2} | {'PREJ':<5} | {'DERI':<5} | {'MBAJTUR?':<8} | {'TITULLI':<64} |",
         border,
     ]
     if not meetings:
-        rows.append(f"| {'-':<2} | {'-':<5} | {'':<8} | {'(Asnje takim)':<64} |")
+        rows.append(f"| {'-':<2} | {'-':<5} | {'-':<5} | {'':<8} | {'(Asnje takim)':<64} |")
         rows.append(border)
         return rows
     for index, meeting in enumerate(sorted(meetings, key=_meeting_clock_sort_key), start=1):
@@ -2039,11 +2040,12 @@ def _meeting_status_checkbox_table(
         title_value, meeting_tone = _split_meeting_tone_marker(title_value)
         title_lines = _append_meeting_markers(_wrap_fixed_width(title_value, 64), highlighted, meeting_tone, 64)
         status_icon = "\u2713" if status == "held" else "\u2715" if status == "canceled" else ""
+        time_from, time_to = meeting_time_columns(calendar_meeting_time_range(meeting, report_timezone()) or _local_time(meeting.starts_at))
         rows.append(
-            f"| {index:<2} | {_local_time(meeting.starts_at):<5} | {status_icon:<8} | {title_lines[0]} |"
+            f"| {index:<2} | {time_from:<5} | {time_to:<5} | {status_icon:<8} | {title_lines[0]} |"
         )
         for line in title_lines[1:]:
-            rows.append(f"| {'':<2} | {'':<5} | {'':<8} | {line} |")
+            rows.append(f"| {'':<2} | {'':<5} | {'':<5} | {'':<8} | {line} |")
         rows.append(border)
     return rows
 
@@ -2388,28 +2390,29 @@ def _strip_list_marker(value: str) -> str:
 
 
 def _tomorrow_meeting_table(title: str, lines: list[str]) -> list[str]:
-    border = "+----+-------+------------------------------------------------------------------+"
+    border = "+----+-------+-------+------------------------------------------------------------------+"
     rows = [
         f"{title}:",
         border,
-        f"| {'NR':<2} | {'KOHA':<5} | {'TITULLI':<64} |",
+        f"| {'NR':<2} | {'PREJ':<5} | {'DERI':<5} | {'TITULLI':<64} |",
         border,
     ]
     values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
     if not values:
-        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje takim)':<64} |")
+        rows.append(f"| {'-':<2} | {'-':<5} | {'-':<5} | {'(Asnje takim)':<64} |")
         rows.append(border)
         return rows
     for index, value in enumerate(values, start=1):
-        match = re.match(r"^(\d{1,2}:\d{2})\s*:\s*(.+)$", value)
+        match = re.match(r"^(\d{1,2}:\d{2}(?:\s*[-–]\s*\d{1,2}:\d{2}(?:\s*\(\+\d+d\))?)?)\s*:\s*(.+)$", value)
         time_value = match.group(1) if match else "-"
         title_value = match.group(2) if match else value
+        time_from, time_to = meeting_time_columns(time_value)
         title_value, highlighted = _split_meeting_highlight_marker(title_value)
         title_value, meeting_tone = _split_meeting_tone_marker(title_value)
         title_lines = _append_meeting_markers(_wrap_fixed_width(title_value, 64), highlighted, meeting_tone, 64)
-        rows.append(f"| {index:<2} | {time_value:<5} | {title_lines[0]} |")
+        rows.append(f"| {index:<2} | {time_from:<5} | {time_to:<5} | {title_lines[0]} |")
         for line in title_lines[1:]:
-            rows.append(f"| {'':<2} | {'':<5} | {line} |")
+            rows.append(f"| {'':<2} | {'':<5} | {'':<5} | {line} |")
         rows.append(border)
     return rows
 
@@ -3269,6 +3272,7 @@ def _email_column_widths(
         "AM/PM": "42",
         "FROM": "38",
         "TO": "38",
+        "PREJ": "46",
         "TIME": "46",
         "ORA": "46",
         "KOHA": "46",
@@ -3290,6 +3294,13 @@ def _email_column_widths(
     }
     normalized = [_normalized_table_header(cell) for cell in header]
     widths = ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
+    if body_rows:
+        for index, name in enumerate(normalized):
+            if name in {"TIME", "ORA", "KOHA"} and any(
+                len(row) > index and re.search(r"\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}", str(row[index]))
+                for row in body_rows
+            ):
+                widths[index] = "125"
     if "PRJK" in normalized and body_rows is not None:
         project_index = normalized.index("PRJK")
         has_project_title = any(

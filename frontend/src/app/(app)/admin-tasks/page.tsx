@@ -2081,8 +2081,9 @@ const parseTimeToMinutes = (value?: string | null) => {
 }
 const formatTimeLabel = (value?: string): string => {
   if (!value) return ""
-  const normalized = value.trim()
+  const normalized = value.trim().replace(/\s*\(\+\d+d\)/g, "")
   if (!normalized || normalized.toLowerCase() === "tbd") return normalized
+  if (/^\d{2}:\d{2} - \d{2}:\d{2}(?: \(\+\d+d\))?$/.test(normalized)) return normalized
   const amPmMatch = /^(\d{1,2}:\d{2})(?::\d{2})?\s*(am|pm)\b/i.exec(normalized)
   if (amPmMatch) {
     return `${amPmMatch[1]} ${amPmMatch[2].toUpperCase()}`

@@ -3,6 +3,7 @@
 import { ProjectActivityControl } from "@/components/project-activity"
 
 import * as React from "react"
+import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
 import { useParams, useRouter } from "next/navigation"
 
 import { toast } from "sonner"
@@ -140,9 +141,9 @@ function formatMeetingLabel(meeting: Meeting) {
     date.getFullYear() === today.getFullYear() &&
     date.getMonth() === today.getMonth() &&
     date.getDate() === today.getDate()
-  const timeLabel = date.toLocaleTimeString("sq-AL", { hour: "2-digit", minute: "2-digit" })
+  const timeLabel = calendarMeetingTimeRange(meeting) ?? date.toLocaleTimeString("sq-AL", { hour: "2-digit", minute: "2-digit" })
   const weekdayLabel = date.toLocaleDateString("sq-AL", { weekday: "long" })
-  const prefix = sameDay ? timeLabel : weekdayLabel
+  const prefix = sameDay ? timeLabel : calendarMeetingTimeRange(meeting) ? `${weekdayLabel} ${timeLabel}` : weekdayLabel
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 

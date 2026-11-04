@@ -1510,7 +1510,8 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert "TAKIMET SOT - 25.08.2026" in report_html
     assert "TAKIMET NESER - 26.08.2026" in report_html
     assert report_html.count(">LLOJI</th>") == 2
-    assert report_html.count(">KOHA</th>") == 2
+    assert report_html.count(">PREJ</th>") == 2
+    assert report_html.count(">DERI</th>") == 2
     assert report_html.count(">USER</th>") == 2
     assert report_html.count(">TAKIMET</th>") == 2
     assert report_html.count('data-meeting-time="true"') == 6
@@ -1518,8 +1519,8 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert ">10:00</td>" in report_html
     assert "Today one-off 10:00" not in report_html
     assert "border-left:4px solid #2563EB" in report_html
-    assert report_html.count("border:2px solid #2563EB") == 8
-    assert report_html.count("border-top:4px solid #111827") == 10
+    assert report_html.count("border:2px solid #2563EB") == 10
+    assert report_html.count("border-top:4px solid #111827") == 12
     assert report_html.count('data-meeting-row="true"') == 3
     assert report_html.count('rowspan="2"') == 2
     assert 'bgcolor="#DCECFF"' in report_html
@@ -1536,11 +1537,11 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
         [], [], date(2026, 8, 25), meeting_sections=sections
     )
     values = [str(cell.value or "") for row in load_workbook(BytesIO(content)).active.iter_rows() for cell in row]
-    assert "KOHA" in values
-    assert "8:15 MANUAL" in values
+    assert "PREJ" in values and "DERI" in values
+    assert "8:15" in values
     assert "10:00" in values
     assert "1. Today one-off" in values
-    assert "2. Today early internal" in values
+    assert "2. [MANUAL] Today early internal" in values
 
 
 @pytest.mark.parametrize("link_field, prefix", [
@@ -1596,14 +1597,14 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
     report_html = _dated_meetings_html(sections)
 
     assert report_html.count('data-calendar-meeting="true"') == 2
-    assert report_html.count('bgcolor="#CCEFF1"') == 8
-    assert report_html.count('bgcolor="#FFF4CC"') == 4
+    assert report_html.count('bgcolor="#CCEFF1"') == 10
+    assert report_html.count('bgcolor="#FFF4CC"') == 5
     assert report_html.count('data-meeting-users="true"') == 6
     assert report_html.count(">USER</th>") == 2
     assert "AK/DV" in report_html
-    assert report_html.count("color:#64748B") == 3
-    external_title_cell = report_html.split('1. Calendar external</td>')[0].rsplit('<td ', 1)[1]
-    linked_internal_title_cell = report_html.split('1. Linked calendar internal</td>')[0].rsplit('<td ', 1)[1]
+    assert report_html.count("color:#64748B") == 4
+    external_title_cell = report_html.split('1. Calendar external')[0].rsplit('<td ', 1)[1]
+    linked_internal_title_cell = report_html.split('1. Linked calendar internal')[0].rsplit('<td ', 1)[1]
     assert "font-weight:800" in external_title_cell
     assert "font-weight:800" not in linked_internal_title_cell
     assert report_html.count('data-manual-internal-meeting="true"') == 1
@@ -1618,20 +1619,21 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
         str(cell.value): cell
         for row in sheet.iter_rows()
         for cell in row
-        if cell.value in {"10:00 CAL", "10:30 CAL", "11:00 MANUAL"}
+        if cell.value in {"10:00", "10:30", "11:00"}
     }
-    assert set(time_cells) == {"10:00 CAL", "10:30 CAL", "11:00 MANUAL"}
-    assert time_cells["10:00 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
-    assert sheet.cell(time_cells["10:00 CAL"].row, 6).font.bold
-    assert not sheet.cell(time_cells["10:30 CAL"].row, 6).font.bold
-    assert sheet.cell(time_cells["10:30 CAL"].row, 5).value == "PAS"
-    assert time_cells["10:30 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
-    assert time_cells["10:30 CAL"].font.color.rgb.endswith("64748B")
-    assert sheet.cell(time_cells["10:30 CAL"].row, 4).value == "AK/DV"
-    assert sheet.cell(time_cells["10:30 CAL"].row, 4).font.color.rgb.endswith("64748B")
-    assert time_cells["10:30 CAL"].border.top.style == "thick"
-    assert time_cells["10:30 CAL"].border.top.color.rgb.endswith("111827")
-    assert time_cells["11:00 MANUAL"].fill.fgColor.rgb.endswith("FFF4CC")
+    assert set(time_cells) == {"10:00", "10:30", "11:00"}
+    assert time_cells["10:00"].fill.fgColor.rgb.endswith("CCEFF1")
+    assert sheet.cell(time_cells["10:00"].row, 7).font.bold
+    assert not sheet.cell(time_cells["10:30"].row, 7).font.bold
+    assert sheet.cell(time_cells["10:30"].row, 7).value == "2. [CAL] Linked calendar internal"
+    assert sheet.cell(time_cells["10:30"].row, 6).value == "PAS"
+    assert time_cells["10:30"].fill.fgColor.rgb.endswith("CCEFF1")
+    assert time_cells["10:30"].font.color.rgb.endswith("64748B")
+    assert sheet.cell(time_cells["10:30"].row, 5).value == "AK/DV"
+    assert sheet.cell(time_cells["10:30"].row, 5).font.color.rgb.endswith("64748B")
+    assert time_cells["10:30"].border.top.style == "thick"
+    assert time_cells["10:30"].border.top.color.rgb.endswith("111827")
+    assert time_cells["11:00"].fill.fgColor.rgb.endswith("FFF4CC")
 
 
 def test_unavailable_meeting_users_are_red_only_when_the_status_covers_meeting_time() -> None:
@@ -1734,8 +1736,8 @@ def test_word_export_preserves_task_markers_and_unavailable_meeting_users() -> N
     )
     document = Document(BytesIO(content))
     meeting_row = next(row for table in document.tables for row in table.rows if any("Internal meeting" in cell.text for cell in row.cells))
-    assert meeting_row.cells[3].text == "PARA"
-    assert meeting_row.cells[4].text == "1. Internal meeting"
+    assert meeting_row.cells[4].text == "PARA"
+    assert meeting_row.cells[5].text == "1. Internal meeting"
     cells = [cell for table in document.tables for row in table.rows for cell in row.cells]
     task_cell = next(cell for cell in cells if "Task with marker" in cell.text)
     marker_run = next(run for paragraph in task_cell.paragraphs for run in paragraph.runs if "[?]" in run.text)

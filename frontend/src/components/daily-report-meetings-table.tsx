@@ -1,5 +1,6 @@
 "use client"
 
+import { calendarMeetingTimeRange, meetingTimeColumns } from "@/lib/calendar-meeting-time"
 import type { Meeting, UserLookup } from "@/lib/types"
 import { useCanceledMeetings } from "@/lib/use-canceled-meetings"
 import { MeetingCanceledBadge } from "@/components/meeting-canceled-badge"
@@ -92,6 +93,7 @@ export function DailyReportMeetingsTable({
             <col className="w-[120px]" />
             <col className="w-[110px]" />
             <col className="w-[90px]" />
+            <col className="w-[90px]" />
           </colgroup>
           <thead className="bg-slate-50 text-slate-700">
             <tr>
@@ -101,7 +103,8 @@ export function DailyReportMeetingsTable({
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Personat</th>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Kur</th>
               <th className="border border-slate-200 px-2 py-2 text-left uppercase">Data</th>
-              <th className="border border-slate-200 px-2 py-2 text-left uppercase">Koha</th>
+              <th className="border border-slate-200 px-2 py-2 text-left uppercase">Prej</th>
+              <th className="border border-slate-200 px-2 py-2 text-left uppercase">Deri</th>
             </tr>
           </thead>
           <tbody>
@@ -109,6 +112,7 @@ export function DailyReportMeetingsTable({
               reportMeetings.map((meeting, index) => {
                 const start = new Date(meeting.starts_at as string)
                 const isExternal = (meeting.meeting_type || "external") === "external"
+                const time = meetingTimeColumns(calendarMeetingTimeRange(meeting) ?? start.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }))
                 const persons = (meeting.participant_ids || [])
                   .map((participantId) => userNames.get(participantId))
                   .filter((name): name is string => Boolean(name))
@@ -140,14 +144,17 @@ export function DailyReportMeetingsTable({
                       {reportDate?.toLocaleDateString("en-GB") || "-"}
                     </td>
                     <td className="border border-slate-200 px-2 py-2 align-top font-medium text-slate-900">
-                      {start.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                      {time.from}
+                    </td>
+                    <td className="border border-slate-200 px-2 py-2 align-top font-medium text-slate-900">
+                      {time.to}
                     </td>
                   </tr>
                 )
               })
             ) : (
               <tr>
-                <td colSpan={7} className="border border-slate-200 px-3 py-4 text-center text-slate-500">
+                <td colSpan={8} className="border border-slate-200 px-3 py-4 text-center text-slate-500">
                   No meetings for this date.
                 </td>
               </tr>

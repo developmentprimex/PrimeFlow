@@ -24,6 +24,7 @@ from docx.shared import Inches, Pt, RGBColor
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.compact_report_questions import question_parts, layout_question_parts
+from app.services.calendar_meeting_time import meeting_time_columns
 from app.config import settings
 from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
@@ -1038,10 +1039,14 @@ def _meeting_status_label(item: dict[str, Any]) -> str:
     return {"held": "Mbajtur", "canceled": "Anuluar"}.get(_meeting_status(item), "")
 
 
-def _meeting_export_title(item: dict[str, Any]) -> str:
+def _meeting_export_title(item: dict[str, Any], *, meeting_type: str = "external", include_canceled_status: bool = True) -> str:
     label = _meeting_status_label(item)
+    if _meeting_status(item) == "canceled" and not include_canceled_status:
+        label = ""
     marker = " X" if _meeting_status(item) == "canceled" else ""
-    return f"[{label}{marker}] {_meeting_title(item)}" if label else _meeting_title(item)
+    origin = _meeting_origin_label(item, meeting_type=meeting_type)
+    title = f"[{origin}] {_meeting_title(item)}" if origin else _meeting_title(item)
+    return f"[{label}{marker}] {title}" if label else title
 
 
 def _meeting_time_sort_key(item: dict[str, Any]) -> tuple[int, int, int, int, str]:
@@ -1244,13 +1249,22 @@ def _meeting_relation(item: dict[str, Any]) -> str:
     return ""
 
 
-def _meeting_time_display(item: dict[str, Any], *, meeting_type: str) -> str:
-    value = str(item.get("time") or "-").strip() or "-"
+def _meeting_origin_label(item: dict[str, Any], *, meeting_type: str) -> str:
     if _is_calendar_meeting(item, meeting_type=meeting_type):
-        return f"{value} CAL"
+        return "CAL"
     if _is_manual_internal_meeting(item, meeting_type=meeting_type):
-        return f"{value} MANUAL"
-    return value
+        return "MANUAL"
+    return ""
+
+
+def _meeting_time_display(item: dict[str, Any], *, meeting_type: str, endpoint: str | None = None, include_canceled_status: bool = False) -> str:
+    value = str(item.get("time") or "-").strip() or "-"
+    start, end = meeting_time_columns(value)
+    if endpoint == "end":
+        return end
+    if endpoint == "start" and include_canceled_status and _meeting_status(item) == "canceled":
+        return f"{start}\nAnuluar X"
+    return start if endpoint == "start" else (f"{start} - {end}" if end != "-" else start)
 
 
 def _meeting_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list[dict[str, Any]]]]:
@@ -1646,11 +1660,12 @@ def _dated_meetings_html(
         if item is None:
             return (
                 f'<td data-meeting-time="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
+                f'<td data-meeting-to="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
                 f'<td data-meeting-users="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
                 f'<td data-meeting-relation="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
                 f'<td data-meeting-cell="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
             )
-        meeting_time = str(item.get("time") or "-").strip() or "-"
+        meeting_from, meeting_to = meeting_time_columns(item.get("time"))
         meeting_users = _meeting_users(item)
         unavailable_users = {
             str(value) for value in item.get("_unavailableUserInitials") or []
@@ -1714,14 +1729,16 @@ def _dated_meetings_html(
         )
         return (
             f'<td data-meeting-time="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};white-space:nowrap{text_color}">'
-            f'{html.escape(meeting_time)}{calendar_badge}{manual_badge}{status_badge}</td>'
+            f'{html.escape(meeting_from)}{status_badge if status == "canceled" else ""}</td>'
+            f'<td data-meeting-to="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};white-space:nowrap{text_color}">'
+            f'{html.escape(meeting_to)}</td>'
             f'<td data-meeting-users="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
             f'white-space:nowrap;font-weight:700{text_color}">{meeting_users_html}</td>'
             f'<td data-meeting-relation="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
             f'white-space:nowrap;text-align:center;font-weight:800;">{_meeting_relation(item) if meeting_type == "internal" else ""}</td>'
             f'<td data-meeting-cell="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};{MEETING_TITLE_TEXT_STYLE};'
             f'{"font-weight:800" if meeting_type == "external" or manual_badge else ""}{text_color}{canceled_background}">'
-            f"{index}. {html.escape(value)}</td>"
+            f'{index}. {html.escape(value)}{calendar_badge}{manual_badge}{status_badge if status != "canceled" else ""}</td>'
         )
 
     left_rows = {
@@ -1779,21 +1796,23 @@ def _dated_meetings_html(
     return (
         '<table data-side-by-side-meetings="true" role="presentation" width="100%" border="1" '
         f'cellpadding="0" cellspacing="0" style="{TABLE_STYLE};margin-top:18px;{MEETING_TABLE_FRAME_STYLE}">'
-        '<colgroup><col width="8%"><col width="7%"><col width="7%"><col width="4%"><col width="24%">'
-        '<col width="8%"><col width="7%"><col width="7%"><col width="4%"><col width="24%"></colgroup>'
+        '<colgroup><col width="8%"><col width="5%"><col width="5%"><col width="7%"><col width="4%"><col width="21%">'
+        '<col width="8%"><col width="5%"><col width="5%"><col width="7%"><col width="4%"><col width="21%"></colgroup>'
         '<thead><tr>'
-        f'<th colspan="5" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};border-left:5px solid #2563EB;'
+        f'<th colspan="6" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};border-left:5px solid #2563EB;'
         f'font-size:15px;">{day_header(left)}</th>'
-        f'<th colspan="5" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};{divider_style};font-size:15px;">'
+        f'<th colspan="6" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};{divider_style};font-size:15px;">'
         f'{day_header(right)}</th></tr>'
         '<tr>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">LLOJI</th>'
-        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">KOHA</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">PREJ</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">DERI</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">USER</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">PARA/PAS</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">TAKIMET</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE};{divider_style}">LLOJI</th>'
-        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">KOHA</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">PREJ</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">DERI</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">USER</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">PARA/PAS</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">TAKIMET</th>'
@@ -2321,8 +2340,8 @@ def _excel_table_attachment(
         rows: list[tuple[str, list[dict[str, Any]], bool]], row_number: int
     ) -> int:
         sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=2)
-        sheet.merge_cells(start_row=row_number, start_column=6, end_row=row_number, end_column=8)
-        for column, value in ((1, "LLOJI"), (3, "KOHA"), (4, "USER"), (5, "PARA/PAS"), (6, "TAKIMET")):
+        sheet.merge_cells(start_row=row_number, start_column=7, end_row=row_number, end_column=8)
+        for column, value in ((1, "LLOJI"), (3, "PREJ"), (4, "DERI"), (5, "USER"), (6, "PARA/PAS"), (7, "TAKIMET")):
             cell = sheet.cell(row_number, column, value)
             cell.font = Font(bold=True)
             cell.fill = header_fill
@@ -2333,14 +2352,15 @@ def _excel_table_attachment(
                 category_start=True,
                 category_end=True,
                 outer_left=column == 1,
-                outer_right=column in (5, 8),
+                outer_right=column in (6, 8),
             )
         row_number += 1
 
         meeting_values = _flatten_meeting_rows(rows) or [("-", None)]
         for index, (label, item) in enumerate(meeting_values, 1):
             sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=2)
-            sheet.merge_cells(start_row=row_number, start_column=6, end_row=row_number, end_column=8)
+            sheet.merge_cells(start_row=row_number, start_column=7, end_row=row_number, end_column=8)
+            sheet.row_dimensions[row_number].height = 32
             sheet.cell(row_number, 1, label)
             meeting_type = "internal" if "INT" in label.upper() else "external"
             meeting_text_color = (
@@ -2349,26 +2369,23 @@ def _excel_table_attachment(
                 and _is_faded_calendar_internal(item, meeting_type=meeting_type)
                 else "000000"
             )
+            sheet.cell(row_number, 3, _meeting_time_display(item, meeting_type=meeting_type, endpoint="start", include_canceled_status=True) if item else "-")
+            sheet.cell(row_number, 4, _meeting_time_display(item, meeting_type=meeting_type, endpoint="end") if item else "-")
             sheet.cell(
                 row_number,
-                3,
-                _meeting_time_display(item, meeting_type=meeting_type) if item else "-",
-            )
-            sheet.cell(
-                row_number,
-                4,
+                5,
                 _excel_meeting_user_initials(item, default_color=meeting_text_color)
                 if item else "-",
             )
             sheet.cell(
                 row_number,
-                5,
+                6,
                 _meeting_relation(item) if item and meeting_type == "internal" else "",
             )
             sheet.cell(
                 row_number,
-                6,
-                f"{index}. {_meeting_export_title(item)}" if item else "-",
+                7,
+                f"{index}. {_meeting_export_title(item, meeting_type=meeting_type, include_canceled_status=False)}" if item else "-",
             )
             highlighted = item is not None and (
                 _is_non_routine_meeting(item)
@@ -2389,22 +2406,22 @@ def _excel_table_attachment(
                 if meeting_fill is not None and column >= 3:
                     cell.fill = meeting_fill
             sheet.cell(row_number, 1).font = Font(bold=True)
-            sheet.cell(row_number, 4).font = Font(bold=True)
             sheet.cell(row_number, 5).font = Font(bold=True)
-            sheet.cell(row_number, 5).alignment = Alignment(horizontal="center", vertical="top")
+            sheet.cell(row_number, 6).font = Font(bold=True)
+            sheet.cell(row_number, 6).alignment = Alignment(horizontal="center", vertical="top")
             if item is not None and (
                 meeting_type == "external"
                 or _is_manual_internal_meeting(item, meeting_type=meeting_type)
             ):
-                sheet.cell(row_number, 6).font = Font(bold=True)
+                sheet.cell(row_number, 7).font = Font(bold=True)
             if item is not None and _is_faded_calendar_internal(item, meeting_type=meeting_type):
-                for column in (3, 4, 6):
+                for column in (3, 4, 5, 7):
                     sheet.cell(row_number, column).font = Font(
-                        bold=column == 4,
+                        bold=column == 5,
                         color=CALENDAR_INTERNAL_TEXT_COLOR.removeprefix("#"),
                     )
             if item is not None and _meeting_status(item) == "canceled":
-                sheet.cell(row_number, 6).font = Font(color="64748B", strike=True)
+                sheet.cell(row_number, 7).font = Font(color="64748B", strike=True)
             row_number += 1
         return row_number
 
@@ -2739,10 +2756,10 @@ def _docx_table_attachment(
 
     for meeting_date, relative, dated_rows in meeting_sections or []:
         heading(f"TAKIMET {relative} - {meeting_date:%d.%m.%Y}", size=10)
-        meeting_table = document.add_table(rows=1, cols=5)
+        meeting_table = document.add_table(rows=1, cols=6)
         meeting_table.style = "Table Grid"
-        set_widths(meeting_table, [1.4, 1.0, 1.1, 0.8, 5.8])
-        for index, value in enumerate(["LLOJI", "KOHA", "USER", "PARA/PAS", "TAKIMET"]):
+        set_widths(meeting_table, [1.2, 0.9, 0.7, 1.1, 0.8, 5.4])
+        for index, value in enumerate(["LLOJI", "PREJ", "DERI", "USER", "PARA/PAS", "TAKIMET"]):
             set_cell(meeting_table.rows[0].cells[index], value, bold=True, center=True)
         style_header(meeting_table.rows[0])
         flattened_meetings = _flatten_meeting_rows(dated_rows)
@@ -2755,6 +2772,7 @@ def _docx_table_attachment(
             shade(row.cells[2], meeting_fill)
             shade(row.cells[3], meeting_fill)
             shade(row.cells[4], meeting_fill)
+            shade(row.cells[5], meeting_fill)
             text_color = (
                 CALENDAR_INTERNAL_TEXT_COLOR
                 if _is_faded_calendar_internal(item, meeting_type=meeting_type)
@@ -2762,19 +2780,20 @@ def _docx_table_attachment(
             )
             set_cell(
                 row.cells[1],
-                _meeting_time_display(item, meeting_type=meeting_type),
+                _meeting_time_display(item, meeting_type=meeting_type, endpoint="start", include_canceled_status=True),
                 color=text_color,
             )
-            set_meeting_user_cell(row.cells[2], item, color=text_color)
-            set_cell(row.cells[3], _meeting_relation(item) if meeting_type == "internal" else "", bold=True, center=True)
+            set_cell(row.cells[2], _meeting_time_display(item, meeting_type=meeting_type, endpoint="end"), color=text_color)
+            set_meeting_user_cell(row.cells[3], item, color=text_color)
+            set_cell(row.cells[4], _meeting_relation(item) if meeting_type == "internal" else "", bold=True, center=True)
             set_cell(
-                row.cells[4],
-                f"{index}. {_meeting_export_title(item)}",
+                row.cells[5],
+                f"{index}. {_meeting_export_title(item, meeting_type=meeting_type, include_canceled_status=False)}",
                 bold=meeting_type == "external" or _is_manual_internal_meeting(item, meeting_type=meeting_type),
                 color=text_color,
             )
             if _meeting_status(item) == "canceled":
-                for run in row.cells[4].paragraphs[0].runs:
+                for run in row.cells[5].paragraphs[0].runs:
                     run.font.strike = True
             previous_label = flattened_meetings[index - 2][0] if index > 1 else ""
             if "INT" in label.upper() and "INT" not in previous_label.upper():
@@ -2879,7 +2898,15 @@ def _core_png_table_attachment(
             meeting_pair.append((meeting_pair[0][0], "", []))
     meeting_half_width = (width - (margin * 2)) // 2
     meeting_label_width = 125
-    meeting_time_width = 85
+    meeting_from_width = max(
+        [90] + [
+            int(regular.getlength(_meeting_time_display(item, meeting_type="internal" if "INT" in label.upper() else "external", endpoint="start"))) + 12
+            for _, _, groups in meeting_pair
+            for label, item in _flatten_meeting_rows(groups)
+        ]
+    )
+    meeting_to_width = 65
+    meeting_time_width = meeting_from_width + meeting_to_width
     meeting_user_width = 90
     meeting_relation_width = 95
     meeting_content_width = (
@@ -2899,7 +2926,8 @@ def _core_png_table_attachment(
             def entry_height(entry: tuple[str, dict[str, Any]] | None) -> int:
                 if entry is None:
                     return 44
-                value = f"{index + 1}. {_report_text(_first_line(entry[1].get('title')))}"
+                meeting_type = "internal" if "INT" in entry[0].upper() else "external"
+                value = f"{index + 1}. {_meeting_export_title(entry[1], meeting_type=meeting_type, include_canceled_status=False)}"
                 return max(
                     58 if _meeting_status_label(entry[1]) else 44,
                     len(wrap(value, regular, meeting_content_width - 18)) * 20 + 12,
@@ -3140,18 +3168,20 @@ def _core_png_table_attachment(
         x = margin
         meeting_column_widths = [
             meeting_label_width,
-            meeting_time_width,
+            meeting_from_width,
+            meeting_to_width,
             meeting_user_width,
             meeting_relation_width,
             meeting_content_width,
             meeting_label_width,
-            meeting_time_width,
+            meeting_from_width,
+            meeting_to_width,
             meeting_user_width,
             meeting_relation_width,
             meeting_content_width,
         ]
         for column, label in enumerate(
-            ["LLOJI", "KOHA", "USER", "PARA/PAS", "TAKIMET", "LLOJI", "KOHA", "USER", "PARA/PAS", "TAKIMET"]
+            ["LLOJI", "PREJ", "DERI", "USER", "PARA/PAS", "TAKIMET", "LLOJI", "PREJ", "DERI", "USER", "PARA/PAS", "TAKIMET"]
         ):
             right = x + meeting_column_widths[column]
             draw.rectangle((x, y, right, y + 38), fill="#F8FAFC", outline="#111827", width=3)
@@ -3188,6 +3218,7 @@ def _core_png_table_attachment(
                 draw.rectangle((time_right, y, user_right, row_bottom), fill="#FFFFFF", outline="#111827")
                 draw.rectangle((user_right, y, relation_right, row_bottom), fill="#FFFFFF", outline="#111827")
                 draw.rectangle((relation_right, y, content_right, row_bottom), fill="#FFFFFF", outline="#111827")
+                draw.line((label_right + meeting_from_width, y, label_right + meeting_from_width, row_bottom), fill="#111827")
                 if item is not None:
                     meeting_type = "internal" if "INT" in label.upper() else "external"
                     meeting_fill = meeting_report_color(item, meeting_type=meeting_type)
@@ -3230,19 +3261,16 @@ def _core_png_table_attachment(
                     )
                     draw.text(
                         (label_right + 6, y + 8),
-                        _meeting_time_display(item, meeting_type=meeting_type),
+                        _meeting_time_display(item, meeting_type=meeting_type, endpoint="start"),
                         fill=text_color,
                         font=regular,
                     )
+                    time_divider = label_right + meeting_from_width
+                    draw.line((time_divider, y, time_divider, row_bottom), fill=outline, width=outline_width)
+                    draw.text((time_divider + 6, y + 8), _meeting_time_display(item, meeting_type=meeting_type, endpoint="end"), fill=text_color, font=regular)
                     status = _meeting_status(item)
-                    status_label = _meeting_status_label(item)
-                    if status_label:
-                        draw.text(
-                            (label_right + 6, y + 31),
-                            f'{status_label}{" X" if status == "canceled" else ""}',
-                            fill="#991B1B" if status == "canceled" else "#166534",
-                            font=small_bold,
-                        )
+                    if status == "canceled":
+                        draw.text((label_right + 6, y + 31), "Anuluar X", fill="#991B1B", font=small_bold)
                     user_x = time_right + 6
                     unavailable_users = {
                         str(value) for value in item.get("_unavailableUserInitials") or []
@@ -3258,7 +3286,7 @@ def _core_png_table_attachment(
                             (user_x, y + 8), token, fill=token_color, font=bold
                         )
                         user_x += measure.textlength(token, font=bold)
-                    value = f"{meeting_index}. {_meeting_title(item)}"
+                    value = f"{meeting_index}. {_meeting_export_title(item, meeting_type=meeting_type, include_canceled_status=False)}"
                     lines = wrap(value, regular, meeting_content_width - 18)
                     for line_index, line in enumerate(lines):
                         draw.text(
@@ -3603,7 +3631,7 @@ async def _build_print_report(
                     f"{label}: " + "; ".join(
                         f"[{_meeting_user_initials(item)}] "
                         + (f"[{_meeting_relation(item)}] " if "INT" in label.upper() and _meeting_relation(item) else "")
-                        + f"{_meeting_export_title(item)} {item.get('time') or ''}".strip()
+                        + f"{_meeting_export_title(item, meeting_type='internal' if 'INT' in label.upper() else 'external')} {item.get('time') or ''}".strip()
                         for item in values
                     )
                 )

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time";
 import {
   CalendarDays,
   ChevronLeft,
@@ -111,6 +112,11 @@ const localDateTimeParts = (value: string) => {
     time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`,
   };
 };
+const calendarWindow = (item: CalendarItem) => calendarMeetingTimeRange({
+  ...item,
+  meeting_type: item.meeting_type === "microsoft" ? "external" : item.meeting_type,
+  calendar_imported: item.source === "microsoft",
+});
 const userLabel = (user: UserLookup) =>
   user.full_name || user.username || user.email;
 const validationFailure = (message: string): Validation => ({
@@ -625,8 +631,9 @@ export default function MeetingSchedulerPage() {
                           <div
                             key={item.id}
                             className={`mb-1 truncate rounded border px-1.5 py-1 text-[10px] font-medium ${calendarMeetingTone(item)}`}
-                            title={item.title}
+                            title={[item.title, calendarWindow(item)].filter(Boolean).join(" · ")}
                           >
+                            {calendarWindow(item) ? <span className="block font-semibold">{calendarWindow(item)}</span> : null}
                             {item.title}
                           </div>
                         ))}

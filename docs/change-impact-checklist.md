@@ -120,6 +120,21 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   statuse sipas datës dhe taska PARA/PAS ose përgatitjeje. Kontrollo këto lidhje
   edhe kur ndryshon ose anulohet takimi. 1H Reports preket nga taskat përkatëse,
   pa qenë domosdoshmërisht një tabelë e plotë takimesh.
+- Intervali i planifikuar i takimeve externe nga kalendari formohet nga
+  `calendar-meeting-time.ts` në frontend dhe `calendar_meeting_time.py` në backend.
+  Kontrollo Common View (ditore/javore, lista/detaje, fallback dhe printim), të tri
+  Department Views/My View dhe printimet e tyre, katër faqet Projects,
+  Meeting Scheduler dhe Admin Tasks (tabela GA e merr nga API-ja Common View),
+  tabelën `DailyReportMeetingsTable`, M1/M2/M3 dhe SHTYPI Today/Tomorrow
+  (HTML, Excel, PDF dhe PNG). API-ja Common View dërgon intervalin në `time`;
+  renditja dhe kontrollet e konfliktit vazhdojnë nga fillimi. Kur mungon mbarimi,
+  ruhet vetëm fillimi. Shënimi i ditës `(+1d)` nuk shfaqet. Tabelat e takimeve
+  në SHTYPI (HTML/Excel/Word/PNG), raportet M1/M2/M3 dhe tabela ditore e
+  departamenteve kanë kolona `PREJ` dhe `DERI`, me vijë ndarëse; pa orë mbarimi,
+  `DERI` mbetet `-`. Snapshot-et historike ruajnë përmbajtjen që kishin në gjenerim.
+  Në SHTYPI, etiketat CAL/MANUAL dhe Mbajtur vendosen te celula e emrit të
+  takimit në HTML, Excel, Word dhe PNG. Anuluar mbetet nën orën te PREJ;
+  DERI mban vetëm orën e mbarimit.
 - Shënimet e takimeve (`meeting_notes`) dalin te PX Notes vetëm kur dërgohen
   ose bashkohen; statusi i tyre lexohet nga taskat e Note-s PX (`ga_note_origin_id`).
   Ngjyrat e statusit duhet të mbeten të njëjta me PX Notes. Regjistrimi i lidhur

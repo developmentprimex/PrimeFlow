@@ -2,6 +2,7 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
 import { ProjectActivityControl, ProjectActivityFilterControl, ProjectListEmptyState, matchesProjectActivity, type ProjectActivityFilter } from "@/components/project-activity"
 import { useBrowserTabTitle } from "@/components/browser-tab-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
@@ -701,9 +702,9 @@ function formatMeetingLabel(meeting: Meeting) {
     date.getFullYear() === today.getFullYear() &&
     date.getMonth() === today.getMonth() &&
     date.getDate() === today.getDate()
-  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  const timeLabel = calendarMeetingTimeRange(meeting) ?? date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
   const weekdayLabel = date.toLocaleDateString("en-US", { weekday: "long" })
-  const prefix = sameDay ? timeLabel : weekdayLabel
+  const prefix = sameDay ? timeLabel : calendarMeetingTimeRange(meeting) ? `${weekdayLabel} ${timeLabel}` : weekdayLabel
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
@@ -719,7 +720,7 @@ function formatMeetingDateTime(meeting: Meeting): string {
   const dateLabel = sameDay
     ? "Today"
     : date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  const timeLabel = calendarMeetingTimeRange(meeting) ?? date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
   return `${dateLabel} ${timeLabel}`
 }
 
@@ -1056,7 +1057,7 @@ function formatMeetingPrintLabel(meeting: Meeting) {
   if (!meeting.starts_at) return meeting.title || "Meeting"
   const date = new Date(meeting.starts_at)
   if (Number.isNaN(date.getTime())) return meeting.title || "Meeting"
-  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  const timeLabel = calendarMeetingTimeRange(meeting) ?? date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
   return `${timeLabel} ${meeting.title || "Meeting"}`
 }
 
@@ -9079,7 +9080,7 @@ export default function DepartmentKanban() {
                           <div key={meeting.id} className="group flex items-center justify-between rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-100 transition hover:ring-slate-300 dark:bg-slate-900 dark:ring-slate-800">
                             <div className="flex items-start gap-4">
                               <div className="flex flex-col items-center min-w-[3rem]">
-                                <span className="text-xs font-bold text-slate-900 dark:text-white">{meeting.starts_at ? new Date(meeting.starts_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--:--"}</span>
+                                <span className="text-xs font-bold text-slate-900 dark:text-white">{calendarMeetingTimeRange(meeting) ?? (meeting.starts_at ? new Date(meeting.starts_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--:--")}</span>
                                 <Badge variant="outline" className="mt-1 h-4 px-1 text-[8px] border-slate-200 text-slate-500">DB</Badge>
                               </div>
                               <div>

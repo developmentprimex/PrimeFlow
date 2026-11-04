@@ -2,6 +2,7 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { calendarMeetingTimeRange, meetingTimeColumns } from "@/lib/calendar-meeting-time"
 import { ProjectActivityControl, ProjectActivityFilterControl, ProjectListEmptyState, matchesProjectActivity, type ProjectActivityFilter } from "@/components/project-activity"
 import { useBrowserTabTitle } from "@/components/browser-tab-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
@@ -726,9 +727,9 @@ function formatMeetingLabel(meeting: Meeting) {
     date.getFullYear() === today.getFullYear() &&
     date.getMonth() === today.getMonth() &&
     date.getDate() === today.getDate()
-  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  const timeLabel = calendarMeetingTimeRange(meeting) ?? date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
   const weekdayLabel = date.toLocaleDateString("en-US", { weekday: "long" })
-  const prefix = sameDay ? timeLabel : weekdayLabel
+  const prefix = sameDay ? timeLabel : calendarMeetingTimeRange(meeting) ? `${weekdayLabel} ${timeLabel}` : weekdayLabel
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
@@ -756,7 +757,7 @@ function formatMeetingDate(meeting: Meeting): string {
 function formatMeetingTime(meeting: Meeting): string {
   const date = resolveMeetingDisplayDate(meeting)
   if (!date || Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  return calendarMeetingTimeRange(meeting) ?? date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
 }
 
 function formatMsEventWindow(event: MicrosoftEvent) {
@@ -1266,7 +1267,7 @@ function formatMeetingPrintLabel(meeting: Meeting) {
   const date = resolveMeetingDisplayDate(meeting)
   if (!date) return meeting.title || "Meeting"
   if (Number.isNaN(date.getTime())) return meeting.title || "Meeting"
-  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  const timeLabel = calendarMeetingTimeRange(meeting) ?? date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
   return `${timeLabel} ${meeting.title || "Meeting"}`
 }
 
@@ -10341,7 +10342,8 @@ export default function DepartmentKanban() {
                           <TableHead className="w-[320px] uppercase">Title</TableHead>
                           <TableHead className="w-[80px] uppercase">DEP</TableHead>
                           <TableHead className="w-[105px] uppercase">Date</TableHead>
-                          <TableHead className="w-[85px] uppercase">Time</TableHead>
+                          <TableHead className="w-[85px] border-r border-slate-200 uppercase">Prej</TableHead>
+                          <TableHead className="w-[85px] uppercase">Deri</TableHead>
                           {!isReadOnly ? <TableHead className="w-[90px] text-right uppercase">Actions</TableHead> : null}
                         </TableRow>
                       </TableHeader>
@@ -10352,7 +10354,7 @@ export default function DepartmentKanban() {
                             <TableRow key={meeting.id}>
                               {isEditing ? (
                                 <>
-                                  <TableCell colSpan={!isReadOnly ? 5 : 4}>
+                                  <TableCell colSpan={!isReadOnly ? 6 : 5}>
                                     <div className="space-y-3">
                                       <Input
                                         value={editMeetingTitle}
@@ -10529,7 +10531,8 @@ export default function DepartmentKanban() {
                                     <MeetingDepartmentTag meeting={meeting} departmentMap={departmentMap} />
                                   </TableCell>
                                   <TableCell>{formatMeetingDate(meeting)}</TableCell>
-                                  <TableCell>{formatMeetingTime(meeting)}</TableCell>
+                                  <TableCell className="border-r border-slate-200">{meetingTimeColumns(formatMeetingTime(meeting)).from}</TableCell>
+                                  <TableCell>{meetingTimeColumns(formatMeetingTime(meeting)).to}</TableCell>
                                   {!isReadOnly ? (
                                     <TableCell className="text-right">
                                       <div className="flex items-center justify-end gap-1">

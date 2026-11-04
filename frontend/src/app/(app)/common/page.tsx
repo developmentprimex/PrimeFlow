@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
 
@@ -1601,8 +1602,9 @@ export default function CommonViewPage() {
   }
   const formatTimeLabel = (value?: string): string => {
     if (!value) return ""
-    const normalized = value.trim()
+    const normalized = value.trim().replace(/\s*\(\+\d+d\)/g, "")
     if (!normalized || normalized.toLowerCase() === "tbd") return normalized
+    if (/^\d{2}:\d{2} - \d{2}:\d{2}(?: \(\+\d+d\))?$/.test(normalized)) return normalized
     if (/am|pm/i.test(normalized)) return normalized
     if (normalized.includes("-")) {
       const [startRaw, endRaw] = normalized.split("-").map((part) => part.trim())
@@ -1741,7 +1743,7 @@ export default function CommonViewPage() {
     const date = resolvedDate ?? new Date(source)
     if (Number.isNaN(date.getTime())) return "Date TBD"
     const dateLabel = formatDateHuman(toISODate(date))
-    const timeLabel = resolvedDate ? formatTime(date) : meeting.starts_at ? formatTime(date) : "TBD"
+    const timeLabel = calendarMeetingTimeRange(meeting) ?? (resolvedDate ? formatTime(date) : meeting.starts_at ? formatTime(date) : "TBD")
     return `${dateLabel} ${timeLabel}`
   }
   const mapMeetingToCommonItem = React.useCallback(
@@ -1764,7 +1766,7 @@ export default function CommonViewPage() {
             : `meeting:${meeting.id}`,
         title: meeting.title || (meetingType === "external" ? "External meeting" : "Internal meeting"),
         date: toISODate(dateSource),
-        time: resolvedDate ? formatTime(resolvedDate) : "TBD",
+        time: calendarMeetingTimeRange(meeting) ?? (resolvedDate ? formatTime(resolvedDate) : "TBD"),
         platform: meeting.platform?.trim() || "TBD",
         owner: fallbackOwnerName || "Unknown",
         recurrenceType: meeting.recurrence_type || "none",
@@ -4263,7 +4265,7 @@ export default function CommonViewPage() {
                 id: `meeting:${meeting.id}:${toISODate(dateSource)}`,
                 title: meeting.title || "External meeting",
                 date: toISODate(dateSource),
-                time: resolvedDate ? formatTime(resolvedDate) : "TBD",
+                time: calendarMeetingTimeRange(meeting) ?? (resolvedDate ? formatTime(resolvedDate) : "TBD"),
                 platform: meeting.platform?.trim() || "TBD",
                 owner: ownerName,
                 assignees: (meeting.participant_ids || [])
@@ -4302,7 +4304,7 @@ export default function CommonViewPage() {
               id: `meeting:${meeting.id}`,
               title: meeting.title || "Internal meeting",
               date: toISODate(dateSource),
-              time: resolvedDate ? formatTime(resolvedDate) : "TBD",
+              time: calendarMeetingTimeRange(meeting) ?? (resolvedDate ? formatTime(resolvedDate) : "TBD"),
               platform: meeting.platform?.trim() || "TBD",
               owner: ownerName,
               recurrenceType: meeting.recurrence_type || "none",

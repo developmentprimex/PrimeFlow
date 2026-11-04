@@ -37,6 +37,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
+from app.services.calendar_meeting_time import calendar_meeting_time_range
 from app.services.one_h_slots import effective_slot_date
 from app.services.one_h_project_coverage import is_project_coverage_department, project_task_periods
 from app.services.meeting_occurrence import meeting_display_dates, meeting_occurs_on_date
@@ -1294,7 +1295,7 @@ async def get_common_view(
                 else {}
             )
             if meeting.recurrence_type and meeting.recurrence_type != "none":
-                time_label = _format_time(meeting.starts_at)
+                time_label = calendar_meeting_time_range(meeting, _tirane_tz()) or _format_time(meeting.starts_at)
                 for day in week_days:
                     if _meeting_occurs_on_date(meeting, day):
                         target = "external" if meeting.meeting_type == "external" else "internal"
@@ -1330,7 +1331,7 @@ async def get_common_view(
                             "id": f"meeting:{meeting.id}:{day.isoformat()}",
                             "title": meeting.title or ("External meeting" if target == "external" else "Internal meeting"),
                             "date": day.isoformat(),
-                            "time": _format_time(meeting.starts_at),
+                            "time": calendar_meeting_time_range(meeting, _tirane_tz()) or _format_time(meeting.starts_at),
                             "platform": meeting.platform or "TBD",
                             "owner": owner_name,
                             "assignees": [
