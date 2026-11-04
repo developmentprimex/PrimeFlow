@@ -88,6 +88,28 @@ class ShutdownTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(list(Path(directory).glob('*.json')))
         self.assertEqual(calls[-1][1]['expected_join_attempt'], 1)
 
+    async def test_old_recovery_cannot_delete_a_new_attempts_recovery_file(self):
+        mid = str(uuid.uuid4())
+        old = {**session(), 'meeting': mid, 'join_attempt': 1, 'finished': True, 'reason': 'completed'}
+        new = {**session(), 'meeting': mid, 'join_attempt': 2, 'finished': False,
+               'lines': [{'id': 'new-line', 'text': 'Raportimi i ri'}]}
+        async def bridge(path, body):
+            if path.endswith('/finish'):
+                # A restart writes its own recovery file while the old finish is in flight.
+                host.session = new
+                host.persist_transcript(new)
+                return {'superseded': True}
+            return {}
+        host = controller.MiraHost(SimpleNamespace(bridge=bridge))
+        with tempfile.TemporaryDirectory() as directory, patch.object(controller, 'RECOVERY_DIR', Path(directory)):
+            host.persist_transcript(old)
+            await host.recover_transcripts()
+            target = controller.recovery_path(mid, 2)
+            self.assertTrue(target.exists(), 'Old cleanup deleted the new transcript recovery file')
+            saved = json.loads(target.read_text(encoding='utf-8'))
+        self.assertEqual(saved['join_attempt'], 2)
+        self.assertEqual([line['id'] for line in saved['lines']], ['new-line'])
+
     async def test_stalled_final_upload_cannot_block_shutdown_and_keeps_recovery(self):
         mid = str(uuid.uuid4())
         state = {**session(), 'meeting': mid, 'finished': False, 'reason': 'stopped_by_command',

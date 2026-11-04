@@ -140,6 +140,18 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   kontrollojë burimin e freskët dhe radhën e ruajtur edhe kur snapshot-i i stafit
   nuk ka detyra PM. Mbyllja dhe skedarët e rikuperimit të Host mbajnë tentativën
   e lidhjes (`join_attempt`); një kërkesë e vjetër nuk duhet të mbyllë rinisjen.
+  Pas upload-it të rikuperimit, fshi vetëm snapshot-in e rikuperuar: rinisja
+  mund të ketë ruajtur një transkript më të ri në të njëjtin skedar ndërkohë.
+  Skedarët e rinj ruhen veçmas për çdo tentativë; lexo edhe formatin e vjetër
+  `<meeting_id>.json`. Rinisja dhe pastrimi i tentativës së vjetër nuk duhet të
+  mbishkruajnë/fshijnë rreshtat, metrikat apo konfirmimet ende të padërguara.
+  Anulimi i procesit regjistrohet si ndërprerje, jo si takim i përfunduar;
+  ruaj identitetin e tentativës edhe kur ndalimi ndodh para lidhjes zanore.
+  Nisja e dështuar gjatë përgatitjes së kredencialeve mbyll vetëm tentativën
+  përkatëse; kontrollo përsëri gjendjen para kthimit të një sesioni të gatshëm.
+  Në ndalim prit me kufi shkrimet që janë në punë para upload-it përfundimtar.
+  Rikuperimi ka kufij kohe për kërkesat dhe kalon me radhë te skedarët e tjerë,
+  që një skedar i dëmtuar ose kërkesë e bllokuar të mos pengojë takimet pasuese.
   Përmbledhjet dhe shënimet për person krijohen në sfond dhe shfaqen te Mira / PX
   Notes: kontrollo veçmas nëse një rezultat i vonuar i gjenerimit mbishkruan një
   transkript më të ri ose përmbledhjen pas rinisjes. Kjo varësi kërkon kontroll

@@ -176,13 +176,24 @@ async def start(payload: Start, db: AsyncSession = Depends(get_db)):
     extra = {'test_meeting_id': payload.test_meeting_id} if payload.test_meeting_id else {}
     meeting = await host.start_meeting(db, payload.slot, test_mode=payload.test_mode, **extra)
     await db.commit()
+    meeting_id, join_attempt = meeting.id, meeting.join_attempts
     try:
         session = await host.realtime_session(db, meeting)
-    except HTTPException as exc:
-        # The meeting never started; it must not stay "live" in the Mira view.
-        await host.finish_meeting(db, meeting, f"realtime:{exc.detail}")
+    except Exception as exc:
+        # Preparation runs after the start was committed. Recover a failed DB
+        # transaction and fence cleanup against a newer concurrent attempt.
+        await db.rollback()
+        current = await host.meeting_for(db, meeting_id, lock=True)
+        if current.join_attempts == join_attempt and current.status in ("GA_PHASE", "STAFF_PHASE"):
+            await host.finish_meeting(db, current, f"realtime:{type(exc).__name__}")
         await db.commit()
-        raise
+        if isinstance(exc, HTTPException):
+            raise
+        host.log.warning("Mira host session preparation failed error=%s", type(exc).__name__)
+        raise HTTPException(502, "Përgatitja e sesionit zanor të Mira-s dështoi.") from None
+    await db.refresh(meeting, with_for_update=True)
+    if meeting.join_attempts != join_attempt or meeting.status != "GA_PHASE":
+        raise HTTPException(409, "Kjo tentativë e lidhjes është zëvendësuar ose ndaluar.")
     if session.get("runtime"):
         from sqlalchemy.dialects.postgresql import insert
         from app.models.mira_host import Mira1HEvent

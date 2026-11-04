@@ -365,7 +365,7 @@ class TestModeTests(unittest.IsolatedAsyncioTestCase):
         at = datetime.combine(DAY, datetime.min.time(), TZ).replace(hour=9)
         test = meeting()
         row = SimpleNamespace(enabled_until=None, target_minutes_per_person=2)
-        db = SimpleNamespace(commit=AsyncMock())
+        db = SimpleNamespace(commit=AsyncMock(), refresh=AsyncMock())
         with patch.object(api, 'command_user', AsyncMock()) as authorize, \
              patch.object(service, 'get_settings', AsyncMock(return_value=row)), \
              patch.object(service, 'start_meeting', AsyncMock(return_value=test)) as start, \

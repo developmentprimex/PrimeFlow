@@ -16,10 +16,10 @@ from app.models.enums import UserRole
 
 class ManualStartTests(unittest.IsolatedAsyncioTestCase):
     async def test_staff_in_shared_control_can_start_without_enabling_schedule(self):
-        meeting=SimpleNamespace(id=uuid.uuid4(),meeting_date=datetime.now().date(),slot='14:20',join_attempts=1)
+        meeting=SimpleNamespace(id=uuid.uuid4(),meeting_date=datetime.now().date(),slot='14:20',join_attempts=1,status='GA_PHASE')
         user=SimpleNamespace(id=uuid.uuid4(),role=UserRole.STAFF,is_active=True)
         row=SimpleNamespace(enabled_until=None,target_minutes_per_person=4)
-        db=SimpleNamespace(commit=AsyncMock())
+        db=SimpleNamespace(commit=AsyncMock(),refresh=AsyncMock())
         from app.services import discord_meeting_control as control
         with patch.object(api.settings,'DISCORD_GUILD_ID','123'), \
              patch.object(api.settings,'DISCORD_MEETING_CONTROL_CHANNEL_ID','77'), \
@@ -66,9 +66,9 @@ class ManualStartTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_manual_entry_starts_the_opening_now_but_keeps_the_official_staff_time(self):
         at = datetime(2026, 10, 29, 10, 57, tzinfo=ZoneInfo('Europe/Budapest'))
-        meeting = SimpleNamespace(id=uuid.uuid4(),meeting_date=at.date(),slot='11:00',join_attempts=1)
+        meeting = SimpleNamespace(id=uuid.uuid4(),meeting_date=at.date(),slot='11:00',join_attempts=1,status='GA_PHASE')
         row = SimpleNamespace(enabled_until=None, target_minutes_per_person=4)
-        db = SimpleNamespace(commit=AsyncMock())
+        db = SimpleNamespace(commit=AsyncMock(),refresh=AsyncMock())
         manager = SimpleNamespace(role=UserRole.MANAGER)
         with patch.object(api.host, 'user_for_discord', AsyncMock(return_value=manager)), \
              patch.object(api.host, 'get_settings', AsyncMock(return_value=row)), \

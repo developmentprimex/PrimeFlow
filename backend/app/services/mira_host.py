@@ -1264,8 +1264,16 @@ async def realtime_session(db: AsyncSession, meeting: Mira1HMeeting) -> dict:
         # OpenAI's error names the rejected setting and never contains the key.
         log.warning("Mira host realtime secret refused status=%s reason=%s", response.status_code, reason)
         raise HTTPException(502, "OpenAI refuzoi sesionin zanor të Mira-s.")
-    body = response.json()
-    return {"client_secret": body.get("value") or (body.get("client_secret") or {}).get("value"),
+    try:
+        body = response.json()
+        secret = body.get("value") if isinstance(body, dict) else None
+        if not secret and isinstance(body, dict) and isinstance(body.get("client_secret"), dict):
+            secret = body["client_secret"].get("value")
+        if not isinstance(secret, str) or not secret.strip():
+            raise ValueError("missing_client_secret")
+    except (ValueError, TypeError):
+        raise HTTPException(502, "OpenAI nuk ktheu kredenciale të vlefshme për sesionin zanor.") from None
+    return {"client_secret": secret,
             "model": settings.MIRA_HOST_MODEL,
             "instructions_by_phase": policies,
             "runtime": {"prompt_version": PROMPT_VERSION, "model": settings.MIRA_HOST_MODEL,

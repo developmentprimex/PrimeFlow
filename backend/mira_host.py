@@ -44,6 +44,12 @@ def tz():
     return ZoneInfo(settings.APP_TIMEZONE)
 
 
+def recovery_path(meeting_id: str, join_attempt: int | None = None) -> Path:
+    meeting_id = str(uuid.UUID(meeting_id))
+    suffix = f".attempt-{join_attempt}" if join_attempt is not None else ""
+    return RECOVERY_DIR / f"{meeting_id}{suffix}.json"
+
+
 def task_lines(tasks: list[dict]) -> str:
     def line(t):
         # The Albanian label, so Mira never says "IN_PROGRESS" aloud; the colour decides her question.
@@ -187,6 +193,7 @@ class MiraHost:
         self.retiring_tasks = set()
         self.retiring_meetings = set()
         self.recovery_task = None
+        self.recovery_cursor = None
         self.notification_receipts = set()
 
     # ------------------------------------------------------------ Discord helpers
@@ -278,7 +285,9 @@ class MiraHost:
             prepared = await self.bot.bridge(PREFIX + "/session/start", {"slot": slot, "discord_user_id": discord_user_id,
                 **({"test_mode": True} if test_mode else {}), **(command_context or {})})
             if generation != self.start_generation:
-                await self.bot.bridge(PREFIX + f"/meetings/{prepared['meeting']['id']}/finish", {"reason": "stopped_by_command"})
+                await self.bot.bridge(PREFIX + f"/meetings/{prepared['meeting']['id']}/finish",
+                    {"reason": "stopped_by_command", **({"expected_join_attempt": prepared["join_attempt"]}
+                     if prepared.get("join_attempt") is not None else {})})
                 raise ValueError("Kyçja e Mira-s u anulua me /mira ndalo.")
             ready = asyncio.get_running_loop().create_future()
             self.task = asyncio.create_task(self.run(slot, guild, voice, manual_by=discord_user_id,
@@ -419,6 +428,7 @@ class MiraHost:
         try:
             if prepared:
                 session["meeting"] = prepared["meeting"]["id"]
+                session["join_attempt"] = prepared.get("join_attempt")
             if start_generation is not None and start_generation != self.start_generation:
                 session["reason"] = "stopped_by_command"
                 return
@@ -471,6 +481,10 @@ class MiraHost:
                 self.schedule_upload(session)
             if not session["closed"].is_set() and not session["ending"]:
                 session["reason"] = "timeout"
+        except asyncio.CancelledError:
+            if session["reason"] == "completed":
+                session["reason"] = "interrupted:task_cancelled"
+            raise
         except Exception as exc:
             if session["reason"] == "completed":
                 session["reason"] = f"error:{type(exc).__name__}"
@@ -834,7 +848,14 @@ class MiraHost:
                 # Mira said goodbye; leave a moment later so the last words are heard.
                 session["ending_at"] = datetime.now(tz()) + timedelta(seconds=4)
         elif kind == "tool_call":
-            asyncio.create_task(self.tool(session, message))
+            tasks = session.setdefault("tool_tasks", set())
+            task = asyncio.create_task(self.tool(session, message))
+            tasks.add(task)
+            def completed(task):
+                tasks.discard(task)
+                if not task.cancelled() and task.exception():
+                    log.warning("MIRA_HOST tool task failed error=%s", type(task.exception()).__name__)
+            task.add_done_callback(completed)
         elif kind == "metric":
             if message.get("kind") == "generated_audio" and isinstance(message.get("duration_ms"), (int, float)):
                 self.add_metric(session, "generated_audio", message["duration_ms"])
@@ -913,6 +934,7 @@ class MiraHost:
                 started = monotonic_time.monotonic()
                 output = await self._tool(session, message)
                 self.add_metric(session, "tool", (monotonic_time.monotonic() - started) * 1000, message.get("name"))
+                self.persist_transcript(session)
                 results[call_id] = output
                 if effect_key is not None and (output.get("success") or output.get("ok") or output.get("result_unknown")):
                     effects[effect_key] = output
@@ -1063,7 +1085,9 @@ class MiraHost:
             return
         try:
             RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
-            target = RECOVERY_DIR / (meeting_id + ".json")
+            # Each attempt owns its pending data until its upload is confirmed.
+            # A restart or late cleanup must never overwrite another attempt.
+            target = recovery_path(meeting_id, session.get("join_attempt"))
             temporary = target.with_suffix(".tmp")
             record = {"meeting": meeting_id, "lines": [*session.get("uploading_lines", []), *session.get("lines", [])],
                       "metrics": [*session.get("uploading_metrics", []), *session.get("metrics", [])],
@@ -1080,28 +1104,43 @@ class MiraHost:
     async def recover_transcripts(self):
         if not RECOVERY_DIR.exists():
             return
-        for path in list(RECOVERY_DIR.glob("*.json"))[:20]:
+        paths = sorted(RECOVERY_DIR.glob("*.json"), key=lambda path: path.name)
+        if self.recovery_cursor:
+            paths = [path for path in paths if path.name > self.recovery_cursor] + [
+                path for path in paths if path.name <= self.recovery_cursor]
+        for path in paths[:20]:
+            # Failed and temporarily active files must not monopolize every batch.
+            self.recovery_cursor = path.name
             try:
-                meeting_id = str(uuid.UUID(path.stem))
+                meeting_id = str(uuid.UUID(path.stem.split(".", 1)[0]))
                 if meeting_id in self.retiring_meetings or (self.session and self.session.get("meeting") == meeting_id):
                     continue
-                record = json.loads(path.read_text(encoding="utf-8"))
+                recovered_text = path.read_text(encoding="utf-8")
+                record = json.loads(recovered_text)
                 if record.get("meeting") != meeting_id:
+                    continue
+                if path not in (recovery_path(meeting_id), recovery_path(meeting_id, record.get("join_attempt"))):
                     continue
                 lines = record.get("lines") or []
                 metrics = record.get("metrics") or []
                 while lines or metrics:
-                    await self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/transcript", {"lines": lines[:200], "metrics": metrics[:200]})
+                    await asyncio.wait_for(self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/transcript",
+                        {"lines": lines[:200], "metrics": metrics[:200]}), WRITE_TIMEOUT_SECONDS)
                     lines = lines[200:]
                     metrics = metrics[200:]
                 acks = record.get("acknowledgements") or {}
                 for bucket, route in (("notes_acks", "notes/ack"), ("progress_acks", "progress/ack"), ("announcement_deferrals", "announcements/defer")):
                     for token in acks.get(bucket, []):
-                        await self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/{route}", {"token": token})
-                await self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/finish",
+                        await asyncio.wait_for(self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/{route}",
+                            {"token": token}), WRITE_TIMEOUT_SECONDS)
+                await asyncio.wait_for(self.bot.bridge(PREFIX + f"/meetings/{meeting_id}/finish",
                     {"reason": record.get("finish_reason") or "interrupted:process_exit",
-                     **({"expected_join_attempt": record["join_attempt"]} if record.get("join_attempt") is not None else {})})
-                path.unlink()
+                     **({"expected_join_attempt": record["join_attempt"]} if record.get("join_attempt") is not None else {})}),
+                    WRITE_TIMEOUT_SECONDS)
+                # Uploads await the network; a new attempt may replace this file
+                # in the meantime. Remove only the snapshot we actually recovered.
+                if path.read_text(encoding="utf-8") == recovered_text:
+                    path.unlink()
             except Exception as exc:
                 log.warning("MIRA_HOST transcript recovery deferred file=%s error=%s", path.name, type(exc).__name__)
 
@@ -1126,6 +1165,12 @@ class MiraHost:
             await asyncio.gather(*notifications, return_exceptions=True)
         if session.get("process"):
             await session["process"].close()
+        tools = list(session.get("tool_tasks", set()))
+        if tools:
+            _, pending = await asyncio.wait(tools, timeout=WRITE_TIMEOUT_SECONDS)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*tools, return_exceptions=True)
         if session.get("timed_upload"):
             session["timed_upload"].cancel()
             await asyncio.gather(session["timed_upload"], return_exceptions=True)
@@ -1142,7 +1187,7 @@ class MiraHost:
                 if not session["lines"] and not session.get("metrics") and not any(session.get(bucket) for bucket in
                         ("notes_acks", "progress_acks", "announcement_deferrals")):
                     with suppress(OSError, ValueError):
-                        (RECOVERY_DIR / (str(uuid.UUID(session["meeting"])) + ".json")).unlink(missing_ok=True)
+                        recovery_path(session["meeting"], session.get("join_attempt")).unlink(missing_ok=True)
             except Exception:
                 self.persist_transcript(session)
         if self.session is session:
