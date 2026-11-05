@@ -22,6 +22,7 @@ import discord
 from discord import app_commands
 
 from app.config import settings
+from app.services.mira_host_prompt import PM_PLAN_QUESTION, NEXT_DAY_PLAN_QUESTION
 from app.services.mira_host_speech import speech_text
 from discord_voice_client import VOICE_DIR, VoiceCaptureClient
 
@@ -770,6 +771,11 @@ class MiraHost:
                       "udhezim": opening +
                                  "Pyet shkurt vetëm çka mungon për progresin, vazhdimin ose përfundimin; "
                                  "pastaj trajto PARAPRAK dhe BLLOK. Mos përsërit përgjigjet apo hyrjet."}
+            if session["slot"] == "16:00":
+                output["udhezim"] += (
+                    f" Në fund, para end_person_turn, pyet një herë: '{NEXT_DAY_PLAN_QUESTION}' "
+                    "Nëse u përgjigj tashmë qartë për nesër, mos e përsërit. Një po mjafton; "
+                    "për jo pyet vetëm çfarë ndryshon. Ruaje përgjigjen siç u tha te summary: 'Nesër: …'.")
         if absent:
             output["mungojne"] = [turn["name"] for turn in absent]
             missing = "; ".join(f"{turn['name']} nuk është në kanalin zanor" for turn in absent)
@@ -810,7 +816,10 @@ class MiraHost:
         if current:
             session.pop("missing_since", None)
             output = {"PM_RISHIKIMI": [current], "turn_id": current["id"],
-                "udhezim": "Pyet vetëm personin PM aktual për vazhdimin ose shtyrjet. Ruaj record_pm_review dhe pastaj end_person_turn me këtë turn_id."}
+                "udhezim": f"Pyet vetëm personin PM aktual: '{PM_PLAN_QUESTION}' "
+                    "Nëse u përgjigj tashmë qartë, mos e përsërit. Një po mjafton; për jo pyet vetëm çfarë ndryshon. "
+                    "Ruaj përgjigjen siç u tha me record_pm_review, pastaj end_person_turn me këtë turn_id. "
+                    "Pa rilexim të listës ose komente për veprimet."}
         elif session["deferred"]:
             session.setdefault("missing_since", datetime.now(tz()))
             self.invite_deferred(session)

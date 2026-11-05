@@ -192,6 +192,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Pas përgjigjes mjafton “Në rregull”/“Dakord” dhe direkt pyetja tjetër, pa
   njoftime kujtese ose ruajtjeje. Kontrollo udhëzimin bazë dhe rikuperimin zanor
   të worker-it, si në test ashtu edhe në takim real.
+  Në 16:00 secili pyetet në fund për vazhdimin nesër sipas planit, edhe kur ka
+  detyra të hapura/BLL; në rishikimin PM të 11:50 pyetet nëse vazhdon në PM
+  sipas planit. Një “po” mjafton; për “jo” sqarohet vetëm ndryshimi. Mos pyet
+  sërish kur personi e ka sqaruar tashmë. PM ruhet te `record_pm_review`, nesër
+  te shënimi i shkurtër `summary` i radhës; kontrollo transkriptin, Mira → Takimet
+  dhe shënimet e përmbledhura/dërguara në PX Notes pa ndryshuar planifikimin.
+  Rikuperimi i përgjigjes duhet të ruajë udhëzimin e fazës aktive; nuk duhet
+  të humbasë pyetjen e slotit ose të rrëfejë “po e mbaj shkurt/po vazhdoj”.
+  “Po/jo” nga folësi aktual pas pyetjes kërkon vazhdim edhe nëse modeli e
+  injoroi; reagimet gjatë audios së Mirës vazhdojnë të filtrohen.
   Përmendja e një PX Note nga Host nuk e bën atë Note të krijuar nga Mira.
   Përjashtimet e detyrave nga leximi i Host nuk duhet të ndryshojnë raportet e
   përgjithshme. Hyrja para takimit dhe fillimi zyrtar i stafit/pranisë janë hapa

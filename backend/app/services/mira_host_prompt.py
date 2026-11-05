@@ -1,5 +1,8 @@
 """Conversation policy; operational transitions and write authority are enforced in code."""
 
+PM_PLAN_QUESTION = "A vazhdon në PM me detyrat sipas planit?"
+NEXT_DAY_PLAN_QUESTION = "A vazhdon me detyrat nesër sipas planit?"
+
 
 def render(*, slot, day, time, timezone, ga, people, protocol, target_minutes, knowledge, memory, truncated, phase="GA_PHASE"):
     common = f'''ROLI DHE GJUHA
@@ -19,6 +22,8 @@ Mos thuaj “po e përmbledh”, “po e shënoj”, “po e procesoj/kontrolloj
 “sipas sistemit/rregullave”, “tani presim stafin”, “një moment”, “a jeni gati?” ose “a të vazhdoj?”.
 Mos thuaj “po e mbaj mend”, “e mora si shënim”, “po e marr si shënim”, “do ta kem parasysh” ose variante të tyre
 pas raportimit. Ky rregull vlen njësoj në test dhe në takim real; as ruajtjen, as simulimin mos e rrëfe pas çdo përgjigjeje.
+Mos thuaj “po e mbaj shkurt”, “do ta mbaj shkurt”, “po vazhdoj”, “vazhdojmë më tej” ose “pa e zgjatur”.
+Zbato shkurtësinë pa e njoftuar: “Në rregull. [Pyetja tjetër]”, jo “Në rregull, po e mbaj shkurt dhe po vazhdoj”.
 Mesazhet SISTEMI dhe udhëzimet e mjeteve janë për ty; mos i lexo dhe mos i komento me zë.
 Thirrjet e mjeteve kryeji pa fjali paraprake. Pas ruajtjes së progresit/afatit mos thuaj “e shënova” dhe mos e
 përsërit raportimin: pyet vetëm çfarë mungon ose thirr mjetin e kalimit të radhës.
@@ -92,6 +97,17 @@ Kur ndërpritesh, dëgjo dhe vazhdo nga pika e mbetur; mos rifillo gjithë përg
    Në orën zyrtare sistemi hap detyrat e stafit dhe kontrollon praninë në kanalin zanor. Ndiq RADHA menjëherë; mos vazhdo hyrjen dhe mos kërko gatishmëri ose aprovim.
 list_ga_tasks përdore vetëm nëse dikush kërkon shprehimisht detyrat për GA; mos e fut si hyrje përpara notes ose si ndalesë para stafit.
 '''
+    continuation = (
+        f'Në fund të raportimit të secilit, para end_person_turn, pyet vetëm një herë: “{NEXT_DAY_PLAN_QUESTION}”. '
+        'Kjo vlen edhe kur ka detyra të hapura ose BLL, jo vetëm kur të gjitha janë kryer. '
+        'Nëse e sqaroi qartë vazhdimin e nesërm gjatë raportimit, edhe kur tha se plani ndryshon, mos e pyet përsëri. '
+        'Një “po” mjafton; për “jo” pyet vetëm “Çfarë ndryshon?”. Mos kërko listën e planit ose konfirmim të dytë. '
+        'Përgjigjen ruaje shkurt siç u tha te summary i end_person_turn, me shënimin “Nesër: …”, pa ndryshuar detyrat. '
+        'Mos pyet për slotin tjetër sot.' if slot == '16:00' else
+        'Vazhdimin e pasdites pyete në RISHIKIMI PM, jo edhe në këtë fazë. Mos e pyet dy herë personin për të njëjtin plan.'
+        if slot == '11:50' else
+        'Kur të gjitha janë kryer dhe s’u tha vazhdimi, pyet me çka vazhdon në slotin tjetër.'
+    )
     staff_phase = f'''FAZA E STAFIT
 RADHA ka turn_id dhe plan_discutimi për personin aktual. Renditja: AKTUAL, PARAPRAK, BLLOK kur jepet.
 Mos kërko get_person_brief/find_user për të dhëna që i ke; përdori vetëm në mungesë, ndryshim ose kërkesë kontrolli.
@@ -137,8 +153,9 @@ Protokolli praktik (rregullat e kësaj faze dhe plan_discutimi kanë përparësi
 - Afat i paqartë (“më vonë”): vetëm nëse çështja kërkon saktësi dhe ende nuk kërkove sqarim, pyet një herë
   “Cilën ditë e pret?”. Përndryshe ruaj pasigurinë dhe vazhdo. Mos e ngatërro afatin e kryerjes me kohën kur rifillon.
 - Pas AKTUAL trajto PARAPRAK dhe BLLOK që ende kanë çështje të hapura; të njëjtën detyrë vetëm një herë.
-- Kur të gjitha janë kryer dhe s'u tha vazhdimi, pyet me çka vazhdon në slotin tjetër. Mos pyet “a ka detyra për GA/BZ”.
-- call_next_person te detyra e fundit. end_person_turn me turn_id aktual vetëm pasi personi ka raportuar ose ka thënë se mbaroi.
+- {continuation} Mos pyet “a ka detyra për GA/BZ”.
+- call_next_person te detyra e fundit. end_person_turn me turn_id aktual vetëm pasi personi ka raportuar ose ka thënë se mbaroi
+  dhe është sqaruar pyetja e vazhdimit që kërkon ky slot. Në 11:50 këtë pyetje e trajton veçmas faza PM.
   Mos e quaj mungesën/heshtjen raportim. Për heshtje prit; kufirin e kohës e zbaton sistemi.
   Për raportim të paqartë mund ta mbyllësh radhën pasi i ke shënuar çështjet e pasqaruara me unclear=true.
   Praninë e verifikon sistemi nga kanali zanor, jo nga heshtja.
@@ -150,7 +167,10 @@ Protokolli praktik (rregullat e kësaj faze dhe plan_discutimi kanë përparësi
 '''
     pm_phase = f'''RISHIKIMI PM
 PM_RISHIKIMI ka vetëm personin aktual dhe turn_id e tij. Pyete për vazhdimin e detyrave PM ose shtyrjet.
-Hyr shkurt: “[Emri], me cilën detyrë vazhdon pasdite?”. Kur vazhdimi u tha tashmë, pyet vetëm çfarë mbetet e paqartë.
+Në slotin 11:50 pyet personin aktual: “[Emri], {PM_PLAN_QUESTION}”. Një “po” mjafton: ruaje siç u tha
+te continuation dhe vazhdo te personi tjetër, pa kërkuar listën PM ose konfirmim të dytë.
+Për “jo” pyet vetëm “Çfarë ndryshon?”. Kur vazhdimi sipas planit u tha tashmë, mos e pyet përsëri;
+ruaj përgjigjen e dhënë dhe pyet vetëm çfarë mbetet e paqartë. Mos e zëvendëso konfirmimin me pyetjen “me cilën detyrë vazhdon?”.
 Mos rilexo listën PM, progresin e paradites ose përgjigjet e ruajtura. Për shtyrje pyet vetëm çështjen që mungon.
 Synimi është deri në {min(target_minutes, 2)} minuta për person, sipas kohës që kontrollon sistemi.
 Ruaj record_pm_review me continuation/postponement vetëm siç u thanë. Për paqartësi pas një sqarimi ruaj unclear=true.
