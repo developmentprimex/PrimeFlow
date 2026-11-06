@@ -281,7 +281,7 @@ def build_realization_workbook(
             ws.merge_cells(start_row=4, start_column=col, end_row=4, end_column=col + 1)
             ws.cell(4, col, person["user_name"])
             _header(ws.cell(4, col), department_color)
-            ws.cell(5, col, "Përgjigjja")
+            ws.cell(5, col, "PËRGJIGJA")
             ws.cell(5, col + 1, "Argumenti / Evidenca")
             _header(ws.cell(5, col), "5B9BD5")
             _header(ws.cell(5, col + 1), "5B9BD5")
@@ -299,7 +299,7 @@ def build_realization_workbook(
             "AUTO_NEEDS_CONFIRMATION": "Kërkon konfirmim",
             "MISSING_EVIDENCE": "Kërkon evidencë",
             "MANAGER_CONFIRMED": "Konfirmuar nga menaxheri",
-            "MANUAL_ANSWERED": "Përgjigjja e përgjegjësit",
+            "MANUAL_ANSWERED": "PËRGJIGJA e përgjegjësit",
             "MANUAL_UNANSWERED": "Pa përgjigje manuale",
         }
         long_answer_keys = {
@@ -619,7 +619,7 @@ def build_realization_workbook(
             ),
             (
                 "Diamanta nga propozimet", lambda person: _diamond_counts(person)[2],
-                lambda person: "Po me koment; përgjigjja javore nuk shpërblen propozimin ditor përsëri.", False, False,
+                lambda person: "Po me koment; PËRGJIGJA javore nuk shpërblen propozimin ditor përsëri.", False, False,
             ),
             (
                 "Propozimi për nivelin e vlerësimit",
@@ -1178,7 +1178,7 @@ def build_realization_workbook(
         fill=BLUE,
     )
     _guide_note(
-        "RREGULLI: Fillo nga A+ dhe zbrit poshtë — niveli i parë ku përgjigjja është "
+        "RREGULLI: Fillo nga A+ dhe zbrit poshtë — niveli i parë ku PËRGJIGJA është "
         "'Po' është niveli i punëtorit. Mungesa e miratuar paraprakisht = M, jo D/E.",
         fill=GREEN,
     )

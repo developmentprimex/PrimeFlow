@@ -16,7 +16,7 @@ kartat individuale të jenë dërguar në orarin e rregullt, jo thjesht gjatë p
 - Detyrat TODO brenda Start–Due të ditës, përfshirë detyrat e sistemit: **Komento**,
   **Në progres**, **Mbylle**, **Shtyje**. Komenti është i detyrueshëm për këto veprime.
 - Dorëzimet me M3 ose M2/3: **Po, e dorëzova** ruhet menjëherë dhe hap koment
-  opsional. **Jo** kërkon koment. Për detyrat e përbashkëta, përgjigjja e secilit
+  opsional. **Jo** kërkon koment. Për detyrat e përbashkëta, PËRGJIGJA e secilit
   shfaqet me emër; një JO e mban rezultatin JO dhe PO kërkon përgjigjen e të gjithëve.
 - Takimet INT/EXT të përfunduara, pa status mbajtur/anuluar: pyetja u shkon
   pjesëmarrësve të caktuar. Vetëm takimet pa asnjë pjesëmarrës i shkojnë
@@ -43,7 +43,7 @@ kartën e plotë me veprimet e detyrës brenda të njëjtit mesazh të raportimi
 Tekstet e gjata shfletohen me faqe që respektojnë kufirin e Discord-it. Preview-t
 automatike të linkut janë të çaktivizuara edhe gjatë rifreskimit të kartave.
 Discord nuk mbështet tre
-butona në të njëjtin rresht me tekstin e titullit. Përgjigjja dhe prania e komentit
+butona në të njëjtin rresht me tekstin e titullit. PËRGJIGJA dhe prania e komentit
 shfaqen si shenja të shkurtra pranë titullit; teksti i gjatë i komentit ruhet në platformë.
 **Jo — shtyje** hap menjëherë Start, Due dhe arsyen; shtyrja ruhet pasi dërgohet formulari.
 

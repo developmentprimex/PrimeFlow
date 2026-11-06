@@ -4,7 +4,7 @@ import { meetingTranslator } from "@/lib/meeting-notes-language"
 
 import * as React from "react"
 import Link from "next/link"
-import { Mic, Pencil, PenLine } from "lucide-react"
+import { Mic, Pencil, PenLine, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import {
@@ -97,16 +97,16 @@ function NoteTextCell({ note, field, onChanged, english = false }: { english?: b
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: text.trim() || null }),
       })
-      if (!response.ok) throw new Error(await readError(response, isContent ? t("Shënimi nuk u ruajt.") : t("Përshkrimi / përgjigjja nuk u ruajt.")))
+      if (!response.ok) throw new Error(await readError(response, isContent ? t("Shënimi nuk u ruajt.") : t("Përshkrimi / PËRGJIGJA nuk u ruajt.")))
       onChanged((await response.json()) as MeetingNote)
-      toast.success(isContent ? t("Shënimi u ruajt.") : t("Përshkrimi / përgjigjja u ruajt."))
+      toast.success(isContent ? t("Shënimi u ruajt.") : t("Përshkrimi / PËRGJIGJA u ruajt."))
     } catch (error) { toast.error(error instanceof Error ? error.message : String(error)) }
     finally { savingRef.current = false; setSaving(false) }
   }
 
   return <div className="grid gap-2">
     {isContent && note.kind === "QUESTION" && <span className="text-xs font-medium">{t("? Pyetje")}</span>}
-    <Textarea aria-label={isContent ? t("Shënimi / pyetja") : t("Përshkrimi / përgjigjja")} placeholder={isContent ? t("Shkruaj shënimin ose pyetjen…") : t("Shkruaj përshkrimin ose përgjigjen…")} rows={2}
+    <Textarea aria-label={isContent ? t("Shënimi / pyetja") : t("Përshkrimi / PËRGJIGJA")} placeholder={isContent ? t("Shkruaj shënimin ose pyetjen…") : t("Shkruaj përshkrimin ose përgjigjen…")} rows={2}
       className={`min-h-14 resize-y ${isContent ? "bg-transparent" : ""}`} value={text} disabled={saving} maxLength={isContent ? 10000 : undefined}
       onChange={(event) => setText(event.target.value)}
       onKeyDown={(event) => {
@@ -186,6 +186,20 @@ export function NotesTable({
     finally { setBusyId(null) }
   }
 
+  const deleteNote = async (note: MeetingNote) => {
+    if (!onRemoved || busyId) return
+    const message = t("Fshi këtë shënim nga takimi?") + (note.ga_note_id ? `\n${t("Fshirja këtu nuk fshin kopjen në PX Notes ose detyrat e saj.")}` : "")
+    if (!window.confirm(message)) return
+    setBusyId(note.id)
+    try {
+      const response = await apiFetch(`/meeting-notes/${note.id}`, { method: "DELETE" })
+      if (!response.ok) throw new Error(await readError(response, t("Shënimi nuk u fshi.")))
+      onRemoved(note.id)
+      toast.success(t("Shënimi u fshi."))
+    } catch (error) { toast.error(error instanceof Error ? error.message : String(error)) }
+    finally { setBusyId(null) }
+  }
+
   return <>
     <div className="overflow-x-auto rounded-md border-2 border-slate-700 bg-white">
       <table className="w-full min-w-[1280px] table-fixed border-collapse text-sm">
@@ -199,7 +213,7 @@ export function NotesTable({
             <th className={`${th} w-[160px]`}>{cols.owner}</th>
             <th className={`${th} w-[150px]`}>{cols.due}</th>
             <th className={`${th} w-[150px]`}>{cols.status}</th>
-            <th className={`${th} w-12`}><span className="sr-only">Edit</span></th>
+            <th className={`${th} w-20`}><span className="sr-only">{english ? "Actions" : "Veprime"}</span></th>
           </tr>
         </thead>
         <tbody>
@@ -231,7 +245,10 @@ export function NotesTable({
                   : <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busyId === note.id} onClick={() => void sendToPx(note)}>{t("Dërgo në PX")}</Button>}
               </td>
               <td className={`${td} p-1 text-center`}>
-                <Button size="icon-sm" variant="ghost" aria-label={t("Edito shënimin")} onClick={() => setEditing(note)}><Pencil aria-hidden="true" /></Button>
+                <div className="flex items-center justify-center gap-0.5">
+                  <Button type="button" size="icon-sm" variant="ghost" aria-label={t("Edito shënimin")} disabled={busyId === note.id} onClick={() => setEditing(note)}><Pencil aria-hidden="true" /></Button>
+                  {onRemoved && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:text-destructive" aria-label={t("Fshi shënimin")} title={t("Fshi shënimin")} disabled={busyId !== null} onClick={() => void deleteNote(note)}><Trash2 aria-hidden="true" /></Button>}
+                </div>
               </td>
             </tr>
           })}
@@ -311,7 +328,7 @@ export function NoteEditDialog({ note, users, onClose, onSaved, onDeleted, engli
             <select id="mn-kind" className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as MeetingNote["kind"])}><option value="NOTE">{t("Shënim")}</option><option value="QUESTION">{t("Pyetje")}</option></select></div>
           <div className="grid gap-1.5"><Label htmlFor="mn-ref">{t("Rasti / referenca")}</Label><Input id="mn-ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={t("p.sh. Ticket #4821")} /></div>
         </div>
-        <div className="grid gap-1.5"><Label htmlFor="mn-answer">{t("Përshkrimi / përgjigjja")}</Label><Textarea id="mn-answer" value={answer} onChange={(e) => setAnswer(e.target.value)} rows={2} /></div>
+        <div className="grid gap-1.5"><Label htmlFor="mn-answer">{t("Përshkrimi / PËRGJIGJA")}</Label><Textarea id="mn-answer" value={answer} onChange={(e) => setAnswer(e.target.value)} rows={2} /></div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5"><Label htmlFor="mn-who">{t("Kush")}</Label>
             <select id="mn-who" className={selectClass} value={assignee} onChange={(e) => setAssignee(e.target.value)}>

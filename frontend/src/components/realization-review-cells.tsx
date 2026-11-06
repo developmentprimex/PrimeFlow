@@ -22,8 +22,8 @@ const RATINGS: Record<RealizationManagerReviewRating, string> = {
 type QuestionDraft = { values: string[]; comment: string; touched: boolean }
 
 const FACT_LABELS: Record<string, string> = {
-  yes: "Përgjigjja", frequent: "Të shpeshta", threshold: "Pragu i vonesave",
-  answer: "Përgjigjja", planned: "Planifikuar", completed: "Kryer", remaining: "Mbetur",
+  yes: "PËRGJIGJA", frequent: "Të shpeshta", threshold: "Pragu i vonesave",
+  answer: "PËRGJIGJA", planned: "Planifikuar", completed: "Kryer", remaining: "Mbetur",
   count: "Numri", total: "Gjithsej", in_progress: "Në progres", no_progress: "Pa progres", todo: "To do", postponed: "Shtyrë",
   approved: "Aprovuar", unapproved: "Pa aprovim", closed: "Mbyllur",
   all_closed: "Të gjitha të mbyllura", attendance_tardiness: "Vonesa",
@@ -108,7 +108,7 @@ function ManualQuestion({ number, label, draft, disabled, onChange, onSaveCommen
     <td className="border-l border-slate-200 px-3 py-2">
       <div className="flex flex-col items-stretch gap-1.5">
         <Textarea aria-label={`Komenti për ${label}`} required={commentRequired} aria-required={commentRequired} className="min-h-9 resize-y bg-white px-2 py-2 text-xs" rows={proposal && commentRequired ? 3 : 1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder={commentRequired ? proposal ? "Përshkruaj propozimin dhe përfitimin (i detyrueshëm)…" : "Shto koment (i detyrueshëm)…" : "Shto koment (opsional)…"} />
-        {commentMissing ? <p className="text-[11px] text-amber-700">Komenti është i detyrueshëm kur përgjigjja është Po.</p> : null}
+        {commentMissing ? <p className="text-[11px] text-amber-700">Komenti është i detyrueshëm kur PËRGJIGJA është Po.</p> : null}
         {draft.touched && !disabled ? <Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" disabled={commentMissing} onClick={onSaveComment}>Ruaj përgjigjen</Button> : null}
       </div>
     </td>
@@ -251,7 +251,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
         return draft?.touched && draft.values.includes("YES") && !draft.comment.trim()
       })
       if (missingComment) {
-        toast.error(`Komenti është i detyrueshëm kur përgjigjja është Po: ${questionLabel(missingComment)}`)
+        toast.error(`Komenti është i detyrueshëm kur PËRGJIGJA është Po: ${questionLabel(missingComment)}`)
         return
       }
     }
@@ -263,7 +263,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
           if (!draft.touched) continue
           const value = draft.values.includes("YES")
           const response = await apiFetch(`/realization/periods/${periodId}/users/${userId}/questions/${question.key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value, clear: draft.values.length === 0, comment: draft.comment.trim() || null, evidence_ids: [] }) })
-          if (!response.ok) throw new Error(`Nuk u ruajt përgjigjja: ${question.label}`)
+          if (!response.ok) throw new Error(`Nuk u ruajt PËRGJIGJA: ${question.label}`)
         }
       }
       if (scope === "weekly" && saveQuestions && questionsDirty) {
@@ -384,7 +384,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
                 <tr>
                   <th scope="col" className="px-2 py-3 text-center">Nr.</th>
                   <th scope="col" className="border-l border-slate-200 px-3 py-3">Pyetja</th>
-                  <th scope="col" className="border-l border-slate-200 px-2 py-3 text-center">Përgjigjja</th>
+                  <th scope="col" className="border-l border-slate-200 px-2 py-3 text-center">PËRGJIGJA</th>
                   <th scope="col" className="border-l border-slate-200 px-3 py-3">Shpjegimi / Komenti</th>
                 </tr>
               </thead>

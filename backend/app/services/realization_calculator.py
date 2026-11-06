@@ -362,7 +362,7 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
                 "unapproved": len(unapproved),
             },
             evidence_ids=postponement_ids,
-            explanation="Numrat e aprovuar dhe pa aprovim janë fakte automatike; përgjigjja Po/Jo jepet nga menaxheri.",
+            explanation="Numrat e aprovuar dhe pa aprovim janë fakte automatike; PËRGJIGJA Po/Jo jepet nga menaxheri.",
         ),
         _manual_question(
             "requested_extra_tasks",
@@ -658,7 +658,7 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
                 "needs_review": c.get("postponement_needs_review_count", 0),
             },
             evidence_ids=postponement_evidence_ids,
-            explanation="Numrat e aprovuar dhe pa aprovim janë fakte automatike; përgjigjja Po/Jo jepet nga menaxheri.",
+            explanation="Numrat e aprovuar dhe pa aprovim janë fakte automatike; PËRGJIGJA Po/Jo jepet nga menaxheri.",
         ),
         _manual_question(
             "requested_extra_tasks",

@@ -52,12 +52,12 @@ def test_semantic_date_events_preserve_reason_and_comment_for_each_change():
     events = record_task_semantic_events(db=db, task_id=uuid.uuid4(), actor_user_id=uuid.uuid4(),
         before={"start_date": "2026-10-20", "due_date": "2026-10-20"},
         after={"start_date": "2026-10-21", "due_date": "2026-10-22"},
-        reason="Mungesë informacioni", reason_code="MISSING_INFORMATION", comment="Duhet përgjigjja e klientit")
+        reason="Mungesë informacioni", reason_code="MISSING_INFORMATION", comment="Duhet PËRGJIGJA e klientit")
     assert len(events) == 2
     for event in events:
         assert event.after["reason"] == "Mungesë informacioni"
         assert event.after["reason_code"] == "MISSING_INFORMATION"
-        assert event.after["comment"] == "Duhet përgjigjja e klientit"
+        assert event.after["comment"] == "Duhet PËRGJIGJA e klientit"
 
 
 def test_reporting_rows_keep_the_explanation_of_their_own_am_or_pm_postponement():

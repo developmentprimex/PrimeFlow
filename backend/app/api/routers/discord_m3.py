@@ -254,7 +254,7 @@ async def live_payload(db, q, link, user):
         if q.kind in {'untouched', 'delivery'} and not reports.select_task_sections([task], [], q.day)[q.kind]:
             result['resolved'] = 'Detyra nuk është më në këtë pikë të M3.'
     if (q.answer or {}).get('platform'):
-        result['resolved'] = 'Përgjigjja u plotësua në PrimeFlow.'
+        result['resolved'] = 'PËRGJIGJA u plotësua në PrimeFlow.'
     if q.kind in {'tomorrow', 'tomorrow_task', 'slot'}:
         rows, owners, names = await tomorrow_data(db, q.target_date,
             user_id=user.id if q.kind == 'tomorrow' else None, task_id=q.task_id)
@@ -388,7 +388,7 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
     if q.kind != 'tomorrow' and q.answered_at and q.answer == recorded and q.comment == value.comment.strip():
         return {'ok': True}
     if value.expected_answered_at != q.answered_at:
-        raise HTTPException(409, 'Përgjigjja ndryshoi ndërkohë. Hape përsëri pyetjen.')
+        raise HTTPException(409, 'PËRGJIGJA ndryshoi ndërkohë. Hape përsëri pyetjen.')
     live = await live_payload(db, q, link, user)
     if live.get('postponement', {}).get('status') == 'PENDING':
         raise HTTPException(409, 'Kërkesa për shtyrje është në pritje të Diellza Veliut.')

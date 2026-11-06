@@ -142,5 +142,5 @@ export async function readError(response: Response, fallback: string): Promise<s
 export function noteColumns(kind: MeetingKind) {
   return kind === "EXTERNAL"
     ? { nr: "NO.", source: "SOURCE", note: "QUESTION / CASE", answer: "ANSWER", owner: "OWNER", due: "DEADLINE", status: "STATUS" }
-    : { nr: "NR", source: "BURIMI", note: "SHËNIMI / PYETJA", answer: "PËRSHKRIMI / PËRGJIGJJA", owner: "KUSH", due: "AFATI", status: "STATUSI" }
+    : { nr: "NR", source: "BURIMI", note: "SHËNIMI / PYETJA", answer: "PËRSHKRIMI / PËRGJIGJA", owner: "KUSH", due: "AFATI", status: "STATUSI" }
 }

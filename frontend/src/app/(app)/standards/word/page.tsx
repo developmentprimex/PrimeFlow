@@ -174,7 +174,7 @@ export default function WordStandardsPage() {
       const documentPart = multipart.get("document")
       const reportText = typeof reportPart === "string" ? reportPart : await reportPart?.text()
       if (!reportText || !(documentPart instanceof Blob)) {
-        throw new Error("Përgjigjja e serverit nuk përmban dokumentin Word final.")
+        throw new Error("PËRGJIGJA e serverit nuk përmban dokumentin Word final.")
       }
       const nextReport = JSON.parse(reportText) as GenerationReport
       const url = URL.createObjectURL(documentPart)

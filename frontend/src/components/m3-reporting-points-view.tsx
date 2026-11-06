@@ -245,7 +245,7 @@ function DeliveryPoint({ rows, answers, disabled, onAnswerChange }: TaskManualCo
     </div>
     <p className="text-sm text-muted-foreground">Detyrat me simbolet M3 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
     <div className="overflow-x-auto border"><table className="w-full min-w-[1150px] border-collapse text-xs">
-      <thead className="bg-slate-100"><tr>{["NR", ...columns.map(([, label]) => label), "TITULLI", "PO/JO", "PËRGJIGJJA MANUALE"].map((label) => <th key={label} className="border px-2 py-2 text-left whitespace-nowrap">{label}</th>)}</tr></thead>
+      <thead className="bg-slate-100"><tr>{["NR", ...columns.map(([, label]) => label), "TITULLI", "PO/JO", "PËRGJIGJA MANUALE"].map((label) => <th key={label} className="border px-2 py-2 text-left whitespace-nowrap">{label}</th>)}</tr></thead>
       <tbody>{rows.map((row, index) => {
         const choiceKey: ManualKey = `delivery_choice:${row.task_id}`
         const answerKey: ManualKey = `delivery:${row.task_id}`
@@ -258,7 +258,7 @@ function DeliveryPoint({ rows, answers, disabled, onAnswerChange }: TaskManualCo
             className={`w-14 rounded border px-1 py-2 ${choice === "PO" ? "border-green-700 bg-green-600 font-bold text-white" : choice === "JO" ? "border-red-800 bg-red-600 font-bold text-white" : "bg-white text-black"}`} onChange={(event) => onAnswerChange(choiceKey, event.target.value)}>
             <option value="">—</option><option value="PO">PO</option><option value="JO">JO</option>
           </select></td>
-          <td className="min-w-[240px] border p-2 align-top"><Textarea aria-label={`Përgjigjja manuale për ${row.title}`} value={answers[answerKey] || ""} disabled={disabled} maxLength={10000}
+          <td className="min-w-[240px] border p-2 align-top"><Textarea aria-label={`PËRGJIGJA manuale për ${row.title}`} value={answers[answerKey] || ""} disabled={disabled} maxLength={10000}
             className="min-h-20 bg-white text-black" placeholder="A është dorëzuar? Shëno përgjigjjen." onChange={(event) => onAnswerChange(answerKey, event.target.value)} /></td>
         </tr>
       })}</tbody>

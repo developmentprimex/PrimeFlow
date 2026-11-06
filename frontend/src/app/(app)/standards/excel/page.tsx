@@ -187,7 +187,7 @@ export default function ExcelStandardsPage() {
       const workbookPart = multipart.get("workbook")
       const reportText = typeof reportPart === "string" ? reportPart : await reportPart?.text()
       if (!reportText || !(workbookPart instanceof Blob)) {
-        throw new Error("Përgjigjja e serverit nuk përmban Excel-in final.")
+        throw new Error("PËRGJIGJA e serverit nuk përmban Excel-in final.")
       }
       const nextReport = JSON.parse(reportText) as GenerationReport
       const url = URL.createObjectURL(workbookPart)

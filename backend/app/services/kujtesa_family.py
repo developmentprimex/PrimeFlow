@@ -200,7 +200,7 @@ async def apply_kaki(db, space, day, answer, *, actor_id, request_id, discord_ac
         return
     today = bridge.utcnow().astimezone(tasks.TZ).date().isoformat()
     if day != today and not allow_historical:
-        raise HTTPException(409, "Përgjigjja e Nalës regjistrohet për ditën e sotme.")
+        raise HTTPException(409, "PËRGJIGJA e Nalës regjistrohet për ditën e sotme.")
     if record is None:
         record = Record(space_id=space.id, kind="kaki", key=key)
         db.add(record)

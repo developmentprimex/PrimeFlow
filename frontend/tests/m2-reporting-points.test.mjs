@@ -342,11 +342,11 @@ test("sent reports remain editable, regenerate, autosave and send repeatedly", a
   await page.flush()
   assert.equal(generations, 1)
   for (let i = 0; i < 3; i++) {
-    page.edit(answerKey, `Përgjigjja ${i}`)
+    page.edit(answerKey, `PËRGJIGJA ${i}`)
     await page.flush()
     await page.fireSave()
     await page.flush()
-    assert.equal(server.manual_answers[answerKey], `Përgjigjja ${i}`)
+    assert.equal(server.manual_answers[answerKey], `PËRGJIGJA ${i}`)
     assert.equal(page.buttonDisabled("Dërgo sërish"), false)
     page.click("Dërgo sërish")
     await page.flush()

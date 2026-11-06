@@ -67,7 +67,7 @@ def question_payload(question, link):
         result.update(choice=values.get('choice'), reason_code=values.get('reason_code'), comment=values.get('comment', ''),
             answered=bool(values.get('choice') or values.get('comment')), answered_at=question.platform_answered_at.isoformat())
         if result['answered']:
-            result['platform_status'] = 'Përgjigjja u plotësua në PrimeFlow.'
+            result['platform_status'] = 'PËRGJIGJA u plotësua në PrimeFlow.'
             result['platform_answered'] = True
     return result
 
@@ -348,10 +348,10 @@ async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Dep
     if platform_newer and any((question.platform_answer or {}).get(key) for key in ('choice', 'comment')):
         raise HTTPException(409, 'Pyetja është plotësuar në PrimeFlow. Rifresko mesazhin.')
     if not platform_newer and question.answered_at and (question.reason_code, question.comment, question.choice) == (reason, comment, choice):
-        return {'ok': True, 'message': 'Përgjigjja është ruajtur tashmë.'}
+        return {'ok': True, 'message': 'PËRGJIGJA është ruajtur tashmë.'}
     effective_stamp = question.platform_answered_at if platform_newer else question.answered_at
     if 'expected_answered_at' in payload.model_fields_set and payload.expected_answered_at != effective_stamp:
-        raise HTTPException(409, 'Përgjigjja ka ndryshuar ndërkohë. Hape përsëri formularin.')
+        raise HTTPException(409, 'PËRGJIGJA ka ndryshuar ndërkohë. Hape përsëri formularin.')
     if question.kind in {'unfinished', 'progress', 'postponed'}:
         state = (await db.execute(select(TaskDailyRlzState).where(TaskDailyRlzState.task_id == question.task_id,
             TaskDailyRlzState.user_id == user.id, TaskDailyRlzState.day_date == question.day))).scalar_one_or_none()

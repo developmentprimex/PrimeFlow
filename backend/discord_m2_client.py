@@ -56,7 +56,7 @@ def prompt(job):
         text += '\nPse nuk është kryer? Shëno arsyen dhe komentin.'
     if job.get('answered'):
         value = job.get('choice') or next((reason['label'] for reason in job['reasons'] if reason['value'] == job.get('reason_code')), '')
-        text += f"\n\n**Përgjigjja e fundit: {value}**"
+        text += f"\n\n**PËRGJIGJA e fundit: {value}**"
     return text[:1900]
 
 
@@ -158,7 +158,7 @@ class CommentOnlyModal(discord.ui.Modal):
 
 class ReplyModal(discord.ui.Modal):
     def __init__(self, bot, job, *, reason=None, choice=None, source_message=None):
-        super().__init__(title='Komenti për PM' if job['kind'] == 'continuation' else 'Komenti për dorëzimin' if choice == 'PO' else 'Përgjigjja për M2', timeout=900)
+        super().__init__(title='Komenti për PM' if job['kind'] == 'continuation' else 'Komenti për dorëzimin' if choice == 'PO' else 'PËRGJIGJA për M2', timeout=900)
         self.bot, self.job, self.reason, self.choice = bot, job, reason, choice
         self.source_message = source_message
         self.comment = discord.ui.TextInput(label=('Pse nuk vazhdon në PM?' if job['kind'] == 'continuation' else 'Pse nuk u dorëzua?') if choice == 'JO' else 'Komenti (opsional)' if choice == 'PO' else 'Komenti / progresi',
@@ -267,7 +267,7 @@ async def handle(bot, interaction):
         return
     if parts[2] == 'comment' and job.get('choice') != 'PO':
         send = interaction.followup.send if deferred else interaction.response.send_message
-        await send('Përgjigjja ka ndryshuar. Zgjidh Po ose Jo përsëri.', ephemeral=True)
+        await send('PËRGJIGJA ka ndryshuar. Zgjidh Po ose Jo përsëri.', ephemeral=True)
         return
     reason = interaction.data['values'][0] if parts[2] == 'reason' else None
     choice = parts[4] if parts[2] == 'reply' else 'PO' if parts[2] == 'comment' else None

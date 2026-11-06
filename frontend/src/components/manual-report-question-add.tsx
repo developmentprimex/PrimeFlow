@@ -50,7 +50,7 @@ export function ManualReportQuestionDelete({ title, onDelete, disabled }: {
       onClick={async () => {
         if (await confirm({
           title: "Fshi pikën manuale?",
-          description: `Pika “${title}” do të hiqet nga raportet e ardhshme. Përgjigjja në këtë raport do të fshihet.`,
+          description: `Pika “${title}” do të hiqet nga raportet e ardhshme. PËRGJIGJA në këtë raport do të fshihet.`,
           confirmLabel: "Fshi",
           variant: "destructive",
         })) await onDelete()

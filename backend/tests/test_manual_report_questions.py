@@ -18,7 +18,7 @@ def test_custom_manual_question_survives_regeneration(kind):
     saved = {
         "section_key": "manual:custom:123",
         "title": "Pyetje e shtuar manualisht",
-        "body": "Përgjigjja e ruajtur",
+        "body": "PËRGJIGJA e ruajtur",
     }
     generated = [{"title": "Generated section", "body": "Fresh content"}]
     with patch(
@@ -68,7 +68,7 @@ def test_persisted_question_appears_on_new_day_without_yesterdays_answer(kind):
 @pytest.mark.parametrize("kind", ["morning", "after_break", "meetings"])
 def test_saved_answer_wins_over_persisted_question_template(kind):
     question = {"section_key": "manual:custom:1:123", "title": "Pika e djeshme"}
-    saved = {**question, "body": "Përgjigjja e sotme"}
+    saved = {**question, "body": "PËRGJIGJA e sotme"}
     with patch(
         "app.services.meeting_point_manual_sync.load_common_view_extra_titles",
         new_callable=AsyncMock,

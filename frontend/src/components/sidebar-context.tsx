@@ -10,6 +10,7 @@ interface SidebarContextType {
   isDesktop: boolean
   setIsOpen: (open: boolean) => void
   toggle: () => void
+  collapseForPage: () => () => void
 }
 
 const SidebarContext = React.createContext<SidebarContextType | undefined>(undefined)
@@ -19,6 +20,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = React.useState(false)
   const [isDesktop, setIsDesktop] = React.useState(false)
+  const [pageOverride, setPageOverride] = React.useState<{ pathname: string; isOpen: boolean } | null>(null)
+  const hasPageOverride = pageOverride?.pathname === pathname
+  const visibleIsOpen = hasPageOverride ? pageOverride.isOpen : isOpen
   const previousPathnameRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
@@ -78,14 +82,22 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [isDesktop, pathname])
 
   const setSidebarOpen = React.useCallback((open: boolean) => {
+    if (hasPageOverride) {
+      setPageOverride((current) => current ? { ...current, isOpen: open } : current)
+      return
+    }
     setIsOpen(open)
 
     if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
       window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(open))
     }
-  }, [])
+  }, [hasPageOverride])
 
   const toggle = React.useCallback(() => {
+    if (hasPageOverride) {
+      setPageOverride((current) => current ? { ...current, isOpen: !current.isOpen } : current)
+      return
+    }
     setIsOpen((prev) => {
       const next = !prev
 
@@ -95,11 +107,17 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
       return next
     })
-  }, [])
+  }, [hasPageOverride])
+
+  // Route-scoped collapse leaves the saved desktop preference untouched.
+  const collapseForPage = React.useCallback(() => {
+    setPageOverride({ pathname, isOpen: false })
+    return () => setPageOverride((current) => current?.pathname === pathname ? null : current)
+  }, [pathname])
 
   const value = React.useMemo(
-    () => ({ isOpen, isDesktop, setIsOpen: setSidebarOpen, toggle }),
-    [isDesktop, isOpen, setSidebarOpen, toggle]
+    () => ({ isOpen: visibleIsOpen, isDesktop, setIsOpen: setSidebarOpen, toggle, collapseForPage }),
+    [isDesktop, visibleIsOpen, setSidebarOpen, toggle, collapseForPage]
   )
 
   return (

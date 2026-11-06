@@ -97,7 +97,7 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
   const todayTasks = tasks.filter((task) => task.start_date === report.report_date)
   const otherTasks = tasks.filter((task) => task.start_date !== report.report_date)
   const manual = (key: ManualKey, title: string) => <Point id={`m1-${key}`} title={title}>
-    <div className="space-y-2 p-5"><Label htmlFor={`m1-answer-${key}`} className="text-sm">Përgjigjja / komenti</Label>
+    <div className="space-y-2 p-5"><Label htmlFor={`m1-answer-${key}`} className="text-sm">PËRGJIGJA / komenti</Label>
       <Textarea id={`m1-answer-${key}`} value={answers[key] || ""} disabled={disabled} maxLength={10000} autoResize
         className="min-h-24 bg-white" placeholder="Shëno përgjigjen dhe komentin." onChange={(event) => onAnswerChange(key, event.target.value)} />
     </div>

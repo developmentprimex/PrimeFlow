@@ -83,7 +83,7 @@ def prompt(job, page=0):
         label = {'PO': 'Po', 'JO': 'Jo', 'done': 'U mbyll', 'progress': 'Në progres',
                  'postpone': 'U shty', 'comment': 'U komentua', 'held': 'Mbajtur', 'canceled': 'Anuluar',
                  'slot': answer.get('slot', '')}.get(answer.get('action'), '')
-        text += '\n\n✅ **Përgjigjja: ' + label + '**'
+        text += '\n\n✅ **PËRGJIGJA: ' + label + '**'
         if job.get('comment'):
             text += '\n' + discord.utils.escape_markdown(job['comment'][:250])
     elif job.get('comment'):

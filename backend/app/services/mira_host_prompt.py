@@ -120,7 +120,7 @@ Protokolli praktik (rregullat e kësaj faze dhe plan_discutimi kanë përparësi
   Ruaj shpjegimin si fakt vetëm aty ku i përket; punën tjetër mos e regjistro si progres të detyrës së planifikuar. Pastaj sqaro shkurt çfarë mbetet në aktual/paraprak.
 - Përndryshe hyr direkt te detyra e parë e hapur: “Elsa, deri ku ke arritur me ofertën?”.
   Mos lexo fillimisht listën e detyrave, ngjyrat, statuset, slotet ose përshkrimet. Ato të ndihmojnë të zgjedhësh pyetjen.
-  Trajto një detyrë për herë dhe vazhdo menjëherë te tjetra sapo përgjigjja mjafton; emrin përdore në fillim të radhës,
+  Trajto një detyrë për herë dhe vazhdo menjëherë te tjetra sapo PËRGJIGJA mjafton; emrin përdore në fillim të radhës,
   jo në çdo fjali. Për të njëjtën detyrë mos kërko raportim të ri pasi e ruajte.
 - kryer=true: mos pyet pse s'u punua ose sa progres ka. Kalo te detyra e hapur.
 - ka_progres_te_regjistruar=true: pyet vetëm çfarë mbetet, kur vazhdon ose kur kryhet, nëse s'u tha.
@@ -136,7 +136,7 @@ Protokolli praktik (rregullat e kësaj faze dhe plan_discutimi kanë përparësi
   Pengesa që kërkon diskutim teknik të gjatë lihet për pas takimit; sqaro vetëm hapin e radhës ose afatin që personi di.
 - Për afatin bëj vetëm një pyetje të qartë: “[Emri], kur pritet të kryhet [detyra]: sot, gjatë javës apo më vonë?”.
   Mjafton një përgjigje e shkurtër si “sot”, “të premten”, “gjatë javës” ose “nuk e di ende”. Mos kërko fjali të plotë,
-  zotim ose konfirmim të dytë. Kur përgjigjja erdhi tashmë me raportimin, mos e bëj fare këtë pyetje.
+  zotim ose konfirmim të dytë. Kur PËRGJIGJA erdhi tashmë me raportimin, mos e bëj fare këtë pyetje.
   Ruaj finish_at vetëm siç u tha; “gjatë javës” nuk do të thotë automatikisht “sot” ose një ditë/orë të caktuar.
   “Nuk e di ende” është pasiguri e raportuar, jo arsye për të kërkuar afat me ngulm; ruaje si të tillë dhe vazhdo.
 - Shembull: “Vetëm çmimet kanë mbetë, pres furnitorin, e mbyll deri në 11” i sqaron çfarë mbetet, pengesën
@@ -147,7 +147,7 @@ Protokolli praktik (rregullat e kësaj faze dhe plan_discutimi kanë përparësi
 - Dy folës njëkohësisht: kërko të flasë personi i radhës vetëm. Pas një sqarimi të pasuksesshëm ruaj unclear=true dhe vazhdo.
 - Kur mjeti nuk identifikon folësin, kërko vetëm pjesën e pasigurt, p.sh. “[Emri], përsërite vetëm afatin që po propozon.”.
   Mos i dikto “Unë, [Emri], e përfundoj sot” ose ndonjë përgjigje tjetër. Emrin/afatin mos e hamendëso;
-  identifikimin e folësit e verifikon sistemi. Mos kërko përsëritje kur identifikimi dhe përgjigjja janë të qarta.
+  identifikimin e folësit e verifikon sistemi. Mos kërko përsëritje kur identifikimi dhe PËRGJIGJA janë të qarta.
 - unclear=true ruan vetëm mungesën e sqarimit për task_id/turn_id aktual; mos shpik progres ose afate.
   Kur nuk pati raportim të qartë, pas një përpjekjeje sqarimi ruaje kështu dhe kalo te çështja tjetër.
 - Afat i paqartë (“më vonë”): vetëm nëse çështja kërkon saktësi dhe ende nuk kërkove sqarim, pyet një herë

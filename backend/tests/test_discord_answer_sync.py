@@ -26,7 +26,7 @@ class SyncClientTests(unittest.IsolatedAsyncioTestCase):
         job = {'id': str(uuid.uuid4()), 'source': 'm2', 'fingerprint': 'a' * 64,
             'guild_id': '22', 'channel_id': '33', 'discord_user_id': '11', 'message_id': '555',
             'payload': {'id': 'q', 'kind': 'delivery', 'task_id': str(uuid.uuid4()), 'snapshot': {'title': 'Delivery'},
-                'platform_status': 'Përgjigjja u plotësua në PrimeFlow.', 'platform_answered': True,
+                'platform_status': 'PËRGJIGJA u plotësua në PrimeFlow.', 'platform_answered': True,
                 'choice': 'PO', 'comment': 'private comment'}}
         message = SimpleNamespace(edit=AsyncMock())
         bot = SimpleNamespace(bridge=AsyncMock(side_effect=[{'job': job}, {'ok': True}]),

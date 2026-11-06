@@ -70,7 +70,7 @@ const MANUAL_BOOLEAN_KEYS = manualChecklistBooleanKeys
 
 const AUTO_VALUE_LABELS: Record<string, string> = {
   missed_meeting_evidence: "Evidenca për takime të humbura",
-  answer: "Përgjigjja",
+  answer: "PËRGJIGJA",
   planned: "Planifikuar",
   completed: "Kryer",
   remaining: "Mbetur",
@@ -758,7 +758,7 @@ function WeeklyRealizationView() {
     if (!draft) return
     const value = draft.value === "YES"
     if (value && !draft.comment.trim()) {
-      toast.error("Komenti është i detyrueshëm kur përgjigjja është Po")
+      toast.error("Komenti është i detyrueshëm kur PËRGJIGJA është Po")
       return
     }
     await run(

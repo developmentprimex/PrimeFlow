@@ -146,7 +146,7 @@ class AnswerModal(discord.ui.Modal):
     def __init__(self, bot, data, item, message):
         super().__init__(title=f'Raporto · 1H {data["bucket"]}', timeout=600)
         self.bot, self.data, self.item, self.message = bot, data, item, message
-        self.answer = discord.ui.TextInput(label='Vazhdimi' if item['id'] == 'next' else 'Përgjigjja për detyrën', style=discord.TextStyle.paragraph,
+        self.answer = discord.ui.TextInput(label='Vazhdimi' if item['id'] == 'next' else 'PËRGJIGJA për detyrën', style=discord.TextStyle.paragraph,
             default=(item.get('answer') or '')[:4000] or None, max_length=4000)
         self.has_expected = item['id'] != 'next' and (item['status'] == 'TODO' or item.get('asks_completion', False))
         self.expected = discord.ui.TextInput(label='Vazhdimi i planifikuar' if item['status'] == 'TODO' else 'Përfundimi i pritshëm', required=False,
@@ -173,7 +173,7 @@ class AnswerModal(discord.ui.Modal):
                 'answer': str(self.answer), 'expected_at': str(self.expected) if self.has_expected else '',
                 'question_status': self.item['status'], 'asks_completion': self.item.get('asks_completion'),
                 'continuation': str(self.continuation) if self.continuation is not None else None})
-            text, view = card(data, continuation=is_continuation(self.message), join_url=self.bot.one_h_url(data['bucket'], interaction.guild_id), notice='✅ Përgjigjja u ruajt.')
+            text, view = card(data, continuation=is_continuation(self.message), join_url=self.bot.one_h_url(data['bucket'], interaction.guild_id), notice='✅ PËRGJIGJA u ruajt.')
             await self.message.edit(content=text, embed=None, view=view)
             receipt = '✅ U ruajt te Mira → Takimet 1H'
             if self.item['id'] != 'next':
@@ -353,7 +353,7 @@ async def reply(bot, message):
         'discord_user_id': str(message.author.id), 'guild_id': str(message.guild.id), 'channel_id': str(message.channel.id),
         'item_id': 'next' if item_id == 'next' else str(uuid.UUID(item_id)), 'request_id': str(message.id), 'answer': message.content[:4000],
         'question_status': 'TODO' if 'Pse s’ke vazhdu' in source.content else 'IN_PROGRESS' if 'A ke me vazhdu' in source.content else None})
-    text, view = card(data, continuation=is_continuation(source), notice='✅ Përgjigjja u ruajt.', join_url=bot.one_h_url(data['bucket'], message.guild.id))
+    text, view = card(data, continuation=is_continuation(source), notice='✅ PËRGJIGJA u ruajt.', join_url=bot.one_h_url(data['bucket'], message.guild.id))
     await source.edit(content=text, embed=None, view=view)
     return True
 

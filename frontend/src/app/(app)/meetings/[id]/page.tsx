@@ -9,7 +9,7 @@ import { ImagePlus, Mic } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import {
-  clock, dmy, isNoteDone, KIND_LABEL, readError, shortDm, STATUS_STYLE,
+  clock, dmy, isNoteDone, readError, shortDm, STATUS_STYLE,
   type MeetingDetail, type MeetingNote, type MeetingNoteTaskStatus,
 } from "@/lib/meeting-notes"
 import { NotesTable } from "@/components/meeting-notes/notes-table"
@@ -19,19 +19,9 @@ import { StatusLegend } from "@/components/meeting-notes/status-legend"
 import { useUsersMap } from "@/components/meeting-notes/use-lookups"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { useSidebar } from "@/components/sidebar-context"
 
 type SourceFilter = "all" | "manual" | "recording"
-
-function frequencyText(detail: MeetingDetail) {
-  const meeting = detail.meeting
-  const english = detail.kind === "EXTERNAL"
-  const type = (meeting.recurrence_type || "").toLowerCase()
-  const days = english ? ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] : ["e hënë", "e martë", "e mërkurë", "e enjte", "e premte", "e shtunë", "e diel"]
-  const time = meeting.starts_at ? new Date(meeting.starts_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : ""
-  if (type === "weekly") return `Weekly, ${(meeting.recurrence_days_of_week || []).map((d) => days[d]).join(", ")} ${time}`.trim()
-  if (type === "monthly") return `Monthly, ${english ? "day" : "dita"} ${(meeting.recurrence_days_of_month || []).join(", ")} ${time}`.trim()
-  return `${english ? "One-off" : "Njëherë"}${meeting.starts_at ? `, ${dmy(meeting.starts_at.slice(0, 10))} ${time}` : ""}`
-}
 
 export default function MeetingPage() {
   const { id } = useParams<{ id: string }>()
@@ -39,6 +29,10 @@ export default function MeetingPage() {
   const users = useUsersMap()
   const [detail, setDetail] = React.useState<MeetingDetail | null>(null)
   const english = detail?.kind === "EXTERNAL"
+  const { collapseForPage } = useSidebar()
+  React.useEffect(() => {
+    if (english) return collapseForPage()
+  }, [english, collapseForPage])
   const t = meetingTranslator(english)
   const [session, setSession] = React.useState<string | null>(null)
   const [notes, setNotes] = React.useState<MeetingNote[]>([])
@@ -88,7 +82,10 @@ export default function MeetingPage() {
   React.useEffect(() => { if (session) void loadNotes(session) }, [session, loadNotes])
 
   const replaceNote = (note: MeetingNote) => setNotes((current) => current.map((item) => item.id === note.id ? note : item))
-  const removeNote = (noteId: string) => setNotes((current) => current.filter((item) => item.id !== noteId))
+  const removeNote = (noteId: string) => {
+    setNotes((current) => current.filter((item) => item.id !== noteId))
+    setSelected((current) => { const next = new Set(current); next.delete(noteId); return next })
+  }
 
   const addNote = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -148,14 +145,6 @@ export default function MeetingPage() {
     } finally { setBulkBusy(false) }
   }
 
-  const toggleTraining = async () => {
-    if (!detail) return
-    const next = !detail.meeting.is_training
-    const response = await apiFetch(`/meeting-notes/meetings/${id}/training`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_training: next }) })
-    if (!response.ok) { toast.error(t("Nuk u ndryshua.")); return }
-    await loadDetail()
-  }
-
   const saveClient = async (selectedClient: MeetingClientSelection | null) => {
     if (!detail || savingClientRef.current) return
     if (selectedClient && !selectedClient.name.trim()) {
@@ -209,38 +198,28 @@ export default function MeetingPage() {
 
   return <div className="min-w-0 w-full space-y-2">
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <div className="space-y-0.5">
+      <div className="space-y-2">
         <Link href="/meetings" className="text-xs text-muted-foreground">{t("← Takimet")}</Link>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h1 className="text-xl font-semibold leading-tight">{detail.meeting.title}</h1>
-    <div className="flex flex-wrap items-center gap-2.5">
-      <div role="tablist" aria-label={t("Seancat")} className="inline-flex flex-wrap gap-0.5 rounded-xl bg-muted p-[3px]">
-        {detail.sessions.map((s) => <button key={s.date} type="button" role="tab" aria-selected={session === s.date} onClick={() => setSession(s.date)}
-          className={`h-[30px] rounded-[9px] px-3 text-sm font-semibold ${session === s.date ? "bg-white shadow-sm" : ""} ${s.status === "canceled" ? "text-neutral-400 line-through" : ""}`}
-          title={s.status === "canceled" ? t("Anuluar") : s.status === "planned" ? t("E planifikuar") : undefined}>
-          {dmy(s.date)}{s.is_today ? (english ? " · Today" : " · Sot") : ""}
-        </button>)}
-      </div>
-      {canceled.length > 0 && <span className="text-xs text-muted-foreground">{t("Seancat e anuluara: shënimet e hapura kalojnë vetë te seanca e radhës.")}</span>}
-    </div>
-        <div aria-busy={savingClient} className="w-56 max-w-full [&_select]:h-8 [&_select]:text-xs [&_input]:h-8 [&_input]:text-xs">
-          <MeetingClientPicker english={english} id="meeting-client" value={selectedClient} onChange={changeClient} onCommit={(selection) => void saveClient(selection)} disabled={savingClient} />
+          <h1 className="text-xl font-semibold leading-tight">{detail.meeting.title}</h1>
+          <div aria-busy={savingClient} className="w-56 max-w-full [&_select]:h-8 [&_select]:text-xs [&_input]:h-8 [&_input]:text-xs">
+            <MeetingClientPicker english={english} id="meeting-client" value={selectedClient} onChange={changeClient} onCommit={(selection) => void saveClient(selection)} disabled={savingClient} />
+          </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div role="tablist" aria-label={t("Seancat")} className="inline-flex flex-wrap gap-0.5 rounded-xl bg-muted p-[3px]">
+            {detail.sessions.map((s) => <button key={s.date} type="button" role="tab" aria-selected={session === s.date} onClick={() => setSession(s.date)}
+              className={`h-[30px] rounded-[9px] px-3 text-sm font-semibold ${session === s.date ? "bg-white shadow-sm" : ""} ${s.status === "canceled" ? "text-neutral-400 line-through" : ""}`}
+              title={s.status === "canceled" ? t("Anuluar") : s.status === "planned" ? t("E planifikuar") : undefined}>
+              {dmy(s.date)}{s.is_today ? (english ? " · Today" : " · Sot") : ""}
+            </button>)}
+          </div>
+          {canceled.length > 0 && <span className="text-xs text-muted-foreground">{t("Seancat e anuluara: shënimet e hapura kalojnë vetë te seanca e radhës.")}</span>}
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
         {detail.meeting.project_id && <Button asChild size="sm" variant="outline"><Link href={`/meetings/client/${detail.meeting.project_id}`}>{t("Historia e projektit")}</Link></Button>}
       </div>
-    </div>
-
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-
-
-    <div className="flex flex-wrap items-center gap-3">
-      {currentSession?.recordings.length ? currentSession.recordings.map((rec) => <Link key={rec.id} href={`/meeting-recordings/${rec.id}`} className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-800">
-        <Mic className="size-4" aria-hidden="true" /><span className="underline">{english ? "Recording" : "Regjistrimi"} {shortDm(session || "")} · {clock(rec.duration_seconds)}</span>
-      </Link>) : <Button asChild size="sm" className="h-9 px-3 font-semibold shadow-sm"><Link href={`/meeting-recordings?meeting_id=${detail.meeting.id}`}><Mic className="size-4" aria-hidden="true" />{t("Nis regjistrimin")}</Link></Button>}
-    </div>
     </div>
 
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -252,6 +231,11 @@ export default function MeetingPage() {
           </button>)}
       </div>
       <Button type="button" size="sm" variant={showDone ? "default" : "outline"} aria-pressed={showDone} className="h-8 rounded-full px-3 text-[13px]" onClick={() => setShowDone((current) => !current)}>{t("Shfaq edhe të mbyllurat")}</Button>
+      <div className="flex flex-wrap items-center gap-3 sm:ml-4">
+        {currentSession?.recordings.length ? currentSession.recordings.map((rec) => <Link key={rec.id} href={`/meeting-recordings/${rec.id}`} className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-800">
+          <Mic className="size-4" aria-hidden="true" /><span className="underline">{english ? "Recording" : "Regjistrimi"} {shortDm(session || "")} · {clock(rec.duration_seconds)}</span>
+        </Link>) : <Button asChild size="sm" className="h-9 px-3 font-semibold shadow-sm"><Link href={`/meeting-recordings?meeting_id=${detail.meeting.id}`}><Mic className="size-4" aria-hidden="true" />{t("Nis regjistrimin")}</Link></Button>}
+      </div>
     </div>
 
     <form onSubmit={(e) => void addNote(e)} className="space-y-2">
@@ -281,19 +265,11 @@ export default function MeetingPage() {
         onToggleSelect={(noteId) => setSelected((current) => { const next = new Set(current); if (next.has(noteId)) next.delete(noteId); else next.add(noteId); return next })}
         onChanged={replaceNote} onRemoved={removeNote} onTasksChanged={() => { if (session) void loadNotes(session) }} />
       : <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">{t("Nuk ka shënime për këtë seancë ende.")}</p>}
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <StatusLegend english={english} />
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <StatusLegend english={english} withStatuses={false} />
       <div className="flex flex-wrap gap-1" aria-label={english ? "Task totals" : "Numërimet e detyrave"}>
         {statusCounts.map(({ status, count }) => <span key={status} className={`border border-slate-600 px-1.5 py-0.5 text-xs font-bold ${STATUS_STYLE[status].cell}`}>{STATUS_STYLE[status].label} {count}</span>)}
       </div>
     </div>
-    <details className="rounded-md border px-3 py-2 text-xs">
-      <summary className="cursor-pointer font-medium">{english ? "Meeting details" : "Detajet e takimit"}</summary>
-      <div className="mt-2 space-y-2">
-        <p className="text-muted-foreground">{KIND_LABEL[detail.kind]} · {frequencyText(detail)}{client ? ` · ${t("Klienti")} ${client}` : ""} · {detail.meeting.participant_ids?.length || 0} {english ? "participants" : "pjesëmarrës"}</p>
-
-        <Button size="sm" variant="ghost" onClick={() => void toggleTraining()}>{detail.meeting.is_training ? t("Hiq nga trajnimet") : t("Shëno si trajnim")}</Button>
-      </div>
-    </details>
   </div>
 }

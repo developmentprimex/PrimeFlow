@@ -171,9 +171,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   teksti i shënimit nuk mund të ruhet bosh dhe lloji Pyetje/Shënim ruhet. Vendimi
   përfshihet në dërgimin/bashkimin e ardhshëm në PX Notes, por ndryshimi nuk
   përditëson kopjen që është dërguar tashmë në PX Notes.
-  Kolona shqip e `answer` quhet “PËRSHKRIMI / PËRGJIGJJA”; formulari dhe fusha
+  Kolona shqip e `answer` quhet “PËRSHKRIMI / PËRGJIGJA”; formulari dhe fusha
   direkte përdorin të njëjtin emërtim. Anglishtja përdor “QUESTION / CASE” dhe “ANSWER”;
   teksti i dërgimit në PX mbetet më vete.
+  `NotesTable` ka buton fshirjeje direkt në rresht, si te seanca ashtu edhe te
+  Historia e klientit, me konfirmim dhe DELETE ekzistues të `meeting_notes`.
+  Hiqet nga lista/përzgjedhja vetëm pas suksesit; gabimi ruan rreshtin.
+  Bashkëngjitjet e shënimit fshihen sipas API-së ekzistuese; kopjet në PX Notes
+  dhe detyrat e tyre nuk fshihen. Butoni shfaqet kur konsumatori ofron `onRemoved`.
 - Gjuha e takimeve lidhet me llojin: tab-i External te lista `/meetings`,
   detajet e takimit ekstern, shënimet, redaktimi, klienti dhe legjenda përdorin
   anglishten përmes `meeting-notes-language.ts`. Historia e klientit përdor
@@ -182,19 +187,32 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   klientët dhe përmbajtja e shkruar nuk përkthehen. Sidebar, Meeting Scheduler,
   Regjistrimet dhe teksti i dërgimit në PX janë ndërfaqe më vete, pa ndryshim
   gjuhe nga ky rregull; nuk ndryshojnë API-të, taskat, raportet ose eksportet.
-- Detajet e takimit kanë krye kompakte me titullin, datat e plota të seancave
-  dhe vetëm dropdown-in e klientit pranë titullit, pa etiketë/buton ruajtjeje.
+- Detajet e takimit kanë krye kompakte me datat e plota të seancave direkt
+  poshtë emrit të takimit dhe vetëm dropdown-in e klientit pranë titullit,
+  pa etiketë/buton ruajtjeje.
+  Në hapjen e një takimi EXTERNAL, `collapseForPage` në `SidebarProvider`
+  mbyll sidebar-in vetëm për atë faqe. Sidebar dhe Topbar lexojnë të njëjtën
+  gjendje; përdoruesi mund ta rihapë manualisht. Preferenca në localStorage
+  mbetet e paprekur dhe gjendja e zakonshme rikthehet kur largohet nga faqja.
+  Takimet interne, lista, Historia e klientit, Regjistrimet dhe raportet nuk
+  e aktivizojnë këtë sjellje.
   Zgjedhja/heqja e klientit ruhet direkt me PATCH; klienti i ri ruhet në blur/Enter
   pasi shkruhet emri. Gjatë ruajtjes fusha çaktivizohet; dështimi i zgjedhjes
   rikthen vlerën e ruajtur. `MeetingClientPicker.onCommit` është opsional:
   Meeting Scheduler ruan sjelljen ekzistuese të ruajtjes gjatë krijimit të takimit.
-  Regjistrimi mbetet sipër filtrave; kur nuk ka regjistrim në seancë, lidhja
+  Regjistrimi është në të njëjtin rresht pas filtrave dhe opsionit për shënimet
+  e mbyllura; në ekran të ngushtë mbështillet. Kur nuk ka regjistrim në seancë, lidhja
   paraqitet si buton kryesor “Nis regjistrimin” / “Start recording”, me mikrofon.
   Hap të njëjtën faqe Regjistrimet me `meeting_id`; lidhjet e regjistrimeve
   ekzistuese dhe Historia e klientit nuk e përdorin këtë buton.
-  Metadatat dhe shënimi si trajnim gjenden poshtë tabelës në seksionin
-  e mbyllur fillimisht “Meeting details” / “Detajet e takimit”. Numërimet e
-  statuseve gjenden poshtë tabelës, pranë legjendës. Kjo paraqitje vlen për
+  Seksioni “Meeting details” / “Detajet e takimit” dhe opsioni për të shënuar
+  si trajnim janë hequr nga kjo faqe. Kjo nuk ndryshon `is_training` të takimeve
+  ekzistuese, API-në përkatëse ose krijimin si trajnim te Meeting Scheduler.
+  Data shfaqet te përzgjedhja e seancës. Numërimet e
+  statuseve gjenden poshtë tabelës, pranë legjendës. Në seancë legjenda tregon
+  vetëm burimin manual/regjistrim (`withStatuses={false}`); statuset shfaqen
+  vetëm te numërimet me ngjyra, pa përsëritje dhe pa shtyrje në skajin e djathtë.
+  Lista dhe Historia e klientit ruajnë legjendën ekzistuese. Kjo paraqitje vlen për
   interne dhe eksterne; Historia e klientit ndan vetëm etiketat/tabelën, jo
   këtë krye. Formulari i klientit ruan hapësirë për krijimin e klientit të ri
   dhe gabimet pa lartësi fikse.
@@ -250,7 +268,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Hyrja zanore është Notes të reja → Done → Strikes; për kategori bosh lexohet
   shkurt se nuk ka të reja. Edhe këto fjali kërkojnë konfirmim audio, pa krijuar
   përmendje për detyra ose Notes që mungojnë. Ky rend i audios nuk ndryshon
-  gjeneruesit e raporteve. Afati pyetet vetëm kur mungon; përgjigjja e shkurtër
+  gjeneruesit e raporteve. Afati pyetet vetëm kur mungon; PËRGJIGJA e shkurtër
   ruhet siç u tha, pa diktuar zotime ose data. Pas konfirmimit të pjesës së fundit,
   kontrolluesi mund të kalojë në pritje të heshtur me `wait_for_staff` para orës
   zyrtare, pa një përgjigje tjetër të modelit. Kontrollo që audioja, reagimet

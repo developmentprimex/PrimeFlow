@@ -75,7 +75,7 @@ const dailyQuestionLabels: Record<string, string> = {
   frequent_delays: "A ka vonesë në prezencë këtë ditë?",
   unexpected_absences: "A ka mungesë të papritur këtë ditë?",
 }
-const dailyValueLabels: Record<string, string> = { missed_meeting_evidence:"Evidenca për takime të humbura", answer:"Përgjigjja",planned:"Planifikuar",completed:"Kryer",remaining:"Mbetur",count:"Numri",total:"Gjithsej",in_progress:"Në progres",no_progress:"Pa progres",todo:"To do",postponed:"Shtyrë",yes:"Po",approved:"Aprovuar",unapproved:"Pa aprovim",needs_review:"Për konfirmim",all_closed:"Të gjitha të mbyllura",closed:"Mbyllur",attendance_tardiness:"Vonesa",frequent:"Të shpeshta",threshold:"Pragu",tasks_completed_late:"Kryer me vonesë",tasks_late_open:"Të vonuara të hapura",additional_tasks_candidate:"Detyra shtesë",verified_categories:"Kategori të verifikuara" }
+const dailyValueLabels: Record<string, string> = { missed_meeting_evidence:"Evidenca për takime të humbura", answer:"PËRGJIGJA",planned:"Planifikuar",completed:"Kryer",remaining:"Mbetur",count:"Numri",total:"Gjithsej",in_progress:"Në progres",no_progress:"Pa progres",todo:"To do",postponed:"Shtyrë",yes:"Po",approved:"Aprovuar",unapproved:"Pa aprovim",needs_review:"Për konfirmim",all_closed:"Të gjitha të mbyllura",closed:"Mbyllur",attendance_tardiness:"Vonesa",frequent:"Të shpeshta",threshold:"Pragu",tasks_completed_late:"Kryer me vonesë",tasks_late_open:"Të vonuara të hapura",additional_tasks_candidate:"Detyra shtesë",verified_categories:"Kategori të verifikuara" }
 const labelOutcome = (v: string) => outcomeLabels[v] || "Rezultat ditor"
 const shortDate = (v?: string | null) => { const m = v?.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}.${m[2]}` : v || "—" }
 const dailyQuestionValue = (value: unknown): string => { if(value==null||value==="")return"—";if(typeof value==="boolean")return value?"Po":"Jo";if(typeof value==="string"||typeof value==="number")return String(value);if(Array.isArray(value))return value.length?value.map(dailyQuestionValue).join("; "):"—";if(typeof value==="object")return Object.entries(value as Record<string,unknown>).map(([key,item])=>`${dailyValueLabels[key]||key.replaceAll("_"," ")}: ${dailyQuestionValue(item)}`).join(" · ");return String(value) }
@@ -153,7 +153,7 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
     const draft = drafts[question.key]
     if (!draft) return
     if (draft.value === "YES" && !draft.comment.trim()) {
-      toast.error("Komenti është i detyrueshëm kur përgjigjja është Po")
+      toast.error("Komenti është i detyrueshëm kur PËRGJIGJA është Po")
       return
     }
     setSaving(question.key)
@@ -165,13 +165,13 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))
-        throw new Error(typeof payload?.detail === "string" ? payload.detail : "Përgjigjja nuk u ruajt")
+        throw new Error(typeof payload?.detail === "string" ? payload.detail : "PËRGJIGJA nuk u ruajt")
       }
       dirtyKeys.current.delete(question.key)
-      toast.success("Përgjigjja u ruajt për të gjithë javën")
+      toast.success("PËRGJIGJA u ruajt për të gjithë javën")
       await onSaved()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Përgjigjja nuk u ruajt")
+      toast.error(error instanceof Error ? error.message : "PËRGJIGJA nuk u ruajt")
     } finally {
       setSaving(null)
     }

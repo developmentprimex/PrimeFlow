@@ -389,7 +389,7 @@ class RealizationQuestionAnswerCreate(RealizationSchema):
     @model_validator(mode="after")
     def require_comment_for_yes(self) -> "RealizationQuestionAnswerCreate":
         if not self.clear and self.value is True and not (self.comment and self.comment.strip()):
-            raise ValueError("Komenti është i detyrueshëm kur përgjigjja është Po")
+            raise ValueError("Komenti është i detyrueshëm kur PËRGJIGJA është Po")
         return self
 
 

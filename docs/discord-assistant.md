@@ -55,7 +55,7 @@ Kërkohet rinisja e API-ve dhe botit që regjistron komandat; nuk ka migrim të 
 **Hap detyrën** shfaq kartën e plotë në të njëjtin mesazh M2: statusin, slotin,
 afatin, të gjitha pikat, komentet dhe veprimet e detyrës. Teksti i gjatë shfletohet
 me faqe pa mesazhe shtesë. **Kthehu te M2** rikthen pyetjen me përgjigjen aktuale.
-Butoni mbetet i përdorshëm edhe kur përgjigjja është plotësuar në PrimeFlow ose
+Butoni mbetet i përdorshëm edhe kur PËRGJIGJA është plotësuar në PrimeFlow ose
 shtyrja është konfirmuar.
 
 ### Përgjigjet e plotësuara në PrimeFlow
@@ -67,7 +67,7 @@ mesazhin ekzistues Discord pa dërguar mesazh të ri. Butonat e përgjigjes hiqe
 kur pyetja është plotësuar; komentet nuk publikohen në kanalin e kërkuesit.
 Ndryshimi i statusit përditëson përsëri mesazhin, ndërsa pastrimi i një përgjigjeje
 manuale M2 ose statusi takimi rikthen pyetjen. **Koment manual** i shtyrjeve
-mbetet shënim i pavarur dhe nuk llogaritet si përgjigjja e punonjësit.
+mbetet shënim i pavarur dhe nuk llogaritet si PËRGJIGJA e punonjësit.
 
 Kërkohet `0168_discord_answer_sync`. Gjurmët e përditësimit dhe marrjes së
 konfirmimit ruhen në databazë dhe riprovohen pas dështimit të përkohshëm të Discord-it.
@@ -81,7 +81,7 @@ Pyetja shkon te personat e caktuar manualisht në takim me lidhje aktive Discord
 Kur takimi nuk ka persona të caktuar, i shkon Diellza Veliut (`diellza.veliu`).
 Një person i caktuar pa Discord nuk e kthen takimin në rast pa përgjegjës.
 Kjo pyetje nuk varet nga aktivizimi i kujtesës para takimit dhe nuk pyet për
-takime ende në zhvillim. Përgjigjja ruan statusin e të njëjtës datë në Common View,
+takime ende në zhvillim. PËRGJIGJA ruan statusin e të njëjtës datë në Common View,
 përditëson pyetjet e pjesëmarrësve dhe nuk mbishkruan një status tashmë të plotësuar.
 
 Boti ekzistues kontrollon çdo 30 sekonda nga 11:45 deri para 12:00, të hënën–të
@@ -110,7 +110,7 @@ Për arsyet përdoret lista e njëjtë si te shtyrjet/My View në PrimeFlow. Zgj
 hap formularin e komentit; ruajtja bëhet me dërgimin e formularit. Komenti ruhet
 si përgjigje M2 me autor, shtohet te komenti personal i detyrës pa fshirë tekstin
 e mëparshëm, dhe arsyeja/komenti operacional ruhen te gjendja ditore e detyrës.
-Për shtyrjet, përgjigjja e Discord-it shfaqet vetëm te kolona **Komenti**;
+Për shtyrjet, PËRGJIGJA e Discord-it shfaqet vetëm te kolona **Komenti**;
 **Koment manual** mbetet fushë e pavarur për shënimet nga faqja e raportit.
 Dorëzimi ruhet në raport dhe te komenti i detyrës; PO nuk e mbyll detyrën.
 Raporti përditëson kolonat e përgjigjeve dhe numëruesin SA/TOTALI. Për detyrat me
@@ -119,7 +119,7 @@ kur të gjithë marrësit e pyetjes janë përgjigjur PO.
 
 Pyetjet/përgjigjet ruhen në `discord_m2_questions` dhe i mbijetojnë rinisjes.
 Klikimi i përsëritur nuk shton dy komente.
-Përgjigjja mund të ndryshohet gjatë së njëjtës ditë: p.sh. JO me koment, pastaj
+PËRGJIGJA mund të ndryshohet gjatë së njëjtës ditë: p.sh. JO me koment, pastaj
 PO kur dorëzohet. Raporti tregon përgjigjen e fundit; komentet e mëparshme dhe
 auditimi mbeten si historik. Një formular i vjetër nuk mbishkruan një përgjigje
 të ndryshuar ndërkohë. Revokimi i lidhjes, heqja e caktimit,
@@ -237,8 +237,8 @@ Për kthim te modeli i mëparshëm vendos `MIRA_HOST_MODEL=gpt-realtime-2.1` në
 dhe rinis API-n. Ky konfigurim vlen vetëm për Mira Host; zëri `marin` dhe transkriptimi
 `gpt-4o-transcribe` ruhen gjatë provës në shqip. Semantic VAD përdor `eagerness=medium` për
 përgjigje më të shpejta pa e trajtuar çdo pauzë si fjali të përfunduar. Kur dikush flet më shumë se një
-"aha" ose "po", ajo ndalet dhe dëgjon. Pas një veprimi, përgjigjja vazhdon sapo përfundojnë të gjitha
-rezultatet dhe përgjigjja përkatëse Realtime, pavarësisht rendit në të cilin mbërrijnë.
+"aha" ose "po", ajo ndalet dhe dëgjon. Pas një veprimi, PËRGJIGJA vazhdon sapo përfundojnë të gjitha
+rezultatet dhe PËRGJIGJA përkatëse Realtime, pavarësisht rendit në të cilin mbërrijnë.
 Mesazhet me shkrim i dërgon boti ekzistues PrimeFlow në kanalet private të `/lidh`.
 
 | Kur | Çka ndodh |
@@ -404,7 +404,7 @@ Përdoruesit mund të shkruajnë direkt, pa klikuar më parë. Detyra gjendet ng
 shohin: mesazhi i botit ku bëjnë Reply, përndryshe mesazhi i fundit i botit me detyra
 (lista, kujtesa e slotit ose karta), pastaj detyrat e tjera të ditës. "Këtë detyrë"
 është detyra e vetme e shfaqur; "detyra 2" ndjek numrat e listës; një fjalë nga titulli
-zgjedh detyrën. Kur nuk është e qartë, boti pyet dhe përgjigjja e shkurtër ("e dyta")
+zgjedh detyrën. Kur nuk është e qartë, boti pyet dhe PËRGJIGJA e shkurtër ("e dyta")
 e plotëson kërkesën. Rezultati shfaqet si karta e përditësuar e detyrës.
 
 Shembuj:
@@ -547,7 +547,7 @@ Për një detyrë DONE tregohet **E kryer** dhe hiqen veprimet për mbyllje/shty
 Mesazhet e fshira nuk rikrijohen dhe kartat pa kontrolle aktive mbeten të arkivuara.
 
 Te **Mira → Takimet 1H**, përgjigjet shfaqen sipas datës, slotit, personit dhe detyrës:
-gjendja në fillim/aktuale, përgjigjja, koha e pritshme, historiku i veprimeve dhe shtyrjet
+gjendja në fillim/aktuale, PËRGJIGJA, koha e pritshme, historiku i veprimeve dhe shtyrjet
 në pritje/konfirmuara/refuzuara. Slotet shfaqen edhe kur nuk ka takim të udhëhequr me zë.
 Migrimi `0170_discord_one_h_reports` shton arkivin JSONB në `discord_reminders`.
 
@@ -590,7 +590,7 @@ para), si dhe anulimet dhe përsëritjet, njësoj si njoftimet në shfletues.
 **Krijimi nga chat-i:** p.sh. "krijo tak int për nesër ora 15 me unë, endi, rinesa, gane".
 Boti kupton llojin (TAK INT / TAK EXT), datën dhe orën, pjesëmarrësit (emri, mbiemri ose
 username; "unë" = vetë personi), titullin, platformën dhe linkun kur jepen. Kur mungon ora,
-lloji ose një emër nuk është unik, pyet; përgjigjja e shkurtër vazhdon draftin. Para ruajtjes
+lloji ose një emër nuk është unik, pyet; PËRGJIGJA e shkurtër vazhdon draftin. Para ruajtjes
 shfaqet karta me **✅ Krijo takimin / ✖ Anulo**. Takimi krijohet përmes `POST /api/meetings`
 me lejet e personit, në departamentin e tij. Nëse orari përputhet me 1H, boti i tregon
 përplasjet dhe ofron **Krijo gjithsesi**. Kujtesa standarde (15 min) vlen menjëherë.
@@ -648,7 +648,7 @@ hyrja me botin dhe rrjedha reale duhen verifikuar pas konfigurimit të Discord-i
 Shtyrjet nga **M3** përdorin të njëjtin konfirmim të Diellza Veliut. Formulari
 shfaq vetëm datat Start/Due dhe komentin. Pas dërgimit, karta tregon **Në pritje
 të Diellzës**; detyra nuk ndryshon deri në konfirmim. Refuzimi i mban datat
-ekzistuese. Përgjigjja M3 dhe kërkesa ruhen bashkë; një ridërgim nuk krijon dy
+ekzistuese. PËRGJIGJA M3 dhe kërkesa ruhen bashkë; një ridërgim nuk krijon dy
 kërkesa. Vendimi rifreskon kartën M3 të kërkuesit. Kërkesat e vjetra dhe shtyrjet
 e përfunduara më parë ruhen si histori.
 

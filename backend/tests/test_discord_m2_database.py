@@ -145,11 +145,11 @@ class M2DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(personal.count('Koment për AM'), 1)
             report = (await db.execute(select(M2ReportingPointsReport))).scalar_one()
             self.assertEqual(report.manual_answers[f'unfinished_comment:{self.task_id}'].count('Koment për AM'), 1)
-        await self.reply(str(qid), reason_code='OTHER', comment='Përgjigjja tjetër')
+        await self.reply(str(qid), reason_code='OTHER', comment='PËRGJIGJA tjetër')
         async with self.sessions() as db:
             report = (await db.execute(select(M2ReportingPointsReport))).scalar_one()
             self.assertIn('Koment për AM', report.manual_answers[f'unfinished_comment:{self.task_id}'])
-            self.assertIn('Përgjigjja tjetër', report.manual_answers[f'unfinished_comment:{self.task_id}'])
+            self.assertIn('PËRGJIGJA tjetër', report.manual_answers[f'unfinished_comment:{self.task_id}'])
 
     async def test_unfinished_continues_in_pm_once_and_keeps_task_planning(self):
         qid = (await self.claim())[0]['id']
