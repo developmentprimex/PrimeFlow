@@ -62,7 +62,7 @@ MARKERS = {
     "F": "F", "BZ1N1": "BZ1N1",
 }
 KNOWLEDGE_CATEGORIES = ("STRUKTURA", "RREGULLORE", "DEFINIME", "PROCESE", "TJETER")
-PROMPT_VERSION = "2026-11-04.5"
+PROMPT_VERSION = "2026-11-05.1"
 
 
 def effective_protocol(value: str | None) -> str:
@@ -1187,7 +1187,7 @@ TOOLS = {
     "add_meeting_note": (Note, "Ruaj një vendim ose shënim të rëndësishëm të takimit (vetëm në shënimet e takimit)."),
     "save_px_note": (PxNote, "Ruaj një shënim të ri në PX Notes kur dikush të thotë 'shënoje/vendose në PX Notes'. "
                              "Thirre menjëherë, pa ia lexuar prapa."),
-    "end_person_turn": (EndTurn, "Thirre MENJËHERË sapo personi ka përfunduar, pa e përmbledhur me zë. Rezultati të jep personin e radhës "
+    "end_person_turn": (EndTurn, "Thirre MENJËHERË sapo raportimi dhe pyetja e vazhdimit të fazës janë sqaruar, pa i përmbledhur me zë. Rezultati të jep personin e radhës "
                                  "(ose, në 11:50 pas të fundit, rishikimin e detyrave PM)."),
     "call_next_person": (NoArgs, "Njofto personin e radhës të kyçet (thirre kur personi aktual është te detyra e fundit)."),
     # Answered inside host-worker.mjs: it keeps Mira quiet and never reaches PrimeFlow.

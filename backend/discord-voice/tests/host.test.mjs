@@ -303,6 +303,22 @@ test('failed responses retry with a bound instead of staying silent or looping f
   assert.ok(events.some(e=>e.type==='interrupted'&&e.reason==='response_stalled'));
 });
 
+for(const phase of ['GA_PHASE','STAFF_PHASE','PM_REVIEW','ENDING'])
+test(`response recovery preserves the active phase policy and concise transitions: ${phase}`,()=>{
+  const policy=`Current ${phase} policy with slot-specific questions and tools`;
+  const {host,sent,advance}=fakes({toolsets:{[phase]:[]},instructions_by_phase:{[phase]:policy}});
+  host.configure(phase,'11','turn');
+  host.say('SISTEMI: Vazhdo');
+  host._onRealtime({type:'response.created',response:{id:'failed'}});
+  host._onRealtime({type:'response.done',response:{id:'failed',status:'failed'}});
+  advance(1000);
+  const instructions=sent.filter(e=>e.type==='response.create').at(-1).response.instructions;
+  assert.ok(instructions.includes(policy),'recovery must retain the slot question and phase rules');
+  assert.ok(instructions.includes('po e mbaj shkurt'),'recovery must explicitly ban process commentary');
+  assert.ok(instructions.includes('po vazhdoj'));
+  host.stop();
+});
+
 test('watchdog never retries while speech, playback or an unresolved tool is active',()=>{
   const {host,sent,advance}=fakes();
   host.say('SISTEMI: RADHA EF');
@@ -354,8 +370,8 @@ test('an empty response to a manual request is retried with a bound',()=>{
   assert.equal(sent.filter(e=>e.type==='response.create').length,2);
 });
 
-for(const answer of ['Duhet me prit furnitorin; e mbyll deri në njëmbëdhjetë.','Sot.','Nesër.','Aha.'])
-test(`an attributed answer is recovered if silently ignored, including short deadlines but excluding filler: ${answer}`,async()=>{
+for(const answer of ['Duhet me prit furnitorin; e mbyll deri në njëmbëdhjetë.','Sot.','Nesër.','Po.','Jo.','Aha.'])
+test(`an attributed answer is recovered if silently ignored, including short confirmations but excluding filler: ${answer}`,async()=>{
   const {host,events,sent,dispatch,advance,connection,streams}=fakes({voiceReady:true});
   dispatch('GUILD_CREATE',{id:'1'});await Promise.resolve();
   host.configure('STAFF_PHASE','11');

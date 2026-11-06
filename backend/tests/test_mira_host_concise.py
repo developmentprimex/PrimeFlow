@@ -6,14 +6,51 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from tests.test_mira_host_bot import session
+from tests.test_mira_host_bot import session, BRIEF
 from tests.test_mira_host_service import DAY, IDS, item, payload
-from app.models.mira_host import Mira1HMeeting, Mira1HTurn
+from app.models.mira_host import Mira1HMeeting, Mira1HTurn, MiraHostSettings
 from app.services import mira_host as service, mira_host_runtime as runtime
 import mira_host as controller
 
 
 class ConciseOpeningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_slot_questions_are_in_the_correct_phase_in_test_and_real_meetings(self):
+        row = MiraHostSettings(ga_participants=[], protocol_text=service.DEFAULT_PROTOCOL,
+                               target_minutes_per_person=2, knowledge_char_budget=8000)
+        for is_test in (False, True):
+            for slot in service.SLOTS:
+                with self.subTest(slot=slot, is_test=is_test), \
+                     patch.object(service, 'common_payload', AsyncMock(return_value=payload([]))), \
+                     patch.object(service, 'knowledge_context', AsyncMock(return_value=('', False))), \
+                     patch.object(service, 'memory_context', AsyncMock(return_value='')):
+                    meeting = Mira1HMeeting(meeting_date=DAY, slot=slot, is_test=is_test)
+                    policies = await service.instructions(SimpleNamespace(), meeting, row, all_phases=True)
+                    tomorrow = 'A vazhdon me detyrat nesër sipas planit?'
+                    afternoon = 'A vazhdon në PM me detyrat sipas planit?'
+                    self.assertEqual(tomorrow in policies['STAFF_PHASE'], slot == '16:00')
+                    self.assertNotIn(afternoon, policies['STAFF_PHASE'])
+                    if slot == '11:50':
+                        self.assertIn(afternoon, policies['PM_REVIEW'])
+                    for phase in ('GA_PHASE', 'ENDING'):
+                        self.assertNotIn(tomorrow, policies[phase])
+                        self.assertNotIn(afternoon, policies[phase])
+
+    async def test_last_slot_handoff_requires_tomorrows_plan_even_with_open_tasks(self):
+        host = controller.MiraHost(SimpleNamespace())
+        state = {**session(), 'slot': '16:00'}
+        current = {'id': 'turn', 'name': 'Elsa', 'initials': 'EP', 'brief': BRIEF}
+        out = await host.present_turn(state, {'current': current}, announce=False)
+        self.assertIn('A vazhdon me detyrat nesër sipas planit?', out['udhezim'])
+        self.assertIn('para end_person_turn', out['udhezim'])
+
+    async def test_pm_handoff_asks_if_the_plan_continues_instead_of_replanning(self):
+        current = {'id': 'PM_person', 'name': 'Elsa'}
+        host = controller.MiraHost(SimpleNamespace(bridge=AsyncMock(return_value={'current': current})))
+        state = {**session(), 'slot': '11:50'}
+        out = await host._advance_pm(state, None, announce=False, outcome='DONE')
+        self.assertIn('A vazhdon në PM me detyrat sipas planit?', out['udhezim'])
+        self.assertIn('record_pm_review', out['udhezim'])
+
     async def test_short_deadlines_are_kept_verbatim_with_the_existing_progress(self):
         task_id = str(uuid.uuid4())
         data = service.SlotData(payload([item('EF', '10:00', 'OFERTA', rank=0, task_id=task_id)]), DAY)
