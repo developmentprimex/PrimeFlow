@@ -140,6 +140,8 @@ def meeting_to_out(
     return MeetingOut(
         id=meeting.id,
         title=meeting.title,
+        client_name=getattr(meeting, "client_name", None),
+        client_id=getattr(meeting, "client_id", None),
         platform=meeting.platform,
         starts_at=meeting.starts_at,
         ends_at=meeting.ends_at,

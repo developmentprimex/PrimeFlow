@@ -138,6 +138,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   statuse sipas datës dhe taska PARA/PAS ose përgatitjeje. Kontrollo këto lidhje
   edhe kur ndryshon ose anulohet takimi. 1H Reports preket nga taskat përkatëse,
   pa qenë domosdoshmërisht një tabelë e plotë takimesh.
+- Meeting Scheduler krijon TAK EXT manual përmes `POST /meetings`, me emër,
+  interval, pjesëmarrës dhe link opsional, pa krijuar automatikisht event/ftesë
+  Microsoft ose TAK INT. Vetëm kontrolli i këtij formulari dërgon
+  `conflicts_as_warnings=true` te `/meeting-scheduler/validate`: mbivendosjet
+  PrimeFlow, 1H dhe Microsoft paralajmërojnë dhe lejojnë “Shto gjithsesi”.
+  Datat në të kaluarën dhe të dhënat e pavlefshme mbeten gabime. Common View
+  nuk dërgon këtë opsion dhe ruan validimin e mëparshëm, ashtu si kërkesat me
+  aprovim. Profilet e orarit janë opsionale dhe nuk përzgjidhen automatikisht.
 - Intervali i planifikuar i takimeve externe nga kalendari formohet nga
   `calendar-meeting-time.ts` në frontend dhe `calendar_meeting_time.py` në backend.
   Kontrollo Common View (ditore/javore, lista/detaje, fallback dhe printim), të tri
@@ -158,6 +166,71 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ose bashkohen; statusi i tyre lexohet nga taskat e Note-s PX (`ga_note_origin_id`).
   Ngjyrat e statusit duhet të mbeten të njëjta me PX Notes. Regjistrimi i lidhur
   me takim krijon shënim takimi edhe kur konfirmohet detyra nga propozimi AI.
+- Shënimi / pyetja dhe vendimi redaktohen direkt në `NotesTable`, si te seanca e takimit ashtu edhe
+  te Historia e klientit, me Ruaj/Anulo. PATCH dërgon vetëm `content` ose `answer`;
+  teksti i shënimit nuk mund të ruhet bosh dhe lloji Pyetje/Shënim ruhet. Vendimi
+  përfshihet në dërgimin/bashkimin e ardhshëm në PX Notes, por ndryshimi nuk
+  përditëson kopjen që është dërguar tashmë në PX Notes.
+  Kolona shqip e `answer` quhet “PËRSHKRIMI / PËRGJIGJJA”; formulari dhe fusha
+  direkte përdorin të njëjtin emërtim. Anglishtja përdor “QUESTION / CASE” dhe “ANSWER”;
+  teksti i dërgimit në PX mbetet më vete.
+- Gjuha e takimeve lidhet me llojin: tab-i External te lista `/meetings`,
+  detajet e takimit ekstern, shënimet, redaktimi, klienti dhe legjenda përdorin
+  anglishten përmes `meeting-notes-language.ts`. Historia e klientit përdor
+  anglishten për seksionet eksterne dhe për filtrat/titullin kur të gjitha
+  takimet e historisë janë eksterne. Interne/trajnime ruajnë shqipen; titujt,
+  klientët dhe përmbajtja e shkruar nuk përkthehen. Sidebar, Meeting Scheduler,
+  Regjistrimet dhe teksti i dërgimit në PX janë ndërfaqe më vete, pa ndryshim
+  gjuhe nga ky rregull; nuk ndryshojnë API-të, taskat, raportet ose eksportet.
+- Detajet e takimit kanë krye kompakte me titullin, datat e plota të seancave
+  dhe vetëm dropdown-in e klientit pranë titullit, pa etiketë/buton ruajtjeje.
+  Zgjedhja/heqja e klientit ruhet direkt me PATCH; klienti i ri ruhet në blur/Enter
+  pasi shkruhet emri. Gjatë ruajtjes fusha çaktivizohet; dështimi i zgjedhjes
+  rikthen vlerën e ruajtur. `MeetingClientPicker.onCommit` është opsional:
+  Meeting Scheduler ruan sjelljen ekzistuese të ruajtjes gjatë krijimit të takimit.
+  Regjistrimi mbetet sipër filtrave; kur nuk ka regjistrim në seancë, lidhja
+  paraqitet si buton kryesor “Nis regjistrimin” / “Start recording”, me mikrofon.
+  Hap të njëjtën faqe Regjistrimet me `meeting_id`; lidhjet e regjistrimeve
+  ekzistuese dhe Historia e klientit nuk e përdorin këtë buton.
+  Metadatat dhe shënimi si trajnim gjenden poshtë tabelës në seksionin
+  e mbyllur fillimisht “Meeting details” / “Detajet e takimit”. Numërimet e
+  statuseve gjenden poshtë tabelës, pranë legjendës. Kjo paraqitje vlen për
+  interne dhe eksterne; Historia e klientit ndan vetëm etiketat/tabelën, jo
+  këtë krye. Formulari i klientit ruan hapësirë për krijimin e klientit të ri
+  dhe gabimet pa lartësi fikse.
+  Formulari i shënimit të ri është direkt poshtë filtrave të burimit dhe sipër
+  tabelës, si fushë më e madhe me disa rreshta, sfond të bardhë, pa etiketë të
+  dukshme “Shënim i ri”; emri i qasshëm ruhet për lexuesit e ekranit.
+  Kjo fushë krijimi është vetëm te seanca e takimit, jo te Historia e klientit.
+  Opsioni “Shfaq edhe të mbyllurat” është buton toggle pranë filtrave të burimit
+  në të njëjtin grup, pa rreshtim në skajin e djathtë të faqes. Gjendja aktive
+  theksohet me variantin kryesor dhe `aria-pressed`; filtrimi mbetet i njëjtë.
+- Në të njëjtën tabelë, KUSH ndryshohet me përzgjedhje personi dhe AFATI shkruhet
+  manualisht (`DDMMYYYY` ose `DD.MM.YYYY`), me Ruaj/Anulo dhe validim date.
+  API-ja merr datën ISO; bosh e heq afatin. PATCH ndryshon vetëm `assignee_user_id` ose `due_date`
+  të shënimit të takimit. Këto fusha nuk transferohen te PX Notes dhe nuk
+  ndryshojnë përgjegjësit apo afatet e taskave të lidhura.
+- Klientët e takimeve ruhen te `meeting_clients`; një klient lidhet me shumë
+  takime përmes `meetings.client_id`, vetëm për identifikim. `client_name` ruan
+  emrin për payload-et ekzistuese. Emrat e njëjtë bashkohen sipas shkronjave të
+  vogla dhe hapësirave; migrimi ruan/bashkon etiketat e mëparshme. Lista dhe
+  krijimi janë te `/meeting-notes/clients`. Zgjidhen ose krijohen te Meeting
+  Scheduler dhe detajet e takimit; lista Takimet ka filtër sipas klientit dhe
+  emri në kolonën KLIENTI aktivizon atë filtër. Lidhja ndryshohet përmes
+  `/meeting-notes/meetings/{id}/client` nga çdo përdorues
+  i kyçur (ADMIN/MANAGER/STAFF), njësoj si shënimet e takimit, përfshirë takimet
+  e importuara pa krijues. Nuk krijon lidhje me projektin, historinë
+  e projektit, taskat ose PX Notes; nuk dërgohet në Microsoft Calendar.
+  `project_id` mbetet lidhje më vete, e përdorur nga historia ekzistuese dhe PX.
+- Lista Takimet përjashton plotësisht interne PARA/PAS (lidhjet
+  `pre_external_meeting_id` / `paired_external_meeting_id`), edhe nga kërkimi,
+  numërimet dhe opsioni shtesë. Eksterne fizike me tonin `outlook-blue` fshihen
+  fillimisht; checkbox-i përfshin vetëm ato sërish. Krijimi dhe të dhënat e
+  interne PARA/PAS nuk ndryshojnë. Klasifikimi përdor `meeting-notes-overview.ts` dhe
+  ngjyrat ekzistuese nga `meeting-tone.ts`. API-ja `/meeting-notes/overview`
+  përdoret edhe për lidhjen e regjistrimit me takim te Regjistrimet: mos e
+  filtro globalisht, sepse do të hiqte takime nga ajo përzgjedhje. Detajet,
+  seancat dhe historia e klientit mbeten të arritshme për takimet e fshehura.
 - Shtyrja, mbyllja, strike-et dhe ndryshimet e afateve mund të ndikojnë te
   Realization, bazat e planit, numërimet dhe raportet, përveç paraqitjes së taskut.
 - Kopjet historike/snapshot-et nuk krahasohen si të dhëna live. SHTYPI Today

@@ -41,6 +41,7 @@ from app.services.meeting_system_tasks import (
     reconcile_tak_int_one_h_tasks_for_meeting,
 )
 from app.services.meeting_scheduler import one_h_schedule_conflicts
+from app.services.meeting_clients import resolve_meeting_client
 from app.services.meeting_cancellation import delete_external_meeting_dependents, delete_internal_meeting_tasks
 from app.services.audit import add_audit_log
 from app.services.meeting_participants import (
@@ -358,8 +359,11 @@ async def create_meeting(
             },
         )
 
+    client = await resolve_meeting_client(db, client_id=payload.client_id, client_name=payload.client_name, actor_id=user.id)
     meeting = Meeting(
         title=payload.title,
+        client_id=client.id if client else None,
+        client_name=client.name if client else None,
         platform=payload.platform,
         starts_at=payload.starts_at,
         ends_at=payload.ends_at,

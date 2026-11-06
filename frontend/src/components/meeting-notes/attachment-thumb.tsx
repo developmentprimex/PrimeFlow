@@ -1,5 +1,7 @@
 "use client"
 
+import { meetingTranslator } from "@/lib/meeting-notes-language"
+
 import * as React from "react"
 import { ImageIcon, Paperclip, X } from "lucide-react"
 import { useAuth } from "@/lib/auth"
@@ -27,7 +29,8 @@ function useAttachmentUrl(attachment: MeetingNoteAttachment) {
   return { url, isImage }
 }
 
-export function AttachmentThumb({ attachment, onDelete }: { attachment: MeetingNoteAttachment; onDelete?: () => void }) {
+export function AttachmentThumb({ attachment, onDelete, english = false }: { english?: boolean; attachment: MeetingNoteAttachment; onDelete?: () => void }) {
+  const t = meetingTranslator(english)
   const { apiFetch } = useAuth()
   const { url, isImage } = useAttachmentUrl(attachment)
   const [open, setOpen] = React.useState(false)
@@ -43,12 +46,12 @@ export function AttachmentThumb({ attachment, onDelete }: { attachment: MeetingN
   }
   return <>
     <span className="relative inline-flex">
-      <button type="button" title={attachment.original_filename} aria-label={`Hap ${attachment.original_filename}`}
+      <button type="button" title={attachment.original_filename} aria-label={`${english ? "Open" : "Hap"} ${attachment.original_filename}`}
         className="flex h-11 w-[72px] items-center justify-center overflow-hidden rounded border border-slate-600 bg-white text-muted-foreground"
         onClick={() => isImage ? setOpen(true) : void download()}>
         {isImage && url ? <img src={url} alt="" className="h-full w-full object-cover" /> : isImage ? <ImageIcon className="size-4" aria-hidden="true" /> : <Paperclip className="size-4" aria-hidden="true" />}
       </button>
-      {onDelete && <button type="button" aria-label="Hiq skedarin" onClick={onDelete}
+      {onDelete && <button type="button" aria-label={t("Hiq skedarin")} onClick={onDelete}
         className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border bg-white text-xs shadow-sm hover:bg-muted" data-button-shape="circle">
         <X className="size-3" aria-hidden="true" />
       </button>}
@@ -56,15 +59,15 @@ export function AttachmentThumb({ attachment, onDelete }: { attachment: MeetingN
     {open && <Dialog open onOpenChange={setOpen}>
       <DialogContent className="max-w-4xl">
         <DialogHeader><DialogTitle className="truncate pr-8">{attachment.original_filename}</DialogTitle></DialogHeader>
-        {url ? <img src={url} alt={attachment.original_filename} className="max-h-[75vh] w-full rounded-md border object-contain" /> : <p className="text-sm text-muted-foreground">Duke ngarkuar…</p>}
-        <div className="flex justify-end"><Button variant="outline" onClick={() => void download()}>Shkarko</Button></div>
+        {url ? <img src={url} alt={attachment.original_filename} className="max-h-[75vh] w-full rounded-md border object-contain" /> : <p className="text-sm text-muted-foreground">{t("Duke ngarkuar…")}</p>}
+        <div className="flex justify-end"><Button variant="outline" onClick={() => void download()}>{t("Shkarko")}</Button></div>
       </DialogContent>
     </Dialog>}
   </>
 }
 
 /** Local preview of a screenshot that is not uploaded yet. */
-export function PendingThumb({ file, onRemove }: { file: File; onRemove: () => void }) {
+export function PendingThumb({ file, onRemove, english = false }: { english?: boolean; file: File; onRemove: () => void }) {
   const [url, setUrl] = React.useState<string | null>(null)
   React.useEffect(() => {
     const objectUrl = URL.createObjectURL(file)
@@ -75,7 +78,7 @@ export function PendingThumb({ file, onRemove }: { file: File; onRemove: () => v
     <span className="flex h-[76px] w-32 items-center justify-center overflow-hidden rounded-md border border-neutral-400 bg-slate-100">
       {url && file.type.startsWith("image/") ? <img src={url} alt={file.name} className="h-full w-full object-cover" /> : <span className="px-2 text-center text-xs text-muted-foreground">{file.name}</span>}
     </span>
-    <button type="button" aria-label={`Hiq ${file.name}`} onClick={onRemove}
+    <button type="button" aria-label={`${english ? "Remove" : "Hiq"} ${file.name}`} onClick={onRemove}
       className="absolute right-1 top-1 flex size-5 items-center justify-center rounded bg-white text-xs shadow-sm hover:bg-muted">
       <X className="size-3" aria-hidden="true" />
     </button>

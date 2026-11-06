@@ -24,6 +24,7 @@ from app.models.holiday import Holiday
 from app.models.internal_note import InternalNote
 from app.models.internal_meeting_session import InternalMeetingSession
 from app.models.meeting import Meeting, MeetingParticipant, MeetingReminderDelivery
+from app.models.meeting_client import MeetingClient
 from app.models.meeting_schedule_request import (
     MeetingScheduleApproval,
     MeetingScheduleRequest,

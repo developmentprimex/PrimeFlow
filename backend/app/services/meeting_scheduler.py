@@ -443,7 +443,10 @@ async def validate_meeting_schedule(
         (conflict for conflict in conflicts if conflict.source in {"tak_ext", "tak_ext_request"}),
         None,
     )
-    if external_conflict is not None and payload.meeting_type == "external":
+    if payload.meeting_type == "external" and getattr(payload, "conflicts_as_warnings", False):
+        if conflicts:
+            warnings.append("Ka një takim tjetër ose pjesëmarrës të zënë në këtë orar. Mund ta shtosh takimin gjithsesi.")
+    elif external_conflict is not None and payload.meeting_type == "external":
         conflict_start = external_conflict.starts_at.astimezone(_app_timezone()).strftime("%d.%m.%Y %H:%M")
         conflict_end = external_conflict.ends_at.astimezone(_app_timezone()).strftime("%H:%M")
         errors.append(

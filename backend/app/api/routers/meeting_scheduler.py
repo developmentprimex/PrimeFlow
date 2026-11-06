@@ -125,12 +125,13 @@ async def _with_microsoft_validation(
     request: Request,
     validation: MeetingScheduleValidationOut,
 ) -> MeetingScheduleValidationOut:
+    advisory = payload.meeting_type == "external" and getattr(payload, "conflicts_as_warnings", False)
     try:
         token = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
     except httpx.HTTPError:
         token = None
     if token is None:
-        if payload.meeting_type == "external":
+        if payload.meeting_type == "external" and not advisory:
             return validation.model_copy(
                 update={
                     "can_create": False,
@@ -170,7 +171,7 @@ async def _with_microsoft_validation(
             schedule, starts_at=checked_start, ends_at=checked_end
         )
     except httpx.HTTPError:
-        if payload.meeting_type == "external":
+        if payload.meeting_type == "external" and not advisory:
             return validation.model_copy(
                 update={
                     "can_create": False,
@@ -185,6 +186,13 @@ async def _with_microsoft_validation(
         )
     if not microsoft_conflicts:
         return validation
+    if advisory:
+        return validation.model_copy(
+            update={
+                "warnings": [*validation.warnings, "Intervali është i zënë në Microsoft Calendar. Mund ta shtosh takimin gjithsesi."],
+                "conflicts": [*validation.conflicts, *microsoft_conflicts],
+            }
+        )
     return validation.model_copy(
         update={
             "can_create": False,

@@ -3,12 +3,43 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class MeetingClientIdentification(BaseModel):
+    client_id: uuid.UUID | None = None
+    client_name: str | None = Field(default=None, max_length=200)
+
+    @field_validator("client_name")
+    @classmethod
+    def normalize_client_name(cls, value: str | None) -> str | None:
+        return " ".join((value or "").split()) or None
+
+
+class MeetingClientCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        name = " ".join(value.split())
+        if not name:
+            raise ValueError("Shkruaj emrin e klientit.")
+        return name
+
+
+class MeetingClientOut(BaseModel):
+    id: uuid.UUID
+    name: str
+
+    model_config = {"from_attributes": True}
 
 
 class MeetingOut(BaseModel):
     id: uuid.UUID
     title: str
+    client_name: str | None = None
+    client_id: uuid.UUID | None = None
     platform: str | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
@@ -40,7 +71,7 @@ class MeetingCreateOut(MeetingOut):
     paired_internal_meeting: MeetingOut | None = None
 
 
-class MeetingCreate(BaseModel):
+class MeetingCreate(MeetingClientIdentification):
     title: str = Field(min_length=2, max_length=200)
     platform: str | None = None
     starts_at: datetime | None = None

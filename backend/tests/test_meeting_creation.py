@@ -248,6 +248,7 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         external_starts_at = datetime(2026, 8, 25, 13, 0, tzinfo=timezone.utc)
         payload = MeetingCreate(
             title="Customer review",
+            client_name="  Kettler  ",
             starts_at=external_starts_at,
             internal_starts_at=datetime(2026, 8, 25, 12, 30, tzinfo=timezone.utc),
             create_internal_meeting=False,
@@ -258,11 +259,18 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
         db = _FakeDb(valid_user_ids=[participant_id])
 
-        result = await create_meeting(payload=payload, db=db, user=user)
+        client = SimpleNamespace(id=uuid.uuid4(), name="Kettler")
+        with patch("app.api.routers.meetings.resolve_meeting_client", new=AsyncMock(return_value=client)):
+            result = await create_meeting(payload=payload, db=db, user=user)
 
         meetings = [value for value in db.added if isinstance(value, Meeting)]
         self.assertEqual(len(meetings), 1)
         self.assertEqual(meetings[0].meeting_type, "external")
+        self.assertEqual(meetings[0].client_id, client.id)
+        self.assertEqual(result.client_id, client.id)
+        self.assertEqual(meetings[0].client_name, "Kettler")
+        self.assertEqual(result.client_name, "Kettler")
+        self.assertIsNone(meetings[0].project_id)
         self.assertIsNone(result.paired_internal_meeting)
 
     async def test_meeting_requires_at_least_one_person(self) -> None:

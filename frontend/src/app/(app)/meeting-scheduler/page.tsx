@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth";
+import { MeetingClientPicker, type MeetingClientSelection } from "@/components/meeting-notes/client-picker";
 
 type Department = { id: string; name: string };
 type UserLookup = {
@@ -136,6 +137,15 @@ const uniqueConflicts = (conflicts: Validation["conflicts"]) =>
     ).values(),
   );
 
+const warningSignature = (result: Validation | null) => result
+  ? JSON.stringify([
+      [...result.warnings].sort(),
+      uniqueConflicts(result.conflicts).map((conflict) =>
+        `${conflict.source}|${conflict.title}|${conflict.starts_at}|${conflict.ends_at}`,
+      ).sort(),
+    ])
+  : "";
+
 const meetingSchedulerError = async (
   response: Response,
   fallback: string,
@@ -238,6 +248,10 @@ export default function MeetingSchedulerPage() {
     React.useState("info@primexeu.com");
   const [loading, setLoading] = React.useState(true);
   const [validating, setValidating] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
+  const [meetingTitle, setMeetingTitle] = React.useState("");
+  const [clientSelection, setClientSelection] = React.useState<MeetingClientSelection | null>(null);
+  const [meetingUrl, setMeetingUrl] = React.useState("");
   const [validation, setValidation] = React.useState<Validation | null>(null);
   const validationRequestRef = React.useRef(0);
 
@@ -250,8 +264,12 @@ export default function MeetingSchedulerPage() {
   // Takimet: a training is scheduled as TAK INT and grouped under "Trajnime".
   const [isTraining, setIsTraining] = React.useState(false);
   const [standardId, setStandardId] = React.useState("");
-  const [selectedDate, setSelectedDate] = React.useState(isoDate(new Date()));
-  const [selectedTime, setSelectedTime] = React.useState("09:00");
+  const [initialSlot] = React.useState(() => {
+    const next = new Date(Math.ceil((Date.now() + 60_000) / 900_000) * 900_000);
+    return localDateTimeParts(next.toISOString());
+  });
+  const [selectedDate, setSelectedDate] = React.useState(initialSlot.date);
+  const [selectedTime, setSelectedTime] = React.useState(initialSlot.time);
   const [duration, setDuration] = React.useState(60);
   const [participantIds, setParticipantIds] = React.useState<string[]>(
     user?.id ? [user.id] : [],
@@ -333,18 +351,6 @@ export default function MeetingSchedulerPage() {
     void loadSchedule();
   }, [loadSchedule]);
 
-  React.useEffect(() => {
-    const matching = standards.find(
-      (standard) => standard.meeting_type === meetingType,
-    );
-    if (!matching) {
-      setStandardId("");
-      return;
-    }
-    setStandardId(matching.id);
-    setDuration(matching.default_duration_minutes);
-  }, [meetingType, standards]);
-
   const payload = React.useMemo(() => {
     const start = localDateTime(selectedDate, selectedTime);
     const end = new Date(start.getTime() + duration * 60_000);
@@ -352,14 +358,15 @@ export default function MeetingSchedulerPage() {
       title: meetingType === "external" ? "Kontroll TAK EXT" : isTraining ? "Trajnim" : "Kontroll TAK INT",
       meeting_type: meetingType,
       is_training: meetingType === "internal" && isTraining,
-      starts_at: start.toISOString(),
-      ends_at: end.toISOString(),
+      starts_at: Number.isNaN(start.getTime()) ? "" : start.toISOString(),
+      ends_at: Number.isNaN(end.getTime()) ? "" : end.toISOString(),
       platform: meetingType === "external" ? "Teams" : null,
       notes: null,
       department_id: departmentId,
       project_id: null,
       standard_id: standardId || null,
       participant_ids: participantIds,
+      conflicts_as_warnings: meetingType === "external",
     };
   }, [
     departmentId,
@@ -376,6 +383,8 @@ export default function MeetingSchedulerPage() {
     const missingFields = [
       !payload.department_id ? "departamentin" : "",
       !payload.participant_ids.length ? "të paktën një pjesëmarrës" : "",
+      !payload.starts_at || !payload.ends_at ? "datën dhe orën" : "",
+      duration < 5 || duration > 480 ? "kohëzgjatjen nga 5 deri në 480 minuta" : "",
     ].filter(Boolean);
     if (missingFields.length) {
       const message = `Plotëso ${missingFields.join(", ")} para validimit.`;
@@ -409,22 +418,96 @@ export default function MeetingSchedulerPage() {
             result.errors.join(" ") ||
             "Kontrollo konfliktet e shfaqura te rezultati i validimit.",
         });
+      } else if (notify && (result.warnings.length || result.conflicts.length)) {
+        toast.warning("Ka paralajmërime për këtë orar.", {
+          description: "Mund ta shtosh takimin gjithsesi.",
+        });
       } else if (notify) {
         toast.success("Orari është i lirë për këtë takim.");
       }
       return result;
+    } catch {
+      const message = "Kontrolli i orarit dështoi. Kontrollo lidhjen dhe provo përsëri.";
+      if (requestId === validationRequestRef.current) setValidation(validationFailure(message));
+      if (notify) toast.error(message);
+      return null;
     } finally {
       if (requestId === validationRequestRef.current) setValidating(false);
     }
-  }, [apiFetch, payload]);
+  }, [apiFetch, duration, payload]);
 
   React.useEffect(() => {
-    if (!payload.department_id || !payload.participant_ids.length) return;
-    const timeout = window.setTimeout(() => void validate(false), 450);
-    return () => window.clearTimeout(timeout);
+    // Invalidate both the visible result and any in-flight response for old inputs.
+    validationRequestRef.current += 1;
+    const timeout = window.setTimeout(() => {
+      setValidation(null);
+      void validate(false);
+    }, 450);
+    return () => {
+      window.clearTimeout(timeout);
+      validationRequestRef.current += 1;
+    };
   }, [payload, validate]);
 
   const oneHConflicts = validation?.conflicts.filter((conflict) => conflict.source === "one_h") || [];
+  const hasWarnings = Boolean(validation && (validation.warnings.length || validation.conflicts.length));
+  const createExternalMeeting = async () => {
+    if (creating) return;
+    if (meetingTitle.trim().length < 2) {
+      toast.error("Shkruaj emrin e takimit.");
+      return;
+    }
+    if (clientSelection && !clientSelection.name.trim()) {
+      toast.error("Shkruaj emrin e klientit të ri.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const result = await validate(false);
+      if (!result) return;
+      if (!result.can_create) {
+        toast.error("Takimi nuk mund të shtohet.", { description: result.errors.join(" ") });
+        return;
+      }
+      if ((result.warnings.length || result.conflicts.length) && warningSignature(result) !== warningSignature(validation)) {
+        toast.warning("Kontrollo paralajmërimet dhe shtyp Shto gjithsesi për të vazhduar.");
+        return;
+      }
+      const response = await apiFetch("/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: meetingTitle.trim(),
+          client_id: clientSelection?.id || null,
+          client_name: clientSelection?.name.trim() || null,
+          meeting_type: "external",
+          starts_at: payload.starts_at,
+          ends_at: payload.ends_at,
+          department_id: departmentId,
+          participant_ids: participantIds,
+          platform: "Teams",
+          meeting_url: meetingUrl.trim() || null,
+          create_internal_meeting: false,
+          allow_one_h_conflict: result.conflicts.some((conflict) => conflict.source === "one_h"),
+        }),
+      });
+      if (!response.ok) {
+        toast.error("Takimi nuk u shtua.", { description: await meetingSchedulerError(response, "Provo përsëri.") });
+        return;
+      }
+      setMeetingTitle("");
+      setClientSelection(null);
+      setMeetingUrl("");
+      setValidation(null);
+      setWeekStart(mondayFor(new Date(payload.starts_at)));
+      toast.success("Takimi extern u shtua.");
+      await loadSchedule().catch(() => toast.warning("Takimi u shtua, por kalendari nuk u rifreskua. Rifresko faqen."));
+    } catch {
+      toast.error("Takimi nuk u shtua. Kontrollo lidhjen dhe provo përsëri.");
+    } finally {
+      setCreating(false);
+    }
+  };
   const applySuggestedSlot = () => {
     if (!validation?.suggested_slot) return;
     const next = localDateTimeParts(validation.suggested_slot.starts_at);
@@ -522,8 +605,8 @@ export default function MeetingSchedulerPage() {
             Meeting Scheduler
           </h1>
           <p className="text-sm text-slate-500">
-            Kontrollo nëse një orar është i lirë për TAK INT ose TAK EXT. Kjo
-            faqe nuk krijon takim dhe nuk i dërgon ftesë klientit.
+            Shto një takim extern ose kontrollo orarin e takimeve.
+            Kur ka mbivendosje, mund të vazhdosh pas paralajmërimit.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -649,12 +732,28 @@ export default function MeetingSchedulerPage() {
 
       <Card id="meeting-request-form">
           <CardHeader>
-            <CardTitle>Kontrollo orarin e takimit</CardTitle>
+            <CardTitle>{meetingType === "external" ? "Shto takim extern" : "Kontrollo orarin e takimit"}</CardTitle>
             <CardDescription>
               {selectedDate} në {selectedTime}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {meetingType === "external" && <div className="grid gap-4 md:grid-cols-3">
+              <div>
+                <Label htmlFor="scheduler-meeting-title">Emri i takimit</Label>
+                <Input id="scheduler-meeting-title" value={meetingTitle} onChange={(event) => setMeetingTitle(event.target.value)} placeholder="Shkruaj emrin e takimit" disabled={creating} />
+              </div>
+              <div>
+                <Label htmlFor="scheduler-client-name">Klienti (opsional)</Label>
+                <MeetingClientPicker id="scheduler-client-name" value={clientSelection} onChange={setClientSelection} disabled={creating} />
+                <p className="mt-1 text-xs text-muted-foreground">Zgjidh klientin ekzistues ose shto një të ri.</p>
+              </div>
+              <div>
+                <Label htmlFor="scheduler-meeting-url">Linku i takimit (opsional)</Label>
+                <Input id="scheduler-meeting-url" type="url" value={meetingUrl} onChange={(event) => setMeetingUrl(event.target.value)} placeholder="https://…" disabled={creating} />
+              </div>
+            </div>}
+            <fieldset disabled={creating} className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
               <div>
                 <Label>Lloji</Label>
@@ -662,16 +761,10 @@ export default function MeetingSchedulerPage() {
                   value={meetingType}
                   onValueChange={(value) => {
                     const nextType = value as "internal" | "external";
-                    const matching = standards.find(
-                      (item) => item.meeting_type === nextType,
-                    );
                     setMeetingType(nextType);
+                    setStandardId("");
+                    setDuration(nextType === "external" ? 60 : 30);
                     if (nextType === "external") setIsTraining(false);
-                    setStandardId(matching?.id || "");
-                    setDuration(
-                      matching?.default_duration_minutes ||
-                        (nextType === "external" ? 60 : 30),
-                    );
                     setValidation(null);
                   }}
                 >
@@ -719,11 +812,11 @@ export default function MeetingSchedulerPage() {
                 </Select>
               </div>
               <div>
-                <Label>Standardi</Label>
+                <Label>Rregullat e orarit (opsionale)</Label>
                 <Select
-                  value={standardId}
+                  value={standardId || "none"}
                   onValueChange={(value) => {
-                    setStandardId(value);
+                    setStandardId(value === "none" ? "" : value);
                     setValidation(null);
                     const selected = standards.find(
                       (item) => item.id === value,
@@ -736,6 +829,7 @@ export default function MeetingSchedulerPage() {
                     <SelectValue placeholder="Pa standard" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="none">Pa rregulla shtesë</SelectItem>
                     {standards
                       .filter((item) => item.meeting_type === meetingType)
                       .map((standard) => (
@@ -745,6 +839,7 @@ export default function MeetingSchedulerPage() {
                       ))}
                   </SelectContent>
                 </Select>
+                <p className="mt-1 text-xs text-muted-foreground">Profili cakton kohëzgjatjen, orarin e punës dhe pauzën mes takimeve.</p>
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
@@ -765,7 +860,7 @@ export default function MeetingSchedulerPage() {
                   type="time"
                   step={900}
                   value={selectedTime}
-                  className={oneHConflicts.length ? "border-red-500 bg-red-50 text-red-800 focus-visible:ring-red-500" : undefined}
+                  className={oneHConflicts.length ? meetingType === "external" ? "border-amber-500 bg-amber-50 text-amber-800" : "border-red-500 bg-red-50 text-red-800 focus-visible:ring-red-500" : undefined}
                   onChange={(event) => {
                     setSelectedTime(event.target.value);
                     setValidation(null);
@@ -822,14 +917,16 @@ export default function MeetingSchedulerPage() {
                 ))}
               </div>
             </div>
+            </fieldset>
             {validation && (
               <div
-                className={`rounded-lg border p-3 text-sm ${validation.can_create ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}
+                role={validation.can_create ? "status" : "alert"}
+                className={`rounded-lg border p-3 text-sm ${!validation.can_create ? "border-red-200 bg-red-50" : hasWarnings ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}
               >
                 <div className="mb-1 font-semibold">
                   {validation.can_create
-                    ? "Orari është i lirë"
-                    : "Ka konflikt në këtë orar"}
+                    ? hasWarnings ? "Paralajmërim — mund ta shtosh takimin gjithsesi" : "Orari është i lirë"
+                    : "Kontrollo të dhënat e takimit"}
                 </div>
                 {validation.errors.map((message) => (
                   <div key={message} className="text-red-700">
@@ -841,12 +938,13 @@ export default function MeetingSchedulerPage() {
                     • {message}
                   </div>
                 ))}
-                {uniqueConflicts(validation.conflicts).filter((conflict) => conflict.source !== "one_h").map((conflict, index) => (
+                {uniqueConflicts(validation.conflicts).map((conflict, index) => (
                   <div
                     key={`${conflict.source}-${conflict.starts_at}-${conflict.ends_at}-${index}`}
                     className="mt-1 text-xs"
                   >
                     {conflict.source === "one_h" ? "1H" : conflict.source}: {conflict.title}
+                    {` (${new Date(conflict.starts_at).toLocaleString("sq-AL")} – ${new Date(conflict.ends_at).toLocaleTimeString("sq-AL", { hour: "2-digit", minute: "2-digit" })})`}
                     {conflict.participant_ids?.length
                       ? ` — ${conflict.participant_ids.map((id) => {
                           const participant = users.find((candidate) => candidate.id === id);
@@ -856,19 +954,23 @@ export default function MeetingSchedulerPage() {
                   </div>
                 ))}
                 {validation.suggested_slot ? (
-                  <Button className="mt-3" size="sm" variant="outline" onClick={applySuggestedSlot}>
+                  <Button className="mt-3" size="sm" variant="outline" onClick={applySuggestedSlot} disabled={creating}>
                     Përdor orarin e lirë {localDateTimeParts(validation.suggested_slot.starts_at).time}
                   </Button>
                 ) : null}
               </div>
             )}
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
               <Button
+                variant="outline"
                 onClick={() => void validate(true)}
-                disabled={validating}
+                disabled={validating || creating}
               >
                 {validating ? "Duke kontrolluar…" : "Kontrollo orarin"}
               </Button>
+              {meetingType === "external" && <Button onClick={() => void createExternalMeeting()} disabled={creating || validating || Boolean(validation && !validation.can_create)}>
+                {creating ? "Duke shtuar…" : hasWarnings ? "Shto gjithsesi" : "Shto takim extern"}
+              </Button>}
             </div>
           </CardContent>
         </Card>

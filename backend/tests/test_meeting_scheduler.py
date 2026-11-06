@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -196,7 +197,8 @@ def test_primeflow_pv_meeting_does_not_block_external_meeting() -> None:
     assert result.conflicts == []
 
 
-def test_external_meeting_blocks_overlapping_external_without_shared_participants() -> None:
+@pytest.mark.parametrize("advisory", [False, True])
+def test_external_overlap_warns_only_when_scheduler_requests_advisory_validation(advisory) -> None:
     start = (datetime.now(timezone.utc) + timedelta(days=10)).replace(hour=6, minute=0, second=0, microsecond=0)
     existing = Meeting(
         title="TAK EXT | Existing client",
@@ -220,13 +222,18 @@ def test_external_meeting_blocks_overlapping_external_without_shared_participant
     payload = MeetingScheduleValidationIn(**_base_payload(
         starts_at=start + timedelta(minutes=30),
         ends_at=start + timedelta(minutes=45),
+        conflicts_as_warnings=advisory,
     ))
 
     result = asyncio.run(validate_meeting_schedule(db, payload))
 
-    assert result.can_create is False
+    assert result.can_create is advisory
     assert any(conflict.source == "tak_ext" for conflict in result.conflicts)
-    assert any("TAK EXT" in error for error in result.errors)
+    if advisory:
+        assert result.errors == []
+        assert result.warnings
+    else:
+        assert any("TAK EXT" in error for error in result.errors)
 
 
 def test_global_one_h_conflict_uses_fifteen_minute_window_and_boundaries() -> None:
@@ -340,3 +347,80 @@ def test_validation_returns_one_h_conflict_and_first_free_suggestion() -> None:
     assert any(conflict.source == "one_h" for conflict in result.conflicts)
     assert result.suggested_slot is not None
     assert result.suggested_slot.starts_at.astimezone(local_tz).strftime("%H:%M") == "10:15"
+
+
+@pytest.mark.parametrize("advisory", [False, True])
+@pytest.mark.parametrize("availability", ["busy", "disconnected", "unavailable"])
+def test_microsoft_conflicts_are_advisory_only_for_scheduler(monkeypatch, advisory, availability) -> None:
+    import httpx
+    from app.api.routers import meeting_scheduler as router
+    from app.schemas.meeting_scheduler import MeetingScheduleValidationOut
+
+    payload = MeetingScheduleValidationIn(**_base_payload(conflicts_as_warnings=advisory))
+    token = None if availability == "disconnected" else SimpleNamespace(access_token="test-token")
+    monkeypatch.setattr(router, "get_shared_calendar_token", AsyncMock(return_value=token))
+    monkeypatch.setattr(router, "resolve_redirect_uri", lambda request: "http://localhost/callback")
+    fetch = AsyncMock(return_value=[{
+        "scheduleId": "person@example.com",
+        "scheduleItems": [{
+            "status": "busy",
+            "start": {"dateTime": payload.starts_at.isoformat()},
+            "end": {"dateTime": payload.ends_at.isoformat()},
+        }],
+    }])
+    if availability == "unavailable":
+        fetch.side_effect = httpx.HTTPError("Unavailable")
+    monkeypatch.setattr(router, "fetch_calendar_schedule", fetch)
+    original = MeetingScheduleValidationOut(can_create=True, checked_at=datetime.now(timezone.utc))
+    db = _ValidationDb([["person@example.com"]])
+    result = asyncio.run(router._with_microsoft_validation(
+        db, payload=payload, request=SimpleNamespace(), validation=original,
+    ))
+    assert result.can_create is advisory
+    assert bool(result.warnings) is advisory
+    assert bool(result.errors) is (not advisory)
+    assert bool(result.conflicts) is (availability == "busy")
+
+
+def test_advisory_conflicts_do_not_override_invalid_participants_or_past_dates() -> None:
+    start = (datetime.now(timezone.utc) - timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0)
+    db = _ValidationDb([[], [], [], [], []])
+    payload = MeetingScheduleValidationIn(**_base_payload(
+        starts_at=start, ends_at=start + timedelta(hours=1), conflicts_as_warnings=True,
+    ))
+    result = asyncio.run(validate_meeting_schedule(db, payload))
+    assert result.can_create is False
+    assert any("pjesëmarrës" in error for error in result.errors)
+    assert any("kaluarën" in error for error in result.errors)
+
+
+def test_scheduler_can_continue_with_one_h_participant_and_pending_request_conflicts(monkeypatch) -> None:
+    from app.schemas.meeting_scheduler import MeetingScheduleConflict
+    from app.services import meeting_scheduler as service
+
+    payload = MeetingScheduleValidationIn(**_base_payload(conflicts_as_warnings=True))
+    participant_id = payload.participant_ids[0]
+    meeting = Meeting(
+        id=uuid.uuid4(), title="Existing internal", meeting_type="internal",
+        starts_at=payload.starts_at, ends_at=payload.ends_at, department_id=payload.department_id,
+    )
+    pending = SimpleNamespace(
+        id=uuid.uuid4(), title="Pending external", meeting_type="external",
+        starts_at=payload.starts_at, ends_at=payload.ends_at,
+    )
+    one_h = MeetingScheduleConflict(
+        source="one_h", title="1H", starts_at=payload.starts_at, ends_at=payload.ends_at,
+    )
+    monkeypatch.setattr(service, "one_h_schedule_conflicts", AsyncMock(return_value=(
+        [one_h], [(payload.starts_at, payload.ends_at)],
+    )))
+    monkeypatch.setattr(service, "common_availability_blockers", AsyncMock(return_value=[]))
+    db = _ValidationDb([
+        [SimpleNamespace(id=participant_id, is_active=True)],
+        [(meeting, participant_id)], [], [(pending, participant_id)], [],
+    ])
+    result = asyncio.run(validate_meeting_schedule(db, payload))
+    assert result.can_create is True
+    assert result.errors == []
+    assert result.warnings
+    assert {conflict.source for conflict in result.conflicts} == {"one_h", "primeflow", "tak_ext_request"}

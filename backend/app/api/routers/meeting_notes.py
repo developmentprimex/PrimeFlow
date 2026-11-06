@@ -26,6 +26,7 @@ from app.config import settings
 from app.db import get_db
 from app.models.ga_note_attachment import GaNoteAttachment
 from app.models.meeting import Meeting
+from app.models.meeting_client import MeetingClient
 from app.models.meeting_note import MeetingNote, MeetingNoteAttachment
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.meeting_recording import MeetingRecording
@@ -33,6 +34,8 @@ from app.models.project import Project
 from app.models.recording_analysis import RecordingAction, RecordingAnalysis
 from app.models.task import Task
 from app.schemas.ga_note import GaNoteCreate
+from app.schemas.meeting import MeetingClientIdentification, MeetingClientCreate, MeetingClientOut
+from app.services.meeting_clients import resolve_meeting_client
 from app.services.ga_note_creation import build_ga_note
 from app.services.meeting_occurrence import meeting_occurs_on_date
 from app.services.meeting_participants import manual_participant_ids, meeting_to_out
@@ -324,6 +327,17 @@ async def _reload(db: AsyncSession, note_id: uuid.UUID) -> MeetingNote:
 
 # ---------------------------------------------------------------- meetings
 
+@router.get("/clients", response_model=list[MeetingClientOut])
+async def list_clients(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return (await db.execute(select(MeetingClient).order_by(MeetingClient.name_key))).scalars().all()
+
+
+@router.post("/clients", response_model=MeetingClientOut)
+async def create_client(payload: MeetingClientCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    client = await resolve_meeting_client(db, client_name=payload.name, actor_id=user.id)
+    await db.commit()
+    return client
+
 @router.get("/overview")
 async def meetings_overview(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """Meetings for the Takimet list with next session and task counts."""
@@ -434,6 +448,22 @@ async def set_training(meeting_id: uuid.UUID, payload: TrainingIn, db: AsyncSess
     meeting.is_training = payload.is_training
     await db.commit()
     return {"id": meeting.id, "is_training": meeting.is_training}
+
+
+@router.patch("/meetings/{meeting_id}/client")
+async def set_client_identification(
+    meeting_id: uuid.UUID,
+    payload: MeetingClientIdentification,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Any authenticated user can edit this local identification, like meeting notes."""
+    meeting = await _get_meeting(db, meeting_id)
+    client = await resolve_meeting_client(db, client_id=payload.client_id, client_name=payload.client_name, actor_id=user.id)
+    meeting.client_id = client.id if client else None
+    meeting.client_name = client.name if client else None
+    await db.commit()
+    return {"id": meeting.id, "client_id": meeting.client_id, "client_name": meeting.client_name}
 
 
 # ---------------------------------------------------------------- notes

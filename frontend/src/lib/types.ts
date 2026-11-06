@@ -755,6 +755,8 @@ export interface Notification {
 export interface Meeting {
   id: string
   title: string
+  client_name?: string | null
+  client_id?: string | null
   platform?: string | null
   starts_at?: string | null
   ends_at?: string | null

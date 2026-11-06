@@ -56,6 +56,7 @@ class MeetingScheduleRequestBase(BaseModel):
 class MeetingScheduleValidationIn(MeetingScheduleRequestBase):
     exclude_request_id: uuid.UUID | None = None
     check_all_meetings: bool = False
+    conflicts_as_warnings: bool = False
 
 
 class MeetingScheduleConflict(BaseModel):

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { meetingTranslator } from "@/lib/meeting-notes-language"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { Mic } from "lucide-react"
@@ -30,6 +31,8 @@ export default function ClientHistoryPage() {
   const [period, setPeriod] = React.useState<Period>("month")
   const [source, setSource] = React.useState<Source>("all")
   const [data, setData] = React.useState<History | null>(null)
+  const english = Boolean(data?.meetings.length && data.meetings.every((meeting) => meeting.kind === "EXTERNAL"))
+  const t = meetingTranslator(english)
   const [error, setError] = React.useState("")
   const [loading, setLoading] = React.useState(true)
   const days = PERIODS.find(([key]) => key === period)?.[2] ?? 31
@@ -63,9 +66,9 @@ export default function ClientHistoryPage() {
   const canceled = data?.sessions.filter((s) => s.status === "canceled").length ?? 0
   const count = (status: string) => shown.filter((n) => n.task_status === status).length
   const chips: [string, number, string][] = [
-    [`Seanca (${canceled} anuluar)`, held, "bg-white rounded-md border-neutral-200"],
-    ["Manuale", shown.filter((n) => n.source === "MANUAL").length, "bg-white rounded-md border-neutral-200"],
-    ["Nga regjistrimi", shown.filter((n) => n.source === "RECORDING").length, "bg-violet-50 text-violet-800 rounded-md border-neutral-200"],
+    [english ? `Sessions (${canceled} canceled)` : `Seanca (${canceled} anuluar)`, held, "bg-white rounded-md border-neutral-200"],
+    [t("Manuale"), shown.filter((n) => n.source === "MANUAL").length, "bg-white rounded-md border-neutral-200"],
+    [t("Nga regjistrimi"), shown.filter((n) => n.source === "RECORDING").length, "bg-violet-50 text-violet-800 rounded-md border-neutral-200"],
     ["TODO", count("TODO"), "bg-pink-200 border-slate-600"],
     ["IN PROGRESS", count("IN_PROGRESS"), "bg-yellow-200 border-slate-600"],
     ["WFE", count("WAITING_CLIENT"), "bg-[#E2C15B] text-[#4F3A00] border-slate-600"],
@@ -74,44 +77,45 @@ export default function ClientHistoryPage() {
 
   return <div className="w-full space-y-4">
     <div className="space-y-1">
-      <Link href="/meetings" className="text-sm text-muted-foreground">← Takimet</Link>
-      <h1 className="text-2xl font-semibold">{data?.project.title || "Klienti"} · Historia e klientit</h1>
-      <p className="text-muted-foreground">Shënimet dhe detyrat nga të gjitha takimet me këtë klient, sipas seancës.</p>
+      <Link href="/meetings" className="text-sm text-muted-foreground">{t("← Takimet")}</Link>
+      <h1 className="text-2xl font-semibold">{data?.project.title || t("Klienti")} · {t("Historia e klientit")}</h1>
+      <p className="text-muted-foreground">{t("Shënimet dhe detyrat nga të gjitha takimet me këtë klient, sipas seancës.")}</p>
     </div>
 
     <div className="flex flex-wrap items-center gap-3">
-      <div role="tablist" aria-label="Periudha" className="inline-flex flex-wrap gap-0.5 rounded-xl bg-muted p-[3px]">
+      <div role="tablist" aria-label={t("Periudha")} className="inline-flex flex-wrap gap-0.5 rounded-xl bg-muted p-[3px]">
         {PERIODS.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={period === key} onClick={() => setPeriod(key)}
-          className={`h-[30px] rounded-[9px] px-3 text-sm font-medium ${period === key ? "bg-white shadow-sm" : "text-neutral-600"}`}>{label}</button>)}
+          className={`h-[30px] rounded-[9px] px-3 text-sm font-medium ${period === key ? "bg-white shadow-sm" : "text-neutral-600"}`}>{t(label)}</button>)}
       </div>
       <span className="tabular-nums text-muted-foreground">{dmy(from)} – {dmy(to)}</span>
-      <div className="inline-flex flex-wrap gap-1.5" aria-label="Burimi">
+      <div className="inline-flex flex-wrap gap-1.5" aria-label={t("Burimi")}>
         {([["all", "Të gjitha", all.length], ["manual", "Manuale", all.length - recN], ["recording", "Nga regjistrimi", recN]] as [Source, string, number][]).map(([key, label, n]) =>
           <button key={key} type="button" aria-pressed={source === key} onClick={() => setSource(key)}
-            className={`h-8 rounded-full border px-3 text-[13px] font-medium ${source === key ? key === "recording" ? "border-violet-600 bg-violet-100 text-violet-800" : "border-neutral-900 bg-muted" : "bg-white"}`}>{label} <span className="opacity-70">{n}</span></button>)}
+            className={`h-8 rounded-full border px-3 text-[13px] font-medium ${source === key ? key === "recording" ? "border-violet-600 bg-violet-100 text-violet-800" : "border-neutral-900 bg-muted" : "bg-white"}`}>{t(label)} <span className="opacity-70">{n}</span></button>)}
       </div>
     </div>
 
     <div className="flex flex-wrap gap-1">{chips.map(([label, n, cls]) => <span key={label} className={`border px-2 py-1 text-xs font-bold ${cls}`}>{label} {n}</span>)}</div>
 
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {loading ? <p role="status" className="text-sm text-muted-foreground">Duke ngarkuar…</p> : <div className="space-y-5">
+    {error && <p role="alert" className="text-sm text-destructive">{t(error)}</p>}
+    {loading ? <p role="status" className="text-sm text-muted-foreground">{t("Duke ngarkuar…")}</p> : <div className="space-y-5">
       {data?.sessions.map((s) => {
         const notes = s.notes.filter(pass)
+        const sessionText = meetingTranslator(s.meeting.kind === "EXTERNAL")
         if (!notes.length && s.status !== "canceled") return null
         return <section key={`${s.meeting.id}-${s.date}`} className="space-y-2">
           <div className={`flex flex-wrap items-center gap-x-3.5 gap-y-1 rounded-md border px-3 py-2 ${s.status === "canceled" ? "bg-muted text-muted-foreground" : "bg-slate-50"}`}>
             <strong className="tabular-nums">{dmy(s.date)}</strong>
             <Link href={`/meetings/${s.meeting.id}?date=${s.date}`} className="underline">{s.meeting.title}</Link>
             <span className="rounded-md border px-1.5 text-xs font-semibold">{KIND_LABEL[s.meeting.kind]}</span>
-            <span className="text-[13px] text-neutral-600">{s.status === "canceled" ? "Anuluar → shënimet e hapura kaluan te seanca e radhës" : s.status === "held" ? "Mbajtur" : ""}</span>
-            {s.recordings.map((rec) => <Link key={rec.id} href={`/meeting-recordings/${rec.id}`} className="inline-flex items-center gap-1 text-[13px] text-violet-800 underline"><Mic className="size-3.5" aria-hidden="true" />Regjistrimi {clock(rec.duration_seconds)}</Link>)}
+            <span className="text-[13px] text-neutral-600">{s.status === "canceled" ? sessionText("Anuluar → shënimet e hapura kaluan te seanca e radhës") : s.status === "held" ? sessionText("Mbajtur") : ""}</span>
+            {s.recordings.map((rec) => <Link key={rec.id} href={`/meeting-recordings/${rec.id}`} className="inline-flex items-center gap-1 text-[13px] text-violet-800 underline"><Mic className="size-3.5" aria-hidden="true" />{s.meeting.kind === "EXTERNAL" ? "Recording" : "Regjistrimi"} {clock(rec.duration_seconds)}</Link>)}
           </div>
           {notes.length > 0 && <NotesTable notes={notes} kind={s.meeting.kind} users={users} onChanged={replaceNote} onRemoved={removeNote} onTasksChanged={() => void load()} />}
         </section>
       })}
-      {!shown.length && <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">Nuk ka shënime për këtë periudhë.</p>}
+      {!shown.length && <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">{t("Nuk ka shënime për këtë periudhë.")}</p>}
     </div>}
-    <StatusLegend />
+    <StatusLegend english={english} />
   </div>
 }

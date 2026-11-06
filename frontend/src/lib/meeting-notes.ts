@@ -99,6 +99,21 @@ export function dmy(value: string | null | undefined): string {
   return y && m && d ? `${d}.${m}.${y}` : value
 }
 
+/** Manual meeting-note deadline: DDMMYYYY or DD.MM.YYYY; undefined means invalid. */
+export function parseMeetingNoteDueDate(value: string): string | null | undefined {
+  const text = value.trim()
+  if (!text) return null
+  const match = /^(\d{2})(\d{2})(\d{4})$/.exec(text) || /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(text)
+  if (!match) return undefined
+  const [, day, month, year] = match
+  const d = Number(day), m = Number(month), y = Number(year)
+  if (y < 1 || m < 1 || m > 12 || d < 1) return undefined
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (d > days[m - 1]) return undefined
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
+}
+
 export function shortDm(value: string): string {
   const [, m, d] = value.slice(0, 10).split("-")
   return `${d}.${m}`
@@ -126,6 +141,6 @@ export async function readError(response: Response, fallback: string): Promise<s
 /** Column titles: EXT meetings show the client-facing English headers. */
 export function noteColumns(kind: MeetingKind) {
   return kind === "EXTERNAL"
-    ? { nr: "NO.", source: "SOURCE", note: "QUESTION / ISSUE", answer: "ANSWER / DECISION", owner: "OWNER", due: "DEADLINE", status: "STATUS" }
-    : { nr: "NR", source: "BURIMI", note: "SHËNIMI / PYETJA", answer: "VENDIMI", owner: "KUSH", due: "AFATI", status: "STATUSI" }
+    ? { nr: "NO.", source: "SOURCE", note: "QUESTION / CASE", answer: "ANSWER", owner: "OWNER", due: "DEADLINE", status: "STATUS" }
+    : { nr: "NR", source: "BURIMI", note: "SHËNIMI / PYETJA", answer: "PËRSHKRIMI / PËRGJIGJJA", owner: "KUSH", due: "AFATI", status: "STATUSI" }
 }
