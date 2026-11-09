@@ -142,12 +142,15 @@ def _adjust_due_datetime_local(
 async def _system_task_user_maps(
     db: AsyncSession,
     user_ids: set[uuid.UUID],
+    *,
+    active_only: bool = False,
 ) -> tuple[dict[uuid.UUID, uuid.UUID | None], dict[uuid.UUID, str]]:
     if not user_ids:
         return {}, {}
-    rows = (
-        await db.execute(select(User.id, User.department_id, User.email).where(User.work_staff_filter()).where(User.id.in_(user_ids)))
-    ).all()
+    stmt = select(User.id, User.department_id, User.email).where(User.work_staff_filter()).where(User.id.in_(user_ids))
+    if active_only:
+        stmt = stmt.where(User.is_active.is_(True))
+    rows = (await db.execute(stmt)).all()
     return (
         {user_id: department_id for user_id, department_id, _ in rows},
         {user_id: (email or "").strip().lower() for user_id, _, email in rows},
@@ -162,6 +165,7 @@ def _replacement_user_for_occurrence(
     leave_by_user: dict[uuid.UUID, list[tuple[date, date]]],
     all_users_ranges: list[tuple[date, date]],
     user_email_map: dict[uuid.UUID, str],
+    eligible_user_ids: set[uuid.UUID] | None = None,
 ) -> tuple[uuid.UUID | None, SystemTaskTemplateAssigneeSlot | object | None]:
     if not slots:
         return None, None
@@ -195,6 +199,8 @@ def _replacement_user_for_occurrence(
         getattr(template, "zv2_user_id", None),
     ):
         if replacement_id is None:
+            continue
+        if eligible_user_ids is not None and replacement_id not in eligible_user_ids:
             continue
         if not _assignee_on_full_day_leave(
             replacement_id,
@@ -304,7 +310,7 @@ async def generate_system_task_instances(
         return 0
 
     all_user_ids = {slot.primary_user_id for slot, _ in slot_rows}
-    department_map, _ = await _system_task_user_maps(db, all_user_ids)
+    department_map, _ = await _system_task_user_maps(db, all_user_ids, active_only=True)
 
     rows_by_template: dict[
         uuid.UUID,
@@ -328,14 +334,18 @@ async def generate_system_task_instances(
         range_start = start
         slots_by_occurrence: dict[datetime, list[SystemTaskTemplateAssigneeSlot]] = {}
         for slot in template_slots:
-            if slot.primary_user_id not in department_map:
-                continue
+            eligible = slot.primary_user_id in department_map
+            # Inactive accounts consume only elapsed days, not the lookahead:
+            # they may be reactivated before those future runs are due.
+            slot_range_end = range_end if eligible else min(range_end, now_utc.astimezone(tz).date())
             next_run = slot.next_run_at or first_run_at(template, now_utc)
             while True:
                 occurrence_day = next_run.astimezone(tz).date()
-                if occurrence_day > range_end:
+                if occurrence_day > slot_range_end:
                     break
-                if range_start is None or occurrence_day >= range_start:
+                # Consume skipped runs too, so reactivation does not backfill
+                # the period when this account was inactive.
+                if eligible and (range_start is None or occurrence_day >= range_start):
                     slots_by_occurrence.setdefault(next_run, []).append(slot)
                 next_run = next_occurrence(template, next_run)
             slot.next_run_at = next_run
@@ -455,7 +465,7 @@ async def reconcile_system_task_assignments_for_day(
         )
         if replacement_id is not None
     )
-    department_map, user_email_map = await _system_task_user_maps(db, user_ids)
+    department_map, user_email_map = await _system_task_user_maps(db, user_ids, active_only=True)
     annual_leave_entries = (
         await db.execute(select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave))
     ).scalars().all()
@@ -490,11 +500,17 @@ async def reconcile_system_task_assignments_for_day(
             leave_by_user=leave_by_user,
             all_users_ranges=all_users_ranges,
             user_email_map=user_email_map,
+            eligible_user_ids=set(department_map),
         )
         if replacement_id in department_map and source_slot is not None:
             expected[source_slot.id] = replacement_id
 
         for task, slot in task_slots:
+            # Do not rewrite existing history for inactive accounts. They also
+            # cannot receive newly generated tasks via PV/ZV reassignment.
+            if slot.primary_user_id not in department_map:
+                counts["skipped"] += 1
+                continue
             if not _task_can_be_daily_reconciled(task, template=template, slot=slot):
                 counts["skipped"] += 1
                 continue

@@ -297,7 +297,7 @@ class TestSystemTaskLeaveGeneration(IsolatedAsyncioTestCase):
         with (
             patch(
                 "app.services.system_task_instances._system_task_user_maps",
-                new=AsyncMock(return_value=({zv1_id: uuid.uuid4()}, {})),
+                new=AsyncMock(return_value=({primary_id: None, zv1_id: uuid.uuid4(), zv2_id: None}, {})),
             ),
             patch(
                 "app.services.system_task_instances._replace_generated_task_assignee",
@@ -380,7 +380,7 @@ class TestSystemTaskLeaveGeneration(IsolatedAsyncioTestCase):
             patch("app.services.system_task_instances.ensure_slots_initialized", new=AsyncMock()),
             patch(
                 "app.services.system_task_instances._system_task_user_maps",
-                new=AsyncMock(return_value=({zv1_id: uuid.uuid4()}, {})),
+                new=AsyncMock(return_value=({first_id: None, second_id: None, zv1_id: uuid.uuid4()}, {})),
             ),
             patch("app.services.system_task_instances.template_tz", return_value=timezone.utc),
             patch("app.services.system_task_instances.template_due_time", return_value=occurrence.time()),

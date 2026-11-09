@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.db import SessionLocal
+from app.services.inactive_system_tasks import cleanup_inactive_user_system_tasks
 from app.services.meeting_system_tasks import (
     reconcile_external_meeting_system_tasks,
     reconcile_tak_int_one_h_tasks,
@@ -22,6 +23,7 @@ def _reconciliation_range(now_utc: datetime) -> tuple[date, date]:
 
 async def generate_system_tasks() -> int:
     async with SessionLocal() as db:
+        await cleanup_inactive_user_system_tasks(db)
         now_utc = datetime.now(timezone.utc)
         created = await generate_system_task_instances(db=db, now_utc=now_utc)
         created += await reconcile_external_meeting_system_tasks(db=db, now_utc=now_utc)
@@ -43,6 +45,7 @@ async def pregenerate_system_tasks_today() -> int:
 
 async def reconcile_system_task_slots_daily() -> dict[str, int]:
     async with SessionLocal() as db:
+        await cleanup_inactive_user_system_tasks(db)
         now_utc = datetime.now(timezone.utc)
         start, end = _reconciliation_range(now_utc)
         result = await reconcile_system_task_assignments_in_range(

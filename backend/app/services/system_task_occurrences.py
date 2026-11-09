@@ -13,6 +13,7 @@ from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.user import User
 from app.models.enums import CommonApprovalStatus
 from app.services.system_task_schedule import matches_template_date
 from app.services.system_task_instances import ensure_task_instances_in_range
@@ -40,7 +41,14 @@ async def _assignee_ids_for_template(db: AsyncSession, template_id: uuid.UUID) -
     if not assignee_ids and tmpl.default_assignee_id:
         assignee_ids = [tmpl.default_assignee_id]
     
-    return assignee_ids
+    if not assignee_ids:
+        return []
+    active_ids = set((await db.execute(
+        select(User.id).where(User.work_staff_filter()).where(
+            User.id.in_(assignee_ids), User.is_active.is_(True)
+        )
+    )).scalars().all())
+    return [user_id for user_id in assignee_ids if user_id in active_ids]
 
 
 def _template_start_date(template: SystemTaskTemplate) -> date | None:

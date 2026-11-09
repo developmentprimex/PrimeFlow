@@ -18,6 +18,8 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.services.meeting_participants import replace_manual_participants
 from app.services import system_task_instances
+from app.services.meeting_system_tasks import _reconcile_external_meeting_task_kind, _user_department_map
+from app.services.system_task_occurrences import _assignee_ids_for_template
 
 
 class AsyncReader:
@@ -133,3 +135,114 @@ class WorkStaffScopeTests(unittest.IsolatedAsyncioTestCase):
             count = await system_task_instances.generate_system_task_instances(db, now_utc=now, start=now.date(), end=now.date())
         self.assertEqual(count, 1)
         self.assertEqual(insert.await_args.kwargs["assignee_id"], self.people["EF"].id)
+
+    async def test_scheduler_skips_inactive_users_and_consumes_missed_runs(self):
+        now = datetime(2026, 11, 3, 9, tzinfo=timezone.utc)
+        template = SimpleNamespace(id=uuid.uuid4(), department_id=self.work_department.id, duration_days=1)
+        slots = [SimpleNamespace(id=uuid.uuid4(), primary_user_id=self.people[key].id, next_run_at=now)
+                 for key in ("OLD", "EF", "NONE", "LC")]
+
+        async def run(day):
+            async def execute(statement):
+                if statement.column_descriptions[0]["entity"] is system_task_instances.SystemTaskTemplateAssigneeSlot:
+                    return SimpleNamespace(all=lambda: [(slot, template) for slot in slots])
+                return self.session.execute(statement)
+
+            with patch.object(system_task_instances, "ensure_slots_initialized", new=AsyncMock()), \
+                 patch.object(system_task_instances, "template_tz", return_value=timezone.utc), \
+                 patch.object(system_task_instances, "template_due_time", return_value=time(10)), \
+                 patch.object(system_task_instances, "next_occurrence", side_effect=lambda _, value: value + timedelta(days=1)), \
+                 patch.object(system_task_instances, "_insert_system_task_instance", new=AsyncMock(return_value=True)) as insert:
+                count = await system_task_instances.generate_system_task_instances(
+                    SimpleNamespace(execute=execute), now_utc=day, start=day.date(), end=day.date() + timedelta(days=7))
+            return count, insert.await_args_list
+
+        count, calls = await run(now)
+        self.assertEqual(count, 16)
+        self.assertEqual({call.kwargs["assignee_id"] for call in calls},
+                         {self.people[key].id for key in ("EF", "NONE")})
+        self.assertEqual(slots[0].next_run_at, now + timedelta(days=1))
+
+        self.people["OLD"].is_active = True
+        self.session.commit()
+        count, calls = await run(now + timedelta(days=1))
+        self.assertEqual(count, 10)
+        reactivated_calls = [call for call in calls if call.kwargs["assignee_id"] == self.people["OLD"].id]
+        self.assertEqual(len(reactivated_calls), 8)
+        self.assertEqual(reactivated_calls[0].kwargs["origin_run_at"], now + timedelta(days=1))
+
+    async def test_legacy_occurrences_filter_inactive_users_with_default_fallback(self):
+        for assignee_ids, default_id, expected in (
+            ([self.people[key].id for key in ("OLD", "EF", "NONE", "LC")], None,
+             [self.people[key].id for key in ("EF", "NONE")]),
+            ([], self.people["OLD"].id, []),
+            ([], self.people["EF"].id, [self.people["EF"].id]),
+        ):
+            template = SimpleNamespace(assignee_ids=assignee_ids, default_assignee_id=default_id)
+            calls = 0
+
+            async def execute(statement):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return SimpleNamespace(scalar_one_or_none=lambda: template)
+                return self.session.execute(statement)
+
+            self.assertEqual(await _assignee_ids_for_template(SimpleNamespace(execute=execute), uuid.uuid4()), expected)
+
+    async def test_daily_reconciliation_skips_inactive_replacement_and_preserves_inactive_history(self):
+        day = datetime(2026, 11, 3, 9, tzinfo=timezone.utc)
+        for primary_key in ("EF", "OLD"):
+            primary_id = self.people[primary_key].id
+            template = SimpleNamespace(id=uuid.uuid4(), timezone="UTC", department_id=self.work_department.id,
+                                       zv1_user_id=self.people["OLD"].id, zv2_user_id=self.people["NONE"].id)
+            slot = SimpleNamespace(id=uuid.uuid4(), primary_user_id=primary_id, created_at=day)
+            task = SimpleNamespace(id=uuid.uuid4(), origin_run_at=day, assigned_to=primary_id,
+                                   status="TODO", is_active=True)
+            leave = SimpleNamespace(description="Date: 2026-11-03 (Full day)", entry_date=day.date(),
+                                    created_at=day, assigned_to_user_id=primary_id, created_by_user_id=primary_id)
+
+            async def execute(statement):
+                entity = statement.column_descriptions[0]["entity"]
+                if entity is Task:
+                    return SimpleNamespace(all=lambda: [(task, template, slot)])
+                if entity is User:
+                    return self.session.execute(statement)
+                return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [leave]))
+
+            with patch.object(system_task_instances, "_replace_generated_task_assignee", new=AsyncMock()) as replace:
+                result = await system_task_instances.reconcile_system_task_assignments_for_day(
+                    SimpleNamespace(execute=execute), target_day=day.date(), now_utc=day)
+            if primary_key == "EF":
+                self.assertEqual(result["reassigned"], 1)
+                self.assertEqual(replace.await_args.kwargs["user_id"], self.people["NONE"].id)
+            else:
+                self.assertEqual(result["skipped"], 1)
+                replace.assert_not_awaited()
+                self.assertTrue(task.is_active)
+
+    async def test_meeting_system_tasks_skip_inactive_users_without_removing_history(self):
+        user_ids = [self.people[key].id for key in ("OLD", "EF", "NONE", "LC")]
+        active_map = await _user_department_map(self.db, user_ids, active_only=True)
+        self.assertEqual(set(active_map), {self.people[key].id for key in ("EF", "NONE")})
+        day = datetime(2026, 11, 3, 9, tzinfo=timezone.utc)
+        old_task = SimpleNamespace(assigned_to=self.people["OLD"].id, meeting_occurrence_date=day.date(),
+                                   status="TODO", is_active=True)
+        first_query = True
+
+        async def execute(statement):
+            nonlocal first_query
+            if first_query:
+                first_query = False
+                return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [old_task]))
+            return self.session.execute(statement)
+
+        with patch("app.services.meeting_system_tasks._ensure_slot", new=AsyncMock()) as ensure_slot:
+            count = await _reconcile_external_meeting_task_kind(
+                SimpleNamespace(execute=execute), SimpleNamespace(id=uuid.uuid4(), starts_at=day),
+                task_kind="TEST", description="Test", qualifies=True,
+                participant_ids=[self.people["OLD"].id], task_title="Test",
+                template=SimpleNamespace(id=uuid.uuid4()), now_utc=day)
+        self.assertEqual(count, 0)
+        ensure_slot.assert_not_awaited()
+        self.assertTrue(old_task.is_active)

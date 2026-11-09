@@ -15,6 +15,7 @@ from app.models.department import Department
 from app.models.enums import UserRole
 from app.models.user import User
 from app.schemas.user import UserCreate, UserLookup, UserOut, UserUpdate
+from app.services.inactive_system_tasks import cleanup_inactive_user_system_tasks
 
 
 router = APIRouter()
@@ -190,6 +191,9 @@ async def update_user(
     if payload.password is not None:
         target.password_hash = get_password_hash(payload.password)
 
+    if payload.is_active is False:
+        await db.flush()
+        await cleanup_inactive_user_system_tasks(db, user_ids=[target.id], actor_user_id=current.id)
     await db.commit()
     await db.refresh(target)
     return UserOut(
@@ -220,6 +224,8 @@ async def deactivate_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot deactivate yourself")
 
     target.is_active = False
+    await db.flush()
+    await cleanup_inactive_user_system_tasks(db, user_ids=[target.id], actor_user_id=current.id)
     await db.commit()
     await db.refresh(target)
     return UserOut(

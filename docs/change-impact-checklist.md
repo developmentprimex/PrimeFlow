@@ -83,6 +83,25 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
+  `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe
+  detyrat sistemore të takimeve në `meeting_system_tasks.py`. Kontrollo scheduler-in,
+  gjenerimin nga API-ja dhe rastin aktiv/joaktiv/riaktivizim; slotet konsumojnë
+  ekzekutimet e kapërcyera që të mos gjenerohen prapa pas riaktivizimit.
+  `inactive_system_tasks.py` fshin instancat ekzistuese të përdoruesve joaktivë
+  në çdo status, gjatë çaktivizimit nga PATCH/DELETE Users dhe scheduler-it.
+  Detyrat e përbashkëta ruhen për përgjegjësit aktivë; hiqen lidhjet joaktive.
+  Skripti `cleanup_inactive_system_tasks.py` ofron preview dhe `--apply` me
+  backup të rreshtave të prekur dhe kontroll pas fshirjes. Instancat e vjetra
+  pastrohen vetëm kur tabela `system_task_occurrences` ekziston. Fshirja prek
+  edhe historikun e detyrave dhe raportet që lexojnë drejtpërdrejt databazën;
+  raportet/snapshot-et e arkivuara nuk rishkruhen. TAK INT 1H janë
+  detyra të zakonshme 1H dhe përdorin rrugë tjetër. ZV1/ZV2 joaktivë përjashtohen
+  edhe nga ricaktimi i instancave të reja gjatë pushimit të përgjegjësit.
+  Pamjet dhe raportet që lexojnë
+  detyrat sistemore trashëgojnë mungesën e instancave të fshira dhe të atyre
+  që nuk krijohen; përkufizimet e modeleve/slotet ruhen për riaktivizim.
+
 - Tabela Stafi në Realization ditor shfaq Due date / Deadline brenda listave të
   detyrave, pa kolonë afatesh: listat shfaqin vetëm titullin e detyrës; afatet e
   pambyllura kanë titull të kuq, pa etiketa, sfond apo vijë shtesë. `realization-table-items.ts`

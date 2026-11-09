@@ -275,10 +275,15 @@ async def _graphic_design_assignee_ids(db: AsyncSession) -> list[uuid.UUID]:
     return list(rows)
 
 
-async def _user_department_map(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, uuid.UUID | None]:
+async def _user_department_map(
+    db: AsyncSession, user_ids: list[uuid.UUID], *, active_only: bool = False,
+) -> dict[uuid.UUID, uuid.UUID | None]:
     if not user_ids:
         return {}
-    rows = (await db.execute(select(User.id, User.department_id).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).all()
+    stmt = select(User.id, User.department_id).where(User.work_staff_filter()).where(User.id.in_(user_ids))
+    if active_only:
+        stmt = stmt.where(User.is_active.is_(True))
+    rows = (await db.execute(stmt)).all()
     return {user_id: department_id for user_id, department_id in rows}
 
 
@@ -348,7 +353,12 @@ async def _reconcile_external_meeting_task_kind(
         if task.status != TaskStatus.DONE:
             task.is_active = False
 
+    # Keep existing history/classification intact, but never create or
+    # reactivate a system task for an inactive account.
+    active_department_map = await _user_department_map(db, participant_ids, active_only=True)
     for user_id in participant_ids:
+        if user_id not in active_department_map:
+            continue
         slot = await _ensure_slot(db, template_id=template.id, user_id=user_id, next_run_at=task_start_at)
         existing = current_tasks.get(user_id)
         if existing is None:
