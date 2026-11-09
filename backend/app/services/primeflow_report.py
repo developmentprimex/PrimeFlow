@@ -572,6 +572,87 @@ def _document_section(
     return ReportSection(title=title, employees=employees)
 
 
+def _without_full_day_unavailable(data: dict[str, Any], day: date) -> dict[str, Any]:
+    """Filter report copies, including shared owners and GA counts, for attendance."""
+    items = data.get("items") or {}
+    unavailable_ids: set[str] = set()
+    unavailable_names: set[str] = set()
+    all_users = False
+
+    def minutes(value: Any) -> int | None:
+        match = re.fullmatch(r"(\d{1,2}):(\d{2})", str(value or "").strip())
+        if not match:
+            return None
+        hour, minute = map(int, match.groups())
+        return hour * 60 + minute if hour < 24 and minute < 60 else None
+
+    for bucket in ("absent", "leave"):
+        for row in items.get(bucket) or []:
+            if bucket == "leave":
+                start = str(row.get("startDate") or row.get("start_date") or "")[:10]
+                end = str(row.get("endDate") or row.get("end_date") or start)[:10]
+                if not start or not start <= day.isoformat() <= end:
+                    continue
+            elif str(row.get("date") or "")[:10] != day.isoformat():
+                continue
+            full_day = row.get("fullDay", row.get("full_day"))
+            start_time, end_time = minutes(row.get("from")), minutes(row.get("to"))
+            # Match SHTYPI's 08:00–16:00 workday and legacy untimed absences.
+            if full_day is not True and not (
+                (start_time is None and end_time is None and full_day is not False)
+                or (start_time is not None and end_time is not None
+                    and start_time <= 8 * 60 and end_time >= 16 * 60)
+            ):
+                continue
+            all_users = all_users or bool(row.get("isAllUsers") or row.get("is_all_users"))
+            user_id = row.get("userId") or row.get("user_id")
+            if user_id:
+                unavailable_ids.add(str(user_id))
+            name = _employee(row).casefold()
+            if name:
+                unavailable_names.add(name)
+
+    # Resolve both ID-based attendance and legacy attendance stored by name.
+    for user in data.get("users") or []:
+        aliases = {str(user[key]).strip().casefold()
+                   for key in ("full_name", "username", "email") if user.get(key)}
+        if str(user.get("id")) in unavailable_ids or aliases & unavailable_names:
+            unavailable_ids.add(str(user.get("id")))
+            unavailable_names.update(aliases)
+
+    def available_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result = []
+        for row in rows:
+            if all_users:
+                continue
+            owners = row.get("assignees") or [name.strip() for name in _employee(row).split(",") if name.strip()]
+            user_id = str(row.get("userId") or row.get("user_id") or "")
+            if len(owners) <= 1 and user_id in unavailable_ids:
+                continue
+            present = [name for name in owners if str(name).strip().casefold() not in unavailable_names]
+            if owners and not present:
+                continue
+            if present != owners:
+                row = {**row, "assignees": present}
+                for key in ("employee", "person", "owner", "user_name", "assignee_name", "user"):
+                    if key in row:
+                        row[key] = ", ".join(present)
+                # A removed primary owner must not receive summary counts.
+                if user_id in unavailable_ids:
+                    row.pop("userId", None)
+                    row.pop("user_id", None)
+            result.append(row)
+        return result
+
+    return {
+        **data,
+        "items": {bucket: available_tasks(rows) if bucket in {
+            "oneH", "blocked", "important", "r1", "personal"
+        } else rows for bucket, rows in items.items()},
+        "tasks": available_tasks(data.get("tasks") or []),
+    }
+
+
 def build_report_document(
     data: dict[str, Any],
     report_day: date,
@@ -588,6 +669,7 @@ def build_report_document(
     truncated = any((guardrails.get("truncated") or {}).values())
     if truncated:
         raise ValueError("Common View contains truncated buckets")
+    data = _without_full_day_unavailable(data, report_day)
     source_items = data.get("items") or {}
     items = {
         bucket: (

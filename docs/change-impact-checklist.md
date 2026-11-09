@@ -70,7 +70,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | Checklista takimesh | Projects, Meetings, Common View, Department Views, My View, Exports |
 | PX Notes | PX Notes, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Projects, Weekly Planner, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | PX JAV | PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, Projects, PX JAV Kontrolli, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
-| Mungesa dhe pushime | Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, Weekly Planner, PX JAV, Realization, Weekly Planning Check, M1 / M2 / M3 |
+| Mungesa dhe pushime | Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, PX JAV, Realization, Weekly Planning Check, M1 / M2 / M3 |
 | WFC / Waiting Client | WFC, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, PX Notes, PX JAV, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Planifikim | Weekly Planner, Monthly Planner, PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, Realization, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Realization dhe Reviews | My View, Department Views, Finance View, Realization, Reviews, Common View, Weekly Planner, Kontrolli ditor RLZ, M3 PIKAT |
@@ -132,6 +132,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   nga Common View ka stil të veçantë `.print-marker-comment`.
 - SHTYPI Today dhe Tomorrow ndajnë komponentin dhe gjeneruesin bazë, por kanë
   dallime në data, gjenerim dhe historik. 1H Reports ka gjenerues tjetër.
+  Mungesa ose PV tërëditore (08:00–16:00) përjashton detyrat nga gjenerimi i ri
+  i 1H Reports në çdo slot, preview, email dhe eksportet Word/PNG/TXT, përfshirë
+  përmbledhjen DET ME GA. Detyrat e përbashkëta mbeten për përgjegjësit e
+  pranishëm; mungesat e pjesshme nuk i fshehin. Kontrollo edhe fallback-un
+  `tasks` kur `oneH` mbetet bosh. Snapshot-et historike ruajnë përmbajtjen
+  e gjenerimit origjinal; Common View dhe të dhënat e taskut nuk ndryshojnë.
 - PX Notes dhe PX JAV lidhen me taskat përmes origjinës së Note dhe paketave
   Note–Task. Kontrollo edhe taskat për secilin përgjegjës, afatet dhe markerat.
 - Takimet externe/interne mund të kenë pjesëmarrës të përbashkët, përsëritje,
