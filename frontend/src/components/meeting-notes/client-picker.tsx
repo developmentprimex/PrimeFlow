@@ -4,6 +4,7 @@ import { meetingTranslator } from "@/lib/meeting-notes-language"
 
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
+import { meetingClientLabel } from "@/lib/meeting-client-label"
 
 export type MeetingClientSelection = { id: string | null; name: string }
 
@@ -33,7 +34,7 @@ export function MeetingClientPicker({ id, value, onChange, onCommit, disabled = 
     ? [...clients, { id: value.id, name: value.name }]
     : clients
   return <div className="space-y-2">
-    <select id={id} aria-label={t("Klienti")} disabled={disabled} value={value ? value.id || "new" : "none"} onFocus={() => void refresh()}
+    <select id={id} aria-label={t("Klienti")} title={value?.name || t("Klienti")} disabled={disabled} value={value ? value.id || "new" : "none"} onFocus={() => void refresh()}
       onChange={(event) => {
         const selected = event.target.value
         if (selected === "none") onChange(null)
@@ -41,7 +42,8 @@ export function MeetingClientPicker({ id, value, onChange, onCommit, disabled = 
         else onChange(options.find((client) => client.id === selected) || null)
       }} className="h-9 w-full rounded-md border bg-background px-3 text-sm">
       <option value="none">{t("Pa klient")}</option>
-      {options.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+      {[...options].sort((a, b) => meetingClientLabel(a.name).localeCompare(meetingClientLabel(b.name), "sq") || a.name.localeCompare(b.name, "sq"))
+        .map((client) => <option key={client.id} value={client.id} title={client.name}>{meetingClientLabel(client.name)}</option>)}
       <option value="new">{t("+ Shto klient të ri")}</option>
     </select>
     {value && !value.id && <input aria-label={t("Emri i klientit të ri")} value={value.name} onChange={(event) => onChange({ id: null, name: event.target.value })}

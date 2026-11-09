@@ -8,6 +8,7 @@ import { Search } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { dmy, isoDate, KIND_LABEL, readError, type MeetingKind, type MeetingOverviewRow } from "@/lib/meeting-notes"
 import { isIncludedOverviewMeeting, isOptionalOverviewMeeting } from "@/lib/meeting-notes-overview"
+import { meetingClientLabel } from "@/lib/meeting-client-label"
 import { StatusLegend } from "@/components/meeting-notes/status-legend"
 import { Button } from "@/components/ui/button"
 
@@ -57,13 +58,13 @@ export default function MeetingsPage() {
   const scopedRows = showOptional ? includedRows : includedRows.filter((row) => !isOptionalOverviewMeeting(row.meeting))
   const clients = [...new Map(includedRows.filter((row) => row.meeting.client_id && row.meeting.client_name)
     .map((row) => [row.meeting.client_id!, row.meeting.client_name!] as const)).entries()]
-    .sort((a, b) => a[1].localeCompare(b[1], "sq"))
+    .sort((a, b) => meetingClientLabel(a[1]).localeCompare(meetingClientLabel(b[1]), "sq") || a[1].localeCompare(b[1], "sq"))
   const clientRows = clientFilter ? scopedRows.filter((row) => row.meeting.client_id === clientFilter) : scopedRows
   const visible = clientRows.filter((row) => {
     if (tab !== "ALL" && row.kind !== tab) return false
     if (!search) return true
     const client = row.meeting.client_name || ""
-    return `${row.meeting.title} ${client}`.toLocaleLowerCase("sq").includes(search)
+    return `${row.meeting.title} ${client} ${meetingClientLabel(client)}`.toLocaleLowerCase("sq").includes(search)
   })
   const count = (key: Tab) => clientRows.filter((row) => key === "ALL" || row.kind === key).length
 
@@ -93,9 +94,9 @@ export default function MeetingsPage() {
     </label>
     <label className="flex items-center gap-2 text-sm">
       {t("Klienti")}
-      <select aria-label={t("Filtro sipas klientit")} value={clientFilter} onChange={(event) => setClientFilter(event.target.value)} className="h-9 min-w-52 rounded-md border bg-background px-3">
+      <select aria-label={t("Filtro sipas klientit")} title={clients.find(([id]) => id === clientFilter)?.[1] || t("Të gjithë klientët")} value={clientFilter} onChange={(event) => setClientFilter(event.target.value)} className="h-9 min-w-52 rounded-md border bg-background px-3">
         <option value="">{t("Të gjithë klientët")}</option>
-        {clients.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        {clients.map(([id, name]) => <option key={id} value={id} title={name}>{meetingClientLabel(name)}</option>)}
       </select>
     </label>
     </div>
@@ -118,8 +119,8 @@ export default function MeetingsPage() {
             </td>
             <td className={td}>{KIND_LABEL[row.kind]}</td>
             <td className={td}>{client && row.meeting.client_id
-              ? <button type="button" onClick={() => setClientFilter(row.meeting.client_id!)} className="text-left underline underline-offset-2" title={t("Shfaq takimet e këtij klienti")}>{client}</button>
-              : client || <span className="text-neutral-400">—</span>}</td>
+              ? <button type="button" onClick={() => setClientFilter(row.meeting.client_id!)} className="text-left underline underline-offset-2" aria-label={`${meetingClientLabel(client)} (${client})`} title={`${client} · ${t("Shfaq takimet e këtij klienti")}`}>{meetingClientLabel(client)}</button>
+              : client ? <span title={client}>{meetingClientLabel(client)}</span> : <span className="text-neutral-400">—</span>}</td>
             <td className={`${td} font-semibold tabular-nums`}>{isToday ? row.kind === "EXTERNAL" ? "Today" : "Sot" : dmy(row.next_session)}</td>
             <td className="border border-slate-600 p-2 align-bottom"><div className="flex gap-1">
               <span title="TODO"><CountChip value={row.counts.TODO} color="bg-pink-200" /></span>

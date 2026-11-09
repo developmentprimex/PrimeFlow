@@ -265,6 +265,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   e importuara pa krijues. Nuk krijon lidhje me projektin, historinë
   e projektit, taskat ose PX Notes; nuk dërgohet në Microsoft Calendar.
   `project_id` mbetet lidhje më vete, e përdorur nga historia ekzistuese dhe PX.
+- Shkurtesat e klientëve paraqiten përmes `meeting-client-label.ts` te kolona dhe
+  filtri i Takimeve dhe te `MeetingClientPicker` (detajet dhe Meeting Scheduler).
+  Emri i plotë shfaqet në hover; kërkimi në Takimet pranon emrin dhe shkurtesën.
+  ID-ja dhe emri i ruajtur mbeten të njëjtë; klientët pa shkurtim të përcaktuar
+  shfaqen me emrin e plotë. Kjo paraqitje nuk klasifikon takime PARA/PAS dhe nuk
+  ndryshon historinë sipas projektit, raportet, PX Notes apo Microsoft Calendar.
 - Lista Takimet përjashton plotësisht interne PARA/PAS (lidhjet
   `pre_external_meeting_id` / `paired_external_meeting_id`), edhe nga kërkimi,
   numërimet dhe opsioni shtesë. Eksterne fizike me tonin `outlook-blue` fshihen
