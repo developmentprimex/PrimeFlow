@@ -42,6 +42,7 @@ class GaNoteOut(BaseModel):
     updated_at: datetime
     attachments: list[GaNoteAttachmentOut] = []
     from_mira: bool = False
+    from_meeting: bool = False
     mira_shared_to_px: bool = False
 
 

@@ -84,6 +84,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Taskat e krijuara drejtpërdrejt nga Regjistrimet krijojnë PX Note me
+  `knowledge_type=RECORDING` dhe lidhjen `ga_note_origin_id`. PX Notes shfaq
+  etiketën `REC` pranë etiketave të tjera; printimi klonon të njëjtën tabelë
+  dhe e përfshin etiketën. Kjo vlerë nuk është kategori Knowledge PX.
+  Shënimet e dërguara nga Takimet identifikohen nga lidhja ekzistuese
+  `MeetingNote.ga_note_id` dhe API-ja kthen `from_meeting=true` për
+  etiketën `TAK`, edhe për shënimet e vjetra dhe të bashkuara. `RECORDING`
+  ka përparësi kur ekziston; etiketat nuk ndryshojnë të dhënat e ruajtura.
+
 - Regjistrimi i ekranit përdor `RecordingCapture` për nisjen te Regjistrimet
   dhe për “Ndaj ekranin përsëri” si në panel ashtu edhe në shiritin global të
   regjistrimit. Të dyja kërkesat `getDisplayMedia` përdorin

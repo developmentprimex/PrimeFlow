@@ -23,7 +23,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { TeamMarkerCommentsButton } from "@/components/team-marker-comments-button"
-import { KNOWLEDGE_CONFIG, knowledgeText } from "@/components/knowledge/knowledge-config"
+import { KNOWLEDGE_CONFIG, knowledgeText, type KnowledgeType } from "@/components/knowledge/knowledge-config"
 import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/prompt-link"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
@@ -40,12 +40,12 @@ import { createNotesVoiceController, reconcileSavedNoteDraft, type NotesVoiceAda
 import { PxNotesMiraControls } from "@/components/px-notes-mira-controls"
 import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCategory, SkillCategoryInference, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
-function isKnowledgeNote(note: GaNote | null | undefined) {
-  return Boolean(note?.knowledge_type && KNOWLEDGE_CONFIG[note.knowledge_type])
+function isKnowledgeNote(note: GaNote | null | undefined): note is GaNote & { knowledge_type: KnowledgeType } {
+  return note?.knowledge_type === "PROMPT" || note?.knowledge_type === "DEFINITION" || note?.knowledge_type === "REGULATION"
 }
 
 function noteKnowledgeText(note: GaNote | null | undefined, text: string) {
-  return knowledgeText(note?.knowledge_type || "PROMPT", text)
+  return knowledgeText(isKnowledgeNote(note) ? note.knowledge_type : "PROMPT", text)
 }
 
 type NoteType = "GA" | "KA"
@@ -4956,6 +4956,15 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                   title="Task created from PX JAV"
                                 >
                                   PX JAV
+                                </Badge>
+                              ) : null}
+                              {note.knowledge_type === "RECORDING" || note.from_meeting ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold"
+                                  title={note.knowledge_type === "RECORDING" ? "Nga Regjistrimet" : "Nga shënimet e takimeve"}
+                                >
+                                  {note.knowledge_type === "RECORDING" ? "REC" : "TAK"}
                                 </Badge>
                               ) : null}
                               {hasTask

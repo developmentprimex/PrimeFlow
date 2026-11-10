@@ -119,6 +119,7 @@ def _note_out(note: GaNote) -> GaNoteOut:
         # Read without triggering an async lazy load on a note created in this request.
         from_mira=bool(note.__dict__.get("from_mira", False) or note.__dict__.get("from_mira_desktop", False)),
         mira_shared_to_px=bool(note.mira_shared_to_px),
+        from_meeting=bool(note.__dict__.get("from_meeting", False)),
     )
 
 

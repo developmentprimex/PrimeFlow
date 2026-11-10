@@ -611,13 +611,15 @@ export interface GaNote {
   next_week?: boolean
   project_id?: string | null
   department_id?: string | null
-  knowledge_type?: "PROMPT" | "DEFINITION" | "REGULATION" | null
+  knowledge_type?: "PROMPT" | "DEFINITION" | "REGULATION" | "RECORDING" | null
   knowledge_tester_id?: string | null
   created_at: string
   updated_at: string
   attachments?: GaNoteAttachment[]
   /** Saved by Mira from a meeting or desktop recording. */
   from_mira?: boolean
+  /** Sent to PX Notes from one or more meeting notes. */
+  from_meeting?: boolean
   mira_shared_to_px?: boolean
 }
 

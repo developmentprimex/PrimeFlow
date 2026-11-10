@@ -37,6 +37,17 @@ class GaNoteFromMiraTests(unittest.TestCase):
         self.assertTrue(_note_out(self.note(from_mira_desktop=True)).from_mira)
         self.assertFalse(_note_out(self.note()).from_mira)
 
+    def test_meeting_origin_uses_the_existing_link_in_the_note_query(self):
+        sql = str(select(GaNote).compile(dialect=postgresql.dialect()))
+        self.assertIn('meeting_notes.ga_note_id = ga_notes.id', sql)
+        self.assertTrue(_note_out(self.note(from_meeting=True)).from_meeting)
+        self.assertFalse(_note_out(self.note()).from_meeting)
+
+    def test_recording_origin_is_preserved_when_also_linked_to_a_meeting(self):
+        result = _note_out(self.note(knowledge_type='RECORDING', from_meeting=True))
+        self.assertEqual(result.knowledge_type, 'RECORDING')
+        self.assertTrue(result.from_meeting)
+
     def test_desktop_note_marker_is_loaded_with_the_existing_note_query(self):
         sql = str(select(GaNote).compile(dialect=postgresql.dialect()))
         self.assertIn('mira_desktop_sessions.note_id = ga_notes.id', sql)

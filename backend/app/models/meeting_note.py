@@ -9,11 +9,12 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, String, Text, exists, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from app.db import Base
+from app.models.ga_note import GaNote
 
 
 class MeetingNote(Base):
@@ -66,6 +67,10 @@ class MeetingNote(Base):
         passive_deletes=True,
         order_by="MeetingNoteAttachment.created_at",
     )
+
+
+# Load the existing meeting-to-PX link with the note, including older and merged notes.
+GaNote.from_meeting = column_property(exists().where(MeetingNote.ga_note_id == GaNote.id))
 
 
 class MeetingNoteAttachment(Base):
