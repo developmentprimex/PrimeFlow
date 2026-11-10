@@ -3,13 +3,14 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { ArrowLeft, Eye, EyeOff, ImagePlus, ListTodo } from "lucide-react"
+import { ArrowLeft, Eye, EyeOff, ImagePlus, ListTodo, Save } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth"
 import { RecordingAnalysisPanel } from "@/components/meeting-recordings/analysis-panel"
 import { recordingJson } from "@/lib/recording-outbox"
+import { saveRecordingFile } from "@/lib/recording-save"
 import { RECORDING_STATUS, recordingSize, recordingTime, type MeetingRecording } from "@/lib/recording-types"
 
 export default function RecordingDetailPage() {
@@ -21,6 +22,18 @@ export default function RecordingDetailPage() {
   const [error, setError] = React.useState("")
   const [capturing, setCapturing] = React.useState(false)
   const [videoVisible, setVideoVisible] = React.useState(false)
+  const [savingFile, setSavingFile] = React.useState(false)
+  const saveFile = async () => {
+    if (!row || savingFile) return
+    setSavingFile(true)
+    try {
+      const result = await saveRecordingFile(row)
+      if (result === "saved") toast.success("Videoja u ruajt në dosjen e zgjedhur.")
+      if (result === "unsupported") toast.info("Ky shfletues nuk mbështet zgjedhjen e dosjes. Përdorni “Shkarko regjistrimin”.")
+    } catch {
+      toast.error("Videoja nuk u ruajt. Kontrolloni lidhjen dhe lejen e dosjes, pastaj provoni përsëri.")
+    } finally { setSavingFile(false) }
+  }
   // Takimet: save the current video frame as a meeting note with the screenshot attached.
   const captureFrame = async () => {
     const video = videoRef.current
@@ -92,6 +105,7 @@ export default function RecordingDetailPage() {
             setVideoVisible(visible => !visible)
           }}>{videoVisible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}{videoVisible ? "Fshih videon" : "Shfaq videon"}</Button>
           <Button asChild><a href={`/api/meeting-recordings/${id}/download`} download>Shkarko regjistrimin</a></Button>
+          <Button variant="outline" disabled={savingFile} onClick={() => void saveFile()}><Save aria-hidden="true" />{savingFile ? "Duke ruajtur…" : "Ruaj në…"}</Button>
         </div>
         <div id="recording-video" hidden={!videoVisible} className="space-y-4">
         <video ref={videoRef} key={id} className="aspect-video w-full rounded-md bg-black" src={`/api/meeting-recordings/${id}/stream`} controls preload="metadata" playsInline

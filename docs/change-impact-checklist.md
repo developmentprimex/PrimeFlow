@@ -96,6 +96,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   luajtjen. Klikimi i kohës së citimit e hap videon automatikisht dhe e çon te
   momenti përkatës. Kontrollo edhe screenshot-in te takimi dhe shkarkimin që
   mbetet i arritshëm kur videoja është e fshehur.
+  “Ruaj në…” te detajet hap zgjedhjen e skedarit lokal dhe përdor të njëjtin
+  shkarkim të autorizuar `/api/meeting-recordings/{id}/download`, duke dërguar
+  videon drejtpërdrejt në disk. Anulimi i dialogut nuk nis shkarkim. Në shfletues
+  pa `showSaveFilePicker`, mbetet butoni “Shkarko regjistrimin”. Kjo ruajtje nuk
+  përdor File Access dhe nuk zhvendos ose fshin regjistrimin në server.
 
 - Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
   `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe

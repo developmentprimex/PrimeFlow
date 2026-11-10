@@ -22,6 +22,65 @@ test("transcript paragraphs separate sentences and quoted task boundaries withou
   assert.deepEqual(Array.from(transcriptParagraphs("", [])), [])
 })
 
+test("save as streams the complete video to the selected file and closes it", async () => {
+  const order = [], saved = []
+  const recording = { id: "test-id", title: "EF/RA: ASC", mime_type: "video/webm" }
+  const { saveRecordingFile } = load("recording-save", {
+    DOMException,
+    window: { showSaveFilePicker: async options => {
+      order.push("picker")
+      assert.equal(options.suggestedName, "Regjistrim - EF-RA- ASC.webm")
+      return { createWritable: async () => new WritableStream({
+        write(chunk) { saved.push(...chunk) }, close() { order.push("closed") },
+      }) }
+    } },
+    fetch: async (url, options) => {
+      order.push("download")
+      assert.equal(url, "/api/meeting-recordings/test-id/download")
+      assert.equal(options.credentials, "same-origin")
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new Uint8Array([1, 2])); controller.enqueue(new Uint8Array([3, 4])); controller.close()
+      } }), { headers: { "content-type": "video/webm" } })
+    },
+  })
+  assert.equal(await saveRecordingFile(recording), "saved")
+  assert.deepEqual(saved, [1, 2, 3, 4])
+  assert.deepEqual(order, ["picker", "download", "closed"])
+})
+
+test("cancelling save as or lacking picker support never downloads or writes a file", async () => {
+  for (const supported of [true, false]) {
+    const { saveRecordingFile } = load("recording-save", {
+      DOMException,
+      window: supported ? { showSaveFilePicker: async () => { throw new DOMException("Cancelled", "AbortError") } } : {},
+      fetch: () => { throw new Error("Must not download") },
+    })
+    assert.equal(await saveRecordingFile({ id: "id", title: "Video", mime_type: "video/mp4" }), supported ? "cancelled" : "unsupported")
+  }
+})
+
+test("failed or invalid downloads never open the destination for writing", async () => {
+  for (const [status, mime] of [[401, "video/webm"], [200, "text/html"], [206, "video/webm"]]) {
+    const { saveRecordingFile } = load("recording-save", {
+      DOMException,
+      window: { showSaveFilePicker: async () => ({ createWritable: () => { throw new Error("Must not write") } }) },
+      fetch: async () => new Response("error", { status, headers: { "content-type": mime } }),
+    })
+    await assert.rejects(saveRecordingFile({ id: "id", title: "Video", mime_type: "video/webm" }), /nuk mund të shkarkohet/)
+  }
+})
+
+test("interrupted saving aborts the destination instead of reporting success", async () => {
+  let aborted = false
+  const { saveRecordingFile } = load("recording-save", {
+    DOMException,
+    window: { showSaveFilePicker: async () => ({ createWritable: async () => new WritableStream({ abort() { aborted = true } }) }) },
+    fetch: async () => new Response(new ReadableStream({ start(controller) { controller.error(new Error("Connection lost")) } }), { headers: { "content-type": "video/webm" } }),
+  })
+  await assert.rejects(saveRecordingFile({ id: "id", title: "Video", mime_type: "video/webm" }), /Connection lost/)
+  assert.equal(aborted, true)
+})
+
 function captureHarness({ system = true, micDenied = false, displayDenied = false, delayedMic } = {}) {
   class Track extends EventTarget {
     constructor(kind) { super(); this.kind = kind; this.readyState = "live"; this.enabled = true; this.muted = false }

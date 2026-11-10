@@ -101,6 +101,26 @@ test('any viewer can start processing with consent and read the results', async 
   expect(harness.writes).toHaveLength(1)
 })
 
+test('save as writes video to the chosen destination while the player stays collapsed', async ({ page }) => {
+  await shell(page)
+  await page.route(`**/api/meeting-recordings/${id}/download`, route => route.fulfill({ contentType: 'video/webm', body: Buffer.from('test-video') }))
+  await page.evaluate(() => {
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async (options: { suggestedName: string }) => {
+      document.body.dataset.savedFilename = options.suggestedName
+      return { createWritable: async () => new WritableStream({
+        write(chunk) { document.body.dataset.savedBytes = String(Number(document.body.dataset.savedBytes || 0) + chunk.byteLength) },
+        close() { document.body.dataset.videoSaved = 'true' },
+      }) }
+    } })
+  })
+  await page.getByRole('button', { name: 'Ruaj në…', exact: true }).click()
+  await expect(page.locator('body')).toHaveAttribute('data-video-saved', 'true')
+  await expect(page.locator('body')).toHaveAttribute('data-saved-bytes', '10')
+  await expect(page.locator('body')).toHaveAttribute('data-saved-filename', 'Regjistrim - Regjistrim për analizë.webm')
+  await expect(page.getByText('Videoja u ruajt në dosjen e zgjedhur.', { exact: true })).toBeVisible()
+  await expect(page.locator('video')).toBeHidden()
+})
+
 test('video stays collapsed until requested and pauses when hidden', async ({ page }) => {
   await shell(page)
   const show = page.getByRole('button', { name: 'Shfaq videon', exact: true })
