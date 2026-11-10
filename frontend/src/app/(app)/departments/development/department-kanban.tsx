@@ -2,6 +2,7 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { calendarMeetingTimeRange, meetingTimeColumns } from "@/lib/calendar-meeting-time"
 import { ProjectActivityControl, ProjectActivityFilterControl, ProjectListEmptyState, matchesProjectActivity, type ProjectActivityFilter } from "@/components/project-activity"
 import { useBrowserTabTitle } from "@/components/browser-tab-title"
@@ -2307,15 +2308,20 @@ export default function DepartmentKanban() {
     [noteTitleByOriginId]
   )
   const renderAllTodayTaskTitle = React.useCallback(
-    (task: Task) => {
-      const completeTitle = completeTaskTitle(task)
-      const title = !completeTitle.includes("[[") ? completeTitle
-        : task.ga_note_origin_id || isTaskStartingOnSelectedAllDate(task)
-          ? renderMarkedNoteContent(completeTitle, completeTitle)
-          : getPlainMarkedText(completeTitle)
-      return <><TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />{title}</>
-    },
-    [completeTaskTitle, isTaskStartingOnSelectedAllDate]
+    (task: Task, systemTitleOnly = false) => (
+      <CollapsibleTaskTitle
+        title={systemTitleOnly ? task.title || "-" : completeTaskTitle(task)}
+        enabled={viewMode === "mine"}
+        renderTitle={(visibleTitle) => {
+          const title = systemTitleOnly || !visibleTitle.includes("[[") ? visibleTitle
+            : task.ga_note_origin_id || isTaskStartingOnSelectedAllDate(task)
+              ? renderMarkedNoteContent(visibleTitle, visibleTitle)
+              : getPlainMarkedText(visibleTitle)
+          return <>{systemTitleOnly ? null : <TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />}{title}</>
+        }}
+      />
+    ),
+    [completeTaskTitle, isTaskStartingOnSelectedAllDate, viewMode]
   )
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const isTaskAssignedToUser = React.useCallback(
@@ -8623,7 +8629,7 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                                <span>{task.title || "-"}</span>
+                                <span>{renderAllTodayTaskTitle(task, true)}</span>
                                 <Badge className="text-[10px] px-1.5 py-0 border-slate-200 bg-slate-50 text-slate-700">SYS</Badge>
                               </div>
                             </TableCell>

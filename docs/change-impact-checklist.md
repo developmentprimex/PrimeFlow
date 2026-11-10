@@ -93,6 +93,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   etiketën `TAK`, edhe për shënimet e vjetra dhe të bashkuara. `RECORDING`
   ka përparësi kur ekziston; etiketat nuk ndryshojnë të dhënat e ruajtura.
 
+- Development, Graphic Design dhe Product Content përdorin
+  `CollapsibleTaskTitle` për titujt në listat All (Waiting Confirmation,
+  Project Tasks, Fast Tasks dhe System Tasks), me rreshtin e parë dhe `+`/`-`
+  vetëm në My View. Department View ruan tekstin e plotë. Finance përdor të
+  njëjtin komponent në tabelën e vet. Daily Report, printimet e departamenteve
+  dhe eksporti Excel i Finance kanë renderues të veçantë dhe ruajnë sjelljen
+  ekzistuese.
+
 - Regjistrimi i ekranit përdor `RecordingCapture` për nisjen te Regjistrimet
   dhe për “Ndaj ekranin përsëri” si në panel ashtu edhe në shiritin global të
   regjistrimit. Të dyja kërkesat `getDisplayMedia` përdorin

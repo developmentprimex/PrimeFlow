@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
@@ -859,9 +860,10 @@ export default function DepartmentKanban() {
                           <div className="flex w-full items-start gap-2">
                             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
                               <TaskMarkerComment comment={row.task.one_h_marker_comment} taskId={row.task.id} />
-                              {typeof row.title === "string" && row.title.includes("[[")
-                                ? renderMarkedNoteContent(row.title, row.title)
-                                : row.title}
+                              <CollapsibleTaskTitle
+                                title={row.title}
+                                renderTitle={(title) => title.includes("[[") ? renderMarkedNoteContent(title, title) : title}
+                              />
                             </span>
                           </div>
                         </TableCell>
