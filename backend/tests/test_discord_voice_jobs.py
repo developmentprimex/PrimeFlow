@@ -99,12 +99,56 @@ class VoiceJobTests(PostgresMeetingTests):
             with self.assertRaises(HTTPException) as missing:await host.note_transcript(db,uuid.uuid4())
             self.assertEqual(missing.exception.status_code,404)
 
-    async def scheduled_meeting(self,stopped_ago):
+    async def test_scheduled_ai_agent_saves_once_and_links_panel_and_transcript(self):
+        from sqlalchemy import select, func
+        from app.models.ga_note import GaNote
+        from app.services import mira_host
+        from app.services.discord_meeting_control import panel_state
+        from app.schemas.discord_voice_meeting import ControlScope
+        sid = await self.scheduled_meeting(timedelta(minutes=2), recorder='ai_agent')
+        with patch.object(jobs, 'SessionLocal', self.sessions), \
+             patch('app.services.discord_voice_openai.summarize_meeting', AsyncMock(return_value='AI Agent: raporti u kontrollua.')):
+            await jobs.process_voice_meetings()
+            await jobs.process_voice_meetings()
+        with patch.object(service.settings, 'DISCORD_GUILD_ID', '123'), \
+             patch.object(service.settings, 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID', '55'), \
+             patch.object(service.settings, 'DISCORD_MEETING_CONTROL_CHANNEL_ID', '44'):
+            async with self.sessions() as db:
+                row = await db.get(Meeting, sid)
+                self.assertEqual(row.status, 'SAVED')
+                self.assertIsNotNone(row.delivered_at)
+                self.assertEqual((await db.execute(select(func.count()).select_from(GaNote))).scalar_one(), 1)
+                note = await db.get(GaNote, row.saved_note_id)
+                self.assertEqual(note.content, 'AI Agent: raporti u kontrollua.')
+                self.assertEqual(note.created_by, self.uid)
+                panel = await panel_state(db, ControlScope(guild_id='123', channel_id='44'), 'ai_agent')
+                self.assertEqual(panel['meeting']['status'], 'SAVED')
+                self.assertTrue(panel['meeting']['note_url'].endswith('/mira?tab=shenimet'))
+                transcript = await mira_host.note_transcript(db, note.id)
+                self.assertEqual(transcript['passages'][0]['speaker'], 'Ana')
+                self.assertEqual((await service.claim_deliveries(db, recorder='ai_agent'))['jobs'], [])
+
+    async def test_scheduled_ai_agent_save_failure_preserves_notes_for_manual_save(self):
+        sid = await self.scheduled_meeting(timedelta(minutes=2), recorder='ai_agent')
+        with patch.object(jobs, 'SessionLocal', self.sessions), \
+             patch('app.services.discord_voice_openai.summarize_meeting', AsyncMock(return_value='AI Agent: raporti.')), \
+             patch.object(service, 'store_note', AsyncMock(side_effect=RuntimeError('save_failed'))):
+            with self.assertLogs(jobs.log, 'WARNING'):
+                await jobs.process_voice_meetings()
+        async with self.sessions() as db:
+            row = await db.get(Meeting, sid)
+            self.assertEqual(row.status, 'READY')
+            self.assertEqual(row.draft_text, 'AI Agent: raporti.')
+            self.assertIsNone(row.delivered_at)
+            self.assertIsNone(row.saved_note_id)
+
+    async def scheduled_meeting(self,stopped_ago, *, recorder='primary'):
         from app.models.discord_voice_meeting import DiscordVoiceSegment as Segment
         sid=uuid.uuid4()
         async with self.sessions() as db:
             db.add(Meeting(id=sid,user_id=self.uid,link_id=self.lid,department_id=self.did,guild_id='123',
-                voice_channel_id='55',private_channel_id='44',request_id='auto1h-202610201558',instance_id=uuid.uuid4(),
+                voice_channel_id='55',private_channel_id='44',recorder=recorder,
+                request_id='autoai-202611100804' if recorder == 'ai_agent' else 'auto1h-202610201558',instance_id=uuid.uuid4(),
                 capture_token_hash=service.token_hash('x'*40),title='1H',status='FINALIZING',stop_authorized=True,
                 expected_segments=1,stopped_at=service.now()-stopped_ago))
             db.add(Segment(id=uuid.uuid4(),session_id=sid,sequence=0,speaker_id='12',speaker_name='Ana',start_ms=0,

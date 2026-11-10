@@ -150,6 +150,9 @@ class Settings(BaseSettings):
     DISCORD_AI_AGENT_BOT_TOKEN: str | None = None
     DISCORD_AI_AGENT_VOICE_CHANNEL_ID: str | None = None
     DISCORD_AI_AGENT_BOT_USER_ID: str | None = None
+    # Independent silent recorder schedule, weekdays in APP_TIMEZONE. Empty disables it.
+    DISCORD_AI_AGENT_AUTO_JOIN_TIMES: str = "08:04,11:59,16:09"
+    DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID: str | None = "1425896175839608933"
     DISCORD_MEETING_CONTROL_CHANNEL_ID: str | None = None
     DISCORD_GUILD_ID: str | None = None
     DISCORD_CATEGORY_ID: str | None = None

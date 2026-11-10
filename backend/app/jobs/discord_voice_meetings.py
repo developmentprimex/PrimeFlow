@@ -48,7 +48,7 @@ async def process_voice_meetings():
             if not parts:
                 row.status='FAILED';row.error='Nuk u dëgjua të folur i kuptueshëm.';row.partial=partial
                 row.memory_status='SKIPPED'
-                # A scheduled 1H slot nobody spoke in is not worth a Discord message.
+                # A scheduled slot nobody spoke in is not worth a Discord message.
                 if service.is_scheduled(row):row.delivered_at=now()
                 await db.commit();stats['failed']+=1;continue
             lease=uuid.uuid4();row.lease_token=lease;row.lease_until=now()+FINALIZE_LEASE
@@ -97,7 +97,7 @@ async def process_voice_meetings():
             current.draft_text=draft;current.partial=partial;current.lease_until=None
             current.memory_status='PENDING' if settings.MIRA_MEMORY_ENABLED else 'SKIPPED'
             if service.is_scheduled(current) and not error:
-                # Scheduled 1H meetings go straight to PX Notes, in the same commit so
+                # Scheduled 1H and AI Agent meetings go straight to PX Notes, in the same commit so
                 # Discord delivery never sees them READY. If saving fails, the savepoint
                 # rolls back and the notes reach the organizer in Discord with the save
                 # button. Failed notes are delivered too, so no 1H is lost silently.

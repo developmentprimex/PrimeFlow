@@ -13,9 +13,20 @@ AI Agent edhe te `.env` e API-së/botit kryesor, që të ruajnë lejet dhe ndarj
 Hyr në kanalin zanor AI Agent dhe nga kanali yt personal përdor
 `/ai-agent fillo`. `/ai-agent mbaro` ndal dëgjimin dhe përgatit shënimet;
 `/ai-agent statusi` tregon nëse po dëgjon. Boti vetëm merr shënime, pa folur.
-Nuk hyn dhe nuk nis regjistrim gjatë lidhjes. Kur largohet personi i fundit,
-ndalet pas 30 sekondash. Shënimet shfaqen në kanalin personal me rrjedhën
-ekzistuese të shikimit dhe ruajtjes në PX Notes.
+Hyn automatikisht nga e hëna në të premte në **08:04, 11:59 dhe 16:09**, sipas
+`APP_TIMEZONE` (Europe/Budapest), edhe kur kanali është bosh. Orari i veçantë
+`DISCORD_AI_AGENT_AUTO_JOIN_TIMES` mund të boshatiset për ta çaktivizuar;
+`DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID` përcakton organizatorin e lidhur në
+PrimeFlow. Të dyja mund të vendosen edhe te `.env` private e AI Agent.
+Kontrolli bëhet çdo 15 sekonda, me deri në tri tentativa lidhjeje brenda katër
+minutave nga orari. Një regjistrim aktiv nuk ndërpritet nga orari automatik.
+Nuk hyn vetëm pse procesi lidhet; hyn kur bie orari. Nëse askush nuk vjen,
+del pas 10 minutash. Kur largohet personi i fundit,
+ndalet pas 30 sekondash. Shënimet e takimeve të nisura nga orari ruhen
+automatikisht në PX Notes, njësoj si 1H, dhe paneli AI Agent te `mira-kontrolli`
+shfaq gjendjen **Ruajtur** me lidhjen te Mira → Shënimet. Nëse ruajtja dështon,
+shënimet mbeten të gatshme për shikim/ruajtje manuale. Takimet e nisura me
+`/ai-agent fillo` ruajnë rrjedhën ekzistuese të shikimit dhe ruajtjes manuale.
 
 Nëse regjistrimi përfundoi ose u ndërpre, **Mbaro** e verifikon sesionin në API dhe
 heq lidhjen zanore të mbetur; shënimet e gatshme ruhen. Një buton i vjetër nuk

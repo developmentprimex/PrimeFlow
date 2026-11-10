@@ -6,6 +6,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import discord
 import httpx
@@ -18,7 +19,9 @@ from dotenv import dotenv_values
 private_env = Path(os.environ.get('DISCORD_AI_AGENT_ENV_FILE', r'C:\PrimeFlowOps\MiraAIAgent\.env'))
 if private_env.exists():
     for key, value in dotenv_values(private_env, interpolate=False).items():
-        if key in {'DISCORD_AI_AGENT_BOT_TOKEN', 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID', 'DISCORD_AI_AGENT_BOT_USER_ID'} and value:
+        if key in {'DISCORD_AI_AGENT_BOT_TOKEN', 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID', 'DISCORD_AI_AGENT_BOT_USER_ID',
+                   'DISCORD_AI_AGENT_AUTO_JOIN_TIMES', 'DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID'} and (
+                       value or (key in {'DISCORD_AI_AGENT_AUTO_JOIN_TIMES', 'DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID'} and value is not None)):
             os.environ.setdefault(key, value)
 from app.config import settings
 import discord_voice_meetings as voice
@@ -108,7 +111,7 @@ class AIAgentBot(discord.Client):
     @tasks.loop(seconds=15)
     async def watch_capture(self):
         try:
-            await self.meeting_capture.check_presence(datetime.now(timezone.utc))
+            await self.meeting_capture.tick(datetime.now(ZoneInfo(settings.APP_TIMEZONE)))
             self.publish_status()
             await self.meeting_capture.panel.tick()
             await voice.deliver_meeting_results(self)
@@ -163,6 +166,8 @@ class AIAgentBot(discord.Client):
             'guild_id': str(guild.id), 'voice_channel_id': str(channel.id), 'voice_channel_name': channel.name,
             'permissions': voice_permissions, 'connected_at': datetime.now(timezone.utc).isoformat(),
             'commands_configured': True, 'recording_enabled': True,
+            'auto_join_times': settings.DISCORD_AI_AGENT_AUTO_JOIN_TIMES,
+            'auto_join_timezone': settings.APP_TIMEZONE,
             'recording': bool(self.meeting_capture.active and self.meeting_capture.active.get('listening') and not self.meeting_capture.active.get('finishing'))}
         temporary = STATUS_FILE.with_suffix('.json.tmp')
         temporary.write_text(json.dumps(status, ensure_ascii=False), encoding='utf-8')
@@ -191,6 +196,34 @@ class AIAgentBot(discord.Client):
 
 
 class AIAgentCapture(voice.MeetingCaptureCoordinator):
+    async def tick(self, now):
+        await self.check_presence(now)
+        slot = voice.auto_join_slot(now, settings.DISCORD_AI_AGENT_AUTO_JOIN_TIMES)
+        owner = settings.DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID
+        if not owner or slot is None or slot in self.scheduled or self.active:
+            return
+        attempt = self.attempts.get(slot, 0) + 1
+        self.attempts[slot] = attempt
+        try:
+            await self.auto_start(slot, owner, attempt)
+            self.scheduled.add(slot)
+        except Exception as exc:
+            log.warning('AI Agent could not join scheduled slot %s attempt=%s: %s', slot.strftime('%H:%M'), attempt, exc)
+            if attempt >= voice.AUTO_JOIN_ATTEMPTS:
+                self.scheduled.add(slot)
+
+    async def auto_start(self, slot, owner, attempt=1):
+        guild, channel = self.organizer_channel(owner)
+        target = guild.get_channel(int(settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID or 0))
+        if not isinstance(target, discord.VoiceChannel):
+            raise ValueError('Kanali zanor AI Agent nuk u gjet.')
+        actor = dict(discord_user_id=str(owner), guild_id=str(guild.id), channel_id=str(channel.id),
+                     voice_channel_id=str(target.id))
+        # Separate request IDs let the finalizer auto-save scheduled AI Agent notes.
+        request_id = f"autoai-{slot.strftime('%Y%m%d%H%M')}" + (f'-{attempt}' if attempt > 1 else '')
+        await self.begin(actor=actor, guild=guild, voice=target, request_id=request_id,
+                         title=f'AI Agent · {slot.strftime("%d.%m.%Y %H:%M")}', department_id=None, notify=channel.send)
+
     async def start(self, interaction, title, department_id):
         from discord_meeting_control import in_control
         if in_control(interaction):

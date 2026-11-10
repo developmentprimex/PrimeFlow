@@ -177,8 +177,9 @@ async def save_notes(db, actor, session_id):
 
 
 def is_scheduled(row):
-    """Mira started this 1H meeting on her own schedule (no Discord interaction)."""
-    return row.request_id.startswith('auto1h-')
+    """A scheduled 1H or AI Agent meeting saves its notes automatically."""
+    return row.request_id.startswith('auto1h-') or (
+        row.recorder == 'ai_agent' and row.request_id.startswith('autoai-'))
 
 
 async def store_note(db, row, user):
