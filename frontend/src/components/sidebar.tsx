@@ -495,7 +495,9 @@ export function Sidebar({ role }: { role: UserRole }) {
         <item.icon
           className={cn(
             "h-4 w-4 shrink-0 transition-colors",
-            active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+            item.href === "/meeting-recordings"
+              ? "text-red-600 group-hover:text-red-700 dark:text-red-400 dark:group-hover:text-red-300"
+              : active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
           )}
         />
         <span className="min-w-0 truncate">{displayLabel}</span>

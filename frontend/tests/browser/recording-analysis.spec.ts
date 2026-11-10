@@ -101,6 +101,25 @@ test('any viewer can start processing with consent and read the results', async 
   expect(harness.writes).toHaveLength(1)
 })
 
+test('video stays collapsed until requested and pauses when hidden', async ({ page }) => {
+  await shell(page)
+  const show = page.getByRole('button', { name: 'Shfaq videon', exact: true })
+  await expect(show).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('video')).toBeHidden()
+  await expect(page.getByRole('link', { name: 'Shkarko regjistrimin', exact: true })).toBeVisible()
+  await show.click()
+  await expect(page.locator('video')).toBeVisible()
+  await page.locator('video').evaluate((video: HTMLVideoElement) => {
+    video.pause = () => { video.dataset.pausedOnHide = 'true' }
+  })
+  await page.getByRole('button', { name: 'Fshih videon', exact: true }).click()
+  await expect(page.locator('video')).toBeHidden()
+  await expect(page.locator('video')).toHaveAttribute('data-paused-on-hide', 'true')
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Shfaq videon', exact: true })).toBeVisible()
+  await expect(page.locator('video')).toBeHidden()
+})
+
 test('citation timing requires a click and survives reload without reprocessing', async ({ page }) => {
   const harness = await shell(page)
   harness.ready()
@@ -116,11 +135,13 @@ test('citation timing requires a click and survives reload without reprocessing'
   await page.reload()
   const jump = page.getByRole('button', { name: /Rreth 00:00:07/ })
   await expect(jump).toBeVisible()
+  await expect(page.locator('video')).toBeHidden()
   await page.locator('video').evaluate((video: HTMLVideoElement) => {
     Object.defineProperty(video, 'currentTime', { writable: true, value: 0 })
     video.play = () => Promise.resolve()
   })
   await jump.click()
+  await expect(page.locator('video')).toBeVisible()
   expect(await page.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeCloseTo(7.58)
   expect(harness.writes).toHaveLength(1)
 })

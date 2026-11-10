@@ -128,10 +128,14 @@ export function RecorderPanel() {
           <option value="">Pa projekt të lidhur</option><RecordingProjectOptions projects={projects} departments={departments} />
         </select>{projectError && <p role="alert" className="text-sm text-destructive">{projectError}</p>}</div>
         <div className="space-y-2"><Label htmlFor="recording-source">Burimi</Label><select id="recording-source" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={source} onChange={e => setSource(e.target.value)}>
-          <option value="monitor">Ekrani i plotë</option><option value="window">Dritare</option><option value="browser">Skedë e shfletuesit</option>
+          <option value="monitor">Ekrani i plotë — gjithçka në ekranin e zgjedhur, edhe kur ndërron programe</option>
+          <option value="window">Dritare — vetëm dritarja e zgjedhur, p.sh. Teams ose Word</option>
+          <option value="browser">Skedë e shfletuesit — vetëm tab-i i zgjedhur në Chrome/Edge</option>
         </select></div>
         <div className="space-y-2"><Label htmlFor="recording-microphone">Mikrofoni</Label><select id="recording-microphone" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={device} onChange={e => setDevice(e.target.value)}>
-          <option value="default">Mikrofoni i parazgjedhur</option><option value="none">Pa mikrofon</option>{devices.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Mikrofoni ${i + 1}`}</option>)}
+          <option value="default">Mikrofoni i parazgjedhur — përdor mikrofonin e zgjedhur automatikisht</option>
+          <option value="none">Pa mikrofon — nuk regjistron zërin nga mikrofoni</option>
+          {devices.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Mikrofoni ${i + 1}`} — regjistron zërin nga kjo pajisje</option>)}
         </select></div>
       </div>
       <details className="text-sm">

@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { ArrowLeft, ImagePlus, ListTodo } from "lucide-react"
+import { ArrowLeft, Eye, EyeOff, ImagePlus, ListTodo } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -20,6 +20,7 @@ export default function RecordingDetailPage() {
   const [authorized, setAuthorized] = React.useState(false)
   const [error, setError] = React.useState("")
   const [capturing, setCapturing] = React.useState(false)
+  const [videoVisible, setVideoVisible] = React.useState(false)
   // Takimet: save the current video frame as a meeting note with the screenshot attached.
   const captureFrame = async () => {
     const video = videoRef.current
@@ -85,13 +86,21 @@ export default function RecordingDetailPage() {
         </Button>}
       </div>
       {authorized && row.status === "READY" && row.media_available !== false && <>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" aria-expanded={videoVisible} aria-controls="recording-video" onClick={() => {
+            if (videoVisible) videoRef.current?.pause()
+            setVideoVisible(visible => !visible)
+          }}>{videoVisible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}{videoVisible ? "Fshih videon" : "Shfaq videon"}</Button>
+          <Button asChild><a href={`/api/meeting-recordings/${id}/download`} download>Shkarko regjistrimin</a></Button>
+        </div>
+        <div id="recording-video" hidden={!videoVisible} className="space-y-4">
         <video ref={videoRef} key={id} className="aspect-video w-full rounded-md bg-black" src={`/api/meeting-recordings/${id}/stream`} controls preload="metadata" playsInline
           onLoadedMetadata={event => { const t = Number(new URLSearchParams(window.location.search).get("t")); if (t > 0) event.currentTarget.currentTime = t }}
           onError={() => setError("Videoja nuk mund të hapet. Rifreskoni faqen për të rinovuar autorizimin.")} />
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild><a href={`/api/meeting-recordings/${id}/download`} download>Shkarko regjistrimin</a></Button>
           {row.meeting_id ? <Button variant="outline" disabled={capturing} onClick={() => void captureFrame()}><ImagePlus aria-hidden="true" />{capturing ? "Duke ruajtur…" : "Screenshot nga videoja"}</Button>
             : <span className="text-sm text-muted-foreground">Lidhe regjistrimin me një takim për të ruajtur screenshots te takimi.</span>}
+        </div>
         </div>
       </>}
       {row.status !== "READY" && <p className="text-sm">{row.error_message || "Ngarkimi dhe verifikimi nuk kanë përfunduar. Hapni faqen e regjistrimeve për rikuperim."}</p>}
@@ -99,8 +108,9 @@ export default function RecordingDetailPage() {
     {row?.status === "READY" && <RecordingAnalysisPanel key={id} recordingId={id} onSeek={authorized ? seconds => {
       const video = videoRef.current
       if (!video) return
+      setVideoVisible(true)
       video.currentTime = Math.max(0, seconds - 0.25)
-      video.scrollIntoView({ behavior: "smooth", block: "center" })
+      requestAnimationFrame(() => video.scrollIntoView({ behavior: "smooth", block: "center" }))
       void video.play().catch(() => setError("Shtyp luaj për të dëgjuar citimin."))
     } : undefined} />}
   </div>

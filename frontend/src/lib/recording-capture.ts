@@ -44,7 +44,7 @@ export class RecordingCapture {
       const display = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: preferredSource, frameRate: { ideal: 15, max: 30 } },
         audio: true,
-        ...{ systemAudio: "include", windowAudio: "system", selfBrowserSurface: "exclude" },
+        ...{ systemAudio: "include", windowAudio: "system", selfBrowserSurface: "exclude", audioSelection: "preferred" },
       })
       if (generation !== this.generation) { display.getTracks().forEach(t => t.stop()); return }
       this.display = display
@@ -148,7 +148,7 @@ export class RecordingCapture {
     try {
       const display = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: preferredSource, frameRate: { ideal: 15, max: 30 } }, audio: true,
-        ...{ systemAudio: "include", windowAudio: "system", selfBrowserSurface: "exclude" },
+        ...{ systemAudio: "include", windowAudio: "system", selfBrowserSurface: "exclude", audioSelection: "preferred" },
       })
       if (generation !== this.generation || !["recording", "paused"].includes(this.state)) {
         display.getTracks().forEach(t => t.stop())

@@ -84,6 +84,19 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Regjistrimi i ekranit përdor `RecordingCapture` për nisjen te Regjistrimet
+  dhe për “Ndaj ekranin përsëri” si në panel ashtu edhe në shiritin global të
+  regjistrimit. Të dyja kërkesat `getDisplayMedia` përdorin
+  `audioSelection: "preferred"` dhe `systemAudio: "include"` që shfletuesit që
+  i mbështesin të parapëlqejnë ndarjen me audio. Këto janë preferenca: përdoruesi
+  dhe shfletuesi vendosin përfundimisht çfarë ndahet. Kontrollo të dyja rrugët;
+  kjo nuk ndryshon Mira/Discord, takimet, PX Notes, raportet apo regjistrimet
+  e ruajtura më parë.
+  Te detajet e regjistrimit, videoja hapet me “Shfaq videon”; fshehja e ndalon
+  luajtjen. Klikimi i kohës së citimit e hap videon automatikisht dhe e çon te
+  momenti përkatës. Kontrollo edhe screenshot-in te takimi dhe shkarkimin që
+  mbetet i arritshëm kur videoja është e fshehur.
+
 - Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
   `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe
   detyrat sistemore të takimeve në `meeting_system_tasks.py`. Kontrollo scheduler-in,

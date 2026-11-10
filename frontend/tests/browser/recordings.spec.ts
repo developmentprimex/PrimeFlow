@@ -42,10 +42,12 @@ test("Chromium display-capture API with test device → chunks → remux → rel
   await page.getByRole("button", { name: "Ndalo", exact: true }).click()
   await expect(page.getByText("Serveri konfirmoi ruajtjen.", { exact: false })).toBeVisible()
   await page.getByRole("link", { name: "Hap regjistrimin", exact: true }).click()
+  await page.getByRole("button", { name: "Shfaq videon", exact: true }).click()
   await expect(page.locator("video")).toBeVisible()
   await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => Number.isFinite(v.duration) && v.duration > 0)).toBe(true)
   const id = new URL(page.url()).pathname.split("/").pop()!
   await page.reload()
+  await page.getByRole("button", { name: "Shfaq videon", exact: true }).click()
   await expect(page.locator("video")).toBeVisible()
   await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1)
   const partial = await page.request.get(`/api/meeting-recordings/${id}/stream`, { headers: { Range: "bytes=0-31" } })
