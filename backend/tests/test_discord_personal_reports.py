@@ -214,6 +214,3 @@ class M3PersonalReportTests(unittest.IsolatedAsyncioTestCase):
         saved = next(item for item in report['jobs'] if item['id'] == job['id'])
         self.assertEqual(saved['comment'], 'Half done')
         self.assertTrue(saved.get('resolved'))
-
-
-from tests.report_attendance_fixtures import present_report_population
