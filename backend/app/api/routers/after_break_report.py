@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_report_sections
+
 import uuid
 from datetime import date, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -163,11 +165,12 @@ async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) ->
     sections = await apply_1h_confirmation_questions(db, sections)
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
+    sections = await filter_report_sections(db, sections, row.report_date)
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
         db, sections, "after_break", row.sections, settings.manual_questions
     )
-    return _draft(row, sections)
+    return _draft(row, await filter_report_sections(db, sections, row.report_date))
 
 
 def _delivery_history(row: AfterBreakReportDraft) -> dict:
@@ -359,6 +362,7 @@ async def preview_draft(
     )
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
+    sections = await filter_report_sections(db, sections, row.report_date)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
         "html": render_html(row.subject, row.report_date, sections),
@@ -382,6 +386,7 @@ async def send_draft(
     )
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
+    sections = await filter_report_sections(db, sections, row.report_date)
     row.sections = sections
     plain_text = render_plain_text(row.subject, row.report_date, sections)
     html_body = render_html(row.subject, row.report_date, sections)

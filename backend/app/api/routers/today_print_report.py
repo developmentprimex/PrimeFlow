@@ -171,6 +171,11 @@ async def get_snapshot(
     row = await get_one_h_print_snapshot(db, "TODAY", snapshot_date)
     if row is None:
         raise HTTPException(status_code=404, detail="Generated report not found")
+    if (row.report_payload or {}).get("attendance_filter_version") != 2:
+        report = await _report(db, snapshot_date)
+        if report.get("is_frozen"):
+            return report
+        row = await save_one_h_print_snapshot(db, report_kind="TODAY", report_date=snapshot_date, report=report, user=_)
     result = await serialize_one_h_print_snapshot(db, row)
     result = await with_report_strikes(db, result, snapshot_date)
     if is_closed(snapshot_date):

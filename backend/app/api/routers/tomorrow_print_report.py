@@ -138,6 +138,9 @@ async def get_snapshot(
     row = await get_one_h_print_snapshot(db, "TOMORROW", delivery_date)
     if row is None:
         raise HTTPException(status_code=404, detail="Generated report not found")
+    if delivery_date == datetime.now(report_timezone()).date() and (row.report_payload or {}).get("attendance_filter_version") != 2:
+        report = await build_tomorrow_print_report(delivery_date, db=db)
+        row = await save_one_h_print_snapshot(db, report_kind="TOMORROW", report_date=delivery_date, report=report, user=_)
     return await serialize_one_h_print_snapshot(db, row)
 
 

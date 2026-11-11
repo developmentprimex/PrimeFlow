@@ -70,7 +70,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | Checklista takimesh | Projects, Meetings, Common View, Department Views, My View, Exports |
 | PX Notes | PX Notes, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Projects, Weekly Planner, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | PX JAV | PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, Projects, PX JAV Kontrolli, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
-| Mungesa dhe pushime | Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, PX JAV, Realization, Weekly Planning Check, M1 / M2 / M3 |
+| Mungesa dhe pushime | Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow (edhe tabelat hyrëse), 1H Reports, Weekly Planner, PX JAV / PX JAV Kontrolli, Realization / Kontrolli ditor RLZ, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, End Week BZ, Reports / Daily Report, eksportet e detyrave, raportimi personal Discord 1H/M2/M3 |
 | WFC / Waiting Client | WFC, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, PX Notes, PX JAV, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Planifikim | Weekly Planner, Monthly Planner, PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, Realization, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Realization dhe Reviews | My View, Department Views, Finance View, Realization, Reviews, Common View, Weekly Planner, Kontrolli ditor RLZ, M3 PIKAT |
@@ -83,6 +83,33 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | GA PERSONAL - grupet dhe filtrat | Pamja ditore dhe javore e GA PERSONAL, filtri i grupeve dhe etiketat e tabelave; klasifikimi i eventeve ndahet përmes `frontend/src/lib/ga-personal-week.ts`, përfshirë eventet e vjetra të volejbollit. Të dhënat e modulit mbeten të ndara nga detyrat dhe raportet e kompanisë. |
 
 ## Varësi që nuk duhen harruar
+
+- Përjashtimi i personave me mungesë gjithë ditën/PV në raporte ndahet te
+  `backend/app/services/report_attendance.py`. Rregulli ndjek 1H Reports:
+  mungesa/PV që mbulon 08:00–16:00 përjashton personin nga puna e raportuar;
+  mungesa e pjesshme nuk e përjashton. Detyrat e përbashkëta ruhen vetëm për
+  përgjegjësit e pranishëm, pa ndryshuar caktimet në databazë.
+  Kontrollo M1/M2/M3, të tri PIKAT, tabelat hyrëse të SHTYPI Tomorrow,
+  përmbledhjen F/GA/P/M2, inicialet e komenteve/takimeve, GA/HV, Daily Report,
+  RLZ, End Week BZ, PX JAV Kontrolli, Weekly Planning Check dhe Discord.
+  M3 përdor datën e raportit për punën e sotme dhe datën pasuese të punës për
+  seksionet `N-`; tabelat hyrëse të SHTYPI Tomorrow përdorin ditën që mbyllet.
+  Eksportet me interval përdorin ditët e punës të intervalit, jo mungesën e
+  sotme për një raport të një periudhe tjetër; personi përjashtohet nga
+  përmbledhja e periudhës kur është i padisponueshëm në të gjitha ato ditë.
+  Pikat dhe tabelat e ruajtura filtrohen edhe gjatë leximit/preview/email/eksportit.
+  Snapshot-et aktuale të SHTYPI kanë `attendance_filter_version=2`; kopjet e
+  vjetra aktualizohen para mbylljes. Arkivat e ngrira në 16:00 dhe skedarët e
+  dërguar më parë mbeten dokumente historike dhe nuk rishkruhen me të dhëna të reja.
+
+- Hyrja automatike e Mira AI Agent dërgon `request_id=autoai-YYYYMMDDHHMM`
+  (tentativat pasuese shtojnë `-2` / `-3`). Skema `VoiceStart` te
+  `backend/app/schemas/discord_voice_meeting.py` duhet t'i pranojë bashkë me
+  `auto1h-` dhe ID-të numerike të nisjeve manuale; përndryshe API-ja e refuzon
+  nisjen para krijimit të sesionit. Kontrollo endpoint-in `/voice-meetings/start`
+  në të dy API-të aktive, panelin mira-kontrolli dhe ruajtjen te Mira/PX Notes.
+  Testet me skema të izoluara të shënimeve duhet të krijojnë edhe `MeetingNote`,
+  sepse leximi i `GaNote` ngarkon flamurin `from_meeting` përmes `meeting_notes`.
 
 - Taskat e krijuara drejtpërdrejt nga Regjistrimet krijojnë PX Note me
   `knowledge_type=RECORDING` dhe lidhjen `ga_note_origin_id`. PX Notes shfaq
@@ -394,6 +421,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ose sjellje të re, ndiq implementimin dhe rishiko hartën.
 - Kontrollo rolet ADMIN/MANAGER/STAFF, filtrat e departamentit/personit/datës,
   cache-in dhe rifreskimin kur ato ndikojnë në sjelljen që po ndryshon.
+
+## Kontrolli i deployment-it të frontend-it
+
+`.github/workflows/deploy.yml` përdor `frontend/scripts/wait-for-readiness.ps1`
+për kandidatin, rikthimin e versionit të mëparshëm dhe kontrollin përfundimtar.
+Ndryshimet e këtij kontrolli ndikojnë pranimin ose rollback-un e gjithë build-it,
+përfshirë Common View, Department Views, Finance dhe faqet e raporteve; nuk
+ndryshojnë renderuesit ose të dhënat e tyre. Kontrollo përgjigjen e vonuar,
+gabimet HTTP dhe refuzimin e një faqeje HTTP 200 me commit të vjetër. Vetëm pas
+kontrollit të commit-it të ri përditësohet shënuesi `frontend.sha`. Prova lokale
+e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
 

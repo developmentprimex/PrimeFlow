@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import load_report_attendance
+
 import json
 import uuid
 from datetime import date
@@ -47,6 +49,8 @@ async def _build_authoritative_report(db: AsyncSession, *, day: date, variant: s
     users = (await db.execute(select(User).where(User.work_staff_filter()).where(
         User.is_active.is_(True), User.department_id.is_not(None), User.role == UserRole.STAFF,
     ).order_by(User.department_id, User.full_name, User.email))).scalars().all()
+    policy = await load_report_attendance(db, day)
+    users = [user for user in users if not policy.excludes(user.id)]
     users_by_id = {user.id: user for user in users}
     department_ids = sorted({user.department_id for user in users if user.department_id}, key=str)
     department_names = {

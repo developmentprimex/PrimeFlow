@@ -15,6 +15,46 @@ from app.schemas.discord_voice_meeting import VoiceActor, VoiceStart
 from app.services import discord_voice_meetings as service
 
 
+class VoiceStartRequestTests(unittest.TestCase):
+    def payload(self, request_id, recorder='ai_agent'):
+        return dict(discord_user_id='12', guild_id='123', channel_id='44', voice_channel_id='55',
+            recorder=recorder, request_id=request_id, instance_id=str(uuid.uuid4()),
+            capture_token='x' * 40, title='AI Agent')
+
+    def test_scheduled_and_manual_requests_reach_the_start_route(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from app.api.routers.discord_voice_meetings import router, require_bot, get_db
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[require_bot] = lambda: None
+        app.dependency_overrides[get_db] = lambda: None
+        with TestClient(app) as client:
+            for recorder, request_id in (
+                ('ai_agent', 'autoai-202611111159'),
+                ('ai_agent', 'autoai-202611111159-2'),
+                ('ai_agent', 'autoai-202611111159-3'),
+                ('primary', 'auto1h-202611110958'),
+                ('primary', 'auto1h-202611110958-2'),
+                ('primary', '1565287350915960882'),
+                ('ai_agent', '1565287350915960882'),
+            ):
+                with self.subTest(recorder=recorder, request_id=request_id), \
+                     patch.object(service, 'start_session', AsyncMock(return_value={'status': 'STARTING'})) as start:
+                    response = client.post('/start', json=self.payload(request_id, recorder))
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual(start.await_args.args[1].request_id, request_id)
+                    self.assertEqual(start.await_args.args[1].recorder, recorder)
+
+    def test_malformed_schedule_identifiers_still_rejected(self):
+        from pydantic import ValidationError
+        for request_id in ('autoai-', 'autoai-20261111115', 'autoai-2026111111599',
+                           'autoai-202611111159-22', 'autoother-202611111159',
+                           'autoai-202611111159-extra', '123abc'):
+            with self.subTest(request_id=request_id), self.assertRaises(ValidationError):
+                VoiceStart(**self.payload(request_id))
+
+
 class VoiceAccessTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.uid = uuid.uuid4()

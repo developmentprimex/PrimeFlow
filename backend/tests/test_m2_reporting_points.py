@@ -659,3 +659,6 @@ def test_removed_ga_reply_is_ignored_when_saving_and_exporting_old_reports():
         assert service.MANUAL_POINTS["reorganization"] in text
     import asyncio
     asyncio.run(scenario())
+
+
+from tests.report_attendance_fixtures import present_report_population

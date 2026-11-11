@@ -1673,7 +1673,7 @@ async def _weekly_response(
             and user.role in {UserRole.MANAGER, UserRole.ADMIN}
         ),
         message=message,
-        people=people,
+        people=[person for person in people if not person.facts_json.get("availability_status")],
         department_result=(
             RealizationDepartmentResultOut.model_validate(department_result)
             if department_result and user.role != UserRole.STAFF

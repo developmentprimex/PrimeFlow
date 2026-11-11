@@ -1,3 +1,4 @@
+import pytest
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -93,3 +94,6 @@ def test_requested_priority_and_meeting_styles_use_shared_report_markers() -> No
     assert 'class="eight-am"' in html
     assert 'class="highlight"' in html
     assert "border-top:3px solid #2563eb" in html
+
+
+from tests.report_attendance_fixtures import present_report_population

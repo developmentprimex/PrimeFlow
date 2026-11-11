@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_export_tasks, filter_export_rows, load_report_attendance
+from app.config import settings
+
 import csv
 import html
 import io
@@ -943,7 +946,10 @@ async def _assignees_for_tasks(db: AsyncSession, task_ids: list[uuid.UUID]) -> d
         )
     ).all()
     out: dict[uuid.UUID, list[str]] = {task_id: [] for task_id in task_ids}
+    policy = getattr(db, "info", {}).get("report_attendance")
     for task_id, user in rows:
+        if policy and policy.excludes(user.id):
+            continue
         label = user.full_name or user.username or ""
         if not label:
             continue
@@ -1004,7 +1010,8 @@ async def _query_tasks(
         if planned_to:
             stmt = stmt.where(planned_expr <= planned_to)
 
-    return (await db.execute(stmt.order_by(Task.created_at.desc()))).scalars().all()
+    tasks = (await db.execute(stmt.order_by(Task.created_at.desc()))).scalars().all()
+    return await filter_export_tasks(db, tasks, (planned_from, planned_to))
 
 
 async def _maps(db: AsyncSession, tasks: list[Task]) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, str]]:
@@ -1919,6 +1926,7 @@ async def export_fast_tasks_xlsx(
             )
         ).all()
 
+    rows = await filter_export_rows(db, rows, (planned_from, planned_to))
     headers = [
         "NR",
         "TYPE",
@@ -2178,6 +2186,7 @@ async def preview_fast_tasks(
             )
         )
     ).all()
+    rows_raw = await filter_export_rows(db, rows_raw, (planned_from, planned_to))
     rows: list[list[str]] = []
     for idx, (task, department, assigned, created) in enumerate(rows_raw, start=1):
         values = [
@@ -2217,8 +2226,19 @@ async def preview_fast_tasks(
 async def export_all_tasks_report_xlsx(
     payload: AllTasksReportExportIn,
     user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     ensure_reports_access(user)
+    from zoneinfo import ZoneInfo
+    policy = await load_report_attendance(db, datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date())
+    rows = []
+    for row in payload.rows:
+        visible = policy.owner_text(row.userInitials or "")
+        if policy.all_users or (row.userInitials and not visible):
+            continue
+        rows.append(row.model_copy(update={"userInitials": visible or row.userInitials,
+                                           "bzMe": policy.owner_text(row.bzMe or "")}))
+    payload = payload.model_copy(update={"rows": rows})
 
     show_frequency_column = any((r.frequency or "").strip() for r in (payload.rows or []))
     headers = [
@@ -4192,6 +4212,9 @@ async def _daily_report_rows_for_user(
     include_cross_department_assigned: bool = False,
     all_open: bool = False,
 ) -> list[list[str]]:
+    policy = await load_report_attendance(db, day)
+    if policy.excludes(user_id):
+        return []
     dept_code: str | None = None
     if department_id is not None:
         dept = (
@@ -5340,6 +5363,7 @@ async def export_system_tasks_xlsx(
     if planned_to:
         task_stmt = task_stmt.where(func.date(Task.start_date) <= planned_to)
     task_rows = (await db.execute(task_stmt.order_by(Task.created_at.desc()))).all()
+    task_rows = await filter_export_rows(db, task_rows, (planned_from, planned_to))
     dedup: dict[uuid.UUID, tuple[Task, SystemTaskTemplate]] = {}
     for task, tmpl in task_rows:
         prev = dedup.get(tmpl.id)
@@ -5358,6 +5382,8 @@ async def export_system_tasks_xlsx(
             )
         ).all()
         for task_id, user_row in assignee_rows:
+            if getattr(db, "info", {}).get("report_attendance") and db.info["report_attendance"].excludes(user_row.id):
+                continue
             label = user_row.full_name or user_row.username or ""
             if label:
                 assignee_map.setdefault(task_id, []).append(label)
@@ -5696,6 +5722,7 @@ async def preview_system_tasks(
     if planned_to:
         task_stmt = task_stmt.where(func.date(Task.start_date) <= planned_to)
     task_rows = (await db.execute(task_stmt.order_by(Task.created_at.desc()))).all()
+    task_rows = await filter_export_rows(db, task_rows, (planned_from, planned_to))
     dedup: dict[uuid.UUID, tuple[Task, SystemTaskTemplate]] = {}
     for task, tmpl in task_rows:
         prev = dedup.get(tmpl.id)
@@ -5714,6 +5741,8 @@ async def preview_system_tasks(
             )
         ).all()
         for task_id, user_row in assignee_rows:
+            if getattr(db, "info", {}).get("report_attendance") and db.info["report_attendance"].excludes(user_row.id):
+                continue
             label = user_row.full_name or user_row.username or ""
             if label:
                 assignee_map.setdefault(task_id, []).append(label)

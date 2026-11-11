@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import load_report_attendance
+
 import hashlib
 import html
 import io
@@ -308,9 +310,12 @@ async def build_px_jav_weekly_report(
         if task.plan_note_origin_id:
             tasks_by_note[task.plan_note_origin_id].append(task)
 
+    policy = await load_report_attendance(db, report_date)
     rows: list[PxJavNoteRow] = []
     excluded_task_count = 0
     for note in notes:
+        if policy.excludes(note.created_by):
+            continue
         linked_tasks = tasks_by_note.get(note.id, [])
         year_end_comment = _is_year_end_comment(note.comment)
         if linked_tasks and not note.next_week:
@@ -322,7 +327,9 @@ async def build_px_jav_weekly_report(
             if task.assigned_to:
                 assignee_ids.add(task.assigned_to)
             assignee_ids.update(explicit_assignees.get(task.id, set()))
-        assignees = sorted({_display_user(users.get(user_id)) for user_id in assignee_ids})
+        if assignee_ids and all(policy.excludes(uid) for uid in assignee_ids):
+            continue
+        assignees = sorted({_display_user(users.get(user_id)) for user_id in assignee_ids if not policy.excludes(user_id)})
         due_dates = _unique_dates([task.due_date for task in linked_tasks])
 
         result = classify_note_result(len(linked_tasks), bool(note.is_converted_to_task))

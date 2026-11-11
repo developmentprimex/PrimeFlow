@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_task_context, filter_report_sections
+
 import re
 from datetime import date
 from typing import Any
@@ -156,6 +158,7 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignees = await _effective_task_assignee_ids(db, tasks)
+    tasks, names, assignees = await filter_task_context(db, report_day, tasks, names, assignees)
     await apply_weekly_planner_task_order(db, tasks, assignees)
     departments = dict((await db.execute(select(Department.id, Department.code))).all())
     open_for_day = [task for task in tasks if _is_open(task) and _task_covers_day(task, report_day)]
@@ -232,7 +235,7 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
     }
     counts.update({SECTION_TITLES[2]: len(deadline), SECTION_TITLES[3]: len(r1), SECTION_TITLES[4]: len(at_eight), "TAK EXT": len(external), "TAK INT": len(internal)})
     sections = [{"section_key": title, "title": title, "body": bodies[title]} for title in SECTION_TITLES]
-    return sections, {"report_day": report_day.isoformat(), "counts": counts}
+    return await filter_report_sections(db, sections, report_day), {"report_day": report_day.isoformat(), "counts": counts}
 
 
 def render_plain_text(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:

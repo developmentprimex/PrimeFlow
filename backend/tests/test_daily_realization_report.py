@@ -1,3 +1,4 @@
+import pytest
 import os
 import asyncio
 import copy
@@ -269,3 +270,6 @@ def test_final_builder_consumes_live_metrics_and_day_scoped_compliance(monkeypat
     assert person["tasks"][0]["comment"] == "Fillestar"
     assert person["tasks"][0]["reason_label"] == "Në pritje të klientit"
     assert report["summary"]["original_planned_count"] == live_metrics["original_planned_count"]
+
+
+from tests.report_attendance_fixtures import present_report_population

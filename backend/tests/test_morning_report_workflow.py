@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import unittest
 import uuid
 from datetime import date, datetime, time, timezone
@@ -735,3 +737,6 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from tests.report_attendance_fixtures import present_report_population

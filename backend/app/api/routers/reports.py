@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import load_report_attendance
+
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
@@ -670,12 +672,29 @@ async def daily_report(
                     "deadline_is_overdue", "postponed_today",
                 ):
                     setattr(state, field, bool(requirement.get(field)))
+    policy = await load_report_attendance(db, day)
+    def present_items(items):
+        result = []
+        if user_id and policy.excludes(user_id):
+            return result
+        for item in items:
+            task = item.task
+            original = list(task.assignees or [])
+            present = [person for person in original if not policy.excludes(person.id)]
+            owner_ids = {person.id for person in present}
+            if task.assigned_to and not policy.excludes(task.assigned_to):
+                owner_ids.add(task.assigned_to)
+            if policy.all_users or ((original or task.assigned_to) and not owner_ids):
+                continue
+            visible_task = task.model_copy(update={"assignees": present, "assigned_to": task.assigned_to if not policy.excludes(task.assigned_to) else next(iter(owner_ids), None)})
+            result.append(item.model_copy(update={"task": visible_task}))
+        return result
     return DailyReportResponse(
         day=day,
-        tasks_today=tasks_today,
-        tasks_overdue=tasks_overdue,
-        system_today=system_today,
-        system_overdue=system_overdue,
+        tasks_today=present_items(tasks_today),
+        tasks_overdue=present_items(tasks_overdue),
+        system_today=present_items(system_today),
+        system_overdue=present_items(system_overdue),
         rlz_close_state=DailyRlzCloseStateOut(**compliance["rlz_close_state"]),
     )
 

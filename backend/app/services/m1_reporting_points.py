@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_points_payload, load_report_attendance
+
 import asyncio
 import html
 import re
@@ -308,6 +310,8 @@ async def build_data(db: AsyncSession, day: date, now: datetime | None = None) -
     ))).scalars().all()
     tasks = (await db.execute(select(Task).where(Task.created_at >= task_start, Task.created_at <= cutoff))).scalars().all()
     tasks, users, departments, assignees = await prepare_task_context(db, tasks)
+    policy = await load_report_attendance(db, day)
+    tasks, _, assignees = policy.task_context(tasks, {user.id: user.full_name or user.username or user.email for user in users}, assignees)
     data = select_sections(entries, ga_notes, [], tasks, day, now=cutoff,
                                    users={user.id: user for user in users}, departments=departments, assignees=assignees)
     data["captured_until"] = cutoff.isoformat()
@@ -517,7 +521,7 @@ async def send_report(db, row, recipients, *, automatic: bool = False):
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To ne konfigurimin e M1.")
-    report = report_payload(row, excluded_note_ids=await excluded_note_ids(db, row))
+    report = await filter_points_payload(db, report_payload(row, excluded_note_ids=await excluded_note_ids(db, row)))
     try:
         gmail = GmailService()
         html_body = render_html(report)

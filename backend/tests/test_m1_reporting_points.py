@@ -578,3 +578,6 @@ def test_rich_note_tabs_use_the_same_column_positions_as_png_wrapping():
     rich_lines = wrapped_runs(runs, lines)
     assert ["".join(run["text"] for run in line) for line in rich_lines] == list(lines)
     assert rich_lines[0][-1]["fill"] == "#BFDBFE"
+
+
+from tests.report_attendance_fixtures import present_report_population

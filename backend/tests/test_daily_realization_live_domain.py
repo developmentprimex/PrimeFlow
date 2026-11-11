@@ -25,7 +25,7 @@ DAY = date(2026, 8, 26)
 
 
 @pytest.mark.parametrize("leave_day, expected_planned", [(DAY, 1), (date(2026, 8, 27), 3)])
-def test_live_daily_labels_full_day_leave_without_counting_its_tasks(monkeypatch, leave_day, expected_planned):
+def test_live_daily_excludes_full_day_leave_without_counting_its_tasks(monkeypatch, leave_day, expected_planned):
     import asyncio
     from app.models.user import User
     from app.services import daily_realization_live as live_service
@@ -65,10 +65,11 @@ def test_live_daily_labels_full_day_leave_without_counting_its_tasks(monkeypatch
     result = asyncio.run(live_service.build_live_daily_realization(
         Session(), department_id=department_id, day=DAY,
     ))
-    expected_users = {str(active.id), str(on_leave.id)}
+    expected_users = {str(active.id)} if leave_day == DAY else {str(active.id), str(on_leave.id)}
     assert {person["user_id"] for person in result["people"]} == expected_users
-    leave_person = next(person for person in result["people"] if person["user_id"] == str(on_leave.id))
-    assert leave_person.get("availability_status") == ("PV" if leave_day == DAY else None)
+    if leave_day != DAY:
+        leave_person = next(person for person in result["people"] if person["user_id"] == str(on_leave.id))
+        assert leave_person.get("availability_status") is None
     assert result["metrics"]["original_planned_count"] == expected_planned
     assert result["metrics"]["raw_plan_realization"] == 0
 

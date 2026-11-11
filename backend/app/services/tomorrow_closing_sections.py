@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from app.services.report_attendance import filter_task_context, load_report_attendance
+
+from dataclasses import dataclass, field, replace
 from datetime import date
 import re
 from typing import Any
@@ -139,6 +141,7 @@ async def build_tomorrow_closing_sections(
     )
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    tasks, names, assignee_ids_by_task = await filter_task_context(db, report_day, tasks, names, assignee_ids_by_task)
     all_participant_ids = await _all_participant_user_ids(db)
     department_codes = {
         department_id: code
@@ -258,7 +261,7 @@ async def build_tomorrow_closing_sections(
 
     note_rows = [ClosingTableRow(values=row) for row in await _blue_note_rows(db)]
 
-    return [
+    sections = [
         ClosingSection(
             title="DET PA PROGRESS",
             tables=[
@@ -316,3 +319,25 @@ async def build_tomorrow_closing_sections(
             ],
         ),
     ]
+
+    policy = await load_report_attendance(db, report_day)
+    filtered = []
+    for section in sections:
+        tables = []
+        for table in section.tables:
+            owner_column = next((i for i, label in enumerate(table.columns) if label in {"KUSH", "FROM"}), None)
+            if owner_column is None:
+                tables.append(table)
+                continue
+            rows = []
+            for row in table.rows:
+                owner = policy.owner_text(row.values[owner_column])
+                if not owner and row.values[owner_column] not in {"", "-"}:
+                    continue
+                values = list(row.values)
+                values[owner_column] = owner or values[owner_column]
+                values[0] = str(len(rows) + 1)
+                rows.append(replace(row, values=values))
+            tables.append(replace(table, rows=rows))
+        filtered.append(replace(section, tables=tables))
+    return filtered

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import attendance_from_items
+
 import html
 import os
 import re
@@ -537,7 +539,7 @@ def _missing_blocked_initials(payload: dict[str, Any], target_date: date) -> lis
     return _missing_task_initials(payload, target_date, bucket="blocked", slots=("BLL",))["BLL"]
 
 
-def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
+def _comment_user_initials(payload: dict[str, Any], target_date: date | None = None) -> list[str]:
     """Fixed report users followed by PCM users in Weekly Planner order."""
     departments = {
         str(row.get("id")): str(row.get("code") or row.get("name") or "").strip().upper()
@@ -562,11 +564,14 @@ def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
     for *_, initials in sorted(pcm_users):
         if initials not in result:
             result.append(initials)
+    if target_date is not None:
+        policy = attendance_from_items(payload.get("items") or {}, target_date, payload.get("users") or [])
+        result = [label for label in result if not policy.all_users and label not in policy.labels]
     return result
 
 
 def _comment_department_rows(initials: list[str]) -> list[list[tuple[str, list[str]]]]:
-    values = initials or list(COMMENT_FIXED_INITIALS)
+    values = initials
     dev = [value for value in COMMENT_DEV_INITIALS if value in values]
     gd = [value for value in COMMENT_GD_INITIALS if value in values]
     pcm = [value for value in values if value not in COMMENT_FIXED_INITIALS]
@@ -916,68 +921,18 @@ def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _full_day_unavailable(
     items: dict[str, Any], target_date: date,
 ) -> tuple[bool, set[str], set[str]]:
-    """Use the Common View workday (08:00-16:00) for full-day absences."""
-    target_iso = target_date.isoformat()
-    user_ids: set[str] = set()
-    names: set[str] = set()
-    all_users = False
-    for bucket in ("absent", "leave"):
-        for row in items.get(bucket) or []:
-            if not isinstance(row, dict):
-                continue
-            if bucket == "leave":
-                start = str(row.get("startDate") or row.get("start_date") or "")[:10]
-                end = str(row.get("endDate") or row.get("end_date") or start)[:10]
-                if not start or not start <= target_iso <= end:
-                    continue
-            elif str(row.get("date") or "")[:10] != target_iso:
-                continue
-            full_day = row.get("fullDay", row.get("full_day"))
-            start_minutes = _clock_minutes(row.get("from"))
-            end_minutes = _clock_minutes(row.get("to"))
-            if full_day is not True and not (
-                (start_minutes is None and end_minutes is None and full_day is not False)
-                or (start_minutes is not None and end_minutes is not None
-                    and start_minutes <= 8 * 60 and end_minutes >= 16 * 60)
-            ):
-                continue
-            all_users = all_users or bool(row.get("isAllUsers") or row.get("is_all_users"))
-            user_id = row.get("userId") or row.get("user_id")
-            if user_id:
-                user_ids.add(str(user_id))
-            name = str(row.get("person") or row.get("owner") or "").strip().casefold()
-            if name:
-                names.add(name)
-    return all_users, user_ids, names
+    policy = attendance_from_items(items, target_date)
+    return policy.all_users, policy.user_ids, policy.names
 
 
 def _task_rows(
     items: dict[str, Any], target_date: date, *, include_completed_today: bool = False,
     users: list[dict[str, Any]] | None = None,
 ) -> list[tuple[str, list[dict[str, Any]], bool]]:
-    all_unavailable, unavailable_ids, unavailable_names = _full_day_unavailable(items, target_date)
-    for user in users or []:
-        if str(user.get("id")) in unavailable_ids:
-            unavailable_names.update(
-                str(user[key]).strip().casefold()
-                for key in ("full_name", "username", "email") if user.get(key)
-            )
-
-    def available(item: dict[str, Any]) -> bool:
-        if all_unavailable:
-            return False
-        user_id = item.get("userId") or item.get("user_id")
-        assignees = item.get("assignees") or []
-        if assignees:
-            if len(assignees) == 1 and str(user_id) in unavailable_ids:
-                return False
-            # Shared work stays visible while at least one assignee is present.
-            return any(str(name).strip().casefold() not in unavailable_names for name in assignees)
-        name = str(item.get("person") or item.get("owner") or "").strip().casefold()
-        return str(user_id) not in unavailable_ids and name not in unavailable_names
-
+    policy = attendance_from_items(items, target_date, users or [])
     by_bucket = {
-        name: [item for item in values if isinstance(item, dict) and _item_date(item) == target_date and available(item)]
+        name: [filtered for item in values if isinstance(item, dict) and _item_date(item) == target_date
+               and (filtered := policy.item(item)) is not None]
         for name, values in items.items()
         if isinstance(values, list)
     }
@@ -1268,12 +1223,18 @@ def _meeting_time_display(item: dict[str, Any], *, meeting_type: str, endpoint: 
 
 def _meeting_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list[dict[str, Any]]]]:
     rows: list[tuple[str, list[dict[str, Any]]]] = []
+    policy = attendance_from_items(items, target_date)
     for bucket, label in MEETING_ROWS:
         values = []
         for item in items.get(bucket, []):
             if not isinstance(item, dict) or _item_date(item) != target_date:
                 continue
-            report_item = dict(item)
+            present_users = [(label, uid) for label, uid in _meeting_users(item)
+                             if not policy.excludes(uid) and label not in policy.labels]
+            if policy.all_users or (_meeting_users(item) and not present_users):
+                continue
+            report_item = {**item, "assignees": [label for label, _ in present_users],
+                           "assigneeUserIds": [uid for _, uid in present_users]}
             report_item["_unavailableUserInitials"] = sorted(
                 _meeting_unavailable_initials(item, items, target_date)
             )
@@ -2448,7 +2409,7 @@ def _excel_table_attachment(
         else:
             next_row = write_section(meeting_rows, meeting=True, row_number=next_row + 1)
 
-    comment_columns = comment_initials or list(COMMENT_FIXED_INITIALS)
+    comment_columns = comment_initials if comment_initials is not None else list(COMMENT_FIXED_INITIALS)
     comment_start_row = next_row + 1
     sheet.merge_cells(
         start_row=comment_start_row,
@@ -2800,7 +2761,7 @@ def _docx_table_attachment(
                     set_meeting_type_divider(cell)
 
     heading("KOMENTE PER STAF", size=10)
-    for line in _comment_write_in_lines(comment_initials or list(COMMENT_FIXED_INITIALS)):
+    for line in _comment_write_in_lines(comment_initials if comment_initials is not None else list(COMMENT_FIXED_INITIALS)):
         paragraph = document.add_paragraph(line)
         paragraph.paragraph_format.space_after = Pt(3)
         for run in paragraph.runs:
@@ -2887,7 +2848,7 @@ def _core_png_table_attachment(
     )
     extra_status_height = compact_height + 16
     header_top, header_height = 92 + extra_status_height, 40
-    comment_columns = comment_initials or list(COMMENT_FIXED_INITIALS)
+    comment_columns = comment_initials if comment_initials is not None else list(COMMENT_FIXED_INITIALS)
     comment_lines = _comment_write_in_lines(comment_columns)
     comment_title_height, comment_line_height = 30, 28
     comment_block_height = 20 + comment_title_height + len(comment_lines) * comment_line_height
@@ -3484,7 +3445,7 @@ async def _build_print_report(
         )
         payload = await client.common_view(target_date)
     items = payload.get("items") or {}
-    comment_initials = _comment_user_initials(payload)
+    comment_initials = _comment_user_initials(payload, target_date)
     missing_one_h_by_slot = _missing_one_h_initials(payload, target_date)
     project_covered_by_slot = _project_covered_initials(payload, target_date)
     personal_covered_by_slot = _personal_covered_initials(payload, target_date)
@@ -3644,6 +3605,7 @@ async def _build_print_report(
         *_comment_write_in_lines(comment_initials),
     ])
     report: dict[str, Any] = {
+        "attendance_filter_version": 2,
         "subject": report_title,
         "target_date": target_date.isoformat(),
         "html": html_body,

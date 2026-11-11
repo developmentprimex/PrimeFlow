@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import unittest
 import uuid
 from io import BytesIO
@@ -1436,3 +1438,6 @@ class MeetingsReportCombinedPostponementTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from tests.report_attendance_fixtures import present_report_population

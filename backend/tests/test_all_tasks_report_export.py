@@ -46,3 +46,6 @@ class TestAllTasksReportExport(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(worksheet.cell(6, columns["TITULLI"]).value, "-")
                 self.assertIsNone(worksheet.cell(6, columns["PERSHKRIMI"]).value)
                 self.assertEqual("F" in columns, frequency is not None)
+
+
+from tests.report_attendance_fixtures import present_report_population

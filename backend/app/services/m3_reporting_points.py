@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_points_payload, load_report_attendance
+
 import html
 import asyncio
 import uuid
@@ -218,6 +220,13 @@ async def build_task_data(db: AsyncSession, day: date, *, section_selector=selec
         AuditLog.entity_type == "task", AuditLog.action.in_(DATE_ACTIONS),
         AuditLog.created_at >= start, AuditLog.created_at < end,
     ).order_by(AuditLog.created_at, AuditLog.id))).scalars().all())
+    policy = await load_report_attendance(db, day)
+    task_ids = {task.id for task in tasks}
+    all_owners = defaultdict(set)
+    if task_ids and (policy.user_ids or policy.all_users):
+        for task_id, user_id in (await db.execute(select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids)))).all():
+            all_owners[task_id].add(user_id)
+    tasks, _, _ = policy.task_context(tasks, {}, all_owners)
     sections = section_selector(tasks, events, day)
     selected = {uuid.UUID(row["task_id"]) for rows in sections.values() for row in rows}
     if not selected:
@@ -241,18 +250,20 @@ async def build_task_data(db: AsyncSession, day: date, *, section_selector=selec
     for state in (await db.execute(select(TaskDailyRlzState).where(
         TaskDailyRlzState.day_date == day, TaskDailyRlzState.task_id.in_(selected),
     ).order_by(TaskDailyRlzState.user_id))).scalars().all():
-        states[state.task_id].append(state)
+        if not policy.excludes(state.user_id):
+            states[state.task_id].append(state)
     progress = {item.task_id: item for item in (await db.execute(select(TaskDailyProgress).where(
         TaskDailyProgress.day_date == day, TaskDailyProgress.task_id.in_(selected),
     ))).scalars().all()}
     by_id = {task.id: task for task in tasks}
+    _, present_names, present_owners = policy.task_context(selected_tasks, users, owners)
     for key, rows in sections.items():
         for row in rows:
             task_id = uuid.UUID(row["task_id"])
             task = by_id[task_id]
             if task.assigned_to:
                 owners[task_id].add(task.assigned_to)
-            row["assignees"] = _task_owners(task, users, owners)
+            row["assignees"] = _task_owners(task, present_names, present_owners)
             row["department"] = _m3_department_label(task, department_codes)
             row["project"] = projects.get(task.project_id, "-")
             evidence = states[task_id]
@@ -267,12 +278,14 @@ async def build_task_data(db: AsyncSession, day: date, *, section_selector=selec
         rows.sort(key=lambda row: (
             *common_view_task_sort_key(by_id[uuid.UUID(row["task_id"])], users, owners), row["task_id"],
         ))
-    return sections
+    return {key: [filtered for row in rows if (filtered := policy.item(row)) is not None] for key, rows in sections.items()}
 
 
 async def build_realization_capture(db: AsyncSession, day: date) -> dict:
     users = list((await db.execute(select(User).where(User.work_staff_filter()).where(User.is_active.is_(True),
         User.department_id.is_not(None)))).scalars().all())
+    policy = await load_report_attendance(db, day)
+    users = [user for user in users if not policy.excludes(user.id)]
     department_by_id = {item.id: item for item in (await db.execute(select(Department))).scalars().all()}
     people, missing, departments = [], [], []
     for department_id in sorted(department_by_id, key=lambda value: (
@@ -283,6 +296,8 @@ async def build_realization_capture(db: AsyncSession, day: date) -> dict:
         if not live.get("baseline_available"):
             missing.append(str(department_id))
         for person in live.get("people", []):
+            if policy.excludes(person["user_id"]) or person.get("availability_status"):
+                continue
             # Use the same complete live population as the Realization page,
             # including managers and historical assignees retained by its engine.
             people.append({"user_id": str(person["user_id"]), "name": person.get("user_name"),
@@ -400,12 +415,14 @@ async def with_current_task_explanations(db: AsyncSession, payload: dict, sectio
     task_ids = {uuid.UUID(row["task_id"]) for row in rows if row.get("task_id")}
     if not task_ids:
         return payload
+    policy = await load_report_attendance(db, date.fromisoformat(payload["report_date"]))
     states = defaultdict(list)
     for state in (await db.execute(select(TaskDailyRlzState).where(
         TaskDailyRlzState.day_date == date.fromisoformat(payload["report_date"]),
         TaskDailyRlzState.task_id.in_(task_ids),
     ).order_by(TaskDailyRlzState.user_id))).scalars().all():
-        states[state.task_id].append(state)
+        if not policy.excludes(state.user_id):
+            states[state.task_id].append(state)
     user_ids = {state.user_id for items in states.values() for state in items}
     users = {user.id: user.full_name or user.username or user.email
              for user in (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(user_ids)))).scalars().all()} if user_ids else {}
@@ -418,7 +435,7 @@ async def current_report_payload(db: AsyncSession, row: M3ReportingPointsReport)
     payload = report_payload(row)
     payload = await with_current_task_explanations(db, payload, "untouched")
     payload["data"] = await add_saved_meeting_appearance(db, payload["data"])
-    return payload
+    return await filter_points_payload(db, payload)
 
 
 def _cell(value: Any) -> str:

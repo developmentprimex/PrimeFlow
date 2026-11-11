@@ -721,6 +721,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location frontend
+          . ./scripts/wait-for-readiness.ps1
  
           Write-Host "1. Installing Dependencies..."
           npm install
@@ -769,32 +770,6 @@ jobs:
             if ($null -ne $exitCode -and $exitCode -ne 0) {
               throw "PM2 frontend start failed with exit code $exitCode."
             }
-          }
-
-          function Wait-PrimeFlowFrontend {
-            param([string]$ExpectedDeploymentId = "")
-
-            $uri = "http://127.0.0.1:3000/admin-tasks?deploy-check=$ExpectedDeploymentId"
-            for ($i = 0; $i -lt 20; $i++) {
-              try {
-                $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers @{ "Cache-Control" = "no-cache" } -TimeoutSec 3
-                Write-Host "Frontend readiness attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
-                if ($resp.StatusCode -eq 200) {
-                  if ([string]::IsNullOrWhiteSpace($ExpectedDeploymentId)) { return $true }
-
-                  $deploymentMarker = "?dpl=$ExpectedDeploymentId"
-                  if ($resp.Content.Contains($deploymentMarker)) {
-                    Write-Host "Frontend is serving deployment $ExpectedDeploymentId."
-                    return $true
-                  }
-                  Write-Host "Port 3000 answered, but it is not serving deployment $ExpectedDeploymentId."
-                }
-              } catch {
-                Write-Host "Frontend readiness attempt $($i + 1)/20: no response yet"
-              }
-              Start-Sleep -Seconds 2
-            }
-            return $false
           }
 
           function Stop-StalePrimeFlowFrontendListener {
@@ -856,6 +831,15 @@ jobs:
           } catch {
             $deploymentError = $_.Exception.Message
             Write-Host "Candidate deployment failed: $deploymentError"
+            # Capture the candidate's evidence before rollback starts writing
+            # to the same PM2 logs. Reading files cannot hang on the PM2 daemon.
+            foreach ($logName in @("frontend-error.log", "frontend-out.log")) {
+              $logPath = Join-Path $env:PM2_HOME "logs/$logName"
+              if (Test-Path -LiteralPath $logPath) {
+                Write-Host "--- Candidate $logName ---"
+                Get-Content -LiteralPath $logPath -Tail 60 -ErrorAction Continue | Out-Host
+              }
+            }
             cmd /c "pm2 delete frontend || ver > NUL" | Out-Host
             if (Test-Path .next) {
               Remove-Item .next -Recurse -Force
@@ -879,24 +863,10 @@ jobs:
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
         run: |
-          $ok = $false
+          $ErrorActionPreference = "Stop"
+          . ./frontend/scripts/wait-for-readiness.ps1
           $expectedDeploymentId = "${{ github.sha }}"
-          $uri = "http://127.0.0.1:3000/admin-tasks?deploy-check=$expectedDeploymentId"
-          for ($i = 0; $i -lt 20; $i++) {
-            try {
-              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers @{ "Cache-Control" = "no-cache" } -TimeoutSec 3
-              Write-Host "Frontend readiness attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
-              if ($resp.StatusCode -eq 200 -and $resp.Content.Contains("?dpl=$expectedDeploymentId")) {
-                $ok = $true
-                break
-              }
-              Write-Host "Port 3000 answered, but it is not serving deployment $expectedDeploymentId."
-            } catch {
-              Write-Host "Frontend readiness attempt $($i + 1)/20: no response yet"
-              Start-Sleep -Seconds 2
-            }
-          }
-          if (-not $ok) {
+          if (-not (Wait-PrimeFlowFrontend -ExpectedDeploymentId $expectedDeploymentId)) {
             Write-Error "Frontend did not serve deployment $expectedDeploymentId on port 3000."
             exit 1
           }

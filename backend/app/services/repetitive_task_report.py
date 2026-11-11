@@ -1,6 +1,11 @@
 """One report row per logical repetitive task, including system definitions."""
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from app.config import settings
+from app.services.report_attendance import load_report_attendance
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,7 +76,10 @@ async def repetitive_task_report_rows(db: AsyncSession) -> list[list[str]]:
 
     people_ids = set().union(*template_people.values(), *task_people.values())
     users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(people_ids)))).scalars().all() if people_ids else []
-    user_map = {item.id: item for item in users}
+    policy = await load_report_attendance(db, datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date())
+    if policy.all_users:
+        return []
+    user_map = {item.id: item for item in users if not policy.excludes(item.id)}
     department_ids = {item.department_id for item in [*templates, *tasks, *users] if item.department_id}
     departments = (await db.execute(
         select(Department).where(Department.id.in_(department_ids))
@@ -92,6 +100,8 @@ async def repetitive_task_report_rows(db: AsyncSession) -> list[list[str]]:
 
     rows = []
     for template in templates:
+        if template_people[template.id] and all(policy.excludes(uid) for uid in template_people[template.id]):
+            continue
         dep_ids = {template.department_id} if template.department_id else set()
         people, department = labels(template_people[template.id], dep_ids)
         if people == "-" and template.scope == SystemTaskScope.ALL.value:
@@ -107,6 +117,8 @@ async def repetitive_task_report_rows(db: AsyncSession) -> list[list[str]]:
 
     grouped = {}
     for task in tasks:
+        if task_people[task.id] and all(policy.excludes(uid) for uid in task_people[task.id]):
+            continue
         key = _task_group_key(task)
         group = grouped.setdefault(key, {"title": task.title, "people": set(), "departments": set()})
         group["people"].update(task_people[task.id])

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import load_report_attendance
+
 import uuid
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -362,6 +364,8 @@ async def build_daily_rlz_control(db: AsyncSession, *, day: date, department_id:
     if user_id:
         stmt = stmt.where(User.id == user_id)
     users = (await db.execute(stmt.order_by(User.department_id, User.full_name, User.email))).scalars().all()
+    policy = await load_report_attendance(db, day)
+    users = [user for user in users if not policy.excludes(user.id)]
     department_ids = {subject.department_id for subject in users if subject.department_id}
     departments = {row.id: row.name for row in (await db.execute(
         select(Department).where(Department.id.in_(department_ids))

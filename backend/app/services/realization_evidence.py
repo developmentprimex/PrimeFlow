@@ -540,18 +540,6 @@ async def collect_weekly_evidence(
         canonical_name = active_by_id[user_id].full_name or name
         availability_status = availability_statuses.get(user_id)
         if availability_status:
-            if user_id not in people:
-                people[user_id] = {
-                    "user_id": user_id,
-                    "user_name": canonical_name,
-                    "tasks": [],
-                    "observations": [],
-                    "attendance": {},
-                    "counters": defaultdict(int),
-                    "needs_review": [],
-                    "daily_rlz": [],
-                    "availability_status": availability_status,
-                }
             return None
         if user_id not in people:
             people[user_id] = {

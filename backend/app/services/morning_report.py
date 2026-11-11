@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_task_context, filter_report_sections
+
 import re
 from datetime import date
 from typing import Any
@@ -509,6 +511,7 @@ async def apply_ga_hv_dv_tasks_table(
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    tasks, names, assignee_ids_by_task = await filter_task_context(db, report_day, tasks, names, assignee_ids_by_task)
     department_codes = {
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
@@ -665,6 +668,7 @@ async def build_morning_report_sections(
     ).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    tasks, names, assignee_ids_by_task = await filter_task_context(db, report_day, tasks, names, assignee_ids_by_task)
     await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
 
     entry_user_ids = {
@@ -826,7 +830,7 @@ async def build_morning_report_sections(
             SECTION_TITLES[8]: len(wfc_report_tasks),
         },
     }
-    return sections, snapshot
+    return await filter_report_sections(db, sections, report_day), snapshot
 
 
 def render_plain_text(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:

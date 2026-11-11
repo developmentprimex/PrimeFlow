@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_task_context, filter_report_sections
+
 import html
 import os
 import re
@@ -713,8 +715,10 @@ def _task_owners(
     if not assignee_ids and task.assigned_to:
         assignee_ids = {task.assigned_to}
     if (
-        (all_participant_ids and assignee_ids and all_participant_ids.issubset(assignee_ids))
-        or len(assignee_ids) > ALL_ASSIGNEES_DISPLAY_THRESHOLD
+        not getattr(names, "attendance_filtered", False) and (
+            (all_participant_ids and assignee_ids and all_participant_ids.issubset(assignee_ids))
+            or len(assignee_ids) > ALL_ASSIGNEES_DISPLAY_THRESHOLD
+        )
     ):
         return "ALL"
     owners = sorted({_initials(names.get(user_id)) for user_id in assignee_ids if _initials(names.get(user_id)) != "-"})
@@ -1635,7 +1639,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         "tomorrow": tomorrow.isoformat(),
         "counts": {section["title"]: section["body"].count("\n- ") + (1 if section["body"].startswith("- ") else 0) for section in sections},
     }
-    return tomorrow, sections, snapshot
+    return tomorrow, await filter_report_sections(db, sections, report_day, tomorrow=tomorrow), snapshot
 
 
 def _normalize_report_status(value: str | None) -> str:
@@ -1797,9 +1801,10 @@ async def _m3_finance_ga_sections(
     db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date
 ) -> tuple[str, str]:
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    tasks, names, assignee_ids_by_task = await filter_task_context(db, report_day, tasks, names, assignee_ids_by_task)
     all_participant_ids = await _all_participant_user_ids(db)
     ga_users = await _users_by_initials(db, "GA")
-    ga_user_ids = {user.id for user in ga_users}
+    ga_user_ids = {user.id for user in ga_users if user.id in names}
     ga_tasks = [
         task for task in tasks
         if ga_user_ids.intersection(assignee_ids_by_task.get(task.id, set()))

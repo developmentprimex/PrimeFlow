@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_report_sections
+
 import uuid
 from datetime import date, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -142,14 +144,14 @@ def _settings(row: MeetingsReportSettings) -> dict:
     }
 
 
-def _draft(row: MeetingsReportDraft) -> dict:
+async def _draft(db: AsyncSession, row: MeetingsReportDraft) -> dict:
     return {
         "id": str(row.id),
         "report_date": row.report_date.isoformat(),
         "tomorrow_date": row.tomorrow_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": with_section_keys("meetings", row.sections),
+        "sections": with_section_keys("meetings", await filter_report_sections(db, row.sections, row.report_date, tomorrow=row.tomorrow_date)),
         "generated_snapshot": row.generated_snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
@@ -251,7 +253,7 @@ async def get_draft(
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     await _normalize_saved_draft_sections(db, row)
-    return _draft(row)
+    return await _draft(db, row)
 
 
 @router.post("/generate")
@@ -299,7 +301,7 @@ async def generate_draft(
         row.updated_by_user_id = user.id
     await db.commit()
     await db.refresh(row)
-    return _draft(row)
+    return await _draft(db, row)
 
 
 @router.patch("/{draft_id}")
@@ -348,7 +350,7 @@ async def update_draft(
     row.updated_by_user_id = user.id
     await db.commit()
     await db.refresh(row)
-    return _draft(row)
+    return await _draft(db, row)
 
 
 @router.get("/{draft_id}/preview")
@@ -360,9 +362,10 @@ async def preview_draft(
     row = await db.get(MeetingsReportDraft, draft_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
+    sections = await filter_report_sections(db, row.sections, row.report_date, tomorrow=row.tomorrow_date)
     return {
-        "plain_text": render_plain_text(row.subject, row.report_date, row.tomorrow_date, row.sections),
-        "html": render_html(row.subject, row.report_date, row.tomorrow_date, row.sections),
+        "plain_text": render_plain_text(row.subject, row.report_date, row.tomorrow_date, sections),
+        "html": render_html(row.subject, row.report_date, row.tomorrow_date, sections),
     }
 
 
@@ -378,13 +381,14 @@ async def send_draft(
     recipients = normalize_recipients(row.recipients)
     if not recipients["to"]:
         raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
-    plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, row.sections)
-    html_body = render_html(row.subject, row.report_date, row.tomorrow_date, row.sections)
+    sections = await filter_report_sections(db, row.sections, row.report_date, tomorrow=row.tomorrow_date)
+    plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, sections)
+    html_body = render_html(row.subject, row.report_date, row.tomorrow_date, sections)
     try:
         _validate_gmail_config()
         message = await send_meetings_report(
             row.subject, recipients, plain_text, html_body,
-            db=db, report_day=row.report_date, tomorrow=row.tomorrow_date, sections=row.sections,
+            db=db, report_day=row.report_date, tomorrow=row.tomorrow_date, sections=sections,
         )
     except Exception as exc:
         row.last_error = str(exc)[:2000]
@@ -398,4 +402,4 @@ async def send_draft(
     row.updated_by_user_id = user.id
     await db.commit()
     await db.refresh(row)
-    return _draft(row)
+    return await _draft(db, row)

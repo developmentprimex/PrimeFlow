@@ -371,3 +371,6 @@ class M2DiscordTests(unittest.TestCase):
             interaction.followup.send.assert_not_awaited()
             self.assertTrue(all(call.args[0] == f"/bot/m2/{job['id']}/open" for call in bot.bridge.call_args_list))
         asyncio.run(check())
+
+
+from tests.report_attendance_fixtures import present_report_population

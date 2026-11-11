@@ -364,3 +364,6 @@ LATE:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from tests.report_attendance_fixtures import present_report_population

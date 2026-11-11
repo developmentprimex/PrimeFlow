@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import io
 import unittest
 import zipfile
@@ -245,3 +247,6 @@ class PxJavWeeklyReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from tests.report_attendance_fixtures import present_report_population

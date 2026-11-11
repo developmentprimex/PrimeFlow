@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_points_payload
+
 import asyncio
 import html
 from datetime import date, datetime
@@ -180,7 +182,8 @@ def report_payload(row: M2ReportingPointsReport) -> dict:
 
 async def current_report_payload(db: AsyncSession, row: M2ReportingPointsReport) -> dict:
     payload = await m3.with_current_task_explanations(db, report_payload(row), "unfinished_priority")
-    return await m3.with_current_task_explanations(db, payload, "ga_progress")
+    payload = await m3.with_current_task_explanations(db, payload, "ga_progress")
+    return await filter_points_payload(db, payload)
 
 
 def table_groups(report, key):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_task_context
+
 import html
 import io
 import os
@@ -341,6 +343,7 @@ async def _ga_hv_bodies(db: AsyncSession, report_day: date) -> tuple[str, str]:
     ).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids = await _effective_task_assignee_ids(db, tasks)
+    tasks, names, assignee_ids = await filter_task_context(db, report_day, tasks, names, assignee_ids)
     department_codes = {
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()

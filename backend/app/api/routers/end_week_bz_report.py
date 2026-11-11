@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import filter_report_sections
+
 import uuid
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -66,8 +68,8 @@ def _settings(row: EndWeekBzReportSettings) -> dict:
     return {"id": str(row.id), "is_active": row.is_active, "send_time": row.send_time.strftime("%H:%M"), "timezone": row.timezone, "weekdays": row.weekdays or [], "recipients": normalize_recipients(row.recipients), "last_run_date": row.last_run_date}
 
 
-def _draft(row: EndWeekBzReportDraft) -> dict:
-    return {"id": str(row.id), "report_date": row.report_date, "subject": row.subject, "recipients": normalize_recipients(row.recipients), "sections": normalize_sections(row.sections), "generated_snapshot": row.generated_snapshot, "status": row.status, "sent_at": row.sent_at, "gmail_message_id": row.gmail_message_id, "gmail_thread_id": row.gmail_thread_id, "last_error": row.last_error, "updated_at": row.updated_at}
+async def _draft(db: AsyncSession, row: EndWeekBzReportDraft) -> dict:
+    return {"id": str(row.id), "report_date": row.report_date, "subject": row.subject, "recipients": normalize_recipients(row.recipients), "sections": await filter_report_sections(db, normalize_sections(row.sections), row.report_date), "generated_snapshot": row.generated_snapshot, "status": row.status, "sent_at": row.sent_at, "gmail_message_id": row.gmail_message_id, "gmail_thread_id": row.gmail_thread_id, "last_error": row.last_error, "updated_at": row.updated_at}
 
 
 @router.get("/settings")
@@ -96,7 +98,7 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
 @router.get("/history")
 async def history(limit: int = 50, db: AsyncSession = Depends(get_db), _: User = Depends(require_manager_or_admin)) -> list[dict]:
     rows = (await db.execute(select(EndWeekBzReportDraft).where(EndWeekBzReportDraft.sent_at.is_not(None)).order_by(EndWeekBzReportDraft.sent_at.desc()).limit(min(max(limit, 1), 100)))).scalars().all()
-    return [_draft(row) for row in rows]
+    return [await _draft(db, row) for row in rows]
 
 
 @router.get("")
@@ -104,7 +106,7 @@ async def get_draft(report_date: date, db: AsyncSession = Depends(get_db), _: Us
     row = (await db.execute(select(EndWeekBzReportDraft).where(EndWeekBzReportDraft.report_date == report_date))).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
-    return _draft(row)
+    return await _draft(db, row)
 
 
 @router.post("/generate")
@@ -120,7 +122,7 @@ async def generate(report_date: date, db: AsyncSession = Depends(get_db), user: 
         row.subject, row.sections, row.generated_snapshot = subject_for(report_date), sections, snapshot
         row.status, row.last_error, row.updated_by_user_id = "DRAFT", None, user.id
     await db.commit(); await db.refresh(row)
-    return _draft(row)
+    return await _draft(db, row)
 
 
 @router.patch("/{draft_id}")
@@ -135,14 +137,14 @@ async def update_draft(draft_id: uuid.UUID, payload: DraftUpdate, db: AsyncSessi
     if row.status != "SENT": row.status = "DRAFT"
     row.updated_by_user_id = user.id
     await db.commit(); await db.refresh(row)
-    return _draft(row)
+    return await _draft(db, row)
 
 
 @router.get("/{draft_id}/preview")
 async def preview(draft_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
     row = await db.get(EndWeekBzReportDraft, draft_id)
     if row is None: raise HTTPException(status_code=404, detail="Draft not found")
-    sections = normalize_sections(row.sections)
+    sections = await filter_report_sections(db, normalize_sections(row.sections), row.report_date)
     return {"plain_text": render_plain_text(row.subject, row.report_date, sections), "html": render_html(row.subject, row.report_date, sections)}
 
 
@@ -152,7 +154,7 @@ async def send(draft_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: Us
     if row is None: raise HTTPException(status_code=404, detail="Draft not found")
     recipients = normalize_recipients(row.recipients)
     if not recipients["to"]: raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
-    sections = normalize_sections(row.sections)
+    sections = await filter_report_sections(db, normalize_sections(row.sections), row.report_date)
     try:
         message = await send_end_week_bz_report(row.subject, recipients, render_plain_text(row.subject, row.report_date, sections), render_html(row.subject, row.report_date, sections), report_day=row.report_date, sections=sections)
     except Exception as exc:
@@ -161,4 +163,4 @@ async def send(draft_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: Us
     row.status, row.sent_at = "SENT", datetime.now(report_timezone())
     row.gmail_message_id, row.gmail_thread_id, row.last_error, row.updated_by_user_id = message.get("id"), message.get("threadId"), None, user.id
     await db.commit(); await db.refresh(row)
-    return _draft(row)
+    return await _draft(db, row)

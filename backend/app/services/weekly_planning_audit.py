@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import load_report_attendance
+
 import json
 import re
 import uuid
@@ -1043,8 +1045,11 @@ async def build_weekly_planning_audit(
         week_start=normalized_start,
     )
     occurrences = await _planner_occurrences(db, week_start=normalized_start, timezone_name=timezone_name)
+    policies = {day: await load_report_attendance(db, day) for day in sorted(week_dates)}
+    included_users = [user for user in included_users if any(not policy.excludes(user.id) for policy in policies.values())]
     included_ids = {user.id for user in included_users}
-    occurrences = [item for item in occurrences if item.user_id in included_ids]
+    occurrences = [item for item in occurrences if item.user_id in included_ids
+                   and (item.task_date not in policies or not policies[item.task_date].excludes(item.user_id))]
     by_user: dict[uuid.UUID, list[AuditTaskOccurrence]] = defaultdict(list)
     for occurrence in occurrences:
         by_user[occurrence.user_id].append(occurrence)

@@ -163,3 +163,6 @@ def test_control_html_colors_in_progress_yellow():
 
 def test_control_subject_uses_configured_schedule_time():
     assert subject_for(DAY, "15:30").endswith("15:30")
+
+
+from tests.report_attendance_fixtures import present_report_population

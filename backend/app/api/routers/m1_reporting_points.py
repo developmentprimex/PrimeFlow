@@ -80,7 +80,8 @@ async def _refresh_saved_metadata(db: AsyncSession, row: M1ReportingPointsReport
 
 
 async def _current_payload(db: AsyncSession, row: M1ReportingPointsReport) -> dict:
-    return report_payload(row, excluded_note_ids=await excluded_note_ids(db, row))
+    from app.services.report_attendance import filter_points_payload
+    return await filter_points_payload(db, report_payload(row, excluded_note_ids=await excluded_note_ids(db, row)))
 
 
 @router.get("/recipients")

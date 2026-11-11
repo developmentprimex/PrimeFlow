@@ -1,6 +1,8 @@
 """Person-specific M3 collection and direct, audited next-day planning actions."""
 from __future__ import annotations
 
+from app.services.report_attendance import load_report_attendance
+
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -151,7 +153,10 @@ async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
     asked = {(q.kind, str(q.task_id)) for q in existing.values()}
     by_user = {link.user_id: link for link in links}
     jobs = []
+    policies = {target: await load_report_attendance(db, target) for target in {item[3] for item in candidates}}
     for uid, kind, row, target in candidates:
+        if policies[target].excludes(uid):
+            continue
         if only_user_id is not None and uid != only_user_id:
             continue
         link = by_user.get(uid)

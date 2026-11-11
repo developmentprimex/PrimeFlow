@@ -13,8 +13,8 @@ class VoiceActor(StrictModel):
 
 class VoiceStart(VoiceActor):
     recorder: Literal['primary', 'ai_agent'] = 'primary'
-    # A Discord interaction ID, or auto1h-YYYYMMDDHHMM for a scheduled 1H meeting.
-    request_id: str = Field(pattern=r'^(\d{1,32}|auto1h-\d{12}(-\d)?)$')
+    # Discord interaction ID, or a scheduled 1H / AI Agent slot with an optional retry suffix.
+    request_id: str = Field(pattern=r'^(\d{1,32}|auto(1h|ai)-\d{12}(-\d)?)$')
     instance_id: uuid.UUID
     capture_token: str = Field(min_length=32, max_length=128)
     title: str = Field(min_length=1, max_length=200)

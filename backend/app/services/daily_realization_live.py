@@ -453,16 +453,6 @@ async def build_live_daily_realization(
     for person_id in sorted(person_ids, key=lambda value: ((users.get(value).full_name if users.get(value) else ""), str(value))):
         availability_status = availability_by_user.get(person_id)
         if availability_status:
-            user = users.get(person_id)
-            people.append({
-                "user_id": str(person_id),
-                "user_name": user.full_name if user else next((p.get("user_name") for p in baseline_people if p.get("user_id") == str(person_id)), str(person_id)),
-                "department_id": str(department_id),
-                "tasks": [],
-                "metrics": calculate_daily_metrics([]),
-                "availability_status": availability_status,
-                "attendance": common_view_attendance_for(person_id),
-            })
             continue
         candidate_ids = candidate_task_ids_for_person(
             person_id, baseline_by_user=baseline_by_user,

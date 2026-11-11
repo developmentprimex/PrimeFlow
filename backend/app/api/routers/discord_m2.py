@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import load_report_attendance
+
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -100,6 +102,8 @@ async def collect_questions(db: AsyncSession, *, now: datetime, only_user_id: uu
     if only_user_id is not None:
         links_query = links_query.where(DiscordLink.user_id == only_user_id)
     links = (await db.execute(links_query)).scalars().all()
+    policy = await load_report_attendance(db, day)
+    links = [link for link in links if not policy.excludes(link.user_id)]
     candidates = service.question_rows(data)
     ids = {uuid.UUID(row['task_id']) for _, row in candidates}
     task_rows = (await db.execute(select(Task.id, Task.assigned_to, Task.status).where(

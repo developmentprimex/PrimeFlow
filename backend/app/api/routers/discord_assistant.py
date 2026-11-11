@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.report_attendance import load_report_attendance
+
 import hashlib
 import secrets
 import uuid
@@ -208,6 +210,8 @@ async def owned_task(db: AsyncSession, user: User, task_id: uuid.UUID):
 
 async def daily_tasks(db: AsyncSession, user: User, bucket: str | None = None, *, include_done: bool = False):
     now = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
+    if (await load_report_attendance(db, now.date())).excludes(user.id):
+        return []
     start = datetime.combine(now.date(), time.min, now.tzinfo)
     end = start + timedelta(days=1) - timedelta(microseconds=1)
     tasks = await tools.user_api(user, "GET", "/api/tasks", params={"assigned_to": str(user.id),
@@ -456,11 +460,14 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
 async def claim_reminders(db: AsyncSession = Depends(get_db)):
     now = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
     jobs = []
+    policy = await load_report_attendance(db, now.date())
     for bucket in tools.due_buckets(now):
         links = (await db.execute(select(DiscordLink).join(User, User.id == DiscordLink.user_id).where(
             DiscordLink.enabled.is_(True), DiscordLink.channel_id.is_not(None),
             DiscordLink.guild_id == settings.DISCORD_GUILD_ID, User.is_active.is_(True)))).scalars().all()
         for link in links:
+            if policy.excludes(link.user_id):
+                continue
             stmt = insert(DiscordReminder).values(id=uuid.uuid4(), link_id=link.id, day=now.date(), bucket=bucket,
                 lease_until=now + timedelta(minutes=2))
             stmt = stmt.on_conflict_do_update(constraint="uq_discord_reminder_bucket",

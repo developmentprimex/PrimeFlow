@@ -328,3 +328,6 @@ class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
             await client.handle(bot, interaction)
         self.assertEqual(save.call_args.args[3], 'held')
         interaction.response.send_modal.assert_not_called()
+
+
+from tests.report_attendance_fixtures import present_report_population

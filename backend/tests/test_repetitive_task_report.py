@@ -136,3 +136,6 @@ class TestRepetitiveTaskReport(unittest.IsolatedAsyncioTestCase):
         app.include_router(router, prefix="/exports")
         with TestClient(app) as client:
             self.assertEqual(client.get("/exports/repetitive-tasks.xlsx").status_code, 401)
+
+
+from tests.report_attendance_fixtures import present_report_population
