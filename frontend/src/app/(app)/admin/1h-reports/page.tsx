@@ -35,6 +35,7 @@ export default function ReportManagementPage() {
   const [slot,setSlot] = React.useState("10:00")
   const [preview,setPreview] = React.useState<Preview|null>(null)
   const [strikesOnly,setStrikesOnly] = React.useState(false)
+  const [doneOnly,setDoneOnly] = React.useState(false)
   const [visibleTaskCount,setVisibleTaskCount] = React.useState<number|null>(null)
   const [totalPreviewTaskCount,setTotalPreviewTaskCount] = React.useState<number|null>(null)
   const [previewStrikeTotal,setPreviewStrikeTotal] = React.useState<number|null>(null)
@@ -63,11 +64,11 @@ export default function ReportManagementPage() {
   const applyPreviewFilter = React.useCallback(() => {
     const document = previewFrame.current?.contentDocument
     if (!document?.querySelector("[data-report-task-section], [data-report-print-section]")) return
-    const counts = applyOneHReportFilter(document, strikesOnly)
+    const counts = applyOneHReportFilter(document, strikesOnly, doneOnly)
     setVisibleTaskCount(counts.visible)
     setTotalPreviewTaskCount(counts.total)
     setPreviewStrikeTotal(counts.strikeTotal)
-  }, [strikesOnly])
+  }, [strikesOnly, doneOnly])
   React.useEffect(() => { applyPreviewFilter() }, [applyPreviewFilter, preview])
 
   const previewReport = async(format="json")=>{
@@ -117,15 +118,19 @@ export default function ReportManagementPage() {
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${run.report_date}_${run.report_slot.replace(":","-")}.${format}`;a.click();URL.revokeObjectURL(url)
   }
   const strikeFilterControl = <div data-testid="one-h-strikes-toolbar" className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-2">
-    <Button type="button" variant="outline" aria-pressed={strikesOnly} onClick={()=>setStrikesOnly(value=>!value)}
+    <Button type="button" variant="outline" aria-pressed={strikesOnly} onClick={()=>{setStrikesOnly(value=>!value);setDoneOnly(false)}}
       className={strikesOnly ? "border-blue-600 bg-blue-200 font-semibold text-blue-900 hover:bg-blue-200" : "border-blue-400 bg-white font-semibold text-blue-800 hover:bg-blue-100"}>
       Vetëm me strikes &gt; 0
+    </Button>
+    <Button type="button" variant="outline" aria-pressed={doneOnly} onClick={()=>{setDoneOnly(value=>!value);setStrikesOnly(false)}}
+      className={doneOnly ? "border-green-600 bg-green-200 font-semibold text-green-900 hover:bg-green-200" : "border-green-400 bg-white font-semibold text-green-800 hover:bg-green-100"}>
+      Vetëm Done
     </Button>
     <span data-testid="one-h-toolbar-strike-total" className="text-base font-bold text-blue-900">Total strikes: {previewStrikeTotal ?? "—"}{preview?.document.strike_interval ? ` · ${preview.document.strike_interval}` : ""}</span>
     <span role="status" className="text-sm text-muted-foreground">Shfaqen {visibleTaskCount ?? preview?.task_count ?? 0} nga {totalPreviewTaskCount ?? preview?.task_count ?? 0} detyra</span>
   </div>
-  const emptyStrikeMessage = strikesOnly && visibleTaskCount === 0
-    ? <p className="rounded-md border bg-muted/30 p-3 text-sm">Nuk ka detyra me strikes &gt; 0 në këtë interval.</p> : null
+  const emptyStrikeMessage = (strikesOnly || doneOnly) && visibleTaskCount === 0
+    ? <p className="rounded-md border bg-muted/30 p-3 text-sm">{doneOnly ? "Nuk ka detyra Done në këtë raport." : "Nuk ka detyra me strikes > 0 në këtë interval."}</p> : null
   if(!user) return <div className="rounded-lg border p-8">Sign in to access 1H reports.</div>
   if(!canManage) return <div className="mx-auto max-w-[1400px] space-y-5">
     <div><h1 className="text-2xl font-semibold">1H Reports</h1><p className="text-sm text-muted-foreground">Generate and download a fresh report for any date and slot.</p></div>

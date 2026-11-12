@@ -1499,6 +1499,7 @@ def _html_table(
                         ) else "false"
                         task_attr = (
                             f' data-task-id="{task_id}" data-task-marker="{marker_value}"'
+                            f' data-task-status="{html.escape(_task_status(item), quote=True)}"'
                             f' data-task-deadline-important="{deadline_important}"'
                             f' data-task-starts-today="{starts_today}"'
                             f' data-task-marker-by-ga="{marker_by_ga}"'

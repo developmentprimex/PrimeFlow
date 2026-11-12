@@ -14,8 +14,8 @@ const preview = (frozen = false) => ({ subject: "Fresh report", html: "<p>Latest
   report_date: "2026-10-22", snapshot_id: "snapshot", generated_at: "2026-10-22T09:00:00Z", is_frozen: frozen })
 
 function mount({ today = false, api, strict = false, user = { id: "staff", role: "STAFF" }, loading = false }) {
-  const state = [], refs = [], callbacks = [], effects = [], queue = []
-  let cursor, refCursor, callbackCursor, effectCursor, changed = true, tree, replayed = false
+  const state = [], refs = [], callbacks = [], memos = [], effects = [], queue = []
+  let cursor, refCursor, callbackCursor, memoCursor, effectCursor, changed = true, tree, replayed = false
   const same = (left, right) => left && right && left.length === right.length && left.every((value, i) => Object.is(value, right[i]))
   const hooks = { ...React,
     useState(initial) {
@@ -31,6 +31,11 @@ function mount({ today = false, api, strict = false, user = { id: "staff", role:
       const index = callbackCursor++
       if (!same(callbacks[index]?.deps, deps)) callbacks[index] = { callback, deps }
       return callbacks[index].callback
+    },
+    useMemo(factory, deps) {
+      const index = memoCursor++
+      if (!same(memos[index]?.deps, deps)) memos[index] = { value: factory(), deps }
+      return memos[index].value
     },
     useEffect(effect, deps) {
       const index = effectCursor++
@@ -73,7 +78,7 @@ function mount({ today = false, api, strict = false, user = { id: "staff", role:
   return {
     async flush() {
       for (let round = 0; round < 30; round++) {
-        if (changed) { changed = false; cursor = refCursor = callbackCursor = effectCursor = 0; tree = PrintReportPage({ today }) }
+        if (changed) { changed = false; cursor = refCursor = callbackCursor = memoCursor = effectCursor = 0; tree = PrintReportPage({ today }) }
         while (queue.length) queue.shift()()
         if (strict && !replayed) {
           replayed = true
@@ -136,7 +141,7 @@ test("Today keeps the frozen response and reads history without regenerating it"
 
 test("automatic generation failure is visible and does not cause a request loop", async () => {
   let count = 0
-  const page = mount({ api: async () => { count++; return { ok: false, status: 503, json: async () => ({ detail: "Generation unavailable" }) } } })
+  const page = mount({ api: async (url) => { if (url.endsWith("/generate")) count++; return { ok: false, status: 503, json: async () => ({ detail: "Generation unavailable" }) } } })
   await page.flush()
   await page.flush()
   assert.equal(count, 1)

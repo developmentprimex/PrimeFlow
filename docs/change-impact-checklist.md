@@ -84,6 +84,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Filtrat “Vetëm me strikes > 0” dhe “Vetëm Done” përdoren te 1H Reports
+  (admin dhe staff, përfshirë BLL dhe SHTYPI brenda raportit) dhe SHTYPI Today.
+  Aktivizimi i njërit çaktivizon tjetrin; filtrohen së bashku karta dhe datat,
+  dhe fshihen grupet/rreshtat bosh. Statusi ruhet në HTML si `data-task-status`;
+  raportet e vjetra të ngrira pa këtë fushë dallojnë Done nga ngjyra e kartës.
+  SHTYPI Tomorrow nuk ka këta filtra. Filtrat veprojnë në preview; shkarkimet
+  dhe email-et e gjeneruara në server ndjekin raportin e plotë, si për Strikes.
+
 - Përjashtimi i personave me mungesë gjithë ditën/PV në raporte ndahet te
   `backend/app/services/report_attendance.py`. Rregulli ndjek 1H Reports:
   mungesa/PV që mbulon 08:00–16:00 përjashton personin nga puna e raportuar;

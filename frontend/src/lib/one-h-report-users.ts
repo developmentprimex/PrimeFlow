@@ -1,3 +1,12 @@
+export function isReportTaskDone(task: HTMLElement): boolean {
+  const status = task.dataset.taskStatus?.trim().toUpperCase()
+  if (status) return ["DONE", "COMPLETED", "COMPLETE"].includes(status)
+  // Older SHTYPI and hourly reports used these backgrounds only for Done.
+  const background = task.getAttribute("bgcolor")
+  if (background) return ["#C4FDC4", "#D4FFE1"].includes(background.toUpperCase())
+  return Boolean(task.querySelector('td[bgcolor="#c4fdc4" i], td[bgcolor="#d4ffe1" i]'))
+}
+
 export function reportTaskUsers(cell: HTMLElement): string[] {
   const saved = cell.dataset.taskUsers
   if (saved) return saved.split("|").filter(Boolean)

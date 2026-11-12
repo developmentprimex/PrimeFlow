@@ -1,8 +1,25 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "../src/lib/one-h-report-users.ts"
+import { reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows, isReportTaskDone } from "../src/lib/one-h-report-users.ts"
 
 const cell = (dataset, text = "") => ({ dataset, querySelector: () => ({ textContent: text }) })
+
+test("Done uses saved status and supports older green task cards without status metadata", () => {
+  const task = (status, background = null, childDone = false) => ({
+    dataset: { taskStatus: status },
+    getAttribute: () => background,
+    querySelector: (selector) => selector === 'td[bgcolor="#c4fdc4" i], td[bgcolor="#d4ffe1" i]' && childDone ? {} : null,
+  })
+  for (const status of ["DONE", "completed", " COMPLETE "]) assert.equal(isReportTaskDone(task(status)), true)
+  for (const status of ["TODO", "IN_PROGRESS", "WAITING_CLIENT"]) {
+    assert.equal(isReportTaskDone(task(status, "#D4FFE1", true)), false)
+  }
+  assert.equal(isReportTaskDone(task(undefined, "#d4ffe1")), true)
+  assert.equal(isReportTaskDone(task(undefined, "#C4FDC4")), true)
+  assert.equal(isReportTaskDone(task(undefined, null, true)), true)
+  assert.equal(isReportTaskDone(task(undefined, "#ffffff", true)), false)
+  assert.equal(isReportTaskDone(task(undefined)), false)
+})
 
 test("all report owners follow department and saved planner order, even outside the GA summary", () => {
   const departments = [

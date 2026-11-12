@@ -4,7 +4,44 @@ import path from "node:path"
 
 const backend = path.resolve(__dirname, "../../../backend")
 
-function report(slot = "11:00", empty = false, embedded = false, shared = false) {
+function printFixture(legacy: boolean) {
+  const python = process.env.ONE_H_FILTER_PYTHON || path.join(backend, process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python")
+  return JSON.parse(execFileSync(python, ["-c", `
+import json, re, uuid
+from datetime import date
+from app.services.tomorrow_print_report import _html_table
+ids=[str(uuid.uuid4()) for _ in range(8)]
+items=[dict(task_id=value,title='EF: Task '+str(index),start_date='2026-10-23',due_date='2026-10-26',status='DONE' if index==6 else 'TODO') for index,value in enumerate(ids)]
+table=_html_table([('1H 10:00',items[:7],False),('P: GA',items[7:],True)],report_date=date(2026,10,23))
+${legacy ? "table=re.sub(r' data-task-status=\"[^\"]*\"', '', table)" : ""}
+print(json.dumps(dict(html='<html><body>'+table+'</body></html>',done_id=ids[6],strike_id=ids[0],one_h_strikes=dict(report_date='2026-10-23',captured_at='2026-10-23T11:00:00Z',active_slot='11:00',active_interval=dict(start='10:00',end='11:00'),intervals={},tasks={value:{'11:00':2 if index==0 else 0} for index,value in enumerate(ids)}))))
+`], { cwd: backend, encoding: "utf8", env: { ...process.env, PYTHONIOENCODING: "utf-8" } }))
+}
+
+async function openPrintReport(page: Page, legacy = false, today = true) {
+  const fixture = printFixture(legacy)
+  const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test owner", email: "owner@example.com", role: "STAFF", is_active: true }
+  await page.addInitScript(({ user }) => {
+    localStorage.setItem("primex_access_token", "test-only-browser-token")
+    localStorage.setItem("primex_user", JSON.stringify(user))
+  }, { user })
+  await page.route("**/api/**", async route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname === "/api/auth/me") return route.fulfill({ json: user })
+    if (pathname.includes("marker-comments")) return route.fulfill({ json: { items: [], unread_count: 0 } })
+    if (pathname.endsWith("/freeze-status")) return route.fulfill({ json: { report_date: "2026-10-23", is_frozen: true, freeze_ready: true } })
+    if (pathname.endsWith("/generate") || pathname.endsWith("/snapshot")) return route.fulfill({ json: {
+      ...fixture, subject: "SHTYPI test", report_date: "2026-10-23", target_date: "2026-10-23", snapshot_id: "test", generated_at: "2026-10-23T11:00:00Z", is_frozen: true,
+    } })
+    return route.fulfill({ json: [] })
+  })
+  await page.goto(today ? "/today-print-report" : "/tomorrow-print-report")
+  const frame = page.frameLocator('iframe[title$="generated email"]')
+  await expect(frame.locator('td[data-task-id]:visible')).toHaveCount(8)
+  return { frame, fixture }
+}
+
+function report(slot = "11:00", empty = false, embedded = false, shared = false, done = false) {
   const python = process.env.ONE_H_FILTER_PYTHON || path.join(backend, process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python")
   return execFileSync(python, ["-c", `
 from tests.test_one_h_report_strike_counts import fresh_document
@@ -17,11 +54,12 @@ d,shared_id,_=fresh_document('${slot}')
 d.board_reminders=[]
 ${slot === "14:10" ? "d.sections[-1].employees=d.sections[0].employees" : ""}
 ${empty ? "for s in d.sections:\n for e in s.employees:\n  for t in e.tasks:t.strike_count=0" : ""}
+${done ? "d.sections[0].employees[0].tasks[0].status='DONE'" : ""}
 supplement='<p>Supplement</p>'
 ${embedded ? `
 ids=[str(uuid.uuid4()) for _ in range(8)]
 ${shared ? "ids[6]=str(shared_id)" : ""}
-items=[dict(task_id=value,title='SHTYPI task '+str(index),start_date='2026-10-23',due_date='2026-10-26') for index,value in enumerate(ids)]
+items=[dict(task_id=value,title='SHTYPI task '+str(index),start_date='2026-10-23',due_date='2026-10-26',status='DONE' if ${done ? 'True' : 'False'} and index==6 else 'TODO') for index,value in enumerate(ids)]
 table=_html_table([('1H 10:00',items[:7],False),('P: GA',items[7:],True)],report_date=d.report_date)
 summary={'active_interval':{'start':'10:00','end':'11:00'},'tasks':{value:{'${slot}':${empty ? "0" : "2 if index==6 else 0"}} for index,value in enumerate(ids)}}
 with patch('app.services.today_print_strikes.task_strike_summary',new=AsyncMock(return_value=summary)):
@@ -31,8 +69,8 @@ print(render_html(d,pre_sections_html=supplement))
 `], { cwd: backend, encoding: "utf8", env: { ...process.env, PYTHONIOENCODING: "utf-8" } })
 }
 
-async function openReport(page: Page, role: "ADMIN" | "STAFF", slot = "11:00", empty = false, embedded = false, shared = false) {
-  const html = report(slot, empty, embedded, shared)
+async function openReport(page: Page, role: "ADMIN" | "STAFF", slot = "11:00", empty = false, embedded = false, shared = false, done = false) {
+  const html = report(slot, empty, embedded, shared, done)
   const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test owner", email: "owner@example.com", role, is_active: true }
   await page.addInitScript(({ user }) => {
     localStorage.setItem("primex_access_token", "test-only-browser-token")
@@ -94,7 +132,7 @@ for (const role of ["ADMIN", "STAFF"] as const) {
 
 test("no matches hides empty groups and shows the message above the report", async ({ page }) => {
   const frame = await openReport(page, "ADMIN", "10:00", true)
-  const button = page.getByTestId("one-h-strikes-toolbar").getByRole("button")
+  const button = page.getByTestId("one-h-strikes-toolbar").getByRole("button", { name: "Vet\u00ebm me strikes > 0" })
   await button.click()
   await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(0)
   await expect(frame.locator('[data-report-task-employee]:visible')).toHaveCount(0)
@@ -108,7 +146,7 @@ test("no matches hides empty groups and shows the message above the report", asy
 
 test("the top filter also controls BLL table rows", async ({ page }) => {
   const frame = await openReport(page, "STAFF", "14:10")
-  const button = page.getByTestId("one-h-strikes-toolbar").getByRole("button")
+  const button = page.getByTestId("one-h-strikes-toolbar").getByRole("button", { name: "Vet\u00ebm me strikes > 0" })
   await button.click()
   await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(2)
   const bll = frame.locator('[data-bll-task-table] tr[data-report-task="true"]:visible')
@@ -124,7 +162,7 @@ for (const role of ["ADMIN", "STAFF"] as const) {
     await page.setViewportSize({ width: 1840, height: 1050 })
     const frame = await openReport(page, role, "11:00", false, true)
     const toolbar = page.getByTestId("one-h-strikes-toolbar")
-    const button = toolbar.getByRole("button")
+    const button = toolbar.getByRole("button", { name: "Vet\u00ebm me strikes > 0" })
     const print = frame.locator('[data-report-print-section]')
     const rows = print.locator('tr[data-task-card-row="content"]')
     await expect(print.locator('[data-task-strike-count]')).toHaveCount(8)
@@ -161,7 +199,7 @@ for (const role of ["ADMIN", "STAFF"] as const) {
 
 test("an embedded SHTYPI table without positive strikes is hidden and restores on toggle", async ({ page }) => {
   const frame = await openReport(page, "ADMIN", "11:00", true, true)
-  const button = page.getByTestId("one-h-strikes-toolbar").getByRole("button")
+  const button = page.getByTestId("one-h-strikes-toolbar").getByRole("button", { name: "Vet\u00ebm me strikes > 0" })
   await button.click()
   await expect(frame.locator('[data-report-print-section]')).toBeHidden()
   await expect(page.getByText("Nuk ka detyra me strikes > 0 në këtë interval.")).toBeVisible()
@@ -174,6 +212,74 @@ test("the toolbar counts a task shared between SHTYPI and the hourly report only
   await openReport(page, "ADMIN", "11:00", false, true, true)
   const total = page.getByTestId("one-h-toolbar-strike-total")
   await expect(total).toHaveText("Total strikes: 2 · 10:00–11:00")
-  await page.getByTestId("one-h-strikes-toolbar").getByRole("button").click()
+  await page.getByTestId("one-h-strikes-toolbar").getByRole("button", { name: "Vet\u00ebm me strikes > 0" }).click()
   await expect(total).toHaveText("Total strikes: 2 · 10:00–11:00")
+})
+
+for (const role of ["ADMIN", "STAFF"] as const) {
+  test(`${role}: Done filters complete tasks and embedded cards, switches from Strikes and persists on regeneration`, async ({ page }) => {
+    const frame = await openReport(page, role, "14:10", false, true, false, true)
+    const toolbar = page.getByTestId("one-h-strikes-toolbar")
+    const done = toolbar.getByRole("button", { name: "Vetëm Done", exact: true })
+    const strikes = toolbar.getByRole("button", { name: "Vetëm me strikes > 0" })
+    await strikes.click()
+    await done.click()
+    await expect(done).toHaveAttribute("aria-pressed", "true")
+    await expect(strikes).toHaveAttribute("aria-pressed", "false")
+    const visible = frame.locator('[data-report-task="true"]:visible')
+    await expect(visible).toHaveCount(3)
+    for (const task of await visible.all()) await expect(task).toHaveAttribute("data-task-status", "DONE")
+    await expect(frame.locator('[data-bll-task-table] tr[data-report-task="true"]:visible')).toHaveCount(1)
+    const print = frame.locator('[data-report-print-section]')
+    await expect(print.locator('td[data-report-task="true"]:visible')).toHaveCount(1)
+    await expect(print.locator('tr[data-task-card-row="dates"]:visible > td:visible')).toHaveCount(1)
+    await expect(print.locator('tr[data-task-card-row="content"]:visible th').first()).toHaveAttribute("rowspan", "2")
+    await page.getByRole("button", { name: role === "ADMIN" ? "Preview fresh report" : "Generate report", exact: true }).click()
+    await expect(done).toHaveAttribute("aria-pressed", "true")
+    await expect(visible).toHaveCount(3)
+    await strikes.click()
+    await expect(done).toHaveAttribute("aria-pressed", "false")
+    await done.click()
+    await done.click()
+    await expect(visible).toHaveCount(12)
+    await expect(print.locator('tr[data-task-card-row="content"]').first().locator("th").first()).toHaveAttribute("rowspan", "4")
+  })
+}
+
+test("Done with no completed tasks hides empty groups and can be reset", async ({ page }) => {
+  const frame = await openReport(page, "STAFF")
+  const done = page.getByRole("button", { name: "Vetëm Done", exact: true })
+  await done.click()
+  await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(0)
+  await expect(frame.locator('[data-report-task-section]:visible')).toHaveCount(0)
+  await expect(page.getByText("Nuk ka detyra Done në këtë raport.")).toBeVisible()
+  await done.click()
+  await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(2)
+})
+
+for (const legacy of [false, true]) {
+  test(`SHTYPI Today: Done filters paired cells and switches with Strikes (${legacy ? "legacy frozen" : "current"})`, async ({ page }, testInfo) => {
+    const { frame, fixture } = await openPrintReport(page, legacy)
+    const done = page.getByRole("button", { name: "Vetëm Done", exact: true })
+    const strikes = page.getByRole("button", { name: "Vetëm detyrat me strikes > 0", exact: true })
+    await strikes.click()
+    await expect(frame.locator('td[data-task-id]:visible')).toHaveAttribute("data-task-id", fixture.strike_id)
+    await done.click()
+    await expect(strikes).toHaveAttribute("aria-pressed", "false")
+    await expect(done).toHaveAttribute("aria-pressed", "true")
+    await expect(frame.locator('td[data-task-id]:visible')).toHaveCount(1)
+    await expect(frame.locator('td[data-task-id]:visible')).toHaveAttribute("data-task-id", fixture.done_id)
+    await expect(frame.locator('tr[data-task-card-row="dates"]:visible > td:visible')).toHaveCount(1)
+    await expect(frame.locator('tr[data-task-card-row="content"]:visible th').first()).toHaveAttribute("rowspan", "2")
+    await page.screenshot({ path: testInfo.outputPath("shtypi-done.png"), fullPage: true })
+    await done.click()
+    await expect(frame.locator('td[data-task-id]:visible')).toHaveCount(8)
+    await expect(frame.locator('tr[data-task-card-row="content"]').first().locator("th").first()).toHaveAttribute("rowspan", "4")
+  })
+}
+
+test("SHTYPI Tomorrow keeps the filters limited to pages which already have Strikes", async ({ page }) => {
+  await openPrintReport(page, false, false)
+  await expect(page.getByRole("button", { name: "Vetëm Done", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Vetëm detyrat me strikes > 0", exact: true })).toHaveCount(0)
 })

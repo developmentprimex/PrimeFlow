@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
 import { useMarkerComments } from "@/components/marker-comments-context"
-import { reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
+import { isReportTaskDone, reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
 import { applyTaskStrikeBadges, taskHasStrikes, reportStrikeTotal, type OneHStrikeSummary } from "@/lib/one-h-strikes"
 
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
@@ -205,6 +205,7 @@ export function PrintReportPage({
   const [markerFilters, setMarkerFilters] = React.useState<Set<TaskMarkerSelection>>(() => new Set())
   const [dueDateFilter, setDueDateFilter] = React.useState<TaskDueDateFilter>("all")
   const [strikesOnly, setStrikesOnly] = React.useState(false)
+  const [doneOnly, setDoneOnly] = React.useState(false)
   const [userFilter, setUserFilter] = React.useState("")
   const [summaryOnly, setSummaryOnly] = React.useState(false)
   const [reportUsers, setReportUsers] = React.useState<string[]>([])
@@ -580,7 +581,8 @@ export function PrintReportPage({
         ))
         const matchesUser = !userFilter || reportTaskUsers(cell).includes(userFilter)
         const matchesStrikes = !today || !strikesOnly || taskHasStrikes(preview?.one_h_strikes, cell.dataset.taskId || "")
-        const matches = matchesMarker && matchesDueDate && matchesUser && matchesStrikes && (!summaryOnly || isReportSummaryTask(cell))
+        const matchesDone = !today || !doneOnly || (isTaskCard && isReportTaskDone(cell))
+        const matches = matchesMarker && matchesDueDate && matchesUser && matchesStrikes && matchesDone && (!summaryOnly || isReportSummaryTask(cell))
         cell.style.display = matches ? "" : "none"
         cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
         if (dateCells[index]) dateCells[index].style.display = matches ? "" : "none"
@@ -591,7 +593,7 @@ export function PrintReportPage({
         if (content) content.style.visibility = ""
       })
     })
-    collapseEmptyReportTaskRows(document, Boolean(userFilter || summaryOnly || markerFilters.size || dueDateFilter !== "all" || (today && strikesOnly)))
+    collapseEmptyReportTaskRows(document, Boolean(userFilter || summaryOnly || markerFilters.size || dueDateFilter !== "all" || (today && (strikesOnly || doneOnly))))
     document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"] td').forEach((cell) => {
       cell.style.display = ""
       const active = summaryOnly && reportSummaryUser(cell) === userFilter
@@ -603,7 +605,7 @@ export function PrintReportPage({
     document.querySelectorAll<HTMLElement>('[data-ga-task-summary="true"]').forEach((summary) => {
       summary.style.display = ""
     })
-  }, [dueDateFilter, markerFilters, userFilter, summaryOnly, preview?.target_date, preview?.one_h_strikes, today, strikesOnly])
+  }, [dueDateFilter, markerFilters, userFilter, summaryOnly, preview?.target_date, preview?.one_h_strikes, today, strikesOnly, doneOnly])
 
   const setupPreviewMarkerControls = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
@@ -994,13 +996,19 @@ export function PrintReportPage({
       background: "#EFF6FF", color: "#1E40AF", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
     {strikeTotal.label}
   </span> : null
-  const strikesFilterControl = today ? <button type="button" aria-pressed={strikesOnly}
+  const strikesFilterControl = today ? <><button type="button" aria-pressed={strikesOnly}
     aria-label="Vetëm detyrat me strikes > 0"
-    onClick={() => setStrikesOnly((selected) => !selected)}
+    onClick={() => { setStrikesOnly((selected) => !selected); setDoneOnly(false) }}
     style={{ minHeight: 34, padding: "0 12px", border: `1px solid ${strikesOnly ? "#2563EB" : "#CBD5E1"}`, borderRadius: 6,
       background: strikesOnly ? "#DBEAFE" : "#F8FAFC", color: strikesOnly ? "#1E40AF" : "#0F172A", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
     Vetëm me strikes &gt; 0
-  </button> : null
+  </button>
+  <button type="button" aria-pressed={doneOnly} aria-label="Vetëm Done"
+    onClick={() => { setDoneOnly((selected) => !selected); setStrikesOnly(false) }}
+    style={{ minHeight: 34, padding: "0 12px", border: `1px solid ${doneOnly ? "#16A34A" : "#CBD5E1"}`, borderRadius: 6,
+      background: doneOnly ? "#BBF7D0" : "#F8FAFC", color: doneOnly ? "#14532D" : "#0F172A", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
+    Vetëm Done
+  </button></> : null
   const userFilterControl = <>
     <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-slate-50 px-3 text-sm font-medium"
       style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #CBD5E1", borderRadius: 6, background: "#F8FAFC", padding: "0 12px", fontSize: 14, color: "#0F172A" }}>
@@ -1011,7 +1019,7 @@ export function PrintReportPage({
         {orderedReportUsers.map((initials) => <option key={initials} value={initials}>{initials}</option>)}
       </select>
     </label>
-    {summaryOnly ? <button type="button" onClick={() => { setSummaryOnly(false); setUserFilter(""); setMarkerFilters(new Set()); setDueDateFilter("all"); setStrikesOnly(false) }}
+    {summaryOnly ? <button type="button" onClick={() => { setSummaryOnly(false); setUserFilter(""); setMarkerFilters(new Set()); setDueDateFilter("all"); setStrikesOnly(false); setDoneOnly(false) }}
       style={{ border: "1px solid #93C5FD", borderRadius: 6, background: "#EFF6FF", padding: "0 10px", fontSize: 13, color: "#1D4ED8" }}>Show all tasks</button> : null}
   </>
 

@@ -1,13 +1,14 @@
-import { collapseEmptyReportTaskRows } from "./one-h-report-users"
+import { collapseEmptyReportTaskRows, isReportTaskDone } from "./one-h-report-users"
 
-export function applyOneHReportFilter(document: Document, strikesOnly: boolean): { visible: number; total: number; strikeTotal: number | null } {
+export function applyOneHReportFilter(document: Document, strikesOnly: boolean, doneOnly = false): { visible: number; total: number; strikeTotal: number | null } {
   // Also handle a preview fetched from the previous API version during a deploy.
   document.getElementById("one-h-strikes-filter")?.parentElement?.remove()
   const tasks = document.querySelectorAll<HTMLElement>('[data-report-task="true"]')
+  const filtering = strikesOnly || doneOnly
   let visible = 0
   const strikesByTask = new Map<string, number>()
   tasks.forEach((task, index) => {
-    task.hidden = strikesOnly && !(Number(task.dataset.strikeCount) > 0)
+    task.hidden = (strikesOnly && !(Number(task.dataset.strikeCount) > 0)) || (doneOnly && !isReportTaskDone(task))
     if (!task.hidden) visible += 1
     const count = Number(task.dataset.strikeCount)
     if (task.dataset.strikeCount !== undefined && Number.isFinite(count) && count >= 0) {
@@ -22,18 +23,18 @@ export function applyOneHReportFilter(document: Document, strikesOnly: boolean):
     const dates = row.nextElementSibling as HTMLTableRowElement | null
     const dateCells = dates?.matches('tr[data-task-card-row="dates"]') ? Array.from(dates.cells) : []
     Array.from(row.cells).filter(cell => cell.tagName === "TD").forEach((cell, index) => {
-      const hide = strikesOnly && (!cell.matches('[data-report-task="true"]') || cell.hidden)
+      const hide = filtering && (!cell.matches('[data-report-task="true"]') || cell.hidden)
       cell.style.display = hide ? "none" : ""
       if (dateCells[index]) dateCells[index].style.display = hide ? "none" : ""
     })
   })
-  collapseEmptyReportTaskRows(document, strikesOnly)
+  collapseEmptyReportTaskRows(document, filtering)
   document.querySelectorAll<HTMLElement>("[data-report-task-employee], [data-report-task-section]").forEach((group) => {
-    group.hidden = strikesOnly && !group.querySelector('[data-report-task="true"]:not([hidden])')
+    group.hidden = filtering && !group.querySelector('[data-report-task="true"]:not([hidden])')
   })
-  document.querySelectorAll<HTMLElement>("[data-report-non-task-supplement], [data-ga-task-summary]").forEach((group) => { group.hidden = strikesOnly })
+  document.querySelectorAll<HTMLElement>("[data-report-non-task-supplement], [data-ga-task-summary]").forEach((group) => { group.hidden = filtering })
   document.querySelectorAll<HTMLElement>("[data-report-supplement], [data-report-print-section]").forEach((group) => {
-    group.hidden = strikesOnly && !group.querySelector('[data-report-task="true"]:not([hidden])')
+    group.hidden = filtering && !group.querySelector('[data-report-task="true"]:not([hidden])')
   })
   const strikeTotal = tasks.length && !strikesByTask.size ? null : [...strikesByTask.values()].reduce((sum, count) => sum + count, 0)
   return { visible, total: tasks.length, strikeTotal }
