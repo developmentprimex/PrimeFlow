@@ -84,6 +84,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Eksporti `/exports/checklists.xlsx` përdoret nga checklistat e Product Content
+  dhe kontrollon edhe shabllonet globale sipas `group_key`: MST, TT dhe
+  shabllonet e takimeve eksportohen nga ADMIN dhe MANAGER; STAFF mbetet i
+  kufizuar. Checklistat e projektit/detyrës ruajnë kontrollin e departamentit.
+  Ndryshimi i lejes së eksportit nuk ndryshon lejet e redaktimit të shablloneve
+  dhe nuk shton butona eksporti në faqe që nuk e përdorin këtë endpoint.
+
 - Butoni i zgjerimit të titullit (`CollapsibleTaskTitle`) rreshtohet në skajin
   e kolonës për My View te Development, Graphic Design dhe Product Content
   (Waiting Confirmation, Project Tasks, Fast Tasks, System Tasks), si dhe te
@@ -184,6 +191,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   detyrat sistemore trashëgojnë mungesën e instancave të fshira dhe të atyre
   që nuk krijohen; përkufizimet e modeleve/slotet ruhen për riaktivizim.
 
+- Vijëzimet e pjesshme të ruajtura në PX JAV (`[[done]]`) duhen renderuar
+  edhe në Preview gjatë redaktimit: butoni `Strike / Undo` te `Edit Note`
+  përdor përzgjedhjen në textarea dhe `editDoneRanges`; vetëm `Save changes`
+  ruan përmbajtjen me serializimin ekzistues. Cancel nuk dërgon ndryshimet.
+  PATCH ekzistues i `plan_notes` sinkronizon titullin/markat e detyrave të
+  lidhura dhe regjistron strike events, pa ndryshuar statusin e detyrës.
+
 - Tabela Stafi në Realization ditor shfaq Due date / Deadline brenda listave të
   detyrave, pa kolonë afatesh: listat shfaqin vetëm titullin e detyrës; afatet e
   pambyllura kanë titull të kuq, pa etiketa, sfond apo vijë shtesë. `realization-table-items.ts`
@@ -277,8 +291,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   vetëm orën e mbarimit. USER është kolona e fundit pas titullit. Tabela ditore në
   Department Views/My View e ka Personat në fund.
 - Shënimet e takimeve (`meeting_notes`) dalin te PX Notes vetëm kur dërgohen
-  ose bashkohen; statusi i tyre lexohet nga taskat e Note-s PX (`ga_note_origin_id`).
-  Ngjyrat e statusit duhet të mbeten të njëjta me PX Notes. Regjistrimi i lidhur
+  ose bashkohen; statusi i tyre ruhet manualisht në `manual_status`, veçmas
+  nga taskat e Note-s PX (`ga_note_origin_id`). Bashkimi në PX përdor numra
+  `1.`, `2.`, `3.` sipas rendit të përzgjedhjes. Renderuesi i PX Notes ruan
+  numrin e shkruar edhe kur përgjigjet ose rreshtat bosh ndërpresin listën.
+  Përmbajtja e bashkuar më parë nuk rishkruhet. Regjistrimi i lidhur
   me takim krijon shënim takimi edhe kur konfirmohet detyra nga propozimi AI.
 - Shënimi / pyetja dhe vendimi redaktohen direkt në `NotesTable`, si te seanca e takimit ashtu edhe
   te Historia e klientit, me Ruaj/Anulo. PATCH dërgon vetëm `content` ose `answer`;
@@ -293,6 +310,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Hiqet nga lista/përzgjedhja vetëm pas suksesit; gabimi ruan rreshtin.
   Bashkëngjitjet e shënimit fshihen sipas API-së ekzistuese; kopjet në PX Notes
   dhe detyrat e tyre nuk fshihen. Butoni shfaqet kur konsumatori ofron `onRemoved`.
+- Ngjyrat dhe etiketat e statuseve te shënimet e takimeve kanë disa burime:
+  Statusi i shënimit ruhet manualisht në `MeetingNote.manual_status` me PATCH
+  të shënimit, edhe pa detyra të lidhura. Seanca, Historia e klientit, numëruesit
+  e listës dhe filtrimi i shënimeve Done përdorin këtë fushë. Statuset e detyrave
+  normale/PX Notes nuk ndryshohen dhe nuk përcaktojnë statusin e shënimit.
+  `meeting-notes.ts` / `NotesTable` përdoren te seanca dhe Historia e klientit;
+  `StatusLegend` përdoret edhe te lista. Lista ka `CountChip`, seanca numëruesit
+  e vet dhe Historia e klientit `chips` më vete. Kontrollo secilin para ndryshimit
+  të DONE ose WFE/WAITING; ndryshimi i një numëruesi nuk përhapet automatikisht.
+  Këto stile nuk përdoren nga raportet ose eksportet e detyrave.
 - Gjuha e takimeve lidhet me llojin: tab-i External te lista `/meetings`,
   detajet e takimit ekstern, shënimet, redaktimi, klienti dhe legjenda përdorin
   anglishten përmes `meeting-notes-language.ts`. Historia e klientit përdor

@@ -20,6 +20,7 @@ EXPECTED_COLUMNS = {
         "status", "transcript", "error", "lease_token", "lease_until",
     )),
     ("meeting_recordings", "deleted_at"),
+    ("meeting_notes", "manual_status"),
     ("meeting_recordings", "files_purged_at"),
     *(("reporting_points_settings", column) for column in (
         "report_type", "is_active", "send_time", "weekdays", "recipients", "manual_recipients", "updated_by", "updated_at",

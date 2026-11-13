@@ -3979,8 +3979,8 @@ async def export_checklist_xlsx(
         ).scalar_one_or_none()
         if task is not None and task.department_id is not None:
             ensure_department_access(user, task.department_id)
-    elif checklist.group_key and user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    elif checklist.group_key and user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or manager only")
 
     items_stmt = (
         select(ChecklistItem)

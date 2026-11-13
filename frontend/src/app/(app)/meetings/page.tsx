@@ -27,8 +27,8 @@ function frequency(row: MeetingOverviewRow) {
   return row.kind === "EXTERNAL" ? "One-off" : "Njëherë"
 }
 
-function CountChip({ value, color }: { value: number; color: string }) {
-  return <span className={`inline-flex h-[26px] min-w-[34px] items-center justify-center border border-slate-600 text-[13px] font-bold ${value > 0 ? color : "bg-white text-neutral-400"}`}>{value}</span>
+function CountChip({ value, color, alwaysColored = false }: { value: number; color: string; alwaysColored?: boolean }) {
+  return <span className={`inline-flex h-[26px] min-w-[34px] items-center justify-center border border-slate-600 text-[13px] font-bold ${value > 0 || alwaysColored ? color : "bg-white text-neutral-400"}`}>{value}</span>
 }
 
 export default function MeetingsPage() {
@@ -132,14 +132,14 @@ export default function MeetingsPage() {
             <td className="border border-slate-600 p-2 align-bottom"><div className="flex gap-1">
               <span title="TODO"><CountChip value={row.counts.TODO} color="bg-pink-200" /></span>
               <span title="IN PROGRESS"><CountChip value={row.counts.IN_PROGRESS} color="bg-yellow-200" /></span>
-              <span title="WFE / WFC"><CountChip value={row.counts.WAITING} color="bg-[#E2C15B] text-[#4F3A00]" /></span>
-              <span title="DONE"><CountChip value={row.counts.DONE} color="bg-emerald-200" /></span>
+              <span title={row.kind === "EXTERNAL" ? "WAITING" : "WFE / WFC"}><CountChip value={row.counts.WAITING} color="bg-[#E2C15B] text-[#4F3A00]" /></span>
+              <span title="DONE"><CountChip value={row.counts.DONE} color="bg-green-200" alwaysColored /></span>
             </div></td>
           </tr>
         })}</tbody>
       </table>
       {!visible.length && <p className="p-4 text-center text-sm text-muted-foreground">{t("Nuk ka takime për këtë filtër.")}</p>}
     </div>}
-    <StatusLegend withNotes={false} />
+    <StatusLegend withNotes={false} english={tab === "EXTERNAL"} />
   </div>
 }

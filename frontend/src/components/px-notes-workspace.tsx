@@ -935,7 +935,7 @@ function renderNoteContentWithRanges(
         const match = itemText.match(/^\s*\d+\.\s+/)
         if (!match) break
         items.push(
-          <li key={`note-ordered-${index}`} data-note-line-index={index}>
+          <li key={`note-ordered-${index}`} data-note-line-index={index} value={Number.parseInt(match[0], 10)}>
             {renderInlineMarkedSegments(
               trimLinePrefix(itemSegments, match[0].length),
               `note-ordered-${index}`,

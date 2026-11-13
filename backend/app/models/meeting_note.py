@@ -22,6 +22,7 @@ class MeetingNote(Base):
     __table_args__ = (
         CheckConstraint("kind IN ('NOTE','QUESTION')", name="meeting_note_kind"),
         CheckConstraint("source IN ('MANUAL','RECORDING')", name="meeting_note_source"),
+        CheckConstraint("manual_status IN ('TODO','IN_PROGRESS','WAITING_CLIENT','WAITING_CONFIRMATION','DONE')", name="meeting_note_manual_status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -45,6 +46,7 @@ class MeetingNote(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     due_date: Mapped[date | None] = mapped_column(Date)
+    manual_status: Mapped[str] = mapped_column(String(32), nullable=False, default="TODO", server_default="TODO")
     ga_note_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ga_notes.id", ondelete="SET NULL"), index=True
     )

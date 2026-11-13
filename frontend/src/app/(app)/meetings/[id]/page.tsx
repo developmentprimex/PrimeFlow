@@ -187,7 +187,7 @@ export default function MeetingPage() {
   const scoped = notes.filter((note) => showDone || !isNoteDone(note))
   const recordingCount = scoped.filter((note) => note.source === "RECORDING").length
   const statusCounts = (["TODO", "IN_PROGRESS", "WAITING_CLIENT", "DONE"] as MeetingNoteTaskStatus[]).map((status) => ({
-    status, count: notes.filter((note) => note.task_status === status).length,
+    status, count: notes.filter((note) => note.manual_status === status).length,
   }))
   const currentSession = detail.sessions.find((s) => s.date === session)
   const client = detail.meeting.client_name
@@ -268,7 +268,7 @@ export default function MeetingPage() {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <StatusLegend english={english} withStatuses={false} />
       <div className="flex flex-wrap gap-1" aria-label={english ? "Task totals" : "Numërimet e detyrave"}>
-        {statusCounts.map(({ status, count }) => <span key={status} className={`border border-slate-600 px-1.5 py-0.5 text-xs font-bold ${STATUS_STYLE[status].cell}`}>{STATUS_STYLE[status].label} {count}</span>)}
+        {statusCounts.map(({ status, count }) => <span key={status} className={`border border-slate-600 px-1.5 py-0.5 text-xs font-bold ${status === "DONE" ? "bg-green-200 text-slate-900" : STATUS_STYLE[status].cell}`}>{english && status === "WAITING_CLIENT" ? "WAITING" : STATUS_STYLE[status].label} {count}</span>)}
       </div>
     </div>
   </div>

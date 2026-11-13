@@ -64,15 +64,15 @@ export default function ClientHistoryPage() {
   const recN = all.filter((n) => n.source === "RECORDING").length
   const held = data?.sessions.filter((s) => s.status !== "canceled").length ?? 0
   const canceled = data?.sessions.filter((s) => s.status === "canceled").length ?? 0
-  const count = (status: string) => shown.filter((n) => n.task_status === status).length
+  const count = (status: string) => shown.filter((n) => n.manual_status === status).length
   const chips: [string, number, string][] = [
     [english ? `Sessions (${canceled} canceled)` : `Seanca (${canceled} anuluar)`, held, "bg-white rounded-md border-neutral-200"],
     [t("Manuale"), shown.filter((n) => n.source === "MANUAL").length, "bg-white rounded-md border-neutral-200"],
     [t("Nga regjistrimi"), shown.filter((n) => n.source === "RECORDING").length, "bg-violet-50 text-violet-800 rounded-md border-neutral-200"],
     ["TODO", count("TODO"), "bg-pink-200 border-slate-600"],
     ["IN PROGRESS", count("IN_PROGRESS"), "bg-yellow-200 border-slate-600"],
-    ["WFE", count("WAITING_CLIENT"), "bg-[#E2C15B] text-[#4F3A00] border-slate-600"],
-    ["DONE", count("DONE"), "bg-emerald-200 border-slate-600"],
+    [english ? "WAITING" : "WFE", count("WAITING_CLIENT"), "bg-[#E2C15B] text-[#4F3A00] border-slate-600"],
+    ["DONE", count("DONE"), "bg-green-200 border-slate-600"],
   ]
 
   return <div className="w-full space-y-4">

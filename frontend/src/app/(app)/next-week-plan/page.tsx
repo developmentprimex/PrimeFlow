@@ -1848,6 +1848,27 @@ export default function NextWeekPlanPage() {
     )
   }, [applyTextEditToTextarea, editContent])
 
+  const markSelectedEditTextDone = () => {
+    const textarea = editTextareaRef.current
+    if (!textarea) return
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    if (!editContent.slice(start, end).trim()) {
+      toast.error("Select text inside the note to strike or undo")
+      return
+    }
+    const scrollTop = textarea.scrollTop
+    const scrollLeft = textarea.scrollLeft
+    const direction = textarea.selectionDirection
+    setEditDoneRanges((current) => toggleDoneRange(current, { start, end }))
+    window.setTimeout(() => {
+      textarea.focus({ preventScroll: true })
+      textarea.setSelectionRange(start, end, direction)
+      textarea.scrollTop = scrollTop
+      textarea.scrollLeft = scrollLeft
+    }, 0)
+  }
+
   const getNoteSelectionRange = (noteId: string) => {
     const container = document.getElementById(`ga-note-content-${noteId}`)
     const selection = window.getSelection()
@@ -4612,6 +4633,10 @@ export default function NextWeekPlanPage() {
                   <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyEditNoteNumbers}>
                     <ListOrdered className="h-4 w-4" />
                     Numbers
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-8"
+                    onMouseDown={(event) => event.preventDefault()} onClick={markSelectedEditTextDone}>
+                    Strike / Undo
                   </Button>
                 </div>
               </div>

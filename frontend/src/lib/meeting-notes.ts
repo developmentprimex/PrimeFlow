@@ -26,6 +26,7 @@ export type MeetingNote = {
   updated_at: string
   attachments: MeetingNoteAttachment[]
   task_status: MeetingNoteTaskStatus | null
+  manual_status: MeetingNoteTaskStatus
   task_ids: string[]
 }
 
@@ -56,29 +57,29 @@ export type LookupUser = { id: string; full_name?: string | null; username?: str
 
 export const KIND_LABEL: Record<MeetingKind, string> = { EXTERNAL: "EXT", INTERNAL: "INT", TRAINING: "TRAJNIM" }
 
-/** Same colours as PX Notes (see px-notes-workspace shenimiCellClass). */
+/** Colours for manually maintained meeting-note statuses. */
 export const STATUS_STYLE: Record<MeetingNoteTaskStatus, { label: string; cell: string }> = {
   TODO: { label: "TODO", cell: "bg-pink-200 text-slate-900" },
   IN_PROGRESS: { label: "IN PROGRESS", cell: "bg-yellow-200 text-slate-900" },
   WAITING_CLIENT: { label: "WFE", cell: "bg-[#E2C15B] text-[#4F3A00]" },
   WAITING_CONFIRMATION: { label: "WFC", cell: "bg-amber-50 text-slate-900" },
-  DONE: { label: "DONE", cell: "bg-emerald-200 text-slate-900" },
+  DONE: { label: "DONE", cell: "bg-green-200 text-slate-900" },
 }
 
 export const MANUAL_NOTE_CELL = "bg-sky-200 text-slate-900"
 export const RECORDING_NOTE_CELL = "bg-violet-100 text-slate-900"
 
-/** Statuses a user can pick for a single linked task (manual, like PX Notes). */
+/** Statuses maintained on the meeting note independently of linked tasks. */
 export const PICKABLE_STATUSES: MeetingNoteTaskStatus[] = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "DONE"]
 
 export function noteCellClass(note: MeetingNote): string {
   if (note.is_closed) return "bg-slate-300 text-slate-700"
-  if (note.task_status) return STATUS_STYLE[note.task_status].cell
+  if (note.manual_status) return STATUS_STYLE[note.manual_status].cell
   return note.source === "RECORDING" ? RECORDING_NOTE_CELL : MANUAL_NOTE_CELL
 }
 
 export function isNoteDone(note: MeetingNote): boolean {
-  return note.is_closed || note.task_status === "DONE"
+  return note.is_closed || note.manual_status === "DONE"
 }
 
 export function userName(users: Map<string, LookupUser>, id: string | null | undefined): string {

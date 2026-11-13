@@ -161,14 +161,12 @@ export function NotesTable({
   const cols = noteColumns(kind)
   const people = React.useMemo(() => [...users.values()].sort((a, b) => userName(users, a.id).localeCompare(userName(users, b.id), "sq")), [users])
 
-  const setTaskStatus = async (note: MeetingNote, status: MeetingNoteTaskStatus) => {
-    const taskId = note.task_ids[0]
-    if (!taskId) return
+  const setNoteStatus = async (note: MeetingNote, status: MeetingNoteTaskStatus) => {
     setBusyId(note.id)
     try {
-      const response = await apiFetch(`/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) })
+      const response = await apiFetch(`/meeting-notes/${note.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_status: status }) })
       if (!response.ok) throw new Error(await readError(response, t("Statusi nuk u ndryshua.")))
-      onChanged({ ...note, task_status: status })
+      onChanged((await response.json()) as MeetingNote)
       onTasksChanged?.()
     } catch (error) { toast.error(error instanceof Error ? error.message : String(error)) }
     finally { setBusyId(null) }
@@ -235,13 +233,12 @@ export function NotesTable({
               <td className={td}><AssignmentCell english={english} key={`${note.id}:owner:${note.assignee_user_id || ""}`} note={note} field="assignee_user_id" people={people} users={users} onChanged={onChanged} /></td>
               <td className={`${td} tabular-nums`}><AssignmentCell english={english} key={`${note.id}:due:${note.due_date || ""}`} note={note} field="due_date" people={people} users={users} onChanged={onChanged} /></td>
               <td className={`${td} p-1.5`}>
-                {note.task_status && note.task_ids.length === 1 ? <select aria-label={t("Statusi i detyrës")} disabled={busyId === note.id}
-                    className={`h-8 w-full rounded-md border border-slate-600 px-1.5 text-xs font-bold ${STATUS_STYLE[note.task_status].cell}`}
-                    value={note.task_status} onChange={(event) => void setTaskStatus(note, event.target.value as MeetingNoteTaskStatus)}>
-                    {[...new Set([note.task_status, ...PICKABLE_STATUSES])].map((status) => <option key={status} value={status}>{STATUS_STYLE[status].label}</option>)}
+                <select aria-label={english ? "Note status" : "Statusi i shënimit"} disabled={busyId === note.id}
+                    className={`h-8 w-full rounded-md border border-slate-600 px-1.5 text-xs font-bold ${STATUS_STYLE[note.manual_status].cell}`}
+                    value={note.manual_status} onChange={(event) => void setNoteStatus(note, event.target.value as MeetingNoteTaskStatus)}>
+                    {[...new Set([note.manual_status, ...PICKABLE_STATUSES])].map((status) => <option key={status} value={status}>{english && status === "WAITING_CLIENT" ? "WAITING" : STATUS_STYLE[status].label}</option>)}
                   </select>
-                  : note.task_status ? <span className={`inline-block rounded-md border border-slate-600 px-2 py-1 text-xs font-bold ${STATUS_STYLE[note.task_status].cell}`}>{STATUS_STYLE[note.task_status].label} · {note.task_ids.length} {english ? "tasks" : "det."}</span>
-                  : note.ga_note_id ? <Link href="/ga-ka-notes" className="text-xs underline">{t("Në PX Notes – krijo detyrën")}</Link>
+                  {note.ga_note_id ? <Link href="/ga-ka-notes" className="text-xs underline">{t("Në PX Notes – krijo detyrën")}</Link>
                   : <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busyId === note.id} onClick={() => void sendToPx(note)}>{t("Dërgo në PX")}</Button>}
               </td>
               <td className={`${td} p-1 text-center`}>

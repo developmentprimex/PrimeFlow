@@ -2,7 +2,7 @@
 
 Notes stay with their meeting until a user sends them to PX Notes (alone or
 merged). Tasks are then created from that PX note with the existing workflow,
-and their status is read back here from the tasks linked to the PX note.
+while meeting-note statuses are maintained manually and independently.
 """
 from __future__ import annotations
 
@@ -78,6 +78,7 @@ class MeetingNoteOut(BaseModel):
     attachments: list[MeetingNoteAttachmentOut] = []
     # Read from the tasks created in PX Notes from the linked PX note.
     task_status: str | None = None
+    manual_status: str = "TODO"
     task_ids: list[uuid.UUID] = []
 
 
@@ -92,6 +93,7 @@ class MeetingNoteCreate(BaseModel):
 
 
 class MeetingNoteUpdate(BaseModel):
+    manual_status: Literal["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] = "TODO"
     content: str | None = Field(default=None, min_length=1, max_length=10000)
     kind: Literal["NOTE", "QUESTION"] | None = None
     reference: str | None = Field(default=None, max_length=200)
@@ -218,6 +220,7 @@ def _note_out(note: MeetingNote, tasks: dict) -> MeetingNoteOut:
             for a in (note.attachments or [])
         ],
         task_status=task_status,
+        manual_status=note.manual_status,
         task_ids=task_ids,
     )
 
@@ -228,12 +231,7 @@ async def _notes_out(db: AsyncSession, notes: list[MeetingNote]) -> list[Meeting
 
 
 def _is_open(note: MeetingNote, tasks: dict) -> bool:
-    if note.is_closed:
-        return False
-    if note.ga_note_id:
-        task_status, _ = tasks.get(note.ga_note_id, (None, []))
-        return task_status != "DONE"
-    return True
+    return not note.is_closed and note.manual_status != "DONE"
 
 
 async def _get_meeting(db: AsyncSession, meeting_id: uuid.UUID) -> Meeting:
@@ -360,11 +358,10 @@ async def meetings_overview(db: AsyncSession = Depends(get_db), user=Depends(get
     counts: dict[uuid.UUID, dict[str, int]] = defaultdict(lambda: {"open_notes": 0, "TODO": 0, "IN_PROGRESS": 0, "WAITING": 0, "DONE": 0})
     for note in notes:
         c = counts[note.meeting_id]
-        task_status = tasks.get(note.ga_note_id, (None, []))[0] if note.ga_note_id else None
-        if task_status is None:
-            if not note.is_closed:
-                c["open_notes"] += 1
-        elif task_status in ("WAITING_CLIENT", "WAITING_CONFIRMATION"):
+        task_status = note.manual_status
+        if _is_open(note, tasks):
+            c["open_notes"] += 1
+        if task_status in ("WAITING_CLIENT", "WAITING_CONFIRMATION"):
             c["WAITING"] += 1
         else:
             c[task_status] += 1
@@ -508,7 +505,7 @@ async def create_note(meeting_id: uuid.UUID, payload: MeetingNoteCreate, db: Asy
 async def update_note(note_id: uuid.UUID, payload: MeetingNoteUpdate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     note = await _get_note(db, note_id)
     fields = payload.model_dump(exclude_unset=True)
-    for key in ("content", "kind", "assignee_user_id", "due_date"):
+    for key in ("content", "kind", "assignee_user_id", "due_date", "manual_status"):
         if key in fields:
             setattr(note, key, fields[key].strip() if isinstance(fields[key], str) else fields[key])
     for key in ("reference", "answer"):
@@ -621,7 +618,7 @@ async def send_to_px(payload: SendToPxIn, db: AsyncSession = Depends(get_db), us
                 content = _px_line(group[0])
             else:
                 header = f"{meeting.title} · {group[0].occurrence_date.strftime('%d.%m.%Y')}"
-                content = header + "\n" + "\n".join(f"• {_px_line(n)}" for n in group)
+                content = header + "\n" + "\n".join(f"{index}. {_px_line(n)}" for index, n in enumerate(group, start=1))
             ga_note = await build_ga_note(db, user, GaNoteCreate(
                 content=content,
                 project_id=meeting.project_id,
