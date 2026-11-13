@@ -1624,7 +1624,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       }
       const query = params.toString() ? `?${params}` : ""
       gaUrl += query
-      planUrl += query
+      const planParams = new URLSearchParams(params)
+      planParams.set("converted_to_task_only", "true")
+      planUrl += `?${planParams}`
       const [gaRes, planRes] = await Promise.all([apiFetch(gaUrl), apiFetch(planUrl)])
       if (gaRes?.ok && planRes?.ok) {
         const gaNotes = (await gaRes.json()) as GaNote[]
@@ -1632,9 +1634,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         const combined: GaNotesTableNote[] = [
           ...gaNotes.map((note) => ({ ...note, source: "GA_KA" as const })),
           ...planNotes
-            .filter((note) => note.is_converted_to_task)
             .map((note) => ({
               ...note,
+              is_converted_to_task: true,
               source: "PX_JAV" as const,
               attachments: [],
             })),

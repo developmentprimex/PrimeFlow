@@ -221,6 +221,7 @@ async def _save_plan_note_attachments(
 async def list_plan_notes(
     project_id: uuid.UUID | None = None,
     department_id: uuid.UUID | None = None,
+    converted_to_task_only: bool = False,
     limit: int | None = Query(default=None, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     include_attachments: bool = True,
@@ -230,6 +231,16 @@ async def list_plan_notes(
     closed_cutoff = datetime.utcnow() - timedelta(days=30)
 
     stmt = select(PlanNote).order_by(PlanNote.created_at.desc(), PlanNote.id.desc())
+    if converted_to_task_only:
+        # PX Notes must also find tasks whose cached conversion flag is stale.
+        # EXISTS keeps one note row even when each assignee has a task copy.
+        stmt = stmt.where(or_(
+            PlanNote.is_converted_to_task.is_(True),
+            select(Task.id).where(
+                Task.plan_note_origin_id == PlanNote.id,
+                Task.is_active.is_(True),
+            ).exists(),
+        ))
     if include_attachments:
         stmt = stmt.options(selectinload(PlanNote.attachments))
 

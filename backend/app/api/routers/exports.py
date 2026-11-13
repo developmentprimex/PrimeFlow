@@ -7224,8 +7224,9 @@ async def export_ga_notes_xlsx(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Export GA/KA notes to Excel"""
+    """Export PX Notes, including task-linked PX JAV notes, to Excel."""
     from datetime import timedelta
+    from app.api.routers.plan_notes import list_plan_notes
     from app.models.enums import GaNoteStatus
     
     # Build query
@@ -7258,13 +7259,30 @@ async def export_ga_notes_xlsx(
     notes = (await db.execute(stmt)).scalars().all()
 
     note_ids = [n.id for n in notes]
+    plan_department_id = department_id
+    if project_id is None and department_id is None and user.role == UserRole.STAFF:
+        plan_department_id = user.department_id
+    plan_notes = await list_plan_notes(
+        project_id=project_id, department_id=plan_department_id,
+        converted_to_task_only=True, limit=None, offset=0,
+        include_attachments=False, db=db, user=user,
+    )
+    plan_note_ids = [note.id for note in plan_notes]
+    notes = sorted(
+        [*notes, *plan_notes],
+        key=lambda note: note.created_at.timestamp() if note.created_at else 0,
+        reverse=True,
+    )
     tasks = []
-    if note_ids:
+    if note_ids or plan_note_ids:
         tasks = (
             await db.execute(
                 select(Task).where(Task.work_staff_filter())
                 .options(selectinload(Task.assignees))
-                .where(Task.ga_note_origin_id.in_(note_ids))
+                .where(or_(
+                    Task.ga_note_origin_id.in_(note_ids),
+                    (Task.plan_note_origin_id.in_(plan_note_ids) & Task.is_active.is_(True)),
+                ))
             )
         ).scalars().all()
 
@@ -7284,10 +7302,11 @@ async def export_ga_notes_xlsx(
 
     note_task_info: dict[uuid.UUID, dict[str, object]] = {}
     for task in tasks:
-        if not task.ga_note_origin_id:
+        origin_id = task.ga_note_origin_id or task.plan_note_origin_id
+        if not origin_id:
             continue
         info = note_task_info.setdefault(
-            task.ga_note_origin_id,
+            origin_id,
             {"assignee_ids": set(), "statuses": [], "has_task": True},
         )
         info["has_task"] = True
@@ -7407,7 +7426,7 @@ async def export_ga_notes_xlsx(
                 if initials and initials not in assignee_initials:
                     assignee_initials.append(initials)
         per_value = "-"
-        if note.is_converted_to_task and assignee_initials:
+        if has_task and assignee_initials:
             per_value = ", ".join(assignee_initials)
         
         # Clean content (remove HTML if any)

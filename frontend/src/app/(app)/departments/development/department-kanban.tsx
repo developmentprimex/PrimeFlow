@@ -2,6 +2,7 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { MyViewTaskColumns } from "@/components/my-view-task-columns"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { calendarMeetingTimeRange, meetingTimeColumns } from "@/lib/calendar-meeting-time"
 import { ProjectActivityControl, ProjectActivityFilterControl, ProjectListEmptyState, matchesProjectActivity, type ProjectActivityFilter } from "@/components/project-activity"
@@ -2312,6 +2313,7 @@ export default function DepartmentKanban() {
       <CollapsibleTaskTitle
         title={systemTitleOnly ? task.title || "-" : completeTaskTitle(task)}
         enabled={viewMode === "mine"}
+        alignToggle={viewMode === "mine"}
         renderTitle={(visibleTitle) => {
           const title = systemTitleOnly || !visibleTitle.includes("[[") ? visibleTitle
             : task.ga_note_origin_id || isTaskStartingOnSelectedAllDate(task)
@@ -8187,8 +8189,9 @@ export default function DepartmentKanban() {
                 {todayWaitingTasks.length ? (
                   <Table
                     containerClassName="mt-2 rounded-lg border border-slate-200 bg-white"
-                    className="min-w-[1100px] text-[11px]"
+                    className={`${viewMode === "mine" ? "table-fixed" : ""} min-w-[1100px] text-[11px]`}
                   >
+                    {viewMode === "mine" ? <MyViewTaskColumns kind="waiting" /> : null}
                     <TableHeader>
                       <TableRow className="bg-slate-50">
                         {["NR", "TYPE", "DEPARTMENT", "PROJECT", "ASSIGNED", "TASK TITLE", "CONFIRMER", "SYMBOL", "STATUS", "START", "DUE", "ACTIONS"].map((label) => (
@@ -8243,7 +8246,7 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                              <div className={`${viewMode === "mine" ? "relative pr-8" : ""} flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{renderAllTodayTaskTitle(task)}</span>
                               </div>
                             </TableCell>
@@ -8317,9 +8320,10 @@ export default function DepartmentKanban() {
                 {todayProjectTasks.length ? (
                   <Table
                     containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-                    className="min-w-[1200px] text-[11px]"
+                    className={`${viewMode === "mine" ? "table-fixed" : ""} min-w-[1200px] text-[11px]`}
                   >
-                    <colgroup>
+                    {viewMode === "mine" ? <MyViewTaskColumns kind="project" /> : (
+<colgroup>
                       <col />
                       <col className="w-[82px]" />
                       <col className="w-[64px]" />
@@ -8332,6 +8336,7 @@ export default function DepartmentKanban() {
                       <col />
                       <col />
                     </colgroup>
+)}
                     <TableHeader>
                       <TableRow className="bg-slate-50">
                         {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "SYMBOL", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
@@ -8383,7 +8388,7 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                              <div className={`${viewMode === "mine" ? "relative pr-8" : ""} flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
@@ -8473,8 +8478,9 @@ export default function DepartmentKanban() {
                 {todayNoProjectTasks.length ? (
                   <Table
                     containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-                    className="min-w-[900px] text-[11px]"
+                    className={`${viewMode === "mine" ? "table-fixed" : ""} min-w-[900px] text-[11px]`}
                   >
+                    {viewMode === "mine" ? <MyViewTaskColumns kind="fast" /> : null}
                     <TableHeader>
                       <TableRow className="bg-slate-50">
                         {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "SYMBOL", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
@@ -8517,7 +8523,7 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                              <div className={`${viewMode === "mine" ? "relative pr-8" : ""} flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
@@ -8585,8 +8591,9 @@ export default function DepartmentKanban() {
                 {todaySystemTasks.length ? (
                   <Table
                     containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-                    className="min-w-[900px] text-[11px]"
+                    className={`${viewMode === "mine" ? "table-fixed" : ""} min-w-[900px] text-[11px]`}
                   >
+                    {viewMode === "mine" ? <MyViewTaskColumns kind="system" /> : null}
                     <TableHeader>
                       <TableRow className="bg-slate-50">
                         {["NR", "ASSIGNED", "TASK TITLE", "SYMBOL", "STATUS", "PRIORITY", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
@@ -8628,7 +8635,7 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                              <div className={`${viewMode === "mine" ? "relative pr-8" : ""} flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{renderAllTodayTaskTitle(task, true)}</span>
                                 <Badge className="text-[10px] px-1.5 py-0 border-slate-200 bg-slate-50 text-slate-700">SYS</Badge>
                               </div>

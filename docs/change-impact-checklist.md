@@ -61,7 +61,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | Taska - personale / R1 / BLL | My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, PX Notes, PX JAV, Weekly Planner, Monthly Planner, Open Tasks, Admin Tasks, Projects, Task Details, Realization, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Taska - sistemore / përsëritje | System Tasks, System Tasks Report, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, Realization, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Task Details |
 | Taska - nga PX Notes | PX Notes, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Projects, Weekly Planner, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Task Details |
-| Taska - nga PX JAV | PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, Projects, PX JAV Kontrolli, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Task Details |
+| Taska - nga PX JAV | PX JAV, PX Notes (edhe printimi dhe Excel), My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, Projects, PX JAV Kontrolli, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Task Details |
 | Taska - nga takimet | Meetings, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, System Tasks, Weekly Planner, Realization, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Department Views, Task Details |
 | Projekte - ndryshime të përgjithshme | Projects, Department Views, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, PX Notes, PX JAV, Weekly Planner, Monthly Planner, Meeting Scheduler, Realization, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Task Details, Open Tasks, Weekly Planning Check |
 | Projekte - faza / checklista | Projects, Meetings, Common View, Department Views, My View, Exports, Task Details |
@@ -83,6 +83,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | GA PERSONAL - grupet dhe filtrat | Pamja ditore dhe javore e GA PERSONAL, filtri i grupeve dhe etiketat e tabelave; klasifikimi i eventeve ndahet përmes `frontend/src/lib/ga-personal-week.ts`, përfshirë eventet e vjetra të volejbollit. Të dhënat e modulit mbeten të ndara nga detyrat dhe raportet e kompanisë. |
 
 ## Varësi që nuk duhen harruar
+
+- Butoni i zgjerimit të titullit (`CollapsibleTaskTitle`) rreshtohet në skajin
+  e kolonës për My View te Development, Graphic Design dhe Product Content
+  (Waiting Confirmation, Project Tasks, Fast Tasks, System Tasks), si dhe te
+  tabela Finance. `alignToggle` kërkon mbështjellës `relative` me hapësirë `pr-8`;
+  në pamjen Department të tri departamenteve rreshtimi i zakonshëm ruhet.
+  Ky komponent nuk përdoret nga raportet ose eksportet.
+  Tabelat My View përdorin `table-fixed` dhe `MyViewTaskColumns` për gjerësi
+  të pavarura nga titulli i zgjeruar; Finance ka kolonat e veta fikse.
+  Zgjerimi ndryshon lartësinë e rreshtit, pa rillogaritur gjerësitë e kolonave;
+  butoni ruan pozicionin vertikal në ekran gjatë hapjes/mbylljes.
 
 - Filtrat “Vetëm me strikes > 0” dhe “Vetëm Done” përdoren te 1H Reports
   (admin dhe staff, përfshirë BLL dhe SHTYPI brenda raportit) dhe SHTYPI Today.
@@ -230,6 +241,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   e gjenerimit origjinal; Common View dhe të dhënat e taskut nuk ndryshojnë.
 - PX Notes dhe PX JAV lidhen me taskat përmes origjinës së Note dhe paketave
   Note–Task. Kontrollo edhe taskat për secilin përgjegjës, afatet dhe markerat.
+  PX Notes lexon `/plan-notes?converted_to_task_only=true`: përfshin shënimet
+  me flamurin e konvertimit ose me detyrë aktive të lidhur, edhe kur flamuri
+  është i pasaktë. `EXISTS` shmang përsëritjen për disa përgjegjës; nuk krijohet
+  GaNote ose detyrë e dytë. Printimi përdor tabelën e PX Notes; Excel-i ka
+  endpoint më vete (`/exports/ga-notes.xlsx`) dhe lexon edhe këto PX JAV përmes
+  të njëjtit filtër në server. Lista e zakonshme e PX JAV dhe raportet e tjera
+  ruajnë filtrat e tyre.
 - Takimet externe/interne mund të kenë pjesëmarrës të përbashkët, përsëritje,
   statuse sipas datës dhe taska PARA/PAS ose përgatitjeje. Kontrollo këto lidhje
   edhe kur ndryshon ose anulohet takimi. 1H Reports preket nga taskat përkatëse,
@@ -342,10 +360,19 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ID-ja dhe emri i ruajtur mbeten të njëjtë; klientët pa shkurtim të përcaktuar
   shfaqen me emrin e plotë. Kjo paraqitje nuk klasifikon takime PARA/PAS dhe nuk
   ndryshon historinë sipas projektit, raportet, PX Notes apo Microsoft Calendar.
+- Kolonat Data / Ora, Pjesëmarrësit dhe Shënime të hapura te lista Takimet
+  përdorin `starts_at`, `next_session`/`last_session`, `participant_ids` dhe
+  `counts.open_notes` nga `/meeting-notes/overview`; inicialet/emrat lexohen nga
+  `/users/lookup` përmes `useUsersMap`. Data e takimit njëherësh ruan datën lokale
+  origjinale; përsëritjet shfaqin seancën e radhës me orën lokale të takimit.
+  E radhës përdoret vetëm për përsëritjet. Numri i shënimeve të hapura përjashton
+  shënimet e mbyllura dhe ato me detyra të krijuara (të cilat numërohen te Detyrat).
+  Këto kolona nuk shtohen automatikisht te detajet, Historia e klientit,
+  Regjistrimet ose raportet; API-ja dhe caktimet e pjesëmarrësve nuk ndryshojnë.
 - Lista Takimet përjashton plotësisht interne PARA/PAS (lidhjet
   `pre_external_meeting_id` / `paired_external_meeting_id`), edhe nga kërkimi,
-  numërimet dhe opsioni shtesë. Eksterne fizike me tonin `outlook-blue` fshihen
-  fillimisht; checkbox-i përfshin vetëm ato sërish. Krijimi dhe të dhënat e
+  numërimet. Eksterne fizike me tonin `outlook-blue` mbeten të fshehura në listë;
+  opsioni për t'i përfshirë është hequr. Krijimi dhe të dhënat e
   interne PARA/PAS nuk ndryshojnë. Klasifikimi përdor `meeting-notes-overview.ts` dhe
   ngjyrat ekzistuese nga `meeting-tone.ts`. API-ja `/meeting-notes/overview`
   përdoret edhe për lidhjen e regjistrimit me takim te Regjistrimet: mos e

@@ -829,7 +829,12 @@ export default function DepartmentKanban() {
             </div>
           ) : (
             <div className="space-y-4">
-              <Table containerClassName="rounded-lg border border-slate-200 bg-white">
+              <Table className="min-w-[2100px] table-fixed" containerClassName="rounded-lg border border-slate-200 bg-white">
+                <colgroup>
+                  {[44, 480, 64, 90, 112, 48, 105, 105, 105, 65, 100, 120, 170, 190, 90].map((width, index) => (
+                    <col key={index} style={{ width }} />
+                  ))}
+                </colgroup>
                 <TableHeader className="bg-slate-50">
                   <TableRow className="bg-slate-50">
                     <TableHead>NR</TableHead>
@@ -857,11 +862,12 @@ export default function DepartmentKanban() {
                       <TableRow key={row.id}>
                         <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                         <TableCell className="w-[480px] min-w-[480px] whitespace-normal font-medium text-slate-800">
-                          <div className="flex w-full items-start gap-2">
+                          <div className="relative flex w-full items-start gap-2 pr-8">
                             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
                               <TaskMarkerComment comment={row.task.one_h_marker_comment} taskId={row.task.id} />
                               <CollapsibleTaskTitle
                                 title={row.title}
+                                alignToggle
                                 renderTitle={(title) => title.includes("[[") ? renderMarkedNoteContent(title, title) : title}
                               />
                             </span>
