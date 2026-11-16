@@ -1831,6 +1831,27 @@ export default function CommonViewPage() {
   const [multiMode, setMultiMode] = React.useState(false)
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
+  const [collapsedWeekRows, setCollapsedWeekRows] = React.useState<Set<CommonType>>(() => new Set())
+  const renderWeekRowToggle = (row: SwimlaneRow) => {
+    const collapsed = collapsedWeekRows.has(row.id)
+    return (
+      <button
+        type="button"
+        className="week-table-row-toggle no-print"
+        aria-label={`${collapsed ? "Expand" : "Collapse"} ${row.label}`}
+        aria-expanded={!collapsed}
+        title={collapsed ? "Expand row and include in weekly print" : "Collapse row and exclude from weekly print"}
+        onClick={() => setCollapsedWeekRows((previous) => {
+          const next = new Set(previous)
+          if (next.has(row.id)) next.delete(row.id)
+          else next.add(row.id)
+          return next
+        })}
+      >
+        {collapsed ? "+" : "−"}
+      </button>
+    )
+  }
   const [colorFilter, setColorFilter] = React.useState<CommonColorFilter>("all")
   const [oneHMarkerFilters, setOneHMarkerFilters] = React.useState<Set<OneHMarkerFilter>>(new Set())
   const [oneHMarkerMenuOpen, setOneHMarkerMenuOpen] = React.useState(false)
@@ -11628,6 +11649,28 @@ export default function CommonViewPage() {
           font-weight: 700;
           background: #f8f9fa;
         }
+        .week-table-row-toggle {
+          width: 20px;
+          height: 20px;
+          margin-right: 4px;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid #94a3b8;
+          border-radius: 4px;
+          background: #fff;
+          color: #0f172a;
+          font-size: 16px;
+          line-height: 1;
+          cursor: pointer;
+          vertical-align: middle;
+        }
+        .week-table-row-toggle:focus-visible {
+          outline: 2px solid #2563eb;
+          outline-offset: 2px;
+        }
+        .week-table-row-collapsed td {
+          vertical-align: middle;
+        }
         .week-table-row.delay .week-table-label {
           background: var(--delay-bg);
         }
@@ -12300,6 +12343,9 @@ export default function CommonViewPage() {
           font-weight: 600;
         }
         @media print {
+          .week-table-row-collapsed {
+            display: none !important;
+          }
           .week-table-view {
             display: block !important;
             page-break-inside: auto;
@@ -16323,6 +16369,18 @@ export default function CommonViewPage() {
               <tbody>
                 {orderCommonRowsForPrint(swimlaneRows.filter((row) => showCard(row.id, row.items.length)))
                   .map((row, rowIndex) => {
+                    if (collapsedWeekRows.has(row.id)) {
+                      return (
+                        <tr key={row.id} className="week-table-row week-table-row-collapsed">
+                          <td className="week-table-number">{rowIndex + 1}</td>
+                          <td className="week-table-label">
+                            {renderWeekRowToggle(row)}
+                            <span>{row.label.toUpperCase()}</span>
+                          </td>
+                          <td colSpan={weekISOs.length} />
+                        </tr>
+                      )
+                    }
                     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
                     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
                     const dayEntries: Record<string, CommonWeekTableEntry[]> = {}
@@ -16847,6 +16905,7 @@ export default function CommonViewPage() {
                         <tr key={row.id} className={`week-table-row ${weekRowClass} week-table-row-merged`}>
                           <td className="week-table-number">{rowIndex + 1}</td>
                           <td className="week-table-label">
+                            {renderWeekRowToggle(row)}
                             <span>{rowLabel}</span>
                             {rowSubtext ? <span className="week-table-label-subtext">{rowSubtext}</span> : null}
                           </td>
@@ -16898,6 +16957,7 @@ export default function CommonViewPage() {
                       <tr key={row.id} className={`week-table-row ${weekRowClass}`}>
                         <td className="week-table-number">{rowIndex + 1}</td>
                         <td className="week-table-label">
+                          {renderWeekRowToggle(row)}
                           <span>{rowLabel}</span>
                           {rowSubtext ? <span className="week-table-label-subtext">{rowSubtext}</span> : null}
                         </td>

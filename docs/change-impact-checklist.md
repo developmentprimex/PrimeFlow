@@ -84,6 +84,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Common View: tabela javore (`THIS WEEK` / `NEXT WEEK`) ka kontrolle −/+ për
+  çdo rresht. Rreshtat e minimizuar mbajnë etiketën në ekran dhe përjashtohen
+  tërësisht nga printimi javor, edhe nga printimi i shfletuesit. Gjendja ndahet
+  mes dy javëve gjatë qëndrimit në faqe. Eksporti Excel dhe raportet e veçanta
+  1H SHTYPI Today/Tomorrow nuk përdorin këtë gjendje minimizimi.
+
 - Eksporti `/exports/checklists.xlsx` përdoret nga checklistat e Product Content
   dhe kontrollon edhe shabllonet globale sipas `group_key`: MST, TT dhe
   shabllonet e takimeve eksportohen nga ADMIN dhe MANAGER; STAFF mbetet i
