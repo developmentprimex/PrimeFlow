@@ -620,6 +620,11 @@ Kur deploy-i e rinis botin me version të ri (`APP_BUILD_SHA` ndryshon) brenda 4
 të gjithë marrin automatikisht "✅ PrimeFlow u përditësua" (një herë, edhe pas disa `/push`).
 Çdo `/push` dërgon njoftimin, pa kufi kohe. Njoftimet ruhen te `discord_actions`.
 
+Push-et në `main` dhe nisjet manuale të workflow-t kanë edhe
+[njoftim automatik të deployment-it](discord-deployment-notices.md): paralajmërim
+7 minuta në çdo kanal personal aktiv para ndalimit të shërbimeve dhe rezultat në
+fund të workflow-t. Ky mekanizëm është i ndarë nga `/push` manual.
+
 ## Identiteti, lejet dhe historiku
 
 API-ja kontrollon serverin, Discord user ID dhe channel ID bashkë. Detyra duhet

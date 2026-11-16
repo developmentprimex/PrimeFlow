@@ -16,9 +16,23 @@ COLUMNS = (
 )
 
 
-def upgrade():
+def _resize_columns(old_size, new_size):
+    # PostgreSQL refuses ALTER TYPE while this UPDATE OF trigger depends on
+    # one_h_marker. Recreate the same trigger within Alembic's transaction;
+    # the function and existing history rows remain intact.
+    op.execute("DROP TRIGGER IF EXISTS trg_sync_task_one_h_marker_history ON tasks")
     for table, column in COLUMNS:
-        op.alter_column(table, column, existing_type=sa.String(16), type_=sa.String(32))
+        op.alter_column(table, column, existing_type=sa.String(old_size), type_=sa.String(new_size))
+    op.execute("""
+        CREATE TRIGGER trg_sync_task_one_h_marker_history
+        AFTER INSERT OR UPDATE OF one_h_marker, one_h_marker_date,
+            one_h_marker_by_ga, one_h_marker_comment ON tasks
+        FOR EACH ROW EXECUTE FUNCTION sync_task_one_h_marker_history()
+    """)
+
+
+def upgrade():
+    _resize_columns(16, 32)
 
 
 def downgrade():
@@ -26,5 +40,4 @@ def downgrade():
     for table, column in COLUMNS:
         if connection.scalar(sa.text(f'SELECT EXISTS (SELECT 1 FROM "{table}" WHERE length("{column}") > 16)')):
             raise RuntimeError("Remove combined task symbols before downgrading to 16-character storage")
-    for table, column in COLUMNS:
-        op.alter_column(table, column, existing_type=sa.String(32), type_=sa.String(16))
+    _resize_columns(32, 16)

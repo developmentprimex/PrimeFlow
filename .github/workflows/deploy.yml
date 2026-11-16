@@ -141,6 +141,19 @@ jobs:
           # A failed marker lookup above must not fail the step.
           exit 0
  
+      - name: Notify Discord before deployment
+        id: discord_notice
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: powershell
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+        run: |
+          $state = Join-Path $env:RUNNER_TEMP "primeflow-discord-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.json"
+          & "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" backend/scripts/notify_discord_deploy.py --phase start --state-file $state
+          if ($LASTEXITCODE -ne 0) { throw "Some Discord deployment notices could not be delivered; see warnings." }
+
       - name: Create Env Files
         shell: cmd
         env:
@@ -922,3 +935,18 @@ jobs:
           call pm2 logs primex-backend --lines 50 --nostream || ver > NUL
           call pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL
           call pm2 logs primeflow-kujtesa --lines 30 --nostream || ver > NUL
+
+      - name: Notify Discord of deployment result
+        if: ${{ always() && steps.discord_notice.outcome != 'skipped' && steps.discord_notice.outcome != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: powershell
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+          DEPLOYMENT_STATUS: ${{ job.status }}
+        run: |
+          $state = Join-Path $env:RUNNER_TEMP "primeflow-discord-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.json"
+          $phase = if ($env:DEPLOYMENT_STATUS -eq "success") { "success" } else { "failure" }
+          & "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" backend/scripts/notify_discord_deploy.py --phase $phase --state-file $state
+          if ($LASTEXITCODE -ne 0) { throw "Some Discord deployment result notices could not be delivered; see warnings." }

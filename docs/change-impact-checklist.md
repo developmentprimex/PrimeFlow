@@ -521,6 +521,13 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
 
+- Njoftimi automatik i deployment-it në Discord përdor workflow-n dhe
+  `backend/scripts/notify_discord_deploy.py`: lexon lidhjet aktive dhe dërgon
+  paralajmërimin 7 minuta në kanalet personale para migrimeve/rinisjeve.
+  Përfundimi njoftohet pas kontrolleve të deployment-it, dështimi veçmas;
+  `/push` manual mbetet i ndarë. Nuk bllokon redaktimin në faqet e aplikacionit.
+  Shih [njoftimet e deployment-it](discord-deployment-notices.md).
+
 - Integrimi i jashtëm NEWS-PX merr GA Time Table nga printimi ditor i Admin
   Tasks dhe `/api/exports/ga-time.xlsx` për email-et 07:00/21:00
   (Europe/Budapest). Ndryshimet në datë, kolonat, selektorët e printimit,
