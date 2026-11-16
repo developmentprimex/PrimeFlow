@@ -521,6 +521,14 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
 
+- Integrimi i jashtëm NEWS-PX merr GA Time Table nga printimi ditor i Admin
+  Tasks dhe `/api/exports/ga-time.xlsx` për email-et 07:00/21:00
+  (Europe/Budapest). Ndryshimet në datë, kolonat, selektorët e printimit,
+  autentikim ose rrugët e serverit kërkojnë kontroll të PDF/Excel në News.
+  Binding-u dhe cache-i privat ruhen jashtë aplikacionit; zhvendosja e checkout-it
+  nuk i zhvendos automatikisht. Shih
+  [kontrollin dhe rikuperimin e integrimit](ga-news-integration-recovery.md).
+
 | Zona | Skedarët kryesorë |
 |---|---|
 | Taska dhe modelet e të dhënave | <code>backend/app/api/routers/tasks.py</code>, <code>backend/app/schemas/task.py</code>, <code>frontend/src/lib/types.ts</code>, <code>frontend/src/components/task-edit-dialog.tsx</code> |
