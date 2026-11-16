@@ -521,6 +521,14 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
 
+- 1H Reports: filtri “Vetëm Notes” përdor `notes_html` për preview dhe
+  `notes_only=true` te `/admin/primeflow-1h-reports/preview` për Word/PNG/Text.
+  Kopja përfshin vetëm Notes të padiskutuara me të njëjtat rregulla përzgjedhjeje
+  si raporti i plotë; nuk shton burime Mira. Kontrollo mënyrat Admin dhe staf,
+  çaktivizimin/kalimin te Done/Strikes, rigjenerimin dhe raportin pa Notes.
+  Emaili manual/automatik, shkarkimet historike dhe SHTYPI Today/Tomorrow mbeten
+  raportet e tyre të plota; ky filtër nuk i ndryshon.
+
 - Njoftimi automatik i deployment-it në Discord përdor workflow-n dhe
   `backend/scripts/notify_discord_deploy.py`: lexon lidhjet aktive dhe dërgon
   paralajmërimin 7 minuta në kanalet personale para migrimeve/rinisjeve.

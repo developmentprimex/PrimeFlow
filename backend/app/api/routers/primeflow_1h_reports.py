@@ -22,7 +22,7 @@ from app.models.user import User
 from app.models.enums import UserRole
 from app.services.audit import add_audit_log
 from app.services.primeflow_report_access import can_manage_reports
-from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, render_plain_text, render_png
+from app.services.primeflow_report import ReportDocument, SLOTS, notes_only_document, render_docx, render_html, render_plain_text, render_png
 from app.services.primeflow_report_delivery import (
     configured_recipients,
     deliver_report,
@@ -112,6 +112,7 @@ class PreviewRequest(BaseModel):
     bcc: list[EmailStr] = Field(default_factory=list)
     use_default_recipients: bool = True
     show_full_mira_notes: bool = False
+    notes_only: bool = False
 
     @field_validator("report_slot")
     @classmethod
@@ -287,20 +288,26 @@ async def preview(
     source_data = await load_common_view(payload.report_date)
     document = await generate_fresh(payload.report_date, payload.report_slot, recipients, data=source_data,
         show_full_mira_notes=payload.show_full_mira_notes)
+    notes_document = notes_only_document(document)
+    if payload.notes_only:
+        document = notes_document
     filename = f"PrimeFlow_1H_{payload.report_date:%d.%m.%Y}_{payload.report_slot.replace(':', '-')}"
+    if payload.notes_only:
+        filename += "_Notes"
     if payload.format == "docx":
         return _file_response(render_docx(document), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename + ".docx")
     if payload.format == "png":
         return _file_response(render_png(document), "image/png", filename + ".png")
     if payload.format == "txt":
         return _file_response(render_plain_text(document).encode(), "text/plain; charset=utf-8", filename + ".txt")
-    email_html = await render_ga_recipient_email_html(db, document, payload.report_date, source_data=source_data)
+    email_html = render_html(document) if payload.notes_only else await render_ga_recipient_email_html(db, document, payload.report_date, source_data=source_data)
     if payload.format == "html":
         return HTMLResponse(email_html)
     return {
         "document": document.model_dump(mode="json"), "html": email_html,
         "plain_text": render_plain_text(document), "task_count": document.task_count,
-        "warning": "No tasks found" if document.task_count == 0 else None,
+        "notes_html": render_html(notes_document), "note_count": len(document.undiscussed_notes),
+        "warning": "No tasks found" if document.task_count == 0 and not payload.notes_only else None,
     }
 
 

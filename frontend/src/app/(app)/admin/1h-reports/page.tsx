@@ -18,7 +18,7 @@ type Recipient = { id:string; email:string; recipient_type:"TO"|"CC"|"BCC"; is_a
 type Schedule = { id:string; name:string; report_slot:string; execution_time:string; timezone:string; weekdays:number[]; is_active:boolean; backfill_enabled:boolean; grace_period_minutes:number; retry_count:number; retry_delays_seconds:number[]; version:number; updated_at:string; next_runs:string[] }
 type Run = { id:string; report_date:string; report_slot:string; trigger_type:string; status:string; subject:string; recipients:string; attempt_count:number; gmail_message_id?:string|null; error_message?:string|null; created_at:string }
 type Audit = { id:string; action:string; entity_type:string; actor_user_id?:string|null; created_at:string; before?:unknown; after?:unknown }
-type Preview = { document:{subject:string;generated_at:string;source_generated_at:string;recipients:Record<string,string[]>;strike_interval?:string|null}; html:string; plain_text:string; task_count:number; warning?:string|null }
+type Preview = { document:{subject:string;generated_at:string;source_generated_at:string;recipients:Record<string,string[]>;strike_interval?:string|null}; html:string; notes_html?:string; note_count?:number; plain_text:string; task_count:number; warning?:string|null }
 
 const API = "/admin/primeflow-1h-reports"
 const slots = ["10:00","11:00","11:50","14:10","14:20","16:00"]
@@ -36,6 +36,7 @@ export default function ReportManagementPage() {
   const [preview,setPreview] = React.useState<Preview|null>(null)
   const [strikesOnly,setStrikesOnly] = React.useState(false)
   const [doneOnly,setDoneOnly] = React.useState(false)
+  const [notesOnly,setNotesOnly] = React.useState(false)
   const [visibleTaskCount,setVisibleTaskCount] = React.useState<number|null>(null)
   const [totalPreviewTaskCount,setTotalPreviewTaskCount] = React.useState<number|null>(null)
   const [previewStrikeTotal,setPreviewStrikeTotal] = React.useState<number|null>(null)
@@ -62,21 +63,22 @@ export default function ReportManagementPage() {
   React.useEffect(()=>{if(!canManage)return;const timer=window.setTimeout(()=>void load(),0);return()=>window.clearTimeout(timer)},[canManage,load])
 
   const applyPreviewFilter = React.useCallback(() => {
+    if (notesOnly) return
     const document = previewFrame.current?.contentDocument
     if (!document?.querySelector("[data-report-task-section], [data-report-print-section]")) return
     const counts = applyOneHReportFilter(document, strikesOnly, doneOnly)
     setVisibleTaskCount(counts.visible)
     setTotalPreviewTaskCount(counts.total)
     setPreviewStrikeTotal(counts.strikeTotal)
-  }, [strikesOnly, doneOnly])
+  }, [strikesOnly, doneOnly, notesOnly])
   React.useEffect(() => { applyPreviewFilter() }, [applyPreviewFilter, preview])
 
   const previewReport = async(format="json")=>{
     setPreviewing(true)
     try {
-      const res=await apiFetch(`${API}/preview`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({report_date:date,report_slot:slot,format,use_default_recipients:true})})
+      const res=await apiFetch(`${API}/preview`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({report_date:date,report_slot:slot,format,use_default_recipients:true,notes_only:format!=="json"&&notesOnly})})
       if(!res.ok) throw new Error(await res.text())
-      if(format!=="json"){const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${date}_${slot.replace(":","-")}.${format}`;a.click();URL.revokeObjectURL(url)}
+      if(format!=="json"){const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${date}_${slot.replace(":","-")}${notesOnly?"_Notes":""}.${format}`;a.click();URL.revokeObjectURL(url)}
       else { setVisibleTaskCount(null); setTotalPreviewTaskCount(null); setPreviewStrikeTotal(null); setPreview(await res.json()) }
     } catch(e){toast.error("Preview failed",{description:String(e)})} finally{setPreviewing(false)}
   }
@@ -118,18 +120,24 @@ export default function ReportManagementPage() {
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${run.report_date}_${run.report_slot.replace(":","-")}.${format}`;a.click();URL.revokeObjectURL(url)
   }
   const strikeFilterControl = <div data-testid="one-h-strikes-toolbar" className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-2">
-    <Button type="button" variant="outline" aria-pressed={strikesOnly} onClick={()=>{setStrikesOnly(value=>!value);setDoneOnly(false)}}
+    <Button type="button" variant="outline" aria-pressed={strikesOnly} onClick={()=>{setStrikesOnly(value=>!value);setDoneOnly(false);setNotesOnly(false)}}
       className={strikesOnly ? "border-blue-600 bg-blue-200 font-semibold text-blue-900 hover:bg-blue-200" : "border-blue-400 bg-white font-semibold text-blue-800 hover:bg-blue-100"}>
       Vetëm me strikes &gt; 0
     </Button>
-    <Button type="button" variant="outline" aria-pressed={doneOnly} onClick={()=>{setDoneOnly(value=>!value);setStrikesOnly(false)}}
+    <Button type="button" variant="outline" aria-pressed={doneOnly} onClick={()=>{setDoneOnly(value=>!value);setStrikesOnly(false);setNotesOnly(false)}}
       className={doneOnly ? "border-green-600 bg-green-200 font-semibold text-green-900 hover:bg-green-200" : "border-green-400 bg-white font-semibold text-green-800 hover:bg-green-100"}>
       Vetëm Done
     </Button>
-    <span data-testid="one-h-toolbar-strike-total" className="text-base font-bold text-blue-900">Total strikes: {previewStrikeTotal ?? "—"}{preview?.document.strike_interval ? ` · ${preview.document.strike_interval}` : ""}</span>
-    <span role="status" className="text-sm text-muted-foreground">Shfaqen {visibleTaskCount ?? preview?.task_count ?? 0} nga {totalPreviewTaskCount ?? preview?.task_count ?? 0} detyra</span>
+    <Button type="button" variant="outline" aria-pressed={notesOnly} disabled={!preview?.notes_html} onClick={()=>{setNotesOnly(value=>!value);setStrikesOnly(false);setDoneOnly(false)}}
+      className={notesOnly ? "border-violet-600 bg-violet-200 font-semibold text-violet-900 hover:bg-violet-200" : "border-violet-400 bg-white font-semibold text-violet-800 hover:bg-violet-100"}>
+      Vetëm Notes
+    </Button>
+    {!notesOnly && <span data-testid="one-h-toolbar-strike-total" className="text-base font-bold text-blue-900">Total strikes: {previewStrikeTotal ?? "—"}{preview?.document.strike_interval ? ` · ${preview.document.strike_interval}` : ""}</span>}
+    <span role="status" className="text-sm text-muted-foreground">{notesOnly ? `Shfaqen ${preview?.note_count ?? 0} Notes` : `Shfaqen ${visibleTaskCount ?? preview?.task_count ?? 0} nga ${totalPreviewTaskCount ?? preview?.task_count ?? 0} detyra`}</span>
   </div>
-  const emptyStrikeMessage = (strikesOnly || doneOnly) && visibleTaskCount === 0
+  const emptyStrikeMessage = notesOnly && !preview?.note_count
+    ? <p className="rounded-md border bg-muted/30 p-3 text-sm">Nuk ka Notes të padiskutuara në këtë raport.</p>
+    : (strikesOnly || doneOnly) && visibleTaskCount === 0
     ? <p className="rounded-md border bg-muted/30 p-3 text-sm">{doneOnly ? "Nuk ka detyra Done në këtë raport." : "Nuk ka detyra me strikes > 0 në këtë interval."}</p> : null
   if(!user) return <div className="rounded-lg border p-8">Sign in to access 1H reports.</div>
   if(!canManage) return <div className="mx-auto max-w-[1400px] space-y-5">
@@ -140,7 +148,7 @@ export default function ReportManagementPage() {
         <div><Label>Slot</Label><Select value={slot} onValueChange={v=>{setSlot(v);setPreview(null)}}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{slots.map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>
         <div className="flex items-end"><Button onClick={()=>void previewReport()} disabled={previewing}>{previewing?<RefreshCw className="animate-spin"/>:<MailCheck/>}Generate report</Button></div>
       </div>
-      {preview ? <><div className="grid gap-3 text-sm md:grid-cols-3"><div><b>Subject</b><br/>{preview.document.subject}</div><div><b>Generated</b><br/>{preview.document.generated_at}</div><div><b>Tasks</b><br/>{preview.task_count}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={()=>void previewReport("docx")}><Download/>Word</Button><Button variant="outline" onClick={()=>void previewReport("png")}><Download/>PNG</Button><Button variant="outline" onClick={()=>void previewReport("txt")}><Download/>Text</Button>{strikeFilterControl}</div>{emptyStrikeMessage}<iframe ref={previewFrame} onLoad={applyPreviewFilter} title="Email preview" srcDoc={preview.html} className="h-[620px] w-full rounded-lg border bg-white"/></> : null}
+      {preview ? <><div className="grid gap-3 text-sm md:grid-cols-3"><div><b>Subject</b><br/>{preview.document.subject}</div><div><b>Generated</b><br/>{preview.document.generated_at}</div><div><b>Tasks</b><br/>{preview.task_count}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={()=>void previewReport("docx")}><Download/>Word</Button><Button variant="outline" onClick={()=>void previewReport("png")}><Download/>PNG</Button><Button variant="outline" onClick={()=>void previewReport("txt")}><Download/>Text</Button>{strikeFilterControl}</div>{emptyStrikeMessage}<iframe ref={previewFrame} onLoad={applyPreviewFilter} title="Email preview" srcDoc={notesOnly && preview.notes_html ? preview.notes_html : preview.html} className="h-[620px] w-full rounded-lg border bg-white"/></> : null}
     </div>
   </div>
 
@@ -151,7 +159,7 @@ export default function ReportManagementPage() {
     <Tabs defaultValue="overview"><TabsList className="flex h-auto flex-wrap"><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="reports">Reports</TabsTrigger><TabsTrigger value="schedules">Schedules</TabsTrigger><TabsTrigger value="recipients">Recipients</TabsTrigger><TabsTrigger value="history">History</TabsTrigger><TabsTrigger value="settings">Settings</TabsTrigger></TabsList>
       <TabsContent value="overview"><div className="space-y-5"><div className="grid gap-4 md:grid-cols-3">{[["Active 1H recipients",active.length],["Active 1H schedules",schedules.filter(s=>s.is_active).length],["Recent successful 1H runs",runs.filter(r=>["SENT","ALREADY_SENT"].includes(r.status)).length]].map(([label,value])=><div className="rounded-xl border p-5" key={String(label)}><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-3xl font-semibold">{value}</p></div>)}</div></div></TabsContent>
       <TabsContent value="reports"><div className="space-y-4 rounded-xl border p-5"><div className="grid gap-3 md:grid-cols-4"><div><Label>Date</Label><Input type="date" value={date} onChange={e=>{setDate(e.target.value);setPreview(null)}}/></div><div><Label>Slot</Label><Select value={slot} onValueChange={v=>{setSlot(v);setPreview(null)}}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{slots.map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div><div className="flex items-end"><Button onClick={()=>void previewReport()} disabled={previewing}>{previewing?<RefreshCw className="animate-spin"/>:<MailCheck/>}Preview fresh report</Button></div></div>
-        {preview&&<><div className="grid gap-3 md:grid-cols-4 text-sm"><div><b>Subject</b><br/>{preview.document.subject}</div><div><b>Generated</b><br/>{preview.document.generated_at}</div><div><b>Tasks</b><br/>{preview.task_count}{preview.warning&&<span className="text-amber-600"> · {preview.warning}</span>}</div><div><b>Recipients</b><br/>{Object.values(preview.document.recipients).flat().join(", ")}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={()=>void previewReport("docx")}><Download/>Word</Button><Button variant="outline" onClick={()=>void previewReport("png")}><Download/>PNG</Button><Button variant="outline" onClick={()=>void previewReport("txt")}><Download/>Text</Button><Button onClick={()=>setSendOpen(true)}><Send/>Send report now</Button>{strikeFilterControl}</div>{emptyStrikeMessage}<iframe ref={previewFrame} onLoad={applyPreviewFilter} title="Email preview" srcDoc={preview.html} className="h-[620px] w-full rounded-lg border bg-white"/></>}</div></TabsContent>
+        {preview&&<><div className="grid gap-3 md:grid-cols-4 text-sm"><div><b>Subject</b><br/>{preview.document.subject}</div><div><b>Generated</b><br/>{preview.document.generated_at}</div><div><b>Tasks</b><br/>{preview.task_count}{preview.warning&&<span className="text-amber-600"> · {preview.warning}</span>}</div><div><b>Recipients</b><br/>{Object.values(preview.document.recipients).flat().join(", ")}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={()=>void previewReport("docx")}><Download/>Word</Button><Button variant="outline" onClick={()=>void previewReport("png")}><Download/>PNG</Button><Button variant="outline" onClick={()=>void previewReport("txt")}><Download/>Text</Button><Button onClick={()=>setSendOpen(true)}><Send/>Send report now</Button>{strikeFilterControl}</div>{emptyStrikeMessage}<iframe ref={previewFrame} onLoad={applyPreviewFilter} title="Email preview" srcDoc={notesOnly && preview.notes_html ? preview.notes_html : preview.html} className="h-[620px] w-full rounded-lg border bg-white"/></>}</div></TabsContent>
       <TabsContent value="schedules"><div className="rounded-xl border"><div className="flex items-center justify-between p-4"><div><h2 className="font-semibold">Delivery schedules</h2><p className="text-xs text-muted-foreground">Changes hot-reload within 45 seconds.</p></div><Button onClick={()=>{setEditingScheduleId(null);setScheduleForm({name:"",report_slot:"10:00",execution_time:"09:00"});setScheduleOpen(true)}}><Plus/>Add</Button></div><Table><TableHeader><TableRow>{["Name","Active","Report slot","Execution","Timezone","Next run","Retry","Version","Actions"].map(x=><TableHead key={x}>{x}</TableHead>)}</TableRow></TableHeader><TableBody>{schedules.map(s=><TableRow key={s.id}><TableCell>{s.name}</TableCell><TableCell>{s.is_active?"Enabled":"Disabled"}</TableCell><TableCell>{s.report_slot}</TableCell><TableCell>{s.execution_time}</TableCell><TableCell>{s.timezone}</TableCell><TableCell>{s.next_runs?.[0]?.slice(0,16)||"—"}</TableCell><TableCell>{s.retry_count} · {s.retry_delays_seconds.join("/")}</TableCell><TableCell>v{s.version}</TableCell><TableCell><div className="flex gap-1"><Button size="sm" variant="outline" onClick={()=>editSchedule(s)}>Edit</Button><Button size="sm" variant="outline" onClick={()=>void toggleSchedule(s)}>{s.is_active?"Disable":"Enable"}</Button></div></TableCell></TableRow>)}</TableBody></Table></div></TabsContent>
       <TabsContent value="recipients"><div className="space-y-4 rounded-xl border p-4"><div className="flex flex-wrap gap-2"><Input className="max-w-sm" type="email" placeholder="recipient@example.com" value={newEmail} onChange={e=>setNewEmail(e.target.value)}/><Select value={newType} onValueChange={setNewType}><SelectTrigger className="w-28"><SelectValue/></SelectTrigger><SelectContent>{["TO","CC","BCC"].map(v=><SelectItem value={v} key={v}>{v}</SelectItem>)}</SelectContent></Select><Button onClick={()=>void addRecipient()} disabled={!newEmail}><Plus/>Add</Button></div><Table><TableHeader><TableRow>{["Email","Type","State","Default","Added","Updated","Updated by","Action"].map(x=><TableHead key={x}>{x}</TableHead>)}</TableRow></TableHeader><TableBody>{recipients.map(r=><TableRow key={r.id}><TableCell>{r.email}</TableCell><TableCell><Select value={r.recipient_type} onValueChange={v=>void changeRecipientType(r,v)}><SelectTrigger className="w-24"><SelectValue/></SelectTrigger><SelectContent>{["TO","CC","BCC"].map(v=><SelectItem value={v} key={v}>{v}</SelectItem>)}</SelectContent></Select></TableCell><TableCell>{r.is_active?"Active":"Inactive"}</TableCell><TableCell>{r.is_default?"Yes":"No"}</TableCell><TableCell>{r.created_at?.slice(0,10)}</TableCell><TableCell>{r.updated_at?.slice(0,16)}</TableCell><TableCell>{r.updated_by||"System"}</TableCell><TableCell><div className="flex gap-1"><Button size="sm" variant="outline" onClick={()=>void toggleRecipient(r)}>{r.is_active?"Disable":"Enable"}</Button><Button size="sm" variant="ghost" onClick={()=>void removeRecipient(r)}>Remove</Button></div></TableCell></TableRow>)}</TableBody></Table></div></TabsContent>
       <TabsContent value="history"><div className="rounded-xl border"><Table><TableHeader><TableRow>{["Date","Slot","Trigger","Status","Subject","Attempts","Gmail","Error","Downloads"].map(x=><TableHead key={x}>{x}</TableHead>)}</TableRow></TableHeader><TableBody>{runs.map(r=><TableRow key={r.id}><TableCell>{r.report_date}</TableCell><TableCell>{r.report_slot}</TableCell><TableCell>{r.trigger_type}</TableCell><TableCell>{r.status}</TableCell><TableCell className="max-w-xs truncate">{r.subject}</TableCell><TableCell>{r.attempt_count}</TableCell><TableCell>{r.gmail_message_id||"—"}</TableCell><TableCell className="max-w-xs truncate">{r.error_message||"—"}</TableCell><TableCell><div className="flex gap-1">{(["docx","png","txt"] as const).map(f=><Button key={f} size="sm" variant="ghost" onClick={()=>void downloadRun(r,f)}>{f.toUpperCase()}</Button>)}</div></TableCell></TableRow>)}</TableBody></Table></div></TabsContent>

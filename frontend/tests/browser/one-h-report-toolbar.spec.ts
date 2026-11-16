@@ -69,7 +69,7 @@ print(render_html(d,pre_sections_html=supplement))
 `], { cwd: backend, encoding: "utf8", env: { ...process.env, PYTHONIOENCODING: "utf-8" } })
 }
 
-async function openReport(page: Page, role: "ADMIN" | "STAFF", slot = "11:00", empty = false, embedded = false, shared = false, done = false) {
+async function openReport(page: Page, role: "ADMIN" | "STAFF", slot = "11:00", empty = false, embedded = false, shared = false, done = false, notes = 0) {
   const html = report(slot, empty, embedded, shared, done)
   const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test owner", email: "owner@example.com", role, is_active: true }
   await page.addInitScript(({ user }) => {
@@ -84,6 +84,8 @@ async function openReport(page: Page, role: "ADMIN" | "STAFF", slot = "11:00", e
       document: { subject: `Report ${slot}`, generated_at: "2026-10-23T11:00:00Z", recipients: { to: ["preview@example.com"] },
         strike_interval: slot === "10:00" ? "08:00–10:00" : slot === "14:10" ? "11:50–14:20" : "10:00–11:00" },
       html, task_count: slot === "10:00" ? 3 : slot === "14:10" ? 4 : 2,
+      notes_html: `<html><body><h2>NOTA PA DISKUTUARA</h2><table data-undiscussed-notes-table="true"><tr><th>NOTE</th></tr>${Array.from({ length: notes }, (_, i) => `<tr><td>PX note ${i + 1}</td></tr>`).join("")}</table></body></html>`,
+      note_count: notes,
     } })
     return route.fulfill({ json: pathname.includes("count") ? { count: 0 } : [] })
   })
@@ -98,6 +100,48 @@ async function openReport(page: Page, role: "ADMIN" | "STAFF", slot = "11:00", e
   await expect(frame.locator('[data-report-task="true"]').first()).toBeVisible()
   return frame
 }
+
+for (const role of ["ADMIN", "STAFF"] as const) {
+  test(`${role}: notes filter persists and downloads notes without affecting Done or full preview`, async ({ page }, testInfo) => {
+    const frame = await openReport(page, role, "11:00", false, false, false, true, 2)
+    const toolbar = page.getByTestId("one-h-strikes-toolbar")
+    const notes = toolbar.getByRole("button", { name: "Vetëm Notes", exact: true })
+    await notes.click()
+    await expect(notes).toHaveAttribute("aria-pressed", "true")
+    await expect(frame.getByText("PX note 1", { exact: true })).toBeVisible()
+    await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(0)
+    await expect(toolbar.getByRole("status")).toHaveText("Shfaqen 2 Notes")
+    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath("notes-filter.png"), fullPage: true })
+    for (const [label, format] of [["Word", "docx"], ["PNG", "png"], ["Text", "txt"]]) {
+      const request = page.waitForRequest(req => req.url().endsWith("/preview") && req.postDataJSON()?.format === format)
+      const download = page.waitForEvent("download")
+      await page.getByRole("button", { name: label, exact: true }).click()
+      expect((await request).postDataJSON().notes_only).toBe(true)
+      expect((await download).suggestedFilename()).toContain(`_Notes.${format}`)
+    }
+    await page.getByRole("button", { name: role === "ADMIN" ? "Preview fresh report" : "Generate report", exact: true }).click()
+    await expect(notes).toHaveAttribute("aria-pressed", "true")
+    await expect(frame.getByText("PX note 2", { exact: true })).toBeVisible()
+    await toolbar.getByRole("button", { name: "Vetëm Done", exact: true }).click()
+    await expect(notes).toHaveAttribute("aria-pressed", "false")
+    await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(1)
+    await notes.click()
+    await notes.click()
+    await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(2)
+    await expect(toolbar.getByRole("status")).toHaveText("Shfaqen 2 nga 2 detyra")
+  })
+}
+
+test("notes filter shows its own empty state and restores the full report", async ({ page }) => {
+  const frame = await openReport(page, "STAFF")
+  const notes = page.getByRole("button", { name: "Vetëm Notes", exact: true })
+  await notes.click()
+  await expect(page.getByText("Nuk ka Notes të padiskutuara në këtë raport.")).toBeVisible()
+  await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(0)
+  await notes.click()
+  await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(2)
+})
 
 for (const role of ["ADMIN", "STAFF"] as const) {
   test(`${role}: larger counts and a filter above the iframe that stays selected on regeneration`, async ({ page }, testInfo) => {

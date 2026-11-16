@@ -260,6 +260,11 @@ class ReportDocument(BaseModel):
     ga_task_summary: list[GaTaskCounts] = Field(default_factory=list)
     truncated: bool = False
     strike_interval: str | None = None
+    notes_only: bool = False
+
+    @property
+    def content_count_label(self) -> str:
+        return f"{len(self.undiscussed_notes)} notes" if self.notes_only else f"{self.task_count} tasks"
 
     @property
     def task_count(self) -> int:
@@ -281,6 +286,14 @@ class ReportDocument(BaseModel):
 def strike_count_label(count: int, document: ReportDocument, *, total: bool = False) -> str:
     label = f"{'Total strikes' if total else 'Strikes'}: {count}"
     return f"{label} · {document.strike_interval}" if document.strike_interval else label
+
+
+def notes_only_document(document: ReportDocument) -> ReportDocument:
+    """Create a preview/download copy; never mutate the full email document."""
+    return document.model_copy(update={
+        "sections": [], "board_reminders": [], "reminders": [],
+        "ga_task_summary": [], "strike_interval": None, "notes_only": True,
+    })
 
 
 def report_timezone() -> ZoneInfo:
@@ -728,7 +741,7 @@ def build_report_document(
 
 
 def render_plain_text(document: ReportDocument) -> str:
-    symbol_legend = one_h_marker_legend_text()
+    symbol_legend = "" if document.notes_only else one_h_marker_legend_text()
     blocks = [document.subject, f"Generated: {document.generated_at.isoformat()}", symbol_legend, ""]
     if document.strike_total is not None:
         blocks.insert(2, strike_count_label(document.strike_total, document, total=True))
@@ -736,7 +749,8 @@ def render_plain_text(document: ReportDocument) -> str:
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
         (REMINDER_SECTION_TITLE, document.reminders),
     )
-    blocks.append("".join(text for text, _ in _extra_question_parts(document)))
+    if not document.notes_only:
+        blocks.append("".join(text for text, _ in _extra_question_parts(document)))
     for reminder_title, questions in reminder_groups:
         if not questions:
             continue
@@ -1048,7 +1062,7 @@ def render_html(
             f'<strong style="margin-right:9px;">LEGJENDA:</strong>{items}</td></tr></table>'
         )
 
-    body_chunks: list[str] = [report_legend_html(), symbol_legend_html()]
+    body_chunks: list[str] = [] if document.notes_only else [report_legend_html(), symbol_legend_html()]
     if pre_sections_html:
         body_chunks.append(f'<div data-report-supplement="true">{pre_sections_html}</div>')
 
@@ -1057,12 +1071,13 @@ def render_html(
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
     )
 
-    body_chunks.append(
-        '<div data-day-specific-question-label="true" style="font-family:Arial,sans-serif;'
-        'font-size:13px;line-height:1.45;color:#b91c1c;margin:0 0 10px;padding:6px 10px;'
-        'background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;">'
-        + questions_html(_extra_question_parts(document)) + '</div>'
-    )
+    if not document.notes_only:
+        body_chunks.append(
+            '<div data-day-specific-question-label="true" style="font-family:Arial,sans-serif;'
+            'font-size:13px;line-height:1.45;color:#b91c1c;margin:0 0 10px;padding:6px 10px;'
+            'background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;">'
+            + questions_html(_extra_question_parts(document)) + '</div>'
+        )
 
     if document.board_reminders and document.reminders:
         body_chunks.append(
@@ -1132,7 +1147,7 @@ def render_html(
         body_chunks.append('</div>')
 
     meta = (
-        f"Generated {html.escape(document.generated_at.isoformat())} · {document.task_count} tasks"
+        f"Generated {html.escape(document.generated_at.isoformat())} · {document.content_count_label}"
     )
     strike_total_html = (
         '<div data-report-strike-total="true" style="font-family:Arial,sans-serif;'
@@ -1213,7 +1228,7 @@ def render_docx(document: ReportDocument) -> bytes:
     title_run.bold = True
     title_run.font.size = Pt(20)
     title_run.font.color.rgb = RGBColor(255, 255, 255)
-    meta = title_cell.add_paragraph(f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks")
+    meta = title_cell.add_paragraph(f"Generated {document.generated_at.isoformat()} · {document.content_count_label}")
     meta.runs[0].font.size = Pt(9)
     meta.runs[0].font.color.rgb = RGBColor(255, 255, 255)
     if document.strike_total is not None:
@@ -1222,44 +1237,45 @@ def render_docx(document: ReportDocument) -> bytes:
         total_run.font.size = Pt(10)
         total_run.font.color.rgb = RGBColor(255, 255, 255)
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
-    legend_header = doc.add_table(rows=1, cols=1).cell(0, 0)
-    shade(legend_header, "#f1f5f9")
-    legend_title = legend_header.paragraphs[0].add_run("COLOR LEGEND")
-    legend_title.bold = True
-    legend_title.font.size = Pt(10)
-    legend_table = doc.add_table(rows=1, cols=3)
-    legend_table.style = "Table Grid"
-    for cell, (label, description, color) in zip(legend_table.rows[0].cells, REPORT_STRIKE_LEGEND):
-        label_run = cell.paragraphs[0].add_run(label)
-        label_run.bold = True
-        label_run.font.strike = True
-        label_run.font.size = Pt(8.5)
-        label_run.font.color.rgb = RGBColor.from_string(color.lstrip("#"))
-        description_run = cell.add_paragraph().add_run(description)
-        description_run.font.size = Pt(7.5)
-        description_run.font.color.rgb = RGBColor.from_string("475569")
-    symbol_legend_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
-    shade(symbol_legend_cell, "#EFF6FF")
-    border(symbol_legend_cell, "#93C5FD", size="6")
-    symbol_legend_paragraph = symbol_legend_cell.paragraphs[0]
-    legend_label_run = symbol_legend_paragraph.add_run("LEGJENDA: ")
-    legend_label_run.bold = True
-    legend_label_run.font.size = Pt(8)
-    legend_label_run.font.color.rgb = RGBColor.from_string("0F2A5F")
-    for index, (symbol, description) in enumerate(ONE_H_MARKER_LEGEND):
-        if index:
-            separator_run = symbol_legend_paragraph.add_run("  /  ")
-            separator_run.bold = True
-            separator_run.font.size = Pt(11)
-            separator_run.font.color.rgb = RGBColor.from_string("0F2A5F")
-        symbol_run = symbol_legend_paragraph.add_run(symbol)
-        symbol_run.bold = True
-        symbol_run.font.size = Pt(8 if symbol in {"KA", "GA", "GENT", "BZ1N1"} else 9)
-        symbol_run.font.color.rgb = RGBColor.from_string("DC2626")
-        if description:
-            description_run = symbol_legend_paragraph.add_run(f" - {description}")
-            description_run.font.size = Pt(6.5)
-            description_run.font.color.rgb = RGBColor.from_string("0F2A5F")
+    if not document.notes_only:
+        legend_header = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(legend_header, "#f1f5f9")
+        legend_title = legend_header.paragraphs[0].add_run("COLOR LEGEND")
+        legend_title.bold = True
+        legend_title.font.size = Pt(10)
+        legend_table = doc.add_table(rows=1, cols=3)
+        legend_table.style = "Table Grid"
+        for cell, (label, description, color) in zip(legend_table.rows[0].cells, REPORT_STRIKE_LEGEND):
+            label_run = cell.paragraphs[0].add_run(label)
+            label_run.bold = True
+            label_run.font.strike = True
+            label_run.font.size = Pt(8.5)
+            label_run.font.color.rgb = RGBColor.from_string(color.lstrip("#"))
+            description_run = cell.add_paragraph().add_run(description)
+            description_run.font.size = Pt(7.5)
+            description_run.font.color.rgb = RGBColor.from_string("475569")
+        symbol_legend_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(symbol_legend_cell, "#EFF6FF")
+        border(symbol_legend_cell, "#93C5FD", size="6")
+        symbol_legend_paragraph = symbol_legend_cell.paragraphs[0]
+        legend_label_run = symbol_legend_paragraph.add_run("LEGJENDA: ")
+        legend_label_run.bold = True
+        legend_label_run.font.size = Pt(8)
+        legend_label_run.font.color.rgb = RGBColor.from_string("0F2A5F")
+        for index, (symbol, description) in enumerate(ONE_H_MARKER_LEGEND):
+            if index:
+                separator_run = symbol_legend_paragraph.add_run("  /  ")
+                separator_run.bold = True
+                separator_run.font.size = Pt(11)
+                separator_run.font.color.rgb = RGBColor.from_string("0F2A5F")
+            symbol_run = symbol_legend_paragraph.add_run(symbol)
+            symbol_run.bold = True
+            symbol_run.font.size = Pt(8 if symbol in {"KA", "GA", "GENT", "BZ1N1"} else 9)
+            symbol_run.font.color.rgb = RGBColor.from_string("DC2626")
+            if description:
+                description_run = symbol_legend_paragraph.add_run(f" - {description}")
+                description_run.font.size = Pt(6.5)
+                description_run.font.color.rgb = RGBColor.from_string("0F2A5F")
     reminder_groups = (
         (REMINDER_SECTION_TITLE, document.reminders),
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
@@ -1293,15 +1309,16 @@ def render_docx(document: ReportDocument) -> bytes:
                 )
         doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
-    day_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
-    shade(day_cell, "#fff7f7")
-    border(day_cell, "#dc2626")
-    paragraph = day_cell.paragraphs[0]
-    for text, role in _extra_question_parts(document):
-        run = paragraph.add_run(text)
-        run.bold = role != "question"
-        run.font.size = Pt(14 if role == "separator" else 12 if role == "label" else 10)
-        run.font.color.rgb = RGBColor.from_string("B91C1C")
+    if not document.notes_only:
+        day_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(day_cell, "#fff7f7")
+        border(day_cell, "#dc2626")
+        paragraph = day_cell.paragraphs[0]
+        for text, role in _extra_question_parts(document):
+            run = paragraph.add_run(text)
+            run.bold = role != "question"
+            run.font.size = Pt(14 if role == "separator" else 12 if role == "label" else 10)
+            run.font.color.rgb = RGBColor.from_string("B91C1C")
     for reminder_title, questions in reminder_groups:
         if not questions:
             continue
@@ -1446,58 +1463,59 @@ def render_png(document: ReportDocument) -> bytes:
     has_total = document.strike_total is not None
     draw.rounded_rectangle((margin, 35, width - margin, 165 if has_total else 135), radius=12, fill="#8799b2")
     draw.text((margin + 24, 55), document.subject, fill="white", font=heading)
-    draw.text((margin + 24, 99), f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks", fill="white", font=font)
+    draw.text((margin + 24, 99), f"Generated {document.generated_at.isoformat()} · {document.content_count_label}", fill="white", font=font)
     if has_total:
         draw.text((margin + 24, 129), strike_count_label(document.strike_total, document, total=True), fill="white", font=bold)
     y = 190 if has_total else 160
-    legend_height = 76
-    draw.rounded_rectangle(
-        (margin, y, width - margin, y + legend_height),
-        radius=8,
-        fill="#ffffff",
-        outline="#cbd5e1",
-        width=1,
-    )
-    draw.rectangle((margin, y, width - margin, y + 30), fill="#f1f5f9", outline="#cbd5e1")
-    draw.text((margin + 10, y + 5), "COLOR LEGEND", fill="#0f172a", font=bold)
-    legend_column_width = (width - (2 * margin)) // 3
-    for column, (label, description, color) in enumerate(REPORT_STRIKE_LEGEND):
-        left = margin + (column * legend_column_width)
-        top = y + 30
-        if column:
-            draw.line((left, top, left, top + 46), fill="#cbd5e1", width=1)
-        text_left = left + 10
-        draw.text((text_left, top + 5), label, fill=color, font=bold)
-        bounds = draw.textbbox((text_left, top + 5), label, font=bold)
-        strike_y = (bounds[1] + bounds[3]) // 2
-        draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
-        draw.text((text_left, top + 26), description, fill="#64748b", font=font)
-    y += legend_height + 18
-    symbol_legend_height = 46
-    draw.rounded_rectangle(
-        (margin, y, width - margin, y + symbol_legend_height),
-        radius=8,
-        fill="#eff6ff",
-        outline="#93c5fd",
-        width=1,
-    )
-    legend_x = margin + 12
-    legend_y = y + 14
-    legend_label = "LEGJENDA: "
-    draw.text((legend_x, legend_y), legend_label, fill="#0f2a5f", font=legend_font)
-    legend_x += draw.textlength(legend_label, font=legend_font)
-    for index, (symbol, description) in enumerate(ONE_H_MARKER_LEGEND):
-        if index:
-            separator = " / "
-            draw.text((legend_x, legend_y), separator, fill="#0f2a5f", font=legend_font)
-            legend_x += draw.textlength(separator, font=legend_font)
-        draw.text((legend_x, legend_y), symbol, fill="#dc2626", font=legend_font)
-        legend_x += draw.textlength(symbol, font=legend_font)
-        if description:
-            detail = f" - {description}"
-            draw.text((legend_x, legend_y), detail, fill="#0f2a5f", font=legend_font)
-            legend_x += draw.textlength(detail, font=legend_font)
-    y += symbol_legend_height + 18
+    if not document.notes_only:
+        legend_height = 76
+        draw.rounded_rectangle(
+            (margin, y, width - margin, y + legend_height),
+            radius=8,
+            fill="#ffffff",
+            outline="#cbd5e1",
+            width=1,
+        )
+        draw.rectangle((margin, y, width - margin, y + 30), fill="#f1f5f9", outline="#cbd5e1")
+        draw.text((margin + 10, y + 5), "COLOR LEGEND", fill="#0f172a", font=bold)
+        legend_column_width = (width - (2 * margin)) // 3
+        for column, (label, description, color) in enumerate(REPORT_STRIKE_LEGEND):
+            left = margin + (column * legend_column_width)
+            top = y + 30
+            if column:
+                draw.line((left, top, left, top + 46), fill="#cbd5e1", width=1)
+            text_left = left + 10
+            draw.text((text_left, top + 5), label, fill=color, font=bold)
+            bounds = draw.textbbox((text_left, top + 5), label, font=bold)
+            strike_y = (bounds[1] + bounds[3]) // 2
+            draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
+            draw.text((text_left, top + 26), description, fill="#64748b", font=font)
+        y += legend_height + 18
+        symbol_legend_height = 46
+        draw.rounded_rectangle(
+            (margin, y, width - margin, y + symbol_legend_height),
+            radius=8,
+            fill="#eff6ff",
+            outline="#93c5fd",
+            width=1,
+        )
+        legend_x = margin + 12
+        legend_y = y + 14
+        legend_label = "LEGJENDA: "
+        draw.text((legend_x, legend_y), legend_label, fill="#0f2a5f", font=legend_font)
+        legend_x += draw.textlength(legend_label, font=legend_font)
+        for index, (symbol, description) in enumerate(ONE_H_MARKER_LEGEND):
+            if index:
+                separator = " / "
+                draw.text((legend_x, legend_y), separator, fill="#0f2a5f", font=legend_font)
+                legend_x += draw.textlength(separator, font=legend_font)
+            draw.text((legend_x, legend_y), symbol, fill="#dc2626", font=legend_font)
+            legend_x += draw.textlength(symbol, font=legend_font)
+            if description:
+                detail = f" - {description}"
+                draw.text((legend_x, legend_y), detail, fill="#0f2a5f", font=legend_font)
+                legend_x += draw.textlength(detail, font=legend_font)
+        y += symbol_legend_height + 18
     reminder_groups = (
         (REMINDER_SECTION_TITLE, document.reminders),
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
@@ -1542,19 +1560,20 @@ def render_png(document: ReportDocument) -> bytes:
             line_y += 28
         y += card_height + 12
 
-    from PIL import ImageFont
-    try:
-        separator_font = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 30)
-    except OSError:
-        separator_font = bold
-    placements, compact_height = layout_question_parts(
-        _extra_question_parts(document),
-        {"label": bold, "question": font, "separator": separator_font}, width - 2 * margin - 40,
-    )
-    draw.rectangle((margin, y, width - margin, y + compact_height + 20), fill="#fff7f7", outline="#dc2626")
-    for part_x, part_y, text, part_font in placements:
-        draw.text((margin + 20 + part_x, y + 8 + part_y), text, fill="#b91c1c", font=part_font)
-    y += compact_height + 34
+    if not document.notes_only:
+        from PIL import ImageFont
+        try:
+            separator_font = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 30)
+        except OSError:
+            separator_font = bold
+        placements, compact_height = layout_question_parts(
+            _extra_question_parts(document),
+            {"label": bold, "question": font, "separator": separator_font}, width - 2 * margin - 40,
+        )
+        draw.rectangle((margin, y, width - margin, y + compact_height + 20), fill="#fff7f7", outline="#dc2626")
+        for part_x, part_y, text, part_font in placements:
+            draw.text((margin + 20 + part_x, y + 8 + part_y), text, fill="#b91c1c", font=part_font)
+        y += compact_height + 34
     for reminder_title, questions in reminder_groups:
         if not questions:
             continue
