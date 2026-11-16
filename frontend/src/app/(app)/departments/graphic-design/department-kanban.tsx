@@ -1960,7 +1960,7 @@ export default function DepartmentKanban() {
         alignToggle={viewMode === "mine"}
         renderTitle={(visibleTitle) => {
           const title = systemTitleOnly || !visibleTitle.includes("[[") ? visibleTitle
-            : task.ga_note_origin_id || task.plan_note_origin_id || isTaskStartingOnSelectedAllDate(task)
+            : task.ga_note_origin_id || isTaskStartingOnSelectedAllDate(task)
               ? renderMarkedNoteContent(visibleTitle, visibleTitle)
               : getPlainMarkedText(visibleTitle)
           return <>{systemTitleOnly ? null : <TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />}{title}</>

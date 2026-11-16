@@ -8,10 +8,6 @@ from app.db import engine
 
 
 EXPECTED_COLUMNS = {
-    *(("mailbox_connections", column) for column in (
-        "mailbox_email", "mailbox_type", "connected_by", "access_token_encrypted",
-        "refresh_token_encrypted", "scope", "expires_at", "connected_at", "last_checked_at",
-    )),
     ("discord_reminders", "one_h_report"),
     ("projects", "is_active"),
     ("system_task_templates", "is_repetitive"),

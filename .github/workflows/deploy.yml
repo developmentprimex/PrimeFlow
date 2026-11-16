@@ -201,9 +201,6 @@ jobs:
           echo MS_CLIENT_SECRET=%MS_CLIENT_SECRET% >> backend\.env
           echo MS_REDIRECT_URI=https://api-flow.primexeu.com/api/microsoft/callback >> backend\.env
           echo MS_ORGANIZER_EMAIL=info@primexeu.com >> backend\.env
-          echo MS_MAILBOX_EMAIL=info@primexeu.com >> backend\.env
-          echo MS_MAIL_REDIRECT_URI=https://api-flow.primexeu.com/api/mailbox/callback >> backend\.env
-          echo MS_MAIL_TOKEN_KEY_FILE=C:/PrimeFlowData/Mailbox/token.key >> backend\.env
           echo MS_CALENDAR_SYNC_PAST_DAYS=0 >> backend\.env
           echo MS_CALENDAR_SYNC_FUTURE_DAYS=14 >> backend\.env
           echo DEVELOPMENT_CLIENTS_PATH=\\192.168.10.8\Files\10_ZHVILLIM\05_CLIENTS >> backend\.env

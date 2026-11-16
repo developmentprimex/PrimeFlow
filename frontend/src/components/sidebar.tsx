@@ -270,7 +270,6 @@ const navGroups: NavGroup[] = [
       { href: "/discord", label: "Asistenti Discord", icon: Sparkles },
       { href: "/users", label: "Users", icon: Users, roles: ["ADMIN", "MANAGER"] },
       { href: "/settings", label: "Settings", icon: Settings, roles: ["ADMIN", "MANAGER"] },
-      { href: "/admin/email", label: "Lidhja e email-it", icon: MailCheck, roles: ["ADMIN"] },
     ],
   },
 ]

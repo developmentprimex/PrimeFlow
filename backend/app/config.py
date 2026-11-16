@@ -115,9 +115,6 @@ class Settings(BaseSettings):
     MS_TENANT_ID: str | None = None
     MS_REDIRECT_URI: str | None = None
     MS_ORGANIZER_EMAIL: str = "info@primexeu.com"
-    MS_MAILBOX_EMAIL: str = "info@primexeu.com"
-    MS_MAIL_REDIRECT_URI: str | None = None
-    MS_MAIL_TOKEN_KEY_FILE: str = "private-data/mailbox/token.key"
     MS_CALENDAR_SYNC_ENABLED: bool = True
     MS_CALENDAR_SYNC_INTERVAL_MINUTES: int = 5
     MS_CALENDAR_SYNC_PAST_DAYS: int = 0
