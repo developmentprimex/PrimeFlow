@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.schemas.task_marker import TaskMarkerValue
+
 import re
 import re
 import uuid
@@ -3996,7 +3998,7 @@ class TaskOneHReportSlotUpdate(BaseModel):
 
 
 class TaskOneHMarkerUpdate(BaseModel):
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$")
+    one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
 
 

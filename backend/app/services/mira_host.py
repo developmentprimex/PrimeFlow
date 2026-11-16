@@ -57,7 +57,7 @@ DEFAULT_PROTOCOL = """1. Hap doc dhe det
 3. Sqaro slotin aktual pastaj detyrat e pambyllura nga sloti paraprak
 4. BZ Det nga Stafi për GA (Komunikimi GA teams Det nga Stafi / KA email)"""
 MARKERS = {
-    "QUESTION": "?", "EXCLAMATION": "!", "CLIENT_URGENT": "!!!", "SHARE": "SHARE", "MONITOR": "👁",
+    "QUESTION": "?", "EXCLAMATION": "!", "DOUBLE_EXCLAM": "!!", "CLIENT_URGENT": "!!!", "SHARE": "SHARE", "MONITOR": "👁",
     "CLOSE": "X", "M2": "M2", "M3": "M3", "M2_M3": "M2/3", "GENT": "GENT", "KA": "KA", "FLAG": "GA",
     "F": "F", "BZ1N1": "BZ1N1",
 }
@@ -256,7 +256,7 @@ class SlotData:
         people: dict[str, list[dict]] = {}
         for slot in SLOTS:
             for item in self.slots.get(slot, []):
-                if str(item.get("one_h_marker") or item.get("oneHMarker") or "").upper() != "FLAG" or \
+                if "FLAG" not in str(item.get("one_h_marker") or item.get("oneHMarker") or "").upper().split(",") or \
                         str(item.get("status") or "").upper() == "DONE":
                     continue
                 line = task_line(item)
@@ -1016,7 +1016,7 @@ async def open_notes(db: AsyncSession, limit: int = 41) -> list[dict]:
              "type": n.note_type.value if hasattr(n.note_type, "value") else str(n.note_type),
              "created": n.created_at.astimezone(ZoneInfo(settings.APP_TIMEZONE)).strftime("%d.%m %H:%M") if n.created_at else None,
              "due": n.due_date.date().isoformat() if n.due_date else None,
-             "symbol": MARKERS.get(n.one_h_marker or "")}
+             "symbol": " + ".join(MARKERS[part] for part in (n.one_h_marker or "").split(",") if part in MARKERS)}
             for i, (n, name, username, email) in enumerate(rows, 1)]
 
 

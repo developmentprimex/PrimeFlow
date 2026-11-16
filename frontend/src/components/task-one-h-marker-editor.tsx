@@ -9,21 +9,13 @@ import { useAuth } from "@/lib/auth"
 import type { Task } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { TaskMarkerSelect } from "@/components/task-marker-select"
+import { taskMarkerLabel } from "@/lib/task-markers"
 import { Textarea } from "@/components/ui/textarea"
 
 type TaskMarker = NonNullable<Task["one_h_marker"]>
 const NONE = "__none__"
 const MARKER_UPDATED_EVENT = "primeflow:task-marker-updated"
-const OPTIONS: Array<{ value: TaskMarker; label: string }> = [
-  { value: "QUESTION", label: "?" }, { value: "EXCLAMATION", label: "!" },
-  { value: "CLIENT_URGENT", label: "!!!" },
-  { value: "SHARE", label: "SHARE" },
-  { value: "MONITOR", label: "👁" }, { value: "CLOSE", label: "X" },
-  { value: "M2", label: "M2" }, { value: "M3", label: "M3" }, { value: "M2_M3", label: "M2/3" },
-  { value: "GENT", label: "GENT" }, { value: "KA", label: "KA" }, { value: "FLAG", label: "GA" },
-  { value: "F", label: "F" }, { value: "BZ1N1", label: "BZ1N1" },
-]
 
 export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment, className }: {
   taskId?: string | null
@@ -47,13 +39,13 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   const wrapperPositionClasses = ["order-last", "ml-auto", "shrink-0"]
     .filter((token) => className?.split(/\s+/).includes(token))
     .join(" ")
-  const selectedLabel = OPTIONS.find((option) => option.value === value)?.label || "—"
-  const selectedDisplayLength = selectedLabel.length + (byGa && value !== NONE ? 2 : 0)
+  const selectedLabel = taskMarkerLabel(value, byGa) || "—"
+  const selectedDisplayLength = selectedLabel.length
   const commonViewWidth = value === NONE || selectedDisplayLength === 1
     ? 50
     : selectedDisplayLength <= 3
       ? 60
-      : 70
+      : Math.min(160, 30 + selectedDisplayLength * 9)
   const compactCommonViewStyle = className?.split(/\s+/).includes("oneh-marker-select")
     ? { width: commonViewWidth, minWidth: commonViewWidth, maxWidth: commonViewWidth }
     : {}
@@ -120,7 +112,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   const chooseMarker = (nextValue: string) => {
     if (nextValue === NONE) { void updateMarker(NONE, comment); return }
     const next = nextValue as TaskMarker
-    setPendingMarker(next); setDraftComment(next === value ? comment : ""); setCommentOpen(true)
+    setPendingMarker(next); setDraftComment(comment); setCommentOpen(true)
   }
   const savePendingMarker = () => {
     if (!pendingMarker) return
@@ -129,15 +121,9 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
 
   return (
     <div className={`relative inline-flex items-center ${wrapperPositionClasses}`} onClick={(event) => event.stopPropagation()}>
-      <Select value={value} onValueChange={chooseMarker} disabled={!taskId || saving}>
-        <SelectTrigger className={`h-7 min-w-[64px] max-w-[82px] border-blue-300 bg-blue-50 px-2 py-0 text-base font-black leading-none [text-shadow:0_0_0_currentColor] ${className || ""}`} style={{ color: value === NONE ? "#0F2A5F" : "#DC2626", ...compactCommonViewStyle }} aria-label="Task symbol" title={comment || "Edit task symbol"}>
-          <SelectValue placeholder="—" className="relative -top-px leading-none" />
-        </SelectTrigger>
-        <SelectContent className="font-black text-[#0F2A5F]">
-          <SelectItem value={NONE}>—</SelectItem>
-          {OPTIONS.map((option) => <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{byGa && value === option.value ? `(${option.label})` : option.label}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      <TaskMarkerSelect value={value} byGa={byGa} onValueChange={chooseMarker} disabled={!taskId || saving}
+        className={`h-7 min-w-[64px] w-auto px-2 py-0 text-base font-black ${className || ""}`}
+        style={{ color: value === NONE ? "#0F2A5F" : "#DC2626", ...compactCommonViewStyle }} aria-label="Task symbols (maximum 2)" title={comment || "Edit task symbols"} />
       {taskId ? (
         <button
           type="button"

@@ -1,4 +1,5 @@
 """Explicit AI processing and reviewed, idempotent creation through existing Tasks."""
+from app.schemas.task_marker import TaskMarkerValue
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
@@ -42,7 +43,7 @@ class TaskConfirmation(BaseModel):
     is_r1: bool = False
     is_personal: bool = False
     one_h_report_slot: str | None = Field(default=None, pattern=r'^(10:00|11:00|11:50|14:20|16:00)$')
-    one_h_marker: str | None = Field(default=None, pattern=r'^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$')
+    one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     skill_category: TaskSkillCategory | None = None
 

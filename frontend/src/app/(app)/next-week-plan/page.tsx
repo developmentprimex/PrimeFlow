@@ -1,6 +1,9 @@
 "use client"
 
+import { taskMarkerLabel, type TaskMarkerValue } from "@/lib/task-markers"
+
 import * as React from "react"
+import { TaskMarkerSelect } from "@/components/task-marker-select"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Bold, Calendar as CalendarIcon, Check, Clock, FileDown, FileSpreadsheet, FileText, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Trash2, Upload } from "lucide-react"
@@ -27,26 +30,10 @@ import type { Department, PlanNote, PlanNoteAttachment, Project, PxJavPlanningBr
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
 
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT" | "SHARE"
+type OneHMarker = TaskMarkerValue
 const ONE_H_MARKER_NONE = "__none__"
-const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
-  { value: "QUESTION", label: "?" },
-  { value: "EXCLAMATION", label: "!" },
-  { value: "CLIENT_URGENT", label: "!!!" },
-  { value: "SHARE", label: "SHARE" },
-  { value: "MONITOR", label: "👁" },
-  { value: "CLOSE", label: "X" },
-  { value: "M2", label: "M2" },
-  { value: "M3", label: "M3" },
-  { value: "M2_M3", label: "M2/3" },
-  { value: "GENT", label: "GENT" },
-  { value: "KA", label: "KA" },
-  { value: "FLAG", label: "GA" },
-  { value: "F", label: "F" },
-  { value: "BZ1N1", label: "BZ1N1" },
-]
 const oneHMarkerLabel = (value?: OneHMarker | null, byGa = false) => {
-  const label = ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
+  const label = taskMarkerLabel(value)
   return label && byGa ? `(${label})` : label
 }
 
@@ -2885,20 +2872,12 @@ export default function NextWeekPlanPage() {
           </div>
           <div className="max-w-[220px] space-y-2">
             <Label>Symbol (optional)</Label>
-            <Select value={noteOneHMarker} onValueChange={(rawValue) => {
+            <TaskMarkerSelect value={noteOneHMarker} onValueChange={(rawValue) => {
               const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
               if (value === ONE_H_MARKER_NONE) { setNoteOneHMarker(value); setNoteOneHMarkerComment(""); return }
               const nextComment = window.prompt("Optional symbol comment:", value === noteOneHMarker ? noteOneHMarkerComment : "")
               if (nextComment !== null) { setNoteOneHMarker(value); setNoteOneHMarkerComment(nextComment) }
-            }}>
-              <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${noteOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
-              <SelectContent className="font-black text-[#0F2A5F]">
-                <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
-                {ONE_H_MARKER_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            }} />
           </div>
           <div className="space-y-2">
             <Label>Attachments</Label>
@@ -4404,20 +4383,12 @@ export default function NextWeekPlanPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Symbol (optional)</Label>
-                  <Select value={taskOneHMarker} onValueChange={(rawValue) => {
+                  <TaskMarkerSelect value={taskOneHMarker} onValueChange={(rawValue) => {
                     const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
                     if (value === ONE_H_MARKER_NONE) { setTaskOneHMarker(value); setTaskOneHMarkerComment(""); return }
                     const nextComment = window.prompt("Optional symbol comment:", value === taskOneHMarker ? taskOneHMarkerComment : "")
                     if (nextComment !== null) { setTaskOneHMarker(value); setTaskOneHMarkerComment(nextComment) }
-                  }}>
-                    <SelectTrigger className={`w-full border-blue-300 bg-blue-50 font-black ${taskOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
-                    <SelectContent className="font-black text-[#0F2A5F]">
-                      <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
-                      {ONE_H_MARKER_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  }} />
                 </div>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
@@ -4655,20 +4626,12 @@ export default function NextWeekPlanPage() {
             </div>
           <div className="max-w-[220px] space-y-2">
             <Label>Symbol (optional)</Label>
-            <Select value={editOneHMarker} onValueChange={(rawValue) => {
+            <TaskMarkerSelect value={editOneHMarker} onValueChange={(rawValue) => {
               const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
               if (value === ONE_H_MARKER_NONE) { setEditOneHMarker(value); setEditOneHMarkerComment(""); return }
               const nextComment = window.prompt("Optional symbol comment:", value === editOneHMarker ? editOneHMarkerComment : "")
               if (nextComment !== null) { setEditOneHMarker(value); setEditOneHMarkerComment(nextComment) }
-            }}>
-              <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${editOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
-              <SelectContent className="font-black text-[#0F2A5F]">
-                <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
-                {ONE_H_MARKER_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            }} />
           </div>
             <div className="space-y-2">
               <Label className="text-xs">Planned for (optional)</Label>

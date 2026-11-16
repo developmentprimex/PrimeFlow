@@ -84,6 +84,24 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Simbolet e prioriteteve `!`, `!!`, `!!!`: PX Notes ka legjendë përmbledhëse
+  dhe tabelë të detajuar; Common View ka legjendë në ekran dhe HTML të veçantë
+  për printim. My View në Development, Graphic Design dhe Product Content
+  përdor `task-one-h-marker-legend.tsx`; Finance përdor editorin e përbashkët.
+  PX JAV, regjistrimet dhe SHTYPI Tomorrow kanë lista të veçanta simbolesh.
+  Kontrollo validimet e Task/GaNote/PlanNote, `task_marker.py`,
+  `primeflow_report.py` dhe `tomorrow_print_report.py` për raportet, printimin
+  dhe Excel. `DOUBLE_EXCLAM` ruan `!!`; `CLIENT_URGENT` ruan `!!!` me kuptimin
+  e ri të qëllimit të javës. Kodet ekzistuese ruhen për përputhshmëri.
+  Përzgjedhja lejon deri në dy kode të ndryshme, të ndara me presje në
+  `one_h_marker`; vlerat me një kod mbeten të vlefshme. `TaskMarkerSelect`
+  përdoret në editorët React; preview 1H Today/Tomorrow ka përzgjedhës të vetin
+  në iframe. Filtrat duhet të kontrollojnë secilin kod, përfshirë KA/GENT në
+  Common View dhe M3/M2_M3 te M3 PIKAT. Kolonat e Task, GaNote, PlanNote,
+  historisë dhe inbox-it kërkojnë migrimin `0189_two_task_markers` (32 shenja).
+  Renditja në përzgjedhës, filtra, legjenda përmbledhëse/tabela dhe raportet
+  e gjeneruara është `!`, `!!`, `!!!`, `?`, pastaj simbolet e tjera.
+
 - Common View: tabela javore (`THIS WEEK` / `NEXT WEEK`) ka kontrolle −/+ për
   çdo rresht. Rreshtat e minimizuar mbajnë etiketën në ekran dhe përjashtohen
   tërësisht nga printimi javor, edhe nga printimi i shfletuesit. Gjendja ndahet

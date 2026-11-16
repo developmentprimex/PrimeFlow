@@ -23,7 +23,7 @@ class TaskMarkerCommentInbox(Base):
     task_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     author_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     revision: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
-    marker: Mapped[str] = mapped_column(String(16), nullable=False)
+    marker: Mapped[str] = mapped_column(String(32), nullable=False)
     comment: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

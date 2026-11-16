@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.schemas.task_marker import TaskMarkerValue
+
 import uuid
 from datetime import date, datetime
 from typing import Literal
@@ -91,7 +93,7 @@ class PlanNoteCreate(BaseModel):
     completed_at: datetime | None = None
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$")
+    one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     next_week: bool | None = None
     project_id: uuid.UUID | None = None
@@ -107,7 +109,7 @@ class PlanNoteUpdate(BaseModel):
     priority: GaNotePriority | None = None
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$")
+    one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     next_week: bool | None = None
     planned_for_date: date | None = None
@@ -128,7 +130,7 @@ class PlanNoteTaskAssigneeStateUpdate(BaseModel):
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None
     one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$")
+    one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     is_deadline_important: bool = False
     priority: TaskPriority = TaskPriority.NORMAL
@@ -143,7 +145,7 @@ class PlanNoteTaskBundleUpdate(TaskPostponementExplanations):
     description: str | None = None
     is_repetitive: bool | None = None
     project_id: uuid.UUID | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$")
+    one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     assignee_ids: list[uuid.UUID] | None = None
     assignee_states: list[PlanNoteTaskAssigneeStateUpdate] | None = None

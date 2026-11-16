@@ -12,6 +12,7 @@ from app.models.task import Task
 GA_MARKER_EMAIL = "ga@primexeu.com"
 ONE_H_MARKER_SYMBOLS = {
     "EXCLAMATION": "!",
+    "DOUBLE_EXCLAM": "!!",
     "CLIENT_URGENT": "!!!",
     "SHARE": "SHARE",
     "QUESTION": "?",
@@ -29,7 +30,7 @@ ONE_H_MARKER_SYMBOLS = {
 
 
 def one_h_marker_label(marker: str | None, marker_by_ga: bool = False) -> str:
-    symbol = ONE_H_MARKER_SYMBOLS.get((marker or "").strip().upper(), "")
+    symbol = " + ".join(ONE_H_MARKER_SYMBOLS.get(part, "") for part in (marker or "").strip().upper().split(",") if part in ONE_H_MARKER_SYMBOLS)
     return f"({symbol})" if symbol and marker_by_ga else symbol
 
 

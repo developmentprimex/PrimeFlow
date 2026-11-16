@@ -156,6 +156,14 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual([row["eight_am"] for row in result], [False, True, False, True])
         self.assertTrue(result[2]["is_system_task"])
 
+    def test_delivery_accepts_m3_as_either_of_two_symbols(self):
+        rows = [task(one_h_marker=marker) for marker in (
+            "CLIENT_URGENT,M3", "M3,CLIENT_URGENT", "KA,M2_M3", "CLIENT_URGENT,KA",
+        )]
+        result = service.select_task_sections(rows, [], DAY)["delivery"]
+        self.assertEqual([row["task_id"] for row in result], [str(row.id) for row in rows[:3]])
+        self.assertEqual(result[0]["marker"], "!!! + M3")
+
     def test_same_day_requires_all_three_dates_and_excludes_done(self):
         rows = [task(status=status, progress_percentage=percent) for status, percent in (
             ("TODO", 0), ("IN_PROGRESS", 35), ("DONE", 100), ("WAITING_CLIENT", 15),

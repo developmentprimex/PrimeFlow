@@ -35,6 +35,8 @@ function load(relativePath, mockContextHook = false) {
     if (name === "@/lib/auth") return { useAuth: () => ({ user: { id: "user" }, apiFetch: noop }) }
     if (name === "@/components/comment-task-edit-dialog") return { CommentTaskEditDialog: component() }
     if (name === "@/lib/note-markup") return load("../src/lib/note-markup.tsx")
+    if (name === "@/lib/task-markers") return load("../src/lib/task-markers.ts")
+    if (name === "@/components/task-marker-select") return load("../src/components/task-marker-select.tsx")
     if (name === "@/lib/utils") return { cn: (...values) => values.filter(Boolean).join(" ") }
     if (name === "@/components/ui/button") return { Button: ({ children, ...props }) => {
       delete props.variant

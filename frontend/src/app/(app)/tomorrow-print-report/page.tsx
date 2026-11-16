@@ -1,5 +1,7 @@
 "use client"
 
+import { taskMarkerLabel, splitTaskMarkers, openTaskMarkerPicker, type TaskMarkerValue } from "@/lib/task-markers"
+
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { ChevronDown, Minus, Plus, RefreshCw, Save, Send, Settings } from "lucide-react"
@@ -46,14 +48,15 @@ type Preview = {
   source_captured_at?: string
 }
 type FrozenHistory = { report_date: string; frozen_at: string; source_captured_at: string }
-type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT" | "SHARE"
+type TaskMarker = TaskMarkerValue
 type TaskMarkerSelection = TaskMarker | "none"
 type TaskDueDateFilter = "all" | "today" | "deadline" | "starts_today"
 
 const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
-  { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
+  { value: "DOUBLE_EXCLAM", label: "!!" },
   { value: "CLIENT_URGENT", label: "!!!" },
+  { value: "QUESTION", label: "?" },
   { value: "SHARE", label: "SHARE" },
   { value: "MONITOR", label: "👁" },
   { value: "CLOSE", label: "X" },
@@ -568,7 +571,7 @@ export function PrintReportPage({
         const marker = cell.dataset.taskMarker || ""
         const isTaskCard = Boolean(cell.dataset.taskId)
         const matchesMarker = markerFilters.size === 0 || (
-          isTaskCard && (marker ? markerFilters.has(marker as TaskMarker) : markerFilters.has("none"))
+          isTaskCard && (marker ? splitTaskMarkers(marker).some(value => markerFilters.has(value)) : markerFilters.has("none"))
         )
         const legacyRedDeadline = cell.getAttribute("bgcolor")?.toUpperCase() === "#DC2626"
         const matchesDeadline = cell.dataset.taskDeadlineImportant === "true" || legacyRedDeadline
@@ -676,7 +679,7 @@ export function PrintReportPage({
     })
 
     document.querySelectorAll<HTMLElement>("td[data-task-id]").forEach((cell) => {
-      if (cell.querySelector("select[data-task-marker-control]")) return
+      if (cell.querySelector("[data-task-marker-control]")) return
       const taskId = cell.dataset.taskId
       if (!taskId) return
 
@@ -693,16 +696,17 @@ export function PrintReportPage({
       markerControl.dataset.taskMarkerControlWrapper = "true"
       markerControl.style.cssText = "position:relative;display:inline-flex;align-items:center;height:22px;float:right;margin:0 0 3px 4px;vertical-align:top"
 
-      const select = document.createElement("select")
+      const select = document.createElement("button")
+      select.type = "button"
       // Render the visible label independently of the native select's baseline.
       // The select still handles focus, keyboard input, and the option menu.
       const selectedSymbol = document.createElement("span")
       selectedSymbol.setAttribute("aria-hidden", "true")
       selectedSymbol.style.cssText = "position:absolute;left:3px;right:14px;top:0;bottom:2px;display:flex;align-items:center;justify-content:center;pointer-events:none;white-space:nowrap;font:900 16px/1 Arial,sans-serif"
       const resizeMarkerSelect = (marker: string, byGa: boolean) => {
-        const label = taskMarkerOptions.find((option) => option.value === marker)?.label || "—"
+        const label = taskMarkerLabel(marker) || "—"
         const visibleLength = label.length + (byGa && marker ? 2 : 0)
-        select.style.width = visibleLength <= 1 ? "46px" : visibleLength <= 2 ? "52px" : "64px"
+        select.style.width = `${Math.max(46, 22 + visibleLength * 9)}px`
         selectedSymbol.textContent = byGa && marker ? `(${label})` : label
         selectedSymbol.style.color = marker ? "#DC2626" : "#0F2A5F"
       }
@@ -715,7 +719,7 @@ export function PrintReportPage({
         "appearance:none",
         "height:22px",
         "min-width:46px",
-        "max-width:64px",
+        "max-width:180px",
         "margin:0",
         "padding:0 14px 0 3px",
         "border:1px solid #93C5FD",
@@ -739,19 +743,12 @@ export function PrintReportPage({
       select.addEventListener("focus", () => { markerControl.style.outline = "2px solid #2563EB"; markerControl.style.outlineOffset = "2px" })
       select.addEventListener("blur", () => { markerControl.style.outline = ""; markerControl.style.outlineOffset = "" })
 
-      const emptyOption = document.createElement("option")
-      emptyOption.value = ""
-      emptyOption.textContent = "—"
-      emptyOption.style.cssText = "color:#0F2A5F;font-size:16px;font-weight:900"
-      select.appendChild(emptyOption)
-      taskMarkerOptions.forEach((option) => {
-        const element = document.createElement("option")
-        element.value = option.value
-        element.textContent = cell.dataset.taskMarkerByGa === "true" && option.value === cell.dataset.taskMarker
-          ? `(${option.label})`
-          : option.label
-        element.style.cssText = "color:#DC2626;font-size:16px;font-weight:900"
-        select.appendChild(element)
+      select.addEventListener("click", async event => {
+        event.preventDefault(); event.stopPropagation()
+        const next = await openTaskMarkerPicker(document, cell.dataset.taskMarker || "")
+        if (next === null || next === (cell.dataset.taskMarker || "")) return
+        select.value = next
+        select.dispatchEvent(new Event("change"))
       })
       select.value = cell.dataset.taskMarker || ""
       resizeMarkerSelect(select.value, cell.dataset.taskMarkerByGa === "true")
@@ -832,7 +829,7 @@ export function PrintReportPage({
         select.disabled = true
         try {
           const nextComment = nextValue
-            ? await openMarkerCommentModal(nextValue === previousValue ? previousComment : "")
+            ? await openMarkerCommentModal(previousComment)
             : previousComment
           if (nextValue && nextComment === null) {
             select.value = previousValue
@@ -857,14 +854,6 @@ export function PrintReportPage({
           updateCommentButton(updated.one_h_marker_comment || "")
           updateCommentBlock(updated.one_h_marker_comment || "")
           window.dispatchEvent(new Event("primeflow:task-marker-updated"))
-          taskMarkerOptions.forEach((option, index) => {
-            const element = select.options[index + 1]
-            if (element) {
-              element.textContent = updated.one_h_marker_by_ga && option.value === nextValue
-                ? `(${option.label})`
-                : option.label
-            }
-          })
           applyPreviewMarkerFilter()
           toast.success("Task marker updated")
         } catch (error) {

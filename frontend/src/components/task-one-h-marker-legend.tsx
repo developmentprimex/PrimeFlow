@@ -4,9 +4,10 @@ import { useId, useState } from "react"
 import { cn } from "@/lib/utils"
 
 const LEGEND_ITEMS = [
+  ["!", "MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT"],
+  ["!!", "DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME"],
+  ["!!!", "QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM"],
   ["?", "PYETJE/PAQARTESI"],
-  ["!", "DYSHIM/ NUK KUPTOHET DET"],
-  ["!!!", "KLIENT/URGJENT"],
   ["SHARE", "DET QE DUHET SCREENSHARE ME GA"],
   ["👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
   ["X", "MBYLL DETYREN"],

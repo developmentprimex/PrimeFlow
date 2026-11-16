@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { TaskMarkerSelect } from "@/components/task-marker-select"
 import { useAuth } from "@/lib/auth"
 import { recordingJson } from "@/lib/recording-outbox"
 import { inferSkillCategory } from "@/lib/skills"
@@ -18,11 +19,6 @@ import { getConfirmerCandidates, isWaitingConfirmation } from "@/lib/task-confir
 import type { RecordingAction, RecordingPerson, RecordingDepartment } from "./analysis-panel"
 
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-const markers: Array<[NonNullable<Task["one_h_marker"]>, string]> = [
-  ["QUESTION", "?"], ["EXCLAMATION", "!"], ["CLIENT_URGENT", "!!!"], ["SHARE", "SHARE"],
-  ["MONITOR", "👁"], ["CLOSE", "X"], ["M2", "M2"], ["M3", "M3"], ["M2_M3", "M2/3"],
-  ["GENT", "GENT"], ["KA", "KA"], ["FLAG", "GA"], ["F", "F"], ["BZ1N1", "BZ1N1"],
-]
 
 function MultiPicker({ label, items, value, onChange }: { label: string; items: { id: string; name: string }[]; value: string[]; onChange: (ids: string[]) => void }) {
   const id = React.useId()
@@ -132,7 +128,7 @@ export function RecordingTaskDialog({ action, recordingId, people, departments, 
         <div><Label htmlFor="recording-task-priority">Priority</Label><select id="recording-task-priority" className={selectClass} value={priority} onChange={e => { setPriority(e.target.value); setSlot("") }}>{["NORMAL", ...(projectId ? ["HIGH"] : []), "R1", "1H", "PERSONAL", "BLLOK"].map(p => <option key={p}>{p}</option>)}</select></div>
         <div><Label htmlFor="recording-task-finish">Finish by (optional)</Label><select id="recording-task-finish" className={selectClass} value={finishPeriod} onChange={e => { setFinishPeriod(e.target.value); setSlot("") }}><option value="">None (all day)</option><option>AM</option><option>PM</option></select></div>
         {(priority === "1H" || (task && priority === "R1")) && <div><Label htmlFor="recording-task-slot">1H slot (optional)</Label><select id="recording-task-slot" className={selectClass} value={slot} onChange={e => { setSlot(e.target.value); if (e.target.value) setFinishPeriod(["14:20", "16:00"].includes(e.target.value) ? "PM" : "AM") }}><option value="">Unassigned</option>{["10:00", "11:00", "11:50", "14:20", "16:00"].filter(s => !finishPeriod || (finishPeriod === "PM" ? s >= "14:20" : s < "14:20")).map(s => <option key={s}>{s}</option>)}</select></div>}
-        <div><Label htmlFor="recording-task-marker">Symbol (optional)</Label><select id="recording-task-marker" className={selectClass} value={marker} onChange={e => { setMarker(e.target.value); setMarkerComment("") }}><option value="">No symbol</option>{markers.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
+        <div><Label htmlFor="recording-task-marker">Symbol (optional)</Label><TaskMarkerSelect id="recording-task-marker" value={marker} onValueChange={value => setMarker(value === "__none__" ? "" : value as NonNullable<Task["one_h_marker"]>)} /></div>
         {marker && <div><Label htmlFor="recording-task-marker-comment">Symbol comment (optional)</Label><Input id="recording-task-marker-comment" value={markerComment} maxLength={1000} onChange={e => setMarkerComment(e.target.value)} /></div>}
         <div><Label htmlFor="recording-task-start">Start date (optional)</Label><Input id="recording-task-start" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
         <div><Label htmlFor="recording-task-due">Due date (optional)</Label><Input id="recording-task-due" type="date" min={startDate || undefined} value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>

@@ -1,6 +1,9 @@
 "use client"
 
+import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
+
 import * as React from "react"
+import { TaskMarkerSelect } from "@/components/task-marker-select"
 import { flushSync } from "react-dom"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
@@ -50,13 +53,14 @@ function noteKnowledgeText(note: GaNote | null | undefined, text: string) {
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT" | "SHARE"
+type OneHMarker = TaskMarkerValue
 type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 const ONE_H_MARKER_NONE = "__none__"
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
-  { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
+  { value: "DOUBLE_EXCLAM", label: "!!" },
   { value: "CLIENT_URGENT", label: "!!!" },
+  { value: "QUESTION", label: "?" },
   { value: "SHARE", label: "SHARE" },
   { value: "MONITOR", label: "👁" },
   { value: "CLOSE", label: "X" },
@@ -70,7 +74,7 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "BZ1N1", label: "BZ1N1" },
 ]
 const oneHMarkerLabel = (value?: OneHMarker | null, byGa = false) => {
-  const label = ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
+  const label = taskMarkerLabel(value)
   return label && byGa ? `(${label})` : label
 }
 
@@ -2212,7 +2216,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const updateEditAssigneeMarker = (assigneeId: string, value: OneHMarker | typeof ONE_H_MARKER_NONE) => {
     const state = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
     const marker = value === ONE_H_MARKER_NONE ? null : value
-    const comment = marker ? window.prompt("Optional symbol comment:", marker === state.oneHMarker ? state.oneHMarkerComment : "") : ""
+    const comment = marker ? window.prompt("Optional symbol comment:", state.oneHMarkerComment) : state.oneHMarkerComment
     if (comment === null) return
     updateEditTaskAssigneeState(assigneeId, { oneHMarker: marker, oneHMarkerComment: comment })
   }
@@ -3237,7 +3241,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       if (oneHMarkerFilter === "all") return true
       if (oneHMarkerFilter === "with") return markers.length > 0
       if (oneHMarkerFilter === "none") return markers.length === 0
-      return markers.some(({ marker }) => marker === oneHMarkerFilter)
+      return markers.some(({ marker }) => splitTaskMarkers(marker).some(value => value === oneHMarkerFilter))
     }
     const matchesSearchQuery = (note: GaNote) => {
       if (!normalizedSearchQuery) return true
@@ -3824,19 +3828,11 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                             </div>
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Symbol</Label>
-                              <Select
+                              <TaskMarkerSelect
                                 value={state.oneHMarker ?? ONE_H_MARKER_NONE}
                                 onValueChange={(value) => updateEditAssigneeMarker(assigneeId, value as OneHMarker | typeof ONE_H_MARKER_NONE)}
                                 disabled={savingEdit}
-                              >
-                                <SelectTrigger aria-label={`Symbol for ${person?.full_name || person?.username || assigneeId}`} className={`border-blue-300 bg-blue-50 font-black ${state.oneHMarker ? "text-red-600" : "text-[#0F2A5F]"}`}><SelectValue /></SelectTrigger>
-                                <SelectContent className="font-black text-[#0F2A5F]">
-                                  <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
-                                  {ONE_H_MARKER_OPTIONS.map((option) => (
-                                    <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                               aria-label={`Symbol for ${person?.full_name || person?.username || assigneeId}`} />
                             </div>
                           </div>
                           <label className="flex items-center gap-2 text-xs text-slate-700">
@@ -4092,12 +4088,14 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           {showLegend ? (
           <div id="px-notes-symbol-legend" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs text-[#0F2A5F]">
             <span className="font-bold uppercase">Legjenda:</span>
+             <span><b className="text-base font-black text-red-600">!</b> - MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT</span>
+             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+             <span><b className="text-base font-black text-red-600">!!</b> - DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME</span>
+             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+             <span><b className="text-base font-black text-red-600">!!!</b> - QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM</span>
+             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
              <span><b className="text-base font-black text-red-600">?</b> - PYETJE/PAQARTESI</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-             <span><b className="text-base font-black text-red-600">!</b> - DYSHIM/ NUK KUPTOHET DET</span>
-             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-             <span><b className="text-base font-black text-red-600">!!!</b> - KLIENT/URGJENT</span>
-             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
              <span><b className="text-xs font-black text-red-600">SHARE</b> - DET QE DUHET SCREENSHARE ME GA</span>
              <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
              <span><b className="text-base font-black text-red-600">👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
@@ -4137,9 +4135,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                   </TableHeader>
                   <TableBody>
                     {[
+                      ["!", "MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT"],
+                      ["!!", "DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME"],
+                      ["!!!", "QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM"],
                       ["?", "PYETJE/PAQARTESI"],
-                      ["!", "DYSHIM/ NUK KUPTOHET DET"],
-                      ["!!!", "KLIENT/URGJENT"],
                       ["SHARE", "DET QE DUHET SCREENSHARE ME GA"],
                       ["👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
                       ["X", "MBYLL DETYREN"],

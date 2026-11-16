@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { test } from "node:test"
 import vm from "node:vm"
 import ts from "typescript"
+import { taskMarkers } from "./helpers/task-markers.mjs"
 
 const source = readFileSync(new URL("../src/components/px-notes-workspace.tsx", import.meta.url), "utf8")
 const start = source.indexOf("const noteDisplayMarkers =")
@@ -62,10 +63,14 @@ test("symbol filters match any displayed assignee symbol", () => {
   }).outputText
   const matches = (oneHMarkerFilter, taskInfo = bundle) => vm.runInNewContext(
     helper + predicate + "\nmatchesOneHMarkerFilter(note)",
-    { note, oneHMarkerFilter, noteTaskInfo: new Map([[note.id, taskInfo]]) },
+    { note, oneHMarkerFilter, noteTaskInfo: new Map([[note.id, taskInfo]]), splitTaskMarkers: taskMarkers.splitTaskMarkers },
   )
   for (const filter of ["all", "with", "KA", "M2", "QUESTION"]) assert.equal(matches(filter), true)
   for (const filter of ["none", "M3"]) assert.equal(matches(filter), false)
   assert.equal(matches("none", { ...bundle, assigneeStates: {} }), true)
   assert.equal(matches("with", { ...bundle, assigneeStates: {} }), false)
+  const combined = { ...bundle, assigneeStates: { olsa: { oneHMarker: "CLIENT_URGENT,M3" } } }
+  assert.equal(matches("CLIENT_URGENT", combined), true)
+  assert.equal(matches("M3", combined), true)
+  assert.equal(matches("KA", combined), false)
 })

@@ -286,8 +286,9 @@ def _task_period_label(item: dict[str, Any]) -> str:
 
 def _task_marker_label(item: dict[str, Any]) -> str:
     raw = str(item.get("oneHMarker") or item.get("one_h_marker") or "").strip().upper()
-    label = {
+    symbols = {
         "EXCLAMATION": "!",
+        "DOUBLE_EXCLAM": "!!",
         "CLIENT_URGENT": "!!!",
         "SHARE": "SHARE",
         "QUESTION": "?",
@@ -301,7 +302,8 @@ def _task_marker_label(item: dict[str, Any]) -> str:
         "MONITOR": "👁",
         "CLOSE": "X",
         "FLAG": "GA",
-    }.get(raw, "")
+    }
+    label = " + ".join(symbols[part] for part in raw.split(",") if part in symbols)
     marker_by_ga = _task_marker_was_set_by_ga(item)
     return f"({label})" if label and marker_by_ga else label
 
@@ -323,9 +325,10 @@ def _task_marker_comment(item: dict[str, Any]) -> str:
 
 def _task_marker_legend_text() -> str:
     return (
-        "LEGJENDA: ? - PYETJE/PAQARTESI / "
-        "! - DYSHIM/ NUK KUPTOHET DET / "
-        "!!! - KLIENT/URGJENT / "
+        "LEGJENDA: ! - MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT / "
+        "!! - DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME / "
+        "!!! - QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM / "
+        "? - PYETJE/PAQARTESI / "
         "SHARE - DET QE DUHET SCREENSHARE ME GA / "
         "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / "
         "X - MBYLL DETYREN / "
@@ -1349,9 +1352,10 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
 def _task_marker_legend_html() -> str:
     """Explain the task markers wherever the generated 1H report is rendered."""
     items = (
+        ("!", "MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT"),
+        ("!!", "DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME"),
+        ("!!!", "QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM"),
         ("?", "PYETJE/PAQARTESI"),
-        ("!", "DYSHIM/ NUK KUPTOHET DET"),
-        ("!!!", "KLIENT/URGJENT"),
         ("SHARE", "DET QE DUHET SCREENSHARE ME GA"),
         ("👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
         ("X", "MBYLL DETYREN"),
@@ -3554,9 +3558,10 @@ async def _build_print_report(
     plain_rows.extend(_closing_sections_plain_text(attachment_sections))
     plain_rows.extend([
         "",
-        "LEGJENDA: ? - PYETJE/PAQARTESI / "
-        "! - DYSHIM/ NUK KUPTOHET DET / "
-        "!!! - KLIENT/URGJENT / "
+        "LEGJENDA: ! - MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT / "
+        "!! - DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME / "
+        "!!! - QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM / "
+        "? - PYETJE/PAQARTESI / "
         "SHARE - DET QE DUHET SCREENSHARE ME GA / "
         "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / "

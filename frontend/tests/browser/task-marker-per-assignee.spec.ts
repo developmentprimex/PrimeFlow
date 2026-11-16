@@ -1,4 +1,6 @@
 import { test, expect, type Page } from "@playwright/test"
+import { readFileSync } from "node:fs"
+import ts from "typescript"
 
 const noteId = "11111111-1111-4111-8111-111111111111"
 const departmentId = "99999999-9999-4999-8999-999999999999"
@@ -44,10 +46,10 @@ async function openEditor(page: Page, source: "ga-notes" | "plan-notes") {
   const editor = page.getByRole("dialog", { name: "Edit Note", exact: true })
   await expect(editor).toBeVisible()
   await expect(editor.getByText("Note symbol", { exact: true })).toHaveCount(0)
-  const symbols = owners.map(owner => editor.getByRole("combobox", { name: `Symbol for ${owner.full_name}`, exact: true }))
-  await expect(symbols[0]).toHaveText("KA")
-  await expect(symbols[1]).toHaveText("?")
-  await expect(symbols[2]).toHaveText("GENT")
+  const symbols = owners.map(owner => editor.getByRole("button", { name: `Symbol for ${owner.full_name}`, exact: true }))
+  await expect(symbols[0]).toContainText("KA")
+  await expect(symbols[1]).toContainText("?")
+  await expect(symbols[2]).toContainText("GENT")
   return { editor, symbols, writes }
 }
 
@@ -56,15 +58,18 @@ for (const source of ["ga-notes", "plan-notes"] as const) {
     const { editor, symbols, writes } = await openEditor(page, source)
     page.once("dialog", dialog => void dialog.accept("Only the second owner"))
     await symbols[1].click()
-    await page.getByRole("option", { name: "M3", exact: true }).click()
-    await expect(symbols[0]).toHaveText("KA")
-    await expect(symbols[1]).toHaveText("M3")
-    await expect(symbols[2]).toHaveText("GENT")
+    const picker = page.getByRole("dialog", { name: "Simbolet", exact: true })
+    await picker.getByRole("checkbox", { name: "M3", exact: true }).check()
+    await expect(picker.getByRole("checkbox", { name: "KA", exact: true })).toBeDisabled()
+    await picker.getByRole("button", { name: "Ruaj", exact: true }).click()
+    await expect(symbols[0]).toContainText("KA")
+    await expect(symbols[1]).toContainText("? + M3")
+    await expect(symbols[2]).toContainText("GENT")
     await editor.getByRole("button", { name: "Save changes", exact: true }).filter({ visible: true }).click()
     await expect(editor).toHaveCount(0)
     expect(writes).toHaveLength(1)
     expect(writes[0].assignee_states).toEqual([expect.objectContaining({
-      assignee_id: owners[1].id, one_h_marker: "M3", one_h_marker_comment: "Only the second owner",
+      assignee_id: owners[1].id, one_h_marker: "QUESTION,M3", one_h_marker_comment: "Only the second owner",
     })])
     expect(writes[0]).not.toHaveProperty("one_h_marker")
     expect(writes[0]).not.toHaveProperty("one_h_marker_comment")
@@ -73,17 +78,51 @@ for (const source of ["ga-notes", "plan-notes"] as const) {
 
 test("canceling a symbol change leaves each owner's symbol intact; clearing affects only one", async ({ page }) => {
   const { editor, symbols, writes } = await openEditor(page, "ga-notes")
-  page.once("dialog", dialog => void dialog.dismiss())
   await symbols[1].click()
-  await page.getByRole("option", { name: "M3", exact: true }).click()
-  await expect(symbols[1]).toHaveText("?")
+  let picker = page.getByRole("dialog", { name: "Simbolet", exact: true })
+  await picker.getByRole("checkbox", { name: "M3", exact: true }).check()
+  await picker.getByRole("button", { name: "Anulo", exact: true }).click()
+  await expect(symbols[1]).toContainText("?")
   await symbols[1].click()
-  await page.getByRole("option", { name: "No symbol", exact: true }).click()
-  await expect(symbols[0]).toHaveText("KA")
-  await expect(symbols[2]).toHaveText("GENT")
+  picker = page.getByRole("dialog", { name: "Simbolet", exact: true })
+  await picker.getByRole("button", { name: "Hiqi të gjitha", exact: true }).click()
+  await picker.getByRole("button", { name: "Ruaj", exact: true }).click()
+  await expect(symbols[0]).toContainText("KA")
+  await expect(symbols[2]).toContainText("GENT")
   await editor.getByRole("button", { name: "Save changes", exact: true }).filter({ visible: true }).click()
   await expect(editor).toHaveCount(0)
   expect(writes[0].assignee_states).toEqual([expect.objectContaining({
-    assignee_id: owners[1].id, one_h_marker: null, one_h_marker_comment: null,
+    assignee_id: owners[1].id, one_h_marker: null, one_h_marker_comment: "Comment 1",
   })])
+})
+
+test("report iframe picker caps selection at two, supports replacement and cancellation", async ({ page }) => {
+  const source = readFileSync("src/lib/task-markers.ts", "utf8")
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  await page.goto("about:blank")
+  await page.evaluate(code => {
+    const module = { exports: {} as { openTaskMarkerPicker: (document: Document, value: string) => Promise<string | null> } }
+    new Function("module", "exports", code)(module, module.exports)
+    const button = document.createElement("button")
+    button.textContent = "Edit report symbols"
+    button.onclick = async () => {
+      const result = await module.exports.openTaskMarkerPicker(document, button.dataset.value || "CLIENT_URGENT")
+      if (result !== null) button.dataset.value = result
+    }
+    document.body.append(button)
+  }, code)
+  const trigger = page.getByRole("button", { name: "Edit report symbols" })
+  await trigger.click()
+  let picker = page.getByRole("dialog")
+  await picker.getByRole("checkbox", { name: "M3", exact: true }).check()
+  await expect(picker.getByRole("checkbox", { name: "KA", exact: true })).toBeDisabled()
+  await picker.getByRole("checkbox", { name: "!!!", exact: true }).uncheck()
+  await picker.getByRole("checkbox", { name: "KA", exact: true }).check()
+  await picker.getByRole("button", { name: "Ruaj", exact: true }).click()
+  await expect(trigger).toHaveAttribute("data-value", "M3,KA")
+  await trigger.click()
+  picker = page.getByRole("dialog")
+  await picker.getByRole("checkbox", { name: "KA", exact: true }).uncheck()
+  await picker.getByRole("button", { name: "Anulo", exact: true }).click()
+  await expect(trigger).toHaveAttribute("data-value", "M3,KA")
 })

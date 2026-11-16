@@ -1,17 +1,14 @@
 "use client"
 
 import * as React from "react"
+import { taskMarkerLabel, TASK_MARKER_OPTIONS } from "@/lib/task-markers"
 import type { Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
-const SYMBOLS: Record<NonNullable<Task["one_h_marker"]>, string> = {
-  EXCLAMATION: "!", CLIENT_URGENT: "!!!", QUESTION: "?", KA: "KA", GENT: "GENT", F: "F", BZ1N1: "BZ1N1", M2: "M2", M3: "M3", M2_M3: "M2/3", FLAG: "GA", MONITOR: "👁", CLOSE: "X", SHARE: "SHARE",
-}
-
 export function taskOneHMarkerLabel(marker?: Task["one_h_marker"], markerByGa = false) {
-  const symbol = marker ? SYMBOLS[marker] : null
+  const symbol = taskMarkerLabel(marker)
   if (!symbol) return null
   return markerByGa ? `(${symbol})` : symbol
 }
@@ -19,8 +16,7 @@ export function taskOneHMarkerLabel(marker?: Task["one_h_marker"], markerByGa = 
 export function TaskOneHMarkerFromLabel({ label }: { label?: string | null }) {
   const markerByGa = Boolean(label?.startsWith("(") && label.endsWith(")"))
   const symbol = markerByGa ? label?.slice(1, -1) : label
-  const marker = (Object.keys(SYMBOLS) as Array<NonNullable<Task["one_h_marker"]>>)
-    .find((key) => SYMBOLS[key] === symbol)
+  const marker = symbol?.split(" + ").map(part => TASK_MARKER_OPTIONS.find(option => option.label === part)?.value).filter(Boolean).join(",") as Task["one_h_marker"]
   return marker ? <TaskOneHMarker marker={marker} markerByGa={markerByGa} /> : <>{label || "—"}</>
 }
 

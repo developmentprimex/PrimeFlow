@@ -66,6 +66,7 @@ REPORT_STRIKE_LEGEND = (
 )
 ONE_H_MARKER_SYMBOLS = {
     "EXCLAMATION": "!",
+    "DOUBLE_EXCLAM": "!!",
     "CLIENT_URGENT": "!!!",
     "SHARE": "SHARE",
     "QUESTION": "?",
@@ -81,9 +82,10 @@ ONE_H_MARKER_SYMBOLS = {
     "FLAG": "GA",
 }
 ONE_H_MARKER_LEGEND = (
+    ("!", "MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT"),
+    ("!!", "DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME"),
+    ("!!!", "QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM"),
     ("?", "PYETJE/PAQARTESI"),
-    ("!", "DYSHIM/ NUK KUPTOHET DET"),
-    ("!!!", "KLIENT/URGJENT"),
     ("SHARE", "DET QE DUHET SCREENSHARE ME GA"),
     ("👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
     ("X", "MBYLL DETYREN"),
@@ -119,7 +121,7 @@ class ReportTask(BaseModel):
 
 
 def one_h_marker_symbol(value: Any) -> str:
-    return ONE_H_MARKER_SYMBOLS.get(str(value or "").strip().upper(), "")
+    return " + ".join(ONE_H_MARKER_SYMBOLS[part] for part in str(value or "").strip().upper().split(",") if part in ONE_H_MARKER_SYMBOLS)
 
 
 def one_h_marker_legend_text() -> str:

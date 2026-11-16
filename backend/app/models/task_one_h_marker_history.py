@@ -20,7 +20,7 @@ class TaskOneHMarkerHistory(Base):
     marker_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     # NULL is a deliberate tombstone: the user manually removed the symbol on
     # marker_date, so older symbols must not carry past that date.
-    one_h_marker: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    one_h_marker: Mapped[str | None] = mapped_column(String(32), nullable=True)
     one_h_marker_by_ga: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     one_h_marker_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

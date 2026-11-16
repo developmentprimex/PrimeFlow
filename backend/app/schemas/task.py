@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.schemas.task_marker import TaskMarkerValue
+
 import uuid
 from datetime import date, datetime
 
@@ -129,7 +131,7 @@ class TaskCreate(BaseModel):
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
     one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$")
+    one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     is_r1: bool | None = None
     is_personal: bool | None = None
@@ -171,7 +173,7 @@ class TaskUpdate(BaseModel):
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
     one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE)$")
+    one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     is_r1: bool | None = None
     is_personal: bool | None = None

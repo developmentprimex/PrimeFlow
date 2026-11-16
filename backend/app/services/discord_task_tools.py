@@ -294,7 +294,7 @@ Numrat janë pikërisht number nga title_points/description_points, jo numra të
 Përdor këtë mjet për strike, kurrë rishkrim të përshkrimit për strike.
 checklist_item: {"item_id":"UUID nga checklists", "is_checked":true/false}.
 slot: {"one_h_report_slot":"10:00|11:00|11:50|14:20|16:00", "report_date":"YYYY-MM-DD"}.
-marker: {"one_h_marker":"EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE", "one_h_marker_comment":"tekst ose null"}.
+marker: {"one_h_marker":"EXCLAMATION|DOUBLE_EXCLAM|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT|SHARE", "one_h_marker_comment":"tekst ose null"}.
 remove_from_day: {"day":"YYYY-MM-DD"}; deactivate: {}; delete: {}.
 Këto tre të fundit vetëm kur përdoruesi i kërkon shprehimisht. 'Mbylle' do të thotë DONE, jo fshirje.
 Mos përdor UUID jashtë kontekstit. Mos ndrysho project_id, department_id ose dependency_task_id nëse

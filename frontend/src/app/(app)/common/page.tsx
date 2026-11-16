@@ -1,5 +1,7 @@
 "use client"
 
+import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
+
 import * as React from "react"
 import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
@@ -55,13 +57,14 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 
 type PersonalTaskGroup = "GA" | "KA" | "GENT" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalGENT" | "personalPX"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT" | "SHARE"
+type OneHMarker = TaskMarkerValue
 type OneHMarkerFilter = "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
-  { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
+  { value: "DOUBLE_EXCLAM", label: "!!" },
   { value: "CLIENT_URGENT", label: "!!!" },
+  { value: "QUESTION", label: "?" },
   { value: "SHARE", label: "SHARE" },
   { value: "MONITOR", label: "👁" },
   { value: "CLOSE", label: "X" },
@@ -77,7 +80,7 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
 const ONE_H_MARKER_VALUES = ONE_H_MARKER_OPTIONS.map((option) => option.value)
 
 const getOneHMarkerLabel = (value?: OneHMarker | null) =>
-  ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
+  taskMarkerLabel(value)
 
 type CommonType =
   | "late"
@@ -319,7 +322,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
   ).join("")}</section>`
 
 const oneHMarkerLegendHtml = () =>
-  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span><i aria-hidden="true">/</i><span><b>!!!</b> - KLIENT/URGJENT</span><i aria-hidden="true">/</i><span><b class="compact-marker">SHARE</b> - DET QE DUHET SCREENSHARE ME GA</span><i aria-hidden="true">/</i><span><b>👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2/3</b> - DOREZIM EDHE NE M2 EDHE M3</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b class="compact-marker">GA</b> - PYETJE/SQARIM ME GA</span><i aria-hidden="true">/</i><span><b>F</b> - DET FIZIKISHT</span><i aria-hidden="true">/</i><span><b class="compact-marker">BZ1N1</b></span></div>`
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>!</b> - MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT</span><i aria-hidden="true">/</i><span><b>!!</b> - DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME</span><i aria-hidden="true">/</i><span><b>!!!</b> - QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM</span><i aria-hidden="true">/</i><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b class="compact-marker">SHARE</b> - DET QE DUHET SCREENSHARE ME GA</span><i aria-hidden="true">/</i><span><b>👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2/3</b> - DOREZIM EDHE NE M2 EDHE M3</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b class="compact-marker">GA</b> - PYETJE/SQARIM ME GA</span><i aria-hidden="true">/</i><span><b>F</b> - DET FIZIKISHT</span><i aria-hidden="true">/</i><span><b class="compact-marker">BZ1N1</b></span></div>`
 
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
@@ -368,11 +371,13 @@ function OneHMarkerLegend() {
   return (
     <div className="one-h-marker-legend">
       <strong>LEGJENDA:</strong>
+      <span><b>!</b> - MUND TË SHTYHET PËR TË SHMANGUR MBINGARKESËN; TË DIHET QË TË PREMTEN GJATË PLANIFIKIMIT</span>
+      <i aria-hidden="true">/</i>
+      <span><b>!!</b> - DUHET TË KRYHET, POR MUND TË SHTYHET PA PASOJA TË RËNDËSISHME</span>
+      <i aria-hidden="true">/</i>
+      <span><b>!!!</b> - QËLLIM I JAVËS: DUHET TË PËRFUNDOJË BRENDA JAVËS PËR REALIZIM (RLZ) TË SUKSESSHËM</span>
+      <i aria-hidden="true">/</i>
       <span><b>?</b> - PYETJE/PAQARTESI</span>
-      <i aria-hidden="true">/</i>
-      <span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span>
-      <i aria-hidden="true">/</i>
-      <span><b>!!!</b> - KLIENT/URGJENT</span>
       <i aria-hidden="true">/</i>
       <span><b className="text-xs">SHARE</b> - DET QE DUHET SCREENSHARE ME GA</span>
       <i aria-hidden="true">/</i>
@@ -4843,11 +4848,11 @@ export default function CommonViewPage() {
       const marker = entry.oneHMarker || null
       if (oneHMarkerFilters.size === 0) return true
       if (marker === null) return oneHMarkerFilters.has("none")
-      return oneHMarkerFilters.has(marker)
+      return splitTaskMarkers(marker).some(value => oneHMarkerFilters.has(value))
     }
     const matchesKaGentFilter = (entry: FastTaskEntry, includePersonalGroup = false) => {
       if (!kaGentFilterActive) return true
-      if (entry.oneHMarker === "KA" || entry.oneHMarker === "GENT") return true
+      if (splitTaskMarkers(entry.oneHMarker).some(value => value === "KA" || value === "GENT")) return true
       if (
         isWaitingConfirmationTask(entry) &&
         (entry.confirmationOwner === "KA" || entry.confirmationOwner === "GENT")

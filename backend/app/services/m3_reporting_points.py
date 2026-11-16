@@ -154,7 +154,7 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, post
                 "marker": one_h_marker_label(active_one_h_marker(task, day), active_one_h_marker_by_ga(task, day)),
                 "eight_am": title_has_eight_am_indicator(task.title, is_system_task=is_system)
                     or (isinstance(task.due_date, datetime) and _local_time(task.due_date) == "08:00")}
-        if (active_one_h_marker(task, day) in {"M3", "M2_M3"}
+        if (set((active_one_h_marker(task, day) or "").split(",")) & {"M3", "M2_M3"}
                 and (not task.created_at or semantic_local_day(task.created_at) <= day)
                 and current["start_date"] and current["due_date"]
                 and current["start_date"] <= day <= current["due_date"]):

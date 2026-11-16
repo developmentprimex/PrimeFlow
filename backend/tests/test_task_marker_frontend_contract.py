@@ -4,6 +4,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def marker_source(relative_path):
+    source = (ROOT / relative_path).read_text(encoding="utf-8")
+    if "TaskMarkerSelect" in source:
+        source += (ROOT / "frontend/src/lib/task-markers.ts").read_text(encoding="utf-8")
+    return source
+
+
 def test_daily_report_api_returns_the_saved_task_marker():
     source = (ROOT / "backend/app/api/routers/reports.py").read_text(encoding="utf-8")
     assert "one_h_marker=active_one_h_marker(t, marker_report_date)" in source
@@ -57,7 +64,7 @@ def test_m2_m3_symbols_are_available_in_shared_editors_and_legends():
         "backend/app/services/tomorrow_print_report.py",
     )
     for relative_path in paths:
-        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        source = marker_source(relative_path)
         assert "M2" in source, relative_path
         assert "M3" in source, relative_path
         assert "M2/3" in source, relative_path
@@ -69,7 +76,7 @@ def test_m2_m3_symbols_are_available_in_shared_editors_and_legends():
         "backend/app/services/tomorrow_print_report.py",
     )
     for relative_path in legend_paths:
-        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        source = marker_source(relative_path)
         assert "DOREZIM EDHE NE M2 EDHE M3" in source, relative_path
 
 
@@ -82,7 +89,7 @@ def test_monitor_close_and_symbol_comments_are_available_everywhere():
         "backend/app/services/tomorrow_print_report.py",
     )
     for relative_path in paths:
-        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        source = marker_source(relative_path)
         assert "MONITOR" in source or "👁" in source, relative_path
         assert "CLOSE" in source or "MBYLL DETYREN" in source, relative_path
         assert "comment" in source.lower(), relative_path
@@ -102,8 +109,8 @@ def test_client_urgent_symbol_is_available_in_editors_legends_and_reports():
         "backend/app/services/tomorrow_print_report.py",
     )
     for relative_path in paths:
-        source = (ROOT / relative_path).read_text(encoding="utf-8")
-        assert "CLIENT_URGENT" in source or "KLIENT/URGJENT" in source, relative_path
+        source = marker_source(relative_path)
+        assert "CLIENT_URGENT" in source or "QËLLIM I JAVËS" in source, relative_path
         assert "!!!" in source, relative_path
 
 
@@ -118,7 +125,7 @@ def test_f_bz1n1_and_ga_symbols_are_available_everywhere():
         "backend/app/services/tomorrow_print_report.py",
     )
     for relative_path in paths:
-        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        source = marker_source(relative_path)
         assert "BZ1N1" in source, relative_path
         assert "DET FIZIKISHT" in source or 'label: "F"' in source, relative_path
         assert "⚑" not in source, relative_path
@@ -126,7 +133,7 @@ def test_f_bz1n1_and_ga_symbols_are_available_everywhere():
 
 
 def test_marker_dropdowns_and_legends_use_the_requested_order():
-    ordered_tokens = ("QUESTION", "EXCLAMATION", "M2", "M3", "M2_M3", "GENT", "KA", "FLAG", "F", "BZ1N1")
+    ordered_tokens = ("EXCLAMATION", "DOUBLE_EXCLAM", "CLIENT_URGENT", "QUESTION", "M2", "M3", "M2_M3", "GENT", "KA", "FLAG", "F", "BZ1N1")
     dropdown_paths = (
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/app/(app)/common/page.tsx",
@@ -134,12 +141,12 @@ def test_marker_dropdowns_and_legends_use_the_requested_order():
         "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
     )
     for relative_path in dropdown_paths:
-        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        source = marker_source(relative_path)
         positions = [source.index(f'value: "{token}"') for token in ordered_tokens]
         assert positions == sorted(positions), relative_path
 
     legend = (ROOT / "frontend/src/components/task-one-h-marker-legend.tsx").read_text(encoding="utf-8")
-    legend_tokens = ('["?"', '["!"', '["M2"', '["M3"', '["M2/3"', '["GENT"', '["KA"', '["GA"', '["F"', '["BZ1N1"')
+    legend_tokens = ('["!"', '["!!"', '["!!!"', '["?"', '["M2"', '["M3"', '["M2/3"', '["GENT"', '["KA"', '["GA"', '["F"', '["BZ1N1"')
     positions = [legend.index(token) for token in legend_tokens]
     assert positions == sorted(positions)
 

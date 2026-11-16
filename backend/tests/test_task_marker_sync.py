@@ -142,6 +142,8 @@ def test_adding_an_assignee_does_not_inherit_someone_elses_marker(model, copy_fu
 
 
 def test_weekly_planner_marker_label_preserves_ga_parentheses():
+    assert one_h_marker_label("DOUBLE_EXCLAM") == "!!"
+    assert one_h_marker_label("DOUBLE_EXCLAM", True) == "(!!)"
     assert one_h_marker_label("M2_M3") == "M2/3"
     assert one_h_marker_label("QUESTION", True) == "(?)"
     assert one_h_marker_label("FLAG") == "GA"
