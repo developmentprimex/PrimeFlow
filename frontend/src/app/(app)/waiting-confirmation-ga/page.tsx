@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
-import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -270,7 +270,7 @@ export default function WaitingConfirmationGaPage() {
                         ) : null}
                       </div>
                       <span className="flex items-start gap-1.5">
-                        <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
+                        <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} markerComment={task.one_h_marker_comment} onSaved={fields => applyTaskResult({ ...task, ...fields })} />
                         <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} />{task.title || "-"}</span>
                       </span>
                       {canManageWaitingConfirmation ? (

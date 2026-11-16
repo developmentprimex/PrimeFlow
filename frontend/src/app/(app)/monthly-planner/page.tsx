@@ -4,7 +4,8 @@ import * as React from "react"
 import Link from "next/link"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -43,6 +44,7 @@ export default function MonthlyPlannerPage() {
   const [departmentId, setDepartmentId] = React.useState<string>("")
   const [userId, setUserId] = React.useState<string>(ALL_USERS_VALUE)
   const [data, setData] = React.useState<MonthlyResponse | null>(null)
+  useTaskMarkerUpdates(update => setData(current => updateTaskMarkersInTree(current, update)))
   const [filtersReady, setFiltersReady] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -241,7 +243,7 @@ export default function MonthlyPlannerPage() {
                             className="block px-3 py-2.5 text-sm text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
                           >
                             <span className="flex items-start gap-1.5">
-                              <TaskOneHMarker marker={t.one_h_marker} markerByGa={t.one_h_marker_by_ga} comment={t.one_h_marker_comment} />
+                              <TaskOneHMarkerEditor taskId={t.id} marker={t.one_h_marker} markerByGa={t.one_h_marker_by_ga} markerComment={t.one_h_marker_comment} />
                               <span className="min-w-0"><TaskMarkerComment comment={t.one_h_marker_comment} taskId={t.id} />{t.title}</span>
                             </span>
                           </Link>

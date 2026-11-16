@@ -10,6 +10,7 @@ import { toast } from "sonner"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { DiamondAward, TaskReviewDialog } from "@/components/task-review-dialog"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { MeetingDetailsDialog } from "@/components/meeting-details-dialog"
 import { useAuth } from "@/lib/auth"
@@ -1295,7 +1296,9 @@ const normalizeTitle = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase(
 const mergePersonalItems = (items: PersonalItem[]): PersonalItem[] => {
   const merged = new Map<string, PersonalItem>()
   for (const item of items) {
-    const key = `${normalizeTitle(item.title)}\0${item.date}`
+    // Preserve each person's task copy before the weekly display groups cards.
+    // A shared title/date does not make two task IDs the same editable record.
+    const key = `${normalizeTitle(item.title)}\0${item.date}\0${item.taskId || ""}`
     const existing = merged.get(key)
     const itemNames = item.assignees?.length
       ? item.assignees
@@ -4714,6 +4717,10 @@ export default function CommonViewPage() {
     },
     [apiFetch, fetchCommonViewStage, savingOneHMarkerTaskId, user?.email, weekStart]
   )
+  useTaskMarkerUpdates(update => {
+    setCommonData(current => updateTaskMarkersInTree(current, update))
+    COMMON_VIEW_CACHE.clear()
+  })
   const renderOneHMarkerControl = React.useCallback(
     (entry: OneHItem | SwimlaneCell) => (
       <TaskOneHMarkerEditor
@@ -16456,6 +16463,23 @@ export default function CommonViewPage() {
                     const getCellContent = (iso: string) => {
                       const entries = dayEntries[iso] || []
                       if (entries.length === 0) return null
+                      const renderWeekTaskMarkers = (entry: FastTaskEntry) => {
+                        const source = tableDataByDay?.[iso]
+                        const originals = [
+                          ...(source?.blocked || []), ...(source?.oneH || []),
+                          ...(source?.r1 || []), ...(source?.personal || []), ...(source?.waitingClient || []),
+                        ]
+                        const key = getPrintTaskDedupeKey(row.id, entry)
+                        const matching = originals.filter(item => item.taskId && getPrintTaskDedupeKey(row.id, item) === key)
+                        const targets = Array.from(new Map((matching.length ? matching : [entry])
+                          .filter(item => item.taskId).map(item => [item.taskId, item])).values())
+                        return <span className="inline-flex flex-wrap items-center gap-2" data-testid="week-task-symbols">
+                          {targets.map(item => <span key={item.taskId} className="inline-flex items-center gap-1">
+                            {targets.length > 1 ? <span className="text-[9px] font-bold">{entryAssignees(item).map(initials).join("/")}</span> : null}
+                            {renderOneHMarkerControl(item)}
+                          </span>)}
+                        </span>
+                      }
                       
                       if (row.id === "late") {
         return (entries as LateItem[]).map((e, idx: number) => (
@@ -16589,7 +16613,7 @@ export default function CommonViewPage() {
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
-                                  {renderOneHMarkerControl(e)}
+                                  {renderWeekTaskMarkers(e)}
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
@@ -16654,7 +16678,7 @@ export default function CommonViewPage() {
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
-                                  {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(e) : null}
+                                  {isShtypiTaskRowId(row.id) ? renderWeekTaskMarkers(e) : null}
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
@@ -16689,7 +16713,7 @@ export default function CommonViewPage() {
                                   <span className="week-table-line-number">{idx + 1}.</span>
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
-                                  {renderOneHMarkerControl(e)}
+                                  {renderWeekTaskMarkers(e)}
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}

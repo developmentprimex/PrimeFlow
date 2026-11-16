@@ -17,7 +17,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { API_HTTP_URL } from "@/lib/config"
 import { useAuth } from "@/lib/auth"
-import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { formatDateDMY, formatDateTimeDMY, toDateInputValue } from "@/lib/dates"
 import { cn } from "@/lib/utils"
@@ -2157,6 +2158,7 @@ export default function AdminTasksPage() {
   const confirm = useConfirm()
   type AssigneeUser = User | UserLookup
   const [tasks, setTasks] = React.useState<Task[]>([])
+  useTaskMarkerUpdates(update => setTasks(current => updateTaskMarkersInTree(current, update)))
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskOut[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<AssigneeUser[]>([])
@@ -3398,6 +3400,8 @@ export default function AdminTasksPage() {
       period: string
       title: string
       oneHMarker?: Task["one_h_marker"]
+      oneHMarkerByGa?: boolean
+      oneHMarkerComment?: string | null
       systemFrequency: string
       systemFrequencyDisplayLabel: string
       bz: string
@@ -3475,6 +3479,8 @@ export default function AdminTasksPage() {
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
         oneHMarker: task.one_h_marker,
+        oneHMarkerByGa: Boolean(task.one_h_marker_by_ga),
+        oneHMarkerComment: task.one_h_marker_comment ?? null,
         systemFrequency,
         systemFrequencyDisplayLabel: systemFrequencyDisplayLabel(systemFrequency),
         bz: hasTaskAlignment || hasTemplateAlignment ? "GA" : "-",
@@ -7183,7 +7189,7 @@ export default function AdminTasksPage() {
                           {row.kohaBz}
                         </span>
                       ) : null}
-                      <TaskOneHMarker marker={row.oneHMarker} />
+                      <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} markerComment={row.oneHMarkerComment} />
                       <span>{renderCommonMarkedTitle(row.title)}</span>
                     </div>
                   </TableCell>

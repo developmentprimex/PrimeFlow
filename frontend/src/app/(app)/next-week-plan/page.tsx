@@ -1,8 +1,9 @@
 "use client"
 
-import { taskMarkerLabel, type TaskMarkerValue } from "@/lib/task-markers"
+import { type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerSelect } from "@/components/task-marker-select"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
@@ -32,10 +33,6 @@ type NotePriority = "NORMAL" | "HIGH" | "NONE"
 
 type OneHMarker = TaskMarkerValue
 const ONE_H_MARKER_NONE = "__none__"
-const oneHMarkerLabel = (value?: OneHMarker | null, byGa = false) => {
-  const label = taskMarkerLabel(value)
-  return label && byGa ? `(${label})` : label
-}
 
 const TYPE_BADGE: Record<NoteType, string> = {
   GA: "bg-amber-100 text-amber-800 border-amber-200",
@@ -3567,16 +3564,9 @@ export default function NextWeekPlanPage() {
                                       ) : null}
                                     </span>
                                   ) : null}
-                                {note.one_h_marker ? (
-                                  <button
-                                    type="button"
-                                    className="inline-flex min-h-6 shrink-0 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-red-600 [text-shadow:0_0_0_currentColor]"
-                                    title={note.one_h_marker_comment || "Note symbol"}
-                                    onClick={() => { if (note.one_h_marker_comment) window.prompt("Symbol comment (copy with Ctrl+C):", note.one_h_marker_comment) }}
-                                  >
-                                    {oneHMarkerLabel(note.one_h_marker, note.one_h_marker_by_ga)}
-                                  </button>
-                                ) : null}
+                                <TaskOneHMarkerEditor noteId={note.id} noteSource="plan-notes"
+                                  marker={note.one_h_marker} markerByGa={note.one_h_marker_by_ga} markerComment={note.one_h_marker_comment}
+                                  onSaved={fields => setNotes(current => current.map(item => item.id === note.id ? { ...item, ...fields } : item))} />
                                   <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
                                     {renderMarkedNoteContent(note.content)}
                                   </span>

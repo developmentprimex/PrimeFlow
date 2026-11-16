@@ -17,8 +17,11 @@ type TaskMarker = NonNullable<Task["one_h_marker"]>
 const NONE = "__none__"
 const MARKER_UPDATED_EVENT = "primeflow:task-marker-updated"
 
-export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment, className }: {
+export function TaskOneHMarkerEditor({ taskId, noteId, noteSource = "ga-notes", onSaved, marker, markerByGa, markerComment, className }: {
   taskId?: string | null
+  noteId?: string | null
+  noteSource?: "ga-notes" | "plan-notes"
+  onSaved?: (fields: Pick<Task, "one_h_marker" | "one_h_marker_by_ga" | "one_h_marker_comment">) => void
   marker?: Task["one_h_marker"]
   markerByGa?: boolean
   markerComment?: string | null
@@ -33,6 +36,21 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   const [pendingMarker, setPendingMarker] = React.useState<TaskMarker | typeof NONE | null>(null)
   const [commentOpen, setCommentOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const resourceKey = taskId ? `task:${taskId}` : `${noteSource}:${noteId || ""}`
+  const [previousProps, setPreviousProps] = React.useState({ resourceKey, marker, markerByGa, markerComment })
+  // Reconcile changed inputs before rendering, while keeping optimistic edits
+  // when the parent renders again with the same saved values.
+  if (previousProps.resourceKey !== resourceKey || previousProps.marker !== marker ||
+      previousProps.markerByGa !== markerByGa || previousProps.markerComment !== markerComment) {
+    const resourceChanged = previousProps.resourceKey !== resourceKey
+    setPreviousProps({ resourceKey, marker, markerByGa, markerComment })
+    if (resourceChanged || previousProps.marker !== marker) setValue(marker || NONE)
+    if (resourceChanged || previousProps.markerByGa !== markerByGa) setByGa(Boolean(markerByGa))
+    if (resourceChanged || previousProps.markerComment !== markerComment) {
+      setComment(markerComment || "")
+      setDraftComment(markerComment || "")
+    }
+  }
   const inboxItem = taskId ? comments?.byTask.get(taskId) : undefined
   const appliedInboxRevision = React.useRef<string | null>(null)
   const hasComment = Boolean(comment.trim())
@@ -50,9 +68,6 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
     ? { width: commonViewWidth, minWidth: commonViewWidth, maxWidth: commonViewWidth }
     : {}
 
-  React.useEffect(() => setValue(marker || NONE), [marker])
-  React.useEffect(() => setByGa(Boolean(markerByGa)), [markerByGa])
-  React.useEffect(() => { setComment(markerComment || ""); setDraftComment(markerComment || "") }, [markerComment])
   React.useEffect(() => {
     if (!inboxItem || saving || commentOpen || appliedInboxRevision.current === inboxItem.revision) return
     appliedInboxRevision.current = inboxItem.revision
@@ -85,14 +100,14 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   }, [taskId])
 
   const updateMarker = async (next: TaskMarker | typeof NONE, nextComment = "") => {
-    if (!taskId || saving) return
+    if ((!taskId && !noteId) || saving) return
     const previous = { value, byGa, comment }
     setValue(next)
     setByGa(Boolean(next !== NONE && user?.email?.trim().toLowerCase() === "ga@primexeu.com"))
     setComment(nextComment)
     setSaving(true)
     try {
-      const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
+      const response = await apiFetch(taskId ? `/tasks/${taskId}/one-h-marker` : `/${noteSource}/${noteId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ one_h_marker: next === NONE ? null : next, one_h_marker_comment: nextComment.trim() || null }),
       })
@@ -101,7 +116,8 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
       const updatedByGa = Boolean(updated.one_h_marker_by_ga)
       const updatedComment = updated.one_h_marker_comment || ""
       setByGa(updatedByGa); setComment(updatedComment)
-      window.dispatchEvent(new CustomEvent(MARKER_UPDATED_EVENT, { detail: { taskId, marker: next === NONE ? null : next, markerByGa: updatedByGa, markerComment: updatedComment } }))
+      if (taskId) window.dispatchEvent(new CustomEvent(MARKER_UPDATED_EVENT, { detail: { taskId, marker: next === NONE ? null : next, markerByGa: updatedByGa, markerComment: updatedComment } }))
+      onSaved?.({ one_h_marker: next === NONE ? null : next, one_h_marker_by_ga: updatedByGa, one_h_marker_comment: updatedComment || null })
       toast.success("Task symbol updated")
     } catch (error) {
       setValue(previous.value); setByGa(previous.byGa); setComment(previous.comment)
@@ -109,10 +125,25 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
     } finally { setSaving(false) }
   }
 
-  const chooseMarker = (nextValue: string) => {
-    if (nextValue === NONE) { void updateMarker(NONE, comment); return }
-    const next = nextValue as TaskMarker
-    setPendingMarker(next); setDraftComment(comment); setCommentOpen(true)
+  const currentComment = async () => {
+    if (!taskId || markerComment !== undefined) return comment
+    setSaving(true)
+    try {
+      const response = await apiFetch(`/tasks/${taskId}`)
+      if (!response?.ok) throw new Error("Could not load the task comment")
+      const task = await response.json() as { one_h_marker_by_ga?: boolean; one_h_marker_comment?: string | null }
+      const savedComment = task.one_h_marker_comment || ""
+      setByGa(Boolean(task.one_h_marker_by_ga)); setComment(savedComment)
+      return savedComment
+    } finally { setSaving(false) }
+  }
+  const chooseMarker = async (nextValue: string) => {
+    try {
+      const savedComment = await currentComment()
+      if (nextValue === NONE) { void updateMarker(NONE, savedComment); return }
+      const next = nextValue as TaskMarker
+      setPendingMarker(next); setDraftComment(savedComment); setCommentOpen(true)
+    } catch { toast.error("Could not load the current task comment") }
   }
   const savePendingMarker = () => {
     if (!pendingMarker) return
@@ -120,11 +151,15 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
   }
 
   return (
-    <div className={`relative inline-flex items-center ${wrapperPositionClasses}`} onClick={(event) => event.stopPropagation()}>
-      <TaskMarkerSelect value={value} byGa={byGa} onValueChange={chooseMarker} disabled={!taskId || saving}
+    <>
+    <span data-task-marker-print={taskId || noteId} className="hidden font-black text-red-600 print:inline-flex">{taskMarkerLabel(value, byGa)}</span>
+    <div data-task-marker-id={taskId || noteId} data-task-marker-resource={taskId ? "task" : "note"}
+      className={`relative inline-flex items-center print:hidden ${wrapperPositionClasses}`}
+      onPointerDown={event => event.stopPropagation()} onClick={(event) => { event.preventDefault(); event.stopPropagation() }}>
+      <TaskMarkerSelect value={value} byGa={byGa} onValueChange={chooseMarker} disabled={(!taskId && !noteId) || saving}
         className={`h-7 min-w-[64px] w-auto px-2 py-0 text-base font-black ${className || ""}`}
         style={{ color: value === NONE ? "#0F2A5F" : "#DC2626", ...compactCommonViewStyle }} aria-label="Task symbols (maximum 2)" title={comment || "Edit task symbols"} />
-      {taskId ? (
+      {taskId || noteId ? (
         <button
           type="button"
           disabled={saving}
@@ -136,7 +171,13 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
           )}
           title={hasComment ? comment : "Add task comment"}
           aria-label={hasComment ? "View task comment" : "Add task comment"}
-          onClick={() => { setPendingMarker(value); setDraftComment(comment); setCommentOpen(true); if (taskId && hasComment) comments?.markTaskRead(taskId, comment) }}
+          onClick={async () => {
+            try {
+              const savedComment = await currentComment()
+              setPendingMarker(value); setDraftComment(savedComment); setCommentOpen(true)
+              if (taskId && savedComment) comments?.markTaskRead(taskId, savedComment)
+            } catch { toast.error("Could not load the current task comment") }
+          }}
         >
           <MessageCircle className={hasComment ? "h-4 w-4" : "h-3 w-3"} strokeWidth={hasComment ? 3 : 2.5} aria-hidden="true" />
         </button>
@@ -153,5 +194,6 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
         </DialogContent>
       </Dialog>
     </div>
+    </>
   )
 }

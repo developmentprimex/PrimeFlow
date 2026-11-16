@@ -2316,7 +2316,7 @@ export default function DepartmentKanban() {
         alignToggle={viewMode === "mine"}
         renderTitle={(visibleTitle) => {
           const title = systemTitleOnly || !visibleTitle.includes("[[") ? visibleTitle
-            : task.ga_note_origin_id || isTaskStartingOnSelectedAllDate(task)
+            : task.ga_note_origin_id || task.plan_note_origin_id || isTaskStartingOnSelectedAllDate(task)
               ? renderMarkedNoteContent(visibleTitle, visibleTitle)
               : getPlainMarkedText(visibleTitle)
           return <>{systemTitleOnly ? null : <TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />}{title}</>
@@ -11428,10 +11428,10 @@ export default function DepartmentKanban() {
                                   {row.typeLabel === "PRJK" && row.projectTitle ? (
                                     <>
                                       <span className="font-semibold">{row.projectTitle}</span>
-                                      <span> : {row.title}</span>
+                                      <span> : {renderMarkedNoteContent(row.title, row.title)}</span>
                                     </>
                                   ) : (
-                                    row.title
+                                    renderMarkedNoteContent(row.title, row.title)
                                   )}
                                 </span>
                               </div>
@@ -11559,10 +11559,10 @@ export default function DepartmentKanban() {
                               {row.typeLabel === "PRJK" && row.projectTitle ? (
                                 <>
                                   <span className="font-semibold">{row.projectTitle}</span>
-                                  <span> : {row.title}</span>
+                                  <span> : {renderMarkedNoteContent(row.title, row.title)}</span>
                                 </>
                               ) : (
-                                row.title
+                                renderMarkedNoteContent(row.title, row.title)
                               )}
                             </span>
                           </div>
@@ -11675,10 +11675,10 @@ export default function DepartmentKanban() {
                           {row.typeLabel === "PRJK" && row.projectTitle ? (
                             <>
                               <span className="font-semibold">{row.projectTitle}</span>
-                              <span> : {row.title}</span>
+                              <span> : {renderMarkedNoteContent(row.title, row.title)}</span>
                             </>
                           ) : (
-                            row.title
+                            renderMarkedNoteContent(row.title, row.title)
                           )}
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>

@@ -23,6 +23,7 @@ async function openEditor(page: Page, source: "ga-notes" | "plan-notes") {
     one_h_marker_comment: `Comment ${index}`, created_at: now, updated_at: now,
   }))
   const writes: Record<string, unknown>[] = []
+  const markerWrites: { taskId: string; body: Record<string, unknown> }[] = []
   await page.addInitScript(user => {
     localStorage.setItem("primex_access_token", "test-only-marker-token")
     localStorage.setItem("primex_user", JSON.stringify(user))
@@ -34,6 +35,14 @@ async function openEditor(page: Page, source: "ga-notes" | "plan-notes") {
     if (path === "/api/departments") return route.fulfill({ json: [{ id: departmentId, name: "Development", code: "DEV" }] })
     if (path === `/api/${source}`) return route.fulfill({ json: [note] })
     if (path === "/api/tasks/by-ga-notes/summary") return route.fulfill({ json: tasks })
+    const markerTask = tasks.find(task => path === `/api/tasks/${task.id}` || path === `/api/tasks/${task.id}/one-h-marker`)
+    if (markerTask) {
+      if (route.request().method() === "PATCH") {
+        const body = route.request().postDataJSON()
+        markerWrites.push({ taskId: markerTask.id, body }); Object.assign(markerTask, body)
+      }
+      return route.fulfill({ json: markerTask })
+    }
     if (path === `/api/${source}/${noteId}/task-bundle`) {
       writes.push(route.request().postDataJSON())
       return route.fulfill({ json: { note, active_task_ids: tasks.map(task => task.id), assignee_ids: owners.map(owner => owner.id) } })
@@ -50,8 +59,24 @@ async function openEditor(page: Page, source: "ga-notes" | "plan-notes") {
   await expect(symbols[0]).toContainText("KA")
   await expect(symbols[1]).toContainText("?")
   await expect(symbols[2]).toContainText("GENT")
-  return { editor, symbols, writes }
+  return { editor, symbols, writes, markerWrites, tasks }
 }
+
+test("PX Notes inline symbols edit only the selected assignee without opening Edit Note", async ({ page }) => {
+  const { editor, markerWrites, tasks, writes } = await openEditor(page, "ga-notes")
+  await page.keyboard.press('Escape')
+  await expect(editor).toHaveCount(0)
+  const inline = page.locator(`[data-task-marker-id="${tasks[0].id}"]`).first()
+  await inline.getByRole('button', { name: 'Task symbols (maximum 2)', exact: true }).click()
+  const picker = page.getByRole('dialog', { name: 'Simbolet', exact: true })
+  await picker.getByRole('checkbox', { name: 'M3', exact: true }).check()
+  await picker.getByRole('button', { name: 'Ruaj', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Task comment', exact: true }).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inline).toContainText('KA + M3')
+  expect(markerWrites).toEqual([{ taskId: tasks[0].id, body: { one_h_marker: 'KA,M3', one_h_marker_comment: 'Comment 0' } }])
+  expect(writes).toHaveLength(0)
+  expect(tasks[1].one_h_marker).toBe('QUESTION')
+})
 
 for (const source of ["ga-notes", "plan-notes"] as const) {
   test(`${source}: changing one owner's symbol and comment preserves the other two`, async ({ page }) => {

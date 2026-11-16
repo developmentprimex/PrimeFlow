@@ -20,7 +20,8 @@ import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { TaskSkillField } from "@/components/task-skill-field"
-import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { ChevronDown, Eye, Pencil } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
@@ -386,6 +387,7 @@ export default function ProjectPage() {
 
   const [project, setProject] = React.useState<Project | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
+  useTaskMarkerUpdates(update => setTasks(current => updateTaskMarkersInTree(current, update)))
   const [taskAssigneeFilter, setTaskAssigneeFilter] = React.useState<string>(ALL_USERS_FILTER)
   const [departmentUsers, setDepartmentUsers] = React.useState<User[]>([])
   const [allUsers, setAllUsers] = React.useState<User[]>([])
@@ -3932,7 +3934,7 @@ export default function ProjectPage() {
                     >
                       <div className="grid grid-cols-[minmax(320px,1fr)_100px_140px_130px_110px_230px] items-start gap-3">
                         <div className="font-medium flex items-center gap-2 flex-wrap">
-                          <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
+                          <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} markerComment={task.one_h_marker_comment} />
                           <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} />{task.title}</span>
                           {task.skill_category ? (
                             <Badge variant="outline" className="text-xs">

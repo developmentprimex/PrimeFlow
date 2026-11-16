@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
 import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
@@ -447,6 +448,7 @@ export default function MorningReportPage() {
         </TabsList>
 
         <TabsContent value="report" className="space-y-5">
+          <ReportTaskSymbolsPanel key={reportDate} reportDate={reportDate} />
       <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-[220px_1fr_auto]">
         <div>
           <Label>Date</Label>

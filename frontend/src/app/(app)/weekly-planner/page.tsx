@@ -45,7 +45,9 @@ import {
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
-import { TaskOneHMarker, taskOneHMarkerLabel } from "@/components/task-one-h-marker"
+import { taskOneHMarkerLabel } from "@/components/task-one-h-marker"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
 import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
@@ -348,6 +350,7 @@ export default function WeeklyPlannerPage() {
     initialUrlWeek === "last" || initialUrlWeek === "next" ? initialUrlWeek : "this"
   )
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
+  useTaskMarkerUpdates(update => setData(current => updateTaskMarkersInTree(current, update)))
   const [pvFestBlocks, setPvFestBlocks] = React.useState<WeeklyPlannerBlock[]>([])
   const [orderedUsersByDept, setOrderedUsersByDept] = React.useState<Record<string, WeeklyPrintUser[]>>({})
   const [orderDirtyByDept, setOrderDirtyByDept] = React.useState<Record<string, boolean>>({})
@@ -385,6 +388,7 @@ export default function WeeklyPlannerPage() {
   const [manualTaskProjectId, setManualTaskProjectId] = React.useState("")
   const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
   const [planningTasks, setPlanningTasks] = React.useState<Task[]>([])
+  useTaskMarkerUpdates(update => setPlanningTasks(current => updateTaskMarkersInTree(current, update)))
   const [planningNotes, setPlanningNotes] = React.useState<GaNote[]>([])
   const [planningInboxLoading, setPlanningInboxLoading] = React.useState(false)
   const [planningFilter, setPlanningFilter] = React.useState<PlanningInboxFilter>("all")
@@ -3671,7 +3675,7 @@ export default function WeeklyPlannerPage() {
               </span>
             </div>
             <div className="mt-1 flex items-start gap-1.5 text-sm font-semibold leading-snug text-slate-900" title={task.title}>
-              <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
+              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} markerComment={task.one_h_marker_comment} />
               <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} /><span className="line-clamp-2">{task.title}</span></span>
             </div>
           </div>
@@ -4792,10 +4796,11 @@ export default function WeeklyPlannerPage() {
                                                   repeatedTaskCardClassName(task),
                                                 ].join(" ")}
                                               >
-                                                  <TaskOneHMarker
+                                                  <TaskOneHMarkerEditor
+                                                    taskId={task.task_id}
                                                     marker={task.one_h_marker}
                                                     markerByGa={task.one_h_marker_by_ga}
-                                                    comment={task.one_h_marker_comment}
+                                                    markerComment={task.one_h_marker_comment}
                                                     className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                                                   />
                                                   <span className="min-w-0 flex-1">
@@ -4888,10 +4893,11 @@ export default function WeeklyPlannerPage() {
                                             repeatedTaskCardClassName(task),
                                           ].join(" ")}
                                         >
-                                            <TaskOneHMarker
+                                            <TaskOneHMarkerEditor
+                                              taskId={task.task_id}
                                               marker={task.one_h_marker}
                                               markerByGa={task.one_h_marker_by_ga}
-                                              comment={task.one_h_marker_comment}
+                                              markerComment={task.one_h_marker_comment}
                                               className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                                             />
                                             <span className="min-w-0 flex-1">
@@ -4966,10 +4972,11 @@ export default function WeeklyPlannerPage() {
                                             repeatedTaskCardClassName(task),
                                           ].join(" ")}
                                         >
-                                        <TaskOneHMarker
+                                        <TaskOneHMarkerEditor
+                                          taskId={task.task_id}
                                           marker={task.one_h_marker}
                                           markerByGa={task.one_h_marker_by_ga}
-                                          comment={task.one_h_marker_comment}
+                                          markerComment={task.one_h_marker_comment}
                                           className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                                         />
                                         <span className="min-w-0 flex-1">

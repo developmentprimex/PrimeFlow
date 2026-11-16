@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
 import { TaskReviewsPanel } from "@/components/task-reviews-panel"
-import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { useTaskMarkerUpdates, type TaskMarkerUpdate } from "@/lib/task-marker-updates"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { PromptLinkButton } from "@/components/knowledge/prompt-link"
 import { clearDepartmentBootstrapCacheByPrefix } from "@/lib/department-bootstrap-cache"
@@ -121,6 +122,14 @@ export default function TaskDetailsPage() {
   const { apiFetch, user } = useAuth()
 
   const [task, setTask] = React.useState<Task | null>(null)
+  const [markerOverride, setMarkerOverride] = React.useState<{ source: Task; update: TaskMarkerUpdate } | null>(null)
+  useTaskMarkerUpdates(update => { if (task && update.taskId === task.id) setMarkerOverride({ source: task, update }) })
+  const shownTaskMarker = markerOverride && markerOverride.source === task ? {
+    one_h_marker: markerOverride.update.marker,
+    one_h_marker_by_ga: markerOverride.update.markerByGa,
+    one_h_marker_comment: markerOverride.update.markerComment,
+  } : task
+
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [users, setUsers] = React.useState<UserLookup[]>([])
 
@@ -559,8 +568,8 @@ export default function TaskDetailsPage() {
                   Back
                 </Button>
                 <div className="flex items-start gap-2 text-2xl font-semibold text-slate-900">
-                  <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} className="mt-1" />
-                  <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} />{renderMarkedNoteContent(title || task.title, title || task.title)}</span>
+                  <TaskOneHMarkerEditor taskId={task.id} marker={shownTaskMarker?.one_h_marker} markerByGa={shownTaskMarker?.one_h_marker_by_ga} markerComment={shownTaskMarker?.one_h_marker_comment} className="mt-1" />
+                  <span className="min-w-0"><TaskMarkerComment comment={shownTaskMarker?.one_h_marker_comment} taskId={task.id} />{renderMarkedNoteContent(title || task.title, title || task.title)}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>Status: {statusText}</span>
