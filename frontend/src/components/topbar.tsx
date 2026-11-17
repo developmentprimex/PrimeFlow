@@ -6,6 +6,7 @@ import { Briefcase, CheckCheck, MessageCircle, PanelLeftOpen, Trash2 } from "luc
 import { toast } from "sonner"
 
 import { AccountMenu } from "@/components/account-menu"
+import { ThemeSwitcher } from "@/components/theme-switcher"
 import { VoiceAssistant } from "@/components/voice-assistant"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
@@ -353,6 +354,7 @@ export function Topbar() {
         </Sheet>
 
         <VoiceAssistant key={user.id} />
+        <ThemeSwitcher />
         <AccountMenu initials={initials(user)} />
       </div>
     </header>

@@ -551,6 +551,18 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
 
+- Tema Light / Dark / System: `frontend/src/lib/theme.ts` vendos klasën `dark`
+  para renderimit dhe ruan `primex-theme` në localStorage; System ndjek ndryshimet
+  e pajisjes dhe zgjedhja sinkronizohet mes skedave. `theme-switcher.tsx` në
+  Topbar dhe njoftimet Sonner përdorin `use-theme.ts`. Variablat në `globals.css`
+  dhe ngjyrat e vjetra në `theme-utilities.css` ndikojnë gjithë aplikacionin:
+  Common View, My View, Development, Graphic Design, Product Content, Finance,
+  planifikuesit, PX Notes/PX JAV dhe faqet M1/M2/M3. Kontrollo secilën pamje
+  veçmas për ngjyra inline/arbitrare. Rregullat e temës vlejnë vetëm në ekran;
+  printimi ruan variablat Light. Preview-t në iframe (1H Reports, SHTYPI dhe
+  raportet që përdorin HTML të gjeneruar), email-et dhe eksportet kanë stile
+  të veçanta dhe nuk trashëgojnë temën e faqes prind.
+
 - Vendosja direkte e simboleve: Weekly Planner (kartat e projekteve, sistemore,
   të shpejta dhe kutia e planifikimit), Common View javore, Monthly Planner,
   Open Tasks, Admin Tasks, WFC, Projects, Task Details, PX JAV dhe preview i 1H Reports përdorin

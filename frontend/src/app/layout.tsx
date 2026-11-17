@@ -3,6 +3,7 @@ import "./globals.css";
 import { ConfirmDialogProvider } from "@/components/providers/confirm-dialog-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/lib/auth";
+import { THEME_SCRIPT } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "PrimeFlow",
@@ -20,7 +21,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} /></head>
       <body className="antialiased">
         <AuthProvider>
           <ConfirmDialogProvider>

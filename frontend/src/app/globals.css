@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./button-system.css";
+@import "./theme-utilities.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --color-background: var(--background);
@@ -92,7 +95,45 @@
   input[type="checkbox"] {
     width: 18px;
     height: 18px;
-    accent-color: #1f2937;
+    accent-color: var(--primary);
     cursor: pointer;
   }
+}
+
+/* Screen-only variables keep browser print and generated reports light. */
+@media screen {
+  :root { color-scheme: light; }
+  :root.dark {
+    color-scheme: dark;
+    --background: #111827;
+    --foreground: #f1f5f9;
+    --card: #182231;
+    --card-foreground: #f1f5f9;
+    --popover: #182231;
+    --popover-foreground: #f1f5f9;
+    --primary: #e2e8f0;
+    --primary-foreground: #111827;
+    --secondary: #253245;
+    --secondary-foreground: #f1f5f9;
+    --muted: #253245;
+    --muted-foreground: #a8b5c7;
+    --accent: #2c3b50;
+    --accent-foreground: #f8fafc;
+    --destructive: #fb7185;
+    --border: #3b4a60;
+    --input: #4b5c73;
+    --ring: #93c5fd;
+    --sidebar: #141d2b;
+    --sidebar-foreground: #e2e8f0;
+    --sidebar-primary: #93c5fd;
+    --sidebar-primary-foreground: #111827;
+    --sidebar-accent: #253245;
+    --sidebar-accent-foreground: #f8fafc;
+    --sidebar-border: #3b4a60;
+    --sidebar-ring: #93c5fd;
+  }
+}
+
+@media print {
+  :root { color-scheme: light; }
 }
