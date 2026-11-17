@@ -10,6 +10,7 @@ import { toast } from "sonner"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { DiamondAward, TaskReviewDialog } from "@/components/task-review-dialog"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { TaskGroupMarkerEditor } from "@/components/task-group-marker-editor"
 import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { MeetingDetailsDialog } from "@/components/meeting-details-dialog"
@@ -1376,12 +1377,15 @@ const mergeAssigneeNames = (current: string[], next: string[]) => {
   return merged
 }
 
-const mergePrintTaskEntries = <T extends FastTaskEntry | SwimlaneCell>(rowId: CommonType, entries: T[]): T[] => {
+const getWeekTaskGroupKey = (rowId: CommonType, entry: FastTaskEntry | SwimlaneCell) =>
+  getPrintTaskDedupeKey(rowId, { ...entry, oneHMarker: null })
+
+const mergePrintTaskEntries = <T extends FastTaskEntry | SwimlaneCell>(rowId: CommonType, entries: T[], groupSymbols = false): T[] => {
   if (!isPrintDedupeTaskRowId(rowId)) return entries
 
   const merged = new Map<string, T>()
   for (const entry of entries) {
-    const key = getPrintTaskDedupeKey(rowId, entry)
+    const key = groupSymbols ? getWeekTaskGroupKey(rowId, entry) : getPrintTaskDedupeKey(rowId, entry)
     const existing = merged.get(key)
     if (!existing) {
       merged.set(key, { ...entry, assignees: [...entryAssignees(entry)] })
@@ -16402,8 +16406,8 @@ export default function CommonViewPage() {
                       else if (row.id === "absent") dayEntries[iso] = dayData?.absent || []
                       else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
                       else if (row.id === "externalHoliday") dayEntries[iso] = dayData?.externalHoliday || []
-                      else if (row.id === "waitingClient") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.waitingClient || [])
-                      else if (row.id === "blocked") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.blocked || [])
+                      else if (row.id === "waitingClient") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.waitingClient || [], true)
+                      else if (row.id === "blocked") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.blocked || [], true)
                       else if (isOneHSlotRowId(row.id)) {
                         const oneHEntries = includeOneH ? dayData?.oneH || [] : []
                         const slot = getOneHSlotRowSlot(row.id)
@@ -16414,13 +16418,13 @@ export default function CommonViewPage() {
                                 ? !normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot)
                                 : normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot) === slot
                             )
-                        dayEntries[iso] = mergePrintTaskEntries(row.id, slotEntries)
+                        dayEntries[iso] = mergePrintTaskEntries(row.id, slotEntries, true)
                       }
-                      else if (row.id === "r1") dayEntries[iso] = includeR1 ? mergePrintTaskEntries(row.id, dayData?.r1 || []) : []
+                      else if (row.id === "r1") dayEntries[iso] = includeR1 ? mergePrintTaskEntries(row.id, dayData?.r1 || [], true) : []
                       else if (isPersonalRowId(row.id)) {
                         dayEntries[iso] = mergePrintTaskEntries(
                           row.id,
-                          personalTasksForRow(dayData?.personal || [], row.id)
+                          personalTasksForRow(dayData?.personal || [], row.id), true
                         )
                       }
                       else if (row.id === "external") dayEntries[iso] = dayData?.external || []
@@ -16469,15 +16473,15 @@ export default function CommonViewPage() {
                           ...(source?.blocked || []), ...(source?.oneH || []),
                           ...(source?.r1 || []), ...(source?.personal || []), ...(source?.waitingClient || []),
                         ]
-                        const key = getPrintTaskDedupeKey(row.id, entry)
-                        const matching = originals.filter(item => item.taskId && getPrintTaskDedupeKey(row.id, item) === key)
+                        const key = getWeekTaskGroupKey(row.id, entry)
+                        const matching = originals.filter(item => item.taskId && getWeekTaskGroupKey(row.id, item) === key)
                         const targets = Array.from(new Map((matching.length ? matching : [entry])
                           .filter(item => item.taskId).map(item => [item.taskId, item])).values())
                         return <span className="inline-flex flex-wrap items-center gap-2" data-testid="week-task-symbols">
-                          {targets.map(item => <span key={item.taskId} className="inline-flex items-center gap-1">
-                            {targets.length > 1 ? <span className="text-[9px] font-bold">{entryAssignees(item).map(initials).join("/")}</span> : null}
-                            {renderOneHMarkerControl(item)}
-                          </span>)}
+                          {targets.length > 1 ? <TaskGroupMarkerEditor targets={targets.map(item => ({
+                            taskId: item.taskId!, person: entryAssignees(item).join(" / "),
+                            marker: item.oneHMarker, markerByGa: item.oneHMarkerByGa, markerComment: item.oneHMarkerComment,
+                          }))} /> : targets.map(item => <React.Fragment key={item.taskId}>{renderOneHMarkerControl(item)}</React.Fragment>)}
                         </span>
                       }
                       

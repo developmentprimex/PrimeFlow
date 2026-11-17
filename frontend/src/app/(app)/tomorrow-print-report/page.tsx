@@ -707,7 +707,17 @@ export function PrintReportPage({
         const label = taskMarkerLabel(marker) || "—"
         const visibleLength = label.length + (byGa && marker ? 2 : 0)
         select.style.width = `${Math.max(46, 22 + visibleLength * 9)}px`
-        selectedSymbol.textContent = byGa && marker ? `(${label})` : label
+        selectedSymbol.replaceChildren()
+        selectedSymbol.style.gap = "4px"
+        const markers = splitTaskMarkers(marker)
+        if (!markers.length) selectedSymbol.textContent = "—"
+        markers.forEach(code => {
+          const badge = document.createElement("span")
+          badge.dataset.taskMarkerSymbol = code
+          badge.textContent = taskMarkerLabel(code, byGa)
+          if (markers.length > 1) badge.style.cssText = "border:1px solid #bfdbfe;border-radius:4px;background:white;padding:0 3px;line-height:1.1"
+          selectedSymbol.append(badge)
+        })
         selectedSymbol.style.color = marker ? "#DC2626" : "#0F2A5F"
       }
       select.dataset.taskMarkerControl = "true"

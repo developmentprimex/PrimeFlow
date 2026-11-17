@@ -42,7 +42,9 @@
     ".next-recorder-test/ga-personal/types/**/*.ts",
     ".next-recorder-test/ga-personal/dev/types/**/*.ts",
     ".next-recorder-test/direct-markers/types/**/*.ts",
-    ".next-recorder-test/direct-markers/dev/types/**/*.ts"
+    ".next-recorder-test/direct-markers/dev/types/**/*.ts",
+    ".next-recorder-test/task-markers/types/**/*.ts",
+    ".next-recorder-test/task-markers/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

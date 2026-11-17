@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { TASK_MARKER_OPTIONS, splitTaskMarkers, taskMarkerLabel, toggleTaskMarker } from "@/lib/task-markers"
+import { TASK_MARKER_OPTIONS, splitTaskMarkers, toggleTaskMarker } from "@/lib/task-markers"
+import { TaskMarkerDisplay } from "@/components/task-marker-display"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
@@ -24,7 +25,7 @@ export function TaskMarkerSelect({ value, onValueChange, disabled, className, st
     <Button id={id} type="button" variant="outline" disabled={disabled} aria-label={ariaLabel} aria-haspopup="dialog" title={title}
       className={cn("w-full justify-between border-blue-300 bg-blue-50 font-black text-red-600", className)} style={style}
       onClick={() => { setDraft(value || ""); setOpen(true) }}>
-      <span>{taskMarkerLabel(value, byGa) || "—"}</span><span aria-hidden="true" className="ml-1 text-xs text-blue-950">⌄</span>
+      <TaskMarkerDisplay value={value} byGa={byGa} /><span aria-hidden="true" className="ml-1 text-xs text-blue-950">⌄</span>
     </Button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent onClick={event => event.stopPropagation()}>

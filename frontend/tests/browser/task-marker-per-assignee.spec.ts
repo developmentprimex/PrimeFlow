@@ -62,20 +62,21 @@ async function openEditor(page: Page, source: "ga-notes" | "plan-notes") {
   return { editor, symbols, writes, markerWrites, tasks }
 }
 
-test("PX Notes inline symbols edit only the selected assignee without opening Edit Note", async ({ page }) => {
+test("PX Notes list shows read-only symbols and keeps editing inside Edit Note", async ({ page }) => {
   const { editor, markerWrites, tasks, writes } = await openEditor(page, "ga-notes")
   await page.keyboard.press('Escape')
   await expect(editor).toHaveCount(0)
-  const inline = page.locator(`[data-task-marker-id="${tasks[0].id}"]`).first()
-  await inline.getByRole('button', { name: 'Task symbols (maximum 2)', exact: true }).click()
-  const picker = page.getByRole('dialog', { name: 'Simbolet', exact: true })
-  await picker.getByRole('checkbox', { name: 'M3', exact: true }).check()
-  await picker.getByRole('button', { name: 'Ruaj', exact: true }).click()
-  await page.getByRole('dialog', { name: 'Task comment', exact: true }).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(inline).toContainText('KA + M3')
-  expect(markerWrites).toEqual([{ taskId: tasks[0].id, body: { one_h_marker: 'KA,M3', one_h_marker_comment: 'Comment 0' } }])
+  const row = page.getByRole('row').filter({ hasText: 'Shared work' })
+  await expect(row.locator('[data-task-marker-id]')).toHaveCount(0)
+  const badges = row.locator('[data-note-symbol]')
+  await expect(badges).toHaveText(['KA', '?', 'GENT'])
+  await badges.first().click()
+  await expect(page.getByRole('dialog', { name: 'Simbolet', exact: true })).toHaveCount(0)
+  expect(markerWrites).toHaveLength(0)
   expect(writes).toHaveLength(0)
   expect(tasks[1].one_h_marker).toBe('QUESTION')
+  await row.getByRole('cell', { name: 'Edit', exact: true }).getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Edit Note', exact: true }).getByRole('button', { name: 'Symbol for First owner', exact: true })).toContainText('KA')
 })
 
 for (const source of ["ga-notes", "plan-notes"] as const) {
@@ -88,7 +89,7 @@ for (const source of ["ga-notes", "plan-notes"] as const) {
     await expect(picker.getByRole("checkbox", { name: "KA", exact: true })).toBeDisabled()
     await picker.getByRole("button", { name: "Ruaj", exact: true }).click()
     await expect(symbols[0]).toContainText("KA")
-    await expect(symbols[1]).toContainText("? + M3")
+    await expect(symbols[1].locator('[data-task-marker-symbol]')).toHaveText(['?', 'M3'])
     await expect(symbols[2]).toContainText("GENT")
     await editor.getByRole("button", { name: "Save changes", exact: true }).filter({ visible: true }).click()
     await expect(editor).toHaveCount(0)

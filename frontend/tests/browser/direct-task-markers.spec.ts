@@ -84,7 +84,7 @@ async function fixture(page: Page, group: "oneH" | "personal" | "blocked" = "one
 }
 
 async function chooseSymbols(page: Page, id: string) {
-  const editor = page.locator(`[data-task-marker-id="${id}"]`).first()
+  const editor = page.locator(`[data-task-marker-id="${id}"]:visible`).first()
   await editor.getByRole("button", { name: "Task symbols (maximum 2)", exact: true }).click()
   const picker = page.getByRole("dialog", { name: "Simbolet", exact: true })
   await picker.getByRole("checkbox", { name: "!!!", exact: true }).check()
@@ -92,7 +92,7 @@ async function chooseSymbols(page: Page, id: string) {
   await picker.getByRole("button", { name: "Ruaj", exact: true }).click()
   const comment = page.getByRole("dialog", { name: "Task comment", exact: true })
   await comment.getByRole("button", { name: "Save", exact: true }).click()
-  await expect(editor.getByRole("button", { name: "Task symbols (maximum 2)", exact: true })).toContainText("!!! + M3")
+  await expect(editor.locator('[data-task-marker-symbol]')).toHaveText(['!!!', 'M3'])
 }
 
 test("Weekly Planner saves only one owner's task and synchronizes all repeated cards", async ({ page }, info) => {
@@ -103,7 +103,7 @@ test("Weekly Planner saves only one owner's task and synchronizes all repeated c
   expect(writes).toEqual([{ id: taskIds[0], body: { one_h_marker: "CLIENT_URGENT,M3", one_h_marker_comment: "Keep this comment" } }])
   expect(tasks[1].one_h_marker).toBeNull()
   for (const button of await page.locator(`[data-task-marker-id="${taskIds[0]}"] button[aria-haspopup="dialog"]`).all()) {
-    await expect(button).toContainText("!!! + M3")
+    await expect(button.locator('[data-task-marker-symbol]')).toHaveText(['!!!', 'M3'])
   }
   await expect(page.getByRole("dialog", { name: "Task Title", exact: true })).toHaveCount(0)
   await page.emulateMedia({ media: 'print' })
@@ -114,32 +114,81 @@ test("Weekly Planner saves only one owner's task and synchronizes all repeated c
   await page.screenshot({ path: info.outputPath("weekly-symbols.png"), fullPage: true })
 })
 
-test("Common View all week keeps separate editors for merged owners", async ({ page }, info) => {
-  const { tasks, writes } = await fixture(page)
-  await page.goto("/common")
-  await page.getByRole("button", { name: /^This Week$/i }).click()
+async function openGroup(page: Page) {
+  await page.goto('/common')
+  await page.getByRole('button', { name: /^This Week$/i }).click()
   const weekly = page.locator('.week-table-view')
-  await expect(weekly.locator(`[data-task-marker-id="${taskIds[0]}"]`).first()).toBeVisible()
-  await expect(weekly.locator(`[data-task-marker-id="${taskIds[1]}"]`).first()).toBeVisible()
-  await chooseSymbols(page, taskIds[1])
-  expect(writes[0].id).toBe(taskIds[1])
-  expect(tasks[0].one_h_marker).toBeNull()
+  await expect(weekly.locator('[data-task-marker-group]')).toHaveCount(1)
+  await expect(weekly.locator('[data-task-marker-id]')).toHaveCount(0)
+  await weekly.getByRole('button', { name: 'Simbolet e grupit', exact: true }).click()
+  return page.getByRole('dialog', { name: 'Simbolet e grupit', exact: true })
+}
+
+async function chooseGroupSymbols(page: Page) {
+  await page.getByRole('button', { name: 'Simbolet për të gjithë', exact: true }).click()
+  const picker = page.getByRole('dialog', { name: 'Simbolet', exact: true })
+  await picker.getByRole('checkbox', { name: '!!!', exact: true }).check()
+  await picker.getByRole('checkbox', { name: 'M3', exact: true }).check()
+  await picker.getByRole('button', { name: 'Ruaj', exact: true }).click()
+}
+
+test("Common View has one control and applies symbols to all owners by default", async ({ page }, info) => {
+  const { tasks, writes } = await fixture(page)
+  tasks[1].one_h_marker_comment = 'Second owner comment'
+  const dialog = await openGroup(page)
+  await expect(dialog.getByRole('button', { name: 'Për të gjithë', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await chooseGroupSymbols(page)
+  await dialog.getByRole('button', { name: 'Ruaj për të gjithë', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(writes).toEqual(tasks.map(task => ({ id: task.id, body: { one_h_marker: 'CLIENT_URGENT,M3', one_h_marker_comment: task.one_h_marker_comment } })))
+  await expect(page.locator('.week-table-view [data-task-marker-group] button').first().locator('[data-task-marker-symbol]')).toHaveText(['!!!', 'M3'])
+  for (const owner of owners) await expect(page.locator(`.week-table-view .week-table-avatar[title="${owner.full_name}"]`)).toBeVisible()
   await page.screenshot({ path: info.outputPath("common-week-symbols.png"), fullPage: true })
 })
 
 for (const group of ['blocked', 'personal'] as const) {
-  test(`Common View ${group}: separate copies retain both controls and save only the chosen person`, async ({ page }) => {
+  test(`Common View ${group}: individual controls appear only inside the dialog`, async ({ page }) => {
     const { tasks, writes } = await fixture(page, group)
-    await page.goto('/common')
-    await page.getByRole('button', { name: /^This Week$/i }).click()
-    const weekly = page.locator('.week-table-view')
-    await expect(weekly.locator(`[data-task-marker-id="${taskIds[0]}"]`)).toBeVisible()
-    await expect(weekly.locator(`[data-task-marker-id="${taskIds[1]}"]`)).toBeVisible()
+    const dialog = await openGroup(page)
+    await dialog.getByRole('button', { name: 'Sipas personit', exact: true }).click()
+    for (const taskId of taskIds) await expect(dialog.locator(`[data-task-marker-id="${taskId}"]`)).toBeVisible()
     await chooseSymbols(page, taskIds[1])
     expect(writes[0].id).toBe(taskIds[1])
     expect(tasks[0].one_h_marker).toBeNull()
+    await dialog.getByRole('button', { name: 'Mbyll', exact: true }).click()
+    const groupButton = page.locator('.week-table-view [data-task-marker-group] button').first()
+    await expect(groupButton).toHaveText('⋯⌄')
+    await expect(groupButton).toHaveAttribute('title', /First Owner: — · Second Owner: !!! \+ M3/)
   })
 }
+
+test('Common View canceling the shared symbol draft writes nothing', async ({ page }) => {
+  const { writes } = await fixture(page)
+  const dialog = await openGroup(page)
+  await chooseGroupSymbols(page)
+  await dialog.getByRole('button', { name: 'Anulo', exact: true }).click()
+  expect(writes).toHaveLength(0)
+})
+
+test('Common View reports partial saves and retries without erasing owner comments', async ({ page }) => {
+  const { tasks, writes } = await fixture(page)
+  let fail = true
+  await page.route(`**/api/tasks/${taskIds[1]}/one-h-marker`, async route => {
+    if (fail) return route.fulfill({ status: 503, json: { detail: 'Unavailable' } })
+    return route.fallback()
+  })
+  const dialog = await openGroup(page)
+  await chooseGroupSymbols(page)
+  await dialog.getByRole('button', { name: 'Ruaj për të gjithë', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Second Owner')
+  expect(tasks[0].one_h_marker).toBe('CLIENT_URGENT,M3')
+  expect(tasks[1].one_h_marker).toBeNull()
+  fail = false
+  await dialog.getByRole('button', { name: 'Ruaj për të gjithë', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(writes.filter(write => write.id === taskIds[1])).toHaveLength(1)
+  expect(tasks[1].one_h_marker_comment).toBe('Keep this comment')
+})
 
 test('Common View personal: a genuinely shared task has one control for its single task ID', async ({ page }) => {
   const { writes } = await fixture(page, 'personal', true)
@@ -226,7 +275,7 @@ for (const report of ['morning-report', 'after-break-report', 'meetings-report']
 }
 
 for (const source of ['ga-notes', 'plan-notes']) {
-  test(`${source}: an unconverted Note edits its own symbol without changing task copies`, async ({ page }) => {
+  test(`${source}: an unconverted Note ${source === 'ga-notes' ? 'shows read-only symbols in PX Notes' : 'edits its own symbol without changing task copies'}`, async ({ page }) => {
     const { writes } = await fixture(page)
     const note = { id: '11111111-1111-4111-8111-111111111111', content: 'Unconverted direct Note',
       note_type: 'GA', status: 'OPEN', created_by: owners[0].id, department_id: department.id,
@@ -244,6 +293,15 @@ for (const source of ['ga-notes', 'plan-notes']) {
     await test.step('Open the Note list', async () => {
       await page.goto(source === 'plan-notes' ? '/next-week-plan' : '/ga-ka-notes')
     })
+    if (source === 'ga-notes') {
+      const row = page.getByRole('row').filter({ hasText: note.content })
+      await expect(row).toBeVisible()
+      await expect(row.locator('[data-task-marker-id]')).toHaveCount(0)
+      await expect(row.getByRole('button', { name: 'Task symbols (maximum 2)', exact: true })).toHaveCount(0)
+      expect(noteWrites).toHaveLength(0)
+      expect(writes).toHaveLength(0)
+      return
+    }
     await test.step('Save the Note symbols and comment', async () => {
       await chooseSymbols(page, note.id)
     })

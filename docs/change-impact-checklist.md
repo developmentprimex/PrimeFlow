@@ -523,9 +523,22 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 - Vendosja direkte e simboleve: Weekly Planner (kartat e projekteve, sistemore,
   të shpejta dhe kutia e planifikimit), Common View javore, Monthly Planner,
-  Open Tasks, Admin Tasks, WFC, Projects, Task Details, PX Notes/PX JAV dhe preview i 1H Reports përdorin
-  redaktuesin e përbashkët. Common View javore ruan kontroll më vete për çdo
-  `taskId` kur karta bashkon disa persona; deduplikimi i printimit nuk ndryshon.
+  Open Tasks, Admin Tasks, WFC, Projects, Task Details, PX JAV dhe preview i 1H Reports përdorin
+  redaktuesin e përbashkët. Common View javore paraqet një kontroll për kartën
+  me disa persona. Dialogu nis me “Për të gjithë” dhe ruan të njëjtat simbole
+  në taskat e kartës, duke ruajtur komentet individuale. “Sipas personit” hap
+  kontrollet e veçanta vetëm brenda dialogut. Kartat mbeten të bashkuara edhe
+  kur simbolet ndryshojnë dhe kontrolli shfaq `⋯ ▾` me ngjyrë neutrale; hover-i
+  tregon personat dhe simbolet e tyre. Kontrollet React dhe përzgjedhësi në
+  preview SHTYPI Today/Tomorrow shfaqin dy simbolet si etiketa të ndara pa `+`.
+  Teksti i printimit/raporteve ruan formatin e vet. Inicialet mbeten
+  në kartë. Deduplikimi i raporteve të printimit mbetet sipas simboleve;
+  printimi nga shfletuesi shfaq vlerat individuale pa kontrollet.
+  Lista PX Notes shfaq vetëm etiketa të simboleve ekzistuese, pa kontrolle
+  direkte dhe pa tregues bosh. Kjo vlen edhe për Notes me burim PX JAV brenda
+  kësaj liste; simbolet ndryshohen në Edit Note. Faqja më vete PX JAV dhe
+  Weekly Planner ruajnë kontrollet e tyre. Editori i përbashkët i komenteve
+  përdor të njëjtin Edit Note dhe nuk merr kontrolle të reja.
   `task-marker-updates.ts` përditëson vetëm kopjet live të të njëjtit task dhe
   pastron cache-in Common View. Printimi përdor vlerën e ruajtur, pa butonat.
   M1/M2/M3 kanë panelin “Simbolet e detyrave” për detyrat aktuale të datës;

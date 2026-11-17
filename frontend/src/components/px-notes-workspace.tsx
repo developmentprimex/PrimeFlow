@@ -1,9 +1,8 @@
 "use client"
 
-import { splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
+import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
-import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerSelect } from "@/components/task-marker-select"
 import { flushSync } from "react-dom"
@@ -4806,16 +4805,11 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                     ) : null}
                                   </span>
                                 ) : null}
-                                {taskInfo?.taskId || note.is_converted_to_task ? (
-                                  Object.entries(taskInfo?.assigneeStates || {}).map(([personId, state]) => state.taskId ? (
-                                    <span key={state.taskId} className="inline-flex items-center gap-1" title={taskInfo?.assignees.find(person => person.id === personId)?.full_name || personId}>
-                                      <span className="text-[10px] font-bold">{getInitials(taskInfo?.assignees.find(person => person.id === personId)?.full_name || "")}</span>
-                                      <TaskOneHMarkerEditor taskId={state.taskId} marker={state.oneHMarker} markerByGa={state.oneHMarkerByGa} markerComment={state.oneHMarkerComment} />
-                                    </span>
-                                  ) : null)
-                                ) : <TaskOneHMarkerEditor noteId={note.id} noteSource={note.source === "PX_JAV" ? "plan-notes" : "ga-notes"}
-                                  marker={note.one_h_marker} markerByGa={note.one_h_marker_by_ga} markerComment={note.one_h_marker_comment}
-                                  onSaved={fields => setNotes(current => current.map(item => item.id === note.id ? { ...item, ...fields } : item))} />}
+                                {displayMarkers.map(symbol => <span key={symbol.key} data-note-symbol={symbol.key}
+                                  className="inline-flex min-h-6 shrink-0 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-red-600 [text-shadow:0_0_0_currentColor]"
+                                  title={[symbol.person, symbol.comment].filter(Boolean).join(": ") || "Note symbol"}>
+                                  {taskMarkerLabel(symbol.marker, symbol.byGa)}
+                                </span>)}
                                 {isKnowledgeNote(note) ? (
                                   <Link
                                     href={`${KNOWLEDGE_CONFIG[note.knowledge_type || "PROMPT"].route}?view=notes`}
