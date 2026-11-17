@@ -23,6 +23,7 @@ import discord_agent_client as agent_client
 import discord_m2_client as m2_client
 import discord_m3_client as m3_client
 import discord_reports
+import discord_ga_replies as ga_replies_client
 from discord_channel_names import personal_channel_name
 import discord_one_h_client as one_h_client
 import discord_m2_approvals as m2_approvals
@@ -367,6 +368,7 @@ class PrimeFlowBot(discord.Client):
         self.m2_questions.start()
         self.meeting_alerts.start()
         self.agent_results.start()
+        self.ga_reply_evidence.start()
 
     async def show_personal_report(self, interaction, kind):
         await interaction.response.defer(thinking=True)
@@ -1071,7 +1073,19 @@ class PrimeFlowBot(discord.Client):
     async def before_mira_host_schedule(self):
         await self.wait_until_ready()
 
+    @tasks.loop(seconds=120)
+    async def ga_reply_evidence(self):
+        try:
+            await ga_replies_client.sync(self)
+        except Exception as exc:
+            log.warning("GA reply evidence unavailable: %s", type(exc).__name__)
+
+    @ga_reply_evidence.before_loop
+    async def before_ga_reply_evidence(self):
+        await self.wait_until_ready()
+
     async def close(self):
+        self.ga_reply_evidence.cancel()
         self.voice_meeting_schedule.cancel()
         self.voice_meeting_results.cancel()
         self.mira_host_schedule.cancel()

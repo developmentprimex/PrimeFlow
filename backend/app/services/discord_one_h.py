@@ -21,6 +21,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.discord_task_tools import plain_text
+from app.services.discord_task_status import settled_for_questions
 
 SLOTS = ('10:00', '11:00', '11:50', '14:20', '16:00')
 NEXT_QUESTION = 'Me çka ke me vazhdu në slotin tjetër?'
@@ -179,7 +180,7 @@ async def sync_jobs(db, at):
 
 
 def all_done(report):
-    return bool(report['tasks']) and all(t['status'] == 'DONE' for t in report['tasks'])
+    return bool(report['tasks']) and all(settled_for_questions(t['status']) for t in report['tasks'])
 
 
 def report_state(report):

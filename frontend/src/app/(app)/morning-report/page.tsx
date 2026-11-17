@@ -59,6 +59,7 @@ type DeliveryHistory = {
 function sectionGroupLabel(section: Section) {
   // Built-in manuals are first; Common View–synced extras sit after them and before autos.
   const knownAuto = [
+    "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
     "GA/HV/DV TASKS",
     "GA TASKS",
     "HV TASKS",

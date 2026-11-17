@@ -1903,6 +1903,7 @@ export default function CommonViewPage() {
   const [formEndDate, setFormEndDate] = React.useState("")
   const [formEndDateDisplay, setFormEndDateDisplay] = React.useState("")
   const [formFullDay, setFormFullDay] = React.useState(false)
+  const [formAbsenceFullDay, setFormAbsenceFullDay] = React.useState(false)
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
   const [formError, setFormError] = React.useState("")
@@ -6219,6 +6220,7 @@ export default function CommonViewPage() {
     setFormEndDate("")
     setFormEndDateDisplay("")
     setFormFullDay(false)
+    setFormAbsenceFullDay(false)
     setFormTitle("")
     setFormNote("")
     setFormError("")
@@ -6344,8 +6346,11 @@ export default function CommonViewPage() {
         const endLine = formUntil ? `Until: ${formUntil}` : ""
         const delayLines = endLine ? `${startLine}\n${endLine}` : startLine
         description = description ? `${description}\n\n${delayLines}` : delayLines
-      } else if (formType === "absent" && formFrom && formTo) {
-        description = description ? `${description}\n\nFrom: ${formFrom} - To: ${formTo}` : `From: ${formFrom} - To: ${formTo}`
+      } else if (formType === "absent" && (formAbsenceFullDay || (formFrom && formTo))) {
+        const absenceFrom = formAbsenceFullDay ? "08:00" : formFrom
+        const absenceTo = formAbsenceFullDay ? "23:00" : formTo
+        const absenceTime = `From: ${absenceFrom} - To: ${absenceTo}`
+        description = description ? `${description}\n\n${absenceTime}` : absenceTime
         } else if (formType === "leave") {
           const leaveInfo =
             formEndDate && formEndDate !== formDate
@@ -13312,6 +13317,21 @@ export default function CommonViewPage() {
             color: #475569;
             font-weight: 700;
           }
+          .attendance-time-fields {
+            align-items: stretch;
+            gap: 14px;
+          }
+          .attendance-time-fields .leave-checkbox {
+            align-self: flex-start;
+            min-width: 0;
+            cursor: pointer;
+          }
+          .attendance-time-fields .leave-checkbox input {
+            width: 16px;
+            height: 16px;
+            margin: 0;
+            accent-color: #2563eb;
+          }
       `}</style>
 
       <div className="common-sticky" ref={stickyRef}>
@@ -17741,28 +17761,40 @@ export default function CommonViewPage() {
                   )}
 
                   {formType === "absent" && (
-                    <>
-                      <div className="form-row">
-                        <label htmlFor="cv-from">From </label>
+                    <div className="form-row span-2 leave-inline attendance-time-fields">
+                      <label className="checkbox leave-checkbox">
                         <input
-                          id="cv-from"
-                          className="input"
-                          type="time"
-                          value={formFrom}
-                          onChange={(e) => setFormFrom(e.target.value)}
+                          type="checkbox"
+                          checked={formAbsenceFullDay}
+                          onChange={(e) => setFormAbsenceFullDay(e.target.checked)}
                         />
-                      </div>
-                      <div className="form-row">
-                        <label htmlFor="cv-to">Until (</label>
-                        <input
-                          id="cv-to"
-                          className="input"
-                          type="time"
-                          value={formTo}
-                          onChange={(e) => setFormTo(e.target.value)}
-                        />
-                      </div>
-                    </>
+                        All day
+                      </label>
+                      {!formAbsenceFullDay && (
+                        <div className="leave-times">
+                          <div className="mini-row">
+                            <label htmlFor="cv-from">From</label>
+                            <input
+                              id="cv-from"
+                              className="input"
+                              type="time"
+                              value={formFrom}
+                              onChange={(e) => setFormFrom(e.target.value)}
+                            />
+                          </div>
+                          <div className="mini-row">
+                            <label htmlFor="cv-to">Until</label>
+                            <input
+                              id="cv-to"
+                              className="input"
+                              type="time"
+                              value={formTo}
+                              onChange={(e) => setFormTo(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {formType === "leave" && (
@@ -17836,7 +17868,7 @@ export default function CommonViewPage() {
                           </svg>
                         </div>
                       </div>
-                      <div className="form-row span-2 leave-inline">
+                      <div className="form-row span-2 leave-inline attendance-time-fields">
                         <label className="checkbox leave-checkbox">
                           <input
                             type="checkbox"

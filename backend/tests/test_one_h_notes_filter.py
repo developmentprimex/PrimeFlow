@@ -73,7 +73,7 @@ class NotesFilterTests(unittest.TestCase):
              patch.object(api, 'generate_fresh', AsyncMock(return_value=self.full)), \
              patch.object(api, 'render_ga_recipient_email_html', AsyncMock(return_value='FULL GA REPORT')):
             result = asyncio.run(api.preview(api.PreviewRequest(
-                report_date=self.full.report_date, report_slot='11:00'), AsyncMock(), SimpleNamespace()))
+                report_date=self.full.report_date, report_slot='11:00'), AsyncMock(), SimpleNamespace(username='gane.arifaj')))
         self.assertEqual(result['html'], 'FULL GA REPORT')
         self.assertGreater(result['task_count'], 0)
         self.assertNotIn('Hourly task', result['notes_html'])
@@ -88,6 +88,27 @@ class NotesFilterTests(unittest.TestCase):
                 report_date=self.full.report_date, report_slot='11:00', reason='manual report', notes_only=True,
             ), AsyncMock(), SimpleNamespace(id=uuid.uuid4())))
         self.assertNotIn('notes_only', delivery.call_args.kwargs)
+
+    def test_ga_supplements_require_ga_username_for_json_and_html(self):
+        for username in ('gane.arifaj', ' GANE.ARIFAJ ', 'other.user', None):
+            for role in ('ADMIN', 'MANAGER', 'STAFF'):
+                for format in ('json', 'html'):
+                    with self.subTest(username=username, role=role, format=format), \
+                         patch.object(api, '_recipient_map', AsyncMock(return_value={'to': ['ga@primexeu.com']})), \
+                         patch.object(api, 'load_common_view', AsyncMock(return_value={})), \
+                         patch.object(api, 'generate_fresh', AsyncMock(return_value=self.full)), \
+                         patch.object(api, 'render_ga_recipient_email_html', AsyncMock(return_value='GA TABLES')) as ga:
+                        result = asyncio.run(api.preview(api.PreviewRequest(
+                            report_date=self.full.report_date, report_slot='11:00', format=format,
+                        ), AsyncMock(), SimpleNamespace(username=username, role=role)))
+                        html = result['html'] if format == 'json' else result.body.decode()
+                        if username and username.strip().casefold() == 'gane.arifaj':
+                            ga.assert_awaited_once()
+                            self.assertEqual(html, 'GA TABLES')
+                        else:
+                            ga.assert_not_awaited()
+                            self.assertEqual(html, render_html(self.full))
+                            self.assertIn('Hourly task', html)
 
 
 if __name__ == '__main__':

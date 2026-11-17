@@ -48,6 +48,42 @@ Lidhja me llogarinë identifikohet nga ID-ja dhe topic-u i kanalit, pavarësisht
 
 ## Raportet me komandë
 
+### M1: përgjigjet nga GA te kërkesat e stafit
+
+Seksioni **A ka reply nga GA tek detyrat nga stafi për GA?** plotësohet
+automatikisht nga kanali `#det-nga-stafi-per-ga`, ID `1572160944358953042`.
+`DISCORD_GA_REPLIES_CHANNEL_ID` lejon ndryshimin e këtij burimi. Identiteti GA
+merret vetëm nga lidhja aktive Discord e përdoruesit `gane.arifaj` në serverin
+e konfiguruar, jo nga emri i afishuar në Discord.
+
+Çdo mesazh fillestar nga një person tjetër që përmend GA dhe ka tekst ose
+bashkëngjitje llogaritet si një kërkesë, edhe nëse përmban disa pyetje.
+Një përmendje bosh, dokumentet pa përmendje, botët dhe mesazhet e sistemit nuk
+numërohen. Përgjigjja konfirmohet vetëm nga një **Reply** i GA (edhe përmes
+zinxhirit të përgjigjeve) ose mesazhi i tij në thread-in publik të kërkesës.
+Mesazhet e lira, reagimet dhe përgjigjet e kolegëve nuk e mbyllin kërkesën.
+Prandaj **pa reply të lidhur** nuk provon mungesën e një përgjigjeje jashtë
+kësaj rrjedhe. Nuk bëhet lidhje automatike me taska të platformës sipas titullit.
+
+Boti lexon 30 ditët e fundit çdo 120 sekonda, pa dërguar mesazhe ose ndryshuar
+lejet e kanalit. Kufijtë janë 2000 mesazhe kryesore, 25 thread-e publike dhe deri
+500 mesazhe për thread; kufizimi shënohet si kontroll i pjesshëm. Në databazë
+ruhet evidenca ditore, jo skedarët e bashkëngjitur. M1 tregon numërimin, kohën
+e kontrollit dhe URL-të e kërkesave/përgjigjeve. Burimi i dështuar ose më i
+vjetër se 5 minuta shfaqet si i pakonfirmuar, jo si zero kërkesa në pritje.
+
+Gjenerimi, rifreskimi dhe preview/dërgimi i draftit M1 përdorin këtë përmbledhje;
+emaili dhe bashkëngjitjet e M1 marrin të njëjtin seksion. Raportet e dërguara
+ruajnë përmbledhjen e tyre; rigjenerimi i një date të kaluar përdor vetëm evidencën
+e ruajtur për atë datë. Pyetja për ndryshimin e planit, M1 PIKAT, M2 dhe M3
+mbeten me rrjedhat ekzistuese.
+
+Aktivizimi kërkon migrimin `0190_discord_ga_reply_snapshot`, rinisjen e API-së
+dhe botit kryesor, lidhjen aktive të GA dhe `DISCORD_MESSAGE_CONTENT_ENABLED=true`.
+Boti duhet të ketë `View Channel` dhe `Read Message History` në kanalin burim.
+Kodi nuk i ndryshon këto leje automatikisht. Verifiko numërimin në server përpara
+se ta konsiderosh aktiv; testet lokale nuk kontaktojnë Discord-in.
+
 Në kanalin personal të krijuar nga `/lidh`, `/m2` dhe `/m3` hapin raportin
 personal të ditës, edhe jashtë orarit të njoftimeve automatike. Çdo pyetje vjen
 drejtpërdrejt në mesazhin e vet, me të njëjtin tekst dhe butona si dërgimi

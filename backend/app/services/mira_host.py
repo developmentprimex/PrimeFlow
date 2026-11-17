@@ -36,6 +36,7 @@ from app.models.task import Task
 from app.models.task_strike_event import TaskStrikeEvent
 from app.models.user import User
 from app.services.mira_host_speech import speech_text as albanian_speech
+from app.services.discord_task_status import is_wfe, settled_for_questions
 
 log = logging.getLogger("primeflow.mira.host")
 
@@ -227,7 +228,7 @@ class SlotData:
             tasks += [item for earlier in SLOTS[:SLOTS.index(slot)] for item in self.slots[earlier]
                       if str(item.get("status") or "TODO").upper() in {"TODO", "IN_PROGRESS"}]
         if slot == BLOCKED_SLOT:
-            tasks += [item for item in self.blocked if str(item.get("status") or "TODO").upper() not in {"DONE", "COMPLETED"}]
+            tasks += [item for item in self.blocked if not settled_for_questions(item.get("status"))]
         for item in tasks:
             for uid in self.owners(item):
                 name = self.users.get(uid, {}).get("full_name")
@@ -257,7 +258,7 @@ class SlotData:
         for slot in SLOTS:
             for item in self.slots.get(slot, []):
                 if "FLAG" not in str(item.get("one_h_marker") or item.get("oneHMarker") or "").upper().split(",") or \
-                        str(item.get("status") or "").upper() == "DONE":
+                        settled_for_questions(item.get("status")):
                     continue
                 line = task_line(item)
                 for uid in self.owners(item) or [""]:
@@ -287,7 +288,7 @@ class SlotData:
         return result
 
     def blocked_tasks(self, user_id: str) -> list[dict]:
-        return [item for item in self.blocked if user_id in self.owners(item)]
+        return [item for item in self.blocked if user_id in self.owners(item) and not is_wfe(item.get("status"))]
 
     def name(self, user_id: str) -> str:
         return (self.users.get(user_id) or {}).get("full_name") or "?"
@@ -395,7 +396,7 @@ def person_brief(data: SlotData, slot: str, user_id: str) -> dict:
         "continuation_check_tasks": [task_line(item) for check_slot in (slot, previous)
                                      for item in data.user_tasks(check_slot, user_id)],
         # Everything in the slot is done: Mira asks what comes next instead of asking about each task.
-        "all_done": bool(current) and all(t["status"] == "DONE" for t in current),
+        "all_done": bool(current) and all(settled_for_questions(t["status"]) for t in current),
         "blocked": [task_line(i) for i in data.blocked_tasks(user_id)] if slot == BLOCKED_SLOT else [],
     }
 
@@ -716,7 +717,7 @@ async def next_turn(db: AsyncSession, meeting: Mira1HMeeting, summary: str | Non
         brief = person_brief(data, meeting.slot, str(active.user_id))
         discussed = await discussion_context(db, meeting, str(active.user_id))
         missing = {t["task_id"]: t["spoken"] for group in ("current", "previous_open", "blocked")
-                   for t in brief[group] if t["task_id"] and t["status"] != "DONE" and t["task_id"] not in discussed}
+                   for t in brief[group] if t["task_id"] and not settled_for_questions(t["status"]) and t["task_id"] not in discussed}
         if missing:
             raise HTTPException(409, "Para mbylljes ruaj record_task_discussion për detyrat e pasqaruara "
                                 "(unclear=true kur s'pati raportim të qartë): " + json.dumps(missing, ensure_ascii=False))

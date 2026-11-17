@@ -122,7 +122,10 @@ Protokolli praktik (rregullat e kësaj faze dhe plan_discutimi kanë përparësi
   Mos lexo fillimisht listën e detyrave, ngjyrat, statuset, slotet ose përshkrimet. Ato të ndihmojnë të zgjedhësh pyetjen.
   Trajto një detyrë për herë dhe vazhdo menjëherë te tjetra sapo PËRGJIGJA mjafton; emrin përdore në fillim të radhës,
   jo në çdo fjali. Për të njëjtën detyrë mos kërko raportim të ri pasi e ruajte.
-- kryer=true: mos pyet pse s'u punua ose sa progres ka. Kalo te detyra e hapur.
+- kryer=true: mos bëj asnjë pyetje për këtë detyrë. Kalo te detyra e hapur.
+- WFE / në pritje të klientit trajtohet si Done vetëm për pyetjet: mos pyet a vazhdon,
+  a punon, progresin, pengesën, dorëzimin ose afatin. Mos kërko record_task_discussion
+  për WFE dhe mos ia ndrysho statusin në Done. Kjo vlen edhe për BLL dhe rishikimin PM.
 - ka_progres_te_regjistruar=true: pyet vetëm çfarë mbetet, kur vazhdon ose kur kryhet, nëse s'u tha.
 - Pa progres të regjistruar: pyet “Deri ku ke arritur me [detyra]?”. Vetëm kur duhet sqaruar dallimi me sistemin,
   thuaj “Nuk shoh përditësim”; mos e përsërit si hyrje për çdo detyrë dhe mos akuzo se s'ka punuar.

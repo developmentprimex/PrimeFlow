@@ -84,6 +84,27 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- M1: pyetja **A ka reply nga GA tek detyrat nga stafi për GA?** përdor
+  evidencën ditore `discord_ga_reply_snapshots` nga kanali Discord
+  `1572160944358953042`, përmes `discord_ga_replies.py` në bot dhe shërbimit
+  përkatës të API-së. Numëron mesazhet fillestare me përmendje GA gjatë 30
+  ditëve dhe përgjigjet e lidhura me Reply/thread publik; nuk bën përputhje
+  titujsh me taskat. Kontrollo gjenerimin, grupin Auto-filled në faqen M1,
+  rifreskimin, preview, emailin manual/automatik dhe Word/PNG/Text të të njëjtit
+  raport. Dështimet/lejet e pamjaftueshme, identiteti GA i revokuar, kufijtë e
+  leximit dhe burimi i vjetruar nuk duhet të raportohen si zero në pritje.
+  Raportet e dërguara ruajnë përmbledhjen ekzistuese; datat e vjetra lexojnë
+  vetëm evidencën e datës së vet. Pyetja e planit në M1, M1 PIKAT, M2/M3 dhe
+  Common View nuk marrin këtë automatizim. Kërkohet migrimi `0190` dhe rinisja
+  e API-së/botit; lejet e kanalit dhe Message Content kontrollohen veçmas.
+
+- Discord: WFE (`WAITING_CLIENT`) trajtohet si Done vetëm për pyetjet. Host-i
+  Mira nuk kërkon progres, vazhdim, afat ose `record_task_discussion` për WFE,
+  përfshirë BLL dhe rishikimin PM. Pyetjet personale 1H dhe M2/M3 përjashtojnë
+  WFE nga kandidatët; kartat e vjetra M2/M3 mbyllin kontrollet pas rifreskimit.
+  Statusi real WFE, Common View, Department Views, Finance, SHTYPI, raportet
+  M1/M2/M3 dhe llogaritjet e realizimit nuk kthehen në Done nga ky rregull.
+
 - Simbolet e prioriteteve `!`, `!!`, `!!!`: PX Notes ka legjendë përmbledhëse
   dhe tabelë të detajuar; Common View ka legjendë në ekran dhe HTML të veçantë
   për printim. My View në Development, Graphic Design dhe Product Content
@@ -151,6 +172,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Snapshot-et aktuale të SHTYPI kanë `attendance_filter_version=2`; kopjet e
   vjetra aktualizohen para mbylljes. Arkivat e ngrira në 16:00 dhe skedarët e
   dërguar më parë mbeten dokumente historike dhe nuk rishkruhen me të dhëna të reja.
+  Formulari Common View ka “All day” edhe për Mungese: ruan intervalin ekzistues
+  `From: 08:00 - To: 23:00`, që lexohet nga pamja, printimi, eksportet dhe
+  kontrollet e konflikteve pa fushë të re në API. Çaktivizimi rikthen orët e
+  zgjedhura për mungesë të pjesshme; zgjedhja është e ndarë nga “All day” i PV.
 
 - Hyrja automatike e Mira AI Agent dërgon `request_id=autoai-YYYYMMDDHHMM`
   (tentativat pasuese shtojnë `-2` / `-3`). Skema `VoiceStart` te
@@ -566,6 +591,13 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
   çaktivizimin/kalimin te Done/Strikes, rigjenerimin dhe raportin pa Notes.
   Emaili manual/automatik, shkarkimet historike dhe SHTYPI Today/Tomorrow mbeten
   raportet e tyre të plota; ky filtër nuk i ndryshon.
+
+- 1H Reports: shtesat GA (Time Table, GA/HV dhe SHTYPI i integruar) në preview
+  JSON/HTML shfaqen vetëm për përdoruesin e autentikuar `gane.arifaj`, pavarësisht
+  rolit dhe marrësve të konfiguruar. Kontrollo edhe llogaritë e tjera ADMIN,
+  MANAGER dhe STAFF. Word/PNG/Text përdorin dokumentin bazë; emaili i GA ka
+  ndarjen e vet sipas marrësit në `primeflow_report_delivery.py`. SHTYPI
+  Today/Tomorrow dhe eksporti GA Time Table kanë rrjedha të veçanta.
 
 - Njoftimi automatik i deployment-it në Discord përdor workflow-n dhe
   `backend/scripts/notify_discord_deploy.py`: lexon lidhjet aktive dhe dërgon

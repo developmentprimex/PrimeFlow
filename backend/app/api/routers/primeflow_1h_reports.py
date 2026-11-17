@@ -280,7 +280,7 @@ async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(require
 async def preview(
     payload: PreviewRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     recipients = await _recipient_map(payload)
     # Load Common View once; the GA email body below reuses it instead of
@@ -300,7 +300,12 @@ async def preview(
         return _file_response(render_png(document), "image/png", filename + ".png")
     if payload.format == "txt":
         return _file_response(render_plain_text(document).encode(), "text/plain; charset=utf-8", filename + ".txt")
-    email_html = render_html(document) if payload.notes_only else await render_ga_recipient_email_html(db, document, payload.report_date, source_data=source_data)
+    # GA's supplementary tables belong only to the authenticated GA account,
+    # regardless of the configured email recipients or the viewer's role.
+    if not payload.notes_only and (getattr(user, "username", None) or "").strip().casefold() == "gane.arifaj":
+        email_html = await render_ga_recipient_email_html(db, document, payload.report_date, source_data=source_data)
+    else:
+        email_html = render_html(document)
     if payload.format == "html":
         return HTMLResponse(email_html)
     return {

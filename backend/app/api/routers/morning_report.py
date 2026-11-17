@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.report_attendance import filter_report_sections
+from app.services.discord_ga_replies import refresh_m1_section
 
 import uuid
 from datetime import date, datetime
@@ -236,6 +237,8 @@ async def get_draft(
     # remain visible in a previously generated or sent report indefinitely.
     sections = normalize_morning_report_sections(row.sections)
     sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
+    if row.status != "SENT":
+        sections = await refresh_m1_section(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
@@ -368,6 +371,8 @@ async def preview_draft(
         raise HTTPException(status_code=404, detail="Draft not found")
     sections = normalize_morning_report_sections(row.sections)
     sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
+    if row.status != "SENT":
+        sections = await refresh_m1_section(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
@@ -389,6 +394,8 @@ async def send_draft(
         raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
     sections = normalize_morning_report_sections(row.sections)
     sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
+    if row.status != "SENT":
+        sections = await refresh_m1_section(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
     row.sections = sections
     plain_text = render_plain_text(row.subject, row.report_date, sections)

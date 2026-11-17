@@ -156,6 +156,7 @@ class Settings(BaseSettings):
     DISCORD_MEETING_CONTROL_CHANNEL_ID: str | None = None
     DISCORD_GUILD_ID: str | None = None
     DISCORD_CATEGORY_ID: str | None = None
+    DISCORD_GA_REPLIES_CHANNEL_ID: str = "1572160944358953042"
     DISCORD_MEETING_VOICE_CHANNEL_ID: str | None = None
     # Voice channel of the 1H slot meetings; slot reminders link to it.
     DISCORD_1H_VOICE_CHANNEL_ID: str | None = "1493866120338477119"

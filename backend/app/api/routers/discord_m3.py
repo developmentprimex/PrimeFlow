@@ -131,9 +131,13 @@ async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
         report.generated_at = now
         ids = {uuid.UUID(row['task_id']) for section in ('untouched', 'delivery') for row in data.get(section, [])}
         tasks = (await db.execute(select(Task).where(Task.id.in_(ids), Task.is_active.is_(True)))).scalars().all() if ids else []
+        from app.services.discord_task_status import is_wfe
+        waiting = {str(task.id) for task in tasks if is_wfe(task.status)}
         owners = await task_owners(db, tasks)
         for kind in ('untouched', 'delivery'):
             for row in data.get(kind, []):
+                if row['task_id'] in waiting or is_wfe(row.get('status')):
+                    continue
                 for uid in owners.get(row['task_id'], set()):
                     candidates.append((uid, kind, row, day))
         for uid, row in await meeting_candidates(db, now, {link.user_id for link in links}):
@@ -254,6 +258,10 @@ async def live_payload(db, q, link, user):
         task = await task_owned(db, user.id, q.task_id)
         result['live_dates'] = {field: getattr(task, field).isoformat() if getattr(task, field) else None for field in ('start_date', 'due_date')}
         result['progress'] = task.progress_percentage or 0
+        from app.services.discord_task_status import is_wfe
+        if is_wfe(task.status):
+            result['resolved'] = 'Detyra është WFE; nuk kërkohet përgjigje në Discord.'
+            return result
         if task.status == 'DONE' and q.kind != 'delivery':
             result['resolved'] = 'Detyra është përfunduar.'
         if q.kind in {'untouched', 'delivery'} and not reports.select_task_sections([task], [], q.day)[q.kind]:

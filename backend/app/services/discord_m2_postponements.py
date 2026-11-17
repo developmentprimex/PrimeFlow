@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.primeflow_report import report_timezone
+from app.services.discord_task_status import settled_for_questions
 
 APPROVER_USERNAME = 'diellza.veliu'
 FIELDS = {'start': ('start_date',), 'due': ('due_date',), 'start_due': ('start_date', 'due_date')}
@@ -44,6 +45,6 @@ def assert_snapshot_unchanged(original, current):
     after = {row['id']: row for row in current}
     if before.keys() != after.keys() or any(
         any(before[key].get(field) != after[key].get(field) for field in ('start_date', 'due_date', 'owners'))
-        or not after[key]['active'] or after[key]['status'] == 'DONE' for key in before
+        or not after[key]['active'] or settled_for_questions(after[key]['status']) for key in before
     ):
         raise HTTPException(409, {'code': 'M2_POSTPONEMENT_STALE', 'message': 'Datat, përgjegjësit ose gjendja kanë ndryshuar. Kërko një shtyrje të re.'})

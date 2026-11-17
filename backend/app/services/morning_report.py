@@ -67,7 +67,7 @@ HV_TASKS_TITLE = "HV TASKS"
 DV_TASKS_TITLE = "DV TASKS"
 GA_HV_DV_TASKS_TITLE = "GA/HV/DV TASKS"
 SECTION_TITLES = [
-    # Manual answer first
+    # Automatic Discord reply summary first
     "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
     # Auto-filled from PrimeFlow
     "(GA) DET NGA EMAILS TE REJA",
@@ -82,7 +82,7 @@ SECTION_TITLES = [
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0], SECTION_TITLES[6], *SECTION_TITLES[1:6], SECTION_TITLES[7], SECTION_TITLES[8]
 ]
-MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
+MANUAL_SECTION_TITLES: set[str] = set()
 GA_HV_DV_TASK_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7),
     ("STATUS", 18), ("T/Y/O", 5), ("TITULLI", 52),
@@ -126,7 +126,7 @@ def _emails_default_body() -> str:
 
 def _default_body(title: str) -> str:
     if title == SECTION_TITLES[0]:
-        return "(Ploteso manualisht)"
+        return "Përgjigjet GA nga Discord përditësohen kur gjenerohet raporti."
     if title == SECTION_TITLES[1]:
         return _emails_default_body()
     if title == SECTION_TITLES[2]:
@@ -800,8 +800,9 @@ async def build_morning_report_sections(
     ]
 
     attendance = _attendance_section(entries, names, report_day)
+    from app.services.discord_ga_replies import summary_for_day
     sections = [
-        {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[0], "body": await summary_for_day(db, report_day)},
         {"title": GA_HV_DV_TASKS_TITLE, "body": task_tables},
         {"title": SECTION_TITLES[1], "body": email_tasks},
         {"title": SECTION_TITLES[2], "body": attendance},
@@ -864,9 +865,15 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
         if group != current_group:
             section_chunks.append(_render_group_label_html(group))
             current_group = group
-        section_chunks.append(
-            _render_section_block_html(index, section["title"], section.get("body") or "")
-        )
+        block = _render_section_block_html(index, section["title"], section.get("body") or "")
+        if (section.get("section_key") or section["title"]) == SECTION_TITLES[0]:
+            # Link only canonical numeric Discord evidence URLs in this M1 section.
+            block = re.sub(
+                r"https://discord\.com/channels/\d+/\d+(?:/\d+)?",
+                lambda match: f'<a href="{match[0]}" style="color:#2563eb;word-break:break-all;">{match[0]}</a>',
+                block,
+            )
+        section_chunks.append(block)
     return _wrap_report_email_html(
         subject,
         f"Sot: {report_day:%d.%m.%Y}",

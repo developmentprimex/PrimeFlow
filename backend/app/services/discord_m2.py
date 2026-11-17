@@ -6,6 +6,7 @@ import json
 from datetime import datetime, time
 from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.primeflow_report import report_timezone
+from app.services.discord_task_status import is_wfe
 
 KINDS = {"unfinished": "Detyrë AM / 08:00 / Deadline e pakryer",
          "postponed": "Pse u shty detyra?", "progress": "Progresi me GA / F / personalisht",
@@ -30,7 +31,7 @@ def question_rows(data: dict) -> list[tuple[str, dict]]:
                           ("postponed_am", "postponed"), ("ga_progress", "progress"), ("delivery", "delivery"),
                           ("pm_continuation", "continuation")):
         for row in data.get(section, []):
-            if not row.get("task_id") or (kind != "delivery" and row.get("status") == "DONE"):
+            if not row.get("task_id") or is_wfe(row.get("status")) or (kind != "delivery" and row.get("status") == "DONE"):
                 continue
             key = context_key(kind, row)
             if key in seen:

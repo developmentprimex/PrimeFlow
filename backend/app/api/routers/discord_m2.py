@@ -109,6 +109,8 @@ async def collect_questions(db: AsyncSession, *, now: datetime, only_user_id: uu
     task_rows = (await db.execute(select(Task.id, Task.assigned_to, Task.status).where(
         Task.id.in_(ids), Task.is_active.is_(True)))).all() if ids else []
     owners = {task_id: {owner} if owner else set() for task_id, owner, _ in task_rows}
+    from app.services.discord_task_status import is_wfe
+    waiting = {task_id for task_id, _, status in task_rows if is_wfe(status)}
     done = {task_id for task_id, _, status in task_rows if str(getattr(status, 'value', status)) == 'DONE'}
     if ids:
         for task_id, owner in (await db.execute(select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(ids)))).all():
@@ -121,7 +123,7 @@ async def collect_questions(db: AsyncSession, *, now: datetime, only_user_id: uu
     for link in links:
         for kind, snapshot in candidates:
             task_id = uuid.UUID(snapshot['task_id'])
-            if kind != 'delivery' and task_id in done:
+            if task_id in waiting or (kind != 'delivery' and task_id in done):
                 continue
             if link.user_id not in owners.get(task_id, set()):
                 continue
@@ -342,6 +344,9 @@ async def update_report_answers(db, report, question):
 async def answer(question_id: uuid.UUID, payload: Answer, db: AsyncSession = Depends(get_db)):
     question, link, user = await own_question(db, question_id, payload)
     task = await task_owned(db, user.id, question.task_id)
+    from app.services.discord_task_status import is_wfe
+    if is_wfe(task.status):
+        raise HTTPException(409, 'Detyra është WFE; nuk kërkohet përgjigje në Discord.')
     if question.kind != 'delivery' and str(getattr(task.status, 'value', task.status)) == 'DONE':
         raise HTTPException(409, 'Detyra është përfunduar ndërkohë.')
     try:

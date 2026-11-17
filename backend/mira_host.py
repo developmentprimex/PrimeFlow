@@ -24,6 +24,7 @@ from discord import app_commands
 from app.config import settings
 from app.services.mira_host_prompt import PM_PLAN_QUESTION, NEXT_DAY_PLAN_QUESTION
 from app.services.mira_host_speech import speech_text
+from app.services.discord_task_status import settled_for_questions
 from discord_voice_client import VOICE_DIR, VoiceCaptureClient
 
 PREFIX = "/bot/mira-host"
@@ -88,9 +89,9 @@ def turn_brief(current: dict) -> dict:
             points = strikes.get(task_id, [])
             discussion.append({
                 "task_id": task_id, "grupi": label, "detyra": task.get("read_aloud") or task.get("spoken") or task["title"],
-                "status": task.get("status_label") or task["status"], "kryer": task["status"] == "DONE",
+                "status": task.get("status_label") or task["status"], "kryer": settled_for_questions(task["status"]),
                 "progres_perqindje": percentage, "strike_ne_interval": points,
-                "ka_progres_te_regjistruar": bool(points or task_id in done or task["status"] == "DONE"
+                "ka_progres_te_regjistruar": bool(points or task_id in done or settled_for_questions(task["status"])
                                                  or (percentage is not None and percentage > 0)),
                 "diskutuar": (brief.get("discussion") or {}).get(task_id, {}),
                 "pershkrimi": task.get("description"), "komenti_simbolit": task.get("symbol_comment"),
@@ -762,15 +763,19 @@ class MiraHost:
             brief = turn_brief(current)
             first_open = next((task for task in brief["plan_discutimi"] if not task["kryer"]), None)
             group = first_open["grupi"] if first_open else "AKTUAL"
-            opening = (f"{current['name']}: të gjitha detyrat e slotit aktual dhe atij paraprak janë To Do. "
+            opening = (f"{current['name']}: të gjitha detyrat janë kryer ose WFE. Mos bëj pyetje për këto detyra; "
+                       "kalo vetëm te vazhdimi i përgjithshëm sipas protokollit. "
+                       if brief['te_gjitha_kryer'] else
+                       f"{current['name']}: të gjitha detyrat e slotit aktual dhe atij paraprak janë To Do. "
                        "Nëse personi s'e ka sqaruar ende çfarë ka punuar, pyet shkurt 'Me çka ke vazhduar?' vetëm një herë për personin. "
                        "Mungesa e përditësimit nuk provon se s'ka punuar. Pastaj sqaro detyrat sipas plan_discutimi. "
                        if brief["aktual_dhe_paraprak_todo"] else
                        f"{current['name']}: hyr direkt te detyra e parë {group} në plan_discutimi. ")
             output = {"RADHA": brief,
-                      "udhezim": opening +
-                                 "Pyet shkurt vetëm çka mungon për progresin, vazhdimin ose përfundimin; "
-                                 "pastaj trajto PARAPRAK dhe BLLOK. Mos përsërit përgjigjet apo hyrjet."}
+                      "udhezim": opening + (
+                                 "Pyet shkurt vetëm çka mungon për progresin, vazhdimin ose përfundimin e detyrave të hapura; "
+                                 "pastaj trajto PARAPRAK dhe BLLOK. Mos përsërit përgjigjet apo hyrjet."
+                                 if not brief['te_gjitha_kryer'] else "")}
             if session["slot"] == "16:00":
                 output["udhezim"] += (
                     f" Në fund, para end_person_turn, pyet një herë: '{NEXT_DAY_PLAN_QUESTION}' "

@@ -14,6 +14,7 @@ from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.user import User
 from app.services.primeflow_report import report_timezone
 from app.services.daily_realization_events import semantic_local_day
+from app.services.discord_task_status import is_wfe
 
 MODELS = {'m2': DiscordM2Question, 'meeting': DiscordMeetingAlert}
 PREFIXES = {'delivery': ('delivery_choice', 'delivery'), 'continuation': ('pm_choice', 'pm_comment'),
@@ -65,6 +66,8 @@ async def m2_payload(db, question, link):
             TaskAssignee.task_id == task.id, TaskAssignee.user_id == link.user_id))).first()
         if not owned:
             status = 'Përgjegjësit e detyrës ndryshuan në PrimeFlow.'
+        elif is_wfe(task.status):
+            status = 'Detyra është WFE; nuk kërkohet përgjigje në Discord.'
         elif str(getattr(task.status, 'value', task.status)) == 'DONE':
             status = 'Detyra u përfundua në PrimeFlow.'
         elif question.kind in {'unfinished', 'progress', 'postponed'}:

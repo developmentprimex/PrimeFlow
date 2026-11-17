@@ -28,7 +28,9 @@ from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.services import discord_meetings
 from app.services import discord_one_h as one_h
+from app.services import discord_ga_replies as ga_replies
 from app.services import discord_task_tools as tools
+from app.services.primeflow_report import report_timezone
 
 router = APIRouter()
 
@@ -43,6 +45,31 @@ def require_bot(x_primeflow_discord_secret: Annotated[str | None, Header()] = No
         raise HTTPException(503, "Asistenti Discord nuk është aktivizuar.")
     if not x_primeflow_discord_secret or not secrets.compare_digest(x_primeflow_discord_secret, settings.DISCORD_BRIDGE_SECRET):
         raise HTTPException(401, "Invalid bot credentials")
+
+
+@router.post("/bot/ga-replies/context", dependencies=[Depends(require_bot)])
+async def ga_reply_context(db: AsyncSession = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    return {"guild_id": settings.DISCORD_GUILD_ID,
+            "channel_id": settings.DISCORD_GA_REPLIES_CHANNEL_ID,
+            "ga_user_id": await ga_replies.ga_identity(db),
+            "captured_at": now.isoformat(), "window_start": (now - timedelta(days=30)).isoformat()}
+
+
+@router.post("/bot/ga-replies/snapshot", dependencies=[Depends(require_bot)])
+async def save_ga_reply_snapshot(payload: ga_replies.ChannelEvidence, db: AsyncSession = Depends(get_db)):
+    from app.models.discord_ga_reply_snapshot import DiscordGaReplySnapshot
+    ga_replies.validate_evidence(payload, await ga_replies.ga_identity(db), datetime.now(timezone.utc))
+    statement = insert(DiscordGaReplySnapshot).values(
+        guild_id=payload.guild_id, channel_id=payload.channel_id,
+        day=payload.captured_at.astimezone(report_timezone()).date(),
+        captured_at=payload.captured_at, evidence=payload.model_dump(mode="json"))
+    await db.execute(statement.on_conflict_do_update(
+        index_elements=["guild_id", "channel_id", "day"],
+        set_={"captured_at": statement.excluded.captured_at, "evidence": statement.excluded.evidence},
+        where=DiscordGaReplySnapshot.captured_at <= statement.excluded.captured_at))
+    await db.commit()
+    return {"ok": True}
 
 
 class Actor(BaseModel):

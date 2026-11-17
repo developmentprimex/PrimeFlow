@@ -57,10 +57,11 @@ def context_key(kind: str, row: dict) -> str:
 
 
 def tomorrow_rows(tasks, target: date, overrides: dict) -> list[dict]:
+    from app.services.discord_task_status import is_wfe
     from app.api.routers.common_view import _get_task_dates
     rows = []
     for task in tasks:
-        if not task.is_active or str(task.status) in {'DONE', 'CANCELED', 'CANCELLED'} or task.completed_at:
+        if not task.is_active or is_wfe(task.status) or str(task.status) in {'DONE', 'CANCELED', 'CANCELLED'} or task.completed_at:
             continue
         if target not in _get_task_dates(task, str(task.phase) in {'CHECK', 'CONTROL'}, target):
             continue
