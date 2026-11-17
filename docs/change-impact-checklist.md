@@ -221,7 +221,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ruan përmbajtjen me serializimin ekzistues. Cancel nuk dërgon ndryshimet.
   PATCH ekzistues i `plan_notes` sinkronizon titullin/markat e detyrave të
   lidhura dhe regjistron strike events, pa ndryshuar statusin e detyrës.
-
+  Këto shenja duhen renderuar
+  edhe në My View / Department Views për detyra që kanë nisur para ditës së
+  zgjedhur, njësoj si PX Notes. Kontrollo veçmas Development, Graphic Design,
+  Product Content, Finance dhe printimet: statusi Done nuk nënkupton vijëzim
+  automatik të gjithë titullit. Common View, SHTYPI, 1H Reports dhe M1/M2/M3
+  kanë renderues të veçantë të markave.
 - Tabela Stafi në Realization ditor shfaq Due date / Deadline brenda listave të
   detyrave, pa kolonë afatesh: listat shfaqin vetëm titullin e detyrës; afatet e
   pambyllura kanë titull të kuq, pa etiketa, sfond apo vijë shtesë. `realization-table-items.ts`
