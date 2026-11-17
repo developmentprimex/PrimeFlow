@@ -31,6 +31,7 @@ tmp/recorder-tools/
 frontend/playwright-report/
 frontend/test-results/
 frontend/.next-recorder-test/
+frontend/.next-mailbox-test/
 tmp/recorder-fixture.json
 tmp/recorder-browser-storage/
 tmp/recorder-baseline/

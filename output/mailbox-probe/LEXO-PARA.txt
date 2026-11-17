@@ -1,0 +1,48 @@
+PRIMEFLOW - PROVE LOKALE OUTLOOK (VETEM LEXIM)
+Versioni 1.1 - deri 50 email-e - Windows 10/11, Outlook klasik
+
+HAPAT NE LAPTOPIN E MENAXHERES
+1. Shpaketo ZIP-in me Extract All ne nje dosje.
+2. Hape Outlook (classic), me menune File lart majtas.
+3. Hape info@primexeu.com > Inbox. Prit te shfaqen email-et e fundit.
+4. Hape PrimeFlow-Outlook-Test.exe normalisht, jo Run as administrator.
+5. Kliko Provo leximin. Mos hap mesazhe ne Outlook gjate proves.
+6. Kontrollo kategorite dhe subjektet/datat e deri 50 email-eve.
+7. Per te na treguar rezultatin, shtyp Kopjo diagnostiken pa permbajtje.
+   Na dergo vetem ate tekst. Nuk permban subjekte, dergues, tekst ose emra kategorish.
+
+Fragmenti i tekstit eshte i fikur fillimisht. Mund ta aktivizosh vete para proves;
+atehere lexohen deri 400 karaktere tekst te thjeshte per email vetem ne dritare.
+Programi nuk hap bashkengjitje, linke ose HTML te email-it.
+
+CFARE BEN / NUK BEN
+- Perdoret vetem sesioni ekzistues i Outlook klasik. Nuk kerkon ose nxjerr
+  fjalekalime, kode, cookies ose tokena nga Outlook.
+- Kerkohet adresa e sakte info@primexeu.com. Nuk perdoret Inbox-i personal
+  si zevendesim dhe nuk mjafton vetem emri i dukur i mailbox-it.
+- Lexohen kategorite e atij mailbox-i, pastaj deri 50 email-et me te fundit
+  ne Inbox sipas dates se pranimit (artikujt jo-email kapercehen).
+- Nuk ruan skedare rezultatesh, nuk dergon te dhena ne internet/PrimeFlow,
+  nuk krijon PX Notes/task dhe nuk ndryshon kategori ose gjendjen Lexuar.
+- Butoni Kopjo vendos ne clipboard vetem diagnostiken pa permbajtje.
+- Outlook mund te sinkronizoje normalisht vete; programi nuk ndryshon kete.
+- Kur Outlook eshte offline/cached, rezultati mund te jete nga kopja lokale.
+  Edhe Outlook online nuk garanton qe cache eshte plotesisht e perditesuar.
+- Suksesi ketu NUK eshte lidhje Microsoft Graph dhe nuk verteton User/Shared.
+- Nuk ka instalim, sherbim ne sfond ose nisje automatike. Mbyllja heq
+  rezultatin nga dritarja. Ky eshte vetem program prove, jo integrim aktiv.
+
+NESE KA PROBLEM
+- Nese Microsoft kerkon password/MFA: mos na e dergo; ndalo proven.
+- Nese Outlook shfaq bllokim/leje sigurie, mos ndrysho Trust Center, antivirus,
+  registry apo politikat e kompanise. Refuzo/mbyll kerkesen dhe na trego kodin.
+- Nese programi pret nje pergjigje nga Outlook, dritarja mund te mbetet ne
+  pritje derisa te mbyllet kerkesa ne Outlook.
+- Nese Windows ose IT bllokon EXE-ne: mos anashkalo mbrojtjen; kerko kontroll
+  nga IT. Programi nuk ka firme digjitale publikuesi.
+- Nuk punon me New Outlook, Outlook Web ose nje profil tjeter Windows.
+- Nuk nevojitet Python, Microsoft Graph Explorer ose Microsoft Admin Center.
+
+Programi perdor .NET Framework te Windows dhe Outlook Object Model.
+Kodi burimor: desktop/mailbox-probe/MailboxProbe.cs ne projektin PrimeFlow.
+SHA256.txt permban shumen e kontrollit te EXE-se se kesaj pakete.

@@ -196,6 +196,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   pa `showSaveFilePicker`, mbetet butoni “Shkarko regjistrimin”. Kjo ruajtje nuk
   përdor File Access dhe nuk zhvendos ose fshin regjistrimin në server.
 
+- Prova lokale Outlook `desktop/mailbox-probe` është program Windows i ndarë
+  nga integrimi Graph `/mailbox/*`. Lexon vetëm profilin ekzistues të Outlook
+  klasik për `info@primexeu.com`, kategoritë e Store-it dhe deri 50 email-et e
+  fundit në Inbox; pa upload, ruajtje rezultatesh, kategori të reja, PX Notes
+  ose taska. Rezultati lokal/cached nuk është provë Graph ose verifikim i llojit
+  User/Shared. Web admin, Calendar, pamjet dhe raportet nuk konsumojnë këtë
+  rezultat. Shih `desktop/mailbox-probe/README.md`; prova reale mbetet në
+  laptopin e menaxheres.
+
 - Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
   `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe
   detyrat sistemore të takimeve në `meeting_system_tasks.py`. Kontrollo scheduler-in,
@@ -214,6 +223,21 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Pamjet dhe raportet që lexojnë
   detyrat sistemore trashëgojnë mungesën e instancave të fshira dhe të atyre
   që nuk krijohen; përkufizimet e modeleve/slotet ruhen për riaktivizim.
+
+- Lidhja e email-it te Administration → Lidhja e email-it (`/admin/email`)
+  përdor `/mailbox/*`, callback-un `/api/mailbox/callback` dhe tabelën
+  `mailbox_connections`, veçmas nga `microsoft_tokens`/Microsoft Calendar.
+  Hapi 1 lexon kategoritë dhe deri në 10 email-et e fundit në Inbox vetëm për
+  ADMIN, pa shkruar në mailbox, PX Notes, taska ose raporte. Kur ndryshon
+  lidhja/refresh-i/shkëputja, kontrollo izolimin nga Development Calendar,
+  Meeting Scheduler dhe `microsoft_calendar_sync`; mos zgjero scopes të
+  kalendarit për email-in. Shih `docs/mailbox-connection.md`. Klasifikimi dhe
+  dërgimi vetëm në PX Notes janë hapa të mëvonshëm, ende të paaktivizuar.
+  Enkriptimi i email-it kërkon skedarin e veçantë `MS_MAIL_TOKEN_KEY_FILE`;
+  nuk përdor JWT_SECRET. Statusi `authorized` ndahet nga leximi real i
+  suksesshëm (`last_checked_at` / `connected`). Callback-u verifikon llojin
+  `userPurpose=user`; shared mailbox kërkon rrjedhë tjetër. Identiteti Entra
+  mbetet i përbashkët me Calendar, ndaj ruaj callback-un dhe consent-in e tij.
 
 - Vijëzimet e pjesshme të ruajtura në PX JAV (`[[done]]`) duhen renderuar
   edhe në Preview gjatë redaktimit: butoni `Strike / Undo` te `Edit Note`

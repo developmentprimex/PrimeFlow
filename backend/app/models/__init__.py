@@ -50,6 +50,7 @@ from app.models.morning_report_settings import MorningReportSettings
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.meeting_note import MeetingNote, MeetingNoteAttachment
 from app.models.microsoft_token import MicrosoftToken
+from app.models.mailbox_connection import MailboxConnection
 from app.models.notification import Notification
 from app.models.one_h_print_report_snapshot import OneHPrintReportSnapshot
 from app.models.open_task_planning_baseline import OpenTaskPlanningBaseline
@@ -167,6 +168,7 @@ __all__ = [
     "MeetingNote",
     "MeetingNoteAttachment",
     "MicrosoftToken",
+    "MailboxConnection",
     "Notification",
     "OneHPrintReportSnapshot",
     "OpenTaskPlanningBaseline",

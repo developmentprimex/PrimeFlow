@@ -41,6 +41,8 @@
     ".next-recorder-test/dev/types/**/*.ts",
     ".next-recorder-test/ga-personal/types/**/*.ts",
     ".next-recorder-test/ga-personal/dev/types/**/*.ts",
+    ".next-mailbox-test/types/**/*.ts",
+    ".next-mailbox-test/dev/types/**/*.ts",
     ".next-recorder-test/direct-markers/types/**/*.ts",
     ".next-recorder-test/direct-markers/dev/types/**/*.ts",
     ".next-recorder-test/task-markers/types/**/*.ts",
