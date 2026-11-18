@@ -81,11 +81,11 @@ if ($Phase -eq 'Prepare') {
         Remove-Item -LiteralPath ("\\?\" + $resolved) -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $candidate | Out-Null
-    $archive = Join-Path $env:RUNNER_TEMP "frontend-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.tar"
-    git archive --format=tar "--output=$archive" "${sha}:frontend"
+    $archive = Join-Path $env:RUNNER_TEMP "frontend-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.zip"
+    git archive --format=zip "--output=$archive" "${sha}:frontend"
     if ($LASTEXITCODE -ne 0) { throw 'Frontend source export failed.' }
-    tar.exe -xf $archive -C $candidate
-    if ($LASTEXITCODE -ne 0) { throw 'Frontend source extraction failed.' }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::ExtractToDirectory($archive, $candidate)
     Remove-Item -LiteralPath $archive
     Copy-Item -LiteralPath (Join-Path $legacy '.env.local') -Destination $candidate
     Set-Location -LiteralPath $candidate
