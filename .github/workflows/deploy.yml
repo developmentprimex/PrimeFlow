@@ -151,9 +151,22 @@ jobs:
     if: ${{ needs.plan.outputs.frontend == 'true' }}
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      - name: Checkout exact frontend source
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init .
+          if ($LASTEXITCODE -ne 0) { throw 'Git initialization failed.' }
+          $url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
+          $credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("x-access-token:$env:GH_TOKEN"))
+          Write-Host "::add-mask::$credential"
+          $env:GIT_AUTH_HEADER = "Authorization: Basic $credential"
+          git --config-env="http.$env:GITHUB_SERVER_URL/.extraheader=GIT_AUTH_HEADER" fetch --no-tags --no-recurse-submodules --depth=1 $url $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend source fetch failed.' }
+          git -c core.longpaths=true checkout $env:GITHUB_SHA -- frontend
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend checkout failed.' }
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
