@@ -119,7 +119,7 @@ jobs:
               return $true
             }
             $files = @(git diff --name-only $deployed $after | Where-Object { $_ -and $_.Trim() -ne "" })
-            $relevant = @($files | Where-Object { $_ -like "$PathPrefix/*" -or $_ -eq ".github/workflows/deploy.yml" })
+            $relevant = @($files | Where-Object { $_ -like "$PathPrefix/*" -or $_ -like "deploy/*" -or $_ -eq ".github/workflows/deploy.yml" })
             Write-Host "${Name}: last deployed $deployed, $($relevant.Count) relevant changed file(s)."
             $relevant | ForEach-Object { Write-Host " - $_" }
             return ($relevant.Count -gt 0)
@@ -141,6 +141,17 @@ jobs:
           # A failed marker lookup above must not fail the step.
           exit 0
  
+      - name: Verify public deployment gateways
+        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./deploy/origins.ps1
+          foreach ($surface in @('web','api')) {
+            $route = Get-PrimeFlowRoute $surface
+            Test-PrimeFlowOrigin $surface $route.port -Public
+          }
+
       - name: Notify Discord before deployment
         id: discord_notice
         continue-on-error: true
@@ -284,9 +295,17 @@ jobs:
         run: ./frontend/scripts/deploy-release.ps1 -Phase Prepare
 
       - name: Release Mira Voice Dependencies
+        id: voice_guard
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
+          . ./deploy/origins.ps1
+          if ((Get-PrimeFlowRoute api).port -eq 8000) {
+            "early_public=true" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' backend/scripts/wait_for_mira_deploy.py
+          if ($LASTEXITCODE -ne 0) { throw 'Mira deployment guard failed.' }
           & backend/scripts/stop_discord_voice_workers.ps1
 
       - name: Prepare Backend
@@ -391,6 +410,20 @@ jobs:
             throw "Memurai is not accepting Redis connections on 127.0.0.1:6379."
           }
           Write-Host "Redis notification service is ready."
+
+      - name: Recover public API while the primary serves traffic
+        if: ${{ steps.changes.outputs.backend_changed == 'true' && steps.voice_guard.outputs.early_public == 'true' }}
+        shell: powershell
+        run: ./deploy/replace-public-api.ps1
+
+      - name: Drain primary API before replacement
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./deploy/origins.ps1
+          Set-PrimeFlowRoute api 8080
+          Wait-PrimeFlowDrain 8000
 
       - name: Restart Backend Services
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
@@ -654,85 +687,20 @@ jobs:
           }
  
       - name: Replace Public API Backend
+        if: ${{ steps.changes.outputs.backend_changed == 'true' && steps.voice_guard.outputs.early_public != 'true' }}
+        shell: powershell
+        run: ./deploy/replace-public-api.ps1
+
+      - name: Record verified backend release
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
         run: |
-          Set-Location backend
-
-          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
-          $port = 8080
-          $processName = "backend-api-flow"
-
-          Write-Host "Replacing public API backend on port $port from current checkout..."
-          cmd /c "pm2 delete backend-api-flow || ver > NUL" | Out-Host
-          cmd /c "pm2 delete primex-public-api || ver > NUL" | Out-Host
-
-          # Kill any orphaned process still holding the port (a squatter outside PM2
-          # keeps serving stale code and makes health checks pass against old builds).
-          Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty OwningProcess -Unique |
-            ForEach-Object {
-              Write-Host "Killing stale listener PID $_ on port $port"
-              Stop-Process -Id $_ -Force
-            }
-
-          # The public API terminates browser WebSocket connections and must
-          # consume Redis notification events for realtime alerts and sounds.
-          $env:REDIS_ENABLED = "true"
-          $env:REDIS_URL = "redis://127.0.0.1:6379/0"
-          $env:APP_TIMEZONE = "Europe/Budapest"
-          # The primary API on port 8000 exclusively owns the shared Outlook
-          # calendar scheduler. Running it here as well causes duplicate imports
-          # and competing long-lived database work.
-          $env:MS_CALENDAR_SYNC_ENABLED = "false"
-          # This process serves every browser request with several workers, and
-          # each worker runs the startup hooks. All schedulers therefore belong
-          # to the primary API on port 8000 (or their own PM2 process) only;
-          # leaving one enabled here would run it once per worker.
-          $env:SYSTEM_TASK_SCHEDULER_ENABLED = "false"
-          $env:REPORT_SCHEDULERS_ENABLED = "false"
-          $env:TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED = "false"
-          $env:TODAY_PRINT_REPORT_SCHEDULER_ENABLED = "false"
-          $env:STD_FEEDBACK_SYNC_ENABLED = "false"
-          $env:MEETING_REMINDER_SCHEDULER_ENABLED = "false"
-          # Keep the total across workers well under PostgreSQL's connection limit.
-          $env:DB_POOL_SIZE = "5"
-          $env:DB_MAX_OVERFLOW = "5"
-          $env:APP_BUILD_SHA = "${{ github.sha }}"
-          $env:RUNNER_TRACKING_ID = ""
-          # The server has 8 slow cores and one Python process can use only one,
-          # so a single worker stalled every user behind any heavy request.
-          cmd /c "pm2 start `"$python`" --name $processName --cwd `"$PWD`" -- -m uvicorn app.main:app --host 0.0.0.0 --port $port --workers 4 --timeout-keep-alive 15 --backlog 2048"
-          if ($LASTEXITCODE -ne 0) { Write-Error "PM2 public API start failed"; exit 1 }
-
-          $ok = $false
-          $expected = "${{ github.sha }}"
-          $lastBuild = "<no response>"
-          $uri = "http://127.0.0.1:$port/health"
-          for ($i = 0; $i -lt 40; $i++) {
-            try {
-              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
-              $body = $resp.Content | ConvertFrom-Json
-              $lastBuild = "$($body.build)"
-              Write-Host "Public API health check attempt $($i + 1)/40: HTTP $($resp.StatusCode) build=$lastBuild"
-              if ($resp.StatusCode -eq 200 -and $lastBuild -eq $expected) {
-                $ok = $true
-                break
-              }
-              Start-Sleep -Seconds 2
-            } catch {
-              Write-Host "Public API health check attempt $($i + 1)/40: no response yet"
-              Start-Sleep -Seconds 2
-            }
-          }
-          if (-not $ok) {
-            Write-Error "Public API /health not serving deployed build $expected (last seen: $lastBuild). A stale process may be holding port $port."
-            exit 1
-          }
-
+          $ErrorActionPreference = 'Stop'
+          . ./deploy/origins.ps1
+          Test-PrimeFlowOrigin api 8080 -Public
           $stateDir = Join-Path $env:PM2_HOME "primeflow-deploy"
-          Set-Content -Path (Join-Path $stateDir "backend.sha") -Value $expected -Encoding ascii
- 
+          Set-Content -Path (Join-Path $stateDir "backend.sha") -Value $env:GITHUB_SHA -Encoding ascii
+
       - name: Activate prepared frontend
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
@@ -792,6 +760,14 @@ jobs:
             Write-Host "::warning::Could not register the PM2 boot recovery task: $_"
           }
           exit 0
+
+      - name: Recover previously running Mira workers
+        if: ${{ failure() && steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          Set-Location backend
+          & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' scripts/wait_for_mira_deploy.py --recover
+          if ($LASTEXITCODE -ne 0) { throw 'Mira recovery failed.' }
 
       - name: Deploy Observability
         if: ${{ failure() }}
