@@ -37,6 +37,24 @@ export class RecordingCapture {
     this.state = "selecting"
     this.events.change()
     try {
+      if (preferredSource === "microphone") {
+        const mime = typeof MediaRecorder !== "undefined" && ["audio/mp4;codecs=mp4a.40.2", "audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(t => MediaRecorder.isTypeSupported(t))
+        if (!navigator.mediaDevices?.getUserMedia || !mime || deviceId === false) {
+          throw new Error("Regjistrimi audio kërkon një mikrofon dhe një shfletues që e mbështet.")
+        }
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: deviceId ? { deviceId: { exact: deviceId } } : true })
+        if (generation !== this.generation) { mic.getTracks().forEach(track => track.stop()); return }
+        this.microphone = mic
+        const track = mic.getAudioTracks()[0]
+        if (!track || track.readyState !== "live") throw new Error("Mikrofoni nuk është aktiv.")
+        this.info = { source: "microphone", microphone: true, system: false, mime }
+        track.addEventListener("ended", this.audioChanged)
+        track.addEventListener("mute", this.events.change)
+        track.addEventListener("unmute", this.events.change)
+        this.state = "prepared"
+        this.events.change()
+        return
+      }
       if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
         throw new Error("Ky shfletues nuk mbështet regjistrimin e ekranit. Përdorni Chrome ose Edge me HTTPS.")
       }
@@ -141,7 +159,7 @@ export class RecordingCapture {
   }
 
   async shareScreen(preferredSource = "monitor") {
-    if (!["recording", "paused"].includes(this.state) || this.sharingRequest) return
+    if (this.info.source === "microphone" || !["recording", "paused"].includes(this.state) || this.sharingRequest) return
     const generation = this.generation
     this.sharingRequest = true
     this.events.change()
@@ -181,6 +199,16 @@ export class RecordingCapture {
   }
 
   async start() {
+    if (this.state !== "prepared") throw new Error("Zgjidhni burimin e regjistrimit përsëri.")
+    if (this.info.source === "microphone") {
+      if (!this.microphone?.getAudioTracks().some(track => track.readyState === "live")) throw new Error("Mikrofoni nuk është aktiv.")
+      this.startRecorder(this.microphone, { mimeType: this.info.mime, audioBitsPerSecond: 96_000 })
+      return
+    }
+    await this.startScreen()
+  }
+
+  private async startScreen() {
     if (this.state !== "prepared") throw new Error("Zgjidhni burimin e ekranit përsëri.")
     const video = this.display!.getVideoTracks()[0]
     if (video.readyState !== "live") throw new Error("Ndarja e ekranit përfundoi.")
@@ -208,11 +236,16 @@ export class RecordingCapture {
     this.connectAudio(this.display!, this.displayNodes)
     if (this.microphone) this.connectAudio(this.microphone, this.nodes)
     destination.stream.getAudioTracks().forEach(t => this.mixed!.addTrack(t))
-    this.recorder = new MediaRecorder(this.mixed, { mimeType: this.info.mime, videoBitsPerSecond: 2_000_000, audioBitsPerSecond: 128_000 })
+    this.startRecorder(this.mixed, { mimeType: this.info.mime, videoBitsPerSecond: 2_000_000, audioBitsPerSecond: 128_000 })
+  }
+
+  private startRecorder(stream: MediaStream, options: MediaRecorderOptions) {
+    this.recorder = new MediaRecorder(stream, options)
     this.recorder.ondataavailable = event => { if (event.data.size) this.events.chunk(event.data) }
     this.recorder.onerror = () => { this.events.error(new Error("Regjistrimi u ndërpre nga shfletuesi.")); void this.stop() }
     this.stopped = new Promise(resolve => { this.resolveStop = resolve })
     this.recorder.onstop = () => {
+      if (this.state !== "stopping") this.events.error(new Error("Shfletuesi e ndërpreu regjistrimin."))
       this.freezeTime()
       this.state = "stopped"
       this.release()
@@ -253,7 +286,7 @@ export class RecordingCapture {
     if (["recording", "paused"].includes(this.state)) {
       this.freezeTime()
       this.state = "stopping"
-      this.recorder!.stop()
+      if (this.recorder!.state !== "inactive") this.recorder!.stop()
       this.events.change()
     }
     return this.stopped || Promise.resolve()

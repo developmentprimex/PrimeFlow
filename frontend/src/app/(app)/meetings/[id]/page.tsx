@@ -4,6 +4,7 @@ import { meetingTranslator } from "@/lib/meeting-notes-language"
 
 import * as React from "react"
 import Link from "next/link"
+import { recordingKindLabel } from "@/lib/recording-types"
 import { useParams } from "next/navigation"
 import { ImagePlus, Mic } from "lucide-react"
 import { toast } from "sonner"
@@ -233,7 +234,7 @@ export default function MeetingPage() {
       <Button type="button" size="sm" variant={showDone ? "default" : "outline"} aria-pressed={showDone} className="h-8 rounded-full px-3 text-[13px]" onClick={() => setShowDone((current) => !current)}>{t("Shfaq edhe të mbyllurat")}</Button>
       <div className="flex flex-wrap items-center gap-3 sm:ml-4">
         {currentSession?.recordings.length ? currentSession.recordings.map((rec) => <Link key={rec.id} href={`/meeting-recordings/${rec.id}`} className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-800">
-          <Mic className="size-4" aria-hidden="true" /><span className="underline">{english ? "Recording" : "Regjistrimi"} {shortDm(session || "")} · {clock(rec.duration_seconds)}</span>
+          <Mic className="size-4" aria-hidden="true" /><span className="underline">{recordingKindLabel(rec.mime_type, english)} · {shortDm(session || "")} · {clock(rec.duration_seconds)}</span>
         </Link>) : <Button asChild size="sm" className="h-9 px-3 font-semibold shadow-sm"><Link href={`/meeting-recordings?meeting_id=${detail.meeting.id}`}><Mic className="size-4" aria-hidden="true" />{t("Nis regjistrimin")}</Link></Button>}
       </div>
     </div>

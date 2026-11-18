@@ -40,6 +40,7 @@ REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
 BOARD_REMINDER_SECTION_TITLE = "PYETJET PER 1H - BORD"
 REMINDER_SECTION_TITLE = "STAFF - HAPAT PER 1H"
 UNDISCUSSED_NOTES_SECTION_TITLE = "NOTA PA DISKUTUARA"
+DAILY_STRIKES_SECTION_TITLE = "STRIKES TË DITËS"
 TECHNICAL_TAGS = re.compile(
     r"\[\[\s*/?\s*(?:added|done(?:\s*:\s*(?:grey|gray|blue|green))?)\s*\]\]",
     re.IGNORECASE,
@@ -525,6 +526,13 @@ def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _count_blue_strikes(*marked_texts: str) -> int:
+    return sum(
+        (match.group(1) or "").lower() == "blue"
+        for text in marked_texts for match in DONE_BLOCK.finditer(text)
+    )
+
+
 def _document_section(
     title: str,
     tasks: list[dict[str, Any]],
@@ -552,10 +560,7 @@ def _document_section(
             marked_description = description_override[1] if description_override else preserve_done_marks(raw_description)
             # Same blue point markers counted by count_struck_points_for_interval.
             # Count both source fields, even when duplicate display text is hidden.
-            strike_count = sum(
-                (match.group(1) or "").lower() == "blue"
-                for marked in (marked_title, marked_description) for match in DONE_BLOCK.finditer(marked)
-            )
+            strike_count = _count_blue_strikes(marked_title, marked_description)
             description_duplicates_title = bool(raw_description) and (
                 clean_description(raw_description) == clean_title(raw_title)
             )
@@ -610,6 +615,7 @@ def build_report_document(
     undiscussed_notes: list[ReportUndiscussedNote] | None = None,
     completion_window_start: datetime | None = None,
     completion_window_end: datetime | None = None,
+    strike_window_start: datetime | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
@@ -708,6 +714,31 @@ def build_report_document(
                 f"{BLOCKED_SECTION_TITLE_PREFIX} {report_day:%d.%m.%Y}",
                 filter_tasks(items.get("blocked") or [], report_day),
             ))
+    if strike_window_start is not None:
+        displayed_ids = {
+            str(task.get("task_id") or task.get("id") or "")
+            for _, tasks in definitions for task in tasks
+        }
+        strike_task_ids = {
+            task_id
+            for overrides in (title_overrides, description_overrides)
+            for task_id, (_, marked) in (overrides or {}).items()
+            if _count_blue_strikes(marked)
+        } - displayed_ids
+        if strike_task_ids:
+            candidates = [
+                *(source_items.get("oneH") or data.get("tasks") or []),
+                *(source_items.get("personal") or []),
+                *(source_items.get("r1") or []),
+                *(source_items.get("blocked") or []),
+            ]
+            carried_strikes = _merge_unique_tasks([
+                task for task in filter_tasks(candidates, report_day)
+                if str(task.get("task_id") or task.get("id") or "") in strike_task_ids
+            ])
+            if carried_strikes:
+                definitions.append((DAILY_STRIKES_SECTION_TITLE, carried_strikes))
+    strike_start = strike_window_start or completion_window_start
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
     source_generated = datetime.fromisoformat(str(generated_value).replace("Z", "+00:00"))
     return ReportDocument(
@@ -717,8 +748,8 @@ def build_report_document(
         generated_at=datetime.now(report_timezone()),
         source_generated_at=source_generated,
         recipients=recipients or {"to": [], "cc": [], "bcc": []},
-        strike_interval=(f"{completion_window_start:%H:%M}–{completion_window_end:%H:%M}"
-                         if completion_window_start and completion_window_end else None),
+        strike_interval=(f"{strike_start:%H:%M}–{completion_window_end:%H:%M}"
+                         if strike_start and completion_window_end else None),
         sections=[
             _document_section(
                 title,
@@ -1103,7 +1134,8 @@ def render_html(
         body_chunks.append(undiscussed_notes_table(document.undiscussed_notes))
 
     for section_index, section in enumerate(document.sections):
-        body_chunks.append('<div data-report-task-section="true">')
+        daily_strikes = ' data-report-daily-strikes="true"' if section.title == DAILY_STRIKES_SECTION_TITLE else ''
+        body_chunks.append(f'<div data-report-task-section="true"{daily_strikes}>')
         if section_index or document.undiscussed_notes:
             body_chunks.append(section_separator())
         body_chunks.append(section_title_block(section.title))

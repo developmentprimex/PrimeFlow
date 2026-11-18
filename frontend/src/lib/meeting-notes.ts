@@ -17,6 +17,7 @@ export type MeetingNote = {
   recording_id: string | null
   recording_action_id: string | null
   recording_seconds: number | null
+  recording_mime_type?: string | null
   assignee_user_id: string | null
   due_date: string | null
   ga_note_id: string | null
@@ -42,7 +43,7 @@ export type MeetingSession = {
   date: string
   status: "planned" | "held" | "canceled" | string | null
   is_today: boolean
-  recordings: { id: string; title: string; status: string; duration_seconds: number | null }[]
+  recordings: { id: string; title: string; status: string; duration_seconds: number | null; mime_type: string }[]
 }
 
 export type MeetingDetail = {

@@ -2,9 +2,8 @@ export type RecordingManifest = {
   id: string; userId: string; title: string; count: number; acknowledged: number
   bytes: number; uploadedBytes: number; stopped: boolean; fatal?: string; partial?: boolean
 }
-const MAX_PENDING_BYTES = 96 * 1024 * 1024
-export const PAUSE_PENDING_BYTES = 32 * 1024 * 1024
-const MAX_CHUNK_BYTES = 32 * 1024 * 1024
+const MAX_PENDING_BYTES = 512 * 1024 * 1024
+export const MAX_CHUNK_BYTES = 32 * 1024 * 1024
 
 export interface RecordingOutbox {
   create(manifest: RecordingManifest): Promise<void>
@@ -48,7 +47,7 @@ export class IndexedRecordingOutbox implements RecordingOutbox {
     return this.transaction("readwrite", async (s, c) => {
       const m = await request<RecordingManifest>(s.get(id))
       if (!m || m.stopped || m.fatal) throw new Error("Sesioni lokal është mbyllur.")
-      if (blob.size > MAX_CHUNK_BYTES || m.bytes - m.uploadedBytes + blob.size > MAX_PENDING_BYTES) throw new Error("U tejkalua kufiri i radhës lokale; regjistrimi nuk është ruajtur plotësisht.")
+      if (blob.size > MAX_CHUNK_BYTES || m.bytes - m.uploadedBytes + blob.size > MAX_PENDING_BYTES) throw new Error("U arrit kufiri i ruajtjes lokale.")
       await request(c.add(blob, `${id}:${m.count}`))
       m.count++; m.bytes += blob.size
       await request(s.put(m))
@@ -74,6 +73,12 @@ export class IndexedRecordingOutbox implements RecordingOutbox {
 }
 
 export type RecordingApiFetch = (path: string, init?: RequestInit) => Promise<Response>
+export class RetryableRecordingUploadError extends Error {}
+
+function isRetryable(response: Response) {
+  return response.status >= 500 || [408, 429, 499].includes(response.status)
+}
+
 export async function recordingJson(response: Response) {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
@@ -117,8 +122,11 @@ export class RecordingUploader {
           this.change()
           break
         }
-        if (attempt >= 4 || (response && response.status < 500 && ![408, 429, 499].includes(response.status))) {
-          throw new Error(response ? `Ngarkimi dështoi (${response.status}). Provoni përsëri.` : "Lidhja me serverin u ndërpre. Provoni përsëri.")
+        if (response && !isRetryable(response)) {
+          throw new Error(`Ngarkimi dështoi (${response.status}). Provoni përsëri.`)
+        }
+        if (attempt >= 4) {
+          throw new RetryableRecordingUploadError("Ngarkimi është në pritje të lidhjes me serverin.")
         }
         await this.sleep(Math.min(1000 * 2 ** attempt, 16_000))
       }
@@ -130,9 +138,23 @@ export class RecordingUploader {
     await this.pump()
     const m = await this.outbox.get(this.id)
     if (!m.stopped || m.fatal || !m.count || m.acknowledged !== m.count) throw new Error(m.fatal || "Regjistrimi është i paplotë.")
-    const result = await recordingJson(await this.apiFetch(`/meeting-recordings/${this.id}/complete`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chunks: m.count, partial: !!m.partial }), signal: AbortSignal.timeout(660_000),
-    }))
+    let response: Response
+    try {
+      response = await this.apiFetch(`/meeting-recordings/${this.id}/complete`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chunks: m.count, partial: !!m.partial }), signal: AbortSignal.timeout(660_000),
+      })
+    } catch {
+      throw new RetryableRecordingUploadError("Finalizimi është në pritje të lidhjes me serverin.")
+    }
+    if (!response.ok && isRetryable(response)) throw new RetryableRecordingUploadError("Finalizimi është në pritje të serverit.")
+    // A previous request can still be remuxing after its connection dropped.
+    if (response.status === 409) {
+      const body = await response.clone().json().catch(() => null)
+      if (body?.detail === "Recording is already being finalized; retry shortly") {
+        throw new RetryableRecordingUploadError("Serveri po finalizon regjistrimin.")
+      }
+    }
+    const result = await recordingJson(response)
     if (result.status !== "READY") throw new Error("Serveri nuk konfirmoi ruajtjen.")
     await this.outbox.remove(this.id)
     return result

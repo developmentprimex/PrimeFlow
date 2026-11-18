@@ -200,6 +200,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   SHTYPI Tomorrow nuk ka këta filtra. Filtrat veprojnë në preview; shkarkimet
   dhe email-et e gjeneruara në server ndjekin raportin e plotë, si për Strikes.
 
+- Strikes te 1H Reports llogariten nga 08:00 deri në fund të slotit të
+  zgjedhur, edhe në SHTYPI të integruar në raportin e GA. Pikat e ditës nga
+  detyrat që mungojnë në seksionet e slotit shfaqen te “STRIKES TË DITËS”.
+  Kontrollo preview, filtrin Strikes, email, Word/PNG/Text dhe raportet
+  historike. SHTYPI Today më vete dhe Mira Host përdorin dritaret e slotit.
+
 - Përjashtimi i personave me mungesë gjithë ditën/PV në raporte ndahet te
   `backend/app/services/report_attendance.py`. Rregulli ndjek 1H Reports:
   mungesa/PV që mbulon 08:00–16:00 përjashton personin nga puna e raportuar;
@@ -236,6 +242,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Testet me skema të izoluara të shënimeve duhet të krijojnë edhe `MeetingNote`,
   sepse leximi i `GaNote` ngarkon flamurin `from_meeting` përmes `meeting_notes`.
 
+- Konfirmimi i klikimeve në Discord përdoret nga panelet 1H dhe AI Agent në
+  `mira-kontrolli` dhe nga butonat e regjistrimit e të shënimeve në mesazhe.
+  Kontrollo konfirmimin para thirrjeve në PrimeFlow, dukshmërinë në kanalin
+  e kontrollit dhe në kanalet personale, si dhe ruajtjen te Mira / PX Notes.
+  Kur Discord kthen `10062`, logu i botit tregon moshën e klikimit në hyrje
+  dhe kohën e kërkesës së konfirmimit. Veprimi i skaduar nuk ekzekutohet.
+
 - Taskat e krijuara drejtpërdrejt nga Regjistrimet krijojnë PX Note me
   `knowledge_type=RECORDING` dhe lidhjen `ga_note_origin_id`. PX Notes shfaq
   etiketën `REC` pranë etiketave të tjera; printimi klonon të njëjtën tabelë
@@ -270,6 +283,22 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   videon drejtpërdrejt në disk. Anulimi i dialogut nuk nis shkarkim. Në shfletues
   pa `showSaveFilePicker`, mbetet butoni “Shkarko regjistrimin”. Kjo ruajtje nuk
   përdor File Access dhe nuk zhvendos ose fshin regjistrimin në server.
+
+- “Vetëm audio” te Regjistrimet kap mikrofonin dhe ruhet në të njëjtin historik
+  si regjistrimi i ekranit. Kontrollo parazgjedhjen dhe nisjen në iPhone/Android,
+  lejet, ndërprerjet, ngarkimin me pjesë, dëgjimin dhe shkarkimin. Detajet e
+  takimit, Historia e klientit dhe burimi i shënimeve të takimeve shfaqin llojin
+  sipas MIME-it të regjistrimit. Citimet dhe lidhjet me sekonda hapin luajtësin
+  përkatës. Screenshot-i kërkon video. Ruajtja private, arkiva FILES, analiza e
+  regjistrimit dhe eksporti i kohëve të citimeve përdorin të njëjtën prapashtesë
+  të skedarit; kontrollo WebM dhe M4A për audio dhe formatet ekzistuese për video.
+
+- Radha IndexedDB dhe shiriti i regjistruesit në krye të aplikacionit përdoren
+  nga Ekran dhe Vetëm audio. Ngarkimi i vonuar mbetet në sfond dhe riprovohet
+  pas rilidhjes, edhe pas “Ndalo”, sa kohë skeda që nisi regjistrimin është hapur.
+  Kontrollo që “Pauzë” / “Vazhdo” të veprojnë vetëm me kërkesë të përdoruesit
+  dhe që historiku e detajet të dallojnë skedarin e plotë nga pjesa e ruajtur
+  pas ndërprerjes së shfletuesit ose arritjes së kufirit të ruajtjes lokale.
 
 - Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
   `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe
@@ -589,6 +618,39 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   cache-in dhe rifreskimin kur ato ndikojnë në sjelljen që po ndryshon.
 
 ## Kontrolli i deployment-it të frontend-it
+
+`frontend/scripts/deploy-release.ps1` përgatit dy versione me varësi të veçanta
+nën `PM2_HOME/primeflow-deploy/frontend-releases`. Kontrollo kandidatin në
+`127.0.0.1:3301` para ndërrimit dhe commit-in që shërbehet në portën 3000 pas tij.
+Ruaj versionin aktiv gjatë instalimit dhe build-it, si dhe versionin e mëparshëm
+për rikthim nëse nisja në portën 3000 dështon.
+
+Për aktivizimin e parë, instalo gateway-n me `deploy/install-gateway.ps1`
+dhe Caddy për Windows në serverin ku punon lidhësi i Cloudflare Tunnel.
+Ruaj adresat aktuale të origjinës në Cloudflare për rikthim. Nëse tuneli
+ka lidhës në serverë të ndryshëm, verifiko arritshmërinë nga secili përpara
+ndryshimit. Për lidhësin në serverin e PrimeFlow përdoren këto destinacione.
+
+| Hostname | Shërbimi i tunelit | Prova publike para push-it |
+| --- | --- | --- |
+| `primeflow.primexeu.com` | `http://127.0.0.1:13000` | `GET /login` kthen 200 dhe header-in `X-PrimeFlow-Origin: 3000` |
+| `api-flow.primexeu.com` | `http://127.0.0.1:18080` | `GET /health` kthen `status=ok` dhe `X-PrimeFlow-Origin: 8080` |
+
+Gjatë deploy-it gateway lexon dy skedarë lokalë për të zgjedhur destinacionin
+e çdo kërkese të re. Proceset në portat 3301 dhe 8000 marrin përkohësisht
+trafikun përkatës pasi kalojnë kontrollin. Lidhjet e hapura përfundojnë te
+procesi i vjetër. Nëse një WebSocket ose kërkesë e gjatë e mban atë të zënë
+për 20 minuta, workflow dështon para ndaljes së tij dhe lë trafikun në
+destinacionin e verifikuar. Nëse deploy ndërpritet, kontrollo të dyja
+origjinat dhe header-in publik përpara rinisjes. Testi në Windows përdor
+`python deploy/test_gateway.py <caddy.exe>` me portat lokale të lira.
+
+Përditësimet e DB-së dhe API-së duhet të funksionojnë edhe me versionin
+që shërben gjatë kalimit. Ndaje heqjen e kolonave ose ndryshimin e kontratës
+nga deploy-i që zhvendos lexuesit. Kontrollo hyrjen, një faqe të hapur që
+ngarkon një chunk të vjetër dhe një kërkesë API në vazhdim. Para rinisjes
+së botëve, `backend/scripts/wait_for_mira_deploy.py` pret mbylljen e seancave
+1H dhe AI Agent, përfundimin e shënimeve dhe mbylljen e takimit Mira Host.
 
 `.github/workflows/deploy.yml` përdor `frontend/scripts/wait-for-readiness.ps1`
 për kandidatin, rikthimin e versionit të mëparshëm dhe kontrollin përfundimtar.

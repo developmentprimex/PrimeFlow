@@ -17,3 +17,11 @@ export function recordingTime(seconds: number | null) {
   return `${Math.floor(n / 3600).toString().padStart(2, "0")}:${Math.floor(n / 60 % 60).toString().padStart(2, "0")}:${(n % 60).toString().padStart(2, "0")}`
 }
 export function recordingSize(bytes: number) { return `${(bytes / 1024 / 1024).toFixed(1)} MB` }
+export function isAudioRecording(mime: string | null | undefined): boolean {
+  return mime?.startsWith("audio/") ?? false
+}
+
+export function recordingKindLabel(mime: string | null | undefined, english = false): string {
+  if (!mime) return english ? "Recording" : "Regjistrimi"
+  return isAudioRecording(mime) ? "Audio" : english ? "Screen" : "Ekran"
+}

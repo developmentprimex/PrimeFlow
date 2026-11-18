@@ -373,9 +373,11 @@ def register_meeting_commands(bot,guild,*,name='takimi'):
 
 async def handle_meeting_interaction(bot,interaction):
     _,_,action,sid=interaction.data['custom_id'].split(':');uuid.UUID(sid)
-    from discord_meeting_control import in_control, require_control
+    from discord_meeting_control import acknowledge_button, in_control, require_control
     shared=in_control(interaction)
-    await interaction.response.defer(thinking=True,ephemeral=not shared)
+    if not await acknowledge_button(interaction, recorder=getattr(bot, 'voice_recorder', 'primary'),
+                                    action=action, ephemeral=not shared):
+        return
     if shared:require_control(interaction)
     else:await bot.private_channel(interaction.guild_id,interaction.channel_id,interaction.user.id)
     if action=='stop':await bot.meeting_capture.stop(interaction,sid);return

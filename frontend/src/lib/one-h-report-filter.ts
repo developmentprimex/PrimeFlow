@@ -8,9 +8,10 @@ export function applyOneHReportFilter(document: Document, strikesOnly: boolean, 
   let visible = 0
   const strikesByTask = new Map<string, number>()
   tasks.forEach((task, index) => {
-    task.hidden = (strikesOnly && !(Number(task.dataset.strikeCount) > 0)) || (doneOnly && !isReportTaskDone(task))
-    if (!task.hidden) visible += 1
     const count = Number(task.dataset.strikeCount)
+    task.hidden = (strikesOnly && !(count > 0)) ||
+      (doneOnly && (task.closest("[data-report-daily-strikes]") !== null || !isReportTaskDone(task)))
+    if (!task.hidden) visible += 1
     if (task.dataset.strikeCount !== undefined && Number.isFinite(count) && count >= 0) {
       // The same task can appear in SHTYPI, a slot, and BLL. Count it once.
       const key = task.dataset.taskId || `card-${index}`

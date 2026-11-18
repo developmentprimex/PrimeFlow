@@ -24,6 +24,7 @@ if private_env.exists():
                        value or (key in {'DISCORD_AI_AGENT_AUTO_JOIN_TIMES', 'DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID'} and value is not None)):
             os.environ.setdefault(key, value)
 from app.config import settings
+from discord_logging import worker_logging
 import discord_voice_meetings as voice
 
 log = logging.getLogger('primeflow.discord.ai_agent')
@@ -235,6 +236,6 @@ class AIAgentCapture(voice.MeetingCaptureCoordinator):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
     validate_configuration()
-    AIAgentBot().run(settings.DISCORD_AI_AGENT_BOT_TOKEN, log_handler=None)
+    with worker_logging():
+        AIAgentBot().run(settings.DISCORD_AI_AGENT_BOT_TOKEN, log_handler=None)

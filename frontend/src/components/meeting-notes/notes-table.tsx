@@ -4,6 +4,7 @@ import { meetingTranslator } from "@/lib/meeting-notes-language"
 
 import * as React from "react"
 import Link from "next/link"
+import { recordingKindLabel } from "@/lib/recording-types"
 import { Mic, Pencil, PenLine, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
@@ -123,11 +124,11 @@ function NoteTextCell({ note, field, onChanged, english = false }: { english?: b
   </div>
 }
 
-export function SourceCell({ note, users }: { note: MeetingNote; users: Map<string, LookupUser> }) {
+export function SourceCell({ note, users, english }: { note: MeetingNote; users: Map<string, LookupUser>; english: boolean }) {
   if (note.source === "RECORDING") {
     const label = `${shortDm(note.occurrence_date)}${note.recording_seconds != null ? ` · ${clock(note.recording_seconds)}` : ""}`
     const content = <>
-      <span className="inline-flex items-center gap-1 text-xs font-bold"><Mic className="size-3.5" aria-hidden="true" />Recording</span>
+      <span className="inline-flex items-center gap-1 text-xs font-bold"><Mic className="size-3.5" aria-hidden="true" />{recordingKindLabel(note.recording_mime_type, english)}</span>
       <span className="text-xs underline">▶ {label}</span>
     </>
     return note.recording_id
@@ -223,7 +224,7 @@ export function NotesTable({
                   title={note.ga_note_id ? t("Është dërguar tashmë në PX Notes") : undefined} onChange={() => onToggleSelect(note.id)} />
               </td>}
               <td className={`${td} font-bold tabular-nums text-muted-foreground`}>{index + 1}</td>
-              <td className={`${td} ${note.source === "RECORDING" ? "bg-violet-50" : ""}`}><SourceCell note={note} users={users} /></td>
+              <td className={`${td} ${note.source === "RECORDING" ? "bg-violet-50" : ""}`}><SourceCell note={note} users={users} english={english} /></td>
               <td className={`${td} whitespace-pre-wrap break-words ${noteCellClass(note)}`}>
                 <NoteTextCell english={english} key={`${note.id}:content:${note.content}`} note={note} field="content" onChanged={onChanged} />
                 <div className="mt-1 text-xs opacity-80">{[note.reference, showSessionDate || note.occurrence_date ? dmy(note.occurrence_date) : null].filter(Boolean).join(" · ")}{note.is_closed ? (english ? " · closed" : " · mbyllur") : ""}</div>

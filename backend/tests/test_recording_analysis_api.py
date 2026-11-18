@@ -79,6 +79,84 @@ class AnalysisApiTests(unittest.TestCase):
         from app.jobs.recording_analysis import process_recording_analyses
         return asyncio.run(process_recording_analyses())
 
+    def test_audio_format_reaches_meeting_client_history_and_action_note(self):
+        from app.api.routers.meeting_notes import router as notes_router
+        from app.models.meeting import Meeting
+        from app.models.project import Project
+        from app.models.recording_analysis import RecordingAction, RecordingAnalysis
+
+        meeting_id = uuid.UUID(self.fixture["meeting_id"])
+        owner_id = uuid.UUID(self.fixture["owner"]["id"])
+
+        async def link_project():
+            async with self.session() as db:
+                project = Project(title="Voice recording client")
+                db.add(project)
+                await db.flush()
+                meeting = await db.get(Meeting, meeting_id)
+                meeting.project_id = project.id
+                await db.commit()
+                return str(project.id)
+
+        project_id = asyncio.run(link_project())
+        self.app.include_router(notes_router, prefix="/api/meeting-notes")
+        response = self.client.post("/api/meeting-recordings", headers=self.auth(), json={
+            "title": "Physical meeting", "meeting_id": str(meeting_id), "project_id": project_id,
+            "mime_type": "audio/webm", "capture_source_type": "microphone",
+            "consent_acknowledged": True, "has_microphone_audio": True,
+        })
+        self.assertEqual(response.status_code, 201, response.text)
+        recording_id = response.json()["id"]
+        self.assertEqual(response.json()["project_id"], project_id)
+        media = subprocess.check_output([
+            self.settings.MEETING_RECORDINGS_FFMPEG, "-v", "error", "-i", str(Path(self.tmp.name) / "source.webm"),
+            "-map", "0:a", "-c:a", "copy", "-f", "webm", "pipe:1",
+        ], timeout=30)
+        response = self.client.put(f"/api/meeting-recordings/{recording_id}/chunks/0", headers={
+            **self.auth(), "Content-Type": "application/octet-stream", "X-Chunk-SHA256": hashlib.sha256(media).hexdigest(),
+        }, content=media)
+        self.assertEqual(response.status_code, 200, response.text)
+        response = self.client.post(f"/api/meeting-recordings/{recording_id}/complete", headers=self.auth(), json={"chunks": 1})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "READY")
+        self.assertIsNone(response.json()["video_width"])
+
+        async def add_proposal():
+            async with self.session() as db:
+                sid = uuid.UUID(recording_id)
+                db.add(RecordingAnalysis(recording_id=sid, requested_by=owner_id, status="READY", language="sq",
+                                         total_segments=1, segments_done=1))
+                await db.flush()
+                action = RecordingAction(recording_id=sid, fingerprint="a" * 64, segment_index=0,
+                                         title="Physical meeting follow-up", description="", evidence="Follow up")
+                db.add(action)
+                await db.commit()
+                return str(action.id)
+
+        action_id = asyncio.run(add_proposal())
+        response = self.client.post(f"/api/meeting-notes/recordings/{recording_id}/actions/{action_id}/note", headers=self.auth())
+        self.assertEqual(response.status_code, 200, response.text)
+        note = response.json()
+        self.assertEqual(note["recording_mime_type"], "audio/webm")
+        meeting_path = f"/api/meeting-notes/meetings/{meeting_id}"
+        response = self.client.get(meeting_path, headers=self.auth())
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn(recording_id, [rec["id"] for session in response.json()["sessions"]
+                                    for rec in session["recordings"] if rec["mime_type"] == "audio/webm"])
+        response = self.client.get(meeting_path + "/notes", headers=self.auth())
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(next(row for row in response.json() if row["id"] == note["id"])["recording_mime_type"], "audio/webm")
+        response = self.client.get("/api/meeting-notes/client-history", headers=self.auth(), params={
+            "project_id": project_id, "date_from": note["occurrence_date"], "date_to": note["occurrence_date"],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        history = response.json()["sessions"][0]
+        self.assertIn(recording_id, [rec["id"] for rec in history["recordings"] if rec["mime_type"] == "audio/webm"])
+        self.assertEqual(history["notes"][0]["recording_mime_type"], "audio/webm")
+        response = self.client.post(f"/api/meeting-notes/recordings/{recording_id}/screenshot", headers=self.auth(),
+                                    files={"file": ("frame.png", b"frame", "image/png")})
+        self.assertEqual(response.status_code, 422, response.text)
+
     def test_citation_times_are_explicit_cached_authorized_and_restart_safe(self):
         from app.jobs import recording_timing as worker
         from app.models.recording_analysis import RecordingAnalysis, RecordingAction, RecordingTranscript
@@ -144,18 +222,27 @@ class AnalysisApiTests(unittest.TestCase):
                 self.assertEqual(measure.call_count, 2)
 
     def test_authorization_consent_and_provider_configuration(self):
+        from app.models.recording_analysis import RecordingAnalysis
+
+        async def remove_job(recording_id):
+            async with self.session() as db:
+                job = await db.get(RecordingAnalysis, uuid.UUID(recording_id))
+                if job is not None:
+                    await db.delete(job)
+                    await db.commit()
+
         sid = self.saved()
         self.assertEqual(self.get(sid, 'other').status_code, 200)
         self.assertEqual(self.get(sid, 'participant').status_code, 200)
         for who in ['other', 'participant', 'manager']:
             sid = self.saved()
+            self.addCleanup(lambda recording_id=sid: asyncio.run(remove_job(recording_id)))
             self.assertTrue(self.get(sid, who).json()['can_start_analysis'])
             response = self.client.post(f'/api/meeting-recordings/{sid}/analysis', headers=self.auth(who), json={'consent_acknowledged': True})
             self.assertEqual(response.status_code, 202, response.text)
             self.assertFalse(self.get(sid, who).json()['can_manage'])
             # Repeated starts by another viewer reuse the existing job.
             self.assertEqual(self.start(sid).status_code, 202)
-            from app.models.recording_analysis import RecordingAnalysis
             async def requester():
                 async with self.session() as db:
                     return str((await db.get(RecordingAnalysis, uuid.UUID(sid))).requested_by)

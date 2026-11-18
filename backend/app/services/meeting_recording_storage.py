@@ -25,6 +25,10 @@ class StorageBusy(StorageError):
     pass
 
 
+def recording_extension(mime: str) -> str:
+    return {"video/webm": "webm", "video/mp4": "mp4", "audio/webm": "webm", "audio/mp4": "m4a"}[mime]
+
+
 @contextmanager
 def finalization_lock(folder: Path):
     # The OS lock outlives a cancelled asyncio request while its remux thread
@@ -79,7 +83,7 @@ class LocalMeetingStorage:
         return result
 
     def available_media(self, key: str, mime: str, size_bytes: int) -> Path | None:
-        extension = "webm" if mime == "video/webm" else "mp4"
+        extension = recording_extension(mime)
         file = self.path(f"{key}/recording.{extension}")
         try:
             if file.is_file() and file.stat().st_size == size_bytes:
@@ -121,7 +125,9 @@ class LocalMeetingStorage:
         FFmpeg's concat demuxer on them or concatenate independent recordings.
         """
         folder = self.path(key)
-        extension = "webm" if mime == "video/webm" else "mp4"
+        extension = recording_extension(mime)
+        audio_only = mime.startswith("audio/")
+        is_webm = extension == "webm"
         joined = folder / "assembled.part"
         output = folder / f"remux.{extension}"
         try:
@@ -140,27 +146,36 @@ class LocalMeetingStorage:
                 os.fsync(dest.fileno())
             with joined.open("rb") as header:
                 magic = header.read(32)
-            if (extension == "webm" and not magic.startswith(b"\x1a\x45\xdf\xa3")) or (extension == "mp4" and magic[4:8] != b"ftyp"):
+            if (is_webm and not magic.startswith(b"\x1a\x45\xdf\xa3")) or (not is_webm and magic[4:8] != b"ftyp"):
                 raise StorageError("Invalid recording container")
-            flags = ["-movflags", "+faststart"] if extension == "mp4" else []
+            flags = [] if is_webm else ["-movflags", "+faststart"]
+            tracks = ["-map", "0:a:0"] if audio_only else ["-map", "0:v:0", "-map", "0:a:0?"]
             # No shell, external resources, subtitles, attachments or data tracks.
             subprocess.run([ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-xerror", "-y",
-                            "-protocol_whitelist", "file", "-f", "matroska" if extension == "webm" else "mov",
-                            "-i", str(joined), "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", *flags, str(output)],
+                            "-protocol_whitelist", "file", "-f", "matroska" if is_webm else "mov",
+                            "-i", str(joined), *tracks, "-c", "copy", *flags, str(output)],
                            check=True, timeout=600, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             result = subprocess.run([ffprobe, "-v", "error", "-protocol_whitelist", "file", "-show_streams", "-show_format", "-of", "json", str(output)],
                                     check=True, timeout=60, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             probe = json.loads(result.stdout)
             video = next((s for s in probe["streams"] if s["codec_type"] == "video"), None)
+            audio = next((s for s in probe["streams"] if s["codec_type"] == "audio"), None)
             duration = float(probe["format"].get("duration", 0))
-            if not video or video.get("width", 0) <= 0 or not math.isfinite(duration) or not 0 < duration <= max_duration:
-                raise StorageError("Recording has no valid video or duration")
-            allowed_video = {"vp8", "vp9", "av1"} if extension == "webm" else {"h264", "hevc", "av1"}
-            if video.get("codec_name") not in allowed_video:
-                raise StorageError("Unsupported video codec")
+            if not math.isfinite(duration) or not 0 < duration <= max_duration:
+                raise StorageError("Recording has no valid duration")
+            if audio_only:
+                allowed_audio = {"opus", "vorbis"} if is_webm else {"aac"}
+                if not audio or audio.get("codec_name") not in allowed_audio:
+                    raise StorageError("Unsupported audio codec")
+            else:
+                if not video or video.get("width", 0) <= 0 or video.get("height", 0) <= 0:
+                    raise StorageError("Recording has no valid video")
+                allowed_video = {"vp8", "vp9", "av1"} if is_webm else {"h264", "hevc", "av1"}
+                if video.get("codec_name") not in allowed_video:
+                    raise StorageError("Unsupported video codec")
             metadata = {"mime_type": mime, "duration_seconds": duration, "size_bytes": output.stat().st_size,
-                        "video_width": video["width"], "video_height": video["height"],
-                        "has_audio": any(s["codec_type"] == "audio" for s in probe["streams"])}
+                        "video_width": video["width"] if video else None, "video_height": video["height"] if video else None,
+                        "has_audio": audio is not None}
             with output.open("r+b") as media:
                 os.fsync(media.fileno())
             durable_replace(output, folder / f"recording.{extension}")

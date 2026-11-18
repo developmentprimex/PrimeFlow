@@ -15,8 +15,15 @@ def configure_test_environment():
     url = sa.engine.make_url(TEST_URL)
     if url.database != "primeflow_recorder_test" or url.host not in {"127.0.0.1", "localhost"}:
         raise RuntimeError("Recorder tests require the isolated localhost primeflow_recorder_test database")
-    os.environ["DATABASE_URL"] = TEST_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    async_url = url.set(drivername="postgresql+asyncpg")
+    os.environ["DATABASE_URL"] = async_url.render_as_string(hide_password=False)
     os.environ["JWT_SECRET"] = "recorder-tests-only-not-a-production-secret"
+    from app.config import settings
+    from app.db import engine
+    # Pytest may have imported application modules before fixture setup. Both
+    # Alembic and the workers must already resolve to the isolated database.
+    if sa.engine.make_url(settings.DATABASE_URL) != async_url or engine.url != async_url:
+        raise RuntimeError("Set DATABASE_URL from RECORDINGS_TEST_DATABASE_URL before importing the app")
     return url
 
 
@@ -27,6 +34,8 @@ def prepare_database(*, full_schema=False):
     from app.models.department import Department
     from app.models.user import User
     from app.models.meeting import Meeting, MeetingParticipant
+    from app.models.meeting_client import MeetingClient
+    from app.models.meeting_note import MeetingNote, MeetingNoteAttachment
     from app.models.audit_log import AuditLog
     from app.models.enums import UserRole
     from app.auth.security import create_access_token
@@ -37,11 +46,16 @@ def prepare_database(*, full_schema=False):
         connection.execute(sa.text("CREATE SCHEMA public"))
         if full_schema:
             from app.db import Base
-            exclude = {'meeting_recordings', 'meeting_recording_chunks', 'recording_analyses', 'recording_transcripts', 'recording_actions', 'recording_protocols'}
-            Base.metadata.create_all(connection, tables=[t for t in Base.metadata.sorted_tables if t.name not in exclude and t.schema is None])
+            exclude = {
+                "meeting_recordings", "meeting_recording_chunks", "recording_analyses",
+                "recording_transcripts", "recording_actions", "recording_protocols",
+                "meeting_notes", "meeting_note_attachments",
+            }
+            Base.metadata.create_all(connection, tables=[t for t in Base.metadata.tables.values() if t.name not in exclude and t.schema is None])
         else:
             Department.__table__.create(connection)
             User.__table__.create(connection)
+            MeetingClient.__table__.create(connection)
             connection.execute(sa.text("CREATE TABLE projects (id UUID PRIMARY KEY, title VARCHAR(200), is_template BOOLEAN NOT NULL DEFAULT false)"))
             Meeting.__table__.create(connection)
             MeetingParticipant.__table__.create(connection)
@@ -91,6 +105,12 @@ def prepare_database(*, full_schema=False):
             project_migration.upgrade()
             project_migration.downgrade()
             project_migration.upgrade()
+        if full_schema:
+            # The recording-analysis migrations above predate meeting notes (0184).
+            operations = Operations(MigrationContext.configure(connection))
+            operations.add_column("recording_actions", sa.Column("dismissed_at", sa.DateTime(timezone=True), nullable=True))
+            MeetingNote.__table__.create(connection)
+            MeetingNoteAttachment.__table__.create(connection)
     with Session(engine) as db:
         department = Department(name="Recorder test", code="REC")
         db.add(department); db.flush()

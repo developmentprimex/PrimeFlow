@@ -23,7 +23,11 @@ async function login(page: Page) {
   await expect(page.getByRole("heading", { name: "Regjistrimet e takimeve", exact: true })).toBeVisible()
 }
 
-test("Chromium display-capture API with test device → chunks → remux → reload → authorized range playback and download", async ({ page, request }) => {
+test("screen capture continues with slow uploads and yields playable video after manual stop", async ({ page, request, context }) => {
+  await page.addInitScript(() => {
+    const start = MediaRecorder.prototype.start
+    MediaRecorder.prototype.start = function () { start.call(this, 250) }
+  })
   await login(page)
   await page.getByLabel("Titulli", { exact: true }).fill("Chromium native capture verification")
   await page.getByLabel("Mikrofoni", { exact: true }).selectOption("none")
@@ -34,11 +38,14 @@ test("Chromium display-capture API with test device → chunks → remux → rel
   const continueWithoutAudio = page.getByRole("button", { name: "Vazhdo pa audio sistemi", exact: true })
   if (await continueWithoutAudio.isVisible()) await continueWithoutAudio.click()
   await expect(page.getByRole("button", { name: "Pauzë", exact: true })).toBeVisible()
-  await page.waitForTimeout(4500)
+  await context.setOffline(true)
+  await expect(page.getByText(/0\/(1[2-9]|[2-9]\d) fragmente/)).toBeVisible()
+  await expect(page.getByText(/Regjistrimi vazhdon\. Ngarkimi do të riprovohet/)).toBeVisible()
   await page.getByRole("button", { name: "Pauzë", exact: true }).click()
   await expect(page.getByRole("button", { name: "Vazhdo", exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Vazhdo", exact: true }).click()
-  await page.waitForTimeout(1200)
+  await context.setOffline(false)
+  await expect(page.getByText(/([1-9]\d*)\/\d+ fragmente/)).toBeVisible()
   await page.getByRole("button", { name: "Ndalo", exact: true }).click()
   await expect(page.getByText("Serveri konfirmoi ruajtjen.", { exact: false })).toBeVisible()
   await page.getByRole("link", { name: "Hap regjistrimin", exact: true }).click()
@@ -57,6 +64,65 @@ test("Chromium display-capture API with test device → chunks → remux → rel
   const download = await page.request.get(`/api/meeting-recordings/${id}/download`)
   expect(download.status()).toBe(200); expect(download.headers()["content-disposition"]).toContain("attachment")
   await page.screenshot({ path: "test-results/recording-detail.png", fullPage: true })
+})
+
+test("microphone-only recording falls back from screen capture and saves after reconnection", async ({ page, context }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, "getDisplayMedia", { value: undefined })
+  })
+  await login(page)
+  await expect(page.getByLabel("Lloji i regjistrimit")).toHaveValue("audio")
+  await expect(page.getByRole("option", { name: "Ekran", exact: true })).toBeDisabled()
+  await page.getByLabel("Titulli", { exact: true }).fill("Takim fizik")
+  await page.getByLabel("Konfirmoj se kam njoftuar", { exact: false }).check()
+  await page.getByRole("button", { name: "Nis regjistrimin audio" }).click()
+  await expect(page.getByRole("button", { name: "Pauzë", exact: true })).toBeVisible()
+
+  await context.setOffline(true)
+  await expect(page.getByText(/0\/[1-9]\d* fragmente/)).toBeVisible()
+  await page.getByRole("button", { name: "Ndalo", exact: true }).click()
+  await expect(page.getByText("Ngarkimi do të riprovohet automatikisht.", { exact: true })).toBeVisible()
+  await context.setOffline(false)
+  await expect(page.getByText("Serveri konfirmoi ruajtjen.", { exact: false })).toBeVisible()
+
+  await page.reload()
+  await page.getByRole("link", { name: "Takim fizik", exact: true }).click()
+  const audio = page.locator("audio")
+  await expect(audio).toBeVisible()
+  await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.duration)).toBeGreaterThan(0)
+  await audio.evaluate((element: HTMLAudioElement) => element.play())
+  await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.currentTime)).toBeGreaterThan(0)
+  await expect(page.locator("video")).toHaveCount(0)
+
+  const downloadUrl = await page.getByRole("link", { name: "Shkarko regjistrimin" }).getAttribute("href")
+  const download = await page.request.get(downloadUrl!)
+  expect(download.status()).toBe(200)
+  const mime = download.headers()["content-type"]
+  expect(["audio/mp4", "audio/webm"]).toContain(mime)
+  expect(download.headers()["content-disposition"]).toContain(mime === "audio/mp4" ? ".m4a" : ".webm")
+})
+
+test("local storage failure saves the available audio and labels it partial", async ({ page }) => {
+  await page.addInitScript(() => {
+    const start = MediaRecorder.prototype.start
+    MediaRecorder.prototype.start = function () { start.call(this, 1000) }
+    const add = IDBObjectStore.prototype.add
+    let fragments = 0
+    IDBObjectStore.prototype.add = function (value, key) {
+      if (this.name === "chunks" && ++fragments === 4) throw new DOMException("Storage exhausted", "QuotaExceededError")
+      return add.call(this, value, key)
+    }
+  })
+  await login(page)
+  await page.getByLabel("Lloji i regjistrimit").selectOption("audio")
+  await page.getByLabel("Titulli", { exact: true }).fill("Audio e pjesshme")
+  await page.getByLabel("Konfirmoj se kam njoftuar", { exact: false }).check()
+  await page.getByRole("button", { name: "Nis regjistrimin audio" }).click()
+  await expect(page.getByText("Serveri ruajti pjesën e disponueshme.", { exact: false })).toBeVisible()
+  await expect(page.getByRole("row").filter({ hasText: "Audio e pjesshme" }).getByText("Pjesë e rikuperuar")).toBeVisible()
+  await page.getByRole("link", { name: "Hap regjistrimin", exact: true }).click()
+  await expect(page.getByText(/Pjesë e rikuperuar nga një regjistrim i ndërprerë/)).toBeVisible()
+  await expect.poll(() => page.locator("audio").evaluate((element: HTMLAudioElement) => element.duration)).toBeGreaterThan(0)
 })
 
 test("real MediaRecorder mixes two synthetic audio sources and durable IndexedDB retries interrupted uploads", async ({ page }) => {
@@ -131,14 +197,14 @@ test("IndexedDB enforces fragment and pending-byte limits across outbox instance
     const fragment = new Blob([new Uint8Array(32 * 1024 * 1024)])
     let oversized = false, backlog = false
     try { await outbox.append(id, new Blob([fragment, "x"])) } catch { oversized = true }
-    for (let n = 0; n < 3; n++) await outbox.append(id, fragment)
+    for (let n = 0; n < 16; n++) await outbox.append(id, fragment)
     try { await outbox.append(id, new Blob(["x"])) } catch { backlog = true }
     const durable = await new globals.IndexedRecordingOutbox().get(id)
     await outbox.remove(id)
     return { oversized, backlog, durable }
   })
   expect(result.oversized).toBe(true); expect(result.backlog).toBe(true)
-  expect(result.durable.bytes).toBe(96 * 1024 * 1024); expect(result.durable.count).toBe(3)
+  expect(result.durable.bytes).toBe(512 * 1024 * 1024); expect(result.durable.count).toBe(16)
 })
 
 test("another tab cannot start or abandon the active browser recording", async ({ page, context }) => {

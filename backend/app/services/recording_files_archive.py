@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.services.meeting_recording_storage import (
-    LocalMeetingStorage, StorageError, durable_replace, finalization_lock,
+    LocalMeetingStorage, StorageError, durable_replace, finalization_lock, recording_extension,
 )
 
 
@@ -50,7 +50,7 @@ def archive_recording(row, store: LocalMeetingStorage, target_root: Path) -> Pat
     if row.status != "READY":
         raise StorageError("Only validated recordings can be archived")
     folder = store.path(row.storage_key)
-    extension = "webm" if row.mime_type == "video/webm" else "mp4"
+    extension = recording_extension(row.mime_type)
     source = folder / f"recording.{extension}"
     try:
         source_stat = source.stat()

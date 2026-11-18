@@ -225,8 +225,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         ):
             title_overrides, _ = asyncio.run(_text_overrides_for_1h_interval(
                 stale_common_view,
-                report_day,
-                "11:00",
+                interval_start=strike_interval_start(report_day, "11:00"),
                 interval_end=interval_end,
             ))
 

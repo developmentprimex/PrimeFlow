@@ -183,15 +183,15 @@ is rejected. PostgreSQL row locks coordinate all API workers. Request streaming
 does not load a full upload in server memory; temporary writes are fsynced and
 atomically renamed before the DB acknowledges persistence.
 
-The uploader retries transient errors 5 times with exponential delays, then
-requires the visible retry action. It holds one bounded fragment while uploading.
-IndexedDB pending data is limited to 96 MiB, individual fragments to 32 MiB, and
-the synchronous staging queue to 64 MiB. Capture pauses at 32 MiB of durable
-backlog, 12 pending fragments, or 16 MiB of pending local writes. Resume is
-explicit after drainage. Oversized browser fragments or local-disk failures stop
-capture and prohibit completion; nothing is silently discarded as “saved”. These
-limits bound retained application data; a browser may itself allocate a large
-Blob when a laptop sleeps. Keep laptops awake for long meetings.
+The uploader makes up to five attempts per fragment with exponential delays
+and holds one bounded fragment in memory while uploading. It retries transient
+upload and finalization errors in the background while the recording tab is open.
+IndexedDB holds up to 512 MiB of pending fragments, individual fragments are
+limited to 32 MiB, and the synchronous staging queue is limited to 64 MiB.
+Capture continues while the upload queue drains. Oversized browser fragments
+or local-disk failures stop capture and trigger partial recovery of the
+contiguous saved fragments. A browser may allocate a large Blob when a laptop
+sleeps. Keep laptops awake for long meetings.
 
 Completion requires a persisted stop marker and acknowledgement of every expected
 fragment. The server re-hashes every stored chunk, reconstructs the single encoded
@@ -312,7 +312,7 @@ upload bounds, auth/read/write scopes, linked/unlinked sessions and persisted
 playback. A separate opt-in test terminates/restarts actual API processes between
 chunks and again after READY, then reads a byte range successfully.
 
-Chrome/Edge with HTTPS and Web Locks are the initial target. Tab capture with a
+For screen recording, Chrome/Edge with HTTPS and Web Locks are the initial target. Tab capture with a
 share-audio option is generally the most practical browser audio path; actual
 availability depends on browser, source, OS and user selection. Firefox/Safari
 and real Windows/macOS source/audio combinations require acceptance testing;
@@ -322,12 +322,31 @@ prevent recording. Multi-hour soak tests and native-device acceptance remain.
 See [MDN getDisplayMedia](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia)
 and [MediaRecorder dataavailable](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder/dataavailable_event).
 
+For physical meetings, select “Vetëm audio” in Regjistrimet. PrimeFlow selects
+it by default on phones and browsers without screen capture. Microphone access
+requires HTTPS, MediaRecorder and Web Locks. Audio is saved in the same history
+as screen recordings and can be played and downloaded as M4A or WebM. Keep the
+page open and the phone unlocked. During a network outage, screen and audio
+capture continue while fragments are stored locally. Upload retries automatically
+after reconnection, including after “Ndalo” while the recording tab stays open.
+“I ruajtur” requires server confirmation. The local queue holds up to 512 MiB
+of pending fragments per session, subject to the browser's storage quota. If
+the browser interrupts capture or local storage runs out, PrimeFlow attempts
+to save the available media and marks a successfully recovered file as partial.
+
+On physical iPhone and Android devices, verify permission denial and retry,
+recording, playback and download from the history, reconnection after going
+offline, and the effect of locking the screen or switching apps during a test
+recording.
+
 ## Reproduce tests and approved deployment checklist
 
 Use an isolated PostgreSQL instance bound to localhost, database named exactly
 `primeflow_recorder_test`. Tests explicitly reject other hosts/database names and
 never fall back to the configured customer DB. Set `RECORDINGS_TEST_DATABASE_URL`
 to its sync PostgreSQL URL, and point the encoding variables at installed binaries.
+When using pytest, also set `DATABASE_URL` to the same database using the
+`postgresql+asyncpg://` driver before starting pytest.
 Use the existing backend virtualenv. Run integration and process tests separately
 because they recreate only the isolated fixture schema:
 

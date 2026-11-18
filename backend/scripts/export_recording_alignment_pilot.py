@@ -17,7 +17,7 @@ from sqlalchemy import select
 from app.db import SessionLocal
 from app.models.meeting_recording import MeetingRecording
 from app.models.recording_analysis import RecordingTranscript, RecordingAction
-from app.services.meeting_recording_storage import LocalMeetingStorage
+from app.services.meeting_recording_storage import LocalMeetingStorage, recording_extension
 from app.services.recording_analysis_provider import extract_audio
 from app.config import settings
 
@@ -34,7 +34,7 @@ async def export(recording_id):
         if not segments or not any(s.text.strip() for s in segments):
             raise ValueError('Recording has no saved transcript')
         source = LocalMeetingStorage(settings.MEETING_RECORDINGS_ROOT).path(
-            f"{row.storage_key}/recording.{'webm' if row.mime_type == 'video/webm' else 'mp4'}")
+            f"{row.storage_key}/recording.{recording_extension(row.mime_type)}")
         folder = Path(__file__).resolve().parents[1] / 'private-data' / 'alignment-pilot' / str(recording_id)
         folder.mkdir(parents=True, exist_ok=True)
         audio = extract_audio(source, 0, math.ceil(row.duration_seconds))
