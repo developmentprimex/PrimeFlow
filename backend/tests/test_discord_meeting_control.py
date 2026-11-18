@@ -17,6 +17,33 @@ from tests.test_discord_voice_model import PostgresMeetingTests
 
 
 class PanelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_expired_stop_is_logged_without_running_it_or_replying_again(self):
+        from discord_meeting_control import MeetingControlPanel
+        from discord_voice_meetings import handle_meeting_interaction
+
+        expired = discord.NotFound(Mock(status=404), {'code': 10062, 'message': 'Unknown interaction'})
+        sid = str(uuid.uuid4())
+        for recorder in ('primary', 'ai_agent'):
+            for custom_id in (f'pf:mc:{recorder}:stop:{sid}', f'pf:vm:stop:{sid}'):
+                with self.subTest(custom_id=custom_id):
+                    capture = SimpleNamespace(stop=AsyncMock())
+                    bot = SimpleNamespace(voice_recorder=recorder, meeting_capture=capture)
+                    capture.bot = bot
+                    interaction = SimpleNamespace(
+                        id=123, created_at=discord.utils.utcnow(), channel_id=77, guild_id=1,
+                        data={'custom_id': custom_id}, response=SimpleNamespace(defer=AsyncMock(side_effect=expired)),
+                        followup=SimpleNamespace(send=AsyncMock()),
+                    )
+                    with self.assertLogs('primeflow.discord.control', level='WARNING') as logs:
+                        if custom_id.startswith('pf:mc:'):
+                            await MeetingControlPanel(capture).handle(interaction)
+                        else:
+                            await handle_meeting_interaction(bot, interaction)
+                    interaction.response.defer.assert_awaited_once()
+                    capture.stop.assert_not_awaited()
+                    interaction.followup.send.assert_not_awaited()
+                    self.assertIn(f'recorder={recorder} action=stop', logs.output[0])
+
     async def test_shared_actions_and_notes_are_visible_to_everyone_in_control_channel(self):
         from discord_meeting_control import MeetingControlPanel
         sid=str(uuid.uuid4())

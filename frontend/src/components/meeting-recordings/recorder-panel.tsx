@@ -179,23 +179,28 @@ export function RecorderPanel() {
           <Button variant="outline" disabled={recorder.busy} onClick={recorder.cancel}>Anulo</Button>
         </>}
         {recorder.state === "recording" && <Button variant="outline" onClick={recorder.pause}><Pause className="mr-2 size-4" /> Pauzë</Button>}
-        {recorder.state === "paused" && <Button variant="outline" disabled={!!recorder.error || (recorder.manifest ? recorder.manifest.bytes - recorder.manifest.uploadedBytes >= 32 * 1024 * 1024 : false)} onClick={recorder.resume}><Play className="mr-2 size-4" /> Vazhdo</Button>}
+        {recorder.state === "paused" && <Button variant="outline" onClick={recorder.resume}><Play className="mr-2 size-4" /> Vazhdo</Button>}
         {active && <>
           <Button variant="destructive" disabled={recorder.state === "stopping"} onClick={recorder.stop}><Square className="mr-2 size-4" /> Ndalo</Button>
           <Button variant="outline" disabled={!recorder.info.microphone} onClick={() => recorder.toggle("microphone")}>Mikrofoni On/Off</Button>
           {!audioCapture && <Button variant="outline" disabled={!recorder.info.system} onClick={() => recorder.toggle("system")}>Audio sistemi On/Off</Button>}
         </>}
       </div>
-      {recorder.backpressure && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Regjistrimi u vendos në pauzë për shkak të ngarkimit. Prisni konfirmimin e fragmenteve, pastaj klikoni Vazhdo.</p>}
       {recorder.manifest && <div className="space-y-2 text-sm" role="status">
         <p>Ngarkuar: {recordingSize(recorder.manifest.uploadedBytes)} / {recordingSize(recorder.manifest.bytes)} ({percent}%) · {recorder.manifest.acknowledged}/{recorder.manifest.count} fragmente</p>
         <progress className="w-full" aria-label="Progresi i ngarkimit" max={100} value={percent} />
-        <p>{recorder.saving ? "Duke përfunduar dhe verifikuar regjistrimin në server…" : active ? "Ngarkimi vazhdon gjatë regjistrimit." : "Nuk është konfirmuar ende si i ruajtur."}</p>
+        <p>{recorder.uploadWaiting
+          ? recorder.state === "recording" ? "Regjistrimi vazhdon. Ngarkimi do të riprovohet automatikisht." : "Ngarkimi do të riprovohet automatikisht."
+          : recorder.saving ? "Duke përfunduar dhe verifikuar regjistrimin në server…"
+            : active ? "Fragmentet ruhen në pajisje derisa serveri të konfirmojë ngarkimin."
+              : "Nuk është konfirmuar ende si i ruajtur."}</p>
         {!recorder.saving && <Button variant="outline" onClick={() => void recorder.retry()}>Riprovo ngarkimin</Button>}
         {!active && !recorder.saving && <Button variant="ghost" onClick={() => { if (window.confirm("Mbyll sesionin dhe hiq fragmentet lokale të pangarkuara?")) void recorder.discard(recorder.manifest!.id) }}>Braktis sesionin</Button>}
       </div>}
+      {recorder.uploadError && <p role="alert" className="text-sm text-destructive">{recorder.uploadError}</p>}
       {recorder.error && <div role="alert" className="rounded-md border border-destructive p-3 text-sm text-destructive">{recorder.error}<p className="mt-1">{mode === "audio" ? "Nëse leja e mikrofonit u refuzua, lejojeni mikrofonin në shfletues dhe provoni përsëri." : "Nëse leja e mikrofonit u refuzua, zgjidhni “Pa mikrofon” ose ndryshoni lejet e shfletuesit. Nëse ekrani u refuzua, klikoni sërish Zgjidh ekranin."}</p></div>}
-      {recorder.savedId && <p role="status" className="text-sm font-semibold text-green-700 dark:text-green-300">Serveri konfirmoi ruajtjen. <Link className="underline" href={`/meeting-recordings/${recorder.savedId}`}>Hap regjistrimin</Link></p>}
+      {recorder.savedPartial && recorder.interruption && <p className="text-sm text-amber-700 dark:text-amber-300">{recorder.interruption}</p>}
+      {recorder.savedId && <p role="status" className={`text-sm font-semibold ${recorder.savedPartial ? "text-amber-700 dark:text-amber-300" : "text-green-700 dark:text-green-300"}`}>{recorder.savedPartial ? "Serveri ruajti pjesën e disponueshme." : "Serveri konfirmoi ruajtjen."} <Link className="underline" href={`/meeting-recordings/${recorder.savedId}`}>Hap regjistrimin</Link></p>}
       {recorder.recoveries.map(m => <div key={m.id} className="space-y-2 rounded-md border p-3 text-sm">
         <p className="font-semibold">Rikuperim: {m.title}</p>
         <p>{m.fatal || (m.stopped ? "Regjistrimi u ndal; ngarkimi mbeti i papërfunduar." : "Shfletuesi u ndërpre. Mund të rikuperohet vetëm pjesa e ruajtur lokalisht; sekondat e fundit mund të mungojnë.")}</p>

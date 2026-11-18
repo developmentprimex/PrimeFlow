@@ -290,7 +290,7 @@ class MemoryOutbox {
   async acknowledge(_, bytes) { this.chunks[this.manifest.acknowledged] = undefined; this.manifest.acknowledged++; this.manifest.uploadedBytes += bytes }
   async remove() { this.removed = true }
 }
-const { RecordingUploader } = load("recording-outbox")
+const { RecordingUploader, RetryableRecordingUploadError } = load("recording-outbox")
 function receipt(index, options) { return Response.json({ index, sha256: options.headers["X-Chunk-SHA256"], size_bytes: options.body.size }) }
 test("chunk retry uses exponential backoff and identical sequential index/hash", async () => {
   const outbox = new MemoryOutbox(), attempts = [], delays = []
@@ -316,6 +316,25 @@ test("failed upload never finalizes or deletes durable pending data; explicit re
   assert.equal(completed, false); assert.equal(outbox.removed, undefined); assert.ok(outbox.chunks[0])
   online = true; await uploader.complete()
   assert.ok(completed); assert.ok(outbox.removed)
+})
+test("retrying finalization after a connection failure never reuploads acknowledged fragments", async () => {
+  const outbox = new MemoryOutbox()
+  await outbox.append("session", new Blob(["captured prefix"]))
+  Object.assign(outbox.manifest, { stopped: true, partial: true })
+  let uploads = 0, finalizations = 0
+  const uploader = new RecordingUploader("session", outbox, async (path, init) => {
+    if (!path.endsWith("/complete")) { uploads++; return receipt(0, init) }
+    assert.deepEqual(JSON.parse(init.body), { chunks: 1, partial: true })
+    if (++finalizations === 1) throw new TypeError("Failed to fetch")
+    if (finalizations === 2) return Response.json({ detail: "Recording is already being finalized; retry shortly" }, { status: 409 })
+    return Response.json({ status: "READY", is_partial: true })
+  }, () => {})
+  await assert.rejects(uploader.complete(), RetryableRecordingUploadError)
+  await assert.rejects(uploader.complete(), RetryableRecordingUploadError)
+  assert.equal(outbox.removed, undefined)
+  assert.equal((await uploader.complete()).is_partial, true)
+  assert.equal(uploads, 1)
+  assert.equal(outbox.removed, true)
 })
 test("unfinished capture, mismatched receipts and non-READY completion never report saved", async () => {
   const outbox = new MemoryOutbox()

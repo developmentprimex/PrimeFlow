@@ -10,6 +10,23 @@ log = logging.getLogger('primeflow.discord.control')
 PREFIX = '/bot/voice-meetings'
 
 
+async def acknowledge_button(interaction, *, recorder, action, ephemeral):
+    received_at = discord.utils.utcnow()
+    started = time.monotonic()
+    try:
+        await interaction.response.defer(thinking=True, ephemeral=ephemeral)
+    except discord.NotFound as exc:
+        if exc.code != 10062:
+            raise
+        log.warning(
+            'Meeting button expired: recorder=%s action=%s interaction=%s age_at_handler_ms=%.0f callback_ms=%.0f',
+            recorder, action, interaction.id, (received_at - interaction.created_at).total_seconds() * 1000,
+            (time.monotonic() - started) * 1000,
+        )
+        return False
+    return True
+
+
 def panel_recorder(message):
     """Recognize panels so the two bots never keep moving past each other."""
     for row in getattr(message, 'components', ()):
@@ -168,7 +185,8 @@ class MeetingControlPanel:
         _, _, recorder, action, sid = interaction.data['custom_id'].split(':')
         if recorder != self.recorder:
             return
-        await interaction.response.defer(thinking=True,ephemeral=action == 'refresh')
+        if not await acknowledge_button(interaction, recorder=recorder, action=action, ephemeral=action == 'refresh'):
+            return
         require_control(interaction)
         if action == 'start':
             await self.start(interaction)

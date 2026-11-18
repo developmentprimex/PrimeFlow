@@ -245,6 +245,7 @@ export class RecordingCapture {
     this.recorder.onerror = () => { this.events.error(new Error("Regjistrimi u ndërpre nga shfletuesi.")); void this.stop() }
     this.stopped = new Promise(resolve => { this.resolveStop = resolve })
     this.recorder.onstop = () => {
+      if (this.state !== "stopping") this.events.error(new Error("Shfletuesi e ndërpreu regjistrimin."))
       this.freezeTime()
       this.state = "stopped"
       this.release()

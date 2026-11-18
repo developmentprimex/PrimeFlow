@@ -186,6 +186,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Testet me skema të izoluara të shënimeve duhet të krijojnë edhe `MeetingNote`,
   sepse leximi i `GaNote` ngarkon flamurin `from_meeting` përmes `meeting_notes`.
 
+- Konfirmimi i klikimeve në Discord përdoret nga panelet 1H dhe AI Agent në
+  `mira-kontrolli` dhe nga butonat e regjistrimit e të shënimeve në mesazhe.
+  Kontrollo konfirmimin para thirrjeve në PrimeFlow, dukshmërinë në kanalin
+  e kontrollit dhe në kanalet personale, si dhe ruajtjen te Mira / PX Notes.
+  Kur Discord kthen `10062`, logu i botit tregon moshën e klikimit në hyrje
+  dhe kohën e kërkesës së konfirmimit. Veprimi i skaduar nuk ekzekutohet.
+
 - Taskat e krijuara drejtpërdrejt nga Regjistrimet krijojnë PX Note me
   `knowledge_type=RECORDING` dhe lidhjen `ga_note_origin_id`. PX Notes shfaq
   etiketën `REC` pranë etiketave të tjera; printimi klonon të njëjtën tabelë
@@ -229,6 +236,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   përkatës. Screenshot-i kërkon video. Ruajtja private, arkiva FILES, analiza e
   regjistrimit dhe eksporti i kohëve të citimeve përdorin të njëjtën prapashtesë
   të skedarit; kontrollo WebM dhe M4A për audio dhe formatet ekzistuese për video.
+
+- Radha IndexedDB dhe shiriti i regjistruesit në krye të aplikacionit përdoren
+  nga Ekran dhe Vetëm audio. Ngarkimi i vonuar mbetet në sfond dhe riprovohet
+  pas rilidhjes, edhe pas “Ndalo”, sa kohë skeda që nisi regjistrimin është hapur.
+  Kontrollo që “Pauzë” / “Vazhdo” të veprojnë vetëm me kërkesë të përdoruesit
+  dhe që historiku e detajet të dallojnë skedarin e plotë nga pjesa e ruajtur
+  pas ndërprerjes së shfletuesit ose arritjes së kufirit të ruajtjes lokale.
 
 - Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
   `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe

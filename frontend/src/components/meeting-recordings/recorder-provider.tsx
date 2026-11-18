@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { useAuth } from "@/lib/auth"
 import { RecordingCapture, type CaptureInfo, type CaptureState } from "@/lib/recording-capture"
-import { IndexedRecordingOutbox, PAUSE_PENDING_BYTES, RecordingUploader, recordingJson, type RecordingManifest } from "@/lib/recording-outbox"
+import { IndexedRecordingOutbox, MAX_CHUNK_BYTES, RecordingUploader, RetryableRecordingUploadError, recordingJson, type RecordingManifest } from "@/lib/recording-outbox"
 import { recordingTime } from "@/lib/recording-types"
 import { Button } from "@/components/ui/button"
 
@@ -12,7 +12,8 @@ type View = {
   screenSharing: boolean; selectingScreen: boolean; sharingError?: string | null
   state: CaptureState; info: CaptureInfo; inputs: { microphone: string; system: string }; seconds: number
   manifest: RecordingManifest | null; recoveries: RecordingManifest[]; error: string | null
-  busy: boolean; saving: boolean; savedId: string | null; backpressure: boolean; available: boolean
+  busy: boolean; saving: boolean; savedId: string | null; savedPartial: boolean; available: boolean
+  uploadWaiting: boolean; uploadError: string | null; interruption: string | null
 }
 type RecorderContextValue = View & {
   shareScreen: (source?: string) => Promise<void>
@@ -23,47 +24,100 @@ type RecorderContextValue = View & {
   retry: (id?: string, partial?: boolean) => Promise<void>; discard: (id: string) => Promise<void>
 }
 const RecorderContext = React.createContext<RecorderContextValue | null>(null)
-const initial: View = { screenSharing: false, selectingScreen: false, state: "idle", info: { source: "unknown", microphone: false, system: false, mime: "" }, inputs: { microphone: "unavailable", system: "unavailable" }, seconds: 0, manifest: null, recoveries: [], error: null, busy: false, saving: false, savedId: null, backpressure: false, available: false }
+const initial: View = { screenSharing: false, selectingScreen: false, state: "idle", info: { source: "unknown", microphone: false, system: false, mime: "" }, inputs: { microphone: "unavailable", system: "unavailable" }, seconds: 0, manifest: null, recoveries: [], error: null, busy: false, saving: false, savedId: null, savedPartial: false, available: false, uploadWaiting: false, uploadError: null, interruption: null }
+
+type Runtime = {
+  capture: RecordingCapture; outbox: IndexedRecordingOutbox; uploader?: RecordingUploader; id?: string
+  tail: Promise<void>; stagingBytes: number; starting: boolean; finishing: boolean; lockRelease?: () => void
+  interruption?: string; dropChunks?: boolean; writeFailed?: boolean
+  pumping?: boolean; pumpRequested?: boolean; uploadBlocked?: boolean; retryTimer?: number
+}
+
+function clearUploadRetry(r: Runtime) {
+  if (r.retryTimer !== undefined) window.clearTimeout(r.retryTimer)
+  r.retryTimer = undefined
+}
 
 export function RecorderProvider({ children }: { children: React.ReactNode }) {
   const { user, apiFetch } = useAuth()
   const api = React.useRef(apiFetch)
   api.current = apiFetch
   const [view, setView] = React.useState<View>(initial)
-  const runtime = React.useRef<{
-    capture: RecordingCapture; outbox: IndexedRecordingOutbox; uploader?: RecordingUploader; id?: string
-    tail: Promise<void>; stagingBytes: number; fatal?: string; starting: boolean; finishing: boolean; lockRelease?: () => void
-  } | null>(null)
+  const runtime = React.useRef<Runtime | null>(null)
   const refresh = React.useCallback(async () => {
     const r = runtime.current
     if (!r || !user) return
     try {
-      const [manifest, all] = await Promise.all([r.id ? r.outbox.get(r.id).catch(() => null) : null, r.outbox.list(user.id)])
-      if (runtime.current !== r) return
-      setView(v => ({ ...v, manifest, recoveries: all.filter(m => m.id !== r.id) }))
+      const id = r.id
+      const all = await r.outbox.list(user.id)
+      if (runtime.current !== r || r.id !== id) return
+      setView(v => ({ ...v, manifest: all.find(m => m.id === id) || null, recoveries: all.filter(m => m.id !== id) }))
     } catch (error) { setView(v => ({ ...v, error: String(error), available: false })) }
   }, [user])
   const finish = React.useRef<() => Promise<void>>(async () => {})
+  const pump = React.useRef<() => Promise<void>>(async () => {})
+  const retryPending = (r: Runtime) => {
+    if (runtime.current !== r || !r.id || r.retryTimer !== undefined) return
+    setView(v => ({ ...v, uploadWaiting: true, uploadError: null }))
+    r.retryTimer = window.setTimeout(() => {
+      r.retryTimer = undefined
+      if (runtime.current !== r) return
+      if (navigator.onLine === false) { retryPending(r); return }
+      if (r.capture.state === "stopped") void finish.current()
+      else void pump.current()
+    }, 5000)
+  }
+  pump.current = async () => {
+    const r = runtime.current
+    if (!r?.uploader || !r.id || r.finishing || r.uploadBlocked || r.retryTimer !== undefined) return
+    if (r.pumping) { r.pumpRequested = true; return }
+    if (navigator.onLine === false) { retryPending(r); return }
+    r.pumping = true
+    try {
+      await r.uploader.pump()
+      if (runtime.current === r && !r.finishing) setView(v => ({ ...v, uploadWaiting: false, uploadError: null }))
+    } catch (error) {
+      if (runtime.current !== r || r.finishing) return
+      if (error instanceof RetryableRecordingUploadError) retryPending(r)
+      else {
+        r.uploadBlocked = true
+        setView(v => ({ ...v, uploadWaiting: false, uploadError: error instanceof Error ? error.message : String(error) }))
+      }
+    } finally {
+      r.pumping = false
+      if (r.pumpRequested && runtime.current === r) {
+        r.pumpRequested = false
+        void pump.current()
+      }
+    }
+  }
   finish.current = async () => {
     const r = runtime.current
-    if (!r?.id || r.finishing) return
+    if (!r?.id || !r.uploader || r.finishing) return
+    clearUploadRetry(r)
     r.finishing = true
-    setView(v => ({ ...v, saving: true, error: r.fatal || null }))
+    const id = r.id
+    setView(v => ({ ...v, saving: true, uploadWaiting: false, uploadError: null }))
     try {
       await r.tail
-      await r.outbox.stop(r.id, r.fatal)
-      if (r.fatal) throw new Error(r.fatal)
-      await r.uploader!.complete()
-      const savedId = r.id
-      setView(v => ({ ...v, savedId, manifest: null, error: null }))
+      await r.outbox.stop(id, undefined, Boolean(r.interruption))
+      if (runtime.current !== r) return
+      if (navigator.onLine === false) throw new RetryableRecordingUploadError("Lidhja me serverin është në pritje.")
+      const saved = await r.uploader.complete()
       r.id = undefined
+      r.uploader = undefined
+      if (runtime.current === r) setView(v => ({ ...v, savedId: id, savedPartial: !!saved.is_partial, manifest: null, uploadError: null }))
     } catch (error) {
-      setView(v => ({ ...v, error: error instanceof Error ? error.message : String(error) }))
+      if (runtime.current !== r) return
+      if (error instanceof RetryableRecordingUploadError) retryPending(r)
+      else setView(v => ({ ...v, uploadError: error instanceof Error ? error.message : String(error) }))
     } finally {
       r.finishing = false
-      r.lockRelease?.(); r.lockRelease = undefined
-      setView(v => ({ ...v, saving: false }))
-      await refresh()
+      if (r.retryTimer === undefined) { r.lockRelease?.(); r.lockRelease = undefined }
+      if (runtime.current === r) {
+        setView(v => ({ ...v, saving: false }))
+        await refresh()
+      }
     }
   }
 
@@ -71,7 +125,11 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     if (!user) return
     let disposed = false
     const outbox = new IndexedRecordingOutbox()
-    const r: NonNullable<typeof runtime.current> = {
+    const interrupt = (message: string) => {
+      r.interruption ||= message
+      if (!disposed) setView(v => ({ ...v, interruption: r.interruption! }))
+    }
+    const r: Runtime = {
       outbox, tail: Promise.resolve(), stagingBytes: 0, starting: false, finishing: false,
       capture: new RecordingCapture({
         change: () => {
@@ -80,41 +138,30 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
           setView(v => ({ ...v, state: r.capture.state, screenSharing: r.capture.screenSharing, selectingScreen: r.capture.selectingScreen, info: { ...r.capture.info }, inputs: r.capture.inputStatus, seconds: r.capture.seconds }))
         },
         error: error => {
-          if (r.id) r.fatal = error.message
-          if (!disposed) setView(v => ({ ...v, error: error.message }))
+          if (r.id) interrupt(error.message)
+          else if (!disposed) setView(v => ({ ...v, error: error.message }))
         },
-        stopped: () => { if (r.id) void finish.current() },
+        stopped: () => { if (r.id && runtime.current === r) void finish.current() },
         chunk: blob => {
-          if (r.fatal) return
+          if (r.writeFailed || r.dropChunks) return
           // Reserve synchronously, before the IndexedDB write can stall. Even
           // a blocked disk must not grow an unbounded promise/Blob RAM queue.
-          if (blob.size > 32 * 1024 * 1024 || r.stagingBytes + blob.size > 64 * 1024 * 1024) {
-            r.fatal = "Fragmenti tejkaloi kufirin lokal. Regjistrimi nuk u ruajt plotësisht."
-            if (!disposed) setView(v => ({ ...v, error: r.fatal! }))
+          if (blob.size > MAX_CHUNK_BYTES || r.stagingBytes + blob.size > 64 * 1024 * 1024) {
+            r.dropChunks = true
+            interrupt("Regjistrimi u ndërpre sepse u arrit kufiri i ruajtjes lokale.")
             void r.capture.stop()
             return
           }
           r.stagingBytes += blob.size
-          if (r.stagingBytes >= 16 * 1024 * 1024) {
-            r.capture.pause()
-            if (!disposed) setView(v => ({ ...v, backpressure: true }))
-          }
           r.tail = r.tail.then(async () => {
-            if (!r.id || r.fatal) return
+            if (!r.id || r.writeFailed) return
             await outbox.append(r.id, blob)
-            const manifest = await outbox.get(r.id)
-            if (manifest.bytes - manifest.uploadedBytes >= PAUSE_PENDING_BYTES || manifest.count - manifest.acknowledged >= 12) {
-              r.capture.pause()
-              if (!disposed) setView(v => ({ ...v, backpressure: true }))
-            }
-            await refresh()
-            void r.uploader!.pump().catch(error => {
-              r.capture.pause()
-              if (!disposed) setView(v => ({ ...v, backpressure: true, error: error.message }))
-            })
-          }).catch(async error => {
-            r.fatal = `Ruajtja lokale dështoi: ${error instanceof Error ? error.message : String(error)}`
-            if (!disposed) setView(v => ({ ...v, error: r.fatal! }))
+            if (disposed) return
+            void refresh()
+            void pump.current()
+          }).catch(error => {
+            r.writeFailed = true
+            interrupt(`Regjistrimi u ndërpre gjatë ruajtjes lokale. ${error instanceof Error ? error.message : String(error)}`)
             void r.capture.stop()
           }).finally(() => { r.stagingBytes -= blob.size })
         },
@@ -127,14 +174,28 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (r.id || ["prepared", "recording", "paused", "stopping", "selecting"].includes(r.capture.state)) { event.preventDefault(); event.returnValue = "" }
     }
-    const pageHide = () => { if (["recording", "paused"].includes(r.capture.state)) void r.capture.stop(); else r.capture.cancel() }
+    const pageHide = () => {
+      if (["recording", "paused"].includes(r.capture.state)) {
+        interrupt("Shfletuesi e ndërpreu regjistrimin.")
+        void r.capture.stop()
+      } else if (["prepared", "selecting"].includes(r.capture.state)) r.capture.cancel()
+    }
+    const online = () => {
+      if (!r.id || r.retryTimer === undefined) return
+      clearUploadRetry(r)
+      if (r.capture.state === "stopped") void finish.current()
+      else void pump.current()
+    }
     window.addEventListener("beforeunload", beforeUnload)
     window.addEventListener("pagehide", pageHide)
+    window.addEventListener("online", online)
     return () => {
       disposed = true
       clearInterval(timer)
       window.removeEventListener("beforeunload", beforeUnload)
       window.removeEventListener("pagehide", pageHide)
+      window.removeEventListener("online", online)
+      clearUploadRetry(r)
       r.capture.cancel()
       r.lockRelease?.()
       if (runtime.current === r) runtime.current = null
@@ -146,7 +207,7 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
   const prepare = async (device: string | false, source: string, recording: { title: string; meetingId: string; description: string; projectId?: string }) => {
     const r = runtime.current
     if (!r || r.starting || r.id || r.finishing) return
-    setView(v => ({ ...v, error: null, savedId: null, backpressure: false }))
+    setView(v => ({ ...v, error: null, savedId: null, savedPartial: false, uploadWaiting: false, uploadError: null, interruption: null }))
     r.starting = true
     try {
       if (!navigator.locks) throw new Error("Ky shfletues nuk mbështet sesionin e regjistrimit. Përdorni një version të përditësuar të Safari, Chrome ose Edge.")
@@ -179,20 +240,23 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
         }), signal: AbortSignal.timeout(30_000),
       }))
       r.id = session.id
-      r.fatal = undefined
+      r.interruption = undefined
+      r.writeFailed = r.dropChunks = r.uploadBlocked = false
       await r.outbox.create({ id: session.id, userId: user.id, title, count: 0, acknowledged: 0, bytes: 0, uploadedBytes: 0, stopped: false })
       r.uploader = new RecordingUploader(session.id, r.outbox, (...args) => api.current(...args), () => { void refresh() })
       await r.capture.start()
       await refresh()
     } catch (error) {
-      r.fatal = error instanceof Error ? error.message : String(error)
+      const message = error instanceof Error ? error.message : String(error)
       r.capture.cancel()
       if (r.id) {
-        await r.outbox.stop(r.id, r.fatal).catch(() => {})
+        await r.outbox.stop(r.id, message).catch(() => {})
         await api.current(`/meeting-recordings/${r.id}/fail`, { method: "POST" }).catch(() => {})
+        r.id = undefined
+        r.uploader = undefined
       }
       r.lockRelease?.(); r.lockRelease = undefined
-      setView(v => ({ ...v, error: r.fatal! }))
+      setView(v => ({ ...v, error: message }))
       await refresh()
     } finally { r.starting = false; setView(v => ({ ...v, busy: false })) }
   }
@@ -203,12 +267,17 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     const target = id || r.id
     if (!target) return
     if (target === r.id && ["recording", "paused"].includes(r.capture.state)) {
-      try { await r.uploader!.pump(); setView(v => ({ ...v, error: null })); await refresh() }
-      catch (error) { setView(v => ({ ...v, error: String(error) })) }
+      r.uploadBlocked = false
+      clearUploadRetry(r)
+      await pump.current()
+      return
+    }
+    if (target === r.id && r.lockRelease) {
+      await finish.current()
       return
     }
     r.finishing = true
-    setView(v => ({ ...v, saving: true, error: null }))
+    setView(v => ({ ...v, saving: true, uploadError: null }))
     let releaseRecoveryLock: (() => void) | undefined
     try {
       await new Promise<void>((resolve, reject) => {
@@ -221,30 +290,46 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
       })
       const m = await r.outbox.get(target)
       if (!m.stopped) {
-        if (!partial) throw new Error("Regjistrimi u ndërpre. Konfirmoni rikuperimin e pjesës së disponueshme.")
+        if (!partial && !(target === r.id && r.interruption)) throw new Error("Regjistrimi u ndërpre. Konfirmoni rikuperimin e pjesës së disponueshme.")
         await r.outbox.stop(target, undefined, true)
       }
       const uploader = new RecordingUploader(target, r.outbox, (...args) => api.current(...args), () => { void refresh() })
-      await uploader.complete()
-      if (r.id === target) r.id = undefined
-      setView(v => ({ ...v, savedId: target, error: null }))
-    } catch (error) { setView(v => ({ ...v, error: error instanceof Error ? error.message : String(error) })) }
+      const saved = await uploader.complete()
+      if (r.id === target) { r.id = undefined; r.uploader = undefined }
+      setView(v => ({ ...v, savedId: target, savedPartial: !!saved.is_partial, uploadError: null }))
+    } catch (error) { setView(v => ({ ...v, uploadError: error instanceof Error ? error.message : String(error) })) }
     finally { releaseRecoveryLock?.(); r.finishing = false; setView(v => ({ ...v, saving: false })); await refresh() }
   }
   const discard = async (id: string) => {
     const r = runtime.current
     if (!r || r.finishing || r.starting || ["recording", "paused", "stopping"].includes(r.capture.state)) return
+    r.finishing = true
+    setView(v => ({ ...v, error: null, uploadError: null }))
+    const ownsSession = r.id === id && !!r.lockRelease
+    const retryWasPending = ownsSession && r.retryTimer !== undefined
+    if (ownsSession) clearUploadRetry(r)
+    const discardSession = async () => {
+      const response = await api.current(`/meeting-recordings/${id}/fail`, { method: "POST" })
+      if (!response.ok) throw new Error("Serveri nuk konfirmoi mbylljen e sesionit.")
+      await r.outbox.remove(id)
+      if (r.id === id) {
+        r.id = undefined
+        r.uploader = undefined
+        r.lockRelease?.(); r.lockRelease = undefined
+      }
+      setView(v => ({ ...v, uploadWaiting: false, uploadError: null, interruption: null }))
+      await refresh()
+    }
     try {
-      await navigator.locks.request("primeflow-screen-recorder", { ifAvailable: true }, async lock => {
+      if (ownsSession) await discardSession()
+      else await navigator.locks.request("primeflow-screen-recorder", { ifAvailable: true }, async lock => {
         if (!lock) throw new Error("Një skedë tjetër ka një regjistrim aktiv.")
-        const response = await api.current(`/meeting-recordings/${id}/fail`, { method: "POST" })
-        if (!response.ok) throw new Error("Serveri nuk konfirmoi mbylljen e sesionit.")
-        await r.outbox.remove(id)
-        if (r.id === id) r.id = undefined
-        setView(v => ({ ...v, error: null }))
-        await refresh()
+        await discardSession()
       })
-    } catch (error) { setView(v => ({ ...v, error: String(error) })) }
+    } catch (error) {
+      if (retryWasPending) retryPending(r)
+      setView(v => ({ ...v, uploadError: error instanceof Error ? error.message : String(error) }))
+    } finally { r.finishing = false }
   }
   const value: RecorderContextValue = { ...view, prepare, start, cancel, retry, discard,
     shareScreen: async source => {
@@ -253,18 +338,20 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
       catch (error) { setView(v => ({ ...v, sharingError: error instanceof Error ? error.message : String(error) })) }
     },
     stop: () => { void runtime.current?.capture.stop() }, pause: () => runtime.current?.capture.pause(),
-    resume: () => { if (!view.error && !view.saving && runtime.current && runtime.current.stagingBytes < 16 * 1024 * 1024 && (!view.manifest || view.manifest.bytes - view.manifest.uploadedBytes < PAUSE_PENDING_BYTES)) { runtime.current.capture.resume(); setView(v => ({ ...v, backpressure: false })) } },
+    resume: () => runtime.current?.capture.resume(),
     toggle: input => runtime.current?.capture.toggle(input),
   }
-  const active = ["recording", "paused", "stopping", "prepared", "selecting"].includes(view.state) || view.saving
+  const active = ["recording", "paused", "stopping", "prepared", "selecting"].includes(view.state) || view.saving || view.uploadWaiting || (!!view.interruption && !view.savedId)
   const capturing = view.state === "recording" || view.state === "paused"
   const audioOnly = view.info.source === "microphone"
   return <RecorderContext.Provider value={value}>
     {active && <div role="status" aria-live="polite" className="sticky top-0 z-50 flex flex-wrap items-center gap-3 border-b border-red-300 bg-red-50 px-4 py-2 text-sm text-red-950 dark:bg-red-950 dark:text-red-100">
       <span className="h-3 w-3 rounded-full bg-red-600 motion-safe:animate-pulse" />
-      <Link href="/meeting-recordings" className="font-semibold underline">{view.state === "recording" ? audioOnly ? "Duke regjistruar audio" : "Duke regjistruar" : view.state === "paused" ? "Regjistrimi në pauzë" : view.saving || view.state === "stopping" ? "Duke ruajtur regjistrimin" : "Duke përgatitur regjistrimin"}</Link>
+      <Link href="/meeting-recordings" className="font-semibold underline">{view.state === "recording" ? audioOnly ? "Duke regjistruar audio" : "Duke regjistruar" : view.state === "paused" ? "Regjistrimi në pauzë" : view.saving || view.state === "stopping" ? "Duke ruajtur regjistrimin" : view.interruption ? "Regjistrimi u ndërpre" : view.uploadWaiting ? "Ngarkimi në pritje" : "Duke përgatitur regjistrimin"}</Link>
       <span className="tabular-nums">{recordingTime(view.seconds)}</span>
       {view.sharingError && <span role="alert">Ndarja e ekranit dështoi: {view.sharingError}</span>}
+      {view.interruption && <span role="alert">{view.interruption}</span>}
+      {capturing && view.uploadWaiting && <span>Ngarkimi në pritje</span>}
       {capturing && !audioOnly && !view.screenSharing && <>
         <span>{view.state === "paused" ? "Ekrani nuk po ndahet. Regjistrimi është në pauzë." : "Regjistrimi vazhdon — ekrani nuk po ndahet."}</span>
         {view.inputs.microphone !== "on" && <span role="alert">Mikrofoni nuk është aktiv; biseda nuk po regjistrohet.</span>}

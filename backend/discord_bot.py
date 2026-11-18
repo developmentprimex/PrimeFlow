@@ -25,6 +25,7 @@ import discord_m3_client as m3_client
 import discord_reports
 import discord_ga_replies as ga_replies_client
 from discord_channel_names import personal_channel_name
+from discord_logging import worker_logging
 import discord_one_h_client as one_h_client
 import discord_m2_approvals as m2_approvals
 import discord_answer_sync as answer_sync
@@ -1101,7 +1102,7 @@ class PrimeFlowBot(discord.Client):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     if not all((settings.DISCORD_ASSISTANT_ENABLED, settings.DISCORD_BOT_TOKEN, settings.DISCORD_BRIDGE_SECRET, settings.DISCORD_GUILD_ID)):
         raise SystemExit("Configure DISCORD_ASSISTANT_ENABLED, DISCORD_BOT_TOKEN, DISCORD_BRIDGE_SECRET and DISCORD_GUILD_ID first.")
-    PrimeFlowBot().run(settings.DISCORD_BOT_TOKEN, log_handler=None)
+    with worker_logging():
+        PrimeFlowBot().run(settings.DISCORD_BOT_TOKEN, log_handler=None)
