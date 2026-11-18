@@ -84,17 +84,62 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
-- M1: pyetja **A ka reply nga GA tek detyrat nga stafi për GA?** përdor
+- M3 PIKAT PER RAP: **NËNNGARKESË** merr stafin nga caktimet kryesore dhe
+  shtesë të detyrave aktive që përmbajnë `NËNNGARKESË` në rreshtin e titullit
+  për datën e raportit. Kontrollo titujt me tekst para dhe pas fjalës.
+  Kontrollo faqen, pamjen paraprake, emailin dhe bashkëngjitjet HTML, Word dhe PNG.
+
+- M3: **A JEMI BRENDA MESATARES ME PROJEKTE?** dhe **PIKAT E DITES** përjashtohen nga draftet e
+  ruajtura, rigjenerimi dhe importi i pyetjeve manuale. Kontrollo gjithashtu
+  faqen M3, preview, emailin dhe bashkëngjitjet.
+
+- M2: **PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU** shfaq PO/JO për VS,
+  VL, MST dhe TT sipas kodeve në titujt e detyrave të caktuara stafit PCM.
+  Data e raportit duhet të bjerë brenda Start Date–Due Date. Kontrollo caktimet
+  kryesore dhe shtesë, rigjenerimin, preview, emailin dhe bashkëngjitjet e M2.
+
+- M2: **A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?** dhe **PIKAT E BORDIT/DISKUTO
+  APLIKANTAT** përjashtohen nga draftet e ruajtura, rigjenerimi dhe importi nga
+  Common View. Kontrollo faqen M2, preview, emailin dhe bashkëngjitjet.
+
+- M1: **FIZIKISHT ME GA?** përdor detyrat aktive me simbolin `F` dhe
+  **A KA PYTJE/SQARIME ME KA/GENTIN** ato me `KA` ose `GENT`. Të dyja pikat
+  pranojnë simbolet e kombinuara dhe përdorin intervalin Start Date–Due Date
+  që mbulon datën lokale të raportit, sipas rregullit të Common View për
+  planifikimin. Kopjet e lidhura me të njëjtën bashkësi
+  simbolesh shfaqen në një rresht me përgjegjësit përkatës pas filtrit të
+  mungesave. Kur janë disa përgjegjës, kolona KUSH i ndan me `/` dhe faqja M1
+  e thekson vijën ndarëse. Kontrollo numrin e rreshtave dhe kolonën KUSH.
+  Të dyja pikat renditen menjëherë pas pikës së përgjigjeve të GA nga Discord.
+  Kontrollo gjenerimin, rifreskimin e draftit, preview, emailin manual dhe
+  automatik dhe bashkëngjitjet Word/PNG. Titulli nga TAK BORD/GA ose nga një
+  pyetje manuale e ruajtur nuk shtohet për herë të dytë në M1. Common View,
+  M1 PIKAT PER RAP, M2 dhe M3 përdorin rrjedhat e tyre.
+
+- M1: **PIKAT E DITES SOT** dhe **EP: A ESHTE LESHUAR MIRA? (PARA TAK 1-2 MIN)**
+  hiqen gjatë leximit të raporteve të ruajtura dhe përjashtohen nga pyetjet e
+  importuara nga TAK BORD/GA dhe nga pyetjet manuale
+  të ruajtura. Kontrollo faqen, preview, emailin dhe bashkëngjitjet e M1.
+
+- M1 dhe M2: pyetja **A ka reply nga GA tek detyrat nga stafi për GA?** përdor
   evidencën ditore `discord_ga_reply_snapshots` nga kanali Discord
   `1572160944358953042`, përmes `discord_ga_replies.py` në bot dhe shërbimit
-  përkatës të API-së. Numëron mesazhet fillestare me përmendje GA gjatë 30
-  ditëve dhe përgjigjet e lidhura me Reply/thread publik; nuk bën përputhje
-  titujsh me taskat. Kontrollo gjenerimin, grupin Auto-filled në faqen M1,
-  rifreskimin, preview, emailin manual/automatik dhe Word/PNG/Text të të njëjtit
+  përkatës të API-së. M1 përfshin mesazhet e GA nga 16:30 e ditës së kaluar;
+  M2 nga 08:00 e datës së raportit. Kufiri i fundit është momenti i gjenerimit,
+  sipas orës së raportit. Preview dhe dërgimi manual përdorin tabelën e ruajtur.
+  Evidenca prej 30 ditësh jep edhe kontekstin e mesazhit origjinal. Tabela shfaq
+  tekstin e GA, inicialet e autorit dhe fjalinë e parë të mesazhit të cilit iu përgjigj,
+  pa URL, në tabelë me nga një rresht për mesazh. Komentet e pavarura brenda
+  intervalit plotësojnë vetëm kolonën e përgjigjes. Kur burimi konfirmon se
+  s’ka Reply, tabela shfaq `Asnjë reply`. Kontrollo
+  gjenerimin, grupin Auto-filled në M1 dhe M2,
+  rifreskimin, preview, emailin manual/automatik dhe Word/PNG/Text të secilit
   raport. Dështimet/lejet e pamjaftueshme, identiteti GA i revokuar, kufijtë e
-  leximit dhe burimi i vjetruar nuk duhet të raportohen si zero në pritje.
-  Raportet e dërguara ruajnë përmbledhjen ekzistuese; datat e vjetra lexojnë
-  vetëm evidencën e datës së vet. Pyetja e planit në M1, M1 PIKAT, M2/M3 dhe
+  leximit dhe burimi i vjetruar duhen dalluar nga mungesa e përgjigjeve.
+  Për raportet e ruajtura në formatin e vjetër, teksti merret vetëm për ID-të
+  e përgjigjeve të referuara dhe nga evidenca e datës së raportit. Nëse
+  raporti ka ruajtur gjendjen e padisponueshme, kontrollo rikuperimin nga
+  evidenca e të njëjtit kanal dhe datë deri në orën e dërgimit. Pyetja e planit në M1, M1 PIKAT, M2 PIKAT, M3 dhe
   Common View nuk marrin këtë automatizim. Kërkohet migrimi `0190` dhe rinisja
   e API-së/botit; lejet e kanalit dhe Message Content kontrollohen veçmas.
 
@@ -176,6 +221,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   `From: 08:00 - To: 23:00`, që lexohet nga pamja, printimi, eksportet dhe
   kontrollet e konflikteve pa fushë të re në API. Çaktivizimi rikthen orët e
   zgjedhura për mungesë të pjesshme; zgjedhja është e ndarë nga “All day” i PV.
+
+- Mira regjistruese hyn në kanalin 1H edhe në 07:59 në ditët e punës, sipas
+  `DISCORD_1H_AUTO_JOIN_TIMES` dhe `APP_TIMEZONE`. Kontrollo hyrjen në Discord,
+  gjendjen te `mira-kontrolli` dhe ruajtjen te Mira → Shënimet dhe PX Notes.
+  Mira Host dhe AI Agent kanë orare të veçanta.
 
 - Hyrja automatike e Mira AI Agent dërgon `request_id=autoai-YYYYMMDDHHMM`
   (tentativat pasuese shtojnë `-2` / `-3`). Skema `VoiceStart` te

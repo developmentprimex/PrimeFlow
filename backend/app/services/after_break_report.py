@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from app.services.report_attendance import filter_task_context, filter_report_sections
+from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE, UNAVAILABLE, summary_for_day
 
 import re
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.after_break_report_settings import AfterBreakReportSettings
@@ -63,11 +64,16 @@ UNFINISHED_PRIORITY_TABLE_LABEL = "DET TE PAKRYERA, 08:00/DEADLINE"
 WAITING_CLIENT_TABLE_LABEL = "DT WFE"
 DONE_AM_TABLE_LABEL = "DET E KRYERA NE AM"
 UNHELD_MEETINGS_TABLE_LABEL = "TAK INT/EXT TE PAMBAJTURA"
+PCM_PROJECTS_TITLE = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
+PCM_PROJECT_CODES = ("VS", "VL", "MST", "TT")
+PCM_PROJECT_CODE_PATTERN = re.compile(r"(?<![A-Z0-9])(?:VS|VL|MST|TT)(?![A-Z0-9])", re.IGNORECASE)
+PCM_PROJECT_SUMMARY_PATTERN = re.compile("\n".join(f"{code} - (?:PO|JO)" for code in PCM_PROJECT_CODES))
+AUTOMATED_SECTION_TITLES = {GA_REPLIES_SECTION_TITLE, PCM_PROJECTS_TITLE}
 SECTION_TITLES = [
     "DET NGA EMAIL/ PX INFO & ZHVILLIM",
-    "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU",
-    "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?",
-    "PIKAT E BORDIT/DISKUTO APLIKANTAT",
+    PCM_PROJECTS_TITLE,
+    "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?",  # Retired, kept as a legacy key.
+    "PIKAT E BORDIT/DISKUTO APLIKANTAT",  # Retired, kept as a legacy key.
     UNFINISHED_PRIORITY_TABLE_LABEL,
     DONE_AM_TABLE_LABEL,
     UNHELD_MEETINGS_TABLE_LABEL,
@@ -77,10 +83,13 @@ SECTION_TITLES = [
     "GA MBYLLJA E DET",
     "HV MBYLLJA E DET",
     WAITING_CLIENT_TABLE_LABEL,
+    GA_REPLIES_SECTION_TITLE,
 ]
-MANUAL_SECTION_TITLES = set(SECTION_TITLES[:4])
+MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
 DISPLAY_SECTION_TITLES = [
-    *SECTION_TITLES[:4],
+    SECTION_TITLES[0],
+    GA_REPLIES_SECTION_TITLE,
+    PCM_PROJECTS_TITLE,
     SECTION_TITLES[9],  # Undiscussed notes first among auto-filled sections.
     SECTION_TITLES[6],  # Unheld internal/external meetings immediately after notes.
     SECTION_TITLES[4],
@@ -88,7 +97,7 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[5],
     SECTION_TITLES[7],
     SECTION_TITLES[8],
-    *SECTION_TITLES[10:],
+    *SECTION_TITLES[10:13],
 ]
 SECTION_TITLE_ALIASES = {
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[9],
@@ -97,6 +106,7 @@ SECTION_TITLE_ALIASES = {
     # draft's stable auto-filled identity.
     "DET TE PAKRYERA AM, 08:00/DEADLINE": SECTION_TITLES[4],
 }
+RETIRED_MANUAL_KEYS = {re.sub(r"[^A-Z0-9]+", "", title) for title in SECTION_TITLES[2:4]}
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
 PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56)]
@@ -739,15 +749,69 @@ def _replace_confirmation_questions_block(body: str, question_lines: list[str]) 
     return "\n".join([*head, "", *question_lines]).strip()
 
 
+def is_retired_after_break_question(title: str | None, section_key: str | None = None) -> bool:
+    for value in (title, section_key):
+        compact = re.sub(r"[^A-Z0-9]+", "", (value or "").upper().replace("Ë", "E"))
+        if re.sub(r"^(?:MANUAL)?\d*", "", compact) in RETIRED_MANUAL_KEYS:
+            return True
+    return False
+
+
+def after_break_automated_section_title(title: str | None, section_key: str | None = None) -> str | None:
+    for value in (section_key, title):
+        compact = re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
+        compact = re.sub(r"^(?:MANUAL)?\d*", "", compact)
+        for expected in AUTOMATED_SECTION_TITLES:
+            if compact == re.sub(r"[^A-Z0-9]+", "", expected):
+                return expected
+    return None
+
+
+def _pcm_projects_summary(tasks: list[Task], report_day: date) -> str:
+    worked: set[str] = set()
+    for task in tasks:
+        start, due = _local_date(task.start_date), _local_date(task.due_date)
+        if start and due and start <= report_day <= due:
+            worked.update(code.upper() for code in PCM_PROJECT_CODE_PATTERN.findall(task.title or ""))
+    return "\n".join(f"{code} - {'PO' if code in worked else 'JO'}" for code in PCM_PROJECT_CODES)
+
+
+async def _load_pcm_projects_summary(db: AsyncSession, report_day: date) -> str:
+    pcm_users = select(User.id).join(Department, User.department_id == Department.id).where(
+        Department.code.in_(("PCM", "PRODUCT CONTENT", "PROJECT CONTENT MANAGER")),
+        User.work_staff_filter(),
+    )
+    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True), or_(
+        Task.assigned_to.in_(pcm_users),
+        Task.id.in_(select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(pcm_users))),
+    )))).scalars().all()
+    return _pcm_projects_summary(tasks, report_day)
+
+
+async def populate_pcm_projects_section(db: AsyncSession, sections: list[dict[str, str]], report_day: date):
+    return [
+        {**section, "body": await _load_pcm_projects_summary(db, report_day)}
+        if section.get("section_key") == PCM_PROJECTS_TITLE and not section.get("body") else section
+        for section in sections
+    ]
+
+
 def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     by_title: dict[str, dict[str, str]] = {}
     extras: list[dict[str, str]] = []
     for section in sections or []:
         raw_title = str(section.get("title") or "").strip()
         section_key = str(section.get("section_key") or "").strip()
+        if is_retired_after_break_question(raw_title, section_key):
+            continue
+        automated_title = after_break_automated_section_title(raw_title, section_key)
+        if automated_title and section_key != automated_title:
+            continue
         identity = section_key or raw_title
         title = SECTION_TITLE_ALIASES.get(identity, identity)
         body = str(section.get("body") or "")
+        if title == PCM_PROJECTS_TITLE and not PCM_PROJECT_SUMMARY_PATTERN.fullmatch(body):
+            body = ""
         if title in SECTION_TITLES and title not in by_title:
             by_title[title] = {
                 "section_key": title,
@@ -784,6 +848,10 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             continue
         elif title in MANUAL_SECTION_TITLES:
             body = "(Ploteso manualisht)"
+        elif title == GA_REPLIES_SECTION_TITLE:
+            body = UNAVAILABLE
+        elif title == PCM_PROJECTS_TITLE:
+            body = ""
         elif title == SECTION_TITLES[4]:
             body = _normalize_section(
                 _ascii_table(
@@ -954,6 +1022,7 @@ async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
 
 
 async def build_after_break_report_sections(db: AsyncSession, report_day: date) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    generated_at = datetime.now(timezone.utc)
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
@@ -1036,9 +1105,9 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
 
     sections = [
         {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
-        {"title": SECTION_TITLES[1], "body": "(Ploteso manualisht)"},
-        {"title": SECTION_TITLES[2], "body": "(Ploteso manualisht)"},
-        {"title": SECTION_TITLES[3], "body": "(Ploteso manualisht)"},
+        {"section_key": PCM_PROJECTS_TITLE, "title": PCM_PROJECTS_TITLE, "body": await _load_pcm_projects_summary(db, report_day)},
+        {"section_key": GA_REPLIES_SECTION_TITLE, "title": GA_REPLIES_SECTION_TITLE,
+         "body": await summary_for_day(db, report_day, report="M2", generated_at=generated_at)},
         {
             "title": SECTION_TITLES[4],
             "body": _normalize_section(
@@ -1080,11 +1149,9 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     sections = [sections_by_title[title] for title in DISPLAY_SECTION_TITLES]
     snapshot = {
         "report_day": report_day.isoformat(),
+        "ga_replies_generated_at": generated_at.isoformat(),
         "counts": {
             SECTION_TITLES[0]: 0,
-            SECTION_TITLES[1]: 0,
-            SECTION_TITLES[2]: 0,
-            SECTION_TITLES[3]: 0,
             SECTION_TITLES[4]: len(unfinished_priority_rows),
             SECTION_TITLES[5]: len(done_am_rows),
             SECTION_TITLES[12]: len(waiting_client_rows),

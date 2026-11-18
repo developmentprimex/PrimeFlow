@@ -1,10 +1,13 @@
+import asyncio
 import unittest
 from datetime import date, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from app.services.after_break_report import (
     DISPLAY_SECTION_TITLES,
+    PCM_PROJECTS_TITLE,
     SECTION_TITLES,
     UNFINISHED_PRIORITY_COLUMNS,
     UNFINISHED_PRIORITY_TABLE_LABEL,
@@ -13,14 +16,17 @@ from app.services.after_break_report import (
     _format_confirmation_questions,
     _done_am_task_rows,
     _new_system_task_rows,
+    _pcm_projects_summary,
     _unheld_meeting_section,
     _unfinished_priority_task_rows,
     _waiting_client_task_rows,
     _waiting_client_entry_dates,
     normalize_after_break_report_sections,
+    render_html,
 )
 from app.services.meetings_report import _render_ascii_table_html, _table_tone_from_label
-from app.services.meeting_point_manual_sync import section_group_label, with_section_keys
+from app.services.meeting_point_manual_sync import is_known_report_title, merge_common_view_manual_sections, section_group_label, with_section_keys
+from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
@@ -45,13 +51,61 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
             [section["title"] for section in sections],
             DISPLAY_SECTION_TITLES,
         )
-        self.assertEqual(sections[4]["title"], "NOTES TE REJA ( NOT DISSCUSED)")
-        self.assertEqual(sections[5]["title"], "TAK INT/EXT TE PAMBAJTURA")
-        self.assertEqual(sections[6]["title"], "DET TE PAKRYERA, 08:00/DEADLINE")
-        self.assertEqual(sections[7]["title"], "DT WFE")
-        self.assertEqual(sections[8]["title"], "DET E KRYERA NE AM")
-        self.assertEqual(sections[11]["title"], "GA MBYLLJA E DET")
-        self.assertEqual(sections[12]["title"], "HV MBYLLJA E DET")
+        automatic = [section["title"] for section in sections
+                     if section_group_label("after_break", section["title"], section["section_key"]) == "AUTO-FILLED FROM PRIMEFLOW"]
+        self.assertEqual(automatic[0], GA_REPLIES_SECTION_TITLE)
+        self.assertEqual(automatic[1], PCM_PROJECTS_TITLE)
+        self.assertEqual(automatic[2:7], ["NOTES TE REJA ( NOT DISSCUSED)", "TAK INT/EXT TE PAMBAJTURA",
+                                        "DET TE PAKRYERA, 08:00/DEADLINE", "DT WFE", "DET E KRYERA NE AM"])
+        self.assertEqual(automatic[9:11], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
+
+    def test_pcm_projects_use_title_codes_on_tasks_covering_the_report_day(self) -> None:
+        def task(title, start, due):
+            return SimpleNamespace(title=title, start_date=start, due_date=due)
+
+        day = date(2026, 11, 18)
+        tasks = [task("vs/vl: Produkte", date(2026, 11, 17), day),
+                 task("TT - Përditësim", day, date(2026, 11, 19)),
+                 task("MST: Nesër", date(2026, 11, 19), date(2026, 11, 20)),
+                 task("MSTUDIO", day, day), task("MST pa afat", day, None)]
+        self.assertEqual(_pcm_projects_summary(tasks, day), "VS - PO\nVL - PO\nMST - JO\nTT - PO")
+
+        sections = normalize_after_break_report_sections([
+            {"title": PCM_PROJECTS_TITLE, "section_key": PCM_PROJECTS_TITLE, "body": "(Ploteso manualisht)"},
+        ])
+        projects = [section for section in sections if section["section_key"] == PCM_PROJECTS_TITLE]
+        self.assertEqual([section["body"] for section in projects], [""])
+        self.assertEqual(section_group_label("after_break", PCM_PROJECTS_TITLE), "AUTO-FILLED FROM PRIMEFLOW")
+
+    def test_m2_ga_reply_is_automatic_without_reimporting_the_manual_question(self) -> None:
+        legacy = {"title": f"3. {GA_REPLIES_SECTION_TITLE}", "section_key": "manual:custom:3:ga", "body": "Old manual answer"}
+        sections = normalize_after_break_report_sections([legacy])
+        with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles",
+                   AsyncMock(return_value=[GA_REPLIES_SECTION_TITLE])):
+            merged = asyncio.run(merge_common_view_manual_sections(None, sections, "after_break", [legacy], [legacy]))
+        point = [section for section in merged if section["title"] == GA_REPLIES_SECTION_TITLE]
+        self.assertEqual(len(point), 1)
+        self.assertEqual(section_group_label("after_break", point[0]["title"], point[0]["section_key"]), "AUTO-FILLED FROM PRIMEFLOW")
+        self.assertNotIn("Old manual answer", render_html("M2", date(2026, 11, 18), merged))
+
+    def test_retired_m2_questions_do_not_return_from_saved_drafts_or_common_view(self) -> None:
+        plan_title, board_title = SECTION_TITLES[2:4]
+        retired = [
+            {"title": "Edited plan question", "section_key": plan_title, "body": "Old plan answer"},
+            {"title": f"6. {board_title}", "section_key": "manual:custom:6:board", "body": "Old board answer"},
+        ]
+        sections = normalize_after_break_report_sections(retired)
+        self.assertEqual([section["title"] for section in sections], DISPLAY_SECTION_TITLES)
+        self.assertTrue(is_known_report_title("after_break", plan_title))
+        self.assertTrue(is_known_report_title("after_break", board_title))
+        self.assertFalse(is_known_report_title("morning", plan_title))
+        with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles",
+                   AsyncMock(return_value=[plan_title, board_title, "Another question"])):
+            merged = asyncio.run(merge_common_view_manual_sections(None, sections, "after_break", retired, retired))
+        self.assertEqual([section["title"] for section in merged], [DISPLAY_SECTION_TITLES[0], "Another question", *DISPLAY_SECTION_TITLES[1:]])
+        html = render_html("M2", date(2026, 11, 18), merged)
+        for removed in (plan_title, board_title, "Old plan answer", "Old board answer"):
+            self.assertNotIn(removed, html)
 
     def test_empty_confirmation_questions(self) -> None:
         lines = _format_confirmation_questions([])

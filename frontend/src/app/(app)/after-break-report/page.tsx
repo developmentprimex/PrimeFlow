@@ -46,9 +46,13 @@ type Draft = {
   updated_at?: string | null
 }
 
-function sectionGroupLabel(section: Section, index: number) {
-  if (index < 4) return "Manual questions"
+const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
+const PCM_PROJECTS_SECTION = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
+const AUTOMATED_SECTIONS = new Set([GA_REPLIES_SECTION, PCM_PROJECTS_SECTION])
+
+function sectionGroupLabel(section: Section) {
   const knownAuto = [
+    ...AUTOMATED_SECTIONS,
     "DET TE PAKRYERA, 08:00/DEADLINE",
     "DT WFE",
     "DET E KRYERA NE AM",
@@ -67,7 +71,7 @@ function sectionGroupLabel(section: Section, index: number) {
 
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
-  return sectionGroupLabel(sections[index], index) !== sectionGroupLabel(sections[index - 1], index - 1)
+  return sectionGroupLabel(sections[index]) !== sectionGroupLabel(sections[index - 1])
 }
 type DeliveryHistory = {
   id: string
@@ -355,7 +359,7 @@ export default function AfterBreakReportPage() {
 
   const addManualQuestion = async (title: string, position: number) => {
     if (!draft) return false
-    const sections = addManualReportSection(draft.sections, title, position, (section, index) => sectionGroupLabel(section, index) === "Manual questions")
+    const sections = addManualReportSection(draft.sections, title, position, (section) => sectionGroupLabel(section) === "Manual questions")
     if (!sections) {
       toast.error("Kjo pikë ekziston tashmë")
       return false
@@ -609,8 +613,8 @@ export default function AfterBreakReportPage() {
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
                     <div className="flex items-center justify-between gap-2 rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                      {sectionGroupLabel(section, index)}
-                      {sectionGroupLabel(section, index) === "Manual questions" && canEdit ? <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} /> : null}
+                      {sectionGroupLabel(section)}
+                      {sectionGroupLabel(section) === "Manual questions" && canEdit ? <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} /> : null}
                     </div>
                   ) : null}
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -639,7 +643,7 @@ export default function AfterBreakReportPage() {
                           </div>
                         ) : null}
                       </div>
-                      {canEdit && !isEditing ? (
+                      {canEdit && !isEditing && !AUTOMATED_SECTIONS.has(section.section_key || section.title) ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
                             <Pencil className="h-4 w-4" /> Edit
@@ -661,6 +665,7 @@ export default function AfterBreakReportPage() {
                       />
                     ) : (
                       <ReportSectionPreview
+                        largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         body={reportSectionPreviewText(section.body)}
                         filterWfeAge={[section.section_key, section.title].some(
                           (value) => value?.trim().toUpperCase() === "DT WFE",

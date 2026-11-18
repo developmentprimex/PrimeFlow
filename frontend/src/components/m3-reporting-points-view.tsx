@@ -57,7 +57,10 @@ export type ReportingPointsReport = {
   subject: string
   status: string
   manual_answers: ManualAnswers
-  data: Partial<Record<"postponed" | "postponed_today" | "untouched" | "same_day" | "ga_postponed" | "delivery", TaskRow[]>> & { unheld_meetings?: UnheldMeetingRow[] }
+  data: Partial<Record<"postponed" | "postponed_today" | "untouched" | "same_day" | "ga_postponed" | "delivery", TaskRow[]>> & {
+    unheld_meetings?: UnheldMeetingRow[]
+    underload?: { user_id: string; person: string }[]
+  }
   realization: {
     percent: number | null
     employees: number
@@ -276,7 +279,7 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
   const data = report.data
   const realization = report.realization
   const realizationDepartments = (realization?.departments || []).filter((item) => !["GA", "HR"].includes(item.code.trim().toUpperCase()))
-  const manual = (key: keyof typeof MANUAL_POINTS) => <div key={key} className="space-y-2">
+  const manual = (key: Exclude<keyof typeof MANUAL_POINTS, "underload">) => <div key={key} className="space-y-2">
     <Label htmlFor={`point-${key}`} className="text-sm leading-6">{MANUAL_POINTS[key]}</Label>
     <Textarea id={`point-${key}`} value={answers[key] || ""} onChange={(event) => onAnswerChange(key, event.target.value)}
       placeholder="Shkruaj përgjigjen…" disabled={disabled} maxLength={10000} autoResize className="min-h-24" />
@@ -285,7 +288,23 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
     <section className="space-y-5" aria-labelledby="m3-points-title">
       <div><h2 id="m3-points-title" className="text-xl font-bold">PIKAT PËR RAPORTIM M3</h2><p className="mt-1 text-sm text-muted-foreground">Përgjigjet manuale dhe gjendja e detyrave për {reportDate(report.report_date)}.</p></div>
       <div className="space-y-5 rounded-xl border bg-card p-5">
-        {manual("underload")}{manual("overload")}{manual("reorganization")}
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium leading-6">{MANUAL_POINTS.underload}</h3>
+          {data.underload?.length ? (
+            <ul className="flex flex-wrap gap-2" aria-label="Stafi në nënngarkesë">
+              {data.underload.map(({ user_id, person }) => (
+                <li key={user_id} className="flex h-9 min-w-9 items-center justify-center rounded-sm border bg-muted px-2 text-base font-bold">
+                  {(person.match(/\p{L}+/gu) ?? []).map((part) => Array.from(part)[0]).join("").toUpperCase() || "–"}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="rounded-md border px-3 py-2 text-sm whitespace-pre-wrap">
+              {data.underload ? "Asnjë person në nënngarkesë." : report.manual_answers.underload || "Pa përgjigje"}
+            </p>
+          )}
+        </div>
+        {manual("overload")}{manual("reorganization")}
       </div>
       <Point title="1. DET QË JANË SHTY NGA KJO JAVË NË JAVËN TJETËR / BRENDA JAVËS" note={<>Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></>} rows={data.postponed || []} kind="postponed" />
       <Point title="DET QË JANË SHTYER SOT AM DHE PM" note="Detyrat që para shtyrjes ishin të planifikuara për ditën e raportit (brenda intervalit Start–Due). Shtyrjet ndahen sipas orës së ndryshimit: para 12:00 dhe nga 12:00." rows={data.postponed_today || []} kind="postponed" splitPeriods />

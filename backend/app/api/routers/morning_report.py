@@ -27,10 +27,12 @@ from app.services.meeting_point_manual_sync import (
 )
 from app.services.morning_report import (
     MANUAL_SECTION_TITLES,
+    MARKER_TASK_SECTIONS,
     SECTION_TITLES,
-    apply_ga_hv_dv_tasks_table,
     build_morning_report_sections,
+    is_removed_morning_manual_question,
     normalize_morning_report_sections,
+    refresh_morning_task_tables,
     render_html,
     render_plain_text,
     send_morning_report,
@@ -236,9 +238,9 @@ async def get_draft(
     # Apply section migrations to saved reports too.  Otherwise retired prompts
     # remain visible in a previously generated or sent report indefinitely.
     sections = normalize_morning_report_sections(row.sections)
-    sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
-    if row.status != "SENT":
-        sections = await refresh_m1_section(db, sections, row.report_date)
+    sections = await refresh_morning_task_tables(db, sections, row.report_date)
+    sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
+                                        sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
@@ -332,8 +334,12 @@ async def update_draft(
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
+        existing = [
+            section for section in (row.sections or [])
+            if not is_removed_morning_manual_question(section.get("title"), section.get("section_key"))
+        ]
         if user.role != UserRole.ADMIN and removes_custom_manual_section(
-            row.sections, [{"section_key": section.section_key} for section in payload.sections]
+            existing, [{"section_key": section.section_key} for section in payload.sections]
         ):
             raise HTTPException(status_code=403, detail="Only admin can delete manually added report points")
         # Keep user-edited question titles as saved (do not remap via normalize).
@@ -344,8 +350,11 @@ async def update_draft(
                 "body": section.body or "",
             }
             for section in payload.sections
+            if section.section_key not in MARKER_TASK_SECTIONS
+            and not is_removed_morning_manual_question(section.title, section.section_key)
         ])
-        previous_questions = custom_manual_questions(row.sections)
+        saved.extend(section for section in existing if section.get("section_key") in MARKER_TASK_SECTIONS)
+        previous_questions = custom_manual_questions(existing)
         current_questions = custom_manual_questions(saved)
         if current_questions != previous_questions:
             settings = await _get_or_create_settings(db)
@@ -370,9 +379,9 @@ async def preview_draft(
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     sections = normalize_morning_report_sections(row.sections)
-    sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
-    if row.status != "SENT":
-        sections = await refresh_m1_section(db, sections, row.report_date)
+    sections = await refresh_morning_task_tables(db, sections, row.report_date)
+    sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
+                                        sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
@@ -393,9 +402,9 @@ async def send_draft(
     if not recipients["to"]:
         raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
     sections = normalize_morning_report_sections(row.sections)
-    sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
-    if row.status != "SENT":
-        sections = await refresh_m1_section(db, sections, row.report_date)
+    sections = await refresh_morning_task_tables(db, sections, row.report_date)
+    sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
+                                        sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
     row.sections = sections
     plain_text = render_plain_text(row.subject, row.report_date, sections)

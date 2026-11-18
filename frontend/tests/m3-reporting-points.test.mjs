@@ -105,13 +105,19 @@ test("point two edits the existing My View comment column per task including SYS
   assert.deepEqual(JSON.parse(JSON.stringify(readManualDraft(storage, "user", "2026-10-05"))), answers)
 })
 
-test("M3 contains three editable manual answers without the removed GA section", () => {
-  const html = render({}, { underload: "Përgjigje e ruajtur", ga_reorganization: "Riorganizo ekipin" })
+test("M3 displays automatic underload staff beside two manual answers", () => {
+  const manual_answers = { underload: "Përgjigje historike", ga_reorganization: "Riorganizo ekipin" }
+  const html = render({ manual_answers, data: { underload: [
+    { user_id: "one", person: "Elsa Ferati" }, { user_id: "two", person: "Çlirim Basha" },
+  ] } })
   assert.match(html, /PIKAT PËR RAPORTIM M3/)
   assert.doesNotMatch(html, /PIKAT PËR RAPORTIM PËR GA/)
-  assert.equal((html.match(/<textarea/g) || []).length, 3)
-  assert.match(html, /Përgjigje e ruajtur/)
-  assert.doesNotMatch(html, /Riorganizo ekipin/)
+  assert.equal((html.match(/<textarea/g) || []).length, 2)
+  assert.match(html, /<li class="[^"]*rounded-sm border[^"]*font-bold">EF<\/li>/)
+  assert.match(html, /<li class="[^"]*rounded-sm border[^"]*font-bold">ÇB<\/li>/)
+  assert.doesNotMatch(html, /Elsa Ferati|Çlirim Basha|Riorganizo ekipin|Përgjigje historike/)
+  assert.match(render({ manual_answers, data: { underload: [] } }), /Asnjë person në nënngarkesë/)
+  assert.match(render({ manual_answers }), /Përgjigje historike/)
   assert.match(html, /brenda intervalit Start–Due/)
 })
 
@@ -255,14 +261,14 @@ test("manual draft survives a reload, stays scoped to user and day, and protects
   const { readManualDraft, writeManualDraft, clearSavedManualDraft } = load("@/lib/m3-reporting-points-draft")
   const values = new Map()
   const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
-  writeManualDraft(storage, "user", "2026-10-05", { underload: "Përgjigje me\nrreshta" })
-  assert.equal(readManualDraft(storage, "user", "2026-10-05").underload, "Përgjigje me\nrreshta")
+  writeManualDraft(storage, "user", "2026-10-05", { overload: "Përgjigje me\nrreshta" })
+  assert.equal(readManualDraft(storage, "user", "2026-10-05").overload, "Përgjigje me\nrreshta")
   assert.equal(readManualDraft(storage, "other-user", "2026-10-05"), null)
   assert.equal(readManualDraft(storage, "user", "2026-10-06"), null)
-  writeManualDraft(storage, "user", "2026-10-05", { underload: "Teksti më i ri" })
-  clearSavedManualDraft(storage, "user", "2026-10-05", { underload: "Përgjigje me\nrreshta" })
-  assert.equal(readManualDraft(storage, "user", "2026-10-05").underload, "Teksti më i ri")
-  clearSavedManualDraft(storage, "user", "2026-10-05", { underload: "Teksti më i ri" })
+  writeManualDraft(storage, "user", "2026-10-05", { overload: "Teksti më i ri" })
+  clearSavedManualDraft(storage, "user", "2026-10-05", { overload: "Përgjigje me\nrreshta" })
+  assert.equal(readManualDraft(storage, "user", "2026-10-05").overload, "Teksti më i ri")
+  clearSavedManualDraft(storage, "user", "2026-10-05", { overload: "Teksti më i ri" })
   assert.equal(readManualDraft(storage, "user", "2026-10-05"), null)
   assert.equal(readManualDraft(null, "user", "2026-10-05"), null)
 })
@@ -284,7 +290,7 @@ test("the stored realization is displayed and missing data never becomes zero", 
 
 test("view-only reports keep manual fields disabled", () => {
   const html = render({ status: "SENT" }, {}, true)
-  assert.equal((html.match(/<textarea[^>]*disabled=""/g) || []).length, 3)
+  assert.equal((html.match(/<textarea[^>]*disabled=""/g) || []).length, 2)
 })
 
 test("staff can open the report and generate it while management actions remain restricted", () => {
@@ -404,11 +410,11 @@ test("sent reports remain editable, regenerate, autosave and send repeatedly", a
   await page.flush()
   assert.equal(generations, 1)
   for (let i = 0; i < 3; i++) {
-    page.edit("underload", `PËRGJIGJA ${i}`)
+    page.edit("overload", `PËRGJIGJA ${i}`)
     await page.flush()
     await page.fireSave()
     await page.flush()
-    assert.equal(server.manual_answers["underload"], `PËRGJIGJA ${i}`)
+    assert.equal(server.manual_answers["overload"], `PËRGJIGJA ${i}`)
     assert.equal(page.buttonDisabled("Dërgo sërish"), false)
     page.click("Dërgo sërish")
     await page.flush()
@@ -479,15 +485,15 @@ test("sent reports restore and autosave local edits after reload", async () => {
   }
   const first = mountPage(storage, api)
   await first.flush()
-  first.edit("underload", "Ndryshim pas dërgimit")
+  first.edit("overload", "Ndryshim pas dërgimit")
   await first.flush()
   first.unmount()
   const reloaded = mountPage(storage, api)
   await reloaded.flush()
-  assert.equal(reloaded.answers()["underload"], "Ndryshim pas dërgimit")
+  assert.equal(reloaded.answers()["overload"], "Ndryshim pas dërgimit")
   await reloaded.fireSave()
   await reloaded.flush()
-  assert.equal(server.manual_answers["underload"], "Ndryshim pas dërgimit")
+  assert.equal(server.manual_answers["overload"], "Ndryshim pas dërgimit")
   assert.equal(values.size, 0)
   reloaded.unmount()
 })
@@ -503,15 +509,15 @@ test("answers survive immediate reload and automatically persist without pressin
   }
   const first = mountPage(storage, api)
   await first.flush()
-  first.edit("underload", "Përgjigje që duhet të mbetet")
+  first.edit("overload", "Përgjigje që duhet të mbetet")
   await first.flush()
   first.unmount() // Refresh before the debounce fires.
   const reloaded = mountPage(storage, api)
   await reloaded.flush()
-  assert.equal(reloaded.answers().underload, "Përgjigje që duhet të mbetet")
+  assert.equal(reloaded.answers().overload, "Përgjigje që duhet të mbetet")
   await reloaded.fireSave()
   await reloaded.flush()
-  assert.equal(server.manual_answers.underload, "Përgjigje që duhet të mbetet")
+  assert.equal(server.manual_answers.overload, "Përgjigje që duhet të mbetet")
   assert.equal(values.size, 0)
   reloaded.unmount()
 })
@@ -525,7 +531,7 @@ test("typing during a slow automatic save is kept and saved after the first requ
   const api = async (url, options) => {
     if (options?.method === "PUT") {
       const answers = JSON.parse(options.body).manual_answers
-      saved.push(answers.underload)
+      saved.push(answers.overload)
       if (saved.length === 1) await new Promise((resolve) => { resolveFirst = resolve })
       server = { ...server, manual_answers: answers }
     }
@@ -533,20 +539,20 @@ test("typing during a slow automatic save is kept and saved after the first requ
   }
   const page = mountPage(storage, api)
   await page.flush()
-  page.edit("underload", "Teksti fillestar")
+  page.edit("overload", "Teksti fillestar")
   await page.flush()
   const firstSave = page.fireSave()
   await page.flush()
-  page.edit("underload", "Teksti më i ri")
+  page.edit("overload", "Teksti më i ri")
   await page.flush()
   resolveFirst()
   await firstSave
   await page.flush()
-  assert.equal(page.answers().underload, "Teksti më i ri")
+  assert.equal(page.answers().overload, "Teksti më i ri")
   await page.fireSave()
   await page.flush()
   assert.deepEqual(saved, ["Teksti fillestar", "Teksti më i ri"])
-  assert.equal(server.manual_answers.underload, "Teksti më i ri")
+  assert.equal(server.manual_answers.overload, "Teksti më i ri")
   page.unmount()
 })
 
@@ -559,15 +565,15 @@ test("a failed automatic save preserves the entered answers and the reload draft
     : { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: [], cc: [], bcc: [] } } : { ...report, report_date: day } }
   const page = mountPage(storage, api)
   await page.flush()
-  page.edit("underload", "Mos e humb përgjigjen")
+  page.edit("overload", "Mos e humb përgjigjen")
   await page.flush()
   await page.fireSave()
   await page.flush()
-  assert.equal(page.answers().underload, "Mos e humb përgjigjen")
+  assert.equal(page.answers().overload, "Mos e humb përgjigjen")
   page.unmount()
   const reloaded = mountPage(storage, api)
   await reloaded.flush()
-  assert.equal(reloaded.answers().underload, "Mos e humb përgjigjen")
+  assert.equal(reloaded.answers().overload, "Mos e humb përgjigjen")
   reloaded.unmount()
 })
 
@@ -599,8 +605,8 @@ test("M3 shows only canceled meetings in separate EXT and INT tables with M3 RAP
   assert.match(html, />MANUAL<\/strong>/)
   assert.ok(html.indexOf("Client call") < html.indexOf("Team sync"))
   assert.doesNotMatch(html, /Already held|Not marked yet|Canceled yesterday|>TIPI<\/th>|>STATUSI<\/th>/)
-  assert.equal((html.match(/<textarea/g) || []).length, 5)
-  assert.equal((render({ data }, answers, true).match(/<textarea[^>]*disabled=""/g) || []).length, 5)
+  assert.equal((html.match(/<textarea/g) || []).length, 4)
+  assert.equal((render({ data }, answers, true).match(/<textarea[^>]*disabled=""/g) || []).length, 4)
 })
 
 
@@ -707,8 +713,8 @@ test("meeting textarea remains enabled while manager question fields are locked"
     report: { ...report, data }, answers: {}, disabled: true, meetingCommentsDisabled: false, onAnswerChange: () => {},
   }))
   const fields = html.match(/<textarea[^>]*>/g) || []
-  assert.equal(fields.length, 4)
-  assert.equal(fields.filter((field) => field.includes('disabled=""')).length, 3)
+  assert.equal(fields.length, 3)
+  assert.equal(fields.filter((field) => field.includes('disabled=""')).length, 2)
   const comment = fields.find((field) => field.includes('aria-label="Kur planifikohen?'))
   assert.ok(comment)
   assert.doesNotMatch(comment, /\sdisabled(?:=|\s|>)/)

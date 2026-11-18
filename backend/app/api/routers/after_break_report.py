@@ -24,11 +24,16 @@ from app.services.after_break_report import (
     apply_waiting_client_task_table,
     build_after_break_report_sections,
     normalize_after_break_report_sections,
+    is_retired_after_break_question,
+    after_break_automated_section_title,
+    AUTOMATED_SECTION_TITLES,
+    populate_pcm_projects_section,
     render_html,
     render_plain_text,
     send_after_break_report,
     subject_for,
 )
+from app.services.discord_ga_replies import refresh_ga_reply_section
 from app.services.meeting_point_manual_sync import (
     custom_manual_questions,
     merge_common_view_manual_sections,
@@ -160,8 +165,10 @@ def _draft(row: AfterBreakReportDraft, sections: list[dict[str, str]] | None = N
 
 
 async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) -> dict:
-    sections = with_section_keys("after_break", row.sections)
-    sections = normalize_after_break_report_sections(sections)
+    sections = normalize_after_break_report_sections(row.sections)
+    sections = await populate_pcm_projects_section(db, sections, row.report_date)
+    sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", refresh_current=row.status != "SENT",
+                                             sent_at=row.sent_at, populate_missing=True, generated_snapshot=row.generated_snapshot)
     sections = await apply_1h_confirmation_questions(db, sections)
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
@@ -320,8 +327,14 @@ async def update_draft(
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
+        existing = [
+            section for section in (row.sections or [])
+            if not is_retired_after_break_question(section.get("title"), section.get("section_key"))
+        ]
         if user.role != UserRole.ADMIN and removes_custom_manual_section(
-            row.sections, [{"section_key": section.section_key} for section in payload.sections]
+            [section for section in existing
+             if not after_break_automated_section_title(section.get("title"), section.get("section_key"))],
+            [{"section_key": section.section_key} for section in payload.sections],
         ):
             raise HTTPException(status_code=403, detail="Only admin can delete manually added report points")
         # Keep user-edited question titles as saved (do not remap via normalize).
@@ -332,7 +345,10 @@ async def update_draft(
                 "body": section.body or "",
             }
             for section in payload.sections
+            if not is_retired_after_break_question(section.title, section.section_key)
+            and not after_break_automated_section_title(section.title, section.section_key)
         ])
+        saved.extend(section for section in existing if section.get("section_key") in AUTOMATED_SECTION_TITLES)
         previous_questions = custom_manual_questions(row.sections)
         current_questions = custom_manual_questions(saved)
         if current_questions != previous_questions:
@@ -360,6 +376,9 @@ async def preview_draft(
     sections = await apply_1h_confirmation_questions(
         db, normalize_after_break_report_sections(row.sections)
     )
+    sections = await populate_pcm_projects_section(db, sections, row.report_date)
+    sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", refresh_current=row.status != "SENT",
+                                             sent_at=row.sent_at, populate_missing=True, generated_snapshot=row.generated_snapshot)
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
@@ -384,6 +403,9 @@ async def send_draft(
     sections = await apply_1h_confirmation_questions(
         db, normalize_after_break_report_sections(row.sections)
     )
+    sections = await populate_pcm_projects_section(db, sections, row.report_date)
+    sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", populate_missing=True,
+                                             generated_snapshot=row.generated_snapshot)
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)

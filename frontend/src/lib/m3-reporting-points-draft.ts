@@ -1,7 +1,7 @@
 import type { ManualAnswers, ManualKey } from "@/components/m3-reporting-points-view"
 
 type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
-const keys = ["underload", "overload", "reorganization"] as const
+const keys = ["overload", "reorganization"] as const
 const validKey = (key: string): key is ManualKey => keys.some((value) => value === key) ||
   /^(?:meeting_plan|untouched_comment|delivery|delivery_choice):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)
 const storageKey = (userId: string) => `primeflow:m3-reporting-points:answers:${userId}`

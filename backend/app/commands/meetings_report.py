@@ -11,6 +11,7 @@ from app.db import SessionLocal
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.services.meetings_report import (
     build_meetings_report_sections,
+    without_retired_meetings_sections,
     render_html,
     render_plain_text,
     send_meetings_report,
@@ -44,17 +45,18 @@ async def main() -> None:
             await db.commit()
             await db.refresh(row)
 
-        plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, row.sections)
+        sections = without_retired_meetings_sections(row.sections)
+        plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, sections)
         if args.send:
             message = await send_meetings_report(
                 row.subject,
                 await configured_recipients(),
                 plain_text,
-                render_html(row.subject, row.report_date, row.tomorrow_date, row.sections),
+                render_html(row.subject, row.report_date, row.tomorrow_date, sections),
                 db=db,
                 report_day=row.report_date,
                 tomorrow=row.tomorrow_date,
-                sections=row.sections,
+                sections=sections,
             )
             row.status = "SENT"
             row.sent_at = datetime.now(report_timezone())

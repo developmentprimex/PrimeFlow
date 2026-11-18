@@ -10,7 +10,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
@@ -44,7 +44,7 @@ from app.services.task_marker import active_one_h_marker, active_one_h_marker_by
 M3_TITLE = "PIKAT PER RAPORTIM M3"
 GA_TITLE = "PIKAT PER RAPORTIM PER GA"
 MANUAL_POINTS = {
-    "underload": "1. NENNGARKESE",
+    "underload": "1. NËNNGARKESË",
     "overload": "2. MBINGARKESE",
     "reorganization": "3. RIORGANIZIM NESER?",
     "ga_reorganization": "1. A KA NEVOJE PER RIORGANIZIM?",
@@ -59,6 +59,7 @@ AUTO_TITLES = {
     "ga_postponed": "2. A KA DET QE SHTYHET (SOT/SOT) OSE DEADLINE?",
 }
 DATE_ACTIONS = {"task.due_date_changed": "due_date", "task.start_date_changed": "start_date"}
+UNDERLOAD_TITLE_PATTERN = r"^[^\r\n]*NENNGARKESE"
 
 
 REALIZATION_CAPTURE_TIME = time(16, 15)
@@ -281,6 +282,30 @@ async def build_task_data(db: AsyncSession, day: date, *, section_selector=selec
     return {key: [filtered for row in rows if (filtered := policy.item(row)) is not None] for key, rows in sections.items()}
 
 
+async def build_underload_staff(db: AsyncSession, day: date) -> list[dict]:
+    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=report_timezone())
+    # PX Notes may store the note body below the title line.
+    normalized_title = func.upper(func.translate(Task.title, "Ëë", "Ee"))
+    candidates = (await db.execute(select(Task).where(
+        Task.is_active.is_(True), Task.created_at < end, normalized_title.op("~")(UNDERLOAD_TITLE_PATTERN),
+    ))).scalars().all()
+    planned = [task for task in candidates if planned_for_report_day(
+        {"old_start_date": task.start_date, "old_due_date": task.due_date}, day,
+    )]
+    if not planned:
+        return []
+    additional_owners = select(TaskAssignee.user_id).where(TaskAssignee.task_id.in_([task.id for task in planned]))
+    primary_owners = {task.assigned_to for task in planned if task.assigned_to}
+    owner_ids = primary_owners | set((await db.execute(additional_owners)).scalars().all())
+    users = (await db.execute(select(User).where(
+        User.id.in_(owner_ids), User.work_staff_filter(), User.is_active.is_(True),
+    ))).scalars().all()
+    policy = await load_report_attendance(db, day)
+    staff = [{"user_id": str(user.id), "person": user.full_name or user.username or user.email}
+             for user in users if not policy.excludes(user.id, user.full_name)]
+    return sorted(staff, key=lambda item: (item["person"].casefold(), item["user_id"]))
+
+
 async def build_realization_capture(db: AsyncSession, day: date) -> dict:
     users = list((await db.execute(select(User).where(User.work_staff_filter()).where(User.is_active.is_(True),
         User.department_id.is_not(None)))).scalars().all())
@@ -373,6 +398,7 @@ async def refresh_report(db: AsyncSession, row: M3ReportingPointsReport, now: da
     if row.report_date != now.date():
         raise ValueError("Raportet historike perdorin te dhenat e ruajtura te asaj dite.")
     data = await build_task_data(db, row.report_date)
+    data["underload"] = await build_underload_staff(db, row.report_date)
     data["unheld_meetings"] = await build_unheld_meetings(db, row.report_date)
     row.data = data
     row.realization = await build_realization_capture(db, row.report_date)
@@ -433,6 +459,8 @@ async def with_current_task_explanations(db: AsyncSession, payload: dict, sectio
 
 async def current_report_payload(db: AsyncSession, row: M3ReportingPointsReport) -> dict:
     payload = report_payload(row)
+    if row.report_date == datetime.now(report_timezone()).date() and "underload" not in payload["data"]:
+        payload["data"]["underload"] = await build_underload_staff(db, row.report_date)
     payload = await with_current_task_explanations(db, payload, "untouched")
     payload["data"] = await add_saved_meeting_appearance(db, payload["data"])
     return await filter_points_payload(db, payload)
@@ -544,10 +572,16 @@ def delivery_summary(report: dict) -> str:
     return f"SA/TOTALI: {delivered}/{len(rows)}"
 
 
+def reporting_point_answer(report: dict, key: str) -> str:
+    if key == "underload" and "underload" in report.get("data", {}):
+        return ", ".join(row["person"] for row in report["data"]["underload"]) or "Asnjë person në nënngarkesë."
+    return report.get("manual_answers", {}).get(key) or "Pa pergjigje"
+
+
 def render_html(report: dict) -> str:
     cell_style = "border:1px solid #000;padding:6px 4px;vertical-align:top;text-align:left;overflow-wrap:anywhere"
     def manual(keys):
-        return "".join(f"<h3>{_cell(MANUAL_POINTS[key])}</h3><p style='white-space:pre-wrap'>{_cell(report['manual_answers'].get(key) or 'Pa pergjigje')}</p>" for key in keys)
+        return "".join(f"<h3>{_cell(MANUAL_POINTS[key])}</h3><p style='white-space:pre-wrap'>{_cell(reporting_point_answer(report, key))}</p>" for key in keys)
 
     def table(key):
         parts = [f"<h3>{_cell(AUTO_TITLES[key])}</h3>"]
@@ -693,7 +727,7 @@ def render_html(report: dict) -> str:
 def render_plain_text(report: dict) -> str:
     lines = [M3_TITLE, report["report_date"]]
     for key in ("underload", "overload", "reorganization"):
-        lines += [MANUAL_POINTS[key], report["manual_answers"].get(key) or "Pa pergjigje"]
+        lines += [MANUAL_POINTS[key], reporting_point_answer(report, key)]
     for key in ("postponed", "postponed_today", "untouched", "same_day", "unheld_meetings", "delivery", "realization"):
         if key == "unheld_meetings":
             lines.append(MEETING_TITLE)

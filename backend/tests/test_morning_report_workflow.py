@@ -19,17 +19,23 @@ from app.services import morning_report_scheduler
 from app.services.morning_report_scheduler import _due_m1_send_slot
 from app.services.after_break_report import _personal_section
 from app.services.meetings_report import PERSONAL_GA
-from app.services.meeting_point_manual_sync import section_group_label, with_section_keys
+from app.services.meeting_point_manual_sync import is_known_report_title, merge_common_view_manual_sections, section_group_label, with_section_keys
 from app.services.morning_report import (
     DISPLAY_SECTION_TITLES,
     GA_HV_DV_TASKS_TITLE,
     GA_TASKS_TITLE,
+    KA_GENT_QUESTIONS_TITLE,
+    MARKER_TASK_SECTIONS,
+    PHYSICAL_GA_TITLE,
     SECTION_TITLES,
     _attendance_section,
     _day_context_section,
     _email_task_source_label,
     _ga_hv_dv_task_rows,
     _ga_hv_dv_tables_body,
+    _group_marked_tasks,
+    _marker_task_table,
+    _marked_tasks_for_day,
     normalize_morning_report_sections,
     render_html,
     subject_for,
@@ -105,9 +111,87 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertEqual(tyo_by_title["Late"], "Y")
         self.assertEqual(tyo_by_title["Multi-day today"], "T")
 
-    def test_ga_hv_dv_is_first_auto_filled_m1_section(self) -> None:
-        self.assertEqual(DISPLAY_SECTION_TITLES[0], SECTION_TITLES[0])
-        self.assertEqual(DISPLAY_SECTION_TITLES[1], GA_HV_DV_TASKS_TITLE)
+    def test_marker_tables_follow_ga_replies_in_m1_and_email(self) -> None:
+        expected = [SECTION_TITLES[0], PHYSICAL_GA_TITLE, KA_GENT_QUESTIONS_TITLE, GA_HV_DV_TASKS_TITLE]
+        sections = normalize_morning_report_sections([
+            {"title": title, "section_key": title, "body": "Saved content"}
+            for title in [SECTION_TITLES[0], GA_HV_DV_TASKS_TITLE, PHYSICAL_GA_TITLE, KA_GENT_QUESTIONS_TITLE]
+        ])
+        self.assertEqual([section["title"] for section in sections[:4]], expected)
+        html = render_html("M1", date(2026, 9, 1), sections)
+        self.assertEqual([html.index(title) for title in expected], sorted(html.index(title) for title in expected))
+
+    def test_physical_ga_includes_the_report_day_within_the_local_task_range(self) -> None:
+        report_day = date(2026, 9, 1)
+        tasks = [
+            self._task("Physical today", one_h_marker="F"),
+            self._task("Physical done", one_h_marker="SHARE,F", status="DONE"),
+            self._task("Physical after local midnight", one_h_marker="F,SHARE",
+                       start_date=datetime(2026, 8, 31, 22, 15, tzinfo=timezone.utc)),
+            self._task("Missing start", one_h_marker="F", start_date=None),
+            self._task("Spans days", one_h_marker="F", due_date=datetime(2026, 9, 2, 16)),
+            self._task("Ends on report day", one_h_marker="F", start_date=datetime(2026, 8, 31, 8)),
+            self._task("GA only", one_h_marker="FLAG"),
+        ]
+        markers, caption = MARKER_TASK_SECTIONS[PHYSICAL_GA_TITLE]
+        selected = _marked_tasks_for_day(tasks, report_day, markers)
+        self.assertEqual(selected, tasks[:-1])
+        body = _marker_task_table(caption, selected, {"ga-user": "Gane Arifaj"}, {}, {"development": "DEV"})
+        self.assertLess(body.index("Physical today"), body.index("Physical done"))
+        html = render_html(subject_for(report_day), report_day, [{"title": PHYSICAL_GA_TITLE, "body": body}])
+        self.assertIn("<table", html)
+        self.assertIn("Physical after local midnight", html)
+        self.assertIn("Physical done", html)
+        self.assertIn('data-task-symbol="true"', html)
+        self.assertRegex(html, r'<tr[^>]*class="todo"')
+        self.assertRegex(html, r'<tr[^>]*class="done"')
+        self.assertNotIn("[[", html)
+
+    def test_ka_gent_questions_include_either_symbol_and_list_each_task_once(self) -> None:
+        tasks = [
+            self._task("Ask KA", one_h_marker="KA"),
+            self._task("Ask Gent", one_h_marker="F,GENT"),
+            self._task("Ask both", one_h_marker="KA,GENT"),
+            self._task("Range covers today", one_h_marker="GENT", start_date=datetime(2026, 8, 31, 8), due_date=datetime(2026, 9, 2, 16)),
+            self._task("Ask later", one_h_marker="GENT", start_date=datetime(2026, 9, 2, 8), due_date=datetime(2026, 9, 2, 16)),
+            self._task("Already due", one_h_marker="KA", start_date=datetime(2026, 8, 31, 8), due_date=datetime(2026, 8, 31, 16)),
+            self._task("GA and physical", one_h_marker="FLAG,F"),
+            self._task("KA in title only"),
+        ]
+        markers, _ = MARKER_TASK_SECTIONS[KA_GENT_QUESTIONS_TITLE]
+        self.assertEqual(_marked_tasks_for_day(tasks, date(2026, 9, 1), markers), tasks[:4])
+
+    def test_marker_tables_group_copies_with_the_same_symbols_and_union_assignees(self) -> None:
+        names = {"ga-user": "Gane Arifaj", "dv-user": "Drita Vela", "hv-user": "Hana Vela"}
+        first = self._task("Shared task", id="one", fast_task_group_id="shared", one_h_marker="F,KA", status="DONE")
+        second = self._task("Shared task", id="two", fast_task_group_id="shared", one_h_marker="KA,F", assigned_to="dv-user")
+        owners = {"one": {"ga-user"}, "two": {"dv-user", "hv-user"}}
+
+        for title in (PHYSICAL_GA_TITLE, KA_GENT_QUESTIONS_TITLE):
+            with self.subTest(title=title):
+                markers, caption = MARKER_TASK_SECTIONS[title]
+                selected = _marked_tasks_for_day([first, second], date(2026, 9, 1), markers)
+                grouped, grouped_owners = _group_marked_tasks(selected, names, owners)
+                self.assertEqual(grouped, [second])
+                self.assertEqual(grouped_owners, {"two": set(names)})
+                body = _marker_task_table(caption, grouped, names, grouped_owners, {"development": "DEV"})
+                self.assertEqual(body.count("Shared task"), 1)
+                self.assertIn("DV / GA / HV", body)
+                self.assertIn("DV / GA / HV", render_html("M1", date(2026, 9, 1), [{"title": title, "body": body}]))
+        self.assertEqual(owners["two"], {"dv-user", "hv-user"})
+
+    def test_marker_groups_preserve_distinct_symbols_and_independently_created_project_tasks(self) -> None:
+        tasks = [
+            self._task("Review project", id="one", project_id="project", one_h_marker="KA"),
+            self._task("Review project", id="two", project_id="project", one_h_marker="KA", assigned_to="dv-user"),
+            self._task("Review project", id="three", project_id="project", one_h_marker="GENT"),
+            self._task("Review project", id="four", project_id="project", one_h_marker="KA", created_at=datetime(2026, 9, 1, 7, 1)),
+        ]
+        grouped, owners = _group_marked_tasks(tasks, {"ga-user": "Gane Arifaj", "dv-user": "Drita Vela"}, {})
+        self.assertEqual(len(grouped), 3)
+        self.assertTrue({"ga-user", "dv-user"} in owners.values())
+        self.assertIn("three", owners)
+        self.assertIn("four", owners)
 
     def test_hv_table_uses_finance_department_instead_of_hv_assignee(self) -> None:
         report_day = date(2026, 9, 1)
@@ -328,6 +412,45 @@ def make_draft() -> MorningReportDraft:
 
 
 class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retired_questions_are_removed_from_saved_and_regenerated_m1(self) -> None:
+        retired = [
+            {"title": "3. Pikat e ditës sot", "section_key": "manual:custom:3:retired", "body": "Old answer"},
+            {"title": "2. EP: A është lëshuar Mira? (Para TAK 1–2 min)",
+             "section_key": "manual:custom:2:retired", "body": "Old Mira answer"},
+        ]
+        retained = {"title": "Another question", "section_key": "manual:custom:2:retained", "body": "Keep this answer"}
+        sections = normalize_morning_report_sections([*retired, retained, {"title": "PIKAT E DITES SOT", "body": "Legacy"}])
+        self.assertEqual([section["title"] for section in sections], [retained["title"], *DISPLAY_SECTION_TITLES])
+        for question in retired:
+            self.assertTrue(is_known_report_title("morning", question["title"]))
+            self.assertFalse(is_known_report_title("after_break", question["title"]))
+            self.assertFalse(is_known_report_title("meetings", question["title"]))
+
+        with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles", new_callable=AsyncMock) as load:
+            load.return_value = ["PIKAT E DITES SOT", "EP: A ESHTE LESHUAR MIRA? (PARA TAK 1-2 MIN)"]
+            regenerated = await merge_common_view_manual_sections(None, sections, "morning", retired, retired)
+        self.assertEqual(regenerated, sections)
+        html = render_html("M1", date(2026, 9, 1), regenerated)
+        self.assertNotIn("Old answer", html)
+        self.assertNotIn("Old Mira answer", html)
+        self.assertIn("Keep this answer", html)
+
+    async def test_marker_tables_replace_legacy_manual_questions_without_duplicates(self) -> None:
+        legacy = [
+            {"title": "4. Fizikisht me GA?", "section_key": "manual:custom:4:physical", "body": "Manual"},
+            {"title": "5. A ka pyetje/sqarime me KA/Gentin?", "section_key": "manual:custom:5:questions", "body": "Manual"},
+        ]
+        sections = normalize_morning_report_sections(legacy)
+        self.assertEqual([section["title"] for section in sections], DISPLAY_SECTION_TITLES)
+        for section in sections[1:3]:
+            self.assertIn("Asnje detyre", section["body"])
+            self.assertEqual(section_group_label("morning", section["title"]), "AUTO-FILLED FROM PRIMEFLOW")
+
+        with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles", new_callable=AsyncMock) as load:
+            load.return_value = [question["title"] for question in legacy] + ["Another question"]
+            merged = await merge_common_view_manual_sections(None, sections, "morning", legacy, legacy)
+        self.assertEqual([section["title"] for section in merged], ["Another question", *DISPLAY_SECTION_TITLES])
+
     def test_personal_and_wfc_sections_are_labeled_as_auto_filled(self) -> None:
         self.assertEqual(SECTION_TITLES[7], "DET PERSONALISHT ME KA/GENTIN?")
         self.assertEqual(SECTION_TITLES[8], "WFC ME KA/GENTIN?")

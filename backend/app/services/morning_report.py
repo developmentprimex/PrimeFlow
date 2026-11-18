@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.services.report_attendance import filter_task_context, filter_report_sections
 
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -21,10 +21,13 @@ from app.services.after_break_report import (
     _blue_note_rows,
     _display_title,
     _personal_section,
+    _task_covers_day,
 )
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
+from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE
+from app.services.task_marker import active_one_h_marker
 from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
@@ -66,9 +69,15 @@ GA_TASKS_TITLE = "GA TASKS"
 HV_TASKS_TITLE = "HV TASKS"
 DV_TASKS_TITLE = "DV TASKS"
 GA_HV_DV_TASKS_TITLE = "GA/HV/DV TASKS"
+PHYSICAL_GA_TITLE = "FIZIKISHT ME GA?"
+KA_GENT_QUESTIONS_TITLE = "A KA PYTJE/SQARIME ME KA/GENTIN"
+MARKER_TASK_SECTIONS = {
+    PHYSICAL_GA_TITLE: ({"F"}, "DETYRAT ME F"),
+    KA_GENT_QUESTIONS_TITLE: ({"KA", "GENT"}, "DETYRAT ME KA OSE GENT"),
+}
 SECTION_TITLES = [
     # Automatic Discord reply summary first
-    "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
+    GA_REPLIES_SECTION_TITLE,
     # Auto-filled from PrimeFlow
     "(GA) DET NGA EMAILS TE REJA",
     "(GA) VONESA/MUNGESA. A NDRYSHON PLANI PER SOT?",
@@ -78,9 +87,11 @@ SECTION_TITLES = [
     GA_HV_DV_TASKS_TITLE,
     "DET PERSONALISHT ME KA/GENTIN?",
     "WFC ME KA/GENTIN?",
+    *MARKER_TASK_SECTIONS,
 ]
 DISPLAY_SECTION_TITLES = [
-    SECTION_TITLES[0], SECTION_TITLES[6], *SECTION_TITLES[1:6], SECTION_TITLES[7], SECTION_TITLES[8]
+    SECTION_TITLES[0], *MARKER_TASK_SECTIONS, GA_HV_DV_TASKS_TITLE,
+    *SECTION_TITLES[1:6], SECTION_TITLES[7], SECTION_TITLES[8],
 ]
 MANUAL_SECTION_TITLES: set[str] = set()
 GA_HV_DV_TASK_COLUMNS = [
@@ -150,6 +161,8 @@ def _default_body(title: str) -> str:
         return "PERSONAL KA: 0\n\nPERSONAL GENTI: 0"
     if title == SECTION_TITLES[8]:
         return "WFC KA: 0\n\nWFC GENTI: 0"
+    if title in MARKER_TASK_SECTIONS:
+        return _marker_task_table(MARKER_TASK_SECTIONS[title][1], [], {}, {}, {})
     return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WFE: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
 
 
@@ -196,6 +209,9 @@ def _canonical_section_title(raw_title: str) -> str | None:
         return title
 
     compact = _compact_section_title(title)
+    marker_title = _marker_section_title(title)
+    if marker_title:
+        return marker_title
     for known in SECTION_TITLES:
         if _compact_section_title(known) == compact:
             return known
@@ -225,12 +241,34 @@ def _canonical_section_title(raw_title: str) -> str | None:
     return None
 
 
+def _marker_section_title(title: str | None) -> str | None:
+    compact = re.sub(r"^(?:MANUAL)?\d*", "", _compact_section_title(title or ""))
+    if compact == "AKAPYETJESQARIMEMEKAGENTIN":
+        return KA_GENT_QUESTIONS_TITLE
+    return next((title for title in MARKER_TASK_SECTIONS if _compact_section_title(title) == compact), None)
+
+
+def is_removed_morning_manual_question(title: str | None, section_key: str | None = None) -> bool:
+    """Skip retired M1 questions and the old manual copies of automated tables."""
+    key = (section_key or "").strip()
+    if key and not key.startswith("manual:"):
+        return False
+    for value in (title, key):
+        compact = _compact_section_title((value or "").upper().replace("Ë", "E"))
+        compact = re.sub(r"^(?:MANUAL)?\d*", "", compact)
+        if compact in {"PIKATEDITESSOT", "EPAESHTELESHUARMIRAPARATAK12MIN"} or _marker_section_title(value):
+            return True
+    return False
+
+
 def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     by_title: dict[str, dict[str, str]] = {}
     extras: list[dict[str, str]] = []
     for section in sections or []:
         raw_title = str(section.get("title") or "").strip()
         section_key = str(section.get("section_key") or "").strip()
+        if is_removed_morning_manual_question(raw_title, section_key):
+            continue
         title = _canonical_section_title(section_key or raw_title)
         body = str(section.get("body") or "")
         if raw_title == LEGACY_NOTES_TITLE or (
@@ -259,7 +297,7 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         if title not in by_title:
             by_title[title] = {
                 "section_key": title,
-                "title": title if title == GA_HV_DV_TASKS_TITLE else (raw_title if section_key else title),
+                "title": title if title == GA_HV_DV_TASKS_TITLE or title in MARKER_TASK_SECTIONS else (raw_title if section_key else title),
                 "body": body,
             }
 
@@ -502,12 +540,73 @@ def _ga_hv_dv_tables_body(rows_by_title: dict[str, list[list[str]]]) -> str:
     return _normalize_section(lines)
 
 
-async def apply_ga_hv_dv_tasks_table(
+def _marked_tasks_for_day(tasks: list[Task], report_day: date, markers: set[str]) -> list[Task]:
+    return [
+        task for task in tasks
+        if markers.intersection((active_one_h_marker(task) or "").split(","))
+        and _task_covers_day(task, report_day)
+    ]
+
+
+def _marked_task_identity(task: Task) -> tuple:
+    for field in ("ga_note_origin_id", "plan_note_origin_id", "fast_task_group_id"):
+        if value := getattr(task, field, None):
+            return field, value
+    if getattr(task, "system_template_origin_id", None) and getattr(task, "origin_run_at", None):
+        return "system", task.system_template_origin_id, task.origin_run_at
+    if all(getattr(task, field, None) for field in ("meeting_origin_id", "meeting_occurrence_date", "meeting_system_task_kind")):
+        return "meeting", task.meeting_origin_id, task.meeting_occurrence_date, task.meeting_system_task_kind
+    if task.project_id and task.created_at:
+        # Project copies created together share PostgreSQL's transaction timestamp.
+        return "project", task.project_id, task.created_at, getattr(task, "created_by", None), task.title
+    return "task", task.id
+
+
+def _group_marked_tasks(
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+) -> tuple[list[Task], dict[Any, set[Any]]]:
+    grouped: dict[tuple, Task] = {}
+    owners: dict[Any, set[Any]] = {}
+    ordered = sorted(tasks, key=lambda task: (
+        bool(getattr(task, "completed_at", None)) or _normalize_report_status(task.status) == "DONE",
+        common_view_task_sort_key(task, names, assignee_ids_by_task),
+        str(task.id),
+    ))
+    for task in ordered:
+        markers = frozenset((active_one_h_marker(task) or "").split(","))
+        representative = grouped.setdefault((_marked_task_identity(task), markers), task)
+        assignees = assignee_ids_by_task.get(task.id, {task.assigned_to} if task.assigned_to else set())
+        owners.setdefault(representative.id, set()).update(assignees)
+    return list(grouped.values()), owners
+
+
+def _marker_task_table(
+    caption: str,
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    department_codes: dict[Any, str],
+) -> str:
+    return _normalize_section(_m3_status_table(
+        caption, tasks, names,
+        with_status=True,
+        include_department=True,
+        include_am_pm=True,
+        include_type=True,
+        department_codes=department_codes,
+        assignee_ids_by_task=assignee_ids_by_task,
+        show_all_assignees=True,
+    ))
+
+
+async def refresh_morning_task_tables(
     db: AsyncSession,
     sections: list[dict[str, str]],
     report_day: date,
 ) -> list[dict[str, str]]:
-    """Refresh the auto-filled GA/HV/DV table in an existing M1 draft."""
+    """Refresh the auto-filled task tables in an existing M1 draft."""
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
@@ -522,11 +621,15 @@ async def apply_ga_hv_dv_tasks_table(
         HV_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "HV"),
         DV_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "DV"),
     }
-    body = _ga_hv_dv_tables_body(rows_by_title)
+    bodies = {GA_HV_DV_TASKS_TITLE: _ga_hv_dv_tables_body(rows_by_title)}
+    for title, (markers, caption) in MARKER_TASK_SECTIONS.items():
+        marked_tasks, owners = _group_marked_tasks(
+            _marked_tasks_for_day(tasks, report_day, markers), names, assignee_ids_by_task,
+        )
+        bodies[title] = _marker_task_table(caption, marked_tasks, names, owners, department_codes)
     return [
-        {**section, "section_key": GA_HV_DV_TASKS_TITLE, "title": GA_HV_DV_TASKS_TITLE, "body": body}
-        if _canonical_section_title(section.get("section_key") or section.get("title") or "")
-        == GA_HV_DV_TASKS_TITLE
+        {**section, "body": bodies[section["section_key"]]}
+        if section.get("section_key") in bodies
         else section
         for section in sections
     ]
@@ -655,6 +758,7 @@ async def _day_context_section(
 async def build_morning_report_sections(
     db: AsyncSession, report_day: date
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    generated_at = datetime.now(timezone.utc)
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     report_categories = [
         CommonCategory.delays,
@@ -669,8 +773,6 @@ async def build_morning_report_sections(
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     tasks, names, assignee_ids_by_task = await filter_task_context(db, report_day, tasks, names, assignee_ids_by_task)
-    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
-
     entry_user_ids = {
         user_id
         for entry in entries
@@ -685,6 +787,7 @@ async def build_morning_report_sections(
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
+    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task, department_codes)
     user_department_codes = {
         user_id: department_codes.get(department_id, "-") or "-"
         for user_id, department_id in (await db.execute(select(User.id, User.department_id).where(User.work_staff_filter()))).all()
@@ -802,7 +905,7 @@ async def build_morning_report_sections(
     attendance = _attendance_section(entries, names, report_day)
     from app.services.discord_ga_replies import summary_for_day
     sections = [
-        {"title": SECTION_TITLES[0], "body": await summary_for_day(db, report_day)},
+        {"title": SECTION_TITLES[0], "body": await summary_for_day(db, report_day, report="M1", generated_at=generated_at)},
         {"title": GA_HV_DV_TASKS_TITLE, "body": task_tables},
         {"title": SECTION_TITLES[1], "body": email_tasks},
         {"title": SECTION_TITLES[2], "body": attendance},
@@ -814,6 +917,7 @@ async def build_morning_report_sections(
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
+        "ga_replies_generated_at": generated_at.isoformat(),
         "counts": {
             SECTION_TITLES[0]: 0,
             GA_HV_DV_TASKS_TITLE: sum(len(rows) for rows in task_rows_by_title.values()),
@@ -831,7 +935,19 @@ async def build_morning_report_sections(
             SECTION_TITLES[8]: len(wfc_report_tasks),
         },
     }
-    return await filter_report_sections(db, sections, report_day), snapshot
+    for title, (markers, caption) in MARKER_TASK_SECTIONS.items():
+        marked_tasks, owners = _group_marked_tasks(
+            _marked_tasks_for_day(tasks, report_day, markers), names, assignee_ids_by_task,
+        )
+        sections.append({
+            "section_key": title,
+            "title": title,
+            "body": _marker_task_table(caption, marked_tasks, names, owners, department_codes),
+        })
+        snapshot["counts"][title] = len(marked_tasks)
+    sections_by_title = {section["title"]: section for section in sections}
+    ordered = [sections_by_title[title] for title in DISPLAY_SECTION_TITLES]
+    return await filter_report_sections(db, ordered, report_day), snapshot
 
 
 def render_plain_text(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
@@ -865,15 +981,7 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
         if group != current_group:
             section_chunks.append(_render_group_label_html(group))
             current_group = group
-        block = _render_section_block_html(index, section["title"], section.get("body") or "")
-        if (section.get("section_key") or section["title"]) == SECTION_TITLES[0]:
-            # Link only canonical numeric Discord evidence URLs in this M1 section.
-            block = re.sub(
-                r"https://discord\.com/channels/\d+/\d+(?:/\d+)?",
-                lambda match: f'<a href="{match[0]}" style="color:#2563eb;word-break:break-all;">{match[0]}</a>',
-                block,
-            )
-        section_chunks.append(block)
+        section_chunks.append(_render_section_block_html(index, section["title"], section.get("body") or ""))
     return _wrap_report_email_html(
         subject,
         f"Sot: {report_day:%d.%m.%Y}",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 import unittest
@@ -19,7 +21,7 @@ from app.models.enums import UserRole
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.services import meetings_report_scheduler
 from app.services.meeting_point_manual_sync import (
-    is_known_report_title, is_manual_section_title, section_group_label, with_section_keys,
+    is_known_report_title, is_manual_section_title, merge_common_view_manual_sections, section_group_label, with_section_keys,
 )
 from app.services.meetings_report import (
     DISPLAY_SECTION_TITLES,
@@ -403,7 +405,7 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
 
     def test_section_exports_keep_email_groups_tables_and_status_colors(self) -> None:
         sections = [
-            {"title": "A JEMI BRENDA MESATARES ME PROJEKTE?", "body": "(Ploteso manualisht)"},
+            {"title": SECTION_TITLES[15], "body": "(Ploteso manualisht)"},
             {
                 "title": "GA MBYLLJA E DET",
                 "body": (
@@ -511,7 +513,8 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
             ]
         )
         titles = [section["title"] for section in normalized]
-        self.assertEqual(titles[0], SECTION_TITLES[0])  # manual first
+        self.assertEqual(titles[0], SECTION_TITLES[15])  # remaining built-in manual first
+        self.assertNotIn(SECTION_TITLES[0], titles)
         auto_titles = [title for title in titles if title == SECTION_TITLES[1]]
         self.assertEqual(auto_titles[0], SECTION_TITLES[1])  # tickets first among auto-filled
         self.assertEqual(titles.count(SECTION_TITLES[1]), 1)
@@ -545,8 +548,20 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
 
         self.assertEqual(
             [section["title"] for section in normalized],
-            [SECTION_TITLES[0], SECTION_TITLES[15]],
+            [SECTION_TITLES[15]],
         )
+
+    def test_retired_manual_questions_do_not_return_from_sync(self) -> None:
+        title = SECTION_TITLES[0]
+        legacy = {"title": f"1. {title}", "section_key": "manual:custom:1:projects", "body": "Old answer"}
+        daily = {"title": "2. PIKAT E DITËS", "section_key": "manual:custom:2:daily", "body": "Old daily points"}
+        original = [{"title": "Edited title", "section_key": title, "body": "Old answer"}, legacy,
+                    {"title": "Edited daily points", "section_key": "manual:PIKATEDITES", "body": "Old answer"}, daily]
+        sections = normalize_meetings_report_sections(original)
+        with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles",
+                   AsyncMock(return_value=[title, "PIKAT E DITES", "Another point"])):
+            merged = asyncio.run(merge_common_view_manual_sections(None, sections, "meetings", original, [legacy, daily]))
+        self.assertEqual([section["title"] for section in merged], [SECTION_TITLES[15], "Another point"])
 
     def test_common_view_aliases_are_known_auto_not_manual(self) -> None:
         self.assertTrue(is_known_report_title("meetings", "(GA) M3 DET GA MBYLLJA ME HV/OH?"))

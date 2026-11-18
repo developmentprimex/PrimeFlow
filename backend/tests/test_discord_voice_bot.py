@@ -205,19 +205,24 @@ class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
             await c.heartbeat(active)
         interrupt.assert_awaited_once_with('heartbeat_failed');self.assertEqual(bot.bridge.await_count,3)
 
-    def test_mira_joins_1h_two_minutes_before_each_weekday_slot(self):
+    def test_mira_joins_1h_at_default_weekday_times(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
+        from app.config import Settings
         from discord_voice_meetings import auto_join_slot
-        tz=ZoneInfo('Europe/Tirane');times='09:58,10:58,11:48,14:18,15:58'
+        tz=ZoneInfo('Europe/Budapest');times=Settings.model_fields['DISCORD_1H_AUTO_JOIN_TIMES'].default
         monday=lambda h,m,s=0:datetime(2026,10,19,h,m,s,tzinfo=tz)
+        self.assertIsNone(auto_join_slot(monday(7,58,59),times))
+        self.assertEqual(auto_join_slot(monday(7,59),times),monday(7,59))
+        self.assertEqual(auto_join_slot(monday(8,2,59),times),monday(7,59))
+        self.assertIsNone(auto_join_slot(monday(8,3),times))
         self.assertEqual(auto_join_slot(monday(9,58,30),times),monday(9,58))
         self.assertEqual(auto_join_slot(monday(11,49,59),times),monday(11,48))
         self.assertIsNone(auto_join_slot(monday(9,57,59),times))
         # Failed connections are retried until 2 minutes after the 1H starts.
         self.assertEqual(auto_join_slot(monday(10,1,59),times),monday(9,58))
         self.assertIsNone(auto_join_slot(monday(10,2,0),times))
-        self.assertIsNone(auto_join_slot(datetime(2026,10,24,9,58,tzinfo=tz),times))  # Saturday
+        self.assertIsNone(auto_join_slot(datetime(2026,10,24,7,59,tzinfo=tz),times))  # Saturday
 
     def auto_fixture(self):
         from types import SimpleNamespace
@@ -232,15 +237,15 @@ class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
         from datetime import datetime
         from zoneinfo import ZoneInfo
         bot,c,voice,private,guild=self.auto_fixture()
-        when=datetime(2026,10,19,9,58,tzinfo=ZoneInfo('Europe/Tirane'))
+        when=datetime(2026,10,19,7,59,tzinfo=ZoneInfo('Europe/Budapest'))
         with patch('discord_voice_meetings.settings') as s,patch.object(c,'begin',AsyncMock()) as begin:
             s.DISCORD_GUILD_ID='123';s.DISCORD_1H_VOICE_CHANNEL_ID='55';s.DISCORD_1H_AUTO_OWNER_DISCORD_ID='77'
-            s.DISCORD_1H_AUTO_JOIN_TIMES='09:58';s.APP_TIMEZONE='Europe/Tirane'
+            s.DISCORD_1H_AUTO_JOIN_TIMES='07:59';s.APP_TIMEZONE='Europe/Budapest'
             await c.tick(when);await c.tick(when)
         begin.assert_awaited_once()
         kwargs=begin.await_args.kwargs
         self.assertEqual(kwargs['actor'],{'discord_user_id':'77','guild_id':'123','channel_id':'44','voice_channel_id':'55'})
-        self.assertEqual(kwargs['request_id'],'auto1h-202610190958');self.assertIs(kwargs['voice'],voice)
+        self.assertEqual(kwargs['request_id'],'auto1h-202610190759');self.assertIs(kwargs['voice'],voice)
 
     async def test_failed_join_is_retried_in_the_slot_and_the_organizer_hears_when_mira_gives_up(self):
         from datetime import datetime, timedelta

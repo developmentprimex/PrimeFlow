@@ -46,7 +46,7 @@ from app.services.task_product_counts import task_product_counts
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
-    "A JEMI BRENDA MESATARES ME PROJEKTE?",
+    "A JEMI BRENDA MESATARES ME PROJEKTE?",  # Retired, kept as a legacy key.
     "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
@@ -64,8 +64,7 @@ SECTION_TITLES = [
     "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
 ]
 DISPLAY_SECTION_TITLES = [
-    SECTION_TITLES[0],  # Manual first
-    SECTION_TITLES[15],  # Manual symbol check second
+    SECTION_TITLES[15],  # Manual symbol check first
     SECTION_TITLES[1],  # STD tickets first among auto-filled
     SECTION_TITLES[2],
     SECTION_TITLES[3],
@@ -82,7 +81,6 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[14],
 ]
 MANUAL_SECTION_TITLES = {
-    SECTION_TITLES[0],
     SECTION_TITLES[15],
 }
 SECTION_TITLE_ALIASES = {
@@ -107,6 +105,9 @@ SECTION_TITLE_ALIASES = {
     "WFC ME KA/GENTIN?": SECTION_TITLES[14],
 }
 RETIRED_CLOSING_SECTION_TITLES = {
+    SECTION_TITLES[0],
+    "PIKAT E DITES",
+    "PIKAT E DITËS",
     "GA MBYLLJA E DET",
     "HV MBYLLJA E DET",
     "(GA) M3 DET GA MBYLLJA ME HV?",
@@ -117,8 +118,15 @@ RETIRED_CLOSING_SECTION_KEYS = {
 }
 
 
-def is_retired_meetings_section_title(title: str | None) -> bool:
-    return _compact_section_title(title) in RETIRED_CLOSING_SECTION_KEYS
+def is_retired_meetings_section_title(title: str | None, section_key: str | None = None) -> bool:
+    return any(re.sub(r"^(?:MANUAL)?\d*", "", _compact_section_title(value)) in RETIRED_CLOSING_SECTION_KEYS
+               for value in (title, section_key))
+
+
+def without_retired_meetings_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    return [section for section in sections or []
+            if not is_retired_meetings_section_title(section.get("title"), section.get("section_key"))]
+
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 # Personal KA/Genti ownership is encoded in task-title markers. WFC grouping
 # uses the linked confirmation assignee instead.
@@ -197,7 +205,7 @@ def _prefer_section_body(current: str, incoming: str) -> str:
 
 def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     """Keep saved drafts aligned with the current M3 question list without losing edits."""
-    existing_sections = sections or []
+    existing_sections = without_retired_meetings_sections(sections)
     by_title: dict[str, dict[str, str]] = {}
     unknown_sections: list[dict[str, str]] = []
     seen_unknown: set[str] = set()
@@ -205,8 +213,6 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
         raw_title = str(section.get("title") or "").strip()
         section_key = str(section.get("section_key") or "").strip()
         identity = section_key or raw_title
-        if is_retired_meetings_section_title(identity):
-            continue
         title = canonical_meetings_section_title(identity)
         if not title:
             continue
@@ -710,19 +716,30 @@ def _task_owners(
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     *,
     all_participant_ids: set[Any] | None = None,
+    show_all_assignees: bool = False,
 ) -> str:
     assignee_ids = set(assignee_ids_by_task.get(task.id, set()) if assignee_ids_by_task else set())
     if not assignee_ids and task.assigned_to:
         assignee_ids = {task.assigned_to}
     if (
-        not getattr(names, "attendance_filtered", False) and (
+        not show_all_assignees and not getattr(names, "attendance_filtered", False) and (
             (all_participant_ids and assignee_ids and all_participant_ids.issubset(assignee_ids))
             or len(assignee_ids) > ALL_ASSIGNEES_DISPLAY_THRESHOLD
         )
     ):
         return "ALL"
-    owners = sorted({_initials(names.get(user_id)) for user_id in assignee_ids if _initials(names.get(user_id)) != "-"})
-    return " ".join(owners) or _initials(names.get(task.assigned_to))
+    assignees_by_initials: dict[str, list[str]] = {}
+    for user_id in assignee_ids:
+        if (name := names.get(user_id)) and (initials := _initials(name)) != "-":
+            assignees_by_initials.setdefault(initials, []).append(name)
+    owners = sorted(assignees_by_initials)
+    if show_all_assignees and any(len(assignees) > 1 for assignees in assignees_by_initials.values()):
+        return " / ".join(
+            label for initials in owners
+            for label in (sorted(assignees_by_initials[initials]) if len(assignees_by_initials[initials]) > 1 else [initials])
+        )
+    separator = " / " if show_all_assignees else " "
+    return separator.join(owners) or _initials(names.get(task.assigned_to))
 
 
 def common_view_task_sort_key(
@@ -964,6 +981,7 @@ def _m3_status_table(
     products_by_task: dict[Any, str] | None = None,
     project_titles_by_id: dict[Any, str] | None = None,
     include_priority_tone: bool = False,
+    show_all_assignees: bool = False,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -1044,7 +1062,8 @@ def _m3_status_table(
     ordered = sorted(tasks, key=sort_key)
     for index, task in enumerate(ordered, start=1):
         owner = _task_owners(
-            task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+            task, names, assignee_ids_by_task,
+            all_participant_ids=all_participant_ids, show_all_assignees=show_all_assignees,
         )
         task_type = _m3_task_type_label(task) if include_type else ""
         department = _m3_department_label(task, department_codes) if include_department else ""
@@ -1474,7 +1493,6 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     section_6 = await _today_meeting_status_section(db, today_meetings, report_day, meetings)
 
     by_title = {
-        SECTION_TITLES[0]: "(Ploteso manualisht)",
         SECTION_TITLES[15]: "(Ploteso manualisht)",
         SECTION_TITLES[1]: std_tickets_section,
         SECTION_TITLES[2]: _normalize_section(section_1),

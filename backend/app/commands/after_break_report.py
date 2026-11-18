@@ -11,11 +11,14 @@ from app.db import SessionLocal
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.services.after_break_report import (
     build_after_break_report_sections,
+    normalize_after_break_report_sections,
+    populate_pcm_projects_section,
     render_html,
     render_plain_text,
     send_after_break_report,
     subject_for,
 )
+from app.services.discord_ga_replies import refresh_ga_reply_section
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_delivery import configured_recipients, validate_report_config
 
@@ -43,16 +46,22 @@ async def main() -> None:
             await db.commit()
             await db.refresh(row)
 
-        plain_text = render_plain_text(row.subject, row.report_date, row.sections)
+        sections = await refresh_ga_reply_section(db, normalize_after_break_report_sections(row.sections),
+                                                 row.report_date, report="M2", refresh_current=args.send or row.status != "SENT",
+                                                 sent_at=None if args.send else row.sent_at, populate_missing=True,
+                                                 generated_snapshot=row.generated_snapshot)
+        sections = await populate_pcm_projects_section(db, sections, row.report_date)
+        plain_text = render_plain_text(row.subject, row.report_date, sections)
         if args.send:
             message = await send_after_break_report(
                 row.subject,
                 await configured_recipients(),
                 plain_text,
-                render_html(row.subject, row.report_date, row.sections),
+                render_html(row.subject, row.report_date, sections),
                 report_day=row.report_date,
-                sections=row.sections,
+                sections=sections,
             )
+            row.sections = sections
             row.status = "SENT"
             row.sent_at = datetime.now(report_timezone())
             row.gmail_message_id = message.get("id")

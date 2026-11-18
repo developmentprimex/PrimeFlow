@@ -46,6 +46,7 @@ class ManualAnswersPayload(BaseModel):
     @field_validator("manual_answers")
     @classmethod
     def validate_answers(cls, value: dict[str, str]) -> dict[str, str]:
+        value = {key: answer for key, answer in value.items() if key != "underload"}
         if any(key not in MANUAL_POINTS and not is_meeting_comment_key(key)
                and not is_task_comment_key(key) for key in value):
             raise ValueError("Pike manuale e panjohur.")
@@ -126,6 +127,8 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     if any(not is_meeting_comment_key(key) for key in payload.manual_answers):
         await require_report_manager(user)
     existing = await _by_id(db, report_id)
+    if not payload.manual_answers:
+        return await current_report_payload(db, existing)
     row = await locked_report(db, existing.report_date)
     await db.refresh(row)
     before = dict(row.manual_answers or {})

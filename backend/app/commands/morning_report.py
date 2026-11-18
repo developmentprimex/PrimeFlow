@@ -9,8 +9,11 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.models.morning_report_draft import MorningReportDraft
+from app.services.discord_ga_replies import refresh_m1_section
 from app.services.morning_report import (
     build_morning_report_sections,
+    normalize_morning_report_sections,
+    refresh_morning_task_tables,
     render_html,
     render_plain_text,
     send_morning_report,
@@ -42,17 +45,24 @@ async def main() -> None:
             db.add(row)
             await db.commit()
             await db.refresh(row)
+        else:
+            sections = await refresh_morning_task_tables(
+                db, normalize_morning_report_sections(row.sections), row.report_date,
+            )
+            sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
+                                                sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
 
-        plain_text = render_plain_text(row.subject, row.report_date, row.sections)
+        plain_text = render_plain_text(row.subject, row.report_date, sections)
         if args.send:
             message = await send_morning_report(
                 row.subject,
                 await configured_recipients(),
                 plain_text,
-                render_html(row.subject, row.report_date, row.sections),
+                render_html(row.subject, row.report_date, sections),
                 report_day=row.report_date,
-                sections=row.sections,
+                sections=sections,
             )
+            row.sections = sections
             row.status = "SENT"
             row.sent_at = datetime.now(report_timezone())
             row.gmail_message_id = message.get("id")

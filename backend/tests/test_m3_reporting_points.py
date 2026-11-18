@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+import asyncio
+import re
 import unittest
 import uuid
 from datetime import date, datetime, timezone
@@ -29,6 +31,44 @@ from tests.test_migration_graph import migration_scripts
 from app.services.reporting_points_excel import XLSX_MIME
 
 DAY = date(2026, 10, 5)
+
+
+@pytest.mark.parametrize(("title", "matches"), [
+    ("NENNGARKESE", True),
+    ("EF: NËNNGARKESË", True),
+    ("EF / FG: Nënngarkesë\r\nShënimet e ditës", True),
+    ("NËNNGARKESË për nesër", True),
+    ("EF: Plan i ditës – Nënngarkesë pas orës 14:00", True),
+    ("Detyrë tjetër\nEF: NËNNGARKESË", False),
+])
+def test_underload_matches_the_title_line(title, matches):
+    normalized = title.upper().replace("Ë", "E")
+    assert bool(re.search(service.UNDERLOAD_TITLE_PATTERN, normalized)) is matches
+
+
+def test_underload_uses_current_assignments_and_report_date():
+    primary, additional, absent = [uuid.uuid4() for _ in range(3)]
+    planned = task(assigned_to=primary, start_date=date(2026, 10, 4), due_date=DAY)
+    outside = task(assigned_to=absent, start_date=date(2026, 10, 6), due_date=date(2026, 10, 7))
+    users = [SimpleNamespace(id=uid, full_name=name) for uid, name in [
+        (primary, "Bora"), (additional, "Arta"), (absent, "Drita"),
+    ]]
+    db = AsyncMock()
+    db.execute.side_effect = [
+        MagicMock(**{"scalars.return_value.all.return_value": [planned, outside]}),
+        MagicMock(**{"scalars.return_value.all.return_value": [additional, primary, additional, absent]}),
+        MagicMock(**{"scalars.return_value.all.return_value": users}),
+    ]
+    from app.services.report_attendance import ReportAttendance
+
+    with patch.object(service, "load_report_attendance", new=AsyncMock(return_value=ReportAttendance(user_ids={str(absent)}))):
+        staff = asyncio.run(service.build_underload_staff(db, DAY))
+
+    title_query, assignment_query, staff_query = [call.args[0].compile() for call in db.execute.await_args_list]
+    assert service.UNDERLOAD_TITLE_PATTERN in title_query.params.values()
+    assert [planned.id] in assignment_query.params.values()
+    assert any(isinstance(ids, list) and set(ids) == {primary, additional, absent} for ids in staff_query.params.values())
+    assert staff == [{"user_id": str(additional), "person": "Arta"}, {"user_id": str(primary), "person": "Bora"}]
 
 
 def task(**changes):
@@ -264,6 +304,22 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("Ne pritje te klientit", service.render_plain_text(report))
         self.assertIn("Klienti kerkoi shtyrjen", service.render_plain_text(report))
 
+    def test_underload_matches_in_preview_and_attachments(self):
+        from app.services.m3_reporting_points_attachments import export_blocks
+
+        report = self.report()
+        for staff, expected in [([{"person": "Arta"}, {"person": "Bora"}], "Arta, Bora"),
+                                ([], "Asnjë person në nënngarkesë.")]:
+            report["data"]["underload"] = staff
+            assert expected in service.render_html(report)
+            assert expected in service.render_plain_text(report)
+            assert expected in [block.get("text") for block in export_blocks(report)]
+            assert "Pergjigje" not in service.render_html(report)
+
+    def test_legacy_manual_underload_is_ignored_on_save(self):
+        payload = api.ManualAnswersPayload(manual_answers={"underload": "Stale", "overload": "Valid"})
+        assert payload.manual_answers == {"overload": "Valid"}
+
     def test_threshold_and_missing_data_are_not_invented_zero(self):
         self.assertIn("mbi 50%", service.realization_comment(62))
         self.assertIn("nen 50%", service.realization_comment(42))
@@ -341,7 +397,7 @@ class RenderingTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             api.ManualAnswersPayload(manual_answers={"percent": "100"})
         with self.assertRaises(ValidationError):
-            api.ManualAnswersPayload(manual_answers={"underload": "x" * 10001})
+            api.ManualAnswersPayload(manual_answers={"overload": "x" * 10001})
 
     def test_migration_emits_unique_per_date_table_and_no_auto_send_settings(self):
         output = StringIO()
@@ -530,10 +586,12 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
                               manual_answers={"ga_reorganization": "Jo"}, realization={"percent": 62},
                               realization_captured_at=datetime.fromisoformat("2026-10-05T16:15:00+02:00"), data={}, generated_at=None)
         with (patch.object(service, "build_task_data", new=AsyncMock(return_value={"untouched": [{"title": "TODO"}]})),
+              patch.object(service, "build_underload_staff", new=AsyncMock(return_value=[{"person": "Arta"}])),
               patch.object(service, "build_unheld_meetings", new=AsyncMock(return_value=[])),
               patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 71}))):
             await service.refresh_report(AsyncMock(), row, now)
         self.assertEqual(row.manual_answers, {"ga_reorganization": "Jo"})
+        self.assertEqual(row.data["underload"], [{"person": "Arta"}])
         self.assertEqual(row.realization, {"percent": 71})
         self.assertEqual(row.realization_captured_at, now)
 
@@ -542,6 +600,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         row = SimpleNamespace(report_date=now.date(), manual_answers={}, realization=None,
                               realization_captured_at=None, data={}, generated_at=None)
         with (patch.object(service, "build_task_data", new=AsyncMock(return_value={})),
+              patch.object(service, "build_underload_staff", new=AsyncMock(return_value=[])),
               patch.object(service, "build_unheld_meetings", new=AsyncMock(return_value=[])),
               patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 25.6}))):
             await service.refresh_report(AsyncMock(), row, now)
@@ -595,6 +654,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(api, "datetime") as clock, patch.object(service, "datetime") as service_clock, \
              patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log"), \
              patch.object(service, "build_task_data", new=AsyncMock(return_value={"untouched": []})), \
+             patch.object(service, "build_underload_staff", new=AsyncMock(return_value=[])), \
              patch.object(service, "build_unheld_meetings", new=AsyncMock(return_value=[])), \
              patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 71})):
             clock.now.return_value = service_clock.now.return_value = now
@@ -781,6 +841,7 @@ class AccessTests(unittest.TestCase):
     def test_all_roles_can_view_generate_history_and_preview(self):
         with (TestClient(self.app) as client,
               patch.object(api, "locked_report", new=AsyncMock(return_value=self.row)),
+              patch.object(service, "build_underload_staff", new=AsyncMock(return_value=[])),
               patch.object(api, "refresh_report", new=AsyncMock())):
             for role in UserRole:
                 self.user.role = role
@@ -792,7 +853,7 @@ class AccessTests(unittest.TestCase):
 
     def test_staff_view_permission_does_not_grant_edit_send_or_recipient_management(self):
         with TestClient(self.app) as client:
-            self.assertEqual(client.put(f"/points/{self.row.id}/answers", json={"manual_answers": {"underload": "test"}}).status_code, 403)
+            self.assertEqual(client.put(f"/points/{self.row.id}/answers", json={"manual_answers": {"overload": "test"}}).status_code, 403)
             self.assertEqual(client.post(f"/points/{self.row.id}/send").status_code, 403)
             self.assertEqual(client.get("/points/recipients").status_code, 403)
         self.db.commit.assert_not_awaited()

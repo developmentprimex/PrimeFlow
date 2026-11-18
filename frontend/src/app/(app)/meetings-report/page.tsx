@@ -57,9 +57,6 @@ function canonicalMeetingsSectionTitle(title: string) {
   if (key === compactSectionTitle("SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER")) {
     return "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER"
   }
-  if (key === compactSectionTitle("A JEMI BRENDA MESATARES ME PROJEKTE?")) {
-    return "A JEMI BRENDA MESATARES ME PROJEKTE?"
-  }
   if (key.includes("TIKETATESTD")) {
     return "(GA) ZHV: TIKETAT E STD?"
   }
@@ -122,7 +119,6 @@ function canonicalMeetingsSectionTitle(title: string) {
 
 function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
-    "A JEMI BRENDA MESATARES ME PROJEKTE?",
     "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
     "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
@@ -140,7 +136,6 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
     "N- WFC ME KA/GENTIN?",
   ]
   const manuals = new Set([
-    "A JEMI BRENDA MESATARES ME PROJEKTE?",
     "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
   ])
   const placeholder = "(Ploteso manualisht)"
@@ -157,6 +152,9 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
   }
 
   for (const section of sections) {
+    if ([section.title, section.section_key || ""].some((value) =>
+      compactSectionTitle(value).replace(/^(?:MANUAL)?\d*/, "") === "AJEMIBRENDAMESATARESMEPROJEKTE"
+    )) continue
     const title = canonicalMeetingsSectionTitle((section.section_key || section.title).trim())
     if (!title) continue
     if (displayOrder.includes(title)) {

@@ -25,6 +25,8 @@ type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
+const MARKER_TASK_SECTIONS = new Set(["FIZIKISHT ME GA?", "A KA PYTJE/SQARIME ME KA/GENTIN"])
+const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -59,7 +61,7 @@ type DeliveryHistory = {
 function sectionGroupLabel(section: Section) {
   // Built-in manuals are first; Common View–synced extras sit after them and before autos.
   const knownAuto = [
-    "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
+    GA_REPLIES_SECTION,
     "GA/HV/DV TASKS",
     "GA TASKS",
     "HV TASKS",
@@ -72,6 +74,7 @@ function sectionGroupLabel(section: Section) {
     "DET PERSONALISHT ME KA/GENTIN?",
     "TASKS PERSONALISHT ME KA/GENTIN?",
     "WFC ME KA/GENTIN?",
+    ...MARKER_TASK_SECTIONS,
   ]
   const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
   const key = compact(section.section_key || section.title)
@@ -616,6 +619,7 @@ export default function MorningReportPage() {
           <div className="space-y-4">
             {draft.sections.map((section, index) => {
               const isEditing = editingSection?.index === index
+              const isMarkerTaskSection = MARKER_TASK_SECTIONS.has(section.section_key || section.title)
               return (
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
@@ -650,7 +654,7 @@ export default function MorningReportPage() {
                           </div>
                         ) : null}
                       </div>
-                      {canEdit && !isEditing ? (
+                      {canEdit && !isEditing && !isMarkerTaskSection ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
                             <Pencil className="h-4 w-4" /> Edit
@@ -671,7 +675,11 @@ export default function MorningReportPage() {
                         onSave={applySectionEditor}
                       />
                     ) : (
-                      <ReportSectionPreview body={reportSectionPreviewText(section.body)} />
+                      <ReportSectionPreview
+                        body={reportSectionPreviewText(section.body)}
+                        largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
+                        emphasizeOwnerSeparator={isMarkerTaskSection}
+                      />
                     )}
                   </div>
                 </React.Fragment>

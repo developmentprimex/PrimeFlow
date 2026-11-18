@@ -19,6 +19,9 @@ const HEADER_LABELS = new Set([
   "TITLE",
   "NOTE",
   "PYETJA",
+  "PËR KË",
+  "MESAZHI ORIGJINAL",
+  "PËRGJIGJJA E GA",
   "TIPI",
   "LLOJI",
   "TYPE",
@@ -135,6 +138,7 @@ function isCompactMetricTable(headers: string[]) {
 function isNarrowTableHeader(header: string) {
   return (
     header === "NR" ||
+    header === "PËR KË" ||
     header === "WHO" ||
     header === "DEP" ||
     header === "FROM" ||
@@ -558,11 +562,15 @@ export function ReportSectionPreview({
   filterCreatedWeek = false,
   filterWfeAge = false,
   projectColumnWidth,
+  largerTableText = false,
+  emphasizeOwnerSeparator = false,
 }: {
   body: string
   filterCreatedWeek?: boolean
   filterWfeAge?: boolean
   projectColumnWidth?: string
+  largerTableText?: boolean
+  emphasizeOwnerSeparator?: boolean
 }) {
   const [createdWeekFilter, setCreatedWeekFilter] = React.useState<"all" | "this" | "last">("all")
   const [wfeAgeFilter, setWfeAgeFilter] = React.useState("all")
@@ -753,7 +761,7 @@ export function ReportSectionPreview({
         })
     const hasWideColumn = headers.some((header) => {
       const name = normalizeHeader(header)
-      return name === "TITLE" || name === "NOTE" || name === "PYETJA"
+      return name === "TITLE" || name === "NOTE" || name === "PYETJA" || name === "PËRGJIGJJA E GA"
     })
     return (
       <div
@@ -761,7 +769,7 @@ export function ReportSectionPreview({
         className={`${hasWideColumn ? "w-full" : "w-max max-w-full"} border-b border-slate-200 last:border-b-0`}
       >
         <table
-          className={`${hasWideColumn ? "w-full" : ""} border-collapse text-xs leading-5 text-slate-950`}
+          className={`${hasWideColumn ? "w-full" : ""} border-collapse ${largerTableText ? "text-base leading-6" : "text-xs leading-5"} text-slate-950`}
         >
           <thead>
             {rows
@@ -906,6 +914,13 @@ export function ReportSectionPreview({
                               >
                                 {line}
                               </span>
+                            ))
+                          ) : emphasizeOwnerSeparator && header === "WHO" && displayedCell.includes(" / ") ? (
+                            displayedCell.split(" / ").map((owner, index) => (
+                              <React.Fragment key={index}>
+                                {index > 0 ? <strong className="mx-1 text-base font-bold leading-none">/</strong> : null}
+                                {owner}
+                              </React.Fragment>
                             ))
                           ) : (
                             renderPreviewTableCell(displayedCell, header)

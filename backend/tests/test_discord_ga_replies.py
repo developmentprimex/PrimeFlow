@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+from zoneinfo import ZoneInfo
 
 import discord
 import unittest
@@ -36,7 +37,48 @@ def async_items(items):
     return iterator()
 
 
+def table_rows(body):
+    from app.services.meetings_report import _section_report_blocks
+
+    return next(block["rows"] for block in _section_report_blocks(body) if block["kind"] == "table")
+
+
 class DiscordGaRepliesTests(unittest.TestCase):
+    def test_m1_and_m2_use_their_own_local_start_and_the_generation_cutoff(self):
+        tz = ZoneInfo("Europe/Tirane")
+        cutoff = datetime(2026, 11, 17, 11, 30, tzinfo=tz)
+        def at(day, hour, minute=0, second=0):
+            return datetime(2026, 11, day, hour, minute, second, tzinfo=tz).isoformat()
+
+        messages = [
+            message(1, content="Pyetja origjinale", created_at=at(16, 15)),
+            message(2, GA, "Para intervalit", reference_id="1", created_at=at(16, 16, 29, 59)),
+            message(3, GA, "Në 16:30", reference_id="1", created_at=at(16, 16, 30)),
+            message(4, GA, "Pak para 08:00", created_at=at(17, 7, 59, 59)),
+            message(5, GA, "Në 08:00", reference_id="1", created_at=at(17, 8)),
+            message(6, GA, "Në çastin e gjenerimit", created_at=at(17, 11, 30)),
+            message(7, GA, "Pas gjenerimit", reference_id="1", created_at=at(17, 11, 30, 1)),
+        ]
+        source = evidence(messages)
+        with patch.object(service, "report_timezone", return_value=tz):
+            m1 = table_rows(service.render_summary(source, cutoff, cutoff,
+                            window=service._report_window(cutoff.date(), "M1", cutoff)))
+            m2 = table_rows(service.render_summary(source, cutoff, cutoff,
+                            window=service._report_window(cutoff.date(), "M2", cutoff)))
+        assert [row[-1] for row in m1] == ["Në 16:30", "Pak para 08:00", "Në 08:00", "Në çastin e gjenerimit"]
+        assert [row[-1] for row in m2] == ["Në 08:00", "Në çastin e gjenerimit"]
+        assert m2[0][2] == "Pyetja origjinale"
+
+    def test_generated_replies_are_reused_on_read_and_send_until_regeneration(self):
+        sections = [{"title": service.GA_REPLIES_SECTION_TITLE, "body": "Generated table"}]
+        with patch.object(service, "summary_for_day", AsyncMock()) as summary:
+            result = asyncio.run(service.refresh_ga_reply_section(
+                None, sections, datetime.now(service.report_timezone()).date(), report="M2",
+                generated_snapshot={"ga_replies_generated_at": NOW.isoformat()},
+            ))
+        assert result == sections
+        summary.assert_not_awaited()
+
     def test_only_explicit_ga_replies_count_and_requests_are_not_individual_questions(self):
         messages = [message(1, content="Dy pyetje në një kërkesë"), message(2),
                     message(3, GA, "Përgjigjja", reference_id="1"),
@@ -48,16 +90,18 @@ class DiscordGaRepliesTests(unittest.TestCase):
         result = service.requests_with_replies(messages, GA)
         assert [(row["id"], row["reply_id"]) for row in result] == [("1", "3"), ("2", None)]
         body = service.render_summary(evidence(messages), NOW, NOW)
-        assert "1 nga 2 kërkesa; 1 pa reply të lidhur" in body
-        assert "/1572160944358953042/3" in body
-        assert "30 ditëve" in body
+        assert table_rows(body) == [["1", "S", "Dy pyetje në një kërkesë", "Përgjigjja"], ["2", "", "", "Folderat?"]]
 
     def test_reply_chains_threads_deduplication_and_deleted_replies(self):
         messages = [message(1), message(2), message(3, reference_id="1"),
-                    message(4, GA, reference_id="3"), message(5, GA, thread_root_id="2")]
+                    message(4, GA, "Përgjigje në zinxhir", reference_id="3"),
+                    message(5, GA, "Koment në thread", thread_root_id="2")]
         result = service.requests_with_replies(messages + [messages[-1]], GA)
         assert [(row["id"], row["reply_id"]) for row in result] == [("1", "4"), ("2", "5")]
-        assert "/2/5" in service.render_summary(evidence(messages), NOW, NOW)
+        assert table_rows(service.render_summary(evidence(messages), NOW, NOW)) == [
+            ["1", "S", "@GA Kërkesë për projektin", "Përgjigje në zinxhir"],
+            ["2", "S", "@GA Kërkesë për projektin", "Koment në thread"],
+        ]
         messages = [m for m in messages if m["id"] not in {"4", "5"}]
         assert all(row["reply_id"] is None for row in service.requests_with_replies(messages, GA))
 
@@ -71,10 +115,12 @@ class DiscordGaRepliesTests(unittest.TestCase):
         for value, captured in [(None, NOW), (evidence(status="UNAVAILABLE"), NOW),
                                 (evidence(), NOW - timedelta(minutes=6))]:
             body = service.render_summary(value, captured, NOW)
-            assert "Nuk mund të konfirmohet" in body
-            assert "0 nga 0" not in body
-        assert "KONTROLL I PJESSHËM" in service.render_summary(evidence(status="PARTIAL"), NOW, NOW)
-        assert "0 nga 0" in service.render_summary(evidence(), NOW, NOW)
+            assert body == service.UNAVAILABLE
+        assert service.render_summary(evidence(status="PARTIAL"), NOW, NOW) == service.UNAVAILABLE
+        assert table_rows(service.render_summary(evidence(), NOW, NOW)) == [["-", "", "", "Asnjë reply"]]
+        assert table_rows(service.render_summary(evidence([message(1, GA, "Koment")]), NOW, NOW)) == [
+            ["1", "", "", "Koment"], ["-", "", "", "Asnjë reply"],
+        ]
 
     def test_evidence_rejects_wrong_channel_identity_time_and_out_of_window_messages(self):
         with patch.object(settings, "DISCORD_GUILD_ID", "1493866119700807722"):
@@ -110,16 +156,17 @@ class DiscordGaRepliesTests(unittest.TestCase):
         db = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(captured_at=NOW, evidence=evidence([message(1)]))))
         # A past date reads that day's stored snapshot, never today's source.
         day = datetime.now(timezone.utc).date() - timedelta(days=1)
-        result = asyncio.run(service.summary_for_day(db, day))
-        assert "0 nga 1" in result
+        with patch.object(settings, "DISCORD_GUILD_ID", "1493866119700807722"):
+            result = asyncio.run(service.summary_for_day(db, day))
+        assert table_rows(result) == [["-", "", "", "Asnjë reply"]]
         assert db.get.call_args.args[1][2] == day
         class Clock(datetime):
             @classmethod
             def now(cls, tz=None):
                 return NOW
-        with patch.object(service, "datetime", Clock), patch.object(settings, "DISCORD_ASSISTANT_ENABLED", True), \
+        with patch.object(service, "datetime", Clock), patch.object(settings, "DISCORD_GUILD_ID", "1493866119700807722"), \
              patch.object(service, "ga_identity", AsyncMock(return_value="other-account")):
-            assert "Nuk mund të konfirmohet" in asyncio.run(service.summary_for_day(db, NOW.date()))
+            assert asyncio.run(service.summary_for_day(db, NOW.date())) == service.UNAVAILABLE
 
     def test_m1_section_refresh_preserves_other_sections_and_edited_title(self):
         from app.services.morning_report import SECTION_TITLES, MANUAL_SECTION_TITLES
@@ -139,14 +186,91 @@ class DiscordGaRepliesTests(unittest.TestCase):
         assert result == sections
         summary.assert_not_awaited()
 
-    def test_m1_html_links_evidence_and_escapes_untrusted_channel_text(self):
+    def test_m2_manual_placeholder_is_filled_from_evidence_before_its_send_time(self):
+        captured = evidence([message(1, GA, "Koment para M2"),
+                             message(2, GA, "Koment pas M2", created_at=(NOW + timedelta(minutes=1)).isoformat())])
+        db = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(evidence=captured, captured_at=NOW)))
+        sections = [{"title": service.GA_REPLIES_SECTION_TITLE, "body": "(Ploteso manualisht)"}]
+        with patch.object(settings, "DISCORD_GUILD_ID", captured["guild_id"]):
+            result = asyncio.run(service.refresh_ga_reply_section(
+                db, sections, NOW.date(), refresh_current=False, sent_at=NOW, populate_missing=True,
+            ))
+        assert table_rows(result[0]["body"]) == [["1", "", "", "Koment para M2"], ["-", "", "", "Asnjë reply"]]
+
+    def test_m1_html_displays_the_original_author_first_sentence_and_escaped_reply(self):
         from app.services.morning_report import SECTION_TITLES, render_html
-        body = service.render_summary(evidence([message(1, content='<script>alert("x")</script>')]), NOW, NOW)
+        messages = [{**message(1, content="<@123> Pyetja e parë? Fjalia tjetër. https://example.com/request"),
+                     "author": "Florent"},
+                    message(2, GA, '<script>alert("x")</script> [Dokumenti](https://example.com/file) https://example.com/', reference_id="1")]
+        body = service.render_summary(evidence(messages), NOW, NOW, initials_by_user={"20": "FG"})
         html = render_html("M1", NOW.date(), [{"title": SECTION_TITLES[0], "body": body}])
-        assert '<a href="https://discord.com/channels/1493866119700807722/1572160944358953042/1"' in html
+        assert "Dokumenti" in html
+        assert "<table" in html and ">FG</td>" in html and "Pyetja e parë?" in html
+        assert "Fjalia tjetër" not in html
+        assert "https://" not in html
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
         assert "AUTO-FILLED" in html
+
+    def test_saved_legacy_report_uses_only_the_original_reply_ids(self):
+        from app.services.morning_report import SECTION_TITLES
+        captured = evidence([message(1), message(2, GA, "Koment i raportuar", reference_id="1"),
+                             message(3, GA, "Koment i mëvonshëm", reference_id="1")])
+        db = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(evidence=captured, captured_at=NOW)),
+                             execute=AsyncMock(return_value=Mock(all=Mock(return_value=[]))))
+        body = (
+            "GA është përgjigjur në 1 nga 1 kërkesa; 0 pa reply të lidhur.\n"
+            "Burimi: #det-nga-stafi-per-ga\n"
+            "Përgjigjja GA: https://discord.com/channels/1493866119700807722/1572160944358953042/2"
+        )
+        sections = [{"title": SECTION_TITLES[0], "body": body}]
+        with patch.object(settings, "DISCORD_GUILD_ID", "1493866119700807722"):
+            result = asyncio.run(service.refresh_m1_section(db, sections, NOW.date(), refresh_current=False))
+        assert table_rows(result[0]["body"]) == [["1", "S", "@GA Kërkesë për projektin", "Koment i raportuar"]]
+        assert db.get.call_args.args[1][2] == NOW.date()
+
+    def test_report_only_instance_recovers_saved_reply_using_the_channel_date_and_send_time(self):
+        from app.services.morning_report import SECTION_TITLES
+        later = (NOW + timedelta(minutes=1)).isoformat()
+        captured = evidence([message(1), message(2, GA, "Koment para dërgimit", reference_id="1"),
+                             message(3, GA, "Koment pas dërgimit", reference_id="1", created_at=later)])
+        snapshot = SimpleNamespace(evidence=captured, captured_at=NOW + timedelta(minutes=2))
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=snapshot),
+                                                               all=Mock(return_value=[]))))
+        with patch.object(settings, "DISCORD_GUILD_ID", None):
+            for old_body in (service.UNAVAILABLE, "Koment para dërgimit",
+                             "Përgjigje për Stafi — «@GA Kërkesë për projektin»\nKoment para dërgimit", "Përgjigje manuale"):
+                sections = [{"title": SECTION_TITLES[0], "body": old_body}]
+                result = asyncio.run(service.refresh_m1_section(db, sections, NOW.date(), refresh_current=False, sent_at=NOW))
+                if old_body == "Përgjigje manuale":
+                    assert result[0]["body"] == old_body
+                else:
+                    assert table_rows(result[0]["body"]) == [["1", "S", "@GA Kërkesë për projektin", "Koment para dërgimit"]]
+        assert NOW.date() in db.execute.call_args_list[0].args[0].compile().params.values()
+
+    def test_saved_table_uses_linked_initials_without_replacing_saved_messages(self):
+        from app.services.after_break_report import _ascii_table
+        from app.services.morning_report import SECTION_TITLES
+
+        body = "\n".join(_ascii_table(service.GA_MESSAGES_CAPTION,
+            [("NR", 2), ("PËR KË", 19), ("MESAZHI ORIGJINAL", 40), ("PËRGJIGJJA E GA", 52)],
+            [["1", "Florent", "Pyetja", "Përgjigjja e ruajtur"]]))
+        captured = evidence([{**message(1), "author": "Florent"}, message(2, GA, "Tekst tjetër", reference_id="1")])
+        db = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(evidence=captured)),
+                             execute=AsyncMock(return_value=Mock(all=Mock(return_value=[("20", "Florent Gara")]))))
+        with patch.object(settings, "DISCORD_GUILD_ID", captured["guild_id"]):
+            sections = [{"title": SECTION_TITLES[0], "body": body}]
+            result = asyncio.run(service.refresh_m1_section(db, sections, NOW.date(), refresh_current=False, sent_at=NOW))
+        assert table_rows(result[0]["body"]) == [["1", "FG", "Pyetja", "Përgjigjja e ruajtur"]]
+
+    def test_standalone_comments_use_report_date_and_do_not_inherit_context(self):
+        messages = [message(1, GA, "Koment i datës së kaluar", created_at=(NOW - timedelta(days=1)).isoformat()),
+                    message(2, content="Mesazh pranë komentit"),
+                    message(3, GA, "<@20> Foto letrën"),
+                    message(4, GA, "Reply me origjinal të munguar", reference_id="99")]
+        assert table_rows(service.render_summary(evidence(messages), NOW, NOW)) == [
+            ["1", "", "", "Foto letrën"], ["2", "", "", "Reply me origjinal të munguar"],
+        ]
 
     def test_channel_evidence_endpoints_require_bot_authentication(self):
         from app.api.routers.discord_assistant import router, require_bot

@@ -177,6 +177,16 @@ def canonical_report_section_key(kind: ReportKind, title: str | None) -> str | N
 
 
 def is_known_report_title(kind: ReportKind, title: str | None) -> bool:
+    if kind == "morning":
+        from app.services.morning_report import is_removed_morning_manual_question
+
+        if is_removed_morning_manual_question(title):
+            return True
+    if kind == "after_break":
+        from app.services.after_break_report import after_break_automated_section_title, is_retired_after_break_question
+
+        if is_retired_after_break_question(title) or after_break_automated_section_title(title):
+            return True
     return canonical_report_section_key(kind, title) is not None
 
 
@@ -355,6 +365,25 @@ async def merge_common_view_manual_sections(
                 "body": bodies.get(title) or DEFAULT_MANUAL_BODY,
             }
         )
+    if kind == "morning":
+        from app.services.morning_report import is_removed_morning_manual_question
+
+        extras = [
+            section for section in extras
+            if not is_removed_morning_manual_question(section["title"], section.get(SECTION_KEY_FIELD))
+        ]
+    elif kind == "after_break":
+        from app.services.after_break_report import after_break_automated_section_title, is_retired_after_break_question
+
+        extras = [
+            section for section in extras
+            if not is_retired_after_break_question(section["title"], section.get(SECTION_KEY_FIELD))
+            and not after_break_automated_section_title(section["title"], section.get(SECTION_KEY_FIELD))
+        ]
+    else:
+        from app.services.meetings_report import without_retired_meetings_sections
+
+        extras = without_retired_meetings_sections(extras)
     return order_custom_manual_sections(kind, _insert_manual_extras(sections, extras, manuals))
 
 

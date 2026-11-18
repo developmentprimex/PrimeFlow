@@ -58,7 +58,7 @@ def export_blocks(report: dict) -> list[dict]:
     from app.services.m3_reporting_points import (
         AUTO_TITLES, M3_TITLE, MANUAL_POINTS,
         report_table_columns, report_table_value, task_table_groups, task_row_appearance, realization_department_rows,
-        delivery_summary,
+        delivery_summary, reporting_point_answer,
     )
 
     from app.services.m3_unheld_meetings import MEETING_COLUMNS, MEETING_TITLE, meeting_cells, meeting_groups
@@ -70,7 +70,7 @@ def export_blocks(report: dict) -> list[dict]:
 
     def manual(key: str):
         text(MANUAL_POINTS[key], 2)
-        text(report.get("manual_answers", {}).get(key) or "Pa pergjigje")
+        text(reporting_point_answer(report, key))
 
     def tasks(key: str):
         text(AUTO_TITLES[key], 2)

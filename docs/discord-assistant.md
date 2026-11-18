@@ -67,15 +67,20 @@ kësaj rrjedhe. Nuk bëhet lidhje automatike me taska të platformës sipas titu
 
 Boti lexon 30 ditët e fundit çdo 120 sekonda, pa dërguar mesazhe ose ndryshuar
 lejet e kanalit. Kufijtë janë 2000 mesazhe kryesore, 25 thread-e publike dhe deri
-500 mesazhe për thread; kufizimi shënohet si kontroll i pjesshëm. Në databazë
-ruhet evidenca ditore, jo skedarët e bashkëngjitur. M1 tregon numërimin, kohën
-e kontrollit dhe URL-të e kërkesave/përgjigjeve. Burimi i dështuar ose më i
-vjetër se 5 minuta shfaqet si i pakonfirmuar, jo si zero kërkesa në pritje.
+500 mesazhe për thread. Në databazë ruhet evidenca ditore me statusin e
+leximit. M1 dhe M2 shfaqin një rresht për çdo përgjigje ose koment të GA. Për një Reply
+shfaq edhe inicialet e autorit dhe fjalinë e parë të mesazhit origjinal, pa URL.
+M1 përfshin mesazhet e GA nga 16:30 e ditës së kaluar dhe M2 nga 08:00 e
+datës së raportit, deri në momentin e gjenerimit sipas orës së raportit.
+Komentet e pavarura plotësojnë vetëm kolonën e përgjigjes.
+Kur burimi konfirmon se s’ka Reply, tabela shfaq «Asnjë reply».
+Kur burimi dështon ose është më i vjetër se 5 minuta, raporti shfaq se teksti
+i përgjigjeve është i padisponueshëm.
 
-Gjenerimi, rifreskimi dhe preview/dërgimi i draftit M1 përdorin këtë përmbledhje;
-emaili dhe bashkëngjitjet e M1 marrin të njëjtin seksion. Raportet e dërguara
-ruajnë përmbledhjen e tyre; rigjenerimi i një date të kaluar përdor vetëm evidencën
-e ruajtur për atë datë. Pyetja për ndryshimin e planit, M1 PIKAT, M2 dhe M3
+Gjenerimi, rifreskimi dhe preview/dërgimi i M1 dhe M2 përdorin këtë përmbledhje;
+emaili dhe bashkëngjitjet marrin të njëjtin seksion. Kur hapet një raport
+në formatin e vjetër, teksti merret nga evidenca e datës së raportit për ID-të
+e përgjigjeve të referuara. Pyetja për ndryshimin e planit, M1 PIKAT, M2 PIKAT dhe M3
 mbeten me rrjedhat ekzistuese.
 
 Aktivizimi kërkon migrimin `0190_discord_ga_reply_snapshot`, rinisjen e API-së
@@ -210,9 +215,11 @@ parazgjedhja është `node`. Kërkohet Node >=22.12.
    dërgohet skedar UTF-8. Përdor **Shiko shënimet**, pastaj **Ruaj në PX Notes**.
    Dy klikime nuk krijojnë dy Notes. **Hap PX Notes** hap listën për redaktim.
 
-Takimet 1H: nga e hëna në të premte Mira hyn vetë në kanalin 1H 2 minuta para
-çdo sloti (`DISCORD_1H_AUTO_JOIN_TIMES`, parazgjedhje 09:58, 10:58, 11:48, 14:18,
-15:58), në emër të `DISCORD_1H_AUTO_OWNER_DISCORD_ID`. Del me `/takimi mbaro`,
+Takimet 1H: nga e hëna në të premte Mira hyn vetë në kanalin 1H në 07:59 për
+takimin e orës 08:00 dhe dy minuta para takimeve të tjera. Orari parazgjedhje
+i `DISCORD_1H_AUTO_JOIN_TIMES` është 07:59, 09:58, 10:58, 11:48, 14:18, 15:58,
+sipas `APP_TIMEZONE`. Mira hyn në emër të `DISCORD_1H_AUTO_OWNER_DISCORD_ID`.
+Del me `/takimi mbaro`,
 30 sekonda pasi del personi i fundit, ose pas 10 minutash nëse s'vjen askush.
 Shënimet e këtyre takimeve ruhen direkt në PX Notes dhe nuk dërgohen në Discord.
 
