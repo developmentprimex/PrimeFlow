@@ -221,6 +221,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   pa `showSaveFilePicker`, mbetet butoni “Shkarko regjistrimin”. Kjo ruajtje nuk
   përdor File Access dhe nuk zhvendos ose fshin regjistrimin në server.
 
+- “Vetëm audio” te Regjistrimet kap mikrofonin dhe ruhet në të njëjtin historik
+  si regjistrimi i ekranit. Kontrollo parazgjedhjen dhe nisjen në iPhone/Android,
+  lejet, ndërprerjet, ngarkimin me pjesë, dëgjimin dhe shkarkimin. Detajet e
+  takimit, Historia e klientit dhe burimi i shënimeve të takimeve shfaqin llojin
+  sipas MIME-it të regjistrimit. Citimet dhe lidhjet me sekonda hapin luajtësin
+  përkatës. Screenshot-i kërkon video. Ruajtja private, arkiva FILES, analiza e
+  regjistrimit dhe eksporti i kohëve të citimeve përdorin të njëjtën prapashtesë
+  të skedarit; kontrollo WebM dhe M4A për audio dhe formatet ekzistuese për video.
+
 - Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
   `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe
   detyrat sistemore të takimeve në `meeting_system_tasks.py`. Kontrollo scheduler-in,

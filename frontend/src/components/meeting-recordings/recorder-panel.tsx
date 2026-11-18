@@ -43,10 +43,15 @@ export function RecorderPanel() {
   const [devices, setDevices] = React.useState<MediaDeviceInfo[]>([])
   const [device, setDevice] = React.useState("default")
   const [source, setSource] = React.useState("monitor")
+  const [mode, setMode] = React.useState<"screen" | "audio">("screen")
+  const [screenAvailable, setScreenAvailable] = React.useState(true)
   const [consent, setConsent] = React.useState(false)
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const timer = window.setTimeout(() => {
+      const supported = typeof navigator.mediaDevices?.getDisplayMedia === "function"
+      setScreenAvailable(supported)
+      if (!supported || navigator.maxTouchPoints > 0 && window.matchMedia("(pointer: coarse)").matches) setMode("audio")
       if (params.get("project_id")) setProjectId(params.get("project_id")!)
       if (params.get("meeting_id")) setMeetingId(params.get("meeting_id")!)
       if (params.get("title")) setTitle(params.get("title")!.slice(0, 200))
@@ -75,6 +80,7 @@ export function RecorderPanel() {
     return () => { active = false }
   }, [apiFetch])
   const active = ["recording", "paused", "stopping"].includes(recorder.state)
+  const audioCapture = recorder.info.source === "microphone"
   const locked = active || recorder.busy || recorder.saving || recorder.state === "selecting" || !!recorder.manifest
   const percent = recorder.manifest?.bytes ? Math.floor(recorder.manifest.uploadedBytes / recorder.manifest.bytes * 100) : 0
   const normalizeSearch = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase().trim()
@@ -91,7 +97,7 @@ export function RecorderPanel() {
     ].join(" "))
     return searchTerms.every(term => searchable.includes(term))
   })
-  const prepare = () => { void recorder.prepare(device === "none" ? false : device === "default" ? "" : device, source, { title: title.trim(), meetingId, description, projectId }) }
+  const prepare = () => { void recorder.prepare(device === "none" ? false : device === "default" ? "" : device, mode === "audio" ? "microphone" : source, { title: title.trim(), meetingId, description, projectId }) }
   const selectMeeting = (id: string) => {
     setMeetingId(id)
     setMeetingOpen(false)
@@ -127,14 +133,22 @@ export function RecorderPanel() {
         <div className="space-y-2"><Label htmlFor="recording-project">Projekti (opsional)</Label><select id="recording-project" className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={projectId} disabled={locked} onChange={e => setProjectId(e.target.value)}>
           <option value="">Pa projekt të lidhur</option><RecordingProjectOptions projects={projects} departments={departments} />
         </select>{projectError && <p role="alert" className="text-sm text-destructive">{projectError}</p>}</div>
-        <div className="space-y-2"><Label htmlFor="recording-source">Burimi</Label><select id="recording-source" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={source} onChange={e => setSource(e.target.value)}>
+        <div className="space-y-2"><Label htmlFor="recording-mode">Lloji i regjistrimit</Label><select id="recording-mode" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={mode} onChange={e => {
+          const next = e.target.value === "audio" ? "audio" : "screen"
+          setMode(next)
+          if (next === "audio" && device === "none") setDevice("default")
+        }}>
+          <option value="screen" disabled={!screenAvailable}>Ekran</option>
+          <option value="audio">Vetëm audio</option>
+        </select></div>
+        {mode === "screen" && <div className="space-y-2"><Label htmlFor="recording-source">Burimi</Label><select id="recording-source" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={source} onChange={e => setSource(e.target.value)}>
           <option value="monitor">Ekrani i plotë — gjithçka në ekranin e zgjedhur, edhe kur ndërron programe</option>
           <option value="window">Dritare — vetëm dritarja e zgjedhur, p.sh. Teams ose Word</option>
           <option value="browser">Skedë e shfletuesit — vetëm tab-i i zgjedhur në Chrome/Edge</option>
-        </select></div>
+        </select></div>}
         <div className="space-y-2"><Label htmlFor="recording-microphone">Mikrofoni</Label><select id="recording-microphone" className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={locked || recorder.state === "prepared"} value={device} onChange={e => setDevice(e.target.value)}>
           <option value="default">Mikrofoni i parazgjedhur — përdor mikrofonin e zgjedhur automatikisht</option>
-          <option value="none">Pa mikrofon — nuk regjistron zërin nga mikrofoni</option>
+          {mode === "screen" && <option value="none">Pa mikrofon — nuk regjistron zërin nga mikrofoni</option>}
           {devices.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Mikrofoni ${i + 1}`} — regjistron zërin nga kjo pajisje</option>)}
         </select></div>
       </div>
@@ -145,22 +159,23 @@ export function RecorderPanel() {
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={consent} disabled={locked} onChange={e => setConsent(e.target.checked)} />
         <span>Konfirmoj se kam njoftuar pjesëmarrësit dhe kam autorizim për regjistrimin.</span>
       </label>
-      {recorder.state === "prepared" && !recorder.info.system && <div role="alert" className="rounded-md border border-amber-400 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950 dark:text-amber-100">
+      {mode === "audio" && <p className="text-sm text-muted-foreground">Mikrofoni regjistron bisedën në sallë. Mbajeni këtë faqe hapur dhe ekranin të zhbllokuar gjatë regjistrimit.</p>}
+      {recorder.state === "prepared" && !audioCapture && !recorder.info.system && <div role="alert" className="rounded-md border border-amber-400 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950 dark:text-amber-100">
         <p className="font-semibold">Audio e sistemit nuk është e disponueshme për këtë burim. Zërat e pjesëmarrësve të tjerë mund të mos regjistrohen.</p>
         <p className="mt-1">Mund të anuloni, të ndryshoni burimin ose të vazhdoni shprehimisht me hyrjet e disponueshme.</p>
       </div>}
       {(active || recorder.state === "prepared" || recorder.state === "stopped") && <div className="flex flex-wrap items-center gap-4 rounded-md bg-muted p-3 text-sm">
         <span className="font-mono text-xl tabular-nums" aria-label="Koha e regjistrimit">{recordingTime(recorder.seconds)}</span>
-        <span>Burimi: {recorder.info.source}</span>
+        <span>Burimi: {audioCapture ? "Vetëm audio" : recorder.info.source}</span>
         <span><Mic className="mr-1 inline size-4" /> Mikrofon: {recorder.inputs.microphone === "on" ? "aktiv" : recorder.inputs.microphone === "muted" ? "i heshtur" : "i padisponueshëm"}</span>
-        <span><Monitor className="mr-1 inline size-4" /> Audio sistemi: {recorder.inputs.system === "on" ? "aktive" : recorder.inputs.system === "muted" ? "e heshtur" : "e padisponueshme"}</span>
+        {!audioCapture && <span><Monitor className="mr-1 inline size-4" /> Audio sistemi: {recorder.inputs.system === "on" ? "aktive" : recorder.inputs.system === "muted" ? "e heshtur" : "e padisponueshme"}</span>}
       </div>}
       <div className="flex flex-wrap gap-2">
-        {["recording", "paused"].includes(recorder.state) && !recorder.screenSharing && <Button variant="outline" disabled={recorder.selectingScreen} onClick={() => void recorder.shareScreen(source)}><Monitor className="mr-2 size-4" />Ndaj ekranin përsëri</Button>}
-        {!active && recorder.state !== "prepared" && <Button disabled={!consent || !title.trim() || locked || !recorder.available} onClick={prepare}><Monitor className="mr-2 size-4" /> Zgjidh ekranin</Button>}
+        {!audioCapture && ["recording", "paused"].includes(recorder.state) && !recorder.screenSharing && <Button variant="outline" disabled={recorder.selectingScreen} onClick={() => void recorder.shareScreen(source)}><Monitor className="mr-2 size-4" />Ndaj ekranin përsëri</Button>}
+        {!active && recorder.state !== "prepared" && <Button disabled={!consent || !title.trim() || locked || !recorder.available} onClick={prepare}>{mode === "audio" ? <><Mic className="mr-2 size-4" />Nis regjistrimin audio</> : <><Monitor className="mr-2 size-4" />Zgjidh ekranin</>}</Button>}
         {recorder.state === "prepared" && <>
-          <Button disabled={!consent || !title.trim() || recorder.busy} onClick={() => void recorder.start(title.trim(), meetingId, description, projectId)}><Play className="mr-2 size-4" />{recorder.info.system ? "Fillo regjistrimin" : "Vazhdo pa audio sistemi"}</Button>
-          <Button variant="outline" disabled={recorder.busy} onClick={() => { recorder.cancel(); prepare() }}>Ndrysho burimin</Button>
+          <Button disabled={!consent || !title.trim() || recorder.busy} onClick={() => void recorder.start(title.trim(), meetingId, description, projectId)}><Play className="mr-2 size-4" />{recorder.info.system || audioCapture ? "Fillo regjistrimin" : "Vazhdo pa audio sistemi"}</Button>
+          {!audioCapture && <Button variant="outline" disabled={recorder.busy} onClick={() => { recorder.cancel(); prepare() }}>Ndrysho burimin</Button>}
           <Button variant="outline" disabled={recorder.busy} onClick={recorder.cancel}>Anulo</Button>
         </>}
         {recorder.state === "recording" && <Button variant="outline" onClick={recorder.pause}><Pause className="mr-2 size-4" /> Pauzë</Button>}
@@ -168,18 +183,18 @@ export function RecorderPanel() {
         {active && <>
           <Button variant="destructive" disabled={recorder.state === "stopping"} onClick={recorder.stop}><Square className="mr-2 size-4" /> Ndalo</Button>
           <Button variant="outline" disabled={!recorder.info.microphone} onClick={() => recorder.toggle("microphone")}>Mikrofoni On/Off</Button>
-          <Button variant="outline" disabled={!recorder.info.system} onClick={() => recorder.toggle("system")}>Audio sistemi On/Off</Button>
+          {!audioCapture && <Button variant="outline" disabled={!recorder.info.system} onClick={() => recorder.toggle("system")}>Audio sistemi On/Off</Button>}
         </>}
       </div>
       {recorder.backpressure && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Regjistrimi u vendos në pauzë për shkak të ngarkimit. Prisni konfirmimin e fragmenteve, pastaj klikoni Vazhdo.</p>}
       {recorder.manifest && <div className="space-y-2 text-sm" role="status">
         <p>Ngarkuar: {recordingSize(recorder.manifest.uploadedBytes)} / {recordingSize(recorder.manifest.bytes)} ({percent}%) · {recorder.manifest.acknowledged}/{recorder.manifest.count} fragmente</p>
         <progress className="w-full" aria-label="Progresi i ngarkimit" max={100} value={percent} />
-        <p>{recorder.saving ? "Duke përfunduar dhe verifikuar videon në server…" : active ? "Ngarkimi vazhdon gjatë regjistrimit." : "Nuk është konfirmuar ende si i ruajtur."}</p>
+        <p>{recorder.saving ? "Duke përfunduar dhe verifikuar regjistrimin në server…" : active ? "Ngarkimi vazhdon gjatë regjistrimit." : "Nuk është konfirmuar ende si i ruajtur."}</p>
         {!recorder.saving && <Button variant="outline" onClick={() => void recorder.retry()}>Riprovo ngarkimin</Button>}
         {!active && !recorder.saving && <Button variant="ghost" onClick={() => { if (window.confirm("Mbyll sesionin dhe hiq fragmentet lokale të pangarkuara?")) void recorder.discard(recorder.manifest!.id) }}>Braktis sesionin</Button>}
       </div>}
-      {recorder.error && <div role="alert" className="rounded-md border border-destructive p-3 text-sm text-destructive">{recorder.error}<p className="mt-1">Nëse leja e mikrofonit u refuzua, zgjidhni “Pa mikrofon” ose ndryshoni lejet e shfletuesit. Nëse ekrani u refuzua, klikoni sërish Zgjidh ekranin.</p></div>}
+      {recorder.error && <div role="alert" className="rounded-md border border-destructive p-3 text-sm text-destructive">{recorder.error}<p className="mt-1">{mode === "audio" ? "Nëse leja e mikrofonit u refuzua, lejojeni mikrofonin në shfletues dhe provoni përsëri." : "Nëse leja e mikrofonit u refuzua, zgjidhni “Pa mikrofon” ose ndryshoni lejet e shfletuesit. Nëse ekrani u refuzua, klikoni sërish Zgjidh ekranin."}</p></div>}
       {recorder.savedId && <p role="status" className="text-sm font-semibold text-green-700 dark:text-green-300">Serveri konfirmoi ruajtjen. <Link className="underline" href={`/meeting-recordings/${recorder.savedId}`}>Hap regjistrimin</Link></p>}
       {recorder.recoveries.map(m => <div key={m.id} className="space-y-2 rounded-md border p-3 text-sm">
         <p className="font-semibold">Rikuperim: {m.title}</p>

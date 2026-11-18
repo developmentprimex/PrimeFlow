@@ -23,7 +23,7 @@ from app.models.user import User
 from app.models.project import Project
 from app.schemas.meeting_recording import RecordingComplete, RecordingCreate, RecordingOut, RecordingUpdate
 from app.services.audit import add_audit_log
-from app.services.meeting_recording_storage import LocalMeetingStorage, StorageBusy, StorageError, durable_replace
+from app.services.meeting_recording_storage import LocalMeetingStorage, StorageBusy, StorageError, durable_replace, recording_extension
 
 router = APIRouter()
 
@@ -310,7 +310,7 @@ async def serve_media(recording_id, db, user, request: Request, *, download=Fals
         raise HTTPException(416, "Only a single byte range is supported")
     if row.status != "READY":
         raise HTTPException(409, "Recording is not ready")
-    extension = "webm" if row.mime_type == "video/webm" else "mp4"
+    extension = recording_extension(row.mime_type)
     file = await asyncio.to_thread(storage().available_media, row.storage_key, row.mime_type, row.size_bytes)
     if file is None:
         raise HTTPException(503, "Recording storage is unavailable")

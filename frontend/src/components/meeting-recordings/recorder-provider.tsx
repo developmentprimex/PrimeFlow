@@ -149,7 +149,7 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     setView(v => ({ ...v, error: null, savedId: null, backpressure: false }))
     r.starting = true
     try {
-      if (!navigator.locks) throw new Error("Ky shfletues nuk mbështet bllokimin e sigurt të sesionit. Përdorni Chrome ose Edge.")
+      if (!navigator.locks) throw new Error("Ky shfletues nuk mbështet sesionin e regjistrimit. Përdorni një version të përditësuar të Safari, Chrome ose Edge.")
       await new Promise<void>((resolve, reject) => {
         void navigator.locks.request("primeflow-screen-recorder", { ifAvailable: true }, async lock => {
           if (!lock) { reject(new Error("Një skedë tjetër ka një regjistrim aktiv.")); return }
@@ -161,7 +161,7 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
       })
     } catch (error) { setView(v => ({ ...v, error: error instanceof Error ? error.message : String(error) })) }
     finally { r.starting = false }
-    if (runtime.current === r && r.capture.state === "prepared" && r.capture.info.system) {
+    if (runtime.current === r && r.capture.state === "prepared" && (r.capture.info.system || r.capture.info.source === "microphone")) {
       await start(recording.title, recording.meetingId, recording.description, recording.projectId)
     }
   }
@@ -257,18 +257,21 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     toggle: input => runtime.current?.capture.toggle(input),
   }
   const active = ["recording", "paused", "stopping", "prepared", "selecting"].includes(view.state) || view.saving
+  const capturing = view.state === "recording" || view.state === "paused"
+  const audioOnly = view.info.source === "microphone"
   return <RecorderContext.Provider value={value}>
     {active && <div role="status" aria-live="polite" className="sticky top-0 z-50 flex flex-wrap items-center gap-3 border-b border-red-300 bg-red-50 px-4 py-2 text-sm text-red-950 dark:bg-red-950 dark:text-red-100">
       <span className="h-3 w-3 rounded-full bg-red-600 motion-safe:animate-pulse" />
-      <Link href="/meeting-recordings" className="font-semibold underline">{view.state === "recording" ? "Duke regjistruar" : view.state === "paused" ? "Regjistrimi në pauzë" : view.saving ? "Duke ruajtur regjistrimin" : "Ndarja e ekranit"}</Link>
+      <Link href="/meeting-recordings" className="font-semibold underline">{view.state === "recording" ? audioOnly ? "Duke regjistruar audio" : "Duke regjistruar" : view.state === "paused" ? "Regjistrimi në pauzë" : view.saving || view.state === "stopping" ? "Duke ruajtur regjistrimin" : "Duke përgatitur regjistrimin"}</Link>
       <span className="tabular-nums">{recordingTime(view.seconds)}</span>
       {view.sharingError && <span role="alert">Ndarja e ekranit dështoi: {view.sharingError}</span>}
-      {["recording", "paused"].includes(view.state) && !view.screenSharing && <>
+      {capturing && !audioOnly && !view.screenSharing && <>
         <span>{view.state === "paused" ? "Ekrani nuk po ndahet. Regjistrimi është në pauzë." : "Regjistrimi vazhdon — ekrani nuk po ndahet."}</span>
         {view.inputs.microphone !== "on" && <span role="alert">Mikrofoni nuk është aktiv; biseda nuk po regjistrohet.</span>}
         <Button size="sm" variant="outline" disabled={view.selectingScreen} onClick={() => void value.shareScreen()}>Ndaj ekranin përsëri</Button>
       </>}
-      {["recording", "paused"].includes(view.state) && <Button size="sm" variant="destructive" onClick={value.stop}>Ndalo regjistrimin</Button>}
+      {capturing && audioOnly && view.inputs.microphone !== "on" && <span role="alert">Mikrofoni nuk është aktiv; biseda nuk po regjistrohet.</span>}
+      {capturing && <Button size="sm" variant="destructive" onClick={value.stop}>Ndalo regjistrimin</Button>}
     </div>}
     {children}
   </RecorderContext.Provider>

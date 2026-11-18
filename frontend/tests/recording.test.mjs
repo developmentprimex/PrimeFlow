@@ -113,7 +113,7 @@ function captureHarness({ system = true, micDenied = false, displayDenied = fals
     close() { this.closed = true; return Promise.resolve() }
   }
   class Recorder {
-    static isTypeSupported(type) { return type.startsWith("video/webm") }
+    static isTypeSupported(type) { return type.startsWith("video/webm") || type.startsWith("audio/webm") }
     constructor(stream, options) { this.stream = stream; this.options = options; Recorder.last = this }
     start(timeslice) { this.timeslice = timeslice; this.state = "recording" }
     pause() { this.state = "paused" }
@@ -134,6 +134,24 @@ function captureHarness({ system = true, micDenied = false, displayDenied = fals
   return { capture, video, sys, mic, contexts, connections, chunks, errors, Recorder, Track, Stream,
     setDisplay: value => { nextDisplay = value }, stopped: () => stopped }
 }
+
+test("audio-only capture uses the microphone without screen sharing and flushes on stop", async () => {
+  const h = captureHarness({ displayDenied: true })
+  await h.capture.prepare("", "microphone")
+  assert.equal(h.capture.state, "prepared")
+  assert.equal(h.capture.info.source, "microphone")
+  assert.equal(h.capture.info.system, false)
+  await h.capture.start()
+  await h.capture.shareScreen()
+  assert.equal(h.Recorder.last.options.mimeType, "audio/webm;codecs=opus")
+  assert.equal(h.Recorder.last.stream.getVideoTracks().length, 0)
+  assert.deepEqual(h.Recorder.last.stream.getAudioTracks(), [h.mic])
+  assert.equal(h.contexts.length, 0)
+  await h.capture.stop()
+  assert.equal(h.chunks.length, 1)
+  assert.equal(h.mic.readyState, "ended")
+  assert.deepEqual(h.errors, [])
+})
 
 test("capture mixes actual microphone/system tracks without speaker playback and cleans up after stop", async () => {
   const h = captureHarness()

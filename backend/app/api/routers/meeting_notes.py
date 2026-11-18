@@ -66,6 +66,7 @@ class MeetingNoteOut(BaseModel):
     answer: str | None = None
     source: str
     recording_id: uuid.UUID | None = None
+    recording_mime_type: str | None = None
     recording_action_id: uuid.UUID | None = None
     recording_seconds: float | None = None
     assignee_user_id: uuid.UUID | None = None
@@ -191,7 +192,7 @@ async def _task_map(db: AsyncSession, ga_note_ids: list[uuid.UUID]) -> dict[uuid
     }
 
 
-def _note_out(note: MeetingNote, tasks: dict) -> MeetingNoteOut:
+def _note_out(note: MeetingNote, tasks: dict, recording_mime_type: str | None = None) -> MeetingNoteOut:
     task_status, task_ids = tasks.get(note.ga_note_id, (None, [])) if note.ga_note_id else (None, [])
     return MeetingNoteOut(
         id=note.id,
@@ -203,6 +204,7 @@ def _note_out(note: MeetingNote, tasks: dict) -> MeetingNoteOut:
         answer=note.answer,
         source=note.source,
         recording_id=note.recording_id,
+        recording_mime_type=recording_mime_type,
         recording_action_id=note.recording_action_id,
         recording_seconds=note.recording_seconds,
         assignee_user_id=note.assignee_user_id,
@@ -225,9 +227,17 @@ def _note_out(note: MeetingNote, tasks: dict) -> MeetingNoteOut:
     )
 
 
-async def _notes_out(db: AsyncSession, notes: list[MeetingNote]) -> list[MeetingNoteOut]:
-    tasks = await _task_map(db, [n.ga_note_id for n in notes if n.ga_note_id])
-    return [_note_out(n, tasks) for n in notes]
+async def _notes_out(db: AsyncSession, notes: list[MeetingNote], tasks: dict | None = None) -> list[MeetingNoteOut]:
+    if tasks is None:
+        tasks = await _task_map(db, [n.ga_note_id for n in notes if n.ga_note_id])
+    ids = {note.recording_id for note in notes if note.recording_id}
+    recording_formats = {}
+    if ids:
+        rows = await db.execute(select(MeetingRecording.id, MeetingRecording.mime_type).where(
+            MeetingRecording.id.in_(ids), MeetingRecording.deleted_at.is_(None),
+        ))
+        recording_formats = dict(rows.all())
+    return [_note_out(note, tasks, recording_formats.get(note.recording_id)) for note in notes]
 
 
 def _is_open(note: MeetingNote, tasks: dict) -> bool:
@@ -422,7 +432,7 @@ async def meeting_detail(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_d
         if day is None:
             continue
         days.add(day)
-        rec_by_day[day].append({"id": rec.id, "title": rec.title, "status": rec.status, "duration_seconds": rec.duration_seconds})
+        rec_by_day[day].append({"id": rec.id, "title": rec.title, "status": rec.status, "duration_seconds": rec.duration_seconds, "mime_type": rec.mime_type})
     sessions = [
         {"date": day, "status": statuses.get(day) or ("planned" if day > today else None),
          "is_today": day == today, "recordings": rec_by_day.get(day, [])}
@@ -483,7 +493,7 @@ async def list_notes(
     tasks = await _task_map(db, [n.ga_note_id for n in notes if n.ga_note_id])
     if scope == "session" and session is not None:
         notes = [n for n in notes if n.occurrence_date == session or _is_open(n, tasks)]
-    return [_note_out(n, tasks) for n in notes]
+    return await _notes_out(db, notes, tasks)
 
 
 @router.post("/meetings/{meeting_id}/notes", response_model=MeetingNoteOut, status_code=status.HTTP_201_CREATED)
@@ -697,7 +707,7 @@ async def client_history(
             )
         )).scalars().all():
             day = _local_date(rec.recording_started_at)
-            session(rec.meeting_id, day)["recordings"].append({"id": rec.id, "duration_seconds": rec.duration_seconds})
+            session(rec.meeting_id, day)["recordings"].append({"id": rec.id, "duration_seconds": rec.duration_seconds, "mime_type": rec.mime_type})
     rows = sorted(sessions.values(), key=lambda s: (s["date"], s["meeting"]["title"]), reverse=True)
     return {
         "project": {"id": project.id, "title": getattr(project, "title", None) or getattr(project, "name", None)},
@@ -775,6 +785,8 @@ async def recording_screenshot(
 ):
     """Save the current video frame as a meeting note with the screenshot attached."""
     recording = await load_recording(db, recording_id, user)
+    if recording.mime_type.startswith("audio/"):
+        raise HTTPException(422, "Screenshots require a screen recording")
     meeting = await _recording_meeting(db, recording)
     total = int(max(seconds, 0))
     stamp = f"{total // 3600:02d}:{total // 60 % 60:02d}:{total % 60:02d}"

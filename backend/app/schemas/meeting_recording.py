@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class RecordingCreate(BaseModel):
@@ -10,11 +10,20 @@ class RecordingCreate(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     meeting_id: UUID | None = None
     project_id: UUID | None = None
-    capture_source_type: Literal["monitor", "window", "browser", "unknown"]
-    mime_type: Literal["video/webm", "video/mp4"]
+    capture_source_type: Literal["monitor", "window", "browser", "unknown", "microphone"]
+    mime_type: Literal["video/webm", "video/mp4", "audio/webm", "audio/mp4"]
     has_microphone_audio: bool = False
     has_system_audio: bool = False
     consent_acknowledged: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_capture_source(self):
+        audio_only = self.mime_type.startswith("audio/")
+        if audio_only != (self.capture_source_type == "microphone"):
+            raise ValueError("Recording format does not match the capture source")
+        if audio_only and (not self.has_microphone_audio or self.has_system_audio):
+            raise ValueError("Audio-only recordings require microphone audio")
+        return self
 
     @field_validator("title")
     @classmethod

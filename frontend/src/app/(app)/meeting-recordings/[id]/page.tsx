@@ -11,27 +11,34 @@ import { useAuth } from "@/lib/auth"
 import { RecordingAnalysisPanel } from "@/components/meeting-recordings/analysis-panel"
 import { recordingJson } from "@/lib/recording-outbox"
 import { saveRecordingFile } from "@/lib/recording-save"
-import { RECORDING_STATUS, recordingSize, recordingTime, type MeetingRecording } from "@/lib/recording-types"
+import { RECORDING_STATUS, isAudioRecording, recordingKindLabel, recordingSize, recordingTime, type MeetingRecording } from "@/lib/recording-types"
 
 export default function RecordingDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { apiFetch } = useAuth()
   const videoRef = React.useRef<HTMLVideoElement>(null)
+  const audioRef = React.useRef<HTMLAudioElement>(null)
   const [row, setRow] = React.useState<MeetingRecording | null>(null)
   const [authorized, setAuthorized] = React.useState(false)
   const [error, setError] = React.useState("")
   const [capturing, setCapturing] = React.useState(false)
   const [videoVisible, setVideoVisible] = React.useState(false)
   const [savingFile, setSavingFile] = React.useState(false)
+  const audioOnly = isAudioRecording(row?.mime_type)
+  const seekFromLink = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+    const seconds = Number(new URLSearchParams(window.location.search).get("t"))
+    if (seconds > 0) event.currentTarget.currentTime = seconds
+  }
+  const playbackError = () => setError("Regjistrimi nuk mund të hapet. Rifreskoni faqen për të rinovuar autorizimin.")
   const saveFile = async () => {
     if (!row || savingFile) return
     setSavingFile(true)
     try {
       const result = await saveRecordingFile(row)
-      if (result === "saved") toast.success("Videoja u ruajt në dosjen e zgjedhur.")
+      if (result === "saved") toast.success("Regjistrimi u ruajt në dosjen e zgjedhur.")
       if (result === "unsupported") toast.info("Ky shfletues nuk mbështet zgjedhjen e dosjes. Përdorni “Shkarko regjistrimin”.")
     } catch {
-      toast.error("Videoja nuk u ruajt. Kontrolloni lidhjen dhe lejen e dosjes, pastaj provoni përsëri.")
+      toast.error("Regjistrimi nuk u ruajt. Kontrolloni lidhjen dhe lejen e dosjes, pastaj provoni përsëri.")
     } finally { setSavingFile(false) }
   }
   // Takimet: save the current video frame as a meeting note with the screenshot attached.
@@ -64,12 +71,12 @@ export default function RecordingDetailPage() {
         setRow(recording)
         if (recording.media_available === false) {
           setAuthorized(false)
-          throw new Error("Skedari i videos nuk është i arritshëm. Kontaktoni administratorin për rikthimin e tij.")
+          throw new Error("Skedari i regjistrimit nuk është i arritshëm. Kontaktoni administratorin për rikthimin e tij.")
         }
         if (recording.status !== "READY") return
         const grant = await recordingJson(await apiFetch(`/meeting-recordings/${id}/playback`, { method: "POST" }))
         const response = await fetch(`/api/meeting-recordings/${id}/playback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(grant) })
-        if (!response.ok) throw new Error("Autorizimi i videos dështoi.")
+        if (!response.ok) throw new Error("Autorizimi i regjistrimit dështoi.")
         if (active) { setAuthorized(true); setError("") }
       } catch (e) { if (active) setError(e instanceof Error ? e.message : String(e)) }
     }
@@ -93,39 +100,39 @@ export default function RecordingDetailPage() {
         : row.meeting_title && <p className="text-sm">Takimi: {row.meeting_title}</p>}
       {row.is_partial && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Pjesë e rikuperuar nga një regjistrim i ndërprerë. Fundi i takimit mund të mungojë.</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <p className="text-sm">{recordingTime(row.duration_seconds)} · {recordingSize(row.size_bytes)} · {row.mime_type} · {row.video_width} × {row.video_height}</p>
+        <p className="text-sm">{recordingKindLabel(row.mime_type)} · {recordingTime(row.duration_seconds)} · {recordingSize(row.size_bytes)} · {row.mime_type}{!audioOnly && row.video_width && row.video_height ? ` · ${row.video_width} × ${row.video_height}` : ""}</p>
         {row.status === "READY" && <Button asChild className="shadow-sm">
           <a href="#recording-tasks"><ListTodo aria-hidden="true" />Shiko detyrat</a>
         </Button>}
       </div>
       {authorized && row.status === "READY" && row.media_available !== false && <>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" aria-expanded={videoVisible} aria-controls="recording-video" onClick={() => {
+          {!audioOnly && <Button variant="outline" aria-expanded={videoVisible} aria-controls="recording-video" onClick={() => {
             if (videoVisible) videoRef.current?.pause()
             setVideoVisible(visible => !visible)
-          }}>{videoVisible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}{videoVisible ? "Fshih videon" : "Shfaq videon"}</Button>
+          }}>{videoVisible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}{videoVisible ? "Fshih videon" : "Shfaq videon"}</Button>}
           <Button asChild><a href={`/api/meeting-recordings/${id}/download`} download>Shkarko regjistrimin</a></Button>
           <Button variant="outline" disabled={savingFile} onClick={() => void saveFile()}><Save aria-hidden="true" />{savingFile ? "Duke ruajtur…" : "Ruaj në…"}</Button>
         </div>
-        <div id="recording-video" hidden={!videoVisible} className="space-y-4">
-        <video ref={videoRef} key={id} className="aspect-video w-full rounded-md bg-black" src={`/api/meeting-recordings/${id}/stream`} controls preload="metadata" playsInline
-          onLoadedMetadata={event => { const t = Number(new URLSearchParams(window.location.search).get("t")); if (t > 0) event.currentTarget.currentTime = t }}
-          onError={() => setError("Videoja nuk mund të hapet. Rifreskoni faqen për të rinovuar autorizimin.")} />
-        <div className="flex flex-wrap items-center gap-2">
-          {row.meeting_id ? <Button variant="outline" disabled={capturing} onClick={() => void captureFrame()}><ImagePlus aria-hidden="true" />{capturing ? "Duke ruajtur…" : "Screenshot nga videoja"}</Button>
-            : <span className="text-sm text-muted-foreground">Lidhe regjistrimin me një takim për të ruajtur screenshots te takimi.</span>}
-        </div>
-        </div>
+        {audioOnly ? <audio ref={audioRef} key={id} className="w-full" aria-label="Regjistrimi audio" src={`/api/meeting-recordings/${id}/stream`} controls preload="metadata"
+          onLoadedMetadata={seekFromLink} onError={playbackError} /> : <div id="recording-video" hidden={!videoVisible} className="space-y-4">
+          <video ref={videoRef} key={id} className="aspect-video w-full rounded-md bg-black" src={`/api/meeting-recordings/${id}/stream`} controls preload="metadata" playsInline
+            onLoadedMetadata={seekFromLink} onError={playbackError} />
+          <div className="flex flex-wrap items-center gap-2">
+            {row.meeting_id ? <Button variant="outline" disabled={capturing} onClick={() => void captureFrame()}><ImagePlus aria-hidden="true" />{capturing ? "Duke ruajtur…" : "Screenshot nga videoja"}</Button>
+              : <span className="text-sm text-muted-foreground">Lidhe regjistrimin me një takim për të ruajtur screenshots te takimi.</span>}
+          </div>
+        </div>}
       </>}
       {row.status !== "READY" && <p className="text-sm">{row.error_message || "Ngarkimi dhe verifikimi nuk kanë përfunduar. Hapni faqen e regjistrimeve për rikuperim."}</p>}
     </CardContent></Card>}
     {row?.status === "READY" && <RecordingAnalysisPanel key={id} recordingId={id} onSeek={authorized ? seconds => {
-      const video = videoRef.current
-      if (!video) return
-      setVideoVisible(true)
-      video.currentTime = Math.max(0, seconds - 0.25)
-      requestAnimationFrame(() => video.scrollIntoView({ behavior: "smooth", block: "center" }))
-      void video.play().catch(() => setError("Shtyp luaj për të dëgjuar citimin."))
+      const media = audioRef.current || videoRef.current
+      if (!media) return
+      if (!audioOnly) setVideoVisible(true)
+      media.currentTime = Math.max(0, seconds - 0.25)
+      requestAnimationFrame(() => media.scrollIntoView({ behavior: "smooth", block: "center" }))
+      void media.play().catch(() => setError("Shtyp luaj për të dëgjuar citimin."))
     } : undefined} />}
   </div>
 }

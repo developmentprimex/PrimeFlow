@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth"
 import { recordingJson } from "@/lib/recording-outbox"
-import { RECORDING_STATUS, recordingSize, recordingTime, type MeetingRecording } from "@/lib/recording-types"
+import { RECORDING_STATUS, recordingKindLabel, recordingSize, recordingTime, type MeetingRecording } from "@/lib/recording-types"
 
 export default function MeetingRecordingsPage() {
   const { apiFetch, user } = useAuth()
@@ -62,7 +62,7 @@ export default function MeetingRecordingsPage() {
   }
   async function removeRecording(row: MeetingRecording) {
     if (!canDelete) return
-    if (!window.confirm(`Fshi përgjithmonë regjistrimin “${row.title}”, përfshirë videon në FILES? Fshirja nuk mund të zhbëhet.`)) return
+    if (!window.confirm(`Fshi përgjithmonë regjistrimin “${row.title}”, përfshirë skedarin në FILES? Fshirja nuk mund të zhbëhet.`)) return
     setDeletingId(row.id)
     try {
       const response = await apiFetch(`/meeting-recordings/${row.id}`, { method: "DELETE" })
@@ -93,7 +93,7 @@ export default function MeetingRecordingsPage() {
               {projectsError && <p role="alert" className="text-sm text-destructive">{projectsError}</p>}
               <div className="flex gap-2"><Button size="sm" type="submit" disabled={savingTitle || !editTitle.trim()}>{savingTitle ? "Duke ruajtur…" : "Ruaj"}</Button><Button size="sm" type="button" variant="outline" disabled={savingTitle} onClick={() => setEditingId(null)}>Anulo</Button></div>
               {titleError && <p role="alert" className="text-sm text-destructive">{titleError}</p>}
-            </form> : <Link className="font-medium underline" href={`/meeting-recordings/${row.id}`}>{row.title}</Link>}{row.meeting_title && <p className="text-muted-foreground">{row.meeting_title}</p>}{row.project_id && <p className="text-muted-foreground">Projekti: <Link className="underline" href={`/projects/${row.project_id}`}>{row.project_title || row.project_id}</Link></p>}</td>
+            </form> : <Link className="font-medium underline" href={`/meeting-recordings/${row.id}`}>{row.title}</Link>}<p className="text-xs text-muted-foreground">{recordingKindLabel(row.mime_type)}</p>{row.meeting_title && <p className="text-muted-foreground">{row.meeting_title}</p>}{row.project_id && <p className="text-muted-foreground">Projekti: <Link className="underline" href={`/projects/${row.project_id}`}>{row.project_title || row.project_id}</Link></p>}</td>
             <td className="p-2">{new Date(row.created_at).toLocaleString("sq-AL")}<p className="text-muted-foreground">{row.recorded_by_name}</p></td>
             <td className="p-2 tabular-nums">{row.duration_seconds == null ? "—" : recordingTime(row.duration_seconds)}</td><td className="p-2">{recordingSize(row.size_bytes)}</td>
             <td className="p-2">{row.media_available === false ? <span className="text-destructive">Skedari nuk është i arritshëm</span> : RECORDING_STATUS[row.status]}{row.is_partial && <p className="text-amber-700">Pjesë e rikuperuar</p>}{row.error_message && <p className="max-w-64 text-destructive">{row.error_message}</p>}</td>

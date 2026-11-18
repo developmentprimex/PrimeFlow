@@ -59,6 +59,43 @@ test("Chromium display-capture API with test device → chunks → remux → rel
   await page.screenshot({ path: "test-results/recording-detail.png", fullPage: true })
 })
 
+test("microphone-only recording falls back from screen capture and saves after reconnection", async ({ page, context }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, "getDisplayMedia", { value: undefined })
+  })
+  await login(page)
+  await expect(page.getByLabel("Lloji i regjistrimit")).toHaveValue("audio")
+  await expect(page.getByRole("option", { name: "Ekran", exact: true })).toBeDisabled()
+  await page.getByLabel("Titulli", { exact: true }).fill("Takim fizik")
+  await page.getByLabel("Konfirmoj se kam njoftuar", { exact: false }).check()
+  await page.getByRole("button", { name: "Nis regjistrimin audio" }).click()
+  await expect(page.getByRole("button", { name: "Pauzë", exact: true })).toBeVisible()
+
+  await context.setOffline(true)
+  await expect(page.getByText(/0\/[1-9]\d* fragmente/)).toBeVisible()
+  await page.getByRole("button", { name: "Ndalo", exact: true }).click()
+  await expect(page.getByText("Nuk është konfirmuar ende si i ruajtur.")).toBeVisible()
+  await context.setOffline(false)
+  await page.getByRole("button", { name: "Riprovo ngarkimin", exact: true }).click()
+  await expect(page.getByText("Serveri konfirmoi ruajtjen.", { exact: false })).toBeVisible()
+
+  await page.reload()
+  await page.getByRole("link", { name: "Takim fizik", exact: true }).click()
+  const audio = page.locator("audio")
+  await expect(audio).toBeVisible()
+  await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.duration)).toBeGreaterThan(0)
+  await audio.evaluate((element: HTMLAudioElement) => element.play())
+  await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.currentTime)).toBeGreaterThan(0)
+  await expect(page.locator("video")).toHaveCount(0)
+
+  const downloadUrl = await page.getByRole("link", { name: "Shkarko regjistrimin" }).getAttribute("href")
+  const download = await page.request.get(downloadUrl!)
+  expect(download.status()).toBe(200)
+  const mime = download.headers()["content-type"]
+  expect(["audio/mp4", "audio/webm"]).toContain(mime)
+  expect(download.headers()["content-disposition"]).toContain(mime === "audio/mp4" ? ".m4a" : ".webm")
+})
+
 test("real MediaRecorder mixes two synthetic audio sources and durable IndexedDB retries interrupted uploads", async ({ page }) => {
   await login(page)
   // No MediaRecorder or AudioContext mocks: synthetic sources let us measure

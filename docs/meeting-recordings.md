@@ -312,7 +312,7 @@ upload bounds, auth/read/write scopes, linked/unlinked sessions and persisted
 playback. A separate opt-in test terminates/restarts actual API processes between
 chunks and again after READY, then reads a byte range successfully.
 
-Chrome/Edge with HTTPS and Web Locks are the initial target. Tab capture with a
+For screen recording, Chrome/Edge with HTTPS and Web Locks are the initial target. Tab capture with a
 share-audio option is generally the most practical browser audio path; actual
 availability depends on browser, source, OS and user selection. Firefox/Safari
 and real Windows/macOS source/audio combinations require acceptance testing;
@@ -322,12 +322,26 @@ prevent recording. Multi-hour soak tests and native-device acceptance remain.
 See [MDN getDisplayMedia](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia)
 and [MediaRecorder dataavailable](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder/dataavailable_event).
 
+For physical meetings, select “Vetëm audio” in Regjistrimet. PrimeFlow selects
+it by default on phones and browsers without screen capture. Microphone access
+requires HTTPS, MediaRecorder and Web Locks. Audio is saved in the same history
+as screen recordings and can be played and downloaded as M4A or WebM. Keep the
+page open and the phone unlocked. If the upload stops during a network outage,
+reconnect and use “Riprovo ngarkimin” for the locally queued fragments.
+
+On physical iPhone and Android devices, verify permission denial and retry,
+recording, playback and download from the history, reconnection after going
+offline, and the effect of locking the screen or switching apps during a test
+recording.
+
 ## Reproduce tests and approved deployment checklist
 
 Use an isolated PostgreSQL instance bound to localhost, database named exactly
 `primeflow_recorder_test`. Tests explicitly reject other hosts/database names and
 never fall back to the configured customer DB. Set `RECORDINGS_TEST_DATABASE_URL`
 to its sync PostgreSQL URL, and point the encoding variables at installed binaries.
+When using pytest, also set `DATABASE_URL` to the same database using the
+`postgresql+asyncpg://` driver before starting pytest.
 Use the existing backend virtualenv. Run integration and process tests separately
 because they recreate only the isolated fixture schema:
 

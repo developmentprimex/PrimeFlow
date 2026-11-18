@@ -3,6 +3,7 @@
 import * as React from "react"
 import { meetingTranslator } from "@/lib/meeting-notes-language"
 import Link from "next/link"
+import { recordingKindLabel } from "@/lib/recording-types"
 import { useParams } from "next/navigation"
 import { Mic } from "lucide-react"
 import { useAuth } from "@/lib/auth"
@@ -17,7 +18,7 @@ type HistorySession = {
   meeting: { id: string; title: string; meeting_type: string; kind: MeetingKind }
   date: string
   status: string | null
-  recordings: { id: string; duration_seconds: number | null }[]
+  recordings: { id: string; duration_seconds: number | null; mime_type: string }[]
   notes: MeetingNote[]
 }
 type History = { project: { id: string; title: string | null }; meetings: { id: string; title: string; kind: MeetingKind }[]; sessions: HistorySession[] }
@@ -109,7 +110,7 @@ export default function ClientHistoryPage() {
             <Link href={`/meetings/${s.meeting.id}?date=${s.date}`} className="underline">{s.meeting.title}</Link>
             <span className="rounded-md border px-1.5 text-xs font-semibold">{KIND_LABEL[s.meeting.kind]}</span>
             <span className="text-[13px] text-neutral-600">{s.status === "canceled" ? sessionText("Anuluar → shënimet e hapura kaluan te seanca e radhës") : s.status === "held" ? sessionText("Mbajtur") : ""}</span>
-            {s.recordings.map((rec) => <Link key={rec.id} href={`/meeting-recordings/${rec.id}`} className="inline-flex items-center gap-1 text-[13px] text-violet-800 underline"><Mic className="size-3.5" aria-hidden="true" />{s.meeting.kind === "EXTERNAL" ? "Recording" : "Regjistrimi"} {clock(rec.duration_seconds)}</Link>)}
+            {s.recordings.map((rec) => <Link key={rec.id} href={`/meeting-recordings/${rec.id}`} className="inline-flex items-center gap-1 text-[13px] text-violet-800 underline"><Mic className="size-3.5" aria-hidden="true" />{recordingKindLabel(rec.mime_type, s.meeting.kind === "EXTERNAL")} · {clock(rec.duration_seconds)}</Link>)}
           </div>
           {notes.length > 0 && <NotesTable notes={notes} kind={s.meeting.kind} users={users} onChanged={replaceNote} onRemoved={removeNote} onTasksChanged={() => void load()} />}
         </section>

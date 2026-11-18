@@ -14,7 +14,7 @@ from app.models.meeting import MeetingParticipant
 from app.models.meeting_recording import MeetingRecording
 from app.models.recording_analysis import RecordingAnalysis as Analysis, RecordingTranscript as Transcript, RecordingAction as Action
 from app.models.user import User
-from app.services.meeting_recording_storage import LocalMeetingStorage
+from app.services.meeting_recording_storage import LocalMeetingStorage, recording_extension
 
 MAX_ATTEMPTS = 3
 # Failures that retrying cannot fix go straight to FAILED.
@@ -61,7 +61,7 @@ async def _process_recording_analysis():
         job.lease_token, job.lease_until = token, now() + timedelta(minutes=15)
         row = await db.get(MeetingRecording, sid)
         source = LocalMeetingStorage(settings.MEETING_RECORDINGS_ROOT).path(
-            f"{row.storage_key}/recording.{'webm' if row.mime_type == 'video/webm' else 'mp4'}")
+            f"{row.storage_key}/recording.{recording_extension(row.mime_type)}")
         title, duration, language = row.title, row.duration_seconds, job.language
         meeting_day = row.recording_started_at.astimezone(ZoneInfo(settings.APP_TIMEZONE)).date()
         people, participants, departments = await load_people(db, row)
