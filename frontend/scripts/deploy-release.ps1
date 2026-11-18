@@ -11,8 +11,12 @@ if ($sha -notmatch '^[a-f0-9]{40}$') { throw 'Missing release SHA.' }
 # Read only the working directory. PM2 also stores credentials in jlist.
 $metadata = & pm2.cmd jlist
 if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the currently served release.' }
-$active = $metadata | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{let p=JSON.parse(s).find(x=>x.name==='frontend');if(p)console.log(p.pm2_env.pm_cwd)})"
-if ($LASTEXITCODE -ne 0) { throw 'Unreadable PM2 process list.' }
+function Get-FrontendDirectory([string]$name) {
+    $directory = $metadata | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{const rows=JSON.parse(s.trim());const p=rows.find(x=>x.name===process.argv[1]);if(p)console.log(p.pm2_env.pm_cwd)}catch{process.exitCode=1}})" $name
+    if ($LASTEXITCODE -ne 0) { throw 'Unreadable PM2 process list.' }
+    return $directory
+}
+$active = Get-FrontendDirectory 'frontend'
 if ($active -and $active -notin ($slots + $legacy)) { throw "Unexpected frontend directory: $active" }
 $candidate = if ($active -eq $slots[0]) { $slots[1] } else { $slots[0] }
 $stamp = Join-Path $candidate '.prepared'
@@ -46,8 +50,7 @@ function Start-Release([string]$directory, [string]$name='frontend', [int]$port=
 if ($Phase -eq 'Prepare') {
     # Recover a previous run interrupted after routing to its standby. Keep
     # serving that standby until port 3000 serves the same verified release.
-    $standby = $metadata | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{let p=JSON.parse(s).find(x=>x.name==='primeflow-frontend-standby');if(p)console.log(p.pm2_env.pm_cwd)})"
-    if ($LASTEXITCODE -ne 0) { throw 'Unreadable standby metadata.' }
+    $standby = Get-FrontendDirectory 'primeflow-frontend-standby'
     if ((Get-PrimeFlowRoute web).port -eq 3301) {
         if ($standby -notin $slots) { throw 'Unknown live standby.' }
         $previousSha = (Get-Content -Raw -LiteralPath (Join-Path $standby '.prepared')).Trim()
