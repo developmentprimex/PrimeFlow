@@ -278,6 +278,11 @@ jobs:
           & "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" backend/scripts/configure_kujtesa_server.py
           if ($LASTEXITCODE -ne 0) { throw "Kujtesa configuration failed; check its dedicated Actions secrets." }
 
+      - name: Prepare and verify isolated frontend
+        if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
+        shell: powershell
+        run: ./frontend/scripts/deploy-release.ps1 -Phase Prepare
+
       - name: Release Mira Voice Dependencies
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
@@ -402,7 +407,6 @@ jobs:
           REM Delete each managed process explicitly. PM2's --only option accepts a
           REM single ecosystem app name; a comma-separated value leaves the old
           REM scheduler supervised and PM2 immediately respawns it after it is killed.
-          call pm2 delete primex-backend || ver > NUL
           call pm2 delete primeflow-recording-timing || ver > NUL
           call pm2 delete primeflow-mcp || ver > NUL
           call pm2 delete primeflow-discord || ver > NUL
@@ -438,11 +442,12 @@ jobs:
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
 
+          powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8010'); Stop-Process -Id $_ -Force }"
+
+          call pm2 delete primex-backend || ver > NUL
           REM Kill any orphaned process still holding port 8000 (a squatter outside PM2
           REM keeps serving stale code and makes health checks pass against old builds).
           powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8000'); Stop-Process -Id $_ -Force }"
-          powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8010'); Stop-Process -Id $_ -Force }"
-
           call pm2 start ecosystem.config.cjs --only primex-backend --update-env
           if errorlevel 1 exit /b 1
           call pm2 start ecosystem.config.cjs --only primeflow-recording-timing --update-env
@@ -728,150 +733,11 @@ jobs:
           $stateDir = Join-Path $env:PM2_HOME "primeflow-deploy"
           Set-Content -Path (Join-Path $stateDir "backend.sha") -Value $expected -Encoding ascii
  
-      - name: Update Frontend
+      - name: Activate prepared frontend
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-Location frontend
-          . ./scripts/wait-for-readiness.ps1
- 
-          Write-Host "1. Installing Dependencies..."
-          npm install
-          if ($LASTEXITCODE -ne 0) { Write-Error "NPM Install Failed"; exit 1 }
- 
-          # Build beside the live .next directory. The current PM2 process keeps
-          # serving traffic unless and until this candidate build succeeds.
-          Write-Host "2. Building Candidate Version..."
-          if (Test-Path .next-deploy) {
-            Remove-Item .next-deploy -Recurse -Force
-          }
-          $env:NEXT_DIST_DIR = ".next-deploy"
-          $env:NEXT_DEPLOYMENT_ID = "${{ github.sha }}"
-          npm run build
-          $buildExitCode = $LASTEXITCODE
-          Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue
-          Remove-Item Env:NEXT_DEPLOYMENT_ID -ErrorAction SilentlyContinue
-          if ($buildExitCode -ne 0) {
-            Write-Error "Candidate build failed; the existing frontend was left running."
-            exit 1
-          }
+        run: ./frontend/scripts/deploy-release.ps1 -Phase Activate
 
-          $CurrentPath = (Get-Location).Path
-          $env:RUNNER_TRACKING_ID = ""
-
-          # `Start-Process -Wait` also waits for every descendant process. When the
-          # PM2 command leaves a child behind, the step hangs forever after PM2
-          # has already printed "Done" and blocks all later deploys. Wait only
-          # for the command itself, with a limit.
-          function Invoke-Pm2Command {
-            param([string]$Command, [int]$TimeoutSeconds = 90)
-
-            $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $Command -NoNewWindow -PassThru
-            $null = $process.Handle
-            if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-              Write-Host "PM2 command did not return within $TimeoutSeconds s; continuing. Command: $Command"
-              return $null
-            }
-            return $process.ExitCode
-          }
-
-          function Start-PrimeFlowFrontend {
-            $exitCode = Invoke-Pm2Command "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000"
-            # A timeout is not treated as failure: the readiness check that
-            # follows decides whether the new frontend is really serving.
-            if ($null -ne $exitCode -and $exitCode -ne 0) {
-              throw "PM2 frontend start failed with exit code $exitCode."
-            }
-          }
-
-          function Stop-StalePrimeFlowFrontendListener {
-            $listeners = @(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue)
-            foreach ($listener in $listeners) {
-              $listenerPid = $listener.OwningProcess
-              $listenerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$listenerPid" -ErrorAction SilentlyContinue
-              $commandLine = if ($listenerProcess) { [string]$listenerProcess.CommandLine } else { "" }
-              $isPrimeFlowFrontend =
-                $commandLine.IndexOf($CurrentPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-                $commandLine.IndexOf("next", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-                $commandLine.IndexOf("start", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-
-              if (-not $isPrimeFlowFrontend) {
-                throw "Port 3000 is held by unrelated PID $listenerPid. Command: $commandLine"
-              }
-
-              Write-Host "Stopping stale PrimeFlow frontend listener PID $listenerPid."
-              Stop-Process -Id $listenerPid -Force -ErrorAction Stop
-            }
-
-            for ($i = 0; $i -lt 20; $i++) {
-              if (-not (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue)) {
-                return
-              }
-              Start-Sleep -Milliseconds 250
-            }
-            throw "Port 3000 did not become free after stopping the stale PrimeFlow frontend."
-          }
-
-          Write-Host "3. Replacing Existing Frontend Process..."
-          $pm2DescribeExit = Invoke-Pm2Command "pm2 describe frontend > NUL 2>&1"
-          if ($pm2DescribeExit -eq 0) {
-            $pm2DeleteExit = Invoke-Pm2Command "pm2 delete frontend"
-            if ($null -ne $pm2DeleteExit -and $pm2DeleteExit -ne 0) { Write-Error "PM2 frontend delete failed"; exit 1 }
-          } else {
-            Write-Host "PM2 frontend process did not exist yet. Continuing with clean start."
-          }
-
-          # A frontend started outside PM2 can survive `pm2 delete`, keep the old
-          # build in memory, and make a plain HTTP readiness check pass. Stop only
-          # a listener whose command belongs to this exact PrimeFlow checkout.
-          Stop-StalePrimeFlowFrontendListener
- 
-          if (Test-Path .next-previous) {
-            Remove-Item .next-previous -Recurse -Force
-          }
-          if (Test-Path .next) {
-            Move-Item .next .next-previous
-          }
-
-          try {
-            Move-Item .next-deploy .next
-            Start-PrimeFlowFrontend
-            if (-not (Wait-PrimeFlowFrontend -ExpectedDeploymentId "${{ github.sha }}")) {
-              throw "The candidate frontend did not serve deployment ${{ github.sha }} on port 3000."
-            }
-            Write-Host "Candidate frontend is healthy. Previous build retained in .next-previous for rollback."
-          } catch {
-            $deploymentError = $_.Exception.Message
-            Write-Host "Candidate deployment failed: $deploymentError"
-            # Capture the candidate's evidence before rollback starts writing
-            # to the same PM2 logs. Reading files cannot hang on the PM2 daemon.
-            foreach ($logName in @("frontend-error.log", "frontend-out.log")) {
-              $logPath = Join-Path $env:PM2_HOME "logs/$logName"
-              if (Test-Path -LiteralPath $logPath) {
-                Write-Host "--- Candidate $logName ---"
-                Get-Content -LiteralPath $logPath -Tail 60 -ErrorAction Continue | Out-Host
-              }
-            }
-            cmd /c "pm2 delete frontend || ver > NUL" | Out-Host
-            if (Test-Path .next) {
-              Remove-Item .next -Recurse -Force
-            }
-            if (Test-Path .next-previous) {
-              Move-Item .next-previous .next
-              Start-PrimeFlowFrontend
-              if (-not (Wait-PrimeFlowFrontend)) {
-                Write-Error "Candidate failed and the previous frontend could not be restored. Original error: $deploymentError"
-                exit 1
-              }
-              Write-Host "Previous frontend restored successfully."
-            } else {
-              Write-Host "No previous frontend build was available to restore."
-            }
-            Write-Error "Frontend deployment failed and was rolled back: $deploymentError"
-            exit 1
-          }
- 
       - name: Wait for Frontend Readiness
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell

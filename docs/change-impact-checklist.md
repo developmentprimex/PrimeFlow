@@ -540,6 +540,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Kontrolli i deployment-it të frontend-it
 
+`frontend/scripts/deploy-release.ps1` përgatit dy versione me varësi të veçanta
+nën `PM2_HOME/primeflow-deploy/frontend-releases`. Kontrollo kandidatin në
+`127.0.0.1:3301` para ndërrimit dhe commit-in që shërbehet në portën 3000 pas tij.
+Ruaj versionin aktiv gjatë instalimit dhe build-it, si dhe versionin e mëparshëm
+për rikthim nëse nisja në portën 3000 dështon.
+
 `.github/workflows/deploy.yml` përdor `frontend/scripts/wait-for-readiness.ps1`
 për kandidatin, rikthimin e versionit të mëparshëm dhe kontrollin përfundimtar.
 Ndryshimet e këtij kontrolli ndikojnë pranimin ose rollback-un e gjithë build-it,
