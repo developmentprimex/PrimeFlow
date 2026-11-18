@@ -8,6 +8,7 @@ const distDir = process.env.NEXT_DIST_DIR || ".next";
 
 const nextConfig: NextConfig = {
   distDir,
+  ...(process.env.PRIMEFLOW_STANDALONE === "1" ? { output: "standalone" as const } : {}),
   ...(deploymentId ? { deploymentId } : {}),
   typescript: {
     ignoreBuildErrors: true,

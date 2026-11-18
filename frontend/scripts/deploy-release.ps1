@@ -37,12 +37,19 @@ function Clear-PreviousListener {
         $allowed = @($legacy) + $slots
         $command = [string]$process.CommandLine
         $owned = @($allowed | Where-Object { $command.Replace('/','\').IndexOf(($_ + '\node_modules\next\'), [StringComparison]::OrdinalIgnoreCase) -ge 0 })
-        if (-not $owned -or $command -notmatch '\bstart\b') { throw "Unexpected listener on port 3000: PID $ownerId" }
+        $standalone = @($slots | Where-Object { $command.Replace('/','\').IndexOf(($_ + '\server.js'), [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+        if (-not $standalone -and (-not $owned -or $command -notmatch '\bstart\b')) { throw "Unexpected listener on port 3000: PID $ownerId" }
         Stop-Process -Id $ownerId -Force -ErrorAction Stop
     }
 }
 
 function Start-Release([string]$directory, [string]$name='frontend', [int]$port=3000) {
+    if (Test-Path -LiteralPath (Join-Path $directory 'server.js')) {
+        $env:PORT = "$port"
+        $env:HOSTNAME = if ($port -eq 3000) { '0.0.0.0' } else { '127.0.0.1' }
+        Invoke-FrontendPm2 "start `"$(Join-Path $directory 'server.js')`" --name $name --cwd `"$directory`" --interpreter node"
+        return
+    }
     $cli = Join-Path $directory 'node_modules\next\dist\bin\next'
     Invoke-FrontendPm2 "start `"$cli`" --name $name --cwd `"$directory`" --interpreter node -- start --port $port"
 }
@@ -81,19 +88,12 @@ if ($Phase -eq 'Prepare') {
         Remove-Item -LiteralPath ("\\?\" + $resolved) -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $candidate | Out-Null
-    $archive = Join-Path $env:RUNNER_TEMP "frontend-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.zip"
-    git archive --format=zip "--output=$archive" "${sha}:frontend"
-    if ($LASTEXITCODE -ne 0) { throw 'Frontend source export failed.' }
+    $archive = Join-Path $env:RUNNER_TEMP "frontend-$sha.zip"
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::ExtractToDirectory($archive, $candidate)
-    Remove-Item -LiteralPath $archive
-    Copy-Item -LiteralPath (Join-Path $legacy '.env.local') -Destination $candidate
-    Set-Location -LiteralPath $candidate
-    npm.cmd ci --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw 'Frontend install failed.' }
-    $env:NEXT_DEPLOYMENT_ID = $sha
-    npm.cmd run build
-    if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+    if ((Get-Content -LiteralPath (Join-Path $candidate '.release-sha') -Raw).Trim() -ne $sha) {
+        throw 'Frontend artifact SHA mismatch.'
+    }
     # Pages opened before the switch can still request a previous lazy chunk.
     # Keep one generation, recording the candidate's own files before merging.
     $static = Join-Path $candidate '.next\static'
@@ -117,7 +117,9 @@ if ($Phase -eq 'Prepare') {
     if (Get-NetTCPConnection -State Listen -LocalPort 3301 -ErrorAction SilentlyContinue) {
         throw 'Frontend readiness port 3301 is already in use.'
     }
-    $probe = Start-Process node.exe -ArgumentList 'node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','3301' -WorkingDirectory $candidate -WindowStyle Hidden -PassThru
+    $env:PORT = '3301'
+    $env:HOSTNAME = '127.0.0.1'
+    $probe = Start-Process node.exe -ArgumentList 'server.js' -WorkingDirectory $candidate -WindowStyle Hidden -PassThru
     try {
         if (-not (Wait-PrimeFlowFrontend -ExpectedDeploymentId $sha -BaseUri 'http://127.0.0.1:3301') -or $probe.HasExited) {
             throw 'Candidate frontend failed its readiness check.'

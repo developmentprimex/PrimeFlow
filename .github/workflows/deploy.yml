@@ -14,7 +14,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  plan:
+    outputs:
+      backend: ${{ steps.changes.outputs.backend_changed }}
+      frontend: ${{ steps.changes.outputs.frontend_changed }}
+      runner: ${{ steps.changes.outputs.runner }}
     runs-on: self-hosted
     env:
       PM2_HOME: C:\pm2-system
@@ -136,11 +140,76 @@ jobs:
             $frontendChanged = $true
           }
 
+          "runner=$env:RUNNER_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "backend_changed=$($backendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           # A failed marker lookup above must not fail the step.
           exit 0
  
+  build_frontend:
+    needs: plan
+    if: ${{ needs.plan.outputs.frontend == 'true' }}
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build isolated Windows frontend artifact
+        shell: powershell
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://api-flow.primexeu.com
+          NEXT_DEPLOYMENT_ID: ${{ github.sha }}
+          PRIMEFLOW_STANDALONE: '1'
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm.cmd ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend install failed.' }
+          npm.cmd run build
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+          $bundle = (Resolve-Path .next/standalone).Path
+          Copy-Item -LiteralPath .next/static -Destination "$bundle/.next/static" -Recurse
+          Copy-Item -LiteralPath public -Destination "$bundle/public" -Recurse
+          Set-Content -LiteralPath "$bundle/.release-sha" -Value $env:GITHUB_SHA -Encoding ascii
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::CreateFromDirectory($bundle, "$env:RUNNER_TEMP/frontend-$env:GITHUB_SHA.zip")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-${{ github.sha }}
+          path: ${{ runner.temp }}/frontend-${{ github.sha }}.zip
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
+
+  deploy:
+    needs: [plan, build_frontend]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.build_frontend.result == 'success' || needs.build_frontend.result == 'skipped') }}
+    runs-on: self-hosted
+    env:
+      PM2_HOME: C:\pm2-system
+      RUNNER_TRACKING_ID: ""
+    steps:
+      - name: Verify planned checkout
+        id: changes
+        shell: powershell
+        run: |
+          if ($env:RUNNER_NAME -ne '${{ needs.plan.outputs.runner }}' -or (git rev-parse HEAD) -ne $env:GITHUB_SHA) {
+            throw 'Production checkout differs from the release plan.'
+          }
+          "C:\npm-global" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "backend_changed=${{ needs.plan.outputs.backend }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "frontend_changed=${{ needs.plan.outputs.frontend }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Download verified frontend package
+        uses: actions/download-artifact@v4
+        if: ${{ needs.plan.outputs.frontend == 'true' }}
+        with:
+          name: frontend-${{ github.sha }}
+          path: ${{ runner.temp }}
+
       - name: Verify public deployment gateways
         if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
