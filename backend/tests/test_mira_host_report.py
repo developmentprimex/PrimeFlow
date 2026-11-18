@@ -1,4 +1,4 @@
-"""Parity with the actual 1H Report builder/blue-strike filter, without network or model calls."""
+"""Verify Mira's slot-based progress alongside the generated 1H Report."""
 import uuid
 import unittest
 from datetime import timedelta
@@ -12,6 +12,7 @@ from tests.test_mira_host_service import DAY, IDS, NAMES, payload, item, report_
 from tests.test_mira_host_bot import session
 from app.models.mira_host import Mira1HMeeting
 from app.services import mira_host as host
+from app.services.primeflow_report import DAILY_STRIKES_SECTION_TITLE
 from app.services.primeflow_report_delivery import generate_fresh, strike_interval_start, strike_interval_end
 from app.services.task_strike_events import point_key, render_text_for_interval, struck_points_for_interval
 import mira_host as controller
@@ -55,7 +56,7 @@ class ReportParity(unittest.IsolatedAsyncioTestCase):
         values=[value for value in query.params.values() if isinstance(value,(list,tuple))]
         self.assertIn(('PX_NOTE','SUMMARY_NOTE'),[tuple(value) for value in values])
         self.assertNotIn('NOTE_MENTION',str(query.params))
-    async def compare(self, source, slot, events):
+    async def compare(self, source, slot, events, *, report_extra_strikes=0, report_extra_task_ids=()):
         for bucket in source['items'].values():
             for row in bucket:
                 if row.get('task_id'):
@@ -72,16 +73,17 @@ class ReportParity(unittest.IsolatedAsyncioTestCase):
             report=await generate_fresh(DAY,slot,{'to':[]},data=source)
         meeting=Mira1HMeeting(id=uuid.uuid4(),meeting_date=DAY,slot=slot,status='GA_PHASE')
         facts=await host.new_progress(db,meeting,data)
-        self.assertEqual(facts['strike_count'],report.strike_total)
+        self.assertEqual(report.strike_total, facts['strike_count'] + report_extra_strikes)
         expected_done={task.task_id for section in report.sections for person in section.employees
-                       for task in person.tasks if task.status in ('DONE','COMPLETED')}
+                       for task in person.tasks if section.title != DAILY_STRIKES_SECTION_TITLE
+                       and task.status in ('DONE','COMPLETED')}
         self.assertEqual({line['task_id'] for line in facts['done']},expected_done)
         expected_strikes={task.task_id for section in report.sections for person in section.employees
                           for task in person.tasks if task.strike_count}
-        self.assertEqual({line['task_id'] for line in facts['strikes']},expected_strikes)
+        self.assertEqual(expected_strikes, {line['task_id'] for line in facts['strikes']} | set(report_extra_task_ids))
         return facts,report,db,meeting
 
-    async def test_all_five_slots_match_the_reports_completion_and_strike_boundaries(self):
+    async def test_all_five_slots_keep_mira_progress_in_its_own_window(self):
         for slot in host.SLOTS:
             with self.subTest(slot=slot):
                 start,end=strike_interval_start(DAY,slot),strike_interval_end(DAY,slot)
@@ -91,7 +93,8 @@ class ReportParity(unittest.IsolatedAsyncioTestCase):
                 future=item('EF',slot,'E VONSHME',rank=3,status='DONE',completed_at=(end+timedelta(seconds=1)).isoformat())
                 events=[event(current['task_id'],'1. Në fillim',start),event(current['task_id'],'2. Brenda',start+timedelta(minutes=1)),
                         event(current['task_id'],'3. Në fund',end)]
-                facts,*_=await self.compare(payload([current,done,early,future]),slot,events)
+                facts,*_=await self.compare(payload([current,done,early,future]),slot,events,
+                                            report_extra_strikes=int(slot != '10:00'))
                 self.assertEqual(facts['strike_count'],2)
                 self.assertEqual(facts['done_count'],1)
                 self.assertEqual(facts['interval_start'],start.isoformat())
@@ -104,7 +107,7 @@ class ReportParity(unittest.IsolatedAsyncioTestCase):
         events=[event(tid,'1. E hershme',start-timedelta(minutes=1)),event(tid,'2. Rihapur',start+timedelta(minutes=1)),
                 event(tid,'2. Rihapur',start+timedelta(minutes=2),action='UNSTRUCK'),event(tid,'3. Brenda',end),
                 event(tid,'4. Dje',start-timedelta(days=1)),event(tid,'5. Fshirë',end)]
-        facts,*_=await self.compare(payload([task]),'11:00',events)
+        facts,*_=await self.compare(payload([task]),'11:00',events,report_extra_strikes=1)
         self.assertEqual([p['text'] for p in facts['strikes'][0]['points']],['3. Brenda'])
 
     async def test_legacy_visible_timestamp_counts_without_an_event_or_invented_actor(self):
@@ -158,7 +161,8 @@ class ReportParity(unittest.IsolatedAsyncioTestCase):
     async def test_wrong_report_section_is_not_announced_even_if_it_has_a_strike(self):
         at=strike_interval_start(DAY,'11:00')+timedelta(minutes=10)
         task=item('EF','16:00','DETYRA E PASDITES',rank=0,description='[[done]]1. Pika[[/done]]')
-        facts,*_=await self.compare(payload([task]),'11:00',[event(task['task_id'],'1. Pika',at)])
+        facts,*_=await self.compare(payload([task]),'11:00',[event(task['task_id'],'1. Pika',at)],
+                                    report_extra_strikes=1,report_extra_task_ids=(task['task_id'],))
         self.assertEqual(facts['strike_count'],0)
 
     async def test_legacy_done_remains_visible_but_does_not_invent_a_completion_time(self):

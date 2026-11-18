@@ -12,13 +12,13 @@ from app.services.primeflow_report import (
     ReportDocument, SLOTS, build_report_document, render_docx, render_html, render_plain_text, render_png,
 )
 from app.services.primeflow_report_delivery import generate_fresh, strike_interval_start, strike_interval_end
-from app.services.task_strike_events import count_struck_points_for_interval, point_key
+from app.services.task_strike_events import point_key
 
 
 DAY = date(2026, 10, 23)
 
 
-def fresh_document(slot="11:00"):
+def fresh_document(slot="11:00", *, include_earlier_task=False):
     start, end = strike_interval_start(DAY, slot), strike_interval_end(DAY, slot)
     task_id, empty_id = uuid.uuid4(), uuid.uuid4()
     title = "Hourly task\n[[done]]1. Earlier title[[/done]]\n[[done]]2. Current title[[/done]]"
@@ -47,6 +47,17 @@ def fresh_document(slot="11:00"):
     rows = [(task_id, "Old task title", description, title, None, strike)
             for strike in events if strike.occurred_at <= end]
     rows.append((empty_id, "Open task", "1. Open", None, None, None))
+    if include_earlier_task:
+        earlier_id = uuid.uuid4()
+        morning = strike_interval_end(DAY, "10:00")
+        data["items"]["oneH"].extend([
+            {**shared, "id": "earlier-strike", "task_id": str(earlier_id), "slot": "10:00",
+             "person": "Alice Person", "status": "DONE", "completed_at": morning.isoformat()},
+            {**shared, "id": "earlier-without-strike", "task_id": str(uuid.uuid4()), "slot": "10:00",
+             "person": "Alice Person", "status": "DONE", "completed_at": morning.isoformat()},
+        ])
+        rows.append((earlier_id, "Morning task", "[[done]]1. Morning point[[/done]]", None, None,
+                     event("1. Morning point", "DESCRIPTION", morning)))
 
     class Session:
         async def __aenter__(self):
@@ -62,39 +73,36 @@ def fresh_document(slot="11:00"):
          patch("app.services.primeflow_report_delivery.load_1h_reminder_questions", new=AsyncMock(return_value=[])), \
          patch("app.services.primeflow_report_delivery.load_undiscussed_notes", new=AsyncMock(return_value=[])):
         document = asyncio.run(generate_fresh(DAY, slot, {"to": ["preview@example.com"]}, data=data))
-    expected = sum(count_struck_points_for_interval(text, events,
-        interval_start=start, interval_end=end, field_name=field)
-        for text, field in ((title, "TITLE"), (description, "DESCRIPTION")))
+    expected = 2 if slot == "10:00" else 3
     return document, task_id, expected
 
 
 @pytest.mark.parametrize("slot", SLOTS)
-def test_every_hour_counts_its_own_interval_and_deduplicates_shared_tasks(slot):
+def test_every_report_counts_from_morning_and_deduplicates_shared_tasks(slot):
     document, shared_id, expected = fresh_document(slot)
     cards = [task for section in document.sections for employee in section.employees for task in employee.tasks]
-    assert expected == 2
     # The morning baseline can repeat a shared task for both owners; other
     # reports already merge those cards before rendering.
     shared_cards = 2 if slot == "10:00" else 1
-    assert sorted(task.strike_count for task in cards) == [0] + [2] * shared_cards
+    assert sorted(task.strike_count for task in cards) == [0] + [expected] * shared_cards
     assert sum(task.task_id == str(shared_id) for task in cards) == shared_cards
     assert document.strike_total == expected
-    assert document.strike_interval == f"{strike_interval_start(DAY, slot):%H:%M}–{strike_interval_end(DAY, slot):%H:%M}"
+    assert document.strike_interval == f"08:00–{strike_interval_end(DAY, slot):%H:%M}"
     assert ReportDocument.model_validate(document.model_dump(mode="json")).strike_total == expected
 
 
 def test_counts_are_visible_in_preview_email_text_word_and_png():
     document, _, _ = fresh_document()
     output = render_html(document)
-    assert "Total strikes: 2 · 10:00–11:00" in output
+    assert "Total strikes: 3 · 08:00–11:00" in output
     assert output.count('data-report-strike-total="true"') == 1
     assert output.count('data-task-strike-count="true"') == 2
-    assert output.count("Strikes: 2 · 10:00–11:00") == 1
-    assert "Strikes: 0 · 10:00–11:00" in output
+    assert output.count("Strikes: 3 · 08:00–11:00") == 1
+    assert "Strikes: 0 · 08:00–11:00" in output
     for rendered in (render_plain_text(document), zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode()):
-        assert "Total strikes: 2 · 10:00–11:00" in rendered
-        assert "Strikes: 2 · 10:00–11:00" in rendered
-        assert "Strikes: 0 · 10:00–11:00" in rendered
+        assert "Total strikes: 3 · 08:00–11:00" in rendered
+        assert "Strikes: 3 · 08:00–11:00" in rendered
+        assert "Strikes: 0 · 08:00–11:00" in rendered
     from PIL import ImageDraw
     original_text = ImageDraw.ImageDraw.text
     labels = []
@@ -107,8 +115,8 @@ def test_counts_are_visible_in_preview_email_text_word_and_png():
 
     with patch.object(ImageDraw.ImageDraw, "text", new=draw_text):
         assert render_png(document).startswith(b"\x89PNG")
-    assert "Total strikes: 2 · 10:00–11:00" in labels
-    assert labels.count("Strikes: 2 · 10:00–11:00") == 1
+    assert "Total strikes: 3 · 08:00–11:00" in labels
+    assert labels.count("Strikes: 3 · 08:00–11:00") == 1
     assert colours["1. At end"] == "#2563eb"
     assert colours["2. Reopened"] == "#64748b"
 
@@ -119,7 +127,19 @@ def test_bll_table_also_displays_its_strike_count():
     section.employees = document.sections[0].employees
     output = render_html(document).split('data-bll-task-table="true"', 1)[1]
     assert 'data-task-strike-count="true"' in output
-    assert "Strikes: 2 · 11:50–14:20" in output
+    assert "Strikes: 3 · 08:00–14:20" in output
+
+
+@pytest.mark.parametrize("slot", ("11:00", "16:00"))
+def test_earlier_strike_survives_the_done_window_and_slot_selection(slot):
+    document, _, expected = fresh_document(slot, include_earlier_task=True)
+    section = document.sections[-1]
+    assert section.title == "STRIKES TË DITËS"
+    assert 'data-report-daily-strikes="true"' in render_html(document)
+    assert document.task_count == 3
+    assert document.strike_total == expected + 1
+    tasks = [task for employee in section.employees for task in employee.tasks]
+    assert [(task.title, task.strike_count) for task in tasks] == [("Morning task", 1)]
 
 
 def test_old_saved_reports_keep_unknown_counts_hidden():
@@ -159,6 +179,6 @@ def test_preview_provides_filterable_cards_without_embedded_controls():
     assert 'id="one-h-strikes-filter"' not in export.body.decode()
     assert 'id="one-h-strikes-filter"' not in render_html(document)
     assert result["task_count"] == document.task_count
-    assert 'data-strike-count="2"' in result["html"]
+    assert 'data-strike-count="3"' in result["html"]
     assert 'data-strike-count="0"' in result["html"]
     assert 'font:700 14px/1.5 Arial,sans-serif' in result["html"]

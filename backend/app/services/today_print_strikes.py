@@ -44,9 +44,10 @@ async def task_strike_summary(
     now = now or datetime.now(report_timezone())
     slots = (report_slot,) if report_slot else ("10:00", "11:00", "11:50", "14:20", "16:00")
     windows = {slot: (strike_interval_start(day, slot), strike_interval_end(day, slot)) for slot in slots}
-    # An embedded SHTYPI table belongs to the selected report, even when an
-    # older slot is previewed later in the day. The standalone view still uses
-    # the last finished interval.
+    # The embedded table follows the selected 1H Report's cumulative window.
+    # The standalone view uses the last finished interval.
+    if report_slot:
+        windows[report_slot] = (strike_interval_start(day, "10:00"), windows[report_slot][1])
     completed = {slot: window for slot, window in windows.items()
                  if report_slot or window[1] <= (completed_through or now)}
     active_slot = next(reversed(completed), None)

@@ -168,7 +168,8 @@ def test_embedded_table_uses_selected_report_slot_instead_of_latest_finished(slo
     db.execute.return_value = MagicMock(all=lambda: [(task_id, "Task", text, None, None, strike) for strike in strikes])
     summary = asyncio.run(task_strike_summary(db, DAY, {task_id}, now=clock(17), report_slot=slot))
     assert summary["active_slot"] == slot
-    assert summary["tasks"][str(task_id)] == {slot: 2}
+    assert summary["active_interval"] == {"start": "08:00", "end": end.strftime("%H:%M")}
+    assert summary["tasks"][str(task_id)] == {slot: 2 if slot == "10:00" else 3}
     assert end in db.execute.await_args.args[0].compile().params.values()
 
 

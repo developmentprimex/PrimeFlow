@@ -340,10 +340,12 @@ async def report_task_snapshot(data: dict, *, interval_end: datetime, db=None) -
 
 
 async def _text_overrides_for_1h_interval(
-    data: dict, day: date, slot: str, *, interval_end: datetime,
+    data: dict, *, interval_start: datetime, interval_end: datetime,
 ) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
+    if data.get("tasks"):
+        data = {**data, "items": {"fallback_tasks": data["tasks"], **(data.get("items") or {})}}
     snapshot = await report_task_snapshot(data, interval_end=interval_end)
-    return report_text_overrides(snapshot, interval_start=strike_interval_start(day, slot), interval_end=interval_end)
+    return report_text_overrides(snapshot, interval_start=interval_start, interval_end=interval_end)
 
 
 def report_text_overrides(snapshot, *, interval_start, interval_end):
@@ -390,8 +392,10 @@ async def generate_fresh(
     data = data or await load_common_view(day)
     reminders = await load_1h_reminder_questions(slot, day)
     undiscussed_notes = await load_undiscussed_notes(show_full_mira_notes=show_full_mira_notes)
+    strike_window_start = strike_interval_start(day, "10:00")
+    window_end = strike_interval_end(day, slot)
     title_overrides, description_overrides = await _text_overrides_for_1h_interval(
-        data, day, slot, interval_end=strike_interval_end(day, slot),
+        data, interval_start=strike_window_start, interval_end=window_end,
     )
     return build_report_document(
         data,
@@ -403,7 +407,8 @@ async def generate_fresh(
         title_overrides=title_overrides,
         description_overrides=description_overrides,
         completion_window_start=strike_interval_start(day, slot),
-        completion_window_end=strike_interval_end(day, slot),
+        completion_window_end=window_end,
+        strike_window_start=strike_window_start,
     )
 
 
