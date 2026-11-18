@@ -1,0 +1,51 @@
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static 127.0.0.1/32 ::1/128
+	}
+}
+
+# Both listeners are private origins for the existing Cloudflare Tunnel.
+(primeflow_origin) {
+	reverse_proxy 127.0.0.1:{args[0]} {
+		header_down X-PrimeFlow-Origin {http.reverse_proxy.upstream.port}
+		transport http {
+			keepalive off
+		}
+	}
+}
+
+# Match one operator-owned marker per incoming request. A cutover never
+# reloads the listener, including for existing WebSockets and slow POSTs.
+http://:13000 {
+	bind 127.0.0.1
+	route {
+		@standby file {
+			root "{$PRIMEFLOW_GATEWAY_STATE}"
+			try_files /web-standby
+		}
+		handle @standby {
+			import primeflow_origin 3301
+		}
+		handle {
+			import primeflow_origin 3000
+		}
+	}
+}
+
+http://:18080 {
+	bind 127.0.0.1
+	route {
+		@standby file {
+			root "{$PRIMEFLOW_GATEWAY_STATE}"
+			try_files /api-standby
+		}
+		handle @standby {
+			import primeflow_origin 8000
+		}
+		handle {
+			import primeflow_origin 8080
+		}
+	}
+}

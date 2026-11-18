@@ -569,6 +569,39 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Kontrolli i deployment-it të frontend-it
 
+`frontend/scripts/deploy-release.ps1` përgatit dy versione me varësi të veçanta
+nën `PM2_HOME/primeflow-deploy/frontend-releases`. Kontrollo kandidatin në
+`127.0.0.1:3301` para ndërrimit dhe commit-in që shërbehet në portën 3000 pas tij.
+Ruaj versionin aktiv gjatë instalimit dhe build-it, si dhe versionin e mëparshëm
+për rikthim nëse nisja në portën 3000 dështon.
+
+Për aktivizimin e parë, instalo gateway-n me `deploy/install-gateway.ps1`
+dhe Caddy për Windows në serverin ku punon lidhësi i Cloudflare Tunnel.
+Ruaj adresat aktuale të origjinës në Cloudflare për rikthim. Nëse tuneli
+ka lidhës në serverë të ndryshëm, verifiko arritshmërinë nga secili përpara
+ndryshimit. Për lidhësin në serverin e PrimeFlow përdoren këto destinacione.
+
+| Hostname | Shërbimi i tunelit | Prova publike para push-it |
+| --- | --- | --- |
+| `primeflow.primexeu.com` | `http://127.0.0.1:13000` | `GET /login` kthen 200 dhe header-in `X-PrimeFlow-Origin: 3000` |
+| `api-flow.primexeu.com` | `http://127.0.0.1:18080` | `GET /health` kthen `status=ok` dhe `X-PrimeFlow-Origin: 8080` |
+
+Gjatë deploy-it gateway lexon dy skedarë lokalë për të zgjedhur destinacionin
+e çdo kërkese të re. Proceset në portat 3301 dhe 8000 marrin përkohësisht
+trafikun përkatës pasi kalojnë kontrollin. Lidhjet e hapura përfundojnë te
+procesi i vjetër. Nëse një WebSocket ose kërkesë e gjatë e mban atë të zënë
+për 20 minuta, workflow dështon para ndaljes së tij dhe lë trafikun në
+destinacionin e verifikuar. Nëse deploy ndërpritet, kontrollo të dyja
+origjinat dhe header-in publik përpara rinisjes. Testi në Windows përdor
+`python deploy/test_gateway.py <caddy.exe>` me portat lokale të lira.
+
+Përditësimet e DB-së dhe API-së duhet të funksionojnë edhe me versionin
+që shërben gjatë kalimit. Ndaje heqjen e kolonave ose ndryshimin e kontratës
+nga deploy-i që zhvendos lexuesit. Kontrollo hyrjen, një faqe të hapur që
+ngarkon një chunk të vjetër dhe një kërkesë API në vazhdim. Para rinisjes
+së botëve, `backend/scripts/wait_for_mira_deploy.py` pret mbylljen e seancave
+1H dhe AI Agent, përfundimin e shënimeve dhe mbylljen e takimit Mira Host.
+
 `.github/workflows/deploy.yml` përdor `frontend/scripts/wait-for-readiness.ps1`
 për kandidatin, rikthimin e versionit të mëparshëm dhe kontrollin përfundimtar.
 Ndryshimet e këtij kontrolli ndikojnë pranimin ose rollback-un e gjithë build-it,
