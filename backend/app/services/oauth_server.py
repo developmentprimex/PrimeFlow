@@ -75,9 +75,9 @@ def resource_is_allowed(resource: str | None) -> bool:
     return resource.rstrip("/") == expected
 
 
-def scope_is_allowed(scope: str | None) -> bool:
-    requested = set((scope or SUPPORTED_SCOPE).split())
-    return requested <= {SUPPORTED_SCOPE}
+def granted_scope(requested: str | None) -> str:
+    """Every grant carries only the PrimeFlow scope, whatever the client asked for."""
+    return SUPPORTED_SCOPE
 
 
 def with_query(uri: str, params: dict[str, str | None]) -> str:
