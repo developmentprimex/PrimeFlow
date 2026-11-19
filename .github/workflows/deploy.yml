@@ -123,7 +123,7 @@ jobs:
               return $true
             }
             $files = @(git diff --name-only $deployed $after | Where-Object { $_ -and $_.Trim() -ne "" })
-            $relevant = @($files | Where-Object { $_ -like "$PathPrefix/*" -or $_ -like "deploy/*" -or $_ -eq ".github/workflows/deploy.yml" })
+            $relevant = @($files | Where-Object { $_ -like "$PathPrefix/*" -or $_ -like "deploy/*" -or $_ -eq ".github/workflows/deploy.yml" -or ($Name -eq "frontend" -and $_ -eq ".github/workflows/prepare-frontend.yml") })
             Write-Host "${Name}: last deployed $deployed, $($relevant.Count) relevant changed file(s)."
             $relevant | ForEach-Object { Write-Host " - $_" }
             return ($relevant.Count -gt 0)
@@ -149,54 +149,9 @@ jobs:
   build_frontend:
     needs: plan
     if: ${{ needs.plan.outputs.frontend == 'true' }}
-    runs-on: windows-2022
-    steps:
-      - name: Checkout exact frontend source
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git init .
-          if ($LASTEXITCODE -ne 0) { throw 'Git initialization failed.' }
-          $url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
-          $credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("x-access-token:$env:GH_TOKEN"))
-          Write-Host "::add-mask::$credential"
-          $env:GIT_AUTH_HEADER = "Authorization: Basic $credential"
-          git --config-env="http.$env:GITHUB_SERVER_URL/.extraheader=GIT_AUTH_HEADER" fetch --no-tags --no-recurse-submodules --depth=1 $url $env:GITHUB_SHA
-          if ($LASTEXITCODE -ne 0) { throw 'Frontend source fetch failed.' }
-          git -c core.longpaths=true checkout $env:GITHUB_SHA -- frontend
-          if ($LASTEXITCODE -ne 0) { throw 'Frontend checkout failed.' }
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Build isolated Windows frontend artifact
-        shell: powershell
-        working-directory: frontend
-        env:
-          NEXT_PUBLIC_API_BASE_URL: https://api-flow.primexeu.com
-          NEXT_DEPLOYMENT_ID: ${{ github.sha }}
-          PRIMEFLOW_STANDALONE: '1'
-          NEXT_TELEMETRY_DISABLED: '1'
-        run: |
-          $ErrorActionPreference = 'Stop'
-          npm.cmd ci --no-audit --no-fund
-          if ($LASTEXITCODE -ne 0) { throw 'Frontend install failed.' }
-          npm.cmd run build
-          if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
-          $bundle = (Resolve-Path .next/standalone).Path
-          Copy-Item -LiteralPath .next/static -Destination "$bundle/.next/static" -Recurse
-          Copy-Item -LiteralPath public -Destination "$bundle/public" -Recurse
-          Set-Content -LiteralPath "$bundle/.release-sha" -Value $env:GITHUB_SHA -Encoding ascii
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          [IO.Compression.ZipFile]::CreateFromDirectory($bundle, "$env:RUNNER_TEMP/frontend-$env:GITHUB_SHA.zip")
-      - uses: actions/upload-artifact@v4
-        with:
-          name: frontend-${{ github.sha }}
-          path: ${{ runner.temp }}/frontend-${{ github.sha }}.zip
-          retention-days: 2
-          compression-level: 0
-          if-no-files-found: error
+    uses: ./.github/workflows/prepare-frontend.yml
+    with:
+      publish_artifact: true
 
   deploy:
     needs: [plan, build_frontend]

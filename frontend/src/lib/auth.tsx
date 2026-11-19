@@ -400,22 +400,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let reconnectTimer: number | null = null
     let heartbeatTimer: number | null = null
     let reconnectDelayMs = 1000
+    let replaySince: string | null = null
+    let replayTimer: number | null = null
+    const seen = new Set<string>()
 
     const clearHeartbeat = () => {
       if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer)
       heartbeatTimer = null
     }
 
-    const handleMessage = (event: MessageEvent) => {
+    const handleMessage = (event: Pick<MessageEvent, "data">) => {
       try {
         const msg = JSON.parse(event.data) as {
           type?: string
+          id?: string
+          since?: string
           notification_type?: string
           title?: string
           body?: string
           data?: { open_url?: string; kind?: string }
         }
+        if (msg.type === "deploy_reconnect" && msg.since) {
+          replaySince ??= msg.since
+        }
         if (msg.type === "notification") {
+          if (msg.id) {
+            if (seen.has(msg.id)) return
+            seen.add(msg.id)
+            if (seen.size > 1024) seen.delete(seen.values().next().value!)
+          }
           const openUrl = msg.data?.open_url
           toast(msg.title || "Notification", {
             description: msg.body || undefined,
@@ -454,10 +467,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    const replay = async (socket: WebSocket) => {
+      if (!replaySince || stopped || ws !== socket || socket.readyState !== WebSocket.OPEN) return
+      const since = Date.parse(replaySince)
+      try {
+        const response = await fetch(`${API_HTTP_URL}/notifications?since=${encodeURIComponent(replaySince)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        })
+        if (!response.ok) throw new Error("Notification replay unavailable")
+        const rows = await response.json()
+        if (stopped || ws !== socket || socket.readyState !== WebSocket.OPEN) return
+        for (const row of rows.reverse()) {
+          // During a rolling upgrade an older API can ignore the since filter.
+          if (!(Date.parse(row.created_at) >= since) || row.read_at) continue
+          handleMessage({ data: JSON.stringify({ ...row, notification_type: row.type, type: "notification" }) })
+        }
+        replaySince = null
+        window.dispatchEvent(new CustomEvent("primex:notification"))
+      } catch {
+        if (!stopped && ws === socket && socket.readyState === WebSocket.OPEN) {
+          replayTimer = window.setTimeout(() => void replay(socket), 3000)
+        }
+      }
+    }
+
     const connect = () => {
       if (stopped) return
       ws = new WebSocket(`${API_WS_URL}/ws/notifications?token=${encodeURIComponent(token)}`)
       ws.onopen = () => {
+        if (ws && replaySince) void replay(ws)
         reconnectDelayMs = 1000
         clearHeartbeat()
         heartbeatTimer = window.setInterval(() => {
@@ -479,6 +519,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       stopped = true
       clearHeartbeat()
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
+      if (replayTimer !== null) window.clearTimeout(replayTimer)
       ws?.close()
     }
   }, [stopActiveMeetingAlarm, token, userId])

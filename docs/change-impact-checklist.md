@@ -549,6 +549,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Kontrollo përmbajtjen te Mira → Shënimet, PX Notes dhe rezultati në Discord
   për ruajtje manuale. Pas dështimit përfundimtar të përmbledhjes, transkripti
   vazhdon të ruhet. Mira Host ka përmbledhje të veçantë te Mira → Takimet.
+- “Mira, shëno … fund shënimi” nga një folës me llogari Discord të lidhur
+  krijon një shënim më vete direkt te PX Notes. Kontrollo komandat e ndara
+  në segmente, folësit që ndërhyjnë dhe riprovimet. Në All Tasks/Notes burimi
+  shfaqet me tekst të thjeshtë. Diktimet nuk shtohen në listën Mira → Shënimet
+  ose në listat e shënimeve të raporteve që përjashtojnë shënimet e Mirës.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
   Radha e raportimit ka përjashtime sipas slotit: LH, EH, EF dhe RA nuk marrin
@@ -644,7 +649,10 @@ ndryshimit. Për lidhësin në serverin e PrimeFlow përdoren këto destinacione
 Gjatë deploy-it gateway lexon dy skedarë lokalë për të zgjedhur destinacionin
 e çdo kërkese të re. Proceset në portat 3301 dhe 8000 marrin përkohësisht
 trafikun përkatës pasi kalojnë kontrollin. Lidhjet e hapura përfundojnë te
-procesi i vjetër. Nëse një WebSocket ose kërkesë e gjatë e mban atë të zënë
+procesi i vjetër. Pas verifikimit publik, lidhja e njoftimeve rilidhet te
+origjina e zgjedhur. Kontrollo rikuperimin e njoftimeve të humbura gjatë
+kalimit, numëruesin në shiritin e sipërm dhe komentet me shenjues.
+Nëse një lidhje tjetër ose kërkesë e gjatë e mban procesin të zënë
 për 20 minuta, workflow dështon para ndaljes së tij dhe lë trafikun në
 destinacionin e verifikuar. Nëse deploy ndërpritet, kontrollo të dyja
 origjinat dhe header-in publik përpara rinisjes. Testi në Windows përdor

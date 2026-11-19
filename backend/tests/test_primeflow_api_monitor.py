@@ -1,7 +1,22 @@
 import json
+from datetime import datetime, timezone
 from unittest.mock import Mock
 
 from scripts import primeflow_api_monitor as monitor
+
+
+def test_external_failure_and_stale_sample_are_distinct(tmp_path):
+    path = tmp_path / "external.json"
+    sample = {"at": datetime.now(timezone.utc).isoformat(), "checks": {
+        "api": {"ok": True}, "login": {"ok": False, "status": 502,
+                                      "url": "https://example.org/login", "elapsed_ms": 241}}}
+    path.write_text(json.dumps(sample))
+    issues = monitor.external_findings(path)
+    assert issues["Jashtë serverit | api"] is None
+    assert "HTTP 502" in issues["Jashtë serverit | login"][1]
+    sample["at"] = "2020-01-01T00:00:00+00:00"
+    path.write_text(json.dumps(sample))
+    assert list(monitor.external_findings(path)) == ["Monitori i jashtëm"]
 
 
 def snapshot(owner_8000=10, owner_8080=21):

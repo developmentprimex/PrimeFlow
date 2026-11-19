@@ -1,0 +1,83 @@
+name: Prepare PrimeFlow frontend
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - 'deploy/**'
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/prepare-frontend.yml'
+  workflow_call:
+    inputs:
+      publish_artifact:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: windows-2022
+    concurrency:
+      group: primeflow-frontend-package-${{ github.sha }}
+      queue: max
+    steps:
+      - uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: ${{ runner.temp }}/frontend-${{ github.sha }}.zip
+          key: primeflow-standalone-windows-v1-${{ github.sha }}
+      - name: Checkout exact frontend source
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init .
+          if ($LASTEXITCODE -ne 0) { throw 'Git initialization failed.' }
+          $url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
+          $credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("x-access-token:$env:GH_TOKEN"))
+          Write-Host "::add-mask::$credential"
+          $env:GIT_AUTH_HEADER = "Authorization: Basic $credential"
+          git --config-env="http.$env:GITHUB_SERVER_URL/.extraheader=GIT_AUTH_HEADER" fetch --no-tags --no-recurse-submodules --depth=1 $url $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend source fetch failed.' }
+          git -c core.longpaths=true checkout $env:GITHUB_SHA -- frontend
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend checkout failed.' }
+      - uses: actions/setup-node@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          node-version: '22'
+      - name: Build isolated Windows frontend artifact
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: powershell
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://api-flow.primexeu.com
+          NEXT_DEPLOYMENT_ID: ${{ github.sha }}
+          PRIMEFLOW_STANDALONE: '1'
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm.cmd ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend install failed.' }
+          npm.cmd run build
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+          $bundle = (Resolve-Path .next/standalone).Path
+          Copy-Item -LiteralPath .next/static -Destination "$bundle/.next/static" -Recurse
+          Copy-Item -LiteralPath public -Destination "$bundle/public" -Recurse
+          Set-Content -LiteralPath "$bundle/.release-sha" -Value $env:GITHUB_SHA -Encoding ascii
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::CreateFromDirectory($bundle, "$env:RUNNER_TEMP/frontend-$env:GITHUB_SHA.zip")
+      - uses: actions/cache/save@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/frontend-${{ github.sha }}.zip
+          key: primeflow-standalone-windows-v1-${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        if: inputs.publish_artifact
+        with:
+          name: frontend-${{ github.sha }}
+          path: ${{ runner.temp }}/frontend-${{ github.sha }}.zip
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error

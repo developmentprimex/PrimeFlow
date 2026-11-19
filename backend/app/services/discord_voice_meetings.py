@@ -229,6 +229,8 @@ async def receive_segment(db, session_id, payload, audio):
     if segment.lease_token!=lease:raise HTTPException(409,'Përpunimi i segmentit ka ndryshuar.')
     segment.transcript,segment.error,segment.status=transcript,error,'ERROR' if error else 'DONE'
     if error:row.partial=True
+    from app.services import mira_voice_dictation
+    await mira_voice_dictation.process(db, row)
     await db.commit()
     return {'sequence':segment.sequence,'status':segment.status}
 

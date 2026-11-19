@@ -10,6 +10,7 @@ from app.services import discord_voice_meetings as service
 from app.services.discord_voice_meetings import now
 from app.services import discord_voice_openai as provider
 from app.services import mira_memory
+from app.services import mira_voice_dictation
 from app.config import settings
 
 log=logging.getLogger(__name__)
@@ -42,6 +43,7 @@ async def process_voice_meetings():
             expected=row.expected_segments
             if expected is not None and len(segments)<expected and row.stopped_at>now()-timedelta(seconds=60):continue
             partial=bool(row.partial or expected is None or len(segments)!=(expected or 0) or any(s.status!='DONE' for s in segments))
+            await mira_voice_dictation.process(db, row, finished_segments=segments)
             parts=provider.compact_transcript([{'sequence':s.sequence,'speaker_id':s.speaker_id,'speaker_name':s.speaker_name,
                 'start_ms':s.start_ms,'end_ms':s.end_ms,'transcript':s.transcript}
                 for s in segments if s.status=='DONE' and s.transcript])

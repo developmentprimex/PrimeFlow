@@ -13,6 +13,51 @@ from app.services import discord_voice_meetings as service
 from app.jobs import discord_voice_meetings as jobs
 
 class VoiceJobTests(PostgresMeetingTests):
+    async def test_dictation_saves_once_in_px_notes_before_the_meeting_ends(self):
+        from sqlalchemy import select
+        from app.api.routers.ga_notes import _note_out
+        from app.models.ga_note import GaNote
+        from app.services.report_note_visibility import is_mira_note
+
+        for recorder, channel_setting, source in (
+            ('primary', 'DISCORD_1H_VOICE_CHANNEL_ID', '1h'),
+            ('ai_agent', 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID', 'ai_agent'),
+        ):
+            sid, instance = uuid.uuid4(), uuid.uuid4()
+            token = 'x' * 40
+            async with self.sessions() as db:
+                db.add(Meeting(id=sid, user_id=self.uid, link_id=self.lid, department_id=self.did,
+                    guild_id='123', voice_channel_id='55', private_channel_id='44', request_id=sid.hex,
+                    recorder=recorder, instance_id=instance, capture_token_hash=service.token_hash(token),
+                    title='Staff', status='LISTENING'))
+                await db.commit()
+
+            async def upload(sequence, speaker, spoken):
+                meta = SegmentMeta(capture_token=token, instance_id=instance, sequence=sequence,
+                    speaker_id=speaker, speaker_name='Staff', start_ms=sequence * 1000, end_ms=(sequence + 1) * 1000)
+                with patch('app.services.discord_voice_openai.transcribe_segment', AsyncMock(return_value=spoken)):
+                    async with self.sessions() as db:
+                        await service.receive_segment(db, sid, meta, wav())
+
+            with patch.object(service.settings, 'DISCORD_GUILD_ID', '123'), \
+                 patch.object(service.settings, channel_setting, '55'):
+                await upload(3, '12', 'Fund shënimi.')
+                await upload(0, '12', 'Mira, shëno. Po, po, e kam dërgu.')
+                await upload(1, '99', 'Fund shënimi. Mira shëno, Mos e ruaj. Fund shënimi.')
+                await upload(2, '12', 'Kontrolloje edhe një herë.')
+                await upload(3, '12', 'Nuk duhet të transkriptohet përsëri.')
+            async with self.sessions() as db:
+                saved = (await db.execute(select(GaNote).where(GaNote.mira_dictation_source == source))).scalars().one()
+                row = await db.get(Meeting, sid)
+                self.assertEqual(row.status, 'LISTENING')
+                self.assertIsNone(row.saved_note_id)
+                self.assertEqual(saved.content, 'Po, po, e kam dërgu. Kontrolloje edhe një herë.')
+                self.assertEqual(saved.created_by, self.uid)
+                view = _note_out(saved)
+                self.assertEqual(view.mira_dictation_source, source)
+                self.assertFalse(view.from_mira)
+                self.assertTrue(is_mira_note(saved))
+
     async def test_chunks_are_deduplicated_ordered_and_finalized_without_tools(self):
         sid,instance=uuid.uuid4(),uuid.uuid4();token='x'*40
         async with self.sessions() as db:

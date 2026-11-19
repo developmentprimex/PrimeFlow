@@ -1,9 +1,15 @@
 {
 	admin off
 	auto_https off
+	metrics
 	servers {
 		trusted_proxies static 127.0.0.1/32 ::1/128
 	}
+}
+
+http://:19019 {
+	bind 127.0.0.1
+	metrics /metrics
 }
 
 # Both listeners are private origins for the existing Cloudflare Tunnel.
