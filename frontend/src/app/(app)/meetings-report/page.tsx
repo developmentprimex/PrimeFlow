@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
+import { M3TomorrowSymbolsTable } from "@/components/m3-tomorrow-symbols-table"
 import { CalendarDays, CheckCircle2, Clock3, Eye, History, Mail, Pencil, RefreshCw, Save, Send, Settings, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 
@@ -26,6 +27,7 @@ type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
+const TOMORROW_SYMBOLS_TITLE = "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -41,6 +43,7 @@ type Draft = {
   subject: string
   recipients: Recipients
   sections: Section[]
+  generated_snapshot?: { tomorrow_symbols_html?: string } | null
   status: string
   sent_at?: string | null
   gmail_message_id?: string | null
@@ -54,8 +57,8 @@ function compactSectionTitle(value: string) {
 
 function canonicalMeetingsSectionTitle(title: string) {
   const key = compactSectionTitle(title)
-  if (key === compactSectionTitle("SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER")) {
-    return "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER"
+  if (key.replace(/^(?:MANUAL)?\d*/, "") === compactSectionTitle(TOMORROW_SYMBOLS_TITLE)) {
+    return TOMORROW_SYMBOLS_TITLE
   }
   if (key.includes("TIKETATESTD")) {
     return "(GA) ZHV: TIKETAT E STD?"
@@ -119,7 +122,7 @@ function canonicalMeetingsSectionTitle(title: string) {
 
 function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
-    "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
+    TOMORROW_SYMBOLS_TITLE,
     "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
@@ -135,9 +138,6 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
     "N- DET PERSONALISHT ME KA/GENTIN?",
     "N- WFC ME KA/GENTIN?",
   ]
-  const manuals = new Set([
-    "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
-  ])
   const placeholder = "(Ploteso manualisht)"
   const byTitle = new Map<string, Section>()
   const extras: Section[] = []
@@ -176,14 +176,9 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
   for (const title of displayOrder) {
     const existing = byTitle.get(title)
     if (existing) ordered.push(existing)
-    else if (manuals.has(title)) ordered.push({ section_key: title, title, body: placeholder })
-  }
-  let insertAt = 0
-  for (let index = 0; index < ordered.length; index += 1) {
-    if (manuals.has(ordered[index].title)) insertAt = index + 1
   }
   return orderManualReportSections(
-    [...ordered.slice(0, insertAt), ...extras, ...ordered.slice(insertAt)],
+    [...extras, ...ordered],
     (section) => sectionGroupLabel(section) === "Manual questions",
   )
 }
@@ -194,6 +189,7 @@ function sectionGroupLabel(section: Section) {
     return "Auto-filled from PrimeFlow"
   }
   const knownAuto = [
+    TOMORROW_SYMBOLS_TITLE,
     "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
@@ -245,7 +241,10 @@ function recipientsSummary(recipients: Recipients) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10)
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date())
+  return ["year", "month", "day"].map((part) => parts.find(({ type }) => type === part)?.value).join("-")
 }
 
 function recipientsText(values?: string[]) {
@@ -339,21 +338,26 @@ export default function MeetingsReportPage() {
     })
   }, [])
 
-  const loadDraft = React.useCallback(async () => {
+  const loadDraft = React.useCallback(async (signal?: AbortSignal) => {
     if (!canAccess) return
     setLoading(true)
     try {
-      const res = await apiFetch(`${API}?report_date=${reportDate}`)
+      let res = await apiFetch(`${API}?report_date=${reportDate}`, { cache: "no-store", signal })
+      if (res.status === 404 && reportDate === todayIso()) {
+        res = await apiFetch(`${API}/generate?report_date=${reportDate}&create_if_missing=true`, { method: "POST", signal })
+      }
+      if (signal?.aborted) return
       if (res.status === 404) {
         applyDraft(null)
         return
       }
       if (!res.ok) throw new Error(await responseError(res))
-      applyDraft(await res.json())
+      const value = await res.json()
+      if (!signal?.aborted) applyDraft(value)
     } catch (error) {
-      if (canAccess) toast.error(`Unable to load ${REPORT_LABEL}`, { description: String(error) })
+      if (!signal?.aborted) toast.error(`Unable to load ${REPORT_LABEL}`, { description: String(error) })
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
   }, [apiFetch, applyDraft, canAccess, reportDate])
 
@@ -384,9 +388,11 @@ export default function MeetingsReportPage() {
 
   React.useEffect(() => {
     if (canAccess) {
-      void loadDraft()
+      const controller = new AbortController()
+      void loadDraft(controller.signal)
       void loadHistory()
       if (canManageDelivery) void loadSettings()
+      return () => controller.abort()
     }
   }, [canAccess, canManageDelivery, loadDraft, loadHistory, loadSettings])
 
@@ -616,8 +622,15 @@ export default function MeetingsReportPage() {
               </div>
 
               <div className="space-y-4">
+                {!draft.sections.some((section) => sectionGroupLabel(section) === "Manual questions") && (
+                  <div className="flex justify-end">
+                    <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} />
+                  </div>
+                )}
                 {draft.sections.map((section, index) => {
-                  const isEditing = editingSection?.index === index
+                  const isSymbolsTable = canonicalMeetingsSectionTitle(section.section_key || section.title) === TOMORROW_SYMBOLS_TITLE
+                  const symbolsHtml = isSymbolsTable && draft.generated_snapshot?.tomorrow_symbols_html
+                  const isEditing = !isSymbolsTable && editingSection?.index === index
                   return (
                     <React.Fragment key={`${section.title}-${index}`}>
                       {shouldShowSectionGroup(draft.sections, index) ? (
@@ -644,7 +657,7 @@ export default function MeetingsReportPage() {
                             ) : (
                               <h2 className="text-sm font-semibold leading-5">{section.title}</h2>
                             )}
-                            {!isEditing ? (
+                            {!isEditing && !isSymbolsTable ? (
                               <div className="flex items-center gap-2">
                                 <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}><Pencil /> Edit</Button>
                                 {user?.role === "ADMIN" && isCustomManualReportSection(section) ? (
@@ -663,6 +676,8 @@ export default function MeetingsReportPage() {
                             onCancel={() => setEditingSection(null)}
                             onSave={applySectionEditor}
                           />
+                        ) : symbolsHtml ? (
+                          <M3TomorrowSymbolsTable html={symbolsHtml} />
                         ) : (
                           <ReportSectionPreview
                             body={sectionPreviewText(section.body)}

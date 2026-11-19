@@ -84,7 +84,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
-- M3 PIKAT PER RAP: **NËNNGARKESË** merr stafin nga caktimet kryesore dhe
+- M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
+  e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
+  kufirit të gjenerimit. Kontrollo faqet, preview dhe emailin për të dy raportet.
+
+- M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
+  importi nga Common View të mos krijojnë kopje në grupin manual të M2.
+
+- M3 PIKAT PER RAP: **NËNNGARKESË NESER?** merr stafin nga caktimet kryesore dhe
   shtesë të detyrave aktive që përmbajnë `NËNNGARKESË` në rreshtin e titullit
   për datën e raportit. Kontrollo titujt me tekst para dhe pas fjalës.
   Kontrollo faqen, pamjen paraprake, emailin dhe bashkëngjitjet HTML, Word dhe PNG.
@@ -93,8 +100,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ruajtura, rigjenerimi dhe importi i pyetjeve manuale. Kontrollo gjithashtu
   faqen M3, preview, emailin dhe bashkëngjitjet.
 
+- M3 End of Day: **SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER** përdor të dhënat,
+  renditjen dhe tabelën e detyrave të SHTYPI Tomorrow për ditën tjetër të punës.
+  Hapja dhe rifreskimi i raportit të sotëm marrin tabelën aktuale. Faqja krijon
+  draftin e sotëm kur mungon. Raportet historike përdorin tabelën e ruajtur.
+  Fshehja e tabelës dhe zgjedhja e simboleve në faqen M3 veprojnë vetëm në pamjen e faqes.
+  Kontrollo filtrin për të gjitha simbolet, faqen M3, preview, emailin, Word dhe PNG.
+
 - M2: **PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU** shfaq PO/JO për VS,
   VL, MST dhe TT sipas kodeve në titujt e detyrave të caktuara stafit PCM.
+  MST dhe TT kërkojnë një detyrë të lidhur me projekt (`project_id`), ndërsa
+  VS dhe VL llogarisin edhe detyrat pa projekt.
   Data e raportit duhet të bjerë brenda Start Date–Due Date. Kontrollo caktimet
   kryesore dhe shtesë, rigjenerimin, preview, emailin dhe bashkëngjitjet e M2.
 

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 
 export const MANUAL_POINTS = {
-  underload: "1. NËNNGARKESË",
+  underload: "1. NËNNGARKESË NESER?",
   overload: "2. MBINGARKESË",
   reorganization: "3. RIORGANIZIM NESER?",
 } as const

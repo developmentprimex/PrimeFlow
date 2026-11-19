@@ -66,6 +66,7 @@ DONE_AM_TABLE_LABEL = "DET E KRYERA NE AM"
 UNHELD_MEETINGS_TABLE_LABEL = "TAK INT/EXT TE PAMBAJTURA"
 PCM_PROJECTS_TITLE = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
 PCM_PROJECT_CODES = ("VS", "VL", "MST", "TT")
+PCM_CODES_REQUIRING_PROJECT = {"MST", "TT"}
 PCM_PROJECT_CODE_PATTERN = re.compile(r"(?<![A-Z0-9])(?:VS|VL|MST|TT)(?![A-Z0-9])", re.IGNORECASE)
 PCM_PROJECT_SUMMARY_PATTERN = re.compile("\n".join(f"{code} - (?:PO|JO)" for code in PCM_PROJECT_CODES))
 AUTOMATED_SECTION_TITLES = {GA_REPLIES_SECTION_TITLE, PCM_PROJECTS_TITLE}
@@ -97,7 +98,7 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[5],
     SECTION_TITLES[7],
     SECTION_TITLES[8],
-    *SECTION_TITLES[10:13],
+    *SECTION_TITLES[10:12],
 ]
 SECTION_TITLE_ALIASES = {
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[9],
@@ -501,39 +502,14 @@ async def apply_waiting_client_task_table(
     body = _normalize_section(
         _ascii_table(WAITING_CLIENT_TABLE_LABEL, WAITING_CLIENT_COLUMNS, rows)
     )
-    refreshed = [
-        {
-            **section,
-            "body": body,
-        }
-        if section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
-        or section.get("title") == WAITING_CLIENT_TABLE_LABEL
-        else section
-        for section in sections
-    ]
-    # Normalize older drafts too: keep one DT WFE section and place it after
-    # the unfinished priority section, even when the draft was created with the old order.
-    waiting_sections = [
-        section for section in refreshed
-        if section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
-        or section.get("title") == WAITING_CLIENT_TABLE_LABEL
-    ]
-    if waiting_sections:
-        waiting = waiting_sections[0]
-        refreshed = [
-            section for section in refreshed
-            if not (
-                section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
-                or section.get("title") == WAITING_CLIENT_TABLE_LABEL
-            )
-        ]
-        unfinished_index = next(
-            (index for index, section in enumerate(refreshed)
-             if section.get("section_key") == UNFINISHED_PRIORITY_TABLE_LABEL
-             or section.get("title") == UNFINISHED_PRIORITY_TABLE_LABEL),
-            len(refreshed) - 1,
-        )
-        refreshed.insert(unfinished_index + 1, waiting)
+    refreshed = []
+    found = False
+    for section in sections:
+        if not is_waiting_client_section(section.get("title"), section.get("section_key")):
+            refreshed.append(section)
+        elif not found:
+            refreshed.append({**section, "section_key": WAITING_CLIENT_TABLE_LABEL, "body": body})
+            found = True
     return refreshed
 
 
@@ -757,6 +733,11 @@ def is_retired_after_break_question(title: str | None, section_key: str | None =
     return False
 
 
+def is_waiting_client_section(title: str | None, section_key: str | None = None) -> bool:
+    return any(re.fullmatch(r"(?:MANUAL)?\d*DTWFE", re.sub(r"[^A-Z0-9]+", "", (value or "").upper()))
+               for value in (title, section_key))
+
+
 def after_break_automated_section_title(title: str | None, section_key: str | None = None) -> str | None:
     for value in (section_key, title):
         compact = re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
@@ -772,7 +753,10 @@ def _pcm_projects_summary(tasks: list[Task], report_day: date) -> str:
     for task in tasks:
         start, due = _local_date(task.start_date), _local_date(task.due_date)
         if start and due and start <= report_day <= due:
-            worked.update(code.upper() for code in PCM_PROJECT_CODE_PATTERN.findall(task.title or ""))
+            codes = {code.upper() for code in PCM_PROJECT_CODE_PATTERN.findall(task.title or "")}
+            if task.project_id is None:
+                codes -= PCM_CODES_REQUIRING_PROJECT
+            worked.update(codes)
     return "\n".join(f"{code} - {'PO' if code in worked else 'JO'}" for code in PCM_PROJECT_CODES)
 
 
@@ -809,6 +793,10 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             continue
         identity = section_key or raw_title
         title = SECTION_TITLE_ALIASES.get(identity, identity)
+        if is_waiting_client_section(raw_title, section_key):
+            title = WAITING_CLIENT_TABLE_LABEL
+            if title in by_title:
+                continue
         body = str(section.get("body") or "")
         if title == PCM_PROJECTS_TITLE and not PCM_PROJECT_SUMMARY_PATTERN.fullmatch(body):
             body = ""

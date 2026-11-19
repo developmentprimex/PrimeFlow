@@ -30,6 +30,22 @@ from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
+    def test_dt_wfe_draft_duplicates_and_manual_keys_stay_in_one_automatic_section(self) -> None:
+        saved = [
+            {"title": "DT WFE", "body": "Original table"},
+            {"title": "DT WFE", "body": "Duplicate generated table"},
+            {"title": "3. DT WFE", "section_key": "manual:custom:3:legacy", "body": "Duplicate manual table"},
+        ]
+        sections = normalize_after_break_report_sections(saved)
+        with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles",
+                   new=AsyncMock(return_value=["3. DT WFE", "Other manual point"])):
+            sections = asyncio.run(merge_common_view_manual_sections(None, sections, "after_break", saved))
+        waiting = [section for section in sections if "DT WFE" in section["title"]]
+        self.assertEqual(waiting, [{"title": "DT WFE", "section_key": "DT WFE", "body": "Original table"}])
+        self.assertEqual(section_group_label("after_break", "DT WFE", "manual:DTWFE"), "AUTO-FILLED FROM PRIMEFLOW")
+        self.assertEqual(sections[sections.index(waiting[0]) - 1]["title"], UNFINISHED_PRIORITY_TABLE_LABEL)
+        self.assertIn("Other manual point", [section["title"] for section in sections])
+
     def test_edited_auto_title_keeps_its_original_m2_identity_and_position(self) -> None:
         saved = [{"title": title, "body": str(index)} for index, title in enumerate(SECTION_TITLES)]
         saved[4]["title"] = "DET TE PAKRYERA AM, 08:00/DEADLINE"
@@ -60,15 +76,17 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
         self.assertEqual(automatic[9:11], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
 
     def test_pcm_projects_use_title_codes_on_tasks_covering_the_report_day(self) -> None:
-        def task(title, start, due):
-            return SimpleNamespace(title=title, start_date=start, due_date=due)
+        def task(title, start, due, project_id=None):
+            return SimpleNamespace(title=title, start_date=start, due_date=due, project_id=project_id)
 
         day = date(2026, 11, 18)
-        tasks = [task("vs/vl: Produkte", date(2026, 11, 17), day),
+        tasks = [task("vs/vl/mst: Produkte", date(2026, 11, 17), day),
                  task("TT - Përditësim", day, date(2026, 11, 19)),
-                 task("MST: Nesër", date(2026, 11, 19), date(2026, 11, 20)),
-                 task("MSTUDIO", day, day), task("MST pa afat", day, None)]
-        self.assertEqual(_pcm_projects_summary(tasks, day), "VS - PO\nVL - PO\nMST - JO\nTT - PO")
+                 task("MST: Nesër", date(2026, 11, 19), date(2026, 11, 20), project_id="project"),
+                 task("MSTUDIO", day, day, project_id="project"), task("MST pa afat", day, None, project_id="project")]
+        self.assertEqual(_pcm_projects_summary(tasks, day), "VS - PO\nVL - PO\nMST - JO\nTT - JO")
+        tasks.append(task("MST / TT - Përditësim", day, day, project_id="project"))
+        self.assertEqual(_pcm_projects_summary(tasks, day), "VS - PO\nVL - PO\nMST - PO\nTT - PO")
 
         sections = normalize_after_break_report_sections([
             {"title": PCM_PROJECTS_TITLE, "section_key": PCM_PROJECTS_TITLE, "body": "(Ploteso manualisht)"},

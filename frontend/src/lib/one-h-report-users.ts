@@ -62,8 +62,8 @@ export function reportUserOptions(document: Document, plannerOrder: string[] = [
   return [...ordered, ...[...users].filter((person) => !ranked.has(person))]
 }
 
-export function collapseEmptyReportTaskRows(document: Document, filtering: boolean): void {
-  const rows = Array.from(document.querySelectorAll<HTMLTableRowElement>('tr[data-task-card-row="content"]'))
+export function collapseEmptyReportTaskRows(container: ParentNode, filtering: boolean): void {
+  const rows = Array.from(container.querySelectorAll<HTMLTableRowElement>('tr[data-task-card-row="content"]'))
   const groups = new Map<string, HTMLTableRowElement[]>()
   let group = ""
   rows.forEach((row, index) => {

@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 
 from app.api.deps import require_admin
+from app.api.routers import meetings_report as meetings_api
 from app.api.routers.meetings_report import DraftUpdate, RecipientsPayload, SectionPayload, router, update_draft
 from app.models.enums import UserRole
 from app.models.meetings_report_draft import MeetingsReportDraft
@@ -93,7 +94,7 @@ class ReportOwnerAndWfcTests(unittest.TestCase):
         self.assertEqual(SECTION_TITLES[13], "N- DET PERSONALISHT ME KA/GENTIN?")
         self.assertEqual(SECTION_TITLES[14], "N- WFC ME KA/GENTIN?")
         self.assertEqual(SECTION_TITLES[15], "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER")
-        self.assertTrue(is_manual_section_title("meetings", SECTION_TITLES[15]))
+        self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[15]))
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[13]))
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[14]))
         self.assertEqual(section_group_label("meetings", SECTION_TITLES[14]), "AUTO-FILLED FROM PRIMEFLOW")
@@ -207,6 +208,46 @@ def make_draft() -> MeetingsReportDraft:
 
 
 class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_opening_today_twice_refreshes_only_symbol_table(self) -> None:
+        draft = make_draft()
+        draft.sections = [{"title": SECTION_TITLES[15], "body": "Previous symbol table"},
+                          {"title": "Manual point", "body": "Saved manual answer"}]
+        draft.generated_snapshot = {"tomorrow_symbols_html": "Previous HTML", "counts": {}}
+        db = AsyncMock()
+        db.execute.return_value = ScalarResult(draft)
+        common_item = {"date": draft.tomorrow_date.isoformat(), "oneHReportSlot": "10:00", "title": "Marked task"}
+        common_view = AsyncMock(side_effect=[
+            {"items": {"oneH": [{**common_item, "oneHMarker": "F"}]}},
+            {"items": {"oneH": [common_item]}},
+        ])
+        with (patch.object(meetings_api, "_normalize_saved_draft_sections", new=AsyncMock()),
+              patch.object(meetings_api, "_is_current_report_day", return_value=True),
+              patch.object(meetings_api, "filter_report_sections", new=AsyncMock(side_effect=lambda _, sections, *args, **kwargs: sections)),
+              patch("app.api.routers.common_view.load_report_common_view", new=common_view)):
+            first = await meetings_api.get_draft(draft.report_date, db, None)
+            second = await meetings_api.get_draft(draft.report_date, db, None)
+        self.assertIn("Marked task", first["generated_snapshot"]["tomorrow_symbols_html"])
+        self.assertEqual(second["generated_snapshot"]["tomorrow_symbols_html"], "")
+        self.assertEqual(second["sections"][0]["body"], "Asnjë detyrë me simbol.")
+        self.assertEqual(second["sections"][1]["body"], "Saved manual answer")
+        self.assertEqual(draft.sections[0]["body"], "Previous symbol table")
+        db.commit.assert_not_awaited()
+
+    async def test_automatic_generation_keeps_existing_draft_and_ignores_history(self) -> None:
+        draft = make_draft()
+        db = AsyncMock()
+        db.execute.return_value = ScalarResult(draft)
+        with (patch.object(meetings_api, "_is_current_report_day", side_effect=[True, False]),
+              patch.object(meetings_api, "_draft", new=AsyncMock(return_value={"id": str(draft.id)})) as load,
+              patch.object(meetings_api, "build_meetings_report_sections", new=AsyncMock()) as build):
+            existing = await meetings_api.generate_draft(draft.report_date, db, None, create_if_missing=True)
+            with self.assertRaises(HTTPException) as error:
+                await meetings_api.generate_draft(draft.report_date, db, None, create_if_missing=True)
+        self.assertEqual(existing, {"id": str(draft.id)})
+        self.assertEqual(error.exception.status_code, 404)
+        load.assert_awaited_once_with(db, draft, refresh_symbols=True)
+        build.assert_not_awaited()
+
     def test_edited_auto_title_keeps_m3_identity_position_and_group(self) -> None:
         sections = normalize_meetings_report_sections(
             with_section_keys("meetings", [{"title": title, "body": str(i)} for i, title in enumerate(SECTION_TITLES)])
@@ -405,7 +446,7 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
 
     def test_section_exports_keep_email_groups_tables_and_status_colors(self) -> None:
         sections = [
-            {"title": SECTION_TITLES[15], "body": "(Ploteso manualisht)"},
+            {"title": "Pyetje manuale", "body": "(Ploteso manualisht)"},
             {
                 "title": "GA MBYLLJA E DET",
                 "body": (
@@ -513,7 +554,7 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
             ]
         )
         titles = [section["title"] for section in normalized]
-        self.assertEqual(titles[0], SECTION_TITLES[15])  # remaining built-in manual first
+        self.assertEqual(titles[1], SECTION_TITLES[15])  # first automatic section follows manual extras
         self.assertNotIn(SECTION_TITLES[0], titles)
         auto_titles = [title for title in titles if title == SECTION_TITLES[1]]
         self.assertEqual(auto_titles[0], SECTION_TITLES[1])  # tickets first among auto-filled
@@ -559,9 +600,9 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
                     {"title": "Edited daily points", "section_key": "manual:PIKATEDITES", "body": "Old answer"}, daily]
         sections = normalize_meetings_report_sections(original)
         with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles",
-                   AsyncMock(return_value=[title, "PIKAT E DITES", "Another point"])):
+                   AsyncMock(return_value=[title, "PIKAT E DITES", SECTION_TITLES[15], "Another point"])):
             merged = asyncio.run(merge_common_view_manual_sections(None, sections, "meetings", original, [legacy, daily]))
-        self.assertEqual([section["title"] for section in merged], [SECTION_TITLES[15], "Another point"])
+        self.assertEqual([section["title"] for section in merged], ["Another point", SECTION_TITLES[15]])
 
     def test_common_view_aliases_are_known_auto_not_manual(self) -> None:
         self.assertTrue(is_known_report_title("meetings", "(GA) M3 DET GA MBYLLJA ME HV/OH?"))

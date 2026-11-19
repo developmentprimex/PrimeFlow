@@ -18,6 +18,7 @@ NO_REPLY = "Nuk ka përgjigje ose komente nga GA për këtë raport."
 LEGACY_NO_REPLY = "Nuk ka përgjigje të lidhura nga GA."
 EMPTY_REPLY_ROW = "Asnjë reply"
 UNAVAILABLE = "Teksti i përgjigjeve të GA nuk është i disponueshëm."
+STALE_REPLY_NOTE = "Discord i lexuar deri në"
 LEGACY_REPLY_LINK = re.compile(r"^Përgjigjja GA: https://discord\.com/channels/\d+/\d+/(\d+)[ \t]*\r?$", re.M)
 GA_MESSAGES_CAPTION = "Përgjigjet dhe komentet e GA"
 GA_REPLIES_SECTION_TITLE = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
@@ -188,9 +189,12 @@ def _report_window(day, report, cutoff):
     return start, min(cutoff, end_of_day)
 
 
-def render_summary(evidence, captured_at, now, *, day=None, reply_ids=None, initials_by_user=None, window=None):
-    if (not evidence or evidence.get("status") == "UNAVAILABLE"
-            or now - captured_at > timedelta(minutes=5)):
+def render_summary(evidence, captured_at, now, *, day=None, reply_ids=None, initials_by_user=None, window=None,
+                   allow_verified_stale=False):
+    if not evidence or evidence.get("status") == "UNAVAILABLE":
+        return UNAVAILABLE
+    stale = now - captured_at > timedelta(minutes=5)
+    if stale and not allow_verified_stale:
         return UNAVAILABLE
     if window:
         start, cutoff = window
@@ -202,12 +206,16 @@ def render_summary(evidence, captured_at, now, *, day=None, reply_ids=None, init
         message_ids, linked_ids = _included_message_ids(evidence, day or captured_at.astimezone(report_timezone()).date(), reply_ids)
     rows = _ga_message_rows(evidence, message_ids, initials_by_user=initials_by_user or {})
     has_reply = bool(linked_ids) or _has_reply(evidence, message_ids)
-    if not rows and (has_reply or evidence["status"] == "PARTIAL"):
+    if not rows and (stale or has_reply or evidence["status"] == "PARTIAL"):
         return UNAVAILABLE
     values = [[str(index), *(value.replace("|", "¦") for value in row)] for index, row in enumerate(rows, 1)]
-    if not has_reply and evidence["status"] == "OK":
+    if not stale and not has_reply and evidence["status"] == "OK":
         values.append(["-", "", "", EMPTY_REPLY_ROW])
-    return _render_reply_table(values)
+    table = _render_reply_table(values)
+    if stale:
+        local_capture = captured_at.astimezone(report_timezone())
+        return f"{STALE_REPLY_NOTE} {local_capture:%d.%m.%Y %H:%M}.\n\n{table}"
+    return table
 
 
 async def _recipient_initials(db, evidence):
@@ -275,9 +283,12 @@ async def summary_for_day(db, day, *, report=None, generated_at=None):
             row = None
     if not row:
         return UNAVAILABLE
-    return render_summary(row.evidence, row.captured_at, now if current else row.captured_at,
+    window = _report_window(day, report, generated_at or now) if report else None
+    verified_fallback = report in {"M1", "M2"}
+    reference = window[1] if verified_fallback else now if current else row.captured_at
+    return render_summary(row.evidence, row.captured_at, reference,
                           day=day, initials_by_user=await _recipient_initials(db, row.evidence),
-                          window=_report_window(day, report, generated_at or now) if report else None)
+                          window=window, allow_verified_stale=verified_fallback)
 
 
 async def refresh_m1_section(db, sections, day, *, refresh_current=True, sent_at=None, generated_snapshot=None):
@@ -287,8 +298,19 @@ async def refresh_m1_section(db, sections, day, *, refresh_current=True, sent_at
 
 async def refresh_ga_reply_section(db, sections, day, *, report=None, refresh_current=True, sent_at=None,
                                    populate_missing=False, generated_snapshot=None):
-    if (generated_snapshot or {}).get("ga_replies_generated_at"):
-        return sections
+    if generated_at := (generated_snapshot or {}).get("ga_replies_generated_at"):
+        if report not in {"M1", "M2"}:
+            return sections
+        result = []
+        for section in sections:
+            body = section.get("body") or ""
+            if ((section.get("section_key") or section.get("title")) == GA_REPLIES_SECTION_TITLE
+                    and (body == UNAVAILABLE or body.startswith(STALE_REPLY_NOTE))):
+                refreshed = await summary_for_day(db, day, report=report, generated_at=datetime.fromisoformat(generated_at))
+                if refreshed != UNAVAILABLE:
+                    section = {**section, "body": refreshed}
+            result.append(section)
+        return result
     current = refresh_current and day == datetime.now(report_timezone()).date()
     result = []
     for section in sections:

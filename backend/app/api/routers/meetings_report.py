@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_manager_or_admin
@@ -20,7 +21,10 @@ from app.models.user import User
 from app.services.meetings_report import (
     MANUAL_SECTION_TITLES,
     build_meetings_report_sections,
+    is_tomorrow_symbols_section,
+    meetings_sections_for_snapshot,
     normalize_meetings_report_sections,
+    refresh_meetings_symbols,
     without_retired_meetings_sections,
     render_html,
     render_plain_text,
@@ -145,7 +149,20 @@ def _settings(row: MeetingsReportSettings) -> dict:
     }
 
 
-async def _draft(db: AsyncSession, row: MeetingsReportDraft) -> dict:
+def _is_current_report_day(report_date: date) -> bool:
+    return report_date == datetime.now(report_timezone()).date()
+
+
+async def _draft_content(db: AsyncSession, row: MeetingsReportDraft, *, refresh_symbols: bool) -> tuple[list[dict], dict | None]:
+    snapshot = row.generated_snapshot
+    sections = meetings_sections_for_snapshot(row.sections, snapshot)
+    if refresh_symbols and _is_current_report_day(row.report_date):
+        return await refresh_meetings_symbols(db, row.tomorrow_date, sections, snapshot)
+    return sections, snapshot
+
+
+async def _draft(db: AsyncSession, row: MeetingsReportDraft, *, refresh_symbols: bool = False) -> dict:
+    sections, snapshot = await _draft_content(db, row, refresh_symbols=refresh_symbols)
     return {
         "id": str(row.id),
         "report_date": row.report_date.isoformat(),
@@ -153,9 +170,9 @@ async def _draft(db: AsyncSession, row: MeetingsReportDraft) -> dict:
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
         "sections": with_section_keys("meetings", await filter_report_sections(
-            db, without_retired_meetings_sections(row.sections), row.report_date, tomorrow=row.tomorrow_date,
+            db, sections, row.report_date, tomorrow=row.tomorrow_date,
         )),
-        "generated_snapshot": row.generated_snapshot,
+        "generated_snapshot": snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
         "gmail_message_id": row.gmail_message_id,
@@ -256,7 +273,7 @@ async def get_draft(
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     await _normalize_saved_draft_sections(db, row)
-    return await _draft(db, row)
+    return await _draft(db, row, refresh_symbols=True)
 
 
 @router.post("/generate")
@@ -264,15 +281,23 @@ async def generate_draft(
     report_date: date,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_meetings_report_user),
+    create_if_missing: bool = False,
 ) -> dict:
+    draft_query = select(MeetingsReportDraft).where(MeetingsReportDraft.report_date == report_date)
+    if create_if_missing:
+        if not _is_current_report_day(report_date):
+            raise HTTPException(status_code=404, detail="Draft not found")
+        existing = (await db.execute(draft_query)).scalar_one_or_none()
+        if existing is not None:
+            return await _draft(db, existing, refresh_symbols=True)
     try:
         tomorrow, sections, snapshot = await build_meetings_report_sections(db, report_date)
         recipients = await _default_draft_recipients(db)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Generate failed: {exc}") from exc
-    row = (
-        await db.execute(select(MeetingsReportDraft).where(MeetingsReportDraft.report_date == report_date))
-    ).scalar_one_or_none()
+    row = (await db.execute(draft_query)).scalar_one_or_none()
+    if create_if_missing and row is not None:
+        return await _draft(db, row, refresh_symbols=True)
     if row is not None:
         sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
     settings = await _get_or_create_settings(db)
@@ -302,7 +327,16 @@ async def generate_draft(
         row.status = "DRAFT"
         row.last_error = None
         row.updated_by_user_id = user.id
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        if not create_if_missing:
+            raise
+        await db.rollback()
+        existing = (await db.execute(draft_query)).scalar_one_or_none()
+        if existing is None:
+            raise
+        return await _draft(db, existing, refresh_symbols=True)
     await db.refresh(row)
     return await _draft(db, row)
 
@@ -341,6 +375,11 @@ async def update_draft(
             }
             for section in payload.sections
         ]))
+        automatic = next((section for section in row.sections or [] if is_tomorrow_symbols_section(section)), None)
+        position = next((index for index, section in enumerate(saved) if is_tomorrow_symbols_section(section)), 0)
+        saved = [section for section in saved if not is_tomorrow_symbols_section(section)]
+        if automatic is not None:
+            saved.insert(position, automatic)
         previous_questions = custom_manual_questions(row.sections)
         current_questions = custom_manual_questions(saved)
         if current_questions != previous_questions:
@@ -353,7 +392,7 @@ async def update_draft(
     row.updated_by_user_id = user.id
     await db.commit()
     await db.refresh(row)
-    return await _draft(db, row)
+    return await _draft(db, row, refresh_symbols=True)
 
 
 @router.get("/{draft_id}/preview")
@@ -365,10 +404,12 @@ async def preview_draft(
     row = await db.get(MeetingsReportDraft, draft_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
-    sections = await filter_report_sections(db, without_retired_meetings_sections(row.sections), row.report_date, tomorrow=row.tomorrow_date)
+    sections, snapshot = await _draft_content(db, row, refresh_symbols=True)
+    sections = await filter_report_sections(db, sections, row.report_date, tomorrow=row.tomorrow_date)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, row.tomorrow_date, sections),
-        "html": render_html(row.subject, row.report_date, row.tomorrow_date, sections),
+        "html": render_html(row.subject, row.report_date, row.tomorrow_date, sections,
+                            tomorrow_symbols_html=(snapshot or {}).get("tomorrow_symbols_html")),
     }
 
 
@@ -384,9 +425,11 @@ async def send_draft(
     recipients = normalize_recipients(row.recipients)
     if not recipients["to"]:
         raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
-    sections = await filter_report_sections(db, without_retired_meetings_sections(row.sections), row.report_date, tomorrow=row.tomorrow_date)
+    sections, snapshot = await _draft_content(db, row, refresh_symbols=True)
+    sections = await filter_report_sections(db, sections, row.report_date, tomorrow=row.tomorrow_date)
     plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, sections)
-    html_body = render_html(row.subject, row.report_date, row.tomorrow_date, sections)
+    html_body = render_html(row.subject, row.report_date, row.tomorrow_date, sections,
+                            tomorrow_symbols_html=(snapshot or {}).get("tomorrow_symbols_html"))
     try:
         _validate_gmail_config()
         message = await send_meetings_report(

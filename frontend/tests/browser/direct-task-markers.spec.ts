@@ -95,6 +95,46 @@ async function chooseSymbols(page: Page, id: string) {
   await expect(editor.locator('[data-task-marker-symbol]')).toHaveText(['!!!', 'M3'])
 }
 
+test("M3 opens the Tomorrow table by default and filters task cards by multiple symbols", async ({ page }) => {
+  await fixture(page)
+  await page.route(/\/api\/meetings-report\?report_date=/, (route) => route.fulfill({ json: {
+    id: "m3-test", report_date: "2026-11-19", tomorrow_date: "2026-11-20", subject: "M3", status: "DRAFT",
+    recipients: { to: [], cc: [], bcc: [] },
+    sections: [{ title: "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER", body: "" }],
+    generated_snapshot: { tomorrow_symbols_html: `
+      <table><tbody>
+        <tr data-task-card-row="content"><th rowspan="2">1H 10:00</th>
+          <td data-task-id="f" data-task-marker="F,QUESTION"><span data-task-title-text="true">Physical task</span></td>
+          <td data-task-id="ka" data-task-marker="KA"><span data-task-title-text="true">KA task</span></td>
+        </tr>
+        <tr data-task-card-row="dates"><td>Physical date</td><td>KA date</td></tr>
+        <tr data-task-card-row="content"><th rowspan="2">1H 11:00</th>
+          <td data-task-id="gent" data-task-marker="GENT"><span data-task-title-text="true">Genti task</span></td>
+        </tr>
+        <tr data-task-card-row="dates"><td>Genti date</td></tr>
+      </tbody></table>` },
+  } }))
+
+  await page.goto("/meetings-report")
+  await expect(page.getByText("Physical task", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Fshihe tabelën" }).click()
+  await expect(page.getByText("Physical task", { exact: true })).toBeHidden()
+  await page.getByRole("button", { name: "Shfaq tabelën" }).click()
+  await page.getByText("Simbolet Të gjitha", { exact: true }).click()
+  await page.getByRole("checkbox", { name: "?", exact: true }).check()
+  await expect(page.getByText("Physical task", { exact: true })).toBeVisible()
+  await expect(page.getByText("KA date", { exact: true })).toBeHidden()
+  await expect(page.getByText("1H 11:00", { exact: true })).toBeHidden()
+  await page.getByRole("checkbox", { name: "KA", exact: true }).check()
+  await expect(page.getByText("KA task", { exact: true })).toBeVisible()
+  await page.getByRole("checkbox", { name: "X", exact: true }).check()
+  await page.getByRole("checkbox", { name: "KA", exact: true }).uncheck()
+  await page.getByRole("checkbox", { name: "?", exact: true }).uncheck()
+  await expect(page.getByText("Asnjë detyrë me simbolet e zgjedhura.")).toBeVisible()
+  await page.getByRole("button", { name: "Të gjitha simbolet" }).click()
+  await expect(page.getByText("Genti task", { exact: true })).toBeVisible()
+})
+
 test("Weekly Planner saves only one owner's task and synchronizes all repeated cards", async ({ page }, info) => {
   const { tasks, writes } = await fixture(page)
   await page.goto("/weekly-planner?week=next")
