@@ -66,6 +66,7 @@ DONE_AM_TABLE_LABEL = "DET E KRYERA NE AM"
 UNHELD_MEETINGS_TABLE_LABEL = "TAK INT/EXT TE PAMBAJTURA"
 PCM_PROJECTS_TITLE = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
 PCM_PROJECT_CODES = ("VS", "VL", "MST", "TT")
+PCM_CODES_REQUIRING_PROJECT = {"MST", "TT"}
 PCM_PROJECT_CODE_PATTERN = re.compile(r"(?<![A-Z0-9])(?:VS|VL|MST|TT)(?![A-Z0-9])", re.IGNORECASE)
 PCM_PROJECT_SUMMARY_PATTERN = re.compile("\n".join(f"{code} - (?:PO|JO)" for code in PCM_PROJECT_CODES))
 AUTOMATED_SECTION_TITLES = {GA_REPLIES_SECTION_TITLE, PCM_PROJECTS_TITLE}
@@ -752,7 +753,10 @@ def _pcm_projects_summary(tasks: list[Task], report_day: date) -> str:
     for task in tasks:
         start, due = _local_date(task.start_date), _local_date(task.due_date)
         if start and due and start <= report_day <= due:
-            worked.update(code.upper() for code in PCM_PROJECT_CODE_PATTERN.findall(task.title or ""))
+            codes = {code.upper() for code in PCM_PROJECT_CODE_PATTERN.findall(task.title or "")}
+            if task.project_id is None:
+                codes -= PCM_CODES_REQUIRING_PROJECT
+            worked.update(codes)
     return "\n".join(f"{code} - {'PO' if code in worked else 'JO'}" for code in PCM_PROJECT_CODES)
 
 

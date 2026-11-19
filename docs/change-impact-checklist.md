@@ -91,7 +91,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 - M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
   importi nga Common View të mos krijojnë kopje në grupin manual të M2.
 
-- M3 PIKAT PER RAP: **NËNNGARKESË** merr stafin nga caktimet kryesore dhe
+- M3 PIKAT PER RAP: **NËNNGARKESË NESER?** merr stafin nga caktimet kryesore dhe
   shtesë të detyrave aktive që përmbajnë `NËNNGARKESË` në rreshtin e titullit
   për datën e raportit. Kontrollo titujt me tekst para dhe pas fjalës.
   Kontrollo faqen, pamjen paraprake, emailin dhe bashkëngjitjet HTML, Word dhe PNG.
@@ -109,6 +109,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 - M2: **PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU** shfaq PO/JO për VS,
   VL, MST dhe TT sipas kodeve në titujt e detyrave të caktuara stafit PCM.
+  MST dhe TT kërkojnë një detyrë të lidhur me projekt (`project_id`), ndërsa
+  VS dhe VL llogarisin edhe detyrat pa projekt.
   Data e raportit duhet të bjerë brenda Start Date–Due Date. Kontrollo caktimet
   kryesore dhe shtesë, rigjenerimin, preview, emailin dhe bashkëngjitjet e M2.
 

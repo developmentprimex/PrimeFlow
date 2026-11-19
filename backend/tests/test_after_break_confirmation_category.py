@@ -76,15 +76,17 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
         self.assertEqual(automatic[9:11], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
 
     def test_pcm_projects_use_title_codes_on_tasks_covering_the_report_day(self) -> None:
-        def task(title, start, due):
-            return SimpleNamespace(title=title, start_date=start, due_date=due)
+        def task(title, start, due, project_id=None):
+            return SimpleNamespace(title=title, start_date=start, due_date=due, project_id=project_id)
 
         day = date(2026, 11, 18)
-        tasks = [task("vs/vl: Produkte", date(2026, 11, 17), day),
+        tasks = [task("vs/vl/mst: Produkte", date(2026, 11, 17), day),
                  task("TT - Përditësim", day, date(2026, 11, 19)),
-                 task("MST: Nesër", date(2026, 11, 19), date(2026, 11, 20)),
-                 task("MSTUDIO", day, day), task("MST pa afat", day, None)]
-        self.assertEqual(_pcm_projects_summary(tasks, day), "VS - PO\nVL - PO\nMST - JO\nTT - PO")
+                 task("MST: Nesër", date(2026, 11, 19), date(2026, 11, 20), project_id="project"),
+                 task("MSTUDIO", day, day, project_id="project"), task("MST pa afat", day, None, project_id="project")]
+        self.assertEqual(_pcm_projects_summary(tasks, day), "VS - PO\nVL - PO\nMST - JO\nTT - JO")
+        tasks.append(task("MST / TT - Përditësim", day, day, project_id="project"))
+        self.assertEqual(_pcm_projects_summary(tasks, day), "VS - PO\nVL - PO\nMST - PO\nTT - PO")
 
         sections = normalize_after_break_report_sections([
             {"title": PCM_PROJECTS_TITLE, "section_key": PCM_PROJECTS_TITLE, "body": "(Ploteso manualisht)"},
