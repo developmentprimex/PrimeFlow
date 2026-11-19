@@ -101,10 +101,43 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
             def upgrade(c):
                 with patch.object(module,'op',Operations(MigrationContext.configure(c))):module.upgrade()
                 # 0156_mira_memory adds the memory columns after this frozen migration.
-                later={'memory_status','memory_attempts','memory_error','memory_lease_until','recorder'}
+                later={'memory_status','memory_attempts','memory_error','memory_lease_until','recorder',
+                    'dictation_progress','quick_summary'}
                 self.assertEqual({x['name'] for x in inspect(c).get_columns(Meeting.__tablename__,schema=self.schema)},set(Meeting.__table__.c.keys())-later)
                 self.assertTrue(any(x['name']=='uq_discord_voice_active_guild' and x['unique'] for x in inspect(c).get_indexes(Meeting.__tablename__,schema=self.schema)))
             await conn.run_sync(upgrade)
+
+    async def test_quick_summary_migration_preserves_legacy_notes(self):
+        import importlib.util
+        from pathlib import Path
+        from alembic.migration import MigrationContext
+        from alembic.operations import Operations
+
+        path = Path(__file__).resolve().parents[1] / 'alembic/versions/0192_mira_quick_summary.py'
+        spec = importlib.util.spec_from_file_location('mira_quick_summary_migration', path)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        sid = uuid.uuid4()
+        async with self.sessions() as db:
+            db.add(Meeting(id=sid, user_id=self.uid, link_id=self.lid, guild_id='123', voice_channel_id='55',
+                private_channel_id='44', request_id=sid.hex, instance_id=uuid.uuid4(), capture_token_hash='test',
+                title='Takimi historik', status='READY', draft_text='Shënimet ekzistuese.'))
+            await db.commit()
+
+        async with self.engine.begin() as conn:
+            await conn.execute(text(f'SET LOCAL search_path TO {self.schema},public'))
+
+            def roundtrip(connection):
+                operations = Operations(MigrationContext.configure(connection))
+                with patch.object(migration, 'op', operations):
+                    migration.downgrade()
+                    migration.upgrade()
+
+            await conn.run_sync(roundtrip)
+        async with self.sessions() as db:
+            row = await db.get(Meeting, sid)
+            self.assertEqual(row.draft_text, 'Shënimet ekzistuese.')
+            self.assertIsNone(row.quick_summary)
 
     async def test_two_recorders_run_concurrently_but_each_keeps_its_own_lock_and_notes(self):
         import asyncio

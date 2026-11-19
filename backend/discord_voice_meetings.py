@@ -397,11 +397,15 @@ async def deliver_meeting_results(bot):
             log.warning('Skipped meeting delivery from another recorder')
             continue
         try:
-            if job['guild_id']==settings.DISCORD_GUILD_ID and job['channel_id']==settings.DISCORD_MEETING_CONTROL_CHANNEL_ID:
+            if (not job.get('private_only') and job['guild_id']==settings.DISCORD_GUILD_ID
+                    and job['channel_id']==settings.DISCORD_MEETING_CONTROL_CHANNEL_ID):
                 channel=await bot.meeting_capture.panel.channel()
             else:
                 channel=await bot.private_channel(job['guild_id'],job['channel_id'],job['discord_user_id'])
-            row=await bot.bridge(PREFIX+f"/{job['id']}/detail",{k:job[k] for k in ('discord_user_id','guild_id','channel_id')})
+            row = await bot.bridge(PREFIX + f"/{job['id']}/detail", {
+                'discord_user_id': job['discord_user_id'], 'guild_id': job['guild_id'],
+                'channel_id': job.get('detail_channel_id', job['channel_id']),
+            })
             ids=await send_durable(bot,channel,row)
             await bot.bridge(PREFIX+f"/{job['id']}/delivery/ack",{'delivery_token':job['delivery_token'],'message_ids':ids})
         except Exception:

@@ -1,4 +1,4 @@
-export type MiraTab = "takimet" | "shenimet" | "knowledge" | "kujtesa" | "cilesimet"
+export type MiraTab = "takimet" | "notetaker" | "shenimet" | "knowledge" | "kujtesa" | "cilesimet"
 
 export type TurnPerson = { initials: string; status: string }
 

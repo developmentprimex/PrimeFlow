@@ -28,6 +28,7 @@ class DiscordVoiceMeeting(Base):
     expected_segments: Mapped[int | None] = mapped_column(Integer)
     stop_authorized: Mapped[bool] = mapped_column(Boolean, default=False)
     draft_text: Mapped[str | None] = mapped_column(Text)
+    quick_summary: Mapped[dict | None] = mapped_column(JSONB)
     summary_progress: Mapped[dict | None] = mapped_column(JSONB)
     dictation_progress: Mapped[dict | None] = mapped_column(JSONB)
     saved_note_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('ga_notes.id', ondelete='SET NULL'))

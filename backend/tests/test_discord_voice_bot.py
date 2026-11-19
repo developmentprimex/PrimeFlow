@@ -101,6 +101,28 @@ class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
                 bot.bridge.assert_awaited_once_with('/bot/voice-meetings/delivery/claim',{'recorder':recorder})
                 send.assert_not_awaited();bot.private_channel.assert_not_awaited()
 
+    async def test_saved_ai_agent_delivery_requires_private_channel(self):
+        from discord_voice_meetings import deliver_meeting_results, settings
+
+        job = {'id': 'meeting', 'recorder': 'ai_agent', 'guild_id': '123', 'channel_id': '44',
+            'detail_channel_id': '45', 'discord_user_id': '12', 'delivery_token': 'token', 'private_only': True}
+        record = {'id': 'meeting', 'status': 'SAVED'}
+        private = AsyncMock(side_effect=[ValueError('privacy_check_failed'), object()])
+        bot = SimpleNamespace(voice_recorder='ai_agent', private_channel=private,
+            meeting_capture=SimpleNamespace(panel=SimpleNamespace(channel=AsyncMock())),
+            bridge=AsyncMock(side_effect=[{'jobs': [job]}, {'jobs': [job]}, record, {}]))
+        with patch.object(settings, 'DISCORD_GUILD_ID', '123'), \
+             patch.object(settings, 'DISCORD_MEETING_CONTROL_CHANNEL_ID', '44'), \
+             patch('discord_voice_meetings.send_durable', AsyncMock(return_value=['sent'])) as send:
+            await deliver_meeting_results(bot)
+            send.assert_not_awaited()
+            await deliver_meeting_results(bot)
+        bot.meeting_capture.panel.channel.assert_not_awaited()
+        self.assertEqual(private.await_count, 2)
+        self.assertEqual(bot.bridge.await_args_list[2].args[1]['channel_id'], '45')
+        self.assertEqual(bot.bridge.await_args_list[3].args[1]['message_ids'], ['sent'])
+        send.assert_awaited_once()
+
     async def test_installed_discord_websocket_dispatches_voice_data_to_capture(self):
         import json
         import discord.gateway

@@ -33,6 +33,8 @@ def view(row):
         created_at=row.created_at.isoformat() if row.created_at else None,
         organizer_user_id=str(row.user_id), voice_channel_id=row.voice_channel_id,
         private_channel_id=row.private_channel_id, error=row.error, draft_text=row.draft_text,
+        quick_summary=getattr(row, 'quick_summary', None),
+        started_at=(getattr(row, 'started_at', None) or row.created_at).isoformat() if row.created_at else None,
         saved_note_id=str(row.saved_note_id) if row.saved_note_id else None,
         note_url=settings.FRONTEND_URL.rstrip('/') + ('/mira?tab=shenimet'
             if settings.DISCORD_MEETING_CONTROL_CHANNEL_ID and row.private_channel_id == settings.DISCORD_MEETING_CONTROL_CHANNEL_ID
@@ -239,7 +241,12 @@ async def claim_deliveries(db, *, recorder='primary'):
     from app.services.discord_meeting_control import voice_id
     voice_id(recorder)  # Reject unknown recorders before acquiring any delivery leases.
     rows=(await db.execute(select(Meeting,DiscordLink).join(DiscordLink,DiscordLink.id==Meeting.link_id)
-        .join(User,User.id==Meeting.user_id).where(Meeting.recorder==recorder, Meeting.status.in_(['READY','FAILED']),
+        .join(User,User.id==Meeting.user_id).where(Meeting.recorder==recorder,
+            or_(Meeting.status.in_(['READY','FAILED']),
+                (Meeting.status == 'SAVED') & (Meeting.recorder == 'ai_agent') &
+                Meeting.request_id.like('autoai-%') & Meeting.quick_summary.is_not(None) &
+                DiscordLink.channel_id.is_not(None) &
+                DiscordLink.channel_id.is_distinct_from(settings.DISCORD_MEETING_CONTROL_CHANNEL_ID)),
             Meeting.delivered_at.is_(None),or_(Meeting.delivery_until.is_(None),Meeting.delivery_until<now()),
             DiscordLink.enabled.is_(True),User.is_active.is_(True),or_(DiscordLink.channel_id==Meeting.private_channel_id,
                 Meeting.private_channel_id==settings.DISCORD_MEETING_CONTROL_CHANNEL_ID),
@@ -248,8 +255,10 @@ async def claim_deliveries(db, *, recorder='primary'):
     jobs=[]
     for row,link in rows:
         row.delivery_token=uuid.uuid4();row.delivery_until=now()+timedelta(minutes=5)
-        jobs.append(dict(id=str(row.id),recorder=row.recorder,guild_id=row.guild_id,channel_id=row.private_channel_id,
-            discord_user_id=link.discord_user_id,delivery_token=str(row.delivery_token)))
+        destination = link.channel_id if row.status == 'SAVED' else row.private_channel_id
+        jobs.append(dict(id=str(row.id), recorder=row.recorder, guild_id=row.guild_id, channel_id=destination,
+            detail_channel_id=row.private_channel_id, discord_user_id=link.discord_user_id,
+            private_only=row.status == 'SAVED', delivery_token=str(row.delivery_token)))
     await db.commit()
     return {'jobs':jobs}
 
@@ -260,3 +269,30 @@ async def ack_delivery(db,session_id,payload):
     row.message_ids=payload.message_ids;row.delivered_at=now();row.delivery_until=None
     await db.commit()
     return {'success':True}
+
+
+def meeting_record_query(user):
+    # The personal record currently requires ownership. Shared Discord controls
+    # authorize their own channel and do not grant web access to other accounts.
+    return select(Meeting).where(Meeting.user_id == user.id,
+        Meeting.status.in_(['READY', 'SAVED', 'FAILED']))
+
+
+async def list_meeting_records(db, user, limit, offset):
+    rows = (await db.execute(meeting_record_query(user)
+        .with_only_columns(Meeting.id, Meeting.title, Meeting.started_at, Meeting.created_at, Meeting.partial)
+        .order_by(Meeting.created_at.desc(), Meeting.id).limit(limit).offset(offset))).all()
+    return {'items': [{'id': str(row.id), 'title': row.title, 'started_at': (row.started_at or row.created_at).isoformat(),
+        'partial': row.partial} for row in rows]}
+
+
+async def meeting_record(db, user, session_id):
+    row = await db.scalar(meeting_record_query(user).where(Meeting.id == session_id))
+    if row is None:
+        raise HTTPException(404, 'Takimi nuk u gjet.')
+    segments = (await db.scalars(select(Segment).where(Segment.session_id == row.id, Segment.status == 'DONE',
+        Segment.transcript.is_not(None)).order_by(Segment.start_ms, Segment.sequence))).all()
+    return {'id': str(row.id), 'title': row.title, 'started_at': (row.started_at or row.created_at).isoformat(),
+        'partial': row.partial, 'quick_summary': row.quick_summary, 'full_notes': row.draft_text, 'error': row.error,
+        'transcript': [{'id': str(segment.id), 'speaker': segment.speaker_name, 'start_ms': segment.start_ms,
+            'end_ms': segment.end_ms, 'text': segment.transcript} for segment in segments]}

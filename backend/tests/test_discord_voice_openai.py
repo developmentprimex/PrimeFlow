@@ -15,6 +15,62 @@ def wav(pcm=b'\x20\x10\x20\x10'*480):
     return f.getvalue()
 
 class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_quick_summary_has_five_sections_and_keeps_empty_decisions(self):
+        from datetime import datetime, timezone
+        quick = dict.fromkeys(provider.QUICK_SECTIONS, [])
+        quick['discussion'] = ['GA dhe Ana diskutuan Modeco dhe Dantese.']
+        quick['actions'] = ['GA kërkoi të kontrollohej Modeco deri nesër (20.11.2026).']
+        quick['open_points'] = ['Për Dantese mungon përgjigjja e klientit.']
+        response = {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps(quick)}]}]}
+        with patch.object(provider, 'with_retries', AsyncMock(return_value=response)) as call:
+            result = await provider.summarize_meeting('Takimi', [{'speaker': 'GA', 'text': 'Kontrollojeni Modeco deri nesër.'},
+                {'speaker': 'Ana', 'text': 'Pritet ende klienti për Dantese.'}],
+                meeting_date=datetime(2026, 11, 19, 12, tzinfo=timezone.utc), quick=True)
+        self.assertEqual(result, quick)
+        payload = call.call_args.kwargs['json']
+        self.assertTrue(payload['text']['format']['strict'])
+        self.assertEqual(json.loads(payload['input'][1]['content'])['meeting_date'], '2026-11-19')
+
+    def test_quick_summary_rejects_invalid_sections(self):
+        with self.assertRaisesRegex(ValueError, 'invalid_quick_summary'):
+            provider.checked_quick_summary('{"discussion": []}')
+        quick = dict.fromkeys(provider.QUICK_SECTIONS, [])
+        quick['discussion'] = ['Temë'] * 8
+        with self.assertRaisesRegex(ValueError, 'quick_summary_too_long'):
+            provider.checked_quick_summary(json.dumps(quick))
+
+    async def test_long_quick_summary_reduces_all_parts_before_final_output(self):
+        quick = dict.fromkeys(provider.QUICK_SECTIONS, [])
+        quick['decisions'] = ['Vendimi i pjesës së fundit.']
+
+        def response(text):
+            return {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': text}]}]}
+
+        segments = [{'text': 'a' * 150, 'speaker': 'GA'}, {'text': 'b' * 150, 'speaker': 'Ana'}]
+        with patch.object(provider, 'SUMMARY_DIRECT_CHARS', 250), patch.object(provider, 'SUMMARY_GROUP_CHARS', 200), \
+             patch.object(provider, 'with_retries', AsyncMock(side_effect=[response('Pjesa e parë.'),
+                 response('Vendimi i pjesës së fundit.'), response(json.dumps(quick))])) as call:
+            self.assertEqual(await provider.summarize_meeting('Takimi', segments, quick=True), quick)
+        final_payload = call.call_args.kwargs['json']
+        self.assertEqual(json.loads(final_payload['input'][1]['content'])['segments'],
+            ['Pjesa e parë.', 'Vendimi i pjesës së fundit.'])
+
+    def test_discord_quick_summary_links_full_notes_and_warns_about_partial_transcript(self):
+        from discord_voice_ui import result_message
+        quick = dict.fromkeys(provider.QUICK_SECTIONS, [])
+        quick['decisions'] = ['Vendimi i konfirmuar.']
+        result = result_message({'id': 'test-id', 'title': 'Modeco', 'status': 'READY',
+            'partial': True, 'started_at': '2026-11-19T09:00:00+00:00', 'quick_summary': quick,
+            'draft_text': 'Ky është transkripti i plotë.'})
+        embed = result['embed']
+        self.assertEqual(embed.title, 'MIRA | Meeting Notes')
+        for label in provider.QUICK_SECTIONS.values():
+            self.assertIn(label, embed.description)
+        self.assertIn('Regjistrimi ose transkripti është i pjesshëm.', embed.description)
+        self.assertIn('meeting=test-id&view=full', embed.description)
+        self.assertIn('meeting=test-id&view=transcript', embed.description)
+        self.assertNotIn('Ky është transkripti i plotë', embed.description)
+
     async def test_short_speech_tail_is_padded_to_provider_minimum_without_changing_samples(self):
         pcm=b'\x20\x10\x20\x10'*960
         with patch.object(provider,'request',AsyncMock(return_value={'text':'Po.'})) as call:

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import discord
 from discord.http import handle_message_parameters
 from app.config import settings
+from app.services.discord_voice_openai import QUICK_SECTIONS, albanian_date
 
 
 def meeting_view(row):
@@ -21,6 +22,25 @@ def meeting_view(row):
 
 
 def result_message(row):
+    quick = row.get('quick_summary')
+    if quick:
+        root = settings.FRONTEND_URL.rstrip('/') + '/mira?tab=notetaker&meeting=' + row['id']
+        date = albanian_date(datetime.fromisoformat(row['started_at'])) if row.get('started_at') else ''
+        lines = [' | '.join(filter(None, (date, discord.utils.escape_markdown(row['title']))))]
+        if row.get('partial'):
+            lines.append('⚠️ Regjistrimi ose transkripti është i pjesshëm.')
+        header = '\n\n'.join(lines)
+        for key, label in QUICK_SECTIONS.items():
+            items = ['• ' + discord.utils.escape_markdown(item, ignore_links=False) for item in quick[key]]
+            lines.append('\n'.join([f'**{label}**', *(items or ['—'])]))
+        links = f'[Shënimet e plota]({root}&view=full) | [Transkripti]({root}&view=transcript)'
+        description = '\n\n'.join([*lines, links])
+        if len(description.encode('utf-16-le')) // 2 <= 4096:
+            return {'embed': discord.Embed(title='MIRA | Meeting Notes', description=description), 'view': meeting_view(row)}
+        # Discord counts the escaped rendering. Keep all points when markup makes it too long.
+        plain = '\n\n'.join('\n'.join([label, *(quick[key] or ['—'])]) for key, label in QUICK_SECTIONS.items())
+        return {'embed': discord.Embed(title='MIRA | Meeting Notes', description='\n\n'.join([header, links])),
+            'view': meeting_view(row), 'file': discord.File(io.BytesIO(plain.encode('utf-8')), filename='permbledhja.txt')}
     text=row.get('draft_text') or row.get('error') or 'Shënimet po përgatiten.'
     embed=discord.Embed(title='Shënimet e takimit',description=text if len(text)<=1800 else None)
     parts={'embed':embed,'view':meeting_view(row)}
@@ -30,7 +50,8 @@ def result_message(row):
 
 async def send_durable(bot, channel, row):
     marker=f"Mira takim · {row['id']}"
-    marker_url=settings.FRONTEND_URL.rstrip('/')+'/mira?tab=shenimet&meeting='+row['id']
+    tab = 'notetaker' if row.get('quick_summary') else 'shenimet'
+    marker_url = settings.FRONTEND_URL.rstrip('/') + f'/mira?tab={tab}&meeting=' + row['id']
     created=datetime.fromisoformat(row['created_at']) if row.get('created_at') else None
     async for previous in channel.history(limit=None,after=created-timedelta(seconds=5) if created else None):
         if previous.author.id==bot.user.id and any(e.footer.text==marker or e.url==marker_url for e in previous.embeds):return [str(previous.id)]

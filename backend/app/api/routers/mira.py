@@ -10,6 +10,7 @@ from app.api.deps import get_current_user, require_manager_or_admin
 from app.db import get_db
 from app.models.mira_host import MiraKnowledgeItem
 from app.services import mira_host as host
+from app.services import discord_voice_meetings as notetaker
 from app.services.mira_note_groups import grouped_notes
 
 router = APIRouter()
@@ -59,6 +60,17 @@ def knowledge_row(row: MiraKnowledgeItem) -> dict:
 @router.get('/meetings')
 async def meetings(limit: int = 50, offset: int = 0, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     return await host.list_meetings(db, min(max(limit, 1), 200), max(offset, 0))
+
+
+@router.get('/notetaker/meetings')
+async def notetaker_meetings(limit: int = Query(default=30, ge=1, le=100), offset: int = Query(default=0, ge=0),
+                             db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return await notetaker.list_meeting_records(db, user, limit, offset)
+
+
+@router.get('/notetaker/meetings/{meeting_id}')
+async def notetaker_meeting(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return await notetaker.meeting_record(db, user, meeting_id)
 
 
 @router.get('/meetings/{meeting_id}')

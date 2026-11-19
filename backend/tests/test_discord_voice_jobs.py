@@ -155,12 +155,23 @@ class VoiceJobTests(PostgresMeetingTests):
     async def test_scheduled_ai_agent_saves_once_and_links_panel_and_transcript(self):
         from sqlalchemy import select, func
         from app.models.ga_note import GaNote
+        from app.models.discord_assistant import DiscordLink
         from app.services import mira_host
         from app.services.discord_meeting_control import panel_state
         from app.schemas.discord_voice_meeting import ControlScope
         sid = await self.scheduled_meeting(timedelta(minutes=2), recorder='ai_agent')
+        async with self.sessions() as db:
+            link = await db.get(DiscordLink, self.lid)
+            link.channel_id = '45'
+            await db.commit()
+        quick = dict.fromkeys(jobs.provider.QUICK_SECTIONS, [])
+        quick['discussion'] = ['Raporti u kontrollua.']
+
+        async def summarize(*args, **options):
+            return quick if options.get('quick') else 'AI Agent: raporti u kontrollua.'
+
         with patch.object(jobs, 'SessionLocal', self.sessions), \
-             patch('app.services.discord_voice_openai.summarize_meeting', AsyncMock(return_value='AI Agent: raporti u kontrollua.')):
+             patch('app.services.discord_voice_openai.summarize_meeting', summarize):
             await jobs.process_voice_meetings()
             await jobs.process_voice_meetings()
         with patch.object(service.settings, 'DISCORD_GUILD_ID', '123'), \
@@ -169,7 +180,8 @@ class VoiceJobTests(PostgresMeetingTests):
             async with self.sessions() as db:
                 row = await db.get(Meeting, sid)
                 self.assertEqual(row.status, 'SAVED')
-                self.assertIsNotNone(row.delivered_at)
+                self.assertIsNone(row.delivered_at)
+                self.assertEqual(row.quick_summary, quick)
                 self.assertEqual((await db.execute(select(func.count()).select_from(GaNote))).scalar_one(), 1)
                 note = await db.get(GaNote, row.saved_note_id)
                 self.assertIn('\n\nAna: Ana dërgon raportin.', note.content)
@@ -180,7 +192,31 @@ class VoiceJobTests(PostgresMeetingTests):
                 self.assertTrue(panel['meeting']['note_url'].endswith('/mira?tab=shenimet'))
                 transcript = await mira_host.note_transcript(db, note.id)
                 self.assertEqual(transcript['passages'][0]['speaker'], 'Ana')
+                claimed = (await service.claim_deliveries(db, recorder='ai_agent'))['jobs']
+                self.assertEqual([item['id'] for item in claimed], [str(sid)])
+                self.assertEqual((claimed[0]['channel_id'], claimed[0]['detail_channel_id']), ('45', '44'))
+                self.assertTrue(claimed[0]['private_only'])
                 self.assertEqual((await service.claim_deliveries(db, recorder='ai_agent'))['jobs'], [])
+
+    async def test_notetaker_record_returns_transcript_only_to_organizer(self):
+        from types import SimpleNamespace
+        from fastapi import HTTPException
+
+        sid = await self.scheduled_meeting(timedelta(minutes=2))
+        async with self.sessions() as db:
+            row = await db.get(Meeting, sid)
+            row.status, row.partial, row.draft_text = 'READY', True, 'Shënimet e plota.'
+            await db.commit()
+            with self.assertRaises(HTTPException) as unreadable:
+                await service.meeting_record(db, SimpleNamespace(id=uuid.uuid4()), sid)
+            self.assertEqual(unreadable.exception.status_code, 404)
+            history = await service.list_meeting_records(db, SimpleNamespace(id=self.uid), 30, 0)
+            self.assertEqual([item['id'] for item in history['items']], [str(sid)])
+            result = await service.meeting_record(db, SimpleNamespace(id=self.uid), sid)
+            self.assertTrue(result['partial'])
+            self.assertEqual(result['full_notes'], 'Shënimet e plota.')
+            self.assertEqual(result['transcript'][0]['speaker'], 'Ana')
+            self.assertEqual(result['transcript'][0]['end_ms'], 1000)
 
     async def test_scheduled_ai_agent_save_failure_preserves_notes_for_manual_save(self):
         sid = await self.scheduled_meeting(timedelta(minutes=2), recorder='ai_agent')

@@ -66,6 +66,29 @@ BRIEF_SYSTEM = RULES+'''
 Shkruaj vetëm një paragraf prej 2–4 fjalish të shkurtra për temat dhe vendimet kryesore që u thanë.
 Përdor vetëm të dhënat nga ky takim. Kthe tekst të thjeshtë, pa titull, lista apo seksione.'''
 
+QUICK_SECTIONS = {
+    'discussion': 'U diskutua',
+    'decisions': '✅ U vendos',
+    'actions': 'U kërkua të bëhet',
+    'open_points': '⚠️ Mbeti e hapur',
+    'follow_up': 'Për takimin tjetër',
+}
+QUICK_SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': list(QUICK_SECTIONS),
+    'properties': {name: {'type': 'array', 'items': {'type': 'string'}} for name in QUICK_SECTIONS}}
+QUICK_SYSTEM = RULES + '''
+Shkruaj përmbledhjen e shpejtë të këtij takimi, zakonisht 200–250 fjalë gjithsej.
+Për takime të shkurtra përdor më pak fjalë. Për takime komplekse ruaj vendimet,
+zotimet dhe rreziqet kritike edhe nëse duhen pak më shumë fjalë.
+discussion: deri në 7 pika. Bashko temat e lidhura dhe ruaj faktet, numrat, klientët dhe projektet.
+decisions: vetëm vendime të konfirmuara. Përmend vendimmarrësin kur është i qartë dhe ka rëndësi.
+actions: vetëm kërkesa, udhëzime dhe hapa konkretë. Përgjegjësi dhe afati vetëm kur janë shprehur.
+Kur përdoret një afat relativ, ruaj formulimin dhe saktëso datën vetëm kur ajo është e qartë nga data e takimit.
+open_points: çështje të pazgjidhura, pyetje pa përgjigje, varësi dhe pengesa me rëndësi.
+follow_up: vetëm pikat e pazgjidhura që ia vlen të rishikohen në takimin tjetër.
+Mos përsërit raportimin rutinë të detyrave. Përdor vargje boshe kur nuk ka evidencë për një seksion.
+Mos përfshi citime, lidhje, tituj, shenja liste apo referenca ndaj segmenteve në tekstin e pikave.
+'''
+
 DAYS = ('e hënë','e martë','e mërkurë','e enjte','e premte','e shtunë','e diel')
 MONTHS = ('janar','shkurt','mars','prill','maj','qershor','korrik','gusht','shtator','tetor','nëntor','dhjetor')
 
@@ -285,21 +308,44 @@ def checked_summary(text):
     return text
 
 
+def checked_quick_summary(text):
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError('invalid_quick_summary') from exc
+    if not isinstance(data, dict) or data.keys() != QUICK_SECTIONS.keys():
+        raise ValueError('invalid_quick_summary')
+    for items in data.values():
+        if not isinstance(items, list) or any(not isinstance(item, str) or not item.strip() for item in items):
+            raise ValueError('invalid_quick_summary')
+    if len(data['discussion']) > 7 or sum(len(item) for items in data.values() for item in items) > 3500:
+        raise ValueError('quick_summary_too_long')
+    return data
+
+
 async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, checkpoint=None, memory=None,
-                            scope: CredentialScope = 'notes', brief=False):
+                            scope: CredentialScope = 'notes', brief=False, quick=False):
     cache=dict(cache or {})
-    final_system=BRIEF_SYSTEM if brief else FINAL_SYSTEM
+    final_system = QUICK_SYSTEM if quick else BRIEF_SYSTEM if brief else FINAL_SYSTEM
     async def summarize(parts,final=False):
         system=final_system if final else PART_SYSTEM
         content={'title':title,'segments':parts}
         # Only the final notes see Mira's memory; batch summaries stay about this meeting.
-        if final and not brief and memory is not None:
+        if final and not brief and not quick and memory is not None:
             system+=MEMORY_NOTES_RULES
             content['kujtesa']={'items':memory['items']}
         payload={'model':settings.DISCORD_AI_MODEL,'store':False,'input':[
             {'role':'system','content':system},
             {'role':'user','content':json.dumps(content,ensure_ascii=False)}]}
-        return await cached(payload,cache,checkpoint,checked_summary,scope=scope)
+        parse = checked_summary
+        if final and quick:
+            if meeting_date:
+                content['meeting_date'] = meeting_date.astimezone(ZoneInfo(settings.APP_TIMEZONE)).date().isoformat()
+                payload['input'][1]['content'] = json.dumps(content, ensure_ascii=False)
+            payload['text'] = {'format': {'type': 'json_schema', 'name': 'mira_quick_summary',
+                'strict': True, 'schema': QUICK_SCHEMA}}
+            parse = checked_quick_summary
+        return await cached(payload,cache,checkpoint,parse,scope=scope)
     parts=[json.dumps(segment,ensure_ascii=False) for segment in segments]
     if not parts:raise ValueError('empty_transcript')
     while sum(map(len,parts))>SUMMARY_DIRECT_CHARS:
@@ -307,7 +353,7 @@ async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, c
         if sum(map(len,reduced))>=sum(map(len,parts)):raise ValueError('summary_did_not_reduce')
         parts=reduced
     result=await summarize(parts,final=True)
-    if brief:
+    if brief or quick:
         return result
     return meeting_heading(title, meeting_date)+'\n\n'+result
 

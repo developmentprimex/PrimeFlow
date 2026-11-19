@@ -72,7 +72,7 @@ class MemoryJobTests(MemoryTests):
         summary = AsyncMock(return_value='Shënimet.')
         with self.enabled(), patch('app.services.discord_voice_openai.summarize_meeting', summary):
             await finalization.process_voice_meetings()
-        self.assertEqual([i['title'] for i in summary.call_args.kwargs['memory']['items']], ['Oferta'])
+        self.assertEqual([i['title'] for i in summary.call_args_list[0].kwargs['memory']['items']], ['Oferta'])
         row = await self.get(sid)
         self.assertEqual((row.status, row.memory_status), ('READY', 'PENDING'))
 
@@ -162,7 +162,7 @@ class MemoryJobTests(MemoryTests):
         with self.enabled(), patch('app.services.mira_memory.snapshot', broken), \
                 patch('app.services.discord_voice_openai.summarize_meeting', summary):
             await finalization.process_voice_meetings()
-        self.assertIsNone(summary.call_args.kwargs['memory'])
+        self.assertIsNone(summary.call_args_list[0].kwargs['memory'])
         self.assertEqual((await self.get(sid)).status, 'READY')
 
     async def test_reclaimed_lease_stops_after_the_attempt_limit(self):

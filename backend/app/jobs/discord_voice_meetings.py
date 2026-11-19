@@ -60,6 +60,7 @@ async def process_voice_meetings():
                 row.recorder == 'primary' and (service.is_scheduled(row)
                     or row.voice_channel_id == settings.DISCORD_1H_VOICE_CHANNEL_ID)
             )
+            smart_notes = row.recorder == 'ai_agent' or not verbatim
             memory=None
             if settings.MIRA_MEMORY_ENABLED and not verbatim:
                 # Notes never wait on memory: without a snapshot they are written as before.
@@ -74,6 +75,7 @@ async def process_voice_meetings():
                 if current.lease_token!=lease:raise ValueError('finalization_lease_changed')
                 current.summary_progress=dict(progress);current.lease_until=now()+FINALIZE_LEASE
                 await db.commit()
+                cache.update(progress)
         retry=False
         try:
             try:
@@ -93,6 +95,15 @@ async def process_voice_meetings():
             log.warning('MIRA_DIAGNOSTIC meeting=%s stage=notes error=%s http_status=%s retry=%s',
                 sid,exc,getattr(exc,'status',None),retry)
             draft=None;error='Përmbledhja dështoi. Transkripti i marrë mbetet i ruajtur.'
+        quick_summary = None
+        if smart_notes and draft and not retry:
+            try:
+                generated = await provider.summarize_meeting(title, parts, meeting_date=meeting_date,
+                    cache=cache, checkpoint=checkpoint, quick=True)
+                if isinstance(generated, dict):
+                    quick_summary = generated
+            except ValueError as exc:
+                log.warning('MIRA_DIAGNOSTIC meeting=%s stage=quick_notes error=%s', sid, exc)
         if verbatim and not retry:
             draft = provider.transcript_notes(title, parts, meeting_date=meeting_date, summary=draft, partial=partial)
             error = None
@@ -104,16 +115,17 @@ async def process_voice_meetings():
                 await db.commit();stats['retrying']+=1;continue
             current.status='FAILED' if error else 'READY';current.error=error
             current.draft_text=draft;current.partial=partial;current.lease_until=None
+            if quick_summary is not None:
+                current.quick_summary = quick_summary
             current.memory_status='PENDING' if settings.MIRA_MEMORY_ENABLED else 'SKIPPED'
             if service.is_scheduled(current) and not error:
-                # Scheduled 1H and AI Agent meetings go straight to PX Notes, in the same commit so
-                # Discord delivery never sees them READY. If saving fails, the savepoint
-                # rolls back and the notes reach the organizer in Discord with the save
-                # button. Failed notes are delivered too, so no 1H is lost silently.
+                # Save before delivery. AI Agent quick notes use the normal delivery
+                # queue after saving. A failed save keeps READY and the manual button.
                 try:
                     async with db.begin_nested():
                         await service.store_note(db,current,await db.get(User,current.user_id))
-                        current.delivered_at=now()
+                        if quick_summary is None:
+                            current.delivered_at=now()
                 except Exception as exc:
                     log.warning('MIRA_DIAGNOSTIC meeting=%s stage=px_notes error=%s detail=%s',
                         sid,type(exc).__name__,getattr(exc,'detail',None))

@@ -8,12 +8,14 @@ import { MiraMemoryPage } from "@/components/mira-memory/mira-memory-page"
 import { KnowledgeTab } from "@/components/mira/knowledge-tab"
 import { MeetingsTab } from "@/components/mira/meetings-tab"
 import { NotesTab } from "@/components/mira/notes-tab"
+import { NotetakerTab } from "@/components/mira/notetaker-tab"
 import { SettingsTab } from "@/components/mira/settings-tab"
 import { clock, json, type HostStatus, type MiraTab } from "@/lib/mira"
 
 const ACCENT = "#2f5d8a"
 const TABS: { id: MiraTab; label: string }[] = [
   { id: "takimet", label: "Takimet 1H" },
+  { id: "notetaker", label: "Notetaker" },
   { id: "shenimet", label: "Shënimet e Mira-s" },
   { id: "knowledge", label: "Knowledge" },
   { id: "kujtesa", label: "Kujtesa" },
@@ -70,6 +72,7 @@ export function MiraPage() {
       </div>
 
       {tab === "takimet" && <MeetingsTab canManage={canManage} />}
+      {tab === "notetaker" && <NotetakerTab meetingId={params.get("meeting")} view={params.get("view")} />}
       {tab === "shenimet" && <NotesTab />}
       {tab === "knowledge" && <KnowledgeTab canManage={canManage} />}
       {tab === "kujtesa" && <div className="-mx-4 md:-mx-8"><MiraMemoryPage /></div>}
