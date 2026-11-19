@@ -6,7 +6,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
-from sqlalchemy import select, text, or_
+from sqlalchemy import and_, or_, select, text
 from app.api.routers import discord_assistant as bridge
 from app.api.access import ensure_department_access
 from app.config import settings
@@ -272,10 +272,18 @@ async def ack_delivery(db,session_id,payload):
 
 
 def meeting_record_query(user):
-    # The personal record currently requires ownership. Shared Discord controls
-    # authorize their own channel and do not grant web access to other accounts.
-    return select(Meeting).where(Meeting.user_id == user.id,
-        Meeting.status.in_(['READY', 'SAVED', 'FAILED']))
+    visible = Meeting.user_id == user.id
+    if settings.DISCORD_GUILD_ID:
+        shared_sources = [
+            and_(Meeting.recorder == 'primary', Meeting.request_id.like('auto1h-%')),
+            and_(Meeting.recorder == 'ai_agent', Meeting.request_id.like('autoai-%')),
+        ]
+        if settings.DISCORD_MEETING_CONTROL_CHANNEL_ID:
+            shared_sources.append(Meeting.private_channel_id == settings.DISCORD_MEETING_CONTROL_CHANNEL_ID)
+        # Scheduled team meetings can deliver their Discord result in the
+        # organizer's private channel. Delivery does not determine web access.
+        visible = or_(visible, and_(Meeting.guild_id == settings.DISCORD_GUILD_ID, or_(*shared_sources)))
+    return select(Meeting).where(visible, Meeting.status.in_(['READY', 'SAVED', 'FAILED']))
 
 
 async def list_meeting_records(db, user, limit, offset):

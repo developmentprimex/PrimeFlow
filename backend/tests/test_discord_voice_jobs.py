@@ -198,7 +198,9 @@ class VoiceJobTests(PostgresMeetingTests):
                 self.assertTrue(claimed[0]['private_only'])
                 self.assertEqual((await service.claim_deliveries(db, recorder='ai_agent'))['jobs'], [])
 
-    async def test_notetaker_record_returns_transcript_only_to_organizer(self):
+    @patch.object(service.settings, 'DISCORD_GUILD_ID', '123')
+    @patch.object(service.settings, 'DISCORD_MEETING_CONTROL_CHANNEL_ID', '99')
+    async def test_notetaker_private_record_returns_transcript_only_to_organizer(self):
         from types import SimpleNamespace
         from fastapi import HTTPException
 
@@ -206,17 +208,55 @@ class VoiceJobTests(PostgresMeetingTests):
         async with self.sessions() as db:
             row = await db.get(Meeting, sid)
             row.status, row.partial, row.draft_text = 'READY', True, 'Shënimet e plota.'
+            row.request_id = '123456'
             await db.commit()
+            other = SimpleNamespace(id=uuid.uuid4())
             with self.assertRaises(HTTPException) as unreadable:
-                await service.meeting_record(db, SimpleNamespace(id=uuid.uuid4()), sid)
+                await service.meeting_record(db, other, sid)
             self.assertEqual(unreadable.exception.status_code, 404)
-            history = await service.list_meeting_records(db, SimpleNamespace(id=self.uid), 30, 0)
+            self.assertEqual((await service.list_meeting_records(db, other, 30, 0))['items'], [])
+            organizer = SimpleNamespace(id=self.uid)
+            history = await service.list_meeting_records(db, organizer, 30, 0)
             self.assertEqual([item['id'] for item in history['items']], [str(sid)])
-            result = await service.meeting_record(db, SimpleNamespace(id=self.uid), sid)
+            result = await service.meeting_record(db, organizer, sid)
             self.assertTrue(result['partial'])
             self.assertEqual(result['full_notes'], 'Shënimet e plota.')
             self.assertEqual(result['transcript'][0]['speaker'], 'Ana')
             self.assertEqual(result['transcript'][0]['end_ms'], 1000)
+
+    async def test_notetaker_shared_records_include_list_notes_and_transcript_for_staff(self):
+        from types import SimpleNamespace
+        from fastapi import HTTPException
+
+        scheduled = await self.scheduled_meeting(timedelta(minutes=2), recorder='ai_agent')
+        shared = await self.scheduled_meeting(timedelta(minutes=2))
+        async with self.sessions() as db:
+            panel_meeting = await db.get(Meeting, shared)
+            panel_meeting.request_id, panel_meeting.private_channel_id = '123456', '99'
+            quick = dict.fromkeys(jobs.provider.QUICK_SECTIONS, [])
+            for sid in (scheduled, shared):
+                row = await db.get(Meeting, sid)
+                row.status, row.draft_text, row.quick_summary = 'SAVED', 'Shënimet.', quick
+            await db.commit()
+        staff = SimpleNamespace(id=uuid.uuid4(), role='STAFF')
+        with patch.object(service.settings, 'DISCORD_GUILD_ID', '123'), \
+             patch.object(service.settings, 'DISCORD_MEETING_CONTROL_CHANNEL_ID', '99'):
+            async with self.sessions() as db:
+                history = await service.list_meeting_records(db, staff, 30, 0)
+                self.assertEqual({item['id'] for item in history['items']}, {str(scheduled), str(shared)})
+                for sid in (scheduled, shared):
+                    detail = await service.meeting_record(db, staff, sid)
+                    self.assertEqual(detail['full_notes'], 'Shënimet.')
+                    self.assertEqual(detail['quick_summary'], quick)
+                    self.assertEqual(detail['transcript'][0]['speaker'], 'Ana')
+                (await db.get(Meeting, shared)).guild_id = '999'
+                (await db.get(Meeting, scheduled)).status = 'LISTENING'
+                await db.commit()
+                self.assertEqual((await service.list_meeting_records(db, staff, 30, 0))['items'], [])
+                for sid in (scheduled, shared):
+                    with self.assertRaises(HTTPException) as unreadable:
+                        await service.meeting_record(db, staff, sid)
+                    self.assertEqual(unreadable.exception.status_code, 404)
 
     async def test_scheduled_ai_agent_save_failure_preserves_notes_for_manual_save(self):
         sid = await self.scheduled_meeting(timedelta(minutes=2), recorder='ai_agent')
