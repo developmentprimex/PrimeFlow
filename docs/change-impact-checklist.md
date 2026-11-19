@@ -551,6 +551,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ka kopje të ngrirë në 16:00; ruaj historikun dhe dallimin para/pas cutoff-it.
 - Notes nga Mira kanë rregulla të veçanta dukshmërie në raporte. Mos supozo se
   çdo Note duhet të dalë në çdo raport; dallo regjistrimin nga tasku i krijuar.
+- Regjistruesit Discord 1H dhe AI Agent ruajnë fillimisht tekstin e transkriptuar
+  sipas folësit, pa kohë pranë replikave, pastaj një përmbledhje të shkurtër nga i njëjti takim.
+  Kontrollo përmbajtjen te Mira → Shënimet, PX Notes dhe rezultati në Discord
+  për ruajtje manuale. Pas dështimit përfundimtar të përmbledhjes, transkripti
+  vazhdon të ruhet. Mira Host ka përmbledhje të veçantë te Mira → Takimet.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
   Radha e raportimit ka përjashtime sipas slotit: LH, EH, EF dhe RA nuk marrin

@@ -54,8 +54,12 @@ async def process_voice_meetings():
             lease=uuid.uuid4();row.lease_token=lease;row.lease_until=now()+FINALIZE_LEASE
             title,cache,meeting_date=row.title,row.summary_progress or {},row.started_at or row.created_at
             stopped=row.stopped_at or row.created_at
+            verbatim = row.recorder == 'ai_agent' or (
+                row.recorder == 'primary' and (service.is_scheduled(row)
+                    or row.voice_channel_id == settings.DISCORD_1H_VOICE_CHANNEL_ID)
+            )
             memory=None
-            if settings.MIRA_MEMORY_ENABLED:
+            if settings.MIRA_MEMORY_ENABLED and not verbatim:
                 # Notes never wait on memory: without a snapshot they are written as before.
                 try:
                     async with db.begin_nested():memory=await mira_memory.snapshot(db)
@@ -71,8 +75,8 @@ async def process_voice_meetings():
         retry=False
         try:
             try:
-                draft=await provider.summarize_meeting(title,parts,meeting_date=meeting_date,
-                    cache=cache,checkpoint=checkpoint,memory=memory)
+                options = {'brief': True} if verbatim else {'meeting_date': meeting_date, 'memory': memory}
+                draft=await provider.summarize_meeting(title,parts,cache=cache,checkpoint=checkpoint,**options)
             except ValueError:
                 if memory is None:raise
                 # Memory must never cost the notes: write them as before.
@@ -87,6 +91,9 @@ async def process_voice_meetings():
             log.warning('MIRA_DIAGNOSTIC meeting=%s stage=notes error=%s http_status=%s retry=%s',
                 sid,exc,getattr(exc,'status',None),retry)
             draft=None;error='Përmbledhja dështoi. Transkripti i marrë mbetet i ruajtur.'
+        if verbatim and not retry:
+            draft = provider.transcript_notes(title, parts, meeting_date=meeting_date, summary=draft, partial=partial)
+            error = None
         async with SessionLocal() as db:
             current=(await db.execute(select(Meeting).where(Meeting.id==sid).with_for_update())).scalar_one()
             if current.lease_token!=lease or current.status not in ('FINALIZING','INTERRUPTED'):continue

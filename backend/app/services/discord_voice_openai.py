@@ -62,6 +62,10 @@ Pas çdo vendimi, detyre, pyetjeje dhe shënimi shto referencën nga e cila vjen
 [segmenti 0, Emri i folësit, 00:02–00:07], me kohën nga fillimi i takimit. Mos i humb referencat
 që vijnë nga përmbledhjet e pjesëve.'''
 
+BRIEF_SYSTEM = RULES+'''
+Shkruaj vetëm një paragraf prej 2–4 fjalish të shkurtra për temat dhe vendimet kryesore që u thanë.
+Përdor vetëm të dhënat nga ky takim. Kthe tekst të thjeshtë, pa titull, lista apo seksione.'''
+
 DAYS = ('e hënë','e martë','e mërkurë','e enjte','e premte','e shtunë','e diel')
 MONTHS = ('janar','shkurt','mars','prill','maj','qershor','korrik','gusht','shtator','tetor','nëntor','dhjetor')
 
@@ -282,13 +286,14 @@ def checked_summary(text):
 
 
 async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, checkpoint=None, memory=None,
-                            scope: CredentialScope = 'notes'):
+                            scope: CredentialScope = 'notes', brief=False):
     cache=dict(cache or {})
+    final_system=BRIEF_SYSTEM if brief else FINAL_SYSTEM
     async def summarize(parts,final=False):
-        system=FINAL_SYSTEM if final else PART_SYSTEM
+        system=final_system if final else PART_SYSTEM
         content={'title':title,'segments':parts}
         # Only the final notes see Mira's memory; batch summaries stay about this meeting.
-        if final and memory is not None:
+        if final and not brief and memory is not None:
             system+=MEMORY_NOTES_RULES
             content['kujtesa']={'items':memory['items']}
         payload={'model':settings.DISCORD_AI_MODEL,'store':False,'input':[
@@ -302,10 +307,24 @@ async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, c
         if sum(map(len,reduced))>=sum(map(len,parts)):raise ValueError('summary_did_not_reduce')
         parts=reduced
     result=await summarize(parts,final=True)
+    if brief:
+        return result
+    return meeting_heading(title, meeting_date)+'\n\n'+result
+
+
+def meeting_heading(title, meeting_date):
     # The default title already ends with "· dd.mm.yyyy HH:MM"; add the date only when it is missing.
     dated=not meeting_date or re.search(r'\d{2}\.\d{2}\.\d{4}',title)
-    heading=('' if dated else albanian_date(meeting_date)+'\n')+title
-    return heading+'\n\n'+result
+    return ('' if dated else albanian_date(meeting_date)+'\n')+title
+
+
+def transcript_notes(title, passages, *, meeting_date, summary, partial):
+    transcript = '\n\n'.join(f"{p['speaker']}: {p['text']}" for p in passages)
+    sections = [meeting_heading(title, meeting_date), '**Transkripti fjalë për fjalë**']
+    if partial:
+        sections.append('Regjistrimi është i pjesshëm. Më poshtë janë pjesët e transkriptuara.')
+    sections.extend([transcript, '**Përmbledhje e shkurtër**', summary or 'Përmbledhja nuk u gjenerua.'])
+    return '\n\n'.join(sections)
 
 
 def parse_operations(text):
