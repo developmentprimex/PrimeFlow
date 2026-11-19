@@ -216,7 +216,9 @@ $env:PRIMEFLOW_MCP_PORT="8010"
 python mcp_server.py
 ```
 
-In this repo's GitHub Actions deploy, backend changes start a `primeflow-mcp` PM2 process on port `8010`. Add GitHub Actions secrets named `PRIMEFLOW_MCP_EMAIL` and `PRIMEFLOW_MCP_PASSWORD` before deploying, then expose port `8010` through HTTPS, for example `https://mcp-flow.primexeu.com/sse`. Add that URL in ChatGPT's Apps & Connectors developer setup. For production, replace the service-account prototype with OAuth so each ChatGPT user authorizes their own Primeflow account.
+In this repo's GitHub Actions deploy, backend changes start a `primeflow-mcp` PM2 process on `127.0.0.1:8010` (service account, SSE, internal use only). Add GitHub Actions secrets named `PRIMEFLOW_MCP_EMAIL` and `PRIMEFLOW_MCP_PASSWORD` before deploying. **Do not expose port 8010 publicly**: it has no inbound authentication and acts as the service account. `DELETE` through `primeflow_api_request` is disabled unless `PRIMEFLOW_MCP_ALLOW_DELETE=true`.
+
+For remote clients (claude.ai custom connector, Claude Code, MCP Inspector) use the OAuth-protected assistant profile instead: `primeflow-mcp-assistant` on `127.0.0.1:8011/mcp` (Streamable HTTP), published as `https://mcp-flow.primexeu.com/mcp`. Each user authorizes with their own PrimeFlow login, so every action is made as that user. See [docs/mcp-assistant.md](docs/mcp-assistant.md).
 
 Available tools include ChatGPT-compatible `search`/`fetch`, task/project search, list/get/create/update tasks, list/get projects, list users, and current user lookup. The MCP server uses the normal Primeflow API, so existing backend permissions still apply.
 

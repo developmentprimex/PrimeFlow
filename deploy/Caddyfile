@@ -55,3 +55,21 @@ http://:18080 {
 		}
 	}
 }
+
+# GA assistant MCP connector (Streamable HTTP + OAuth resource metadata).
+# Cloudflare Tunnel public hostname mcp-flow.primexeu.com -> http://127.0.0.1:18011.
+# Only the MCP endpoint and its protected-resource metadata are forwarded; the
+# primeflow-mcp SSE server on 8010 is intentionally not reachable through Caddy.
+http://:18011 {
+	bind 127.0.0.1
+	@assistant path /mcp /mcp/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
+	handle @assistant {
+		reverse_proxy 127.0.0.1:8011 {
+			# Streamable HTTP answers with server-sent events; send them immediately.
+			flush_interval -1
+		}
+	}
+	handle {
+		respond 404
+	}
+}

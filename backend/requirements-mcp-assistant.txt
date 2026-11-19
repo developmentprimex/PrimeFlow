@@ -1,0 +1,10 @@
+# Isolated environment for the primeflow-mcp-assistant process (PRIMEFLOW_MCP_PROFILE=assistant).
+# It needs a newer MCP SDK (Streamable HTTP + OAuth resource-server support) than the
+# mcp==1.10.1 pinned in requirements.txt for primeflow-mcp (8010), so it runs from its
+# own virtualenv (backend\.venv-mcp-assistant) and never changes the shared interpreter.
+mcp==1.28.1
+httpx==0.28.1
+asyncpg==0.30.0
+python-dotenv==1.0.1
+# Windows has no system IANA time-zone database: without tzdata ZoneInfo("Europe/Belgrade") fails.
+tzdata==2026.3

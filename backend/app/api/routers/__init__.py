@@ -152,3 +152,16 @@ api_router.include_router(
 api_router.include_router(standards_router, prefix="/standards", tags=["standards"])
 api_router.include_router(external_tickets_router, prefix="/external-tickets", tags=["external-tickets"])
 
+
+# Text search over tasks/projects. The router existed but was never mounted, so
+# the frontend command palette and the MCP search/fetch tools received 404.
+from app.api.routers.search import router as search_router
+api_router.include_router(search_router, prefix="/search", tags=["search"])
+
+# Consent + internal-session API of the MCP assistant OAuth server.
+from app.api.routers.oauth import api_router as oauth_api_router
+api_router.include_router(oauth_api_router, prefix="/oauth", tags=["oauth"])
+
+# GA assistant agenda and actions (MCP assistant profile).
+from app.api.routers.ga_assistant import router as ga_assistant_router
+api_router.include_router(ga_assistant_router, prefix="/ga-assistant", tags=["ga-assistant"])

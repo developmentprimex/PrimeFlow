@@ -19,9 +19,9 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.services.system_task_schedule import first_run_at, next_occurrence, template_due_time, template_tz
+from app.services.ga_identity import is_ga_email
 
 ALL_USERS_MARKER = "[ALL_USERS]"
-GA_EMAIL = "ga@primexeu.com"
 
 
 def _safe_iso_date(value: str | None, fallback: date) -> date:
@@ -182,7 +182,7 @@ def _replacement_user_for_occurrence(
         source_slot = slots[0]
     else:
         non_gane_slots = [
-            slot for slot in slots if user_email_map.get(slot.primary_user_id, "") != GA_EMAIL
+            slot for slot in slots if not is_ga_email(user_email_map.get(slot.primary_user_id, ""))
         ]
         relevant_slots = non_gane_slots or slots
         fallback_required = all(slot.primary_user_id in absent_ids for slot in relevant_slots)

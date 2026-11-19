@@ -36,10 +36,7 @@ from app.services.meetings_report import (
     render_section_report_png,
 )
 from app.services.primeflow_report import report_timezone
-
-
-GA_EMAIL = "ga@primexeu.com"
-GA_USERNAME = "gane.arifaj"
+from app.services.ga_identity import resolve_ga_user
 
 
 def _week_start(day: date) -> date:
@@ -66,14 +63,7 @@ def _color(value: Any, fallback: str) -> str:
 
 
 async def _ga_user(db: AsyncSession) -> User | None:
-    user = (
-        await db.execute(select(User).where(func.lower(User.username) == GA_USERNAME))
-    ).scalar_one_or_none()
-    if user is not None:
-        return user
-    return (
-        await db.execute(select(User).where(func.lower(User.email) == GA_EMAIL))
-    ).scalar_one_or_none()
+    return await resolve_ga_user(db)
 
 
 def _row_start(rows: list[Any], value: time) -> time:
