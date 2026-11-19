@@ -102,6 +102,21 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
                 meeting_date=datetime(2026,10,20,8,32,tzinfo=timezone.utc))
         self.assertTrue(result.startswith(title+'\n\n**Përmbledhja:**'))
 
+    async def test_brief_recorder_summary_does_not_rewrite_the_transcript(self):
+        spoken = 'Po, po… e kam, e kam dërgu.'
+        passages = [{'time': '00:00–00:02', 'speaker': 'Ana', 'text': spoken}]
+        response = {'output': [{'type': 'message', 'content': [{'type': 'output_text',
+            'text': 'Ana tha se e kishte dërguar.'}]}]}
+        with patch.object(provider, 'request', AsyncMock(return_value=response)) as call:
+            summary = await provider.summarize_meeting('1H', passages, brief=True, memory={'items': ['Oferta']})
+        self.assertIn('2–4 fjali', call.call_args.kwargs['json']['input'][0]['content'])
+        self.assertNotIn('Oferta', call.call_args.kwargs['json']['input'][1]['content'])
+        notes = provider.transcript_notes('1H', passages, meeting_date=None, summary=summary, partial=True)
+        self.assertIn('Regjistrimi është i pjesshëm.', notes)
+        self.assertIn(f'\n\nAna: {spoken}', notes)
+        self.assertNotIn('00:00–00:02', notes)
+        self.assertTrue(notes.endswith('**Përmbledhje e shkurtër**\n\nAna tha se e kishte dërguar.'))
+
     async def test_partial_batches_keep_tasks_and_questions_and_only_the_last_pass_uses_the_template(self):
         systems=[]
         async def respond(path,**kwargs):

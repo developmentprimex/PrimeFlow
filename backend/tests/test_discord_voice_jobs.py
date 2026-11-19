@@ -29,12 +29,17 @@ class VoiceJobTests(PostgresMeetingTests):
             async with self.sessions() as db:
                 with self.assertRaises(Exception):await service.receive_segment(db,sid,meta(1,1000),wav(b'\x40\x10\x40\x10'*480))
         async with self.sessions() as db:await service.finish_session(db,sid,Finish(capture_token=token,instance_id=instance,segment_count=2))
-        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='Vendime: kontrollo.')) as summary:
+        with patch.object(jobs,'SessionLocal',self.sessions),patch.object(jobs.settings,'DISCORD_1H_VOICE_CHANNEL_ID','55'), \
+                patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='U diskutua raporti.')) as summary:
             await jobs.process_voice_meetings()
             # One speaker's consecutive chunks reach the notes model as one passage.
             self.assertEqual(summary.call_args.args[1],[{'segment':0,'speaker':'Ana','time':'00:00–00:02',
                 'text':'Kontrollo raportin. Kontrollo raportin.'}])
-            async with self.sessions() as db:self.assertEqual((await db.get(Meeting,sid)).status,'READY')
+            self.assertTrue(summary.call_args.kwargs['brief'])
+            async with self.sessions() as db:
+                row=await db.get(Meeting,sid)
+                self.assertEqual(row.status,'READY')
+                self.assertIn('\n\nAna: Kontrollo raportin. Kontrollo raportin.',row.draft_text)
 
     async def test_failed_segment_records_the_openai_status_for_diagnostics(self):
         from app.models.discord_voice_meeting import DiscordVoiceSegment as Segment
@@ -66,13 +71,16 @@ class VoiceJobTests(PostgresMeetingTests):
             db.add(Segment(id=uuid.uuid4(),session_id=sid,sequence=0,speaker_id='12',speaker_name='Ana',start_ms=0,
                 end_ms=1000,content_hash='h',status='DONE',transcript='Ana dërgon raportin.'))
             await db.commit()
-        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='**Përmbledhja:** Raporti.')):
+        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='U diskutua raporti.')) as summary:
             await jobs.process_voice_meetings()
+            self.assertTrue(summary.call_args.kwargs['brief'])
         async with self.sessions() as db:
             row=await db.get(Meeting,sid)
             self.assertEqual(row.status,'SAVED');self.assertIsNotNone(row.delivered_at)
             note=await db.get(GaNote,row.saved_note_id)
-            self.assertEqual(note.content,'**Përmbledhja:** Raporti.');self.assertEqual(note.created_by,self.uid)
+            self.assertTrue(note.content.endswith('**Transkripti fjalë për fjalë**\n\n'
+                'Ana: Ana dërgon raportin.\n\n**Përmbledhje e shkurtër**\n\nU diskutua raporti.'))
+            self.assertEqual(note.created_by,self.uid)
         async with self.sessions() as db:
             self.assertEqual((await service.claim_deliveries(db))['jobs'],[])
 
@@ -119,7 +127,8 @@ class VoiceJobTests(PostgresMeetingTests):
                 self.assertIsNotNone(row.delivered_at)
                 self.assertEqual((await db.execute(select(func.count()).select_from(GaNote))).scalar_one(), 1)
                 note = await db.get(GaNote, row.saved_note_id)
-                self.assertEqual(note.content, 'AI Agent: raporti u kontrollua.')
+                self.assertIn('\n\nAna: Ana dërgon raportin.', note.content)
+                self.assertTrue(note.content.endswith('**Përmbledhje e shkurtër**\n\nAI Agent: raporti u kontrollua.'))
                 self.assertEqual(note.created_by, self.uid)
                 panel = await panel_state(db, ControlScope(guild_id='123', channel_id='44'), 'ai_agent')
                 self.assertEqual(panel['meeting']['status'], 'SAVED')
@@ -138,7 +147,8 @@ class VoiceJobTests(PostgresMeetingTests):
         async with self.sessions() as db:
             row = await db.get(Meeting, sid)
             self.assertEqual(row.status, 'READY')
-            self.assertEqual(row.draft_text, 'AI Agent: raporti.')
+            self.assertIn('\n\nAna: Ana dërgon raportin.', row.draft_text)
+            self.assertTrue(row.draft_text.endswith('**Përmbledhje e shkurtër**\n\nAI Agent: raporti.'))
             self.assertIsNone(row.delivered_at)
             self.assertIsNone(row.saved_note_id)
 
@@ -170,16 +180,19 @@ class VoiceJobTests(PostgresMeetingTests):
             # The next tick inside the back-off leaves it alone.
             self.assertEqual((await jobs.process_voice_meetings())['retrying'],0)
 
-    async def test_1h_notes_that_cannot_be_written_reach_the_organizer_instead_of_vanishing(self):
+    async def test_1h_transcript_is_saved_when_summary_retries_expire(self):
         from app.services.discord_voice_openai import ProviderError
+        from app.models.ga_note import GaNote
         sid=await self.scheduled_meeting(timedelta(minutes=40))
         with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',
                 AsyncMock(side_effect=ProviderError(503))),patch.object(service.settings,'DISCORD_GUILD_ID','123'):
             await jobs.process_voice_meetings()
             async with self.sessions() as db:
                 row=await db.get(Meeting,sid)
-                self.assertEqual(row.status,'FAILED');self.assertIsNone(row.delivered_at)
-                self.assertEqual([j['id'] for j in (await service.claim_deliveries(db))['jobs']],[str(sid)])
+                self.assertEqual(row.status,'SAVED');self.assertIsNotNone(row.delivered_at)
+                note=await db.get(GaNote,row.saved_note_id)
+                self.assertIn('\n\nAna: Ana dërgon raportin.', note.content)
+                self.assertTrue(note.content.endswith('Përmbledhja nuk u gjenerua.'))
 
     async def test_1h_notes_that_px_notes_refuses_stay_ready_for_the_save_button(self):
         sid=await self.scheduled_meeting(timedelta(minutes=2))
