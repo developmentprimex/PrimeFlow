@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 from app.api.deps import require_admin
+from app.api.routers import morning_report as morning_api
 from app.api.routers.morning_report import DraftUpdate, SectionPayload, router, update_draft
 from app.models.common_entry import CommonEntry
 from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
@@ -412,6 +413,24 @@ def make_draft() -> MorningReportDraft:
 
 
 class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_read_returns_refreshed_f_table_without_overwriting_draft(self) -> None:
+        old = [{"section_key": PHYSICAL_GA_TITLE, "title": PHYSICAL_GA_TITLE, "body": "Old table"}]
+        fresh = [{**old[0], "body": "Updated F table"}]
+        row = SimpleNamespace(report_date=date(2026, 11, 19), sections=old, status="SENT", sent_at=None,
+                              generated_snapshot={})
+        db = AsyncMock()
+        db.execute.return_value = Mock(scalar_one_or_none=Mock(return_value=row))
+        with (patch.object(morning_api, "refresh_morning_task_tables", new=AsyncMock(return_value=fresh)),
+              patch.object(morning_api, "refresh_m1_section", new=AsyncMock(return_value=fresh)),
+              patch.object(morning_api, "_get_or_create_settings", new=AsyncMock(return_value=SimpleNamespace(manual_questions=[]))),
+              patch.object(morning_api, "merge_common_view_manual_sections", new=AsyncMock(return_value=fresh)),
+              patch.object(morning_api, "_draft", new=AsyncMock(return_value={"sections": fresh})) as result):
+            payload = await morning_api.get_draft(row.report_date, db, None)
+        result.assert_awaited_once_with(db, row, fresh)
+        self.assertEqual(payload["sections"][0]["body"], "Updated F table")
+        self.assertEqual(row.sections, old)
+        db.commit.assert_not_awaited()
+
     async def test_retired_questions_are_removed_from_saved_and_regenerated_m1(self) -> None:
         retired = [
             {"title": "3. Pikat e ditës sot", "section_key": "manual:custom:3:retired", "body": "Old answer"},

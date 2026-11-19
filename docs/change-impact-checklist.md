@@ -84,6 +84,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
+  e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
+  kufirit të gjenerimit. Kontrollo faqet, preview dhe emailin për të dy raportet.
+
+- M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
+  importi nga Common View të mos krijojnë kopje në grupin manual të M2.
+
 - M3 PIKAT PER RAP: **NËNNGARKESË** merr stafin nga caktimet kryesore dhe
   shtesë të detyrave aktive që përmbajnë `NËNNGARKESË` në rreshtin e titullit
   për datën e raportit. Kontrollo titujt me tekst para dhe pas fjalës.

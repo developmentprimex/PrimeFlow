@@ -143,13 +143,15 @@ def _settings(row: MorningReportSettings) -> dict:
     }
 
 
-async def _draft(db: AsyncSession, row: MorningReportDraft) -> dict:
+async def _draft(db: AsyncSession, row: MorningReportDraft, sections: list[dict[str, str]] | None = None) -> dict:
     return {
         "id": str(row.id),
         "report_date": row.report_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": with_section_keys("morning", await filter_report_sections(db, row.sections, row.report_date)),
+        "sections": with_section_keys("morning", await filter_report_sections(
+            db, row.sections if sections is None else sections, row.report_date,
+        )),
         "generated_snapshot": row.generated_snapshot,
         "auto_sent_slots": list(row.auto_sent_slots or []),
         "status": row.status,
@@ -241,16 +243,13 @@ async def get_draft(
     sections = await refresh_morning_task_tables(db, sections, row.report_date)
     sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
-    sections = await filter_report_sections(db, sections, row.report_date)
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
         db, sections, "morning", row.sections, settings.manual_questions
     )
-    if sections != row.sections:
-        row.sections = sections
-        await db.commit()
-        await db.refresh(row)
-    return await _draft(db, row)
+    # A read can overlap with generation or a manual save. Do not write a
+    # refreshed view of older sections back over the newly saved report.
+    return await _draft(db, row, sections)
 
 
 @router.post("/generate")
@@ -316,7 +315,7 @@ async def generate_draft(
         row.updated_by_user_id = user.id
     await db.commit()
     await db.refresh(row)
-    return await _draft(db, row)
+    return await _draft(db, row, sections)
 
 
 @router.patch("/{draft_id}")

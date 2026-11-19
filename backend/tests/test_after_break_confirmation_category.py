@@ -30,6 +30,22 @@ from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
+    def test_dt_wfe_draft_duplicates_and_manual_keys_stay_in_one_automatic_section(self) -> None:
+        saved = [
+            {"title": "DT WFE", "body": "Original table"},
+            {"title": "DT WFE", "body": "Duplicate generated table"},
+            {"title": "3. DT WFE", "section_key": "manual:custom:3:legacy", "body": "Duplicate manual table"},
+        ]
+        sections = normalize_after_break_report_sections(saved)
+        with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles",
+                   new=AsyncMock(return_value=["3. DT WFE", "Other manual point"])):
+            sections = asyncio.run(merge_common_view_manual_sections(None, sections, "after_break", saved))
+        waiting = [section for section in sections if "DT WFE" in section["title"]]
+        self.assertEqual(waiting, [{"title": "DT WFE", "section_key": "DT WFE", "body": "Original table"}])
+        self.assertEqual(section_group_label("after_break", "DT WFE", "manual:DTWFE"), "AUTO-FILLED FROM PRIMEFLOW")
+        self.assertEqual(sections[sections.index(waiting[0]) - 1]["title"], UNFINISHED_PRIORITY_TABLE_LABEL)
+        self.assertIn("Other manual point", [section["title"] for section in sections])
+
     def test_edited_auto_title_keeps_its_original_m2_identity_and_position(self) -> None:
         saved = [{"title": title, "body": str(index)} for index, title in enumerate(SECTION_TITLES)]
         saved[4]["title"] = "DET TE PAKRYERA AM, 08:00/DEADLINE"

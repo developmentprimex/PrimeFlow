@@ -79,6 +79,40 @@ class DiscordGaRepliesTests(unittest.TestCase):
         assert result == sections
         summary.assert_not_awaited()
 
+    def test_m1_keeps_verified_rows_from_a_stale_capture(self):
+        captured = NOW - timedelta(minutes=12)
+        source = evidence([message(1, GA, "Koment i verifikuar", created_at=captured.isoformat())])
+        window = (captured - timedelta(hours=1), NOW)
+        body = service.render_summary(source, captured, NOW, window=window, allow_verified_stale=True)
+        assert body.startswith(service.STALE_REPLY_NOTE)
+        assert table_rows(body) == [["1", "", "", "Koment i verifikuar"]]
+        assert service.render_summary(evidence(), captured, NOW, window=window, allow_verified_stale=True) == service.UNAVAILABLE
+
+    def test_m1_recovers_unavailable_rows_using_original_generate_cutoff(self):
+        sections = [{"title": service.GA_REPLIES_SECTION_TITLE, "body": service.UNAVAILABLE}]
+        with patch.object(service, "summary_for_day", AsyncMock(return_value="Recovered table")) as summary:
+            refreshed = asyncio.run(service.refresh_m1_section(
+                None, sections, NOW.date(), refresh_current=False,
+                generated_snapshot={"ga_replies_generated_at": NOW.isoformat()},
+            ))
+        assert refreshed[0]["body"] == "Recovered table"
+        summary.assert_awaited_once_with(None, NOW.date(), report="M1", generated_at=NOW)
+
+    def test_m2_recovers_when_a_later_capture_confirms_no_reply_before_generate(self):
+        cutoff = datetime(2026, 11, 19, 11, 30, tzinfo=timezone.utc)
+        captured = cutoff + timedelta(seconds=10)
+        snapshot = SimpleNamespace(captured_at=captured, evidence=evidence([
+            message(1, GA, "Pas gjenerimit", created_at=captured.isoformat()),
+        ]))
+        sections = [{"section_key": service.GA_REPLIES_SECTION_TITLE, "body": service.UNAVAILABLE}]
+        with (patch.object(service, "_snapshot_for_day", new=AsyncMock(return_value=snapshot)),
+              patch.object(service, "ga_identity", new=AsyncMock(return_value=GA))):
+            result = asyncio.run(service.refresh_ga_reply_section(
+                None, sections, cutoff.date(), report="M2",
+                generated_snapshot={"ga_replies_generated_at": cutoff.isoformat()},
+            ))
+        assert table_rows(result[0]["body"]) == [["-", "", "", service.EMPTY_REPLY_ROW]]
+
     def test_only_explicit_ga_replies_count_and_requests_are_not_individual_questions(self):
         messages = [message(1, content="Dy pyetje në një kërkesë"), message(2),
                     message(3, GA, "Përgjigjja", reference_id="1"),

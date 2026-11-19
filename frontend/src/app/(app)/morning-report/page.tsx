@@ -202,7 +202,7 @@ export default function MorningReportPage() {
     if (!canAccess) return
     setLoading(true)
     try {
-      const res = await apiFetch(`${API}?report_date=${reportDate}`)
+      const res = await apiFetch(`${API}?report_date=${reportDate}`, { cache: "no-store" })
       if (res.status === 404) {
         applyDraft(null)
         return

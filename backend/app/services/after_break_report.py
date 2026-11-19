@@ -97,7 +97,7 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[5],
     SECTION_TITLES[7],
     SECTION_TITLES[8],
-    *SECTION_TITLES[10:13],
+    *SECTION_TITLES[10:12],
 ]
 SECTION_TITLE_ALIASES = {
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[9],
@@ -501,39 +501,14 @@ async def apply_waiting_client_task_table(
     body = _normalize_section(
         _ascii_table(WAITING_CLIENT_TABLE_LABEL, WAITING_CLIENT_COLUMNS, rows)
     )
-    refreshed = [
-        {
-            **section,
-            "body": body,
-        }
-        if section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
-        or section.get("title") == WAITING_CLIENT_TABLE_LABEL
-        else section
-        for section in sections
-    ]
-    # Normalize older drafts too: keep one DT WFE section and place it after
-    # the unfinished priority section, even when the draft was created with the old order.
-    waiting_sections = [
-        section for section in refreshed
-        if section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
-        or section.get("title") == WAITING_CLIENT_TABLE_LABEL
-    ]
-    if waiting_sections:
-        waiting = waiting_sections[0]
-        refreshed = [
-            section for section in refreshed
-            if not (
-                section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
-                or section.get("title") == WAITING_CLIENT_TABLE_LABEL
-            )
-        ]
-        unfinished_index = next(
-            (index for index, section in enumerate(refreshed)
-             if section.get("section_key") == UNFINISHED_PRIORITY_TABLE_LABEL
-             or section.get("title") == UNFINISHED_PRIORITY_TABLE_LABEL),
-            len(refreshed) - 1,
-        )
-        refreshed.insert(unfinished_index + 1, waiting)
+    refreshed = []
+    found = False
+    for section in sections:
+        if not is_waiting_client_section(section.get("title"), section.get("section_key")):
+            refreshed.append(section)
+        elif not found:
+            refreshed.append({**section, "section_key": WAITING_CLIENT_TABLE_LABEL, "body": body})
+            found = True
     return refreshed
 
 
@@ -757,6 +732,11 @@ def is_retired_after_break_question(title: str | None, section_key: str | None =
     return False
 
 
+def is_waiting_client_section(title: str | None, section_key: str | None = None) -> bool:
+    return any(re.fullmatch(r"(?:MANUAL)?\d*DTWFE", re.sub(r"[^A-Z0-9]+", "", (value or "").upper()))
+               for value in (title, section_key))
+
+
 def after_break_automated_section_title(title: str | None, section_key: str | None = None) -> str | None:
     for value in (section_key, title):
         compact = re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
@@ -809,6 +789,10 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             continue
         identity = section_key or raw_title
         title = SECTION_TITLE_ALIASES.get(identity, identity)
+        if is_waiting_client_section(raw_title, section_key):
+            title = WAITING_CLIENT_TABLE_LABEL
+            if title in by_title:
+                continue
         body = str(section.get("body") or "")
         if title == PCM_PROJECTS_TITLE and not PCM_PROJECT_SUMMARY_PATTERN.fullmatch(body):
             body = ""
