@@ -133,6 +133,8 @@ class Settings(BaseSettings):
     MS_TENANT_ID: str | None = None
     MS_REDIRECT_URI: str | None = None
     MS_ORGANIZER_EMAIL: str = "info@primexeu.com"
+    # Microsoft To Do for the GA assistant; off = Microsoft connect asks for the same permissions as before.
+    MS_TODO_ENABLED: bool = False
     MS_CALENDAR_SYNC_ENABLED: bool = True
     MS_CALENDAR_SYNC_INTERVAL_MINUTES: int = 5
     MS_CALENDAR_SYNC_PAST_DAYS: int = 0

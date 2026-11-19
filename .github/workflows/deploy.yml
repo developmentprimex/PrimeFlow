@@ -264,6 +264,7 @@ jobs:
           MCP_ASSISTANT_ENABLED: ${{ vars.MCP_ASSISTANT_ENABLED || 'false' }}
           MCP_ASSISTANT_ALLOWED_EMAILS: ${{ vars.MCP_ASSISTANT_ALLOWED_EMAILS }}
           MCP_ASSISTANT_INTERNAL_SECRET: ${{ secrets.MCP_ASSISTANT_INTERNAL_SECRET }}
+          MS_TODO_ENABLED: ${{ vars.MS_TODO_ENABLED || 'false' }}
         run: |
           if not defined MS_CLIENT_ID (echo ::error::MS_CLIENT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
           if not defined MS_TENANT_ID (echo ::error::MS_TENANT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
@@ -336,6 +337,7 @@ jobs:
           echo MCP_ASSISTANT_RESOURCE_URL=https://mcp-flow.primexeu.com/mcp >> backend\.env
           echo OAUTH_ISSUER_URL=https://api-flow.primexeu.com >> backend\.env
           echo GA_TIMEZONE=Europe/Belgrade >> backend\.env
+          echo MS_TODO_ENABLED=%MS_TODO_ENABLED% >> backend\.env
  
       - name: Configure Discord Assistant
         shell: powershell
@@ -405,11 +407,11 @@ jobs:
         shell: cmd
         env:
           MCP_ASSISTANT_ENABLED: ${{ vars.MCP_ASSISTANT_ENABLED || 'false' }}
-          INSTALL_BACKEND_REQUIREMENTS: ${{ vars.INSTALL_BACKEND_REQUIREMENTS || 'true' }}
+          INSTALL_BACKEND_REQUIREMENTS: ${{ vars.INSTALL_BACKEND_REQUIREMENTS || 'false' }}
         run: |
           cd backend
           REM The API's own pinned dependencies were never installed by this workflow.
-          REM Set the Actions variable INSTALL_BACKEND_REQUIREMENTS=false to skip it.
+          REM Off by default; set the Actions variable INSTALL_BACKEND_REQUIREMENTS=true to enable it.
           if /I "%INSTALL_BACKEND_REQUIREMENTS%"=="true" (
             "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
             if errorlevel 1 exit /b 1

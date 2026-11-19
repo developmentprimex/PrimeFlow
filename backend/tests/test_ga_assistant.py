@@ -152,6 +152,21 @@ class TodoBodyTests(unittest.TestCase):
         )
 
 
+class MicrosoftScopeTests(unittest.TestCase):
+    def test_connect_flow_is_unchanged_unless_todo_is_enabled(self) -> None:
+        from unittest.mock import patch
+
+        from app.config import settings
+        from app.integrations import microsoft
+
+        with patch.object(settings, "MS_TODO_ENABLED", False):
+            self.assertEqual(microsoft.authorize_scope_str(), microsoft.SCOPE_STR)
+            self.assertNotIn("Tasks.ReadWrite", microsoft.build_authorize_url("c", "https://x/cb", "s"))
+        with patch.object(settings, "MS_TODO_ENABLED", True):
+            self.assertIn("Tasks.ReadWrite", microsoft.authorize_scope_str())
+        self.assertNotIn("Tasks", microsoft.SCOPE_STR)  # refreshes never ask for To Do
+
+
 class GaIdentityTests(unittest.TestCase):
     def test_ga_identity_uses_settings_defaults(self) -> None:
         self.assertTrue(is_ga_user(SimpleNamespace(username="Gane.Arifaj", email=None)))

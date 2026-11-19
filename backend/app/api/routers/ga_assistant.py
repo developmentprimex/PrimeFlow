@@ -152,6 +152,8 @@ async def _todo_client(db: AsyncSession):
     from app.integrations.microsoft_todo import TodoClient, TodoScopeMissing, ensure_todo_scope
     from app.services.microsoft_calendar_sync import get_shared_calendar_token
 
+    if not settings.MS_TODO_ENABLED:
+        raise HTTPException(status_code=503, detail="Microsoft To Do is not enabled (MS_TODO_ENABLED=false)")
     if not settings.MS_REDIRECT_URI:
         raise HTTPException(status_code=503, detail="Microsoft integration is not configured")
     token = await get_shared_calendar_token(db, redirect_uri=settings.MS_REDIRECT_URI)

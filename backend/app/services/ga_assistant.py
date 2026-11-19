@@ -518,6 +518,8 @@ async def collect_microsoft_items(
         logger.warning("GA assistant: Outlook events failed: %s", type(exc).__name__)
         warnings.append("Outlook events could not be read.")
 
+    if not settings.MS_TODO_ENABLED:
+        return items, warnings
     try:
         ensure_todo_scope(token.scope)
         client = TodoClient(token.access_token)

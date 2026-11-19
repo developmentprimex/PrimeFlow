@@ -14,11 +14,15 @@ OAUTH_BASE_URL = f"https://login.microsoftonline.com/{settings.MS_TENANT_ID}/oau
 
 SCOPES = ["offline_access", "https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/Calendars.ReadWrite"]
 SCOPE_STR = " ".join(SCOPES)
-# Tasks.ReadWrite (Microsoft To Do for the GA assistant) is requested only when the
-# mailbox is (re-)authorized. Token refreshes keep asking for SCOPE_STR, so existing
-# grants without Tasks.ReadWrite keep refreshing and calendar sync is unaffected.
-AUTHORIZE_SCOPES = [*SCOPES, "https://graph.microsoft.com/Tasks.ReadWrite"]
-AUTHORIZE_SCOPE_STR = " ".join(AUTHORIZE_SCOPES)
+# Tasks.ReadWrite (Microsoft To Do for the GA assistant) is requested only when
+# MS_TODO_ENABLED=true AND the mailbox is (re-)authorized. Off by default, so the
+# Microsoft connect flow asks for exactly the same permissions as before. Token
+# refreshes always keep asking for SCOPE_STR, so calendar sync is unaffected.
+TODO_SCOPE = "https://graph.microsoft.com/Tasks.ReadWrite"
+
+
+def authorize_scope_str() -> str:
+    return " ".join([*SCOPES, TODO_SCOPE] if settings.MS_TODO_ENABLED else SCOPES)
 
 
 def format_datetime(dt: datetime) -> str:
@@ -33,7 +37,7 @@ def build_authorize_url(client_id: str, redirect_uri: str, state: str) -> str:
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
-        "scope": AUTHORIZE_SCOPE_STR,
+        "scope": authorize_scope_str(),
         "state": state,
         "prompt": "select_account",
     }
@@ -50,7 +54,7 @@ async def exchange_code_for_token(code: str, redirect_uri: str) -> dict[str, Any
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
-                "scope": AUTHORIZE_SCOPE_STR,
+                "scope": authorize_scope_str(),
             },
         )
     res.raise_for_status()

@@ -101,7 +101,8 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 | `status=completed` | ✓ |
 | `body` (text) | shënimet; hapat ruhen si rreshta `☐`/`☑`, sepse `checklistItems` nuk sinkronizohen me iPhone |
 
-Leja `Tasks.ReadWrite` kërkohet **vetëm në autorizim** (`AUTHORIZE_SCOPES`). Refresh-i i token-it
+Leja `Tasks.ReadWrite` kërkohet **vetëm në autorizim dhe vetëm kur `MS_TODO_ENABLED=true`**
+(`authorize_scope_str()`). Refresh-i i token-it
 vazhdon me scope-t e kalendarit, që sinkronizimi ekzistues i kalendarit të mos prishet para
 ri-autorizimit.
 
@@ -132,7 +133,8 @@ ri-autorizimit.
 | `PRIMEFLOW_MCP_PROFILE` | PM2 | `assistant` vetëm për 8011 |
 | `PRIMEFLOW_MCP_ALLOW_DELETE` | opsionale | `false` si parazgjedhje |
 | `PRIMEFLOW_MCP_ASSISTANT_HOST`, `PRIMEFLOW_MCP_ASSISTANT_PORT` | opsionale | `127.0.0.1` / `8011` |
-| `INSTALL_BACKEND_REQUIREMENTS` | Actions variable | `false` e anashkalon `pip install -r requirements.txt` |
+| `INSTALL_BACKEND_REQUIREMENTS` | Actions variable | parazgjedhja `false`; `true` e ndez `pip install -r requirements.txt` në deploy |
+| `MS_TODO_ENABLED` | Actions variable → `.env` | parazgjedhja `false`: lidhja Microsoft kërkon të njëjtat leje si më parë dhe tools e To Do janë të fikura. Vendose `true` vetëm pasi Azure ka `Tasks.ReadWrite`, pastaj ri-autorizo `info@` |
 
 ## Hapat manualë
 
@@ -140,7 +142,7 @@ ri-autorizimit.
    E ekzekuton deploy-i.
 2. **Azure app registration**: shto lejen delegated `Tasks.ReadWrite` (Microsoft Graph).
    Jep admin consent nëse tenant-i e kërkon.
-3. **Ri-autorizimi i Microsoft**: hyr në PrimeFlow → lidhja Microsoft → lidhu përsëri me
+3. **`MS_TODO_ENABLED=true`** (Actions variable), pastaj **ri-autorizimi i Microsoft**: hyr në PrimeFlow → lidhja Microsoft → lidhu përsëri me
    `info@primexeu.com`. Pa këtë, tools e To Do kthejnë “no Tasks.ReadWrite permission”,
    ndërsa kalendari vazhdon të punojë.
 4. **GitHub Actions**:
