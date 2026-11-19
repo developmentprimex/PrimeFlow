@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
 from app.models.task import Task
-GA_MARKER_EMAIL = "ga@primexeu.com"
+from app.services.ga_identity import is_ga_email
 ONE_H_MARKER_SYMBOLS = {
     "EXCLAMATION": "!",
     "DOUBLE_EXCLAM": "!!",
@@ -48,7 +48,7 @@ def current_effective_marker_date(now: datetime | None = None) -> date:
 
 
 def marker_is_by_ga(actor_email: str | None) -> bool:
-    return (actor_email or "").strip().casefold() == GA_MARKER_EMAIL
+    return is_ga_email(actor_email)
 
 
 def normalize_marker_comment(marker: str | None, comment: str | None) -> str | None:

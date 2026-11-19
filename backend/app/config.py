@@ -52,6 +52,24 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"
+    # The GA (CEO) account identity. Every lookup of "the GA user" reads these
+    # two values through app.services.ga_identity; the defaults keep the
+    # historical behaviour (username first, then email).
+    GA_USER_EMAIL: str = "ga@primexeu.com"
+    GA_USERNAME: str = "gane.arifaj"
+    # Timezone used by the GA assistant agenda (MCP assistant profile).
+    GA_TIMEZONE: str = "Europe/Belgrade"
+    # MCP assistant / OAuth 2.1 authorization server for the remote connector.
+    MCP_ASSISTANT_ENABLED: bool = False
+    MCP_ASSISTANT_ALLOWED_EMAILS: str = ""
+    MCP_ASSISTANT_RESOURCE_URL: str = "https://mcp-flow.primexeu.com/mcp"
+    MCP_ASSISTANT_INTERNAL_SECRET: str | None = None
+    OAUTH_ISSUER_URL: str = "https://api-flow.primexeu.com"
+    OAUTH_ALLOWED_REDIRECT_URIS: str = "https://claude.ai/api/mcp/auth_callback"
+    OAUTH_ACCESS_TOKEN_MINUTES: int = 60
+    OAUTH_REFRESH_TOKEN_DAYS: int = 30
+    OAUTH_AUTH_CODE_SECONDS: int = 300
+    OAUTH_PENDING_REQUEST_SECONDS: int = 900
     GA_PERSONAL_ENABLED: bool = False
     GA_PERSONAL_UNLOCK_MINUTES: int = 60
     GA_PERSONAL_DISCORD_BRIDGE_SECRET: str | None = None

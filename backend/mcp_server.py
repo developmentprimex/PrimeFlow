@@ -104,7 +104,170 @@ Endpoint guidance:
 - run_readonly_sql allows only SELECT/WITH statements and runs in a read-only transaction. Never use database tools for create/update/delete actions.
 """
 
-mcp = FastMCP("primeflow", instructions=PRIMEFLOW_GUIDE, host=MCP_HOST, port=MCP_PORT)
+# ---------------------------------------------------------------- profiles
+#
+# "full" (default): the historical server used by the primeflow-mcp process on
+#   8010 - every tool, SSE, one shared service account. Unchanged.
+# "assistant": the remote GA assistant connector - Streamable HTTP on /mcp, OAuth
+#   bearer tokens per user, only ASSISTANT_TOOLS, and every API call is made as
+#   the token's user (created_by / audit_logs record that user).
+MCP_PROFILE = os.getenv("PRIMEFLOW_MCP_PROFILE", "full").strip().lower() or "full"
+if MCP_PROFILE not in {"full", "assistant"}:
+    raise RuntimeError("PRIMEFLOW_MCP_PROFILE must be 'full' or 'assistant'")
+IS_ASSISTANT = MCP_PROFILE == "assistant"
+ALLOW_DELETE = os.getenv("PRIMEFLOW_MCP_ALLOW_DELETE", "false").strip().lower() in {"1", "true", "yes"}
+MCP_INTERNAL_SECRET = os.getenv("MCP_ASSISTANT_INTERNAL_SECRET", "")
+MCP_RESOURCE_URL = os.getenv("MCP_ASSISTANT_RESOURCE_URL", "https://mcp-flow.primexeu.com/mcp")
+OAUTH_ISSUER_URL = os.getenv("OAUTH_ISSUER_URL", "https://api-flow.primexeu.com")
+
+# Tools exposed by the assistant profile (existing tools + the GA assistant tools).
+ASSISTANT_TOOLS = frozenset({
+    "primeflow_me", "primeflow_context", "health_check", "list_users", "resolve_user", "list_projects",
+    "get_project", "resolve_project", "list_tasks", "get_task", "get_task_people", "get_task_steps",
+    "get_tasks_today", "get_overdue_tasks", "get_user_tasks_for_day", "get_user_unfinished_tasks_today",
+    "list_meetings", "get_common_view_meetings_for_week", "get_daily_ga_table", "list_ga_notes",
+    "create_ga_note", "update_ga_note", "create_task", "update_task", "schedule_task", "add_task_step",
+    "set_task_step_done", "search_primeflow", "search", "fetch",
+    "ga_agenda", "ga_leftovers", "ga_untimed_today", "ga_item_done", "ga_item_postpone", "ga_item_set_time",
+    "ga_item_remove_from_day", "ga_add_comment",
+    "todo_list", "todo_create", "todo_update", "todo_complete", "todo_set_steps",
+})
+# Tools that exist only in the assistant profile; the full profile stays as it was.
+ASSISTANT_ONLY_TOOLS = frozenset({
+    "ga_agenda", "ga_leftovers", "ga_untimed_today", "ga_item_done", "ga_item_postpone", "ga_item_set_time",
+    "ga_item_remove_from_day", "ga_add_comment",
+    "todo_list", "todo_create", "todo_update", "todo_complete", "todo_set_steps",
+})
+# Existing allowlisted tools that change data (everything else allowlisted only reads).
+ASSISTANT_WRITE_TOOLS = frozenset({
+    "create_ga_note", "update_ga_note", "create_task", "update_task", "schedule_task", "add_task_step", "set_task_step_done",
+})
+
+
+def _assistant_auth_kwargs() -> dict[str, Any]:
+    """FastMCP kwargs that turn the server into an OAuth-protected resource server."""
+    try:
+        from mcp.server.auth.provider import AccessToken
+        from mcp.server.auth.settings import AuthSettings
+        from mcp.server.transport_security import TransportSecuritySettings
+    except ImportError as exc:  # pragma: no cover - depends on the installed SDK
+        raise RuntimeError(
+            "The assistant profile needs the newer MCP SDK from requirements-mcp-assistant.txt."
+        ) from exc
+    if "subject" not in AccessToken.model_fields:  # pragma: no cover - SDK guard
+        raise RuntimeError(
+            "The assistant profile needs the newer MCP SDK from requirements-mcp-assistant.txt "
+            "(run it with backend/.venv-mcp-assistant)."
+        )
+    import hashlib
+    from urllib.parse import urlsplit
+
+    class PrimeflowAccessToken(AccessToken):
+        api_token: str = ""
+        api_token_expires_at: float = 0.0
+        email: str | None = None
+
+    class PrimeflowTokenVerifier:
+        """Validates assistant tokens with the PrimeFlow OAuth server (internal endpoint)."""
+
+        def __init__(self) -> None:
+            self._cache: dict[str, PrimeflowAccessToken] = {}
+
+        async def verify_token(self, token: str) -> AccessToken | None:
+            key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            cached = self._cache.get(key)
+            now = time.time()
+            if cached is not None and cached.api_token_expires_at - 60 > now and (cached.expires_at or 0) > now:
+                return cached
+            if not MCP_INTERNAL_SECRET:
+                print("MCP assistant: MCP_ASSISTANT_INTERNAL_SECRET is not set; rejecting tokens")
+                return None
+            try:
+                async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT) as client:
+                    response = await client.post(
+                        "/api/oauth/internal/session",
+                        json={"token": token},
+                        headers={"X-MCP-Internal-Secret": MCP_INTERNAL_SECRET},
+                    )
+            except httpx.HTTPError as exc:
+                print(f"MCP assistant: token validation unreachable: {type(exc).__name__}")
+                return None
+            if response.status_code != 200:
+                print(f"MCP assistant: token validation returned HTTP {response.status_code}")
+                return None
+            data = response.json()
+            if not data.get("active"):
+                self._cache.pop(key, None)
+                return None
+            verified = PrimeflowAccessToken(
+                token=token,
+                client_id=str(data.get("client_id") or ""),
+                scopes=str(data.get("scope") or "").split(),
+                expires_at=int(data.get("exp") or 0),
+                resource=data.get("resource"),
+                subject=str(data.get("sub") or ""),
+                api_token=str(data.get("primeflow_access_token") or ""),
+                api_token_expires_at=now + float(data.get("primeflow_access_token_expires_in") or 0),
+                email=data.get("email"),
+            )
+            if len(self._cache) > 500:
+                self._cache.clear()
+            self._cache[key] = verified
+            return verified
+
+    public_host = urlsplit(MCP_RESOURCE_URL).netloc
+    allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"] + ([public_host] if public_host else [])
+    allowed_origins = ["http://127.0.0.1:*", "http://localhost:*", "https://claude.ai"]
+    return {
+        "token_verifier": PrimeflowTokenVerifier(),
+        "auth": AuthSettings(
+            issuer_url=OAUTH_ISSUER_URL,
+            resource_server_url=MCP_RESOURCE_URL,
+            required_scopes=["primeflow"],
+        ),
+        "transport_security": TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
+        ),
+        "streamable_http_path": "/mcp",
+    }
+
+
+if IS_ASSISTANT:
+    mcp = FastMCP("primeflow-assistant", instructions=PRIMEFLOW_GUIDE, host=MCP_HOST, port=MCP_PORT, **_assistant_auth_kwargs())
+else:
+    mcp = FastMCP("primeflow", instructions=PRIMEFLOW_GUIDE, host=MCP_HOST, port=MCP_PORT)
+
+
+def _tool(name: str | None = None, *, read_only: bool | None = None, destructive: bool | None = None, idempotent: bool | None = None):
+    """Register a tool for the active profile.
+
+    full profile: identical to ``@mcp.tool(name=...)`` for every pre-existing tool;
+    assistant-only tools are skipped. assistant profile: only ASSISTANT_TOOLS, with
+    MCP tool annotations (readOnlyHint / destructiveHint).
+    """
+
+    def decorator(fn):
+        tool_name = name or fn.__name__
+        if not IS_ASSISTANT:
+            if tool_name in ASSISTANT_ONLY_TOOLS:
+                return fn
+            return mcp.tool(name=name)(fn) if name else mcp.tool()(fn)
+        if tool_name not in ASSISTANT_TOOLS:
+            return fn
+        from mcp.types import ToolAnnotations
+
+        is_read_only = read_only if read_only is not None else tool_name not in ASSISTANT_WRITE_TOOLS
+        annotations = ToolAnnotations(
+            readOnlyHint=is_read_only,
+            destructiveHint=bool(destructive) if not is_read_only else None,
+            idempotentHint=idempotent,
+            openWorldHint=False,
+        )
+        return mcp.tool(name=name, annotations=annotations)(fn)
+
+    return decorator
 
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 FORBIDDEN_SQL_RE = re.compile(
@@ -123,7 +286,30 @@ def _jwt_exp(token: str) -> int:
         return 0
 
 
+def _caller_access() -> Any:
+    """The verified OAuth token of the current assistant request (assistant profile only)."""
+    from mcp.server.auth.middleware.auth_context import get_access_token
+
+    access = get_access_token()
+    if access is None or not getattr(access, "api_token", ""):
+        raise RuntimeError("This assistant request is not authenticated.")
+    return access
+
+
+def _cache_scope() -> str:
+    """Lookup caches are per user in the assistant profile (visibility differs by role)."""
+    if not IS_ASSISTANT:
+        return ""
+    try:
+        return f"{_caller_access().subject}:"
+    except RuntimeError:
+        return "anonymous:"
+
+
 async def _access_token() -> str:
+    if IS_ASSISTANT:
+        # Never the shared service account: act as the user who authorized the connector.
+        return str(_caller_access().api_token)
     cached_token = str(_token_cache.get("access_token") or "")
     cached_exp = int(_token_cache.get("expires_at") or 0)
     if cached_token and cached_exp > int(time.time()) + 30:
@@ -219,7 +405,13 @@ def _validate_startup_configuration() -> None:
     missing = []
     if not API_BASE_URL:
         missing.append("PRIMEFLOW_API_BASE_URL")
-    if not (ACCESS_TOKEN or (os.getenv("PRIMEFLOW_EMAIL") and os.getenv("PRIMEFLOW_PASSWORD"))):
+    if IS_ASSISTANT:
+        # The assistant never uses the shared service account; it needs the OAuth wiring instead.
+        if not MCP_INTERNAL_SECRET:
+            missing.append("MCP_ASSISTANT_INTERNAL_SECRET")
+        if not MCP_RESOURCE_URL:
+            missing.append("MCP_ASSISTANT_RESOURCE_URL")
+    elif not (ACCESS_TOKEN or (os.getenv("PRIMEFLOW_EMAIL") and os.getenv("PRIMEFLOW_PASSWORD"))):
         missing.append("PRIMEFLOW_EMAIL/PRIMEFLOW_PASSWORD or PRIMEFLOW_ACCESS_TOKEN")
     if not MCP_HOST:
         missing.append("PRIMEFLOW_MCP_HOST")
@@ -350,6 +542,7 @@ def _week_start(value: str | None = None, week: str = "current") -> str:
 
 
 async def _cached_lookup(key: str, path: str) -> list[dict[str, Any]]:
+    key = f"{_cache_scope()}{key}"
     now = time.monotonic()
     cached = _lookup_cache.get(key)
     if cached and float(cached.get("expires_at") or 0) > now:
@@ -669,19 +862,19 @@ def _parse_date_arg(value: str | None) -> str | None:
     return _parse_day(value).isoformat()
 
 
-@mcp.tool()
+@_tool()
 async def primeflow_me() -> Any:
     """Return the Primeflow user connected to this MCP server."""
     return await _request("GET", "/api/auth/me")
 
 
-@mcp.tool()
+@_tool()
 async def primeflow_guide() -> str:
     """Return a broad guide explaining Primeflow modules, terminology, and MCP/API usage rules."""
     return PRIMEFLOW_GUIDE
 
 
-@mcp.tool()
+@_tool()
 async def primeflow_context() -> Any:
     """Return current Primeflow time, timezone, connected user, and departments. Use when a request depends on 'today' or access scope."""
     now = datetime.now(_local_tz())
@@ -698,7 +891,7 @@ async def primeflow_context() -> Any:
     }
 
 
-@mcp.tool()
+@_tool()
 async def list_api_endpoints(tag: str | None = None, query: str | None = None) -> Any:
     """List Primeflow API endpoints from FastAPI OpenAPI. Optional tag/query filters narrow the result."""
     spec = await _request("GET", "/openapi.json")
@@ -735,13 +928,13 @@ async def list_api_endpoints(tag: str | None = None, query: str | None = None) -
     return results
 
 
-@mcp.tool()
+@_tool()
 async def list_departments() -> Any:
     """List Primeflow departments. Use this before department-specific reports if the department ID is unknown."""
     return await _cached_lookup("departments", "/api/departments")
 
 
-@mcp.tool()
+@_tool()
 async def resolve_department(department_ref: str) -> Any:
     """Resolve a Primeflow department name/code/slug/UUID such as Development, DEV, GA, PCM to a department record."""
     department_id = await _resolve_department_id(department_ref)
@@ -752,7 +945,7 @@ async def resolve_department(department_ref: str) -> Any:
     return {"id": department_id}
 
 
-@mcp.tool()
+@_tool()
 async def primeflow_api_request(
     method: str,
     path: str,
@@ -767,11 +960,16 @@ async def primeflow_api_request(
     params_json: JSON object for query params, for example {"include_done": false}.
     body_json: JSON body for POST/PATCH/PUT, for example {"title": "Task"}.
 
-    Use DELETE only after an explicit user request and a clear target ID.
+    DELETE is disabled unless the server sets PRIMEFLOW_MCP_ALLOW_DELETE=true.
     """
     method_upper = method.strip().upper()
     if method_upper not in {"GET", "POST", "PATCH", "PUT", "DELETE"}:
         raise ValueError("method must be GET, POST, PATCH, PUT, or DELETE.")
+    if method_upper == "DELETE" and not ALLOW_DELETE:
+        raise ValueError(
+            "DELETE is disabled on this MCP server (PRIMEFLOW_MCP_ALLOW_DELETE=false). "
+            "Ask an administrator to delete the item in PrimeFlow."
+        )
     normalized_path = _normalize_api_path(path)
     params = _parse_json_arg(params_json, default={})
     body = _parse_json_arg(body_json, default=None)
@@ -808,7 +1006,7 @@ async def primeflow_api_request(
     }
 
 
-@mcp.tool()
+@_tool()
 async def list_database_tables(schema_name: str = "public") -> Any:
     """List database tables/views in a schema using the read-only DB connection."""
     return await _db_fetch(
@@ -822,7 +1020,7 @@ async def list_database_tables(schema_name: str = "public") -> Any:
     )
 
 
-@mcp.tool()
+@_tool()
 async def describe_database_table(table_name: str, schema_name: str = "public") -> Any:
     """Describe columns, types, nullability, defaults, and primary key status for a database table."""
     columns = await _db_fetch(
@@ -858,7 +1056,7 @@ async def describe_database_table(table_name: str, schema_name: str = "public") 
     return columns
 
 
-@mcp.tool()
+@_tool()
 async def list_database_relationships(table_name: str | None = None, schema_name: str = "public") -> Any:
     """List foreign-key relationships, optionally filtered to one table."""
     return await _db_fetch(
@@ -888,7 +1086,7 @@ async def list_database_relationships(table_name: str | None = None, schema_name
     )
 
 
-@mcp.tool()
+@_tool()
 async def run_readonly_sql(sql: str, max_rows: int = 100) -> Any:
     """
     Run a read-only SQL query against Primeflow DB.
@@ -904,13 +1102,13 @@ async def run_readonly_sql(sql: str, max_rows: int = 100) -> Any:
     return {"row_count": len(rows), "max_rows": row_limit, "rows": rows}
 
 
-@mcp.tool()
+@_tool()
 async def search_primeflow(query: str) -> Any:
     """Search Primeflow tasks and projects by text."""
     return await _request("GET", "/api/search", params={"q": query})
 
 
-@mcp.tool(name="search")
+@_tool(name="search")
 async def search_for_chatgpt(query: str) -> dict[str, list[dict[str, str]]]:
     """Search Primeflow and return ChatGPT-compatible citation results."""
     data = await search_primeflow(query)
@@ -937,7 +1135,7 @@ async def search_for_chatgpt(query: str) -> dict[str, list[dict[str, str]]]:
     return {"results": results}
 
 
-@mcp.tool(name="fetch")
+@_tool(name="fetch")
 async def fetch_for_chatgpt(id: str) -> dict[str, Any]:
     """Fetch a Primeflow search result by ID. IDs are returned by the search tool."""
     kind, _, item_id = id.partition(":")
@@ -981,7 +1179,7 @@ async def fetch_for_chatgpt(id: str) -> dict[str, Any]:
     raise ValueError("Expected a search result ID like task:<uuid> or project:<uuid>.")
 
 
-@mcp.tool()
+@_tool()
 async def list_tasks(
     department_id: str | None = None,
     department_ref: str | None = None,
@@ -1024,7 +1222,7 @@ async def list_tasks(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_user_tasks_for_day(
     user_ref: str,
     day_date: str | None = None,
@@ -1092,7 +1290,7 @@ async def get_user_tasks_for_day(
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_user_unfinished_tasks_today(user_ref: str, department_ref: str | None = None) -> Any:
     """Get unfinished Primeflow tasks for a user today. Use this for 'left unfinished today' questions."""
     return await get_user_tasks_for_day(
@@ -1103,7 +1301,7 @@ async def get_user_unfinished_tasks_today(user_ref: str, department_ref: str | N
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_open_tasks_by_department(
     department_ref: str,
     include_done: bool = False,
@@ -1118,7 +1316,7 @@ async def get_open_tasks_by_department(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_common_view(
     week_start: str | None = None,
     include: str | None = "users,departments,entries,meetings,system_tasks,tasks",
@@ -1147,7 +1345,7 @@ async def get_common_view(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_common_view_meetings_for_week(
     week_start: str | None = None,
     department_ref: str | None = None,
@@ -1181,7 +1379,7 @@ async def get_common_view_meetings_for_week(
     }
 
 
-@mcp.tool()
+@_tool()
 async def list_meetings(
     department_id: str | None = None,
     department_ref: str | None = None,
@@ -1210,7 +1408,7 @@ async def list_meetings(
     )
 
 
-@mcp.tool()
+@_tool()
 async def create_meeting(
     title: str,
     department_ref: str,
@@ -1262,7 +1460,7 @@ async def create_meeting(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_weekly_planner(
     week_start: str | None = None,
     department_ref: str | None = None,
@@ -1278,7 +1476,7 @@ async def get_weekly_planner(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_weekly_table(
     week_start: str | None = None,
     department_ref: str | None = None,
@@ -1293,7 +1491,7 @@ async def get_weekly_table(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_monthly_planner(
     year: int,
     month: int,
@@ -1310,7 +1508,7 @@ async def get_monthly_planner(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_daily_report(
     day: str | None = None,
     department_ref: str | None = None,
@@ -1327,7 +1525,7 @@ async def get_daily_report(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_daily_ga_table(
     day: str | None = None,
     department_ref: str | None = None,
@@ -1344,13 +1542,13 @@ async def get_daily_ga_table(
     )
 
 
-@mcp.tool()
+@_tool()
 async def list_common_entries(from_date: str | None = None, to_date: str | None = None) -> Any:
     """List Common entries, optionally by date range. Use for complaints, requests, proposals, problems, leave/PV, holidays, feedback."""
     return await _request("GET", "/api/common-entries", params={"from": from_date, "to": to_date})
 
 
-@mcp.tool()
+@_tool()
 async def create_common_entry(
     category: Literal[
         "Delays",
@@ -1385,7 +1583,7 @@ async def create_common_entry(
     )
 
 
-@mcp.tool()
+@_tool()
 async def list_leave_blocks(
     block_type: str = "PV_FEST",
     start: str | None = None,
@@ -1401,14 +1599,14 @@ async def list_leave_blocks(
     )
 
 
-@mcp.tool()
+@_tool()
 async def list_ga_notes(project_id: str | None = None, department_ref: str | None = None) -> Any:
     """List GA/KA notes, optionally for a project or department."""
     department_id = await _resolve_department_id(department_ref)
     return await _request("GET", "/api/ga-notes", params={"project_id": project_id, "department_id": department_id})
 
 
-@mcp.tool()
+@_tool()
 async def create_ga_note(
     content: str,
     note_type: Literal["GA", "KA"] = "GA",
@@ -1447,7 +1645,7 @@ async def create_ga_note(
     )
 
 
-@mcp.tool()
+@_tool()
 async def update_ga_note(
     note_id: str,
     content: str | None = None,
@@ -1471,7 +1669,7 @@ async def update_ga_note(
     )
 
 
-@mcp.tool()
+@_tool()
 async def create_task_from_ga_note(
     note_id: str,
     assignee_name: str | None = None,
@@ -1562,14 +1760,14 @@ async def create_task_from_ga_note(
     }
 
 
-@mcp.tool()
+@_tool()
 async def list_plan_notes(project_id: str | None = None, department_ref: str | None = None) -> Any:
     """List plan notes, optionally for a project or department."""
     department_id = await _resolve_department_id(department_ref)
     return await _request("GET", "/api/plan-notes", params={"project_id": project_id, "department_id": department_id})
 
 
-@mcp.tool()
+@_tool()
 async def create_plan_note(
     content: str,
     department_ref: str | None = None,
@@ -1604,7 +1802,7 @@ async def create_plan_note(
     )
 
 
-@mcp.tool()
+@_tool()
 async def list_internal_notes(department_ref: str, to_user_ref: str | None = None) -> Any:
     """List internal notes for a department, optionally targeted to a user."""
     department_id = await _resolve_department_id(department_ref)
@@ -1616,7 +1814,7 @@ async def list_internal_notes(department_ref: str, to_user_ref: str | None = Non
     )
 
 
-@mcp.tool()
+@_tool()
 async def create_internal_note(
     title: str,
     to_user_names: list[str],
@@ -1647,7 +1845,7 @@ async def create_internal_note(
     )
 
 
-@mcp.tool()
+@_tool()
 async def list_system_tasks(
     department_ref: str | None = None,
     only_active: bool = False,
@@ -1671,19 +1869,19 @@ async def list_system_tasks(
     )
 
 
-@mcp.tool()
+@_tool()
 async def list_system_task_templates() -> Any:
     """List Primeflow system task templates including recurring task definitions where visible."""
     return await _request("GET", "/api/system-tasks/templates")
 
 
-@mcp.tool()
+@_tool()
 async def get_task(task_id: str) -> Any:
     """Get a Primeflow task by ID."""
     return await _request("GET", f"/api/tasks/{task_id}")
 
 
-@mcp.tool()
+@_tool()
 async def create_task(
     title: str,
     description: str | None = None,
@@ -1766,7 +1964,7 @@ async def create_task(
     )
 
 
-@mcp.tool()
+@_tool()
 async def create_1h_task(
     title: str,
     assignee_name: str,
@@ -1795,7 +1993,7 @@ async def create_1h_task(
     )
 
 
-@mcp.tool()
+@_tool()
 async def update_task(
     task_id: str,
     title: str | None = None,
@@ -1836,7 +2034,7 @@ async def update_task(
     return await _request("PATCH", f"/api/tasks/{task_id}", json={key: value for key, value in payload.items() if value is not None})
 
 
-@mcp.tool()
+@_tool()
 async def list_projects(
     department_id: str | None = None,
     department_ref: str | None = None,
@@ -1853,26 +2051,26 @@ async def list_projects(
     )
 
 
-@mcp.tool()
+@_tool()
 async def get_project(project_id: str) -> Any:
     """Get a Primeflow project by ID."""
     return await _request("GET", f"/api/projects/{project_id}")
 
 
-@mcp.tool()
+@_tool()
 async def resolve_project(project_ref: str, department_ref: str | None = None) -> Any:
     """Resolve a Primeflow project title/display title/UUID, optionally inside a department, to its project record."""
     project_id = await _resolve_project_id(project_ref, department_ref)
     return await _request("GET", f"/api/projects/{project_id}")
 
 
-@mcp.tool()
+@_tool()
 async def list_users() -> Any:
     """List active Primeflow users visible to the connected account."""
     return await _cached_lookup("users", "/api/users")
 
 
-@mcp.tool()
+@_tool()
 async def resolve_user(user_ref: str, department_ref: str | None = None) -> Any:
     """Resolve a Primeflow user name, email, username, UUID, or initials like LH to a user record."""
     user_id = await _resolve_user_id(user_ref, department_ref)
@@ -1883,7 +2081,7 @@ async def resolve_user(user_ref: str, department_ref: str | None = None) -> Any:
     return {"id": user_id}
 
 
-@mcp.tool()
+@_tool()
 async def get_tasks_today(
     user_ref: str | None = None,
     department_ref: str | None = None,
@@ -1942,7 +2140,7 @@ async def get_tasks_today(
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_tasks_this_week(
     week: str = "current",
     week_start: str | None = None,
@@ -2000,7 +2198,7 @@ async def get_tasks_this_week(
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_all_open_tasks_by_person(
     department_ref: str | None = None,
     task_type: str | None = None,
@@ -2031,7 +2229,7 @@ async def get_all_open_tasks_by_person(
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_overdue_tasks(
     user_ref: str | None = None,
     department_ref: str | None = None,
@@ -2060,7 +2258,7 @@ async def get_overdue_tasks(
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_weekly_plan(
     week: str = "current",
     week_start: str | None = None,
@@ -2089,7 +2287,7 @@ async def get_weekly_plan(
     return {"week_start": monday, "source": "weekly_table", "plans": [], "weekly_table": table}
 
 
-@mcp.tool()
+@_tool()
 async def save_weekly_plan(
     department_ref: str,
     content_json: str,
@@ -2136,7 +2334,7 @@ async def save_weekly_plan(
     return {"action": "created", "plan": plan}
 
 
-@mcp.tool()
+@_tool()
 async def get_plan_vs_actual(
     department_ref: str,
     week: str = "current",
@@ -2176,7 +2374,7 @@ async def _weekly_realization(
     return department_id, monday, result
 
 
-@mcp.tool()
+@_tool()
 async def get_weekly_realization(
     department_ref: str,
     week_start: str | None = None,
@@ -2191,7 +2389,7 @@ async def get_weekly_realization(
     return result
 
 
-@mcp.tool()
+@_tool()
 async def calculate_weekly_realization(
     department_ref: str,
     week_start: str | None = None,
@@ -2213,7 +2411,7 @@ async def calculate_weekly_realization(
     )
 
 
-@mcp.tool()
+@_tool()
 async def review_weekly_realization_person(
     department_ref: str,
     user_ref: str,
@@ -2259,7 +2457,7 @@ async def review_weekly_realization_person(
     )
 
 
-@mcp.tool()
+@_tool()
 async def add_realization_observation(
     department_ref: str,
     user_ref: str,
@@ -2340,7 +2538,7 @@ async def add_realization_observation(
     )
 
 
-@mcp.tool()
+@_tool()
 async def verify_realization_observation(
     observation_id: str,
     comment: str | None = None,
@@ -2353,7 +2551,7 @@ async def verify_realization_observation(
     )
 
 
-@mcp.tool()
+@_tool()
 async def void_realization_observation(observation_id: str, reason: str) -> Any:
     """Void an observation with a required reason; Primeflow retains its audit history."""
     if not reason.strip():
@@ -2365,7 +2563,7 @@ async def void_realization_observation(observation_id: str, reason: str) -> Any:
     )
 
 
-@mcp.tool()
+@_tool()
 async def approve_weekly_realization(
     department_ref: str,
     week_start: str | None = None,
@@ -2377,7 +2575,7 @@ async def approve_weekly_realization(
     )
 
 
-@mcp.tool()
+@_tool()
 async def lock_weekly_realization(
     department_ref: str,
     week_start: str | None = None,
@@ -2394,7 +2592,7 @@ async def lock_weekly_realization(
     )
 
 
-@mcp.tool()
+@_tool()
 async def prepare_next_week_plan(department_ref: str | None = None) -> Any:
     """
     Collect everything needed to draft next week's plan in one call.
@@ -2471,7 +2669,7 @@ async def prepare_next_week_plan(department_ref: str | None = None) -> Any:
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_task_people(task_id: str) -> Any:
     """
     Get everyone involved in a task: assignees, control 1 (the confirmer), control 2
@@ -2507,7 +2705,7 @@ async def get_task_people(task_id: str) -> Any:
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_person_workload(
     user_ref: str,
     week: str = "current",
@@ -2561,7 +2759,7 @@ async def get_person_workload(
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_department_overview(
     department_ref: str,
     week: str = "current",
@@ -2618,7 +2816,7 @@ async def get_department_overview(
     }
 
 
-@mcp.tool()
+@_tool()
 async def get_task_steps(task_id: str) -> Any:
     """Get a task with its step checklists and items. Use for "detyra me hapat/steps"."""
     task, checklists = await asyncio.gather(
@@ -2628,7 +2826,7 @@ async def get_task_steps(task_id: str) -> Any:
     return {"task": _compact_task(task), "checklists": checklists}
 
 
-@mcp.tool()
+@_tool()
 async def add_task_step(
     task_id: str,
     title: str,
@@ -2654,13 +2852,13 @@ async def add_task_step(
     return {"checklist_id": checklist_id, "item": item}
 
 
-@mcp.tool()
+@_tool()
 async def set_task_step_done(item_id: str, done: bool = True) -> Any:
     """Mark a task step (checklist item) as done or not done."""
     return await _request("PATCH", f"/api/checklist-items/{item_id}", json={"is_checked": done})
 
 
-@mcp.tool()
+@_tool()
 async def schedule_task(
     task_id: str,
     start_date: str | None = None,
@@ -2687,7 +2885,7 @@ async def schedule_task(
     return await _request("PATCH", f"/api/tasks/{task_id}", json=payload)
 
 
-@mcp.tool()
+@_tool()
 async def get_weekly_report(
     week: str = "current",
     week_start: str | None = None,
@@ -2764,7 +2962,7 @@ async def get_weekly_report(
     }
 
 
-@mcp.tool()
+@_tool()
 async def export_report(
     kind: Literal[
         "tasks",
@@ -2814,7 +3012,7 @@ async def export_report(
     }
 
 
-@mcp.tool()
+@_tool()
 async def health_check() -> dict[str, Any]:
     """Read-only functional health check for MCP, authentication, and Common View."""
     result: dict[str, Any] = {
@@ -2841,10 +3039,214 @@ async def health_check() -> dict[str, Any]:
     return result
 
 
+# ---------------------------------------------------------------- GA assistant tools (assistant profile)
+#
+# Item ids carry their source: pf_task:<uuid>, pf_meeting:<uuid>@YYYY-MM-DD,
+# ms_event:<id>, todo:<list_id>::<task_id>. Times are GA_TIMEZONE (default
+# Europe/Belgrade); dates and datetimes are ISO 8601.
+
+
+@_tool(read_only=True)
+async def ga_agenda(start: str, end: str, include_untimed: bool = False) -> Any:
+    """
+    GA's agenda for the window [start, end): GA TASKS, BZ ME GA TASKS (koha_bz, bz_with),
+    tasks with the F symbol, PrimeFlow meetings (TAK INT/EXT), Outlook events and
+    Microsoft To Do reminders of info@, each with a source-prefixed id.
+
+    start/end: ISO 8601 (e.g. 2026-11-19T08:00:00+01:00). Items without a time are left
+    out unless include_untimed=true (then the untimed open items of the covered days are added).
+    Use this for the scheduled reports (08:00, 09:00, 11:50, 14:20, 16:00).
+    """
+    return await _request("GET", "/api/ga-assistant/agenda", params={"start": start, "end": end, "include_untimed": include_untimed})
+
+
+@_tool(read_only=True)
+async def ga_leftovers(as_of: str | None = None) -> Any:
+    """
+    Every unfinished item due before as_of (ISO 8601, default now): earlier days and
+    earlier today, oldest first, with source and days late. Unmarked meetings count
+    only on their own day.
+    """
+    return await _request("GET", "/api/ga-assistant/leftovers", params={"as_of": as_of})
+
+
+@_tool(read_only=True)
+async def ga_untimed_today(date: str | None = None) -> Any:
+    """Open items without a time for a day (YYYY-MM-DD, default today): GA TASKS without koha_bz and To Do without a time."""
+    return await _request("GET", "/api/ga-assistant/untimed", params={"day": _parse_date_arg(date) if date else None})
+
+
+@_tool(read_only=False, destructive=False, idempotent=True)
+async def ga_item_done(item_id: str, comment: str | None = None, override_reason: str | None = None) -> Any:
+    """
+    Mark an agenda item as done ("4 kryer").
+    PrimeFlow task -> DONE (like the Done/Confirm button). Normal tasks (not 1H/special ones)
+    need GA's own result comment before closing: pass it as comment (saved together with the
+    close). If PrimeFlow answers that a comment is required, ask GA for one; override_reason
+    is only for an explicit exception.
+    BZ where GA is not an assignee -> records "BZ u mbajt" (comment + audit) without closing
+    the colleague's task. Meeting -> "Mbajtur". To Do -> completed. Outlook events are read-only.
+    """
+    return await _request(
+        "POST",
+        "/api/ga-assistant/items/done",
+        json={"item_id": item_id, "comment": comment, "override_reason": override_reason},
+    )
+
+
+@_tool(read_only=False, destructive=False)
+async def ga_item_postpone(
+    item_id: str,
+    new_date: str,
+    new_time: str | None = None,
+    reason_code: str | None = None,
+    reason_comment: str | None = None,
+) -> Any:
+    """
+    Postpone an item ("5 shtyje"). new_date: YYYY-MM-DD or sot/neser; new_time: HH:MM (optional).
+    PrimeFlow tasks change due_date (original_due_date is kept); tasks not assigned to GA may
+    require reason_code + reason_comment (the backend says so). To Do changes its date/reminder.
+    BZ items and meetings cannot be postponed from here.
+    """
+    return await _request(
+        "POST",
+        "/api/ga-assistant/items/postpone",
+        json={
+            "item_id": item_id,
+            "new_date": _parse_date_arg(new_date),
+            "new_time": new_time,
+            "reason_code": reason_code,
+            "reason_comment": reason_comment,
+        },
+    )
+
+
+@_tool(read_only=False, destructive=False, idempotent=True)
+async def ga_item_set_time(item_id: str, time: str | None = None, date: str | None = None) -> Any:
+    """
+    Set, change or clear (time=null) an item's time ("2 në 11:00").
+    PrimeFlow tasks/BZ: a per-day time for GA's agenda only (due date and BZ template stay
+    unchanged); date defaults to the item's day or today. To Do: sets/clears the reminder time.
+    """
+    return await _request(
+        "POST",
+        "/api/ga-assistant/items/set-time",
+        json={"item_id": item_id, "time": time, "day": _parse_date_arg(date) if date else None},
+    )
+
+
+@_tool(read_only=False, destructive=True, idempotent=True)
+async def ga_item_remove_from_day(item_id: str, reason: str, date: str | None = None) -> Any:
+    """Soft-remove an item from GA's agenda for one day (default today; meetings use their own day). Nothing is deleted."""
+    return await _request(
+        "POST",
+        "/api/ga-assistant/items/remove-from-day",
+        json={"item_id": item_id, "reason": reason, "day": _parse_date_arg(date) if date else None},
+    )
+
+
+@_tool(read_only=False, destructive=False)
+async def ga_add_comment(item_id: str, text: str) -> Any:
+    """Add a comment: PrimeFlow task -> appended to GA's task comment; To Do -> appended to its notes."""
+    return await _request("POST", "/api/ga-assistant/items/comment", json={"item_id": item_id, "text": text})
+
+
+@_tool(read_only=True)
+async def todo_list(
+    list_name: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    include_completed: bool = False,
+) -> Any:
+    """List Microsoft To Do items of info@ (synced with GA's iPhone Reminders), optionally by list and due-date range."""
+    return await _request(
+        "GET",
+        "/api/ga-assistant/todo",
+        params={
+            "list_name": list_name,
+            "from": _parse_date_arg(from_date) if from_date else None,
+            "to": _parse_date_arg(to_date) if to_date else None,
+            "include_completed": include_completed,
+        },
+    )
+
+
+@_tool(read_only=False, destructive=False)
+async def todo_create(
+    title: str,
+    due_date: str | None = None,
+    time: str | None = None,
+    notes: str | None = None,
+    list_name: str | None = None,
+) -> Any:
+    """Create a To Do item (iPhone reminder). due_date YYYY-MM-DD/sot/neser; time HH:MM needs due_date; default list when list_name is omitted."""
+    return await _request(
+        "POST",
+        "/api/ga-assistant/todo",
+        json={
+            "title": title,
+            "due_date": _parse_date_arg(due_date) if due_date else None,
+            "time": time,
+            "notes": notes,
+            "list_name": list_name,
+        },
+    )
+
+
+@_tool(read_only=False, destructive=False, idempotent=True)
+async def todo_update(
+    id: str,
+    title: str | None = None,
+    due_date: str | None = None,
+    time: str | None = None,
+    clear_time: bool = False,
+    notes: str | None = None,
+) -> Any:
+    """Update a To Do item (id from todo_list/ga_agenda). clear_time=true removes the reminder time; notes replaces the notes but keeps the steps."""
+    return await _request(
+        "PATCH",
+        f"/api/ga-assistant/todo/{_todo_path(id)}",
+        json={
+            "title": title,
+            "due_date": _parse_date_arg(due_date) if due_date else None,
+            "time": time,
+            "clear_time": clear_time,
+            "notes": notes,
+        },
+    )
+
+
+@_tool(read_only=False, destructive=False, idempotent=True)
+async def todo_complete(id: str) -> Any:
+    """Mark a To Do item as completed (ticked on iPhone)."""
+    return await _request("POST", f"/api/ga-assistant/todo/{_todo_path(id)}/complete")
+
+
+@_tool(read_only=False, destructive=False, idempotent=True)
+async def todo_set_steps(id: str, steps: list[dict[str, Any]]) -> Any:
+    """
+    Replace the steps of a To Do item: steps=[{"text": "...", "done": false}, ...].
+    Steps are stored as checkbox lines in the notes, because iPhone Reminders does not sync To Do checklist items.
+    """
+    return await _request("PUT", f"/api/ga-assistant/todo/{_todo_path(id)}/steps", json={"steps": steps})
+
+
+def _todo_path(item_id: str) -> str:
+    from urllib.parse import quote
+
+    value = item_id.strip()
+    if not value.startswith("todo:"):
+        raise ValueError("To Do ids look like todo:<list_id>::<task_id> (from todo_list or ga_agenda).")
+    return quote(value, safe=":")
+
+
 if __name__ == "__main__":
     _validate_startup_configuration()
     transport = os.getenv("PRIMEFLOW_MCP_TRANSPORT", "stdio")
-    if transport == "sse":
+    if IS_ASSISTANT:
+        # The remote connector speaks Streamable HTTP on /mcp behind the HTTPS tunnel.
+        mcp.run(transport="streamable-http")
+    elif transport == "sse":
         mcp.run(transport="sse")
     else:
         mcp.run()

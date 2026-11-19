@@ -261,6 +261,9 @@ jobs:
           MS_TENANT_ID: ${{ vars.MS_TENANT_ID || secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
           GA_PERSONAL_DISCORD_BRIDGE_SECRET: ${{ secrets.GA_PERSONAL_DISCORD_BRIDGE_SECRET }}
+          MCP_ASSISTANT_ENABLED: ${{ vars.MCP_ASSISTANT_ENABLED || 'false' }}
+          MCP_ASSISTANT_ALLOWED_EMAILS: ${{ vars.MCP_ASSISTANT_ALLOWED_EMAILS }}
+          MCP_ASSISTANT_INTERNAL_SECRET: ${{ secrets.MCP_ASSISTANT_INTERNAL_SECRET }}
         run: |
           if not defined MS_CLIENT_ID (echo ::error::MS_CLIENT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
           if not defined MS_TENANT_ID (echo ::error::MS_TENANT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
@@ -301,7 +304,7 @@ jobs:
           echo PRIMEFLOW_API_BASE_URL=https://api-flow.primexeu.com >> backend\.env
           echo PRIMEFLOW_WEB_BASE_URL=https://primeflow.primexeu.com >> backend\.env
           echo PRIMEFLOW_MCP_TRANSPORT=sse >> backend\.env
-          echo PRIMEFLOW_MCP_HOST=0.0.0.0 >> backend\.env
+          echo PRIMEFLOW_MCP_HOST=127.0.0.1 >> backend\.env
           echo PRIMEFLOW_MCP_PORT=8010 >> backend\.env
           echo PRIMEFLOW_EMAIL=%PRIMEFLOW_MCP_EMAIL% >> backend\.env
           echo PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD% >> backend\.env
@@ -326,6 +329,13 @@ jobs:
           echo WEEKLY_PLANNING_AUDIT_AI_ENABLED=true >> backend\.env
           echo WEEKLY_PLANNING_AUDIT_AI_MODEL=gpt-5.2 >> backend\.env
           echo WEEKLY_PLANNING_AUDIT_AI_TIMEOUT_SECONDS=90 >> backend\.env
+          REM GA assistant MCP connector (OAuth server + primeflow-mcp-assistant on 8011).
+          echo MCP_ASSISTANT_ENABLED=%MCP_ASSISTANT_ENABLED% >> backend\.env
+          echo MCP_ASSISTANT_ALLOWED_EMAILS=%MCP_ASSISTANT_ALLOWED_EMAILS% >> backend\.env
+          echo MCP_ASSISTANT_INTERNAL_SECRET=%MCP_ASSISTANT_INTERNAL_SECRET% >> backend\.env
+          echo MCP_ASSISTANT_RESOURCE_URL=https://mcp-flow.primexeu.com/mcp >> backend\.env
+          echo OAUTH_ISSUER_URL=https://api-flow.primexeu.com >> backend\.env
+          echo GA_TIMEZONE=Europe/Belgrade >> backend\.env
  
       - name: Configure Discord Assistant
         shell: powershell
@@ -393,8 +403,27 @@ jobs:
       - name: Prepare Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
+        env:
+          MCP_ASSISTANT_ENABLED: ${{ vars.MCP_ASSISTANT_ENABLED || 'false' }}
+          INSTALL_BACKEND_REQUIREMENTS: ${{ vars.INSTALL_BACKEND_REQUIREMENTS || 'true' }}
         run: |
           cd backend
+          REM The API's own pinned dependencies were never installed by this workflow.
+          REM Set the Actions variable INSTALL_BACKEND_REQUIREMENTS=false to skip it.
+          if /I "%INSTALL_BACKEND_REQUIREMENTS%"=="true" (
+            "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
+            if errorlevel 1 exit /b 1
+          )
+          REM The GA assistant MCP needs a newer MCP SDK; it lives in its own virtualenv
+          REM so primeflow-mcp (8010) keeps the mcp version from requirements.txt.
+          if /I "%MCP_ASSISTANT_ENABLED%"=="true" (
+            if not exist .venv-mcp-assistant\Scripts\python.exe "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m venv .venv-mcp-assistant
+            if errorlevel 1 exit /b 1
+            .venv-mcp-assistant\Scripts\python.exe -m pip install -r requirements-mcp-assistant.txt
+            if errorlevel 1 exit /b 1
+            .venv-mcp-assistant\Scripts\python.exe -m unittest tests.test_mcp_assistant_profile
+            if errorlevel 1 exit /b 1
+          )
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements-discord.txt
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r integrations/kujtesa/requirements-primeflow.txt
@@ -407,7 +436,7 @@ jobs:
           REM process. This catches missing modules and startup-time config errors.
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "from app.main import app; print('Backend application import: OK')"
           if errorlevel 1 exit /b 1
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server tests.test_migration_graph tests.test_mira_credentials
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server tests.test_migration_graph tests.test_mira_credentials tests.test_oauth_server tests.test_ga_assistant
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_kujtesa_deploy tests.test_kujtesa_bridge
           if errorlevel 1 exit /b 1
@@ -515,6 +544,7 @@ jobs:
           PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          MCP_ASSISTANT_ENABLED: ${{ vars.MCP_ASSISTANT_ENABLED || 'false' }}
         run: |
           cd backend
  
@@ -524,6 +554,7 @@ jobs:
           REM scheduler supervised and PM2 immediately respawns it after it is killed.
           call pm2 delete primeflow-recording-timing || ver > NUL
           call pm2 delete primeflow-mcp || ver > NUL
+          call pm2 delete primeflow-mcp-assistant || ver > NUL
           call pm2 delete primeflow-discord || ver > NUL
           call pm2 delete primeflow-report-scheduler || ver > NUL
           call pm2 delete primex-tomorrow-shtypi-scheduler || ver > NUL
@@ -569,6 +600,11 @@ jobs:
           if errorlevel 1 exit /b 1
           call pm2 start ecosystem.config.cjs --only primeflow-mcp --update-env
           if errorlevel 1 exit /b 1
+          if /I "%MCP_ASSISTANT_ENABLED%"=="true" (
+            powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8011 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8011'); Stop-Process -Id $_ -Force }"
+            call pm2 start ecosystem.config.cjs --only primeflow-mcp-assistant --update-env
+            if errorlevel 1 exit /b 1
+          )
           call pm2 start ecosystem.config.cjs --only primeflow-report-scheduler --update-env
           if errorlevel 1 exit /b 1
           call pm2 start ecosystem.config.cjs --only primex-tomorrow-shtypi-scheduler --update-env
@@ -702,6 +738,8 @@ jobs:
       - name: Wait for MCP Readiness
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
+        env:
+          MCP_ASSISTANT_ENABLED: ${{ vars.MCP_ASSISTANT_ENABLED || 'false' }}
         run: |
           $ok = $false
           $port = 8010
@@ -723,6 +761,28 @@ jobs:
             exit 1
           }
           Write-Host "Primeflow MCP readiness: OK"
+          if ($env:MCP_ASSISTANT_ENABLED -eq 'true') {
+            # Unauthenticated requests must get 401 + the OAuth resource metadata pointer.
+            $assistantOk = $false
+            for ($i = 0; $i -lt 20; $i++) {
+              try {
+                Invoke-WebRequest -Uri 'http://127.0.0.1:8011/mcp' -Method Post -Body '{}' -ContentType 'application/json' -UseBasicParsing -ErrorAction Stop | Out-Null
+              } catch {
+                $response = $_.Exception.Response
+                if ($response -and [int]$response.StatusCode -eq 401 -and "$($response.Headers['WWW-Authenticate'])" -match 'resource_metadata') {
+                  $assistantOk = $true
+                  break
+                }
+              }
+              Start-Sleep -Seconds 2
+            }
+            if (-not $assistantOk) {
+              cmd /c "pm2 logs primeflow-mcp-assistant --lines 100 --nostream || ver > NUL"
+              Write-Error "Primeflow MCP assistant did not answer on 127.0.0.1:8011/mcp with an OAuth challenge."
+              exit 1
+            }
+            Write-Host "Primeflow MCP assistant readiness: OK"
+          }
 
       - name: Functional MCP and Scheduler Readiness
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}

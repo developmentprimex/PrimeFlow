@@ -25,6 +25,13 @@ export default function LoginPage() {
     setError(null)
     try {
       await login(email, password)
+      // The MCP assistant OAuth flow returns to its consent page after login.
+      // Only that exact same-origin path is honoured, so `next` cannot redirect elsewhere.
+      const next = new URLSearchParams(window.location.search).get("next") || ""
+      if (next.startsWith("/oauth/consent?") && !next.startsWith("//")) {
+        router.push(next)
+        return
+      }
       // The home screen icon is the PX Notes app, so signing in there returns to it.
       router.push(isHomeScreenApp() ? PX_NOTES_QUICK_URL : "/dashboard")
     } catch (error) {

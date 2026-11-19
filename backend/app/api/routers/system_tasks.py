@@ -67,10 +67,10 @@ from app.services.meeting_system_tasks import (
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events
 from app.services.task_postponement import check_task_postponement_explanation, save_postponement_daily_explanation
+from app.services.ga_identity import is_ga_email
 
 
 router = APIRouter()
-GA_EMAIL = "ga@primexeu.com"
 MAX_ASSIGNEES_REQUIRING_REPLACEMENTS = 9
 
 
@@ -105,7 +105,7 @@ def _user_to_assignee(user: User) -> TaskAssigneeOut:
 
 
 def _is_gane_user(user: User | object) -> bool:
-    return (getattr(user, "email", None) or "").strip().lower() == GA_EMAIL
+    return is_ga_email(getattr(user, "email", None))
 
 
 def _replacements_required(assignee_ids: list[uuid.UUID] | None) -> bool:

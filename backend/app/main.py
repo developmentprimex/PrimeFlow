@@ -33,6 +33,7 @@ from app.services.system_task_scheduler import (
 )
 from app.websocket.redis_listener import start_notification_listener
 from app.websocket.manager import manager
+from app.api.routers.oauth import public_router as oauth_public_router
 
 
 app = FastAPI(title="Primex Nexus", default_response_class=ORJSONResponse)
@@ -52,6 +53,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=3)
 app.include_router(api_router, prefix="/api")
 # CalDAV clients address the account by absolute path, so it lives at the site root.
 app.include_router(ga_caldav_router)
+# OAuth 2.1 authorization server for the MCP assistant (404 unless MCP_ASSISTANT_ENABLED).
+app.include_router(oauth_public_router)
 
 listener_task: asyncio.Task | None = None
 recording_files_archive_task: asyncio.Task | None = None

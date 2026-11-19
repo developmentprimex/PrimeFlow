@@ -247,3 +247,4 @@ from app.models.ga_personal import (
     GaPersonalDeviceOp, GaPersonalDeviceRecord,
     GaPersonalTemplate, GaPersonalOccurrence, GaPersonalEvent, GaPersonalDelivery, GaPersonalImport,
 )
+from app.models.oauth import GaAssistantItemTime, OAuthAuthorizationRequest, OAuthClient, OAuthToken  # noqa: E402,F401

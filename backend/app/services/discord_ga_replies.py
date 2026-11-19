@@ -49,7 +49,7 @@ class ChannelEvidence(BaseModel):
 async def ga_identity(db, *, guild_id=None):
     identity = (await db.execute(select(DiscordLink.discord_user_id).join(
         User, User.id == DiscordLink.user_id).where(
-        User.username == "gane.arifaj", User.is_active.is_(True),
+        User.username == settings.GA_USERNAME, User.is_active.is_(True),
         DiscordLink.enabled.is_(True), DiscordLink.guild_id == (guild_id or settings.DISCORD_GUILD_ID),
     ))).scalar_one_or_none()
     if not identity:

@@ -67,6 +67,7 @@ from app.services.daily_report_logic import business_days_between, parse_ko_user
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
 from app.services.task_postponement import check_task_postponement_explanation, save_postponement_daily_explanation
+from app.services.ga_identity import ga_username
 from app.services.project_classification import (
     is_mst_or_tt_project as _is_mst_or_tt_project,
     is_mst_project,
@@ -359,7 +360,7 @@ def _is_ga_confirmation_user(user: User) -> bool:
     """GA is an account identity, not one of the three system roles."""
     full_name = (user.full_name or "").strip().lower()
     username = (user.username or "").strip().lower()
-    return full_name == "gane arifaj" or username in {"gane.arifaj", "gane_arifaj", "gane"}
+    return full_name == "gane arifaj" or username in {ga_username(), "gane_arifaj", "gane"}
 
 
 def _normalize_ga_note_task_status(value: str | TaskStatus | None) -> TaskStatus:

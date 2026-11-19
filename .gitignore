@@ -70,3 +70,6 @@ tmp/mira-diagnose-server.xml
 tmp/mira-primary-approved.xml
 tmp/mira-server-activation.json
 tmp/mira-installed-check.json
+
+# Isolated venv of the MCP assistant process
+backend/.venv-mcp-assistant/
