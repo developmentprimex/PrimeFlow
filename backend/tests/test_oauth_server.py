@@ -48,10 +48,9 @@ class RedirectAndResourceTests(unittest.TestCase):
             self.assertTrue(oauth.resource_is_allowed("https://mcp-flow.primexeu.com/mcp/"))
             self.assertFalse(oauth.resource_is_allowed("https://other.example.com/mcp"))
 
-    def test_scope(self) -> None:
-        self.assertTrue(oauth.scope_is_allowed(None))
-        self.assertTrue(oauth.scope_is_allowed("primeflow"))
-        self.assertFalse(oauth.scope_is_allowed("primeflow admin"))
+    def test_requested_scopes_never_widen_the_grant(self) -> None:
+        for requested in (None, "primeflow", "claudeai", "primeflow admin"):
+            self.assertEqual(oauth.granted_scope(requested), "primeflow")
 
 
 class AllowlistAndMetadataTests(unittest.TestCase):
@@ -81,6 +80,33 @@ class AllowlistAndMetadataTests(unittest.TestCase):
     def test_with_query_keeps_existing_params(self) -> None:
         url = oauth.with_query("http://127.0.0.1:1/cb?x=1", {"code": "c", "state": None})
         self.assertEqual(url, "http://127.0.0.1:1/cb?x=1&code=c")
+
+
+class ClaudeRegistrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_claude_ai_registration_payload_is_accepted(self) -> None:
+        """claude.ai registers with scope "claudeai"; it must still get a client (scope primeflow)."""
+        import httpx
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.db import get_db
+        from app.main import app
+
+        session = MagicMock()
+        session.commit = AsyncMock()
+        app.dependency_overrides[get_db] = lambda: session
+        try:
+            with patch.object(settings, "MCP_ASSISTANT_ENABLED", True),                     patch.object(settings, "OAUTH_ALLOWED_REDIRECT_URIS", "https://claude.ai/api/mcp/auth_callback"):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                    res = await client.post("/oauth/register", json={
+                        "client_name": "Claude", "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+                        "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"],
+                        "token_endpoint_auth_method": "none", "scope": "claudeai",
+                    })
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+        self.assertEqual(res.status_code, 201, res.text)
+        self.assertEqual(res.json()["scope"], "primeflow")
+        session.add.assert_called_once()
 
 
 class EnabledFlagTests(unittest.IsolatedAsyncioTestCase):

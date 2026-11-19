@@ -40,7 +40,6 @@ from app.services.oauth_server import (
     new_secret,
     redirect_uri_is_allowed,
     resource_is_allowed,
-    scope_is_allowed,
     verify_pkce,
     with_query,
 )
@@ -101,8 +100,8 @@ async def register_client(payload: ClientRegistrationIn, db: AsyncSession = Depe
     grant_types = payload.grant_types or ["authorization_code", "refresh_token"]
     if not set(grant_types) <= {"authorization_code", "refresh_token"}:
         return _oauth_error("invalid_client_metadata", "Only authorization_code and refresh_token are supported.")
-    if payload.scope and not scope_is_allowed(payload.scope):
-        return _oauth_error("invalid_client_metadata", f"Only the '{SUPPORTED_SCOPE}' scope is supported.")
+    # Requested scopes are informational (claude.ai sends e.g. "claudeai"); RFC 7591 lets
+    # the server replace them, so every client is registered with the single PrimeFlow scope.
     client = OAuthClient(
         client_id="pfm_" + uuid.uuid4().hex,
         client_name=(payload.client_name or "").strip()[:200] or None,
@@ -162,8 +161,8 @@ async def authorize(request: Request, db: AsyncSession = Depends(get_db)):
     challenge = params.get("code_challenge") or ""
     if params.get("code_challenge_method") != "S256" or not (43 <= len(challenge) <= 128):
         return fail("invalid_request", "PKCE with code_challenge_method=S256 is required.")
-    if not scope_is_allowed(params.get("scope")):
-        return fail("invalid_scope", f"Only the '{SUPPORTED_SCOPE}' scope is supported.")
+    # Unknown requested scopes are ignored (RFC 6749 3.3): the grant always carries
+    # only the PrimeFlow scope, so nothing beyond it can be requested.
     resource = params.get("resource")
     if not resource_is_allowed(resource):
         return fail("invalid_target", "The requested resource is not served by this authorization server.")
