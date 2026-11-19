@@ -4718,7 +4718,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                       : "Edit"
                     const canCreateTask = !isPxJavNote && !isClosed && (!hasProject || isDevLinked)
                     const showManualOnly = hasProject && !isDevLinked
-                    const shenimiCellClass = isClosed
+                    const dictationSource = note.mira_dictation_source === "1h" ? "Nga Mira 1H"
+                      : note.mira_dictation_source === "ai_agent" ? "Nga Mira AI Agent" : null
+                    const shenimiCellClass = dictationSource ? "" : isClosed
                       ? "bg-slate-300 opacity-70"
                       : hasTask
                         ? aggregatedStatus === "TODO"
@@ -4828,6 +4830,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                       </span>
                                     ) : null)}
                                     {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
+                                    {dictationSource && <span className="mt-1 block text-xs text-muted-foreground">{dictationSource}</span>}
                                   </span>
                                 )}
                               </div>

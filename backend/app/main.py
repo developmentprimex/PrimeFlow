@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -246,6 +248,17 @@ async def _shutdown() -> None:
         meeting_reminder_scheduler_task = None
 
 
+def notification_origin_retired(port: int, routes: Path) -> bool:
+    if port not in (8000, 8080):
+        return False
+    try:
+        verified = (routes / "notification-origin").read_text(encoding="ascii")
+        selected = 8000 if (routes / "api-standby").exists() else 8080
+        return verified == str(selected) and port != selected
+    except OSError:
+        return False
+
+
 @app.websocket("/ws/notifications")
 async def ws_notifications(websocket: WebSocket, token: str = Query(...)) -> None:
     try:
@@ -259,8 +272,19 @@ async def ws_notifications(websocket: WebSocket, token: str = Query(...)) -> Non
     await websocket.accept()
     await manager.connect(user_id, websocket)
     try:
+        routes = Path(os.getenv("PRIMEFLOW_GATEWAY_STATE", r"C:\PrimeFlowOps\DeploymentGateway\routes"))
+        port = (websocket.scope.get("server") or (None, 0))[1]
         while True:
-            await websocket.receive_text()
+            if notification_origin_retired(port, routes):
+                await websocket.send_json({"type": "deploy_reconnect", "since": datetime.now(timezone.utc).isoformat()})
+                await websocket.close(code=1012)
+                return
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=5)
+            except asyncio.TimeoutError:
+                pass
     except WebSocketDisconnect:
+        pass
+    finally:
         await manager.disconnect(user_id, websocket)
 

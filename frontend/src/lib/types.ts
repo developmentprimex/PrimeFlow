@@ -622,6 +622,7 @@ export interface GaNote {
   /** Sent to PX Notes from one or more meeting notes. */
   from_meeting?: boolean
   mira_shared_to_px?: boolean
+  mira_dictation_source?: "1h" | "ai_agent" | null
 }
 
 export interface PlanNote {

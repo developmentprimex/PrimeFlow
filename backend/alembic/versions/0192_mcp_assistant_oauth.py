@@ -6,8 +6,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0191_mcp_assistant_oauth"
-down_revision = "0190_discord_ga_reply_snapshot"
+revision = "0192_mcp_assistant_oauth"
+down_revision = "0191_mira_voice_dictation"
 branch_labels = None
 depends_on = None
 

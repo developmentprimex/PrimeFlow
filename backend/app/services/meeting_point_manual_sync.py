@@ -151,7 +151,10 @@ def canonical_report_section_key(kind: ReportKind, title: str | None) -> str | N
         if canonical is not None:
             return canonical
     elif kind == "after_break":
-        from app.services.after_break_report import SECTION_TITLE_ALIASES
+        from app.services.after_break_report import SECTION_TITLE_ALIASES, WAITING_CLIENT_TABLE_LABEL, is_waiting_client_section
+
+        if is_waiting_client_section(raw):
+            return WAITING_CLIENT_TABLE_LABEL
 
         raw = SECTION_TITLE_ALIASES.get(raw, raw)
         raw = next(
@@ -221,7 +224,10 @@ def is_manual_section_title(
         canonical = _canonical_section_title(aliased)
         raw = canonical or aliased
     elif kind == "after_break":
-        from app.services.after_break_report import SECTION_TITLE_ALIASES
+        from app.services.after_break_report import SECTION_TITLE_ALIASES, is_waiting_client_section
+
+        if is_waiting_client_section(title, section_key):
+            return False
 
         raw = SECTION_TITLE_ALIASES.get(raw, raw)
     else:
@@ -373,12 +379,15 @@ async def merge_common_view_manual_sections(
             if not is_removed_morning_manual_question(section["title"], section.get(SECTION_KEY_FIELD))
         ]
     elif kind == "after_break":
-        from app.services.after_break_report import after_break_automated_section_title, is_retired_after_break_question
+        from app.services.after_break_report import (
+            after_break_automated_section_title, is_retired_after_break_question, is_waiting_client_section,
+        )
 
         extras = [
             section for section in extras
             if not is_retired_after_break_question(section["title"], section.get(SECTION_KEY_FIELD))
             and not after_break_automated_section_title(section["title"], section.get(SECTION_KEY_FIELD))
+            and not is_waiting_client_section(section["title"], section.get(SECTION_KEY_FIELD))
         ]
     else:
         from app.services.meetings_report import is_tomorrow_symbols_section, without_retired_meetings_sections

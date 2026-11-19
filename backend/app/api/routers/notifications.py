@@ -57,10 +57,13 @@ async def unread_notification_count(
 @router.get("", response_model=list[NotificationOut])
 async def list_notifications(
     unread_only: bool = False,
+    since: datetime | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[NotificationOut]:
     stmt = select(Notification).where(Notification.user_id == user.id, visible_marker_notifications())
+    if since is not None:
+        stmt = stmt.where(Notification.created_at >= since)
     if unread_only:
         stmt = stmt.where(Notification.read_at.is_(None))
     notifications = (await db.execute(stmt.order_by(Notification.created_at.desc()))).scalars().all()

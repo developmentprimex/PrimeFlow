@@ -46,6 +46,7 @@ class GaNoteOut(BaseModel):
     from_mira: bool = False
     from_meeting: bool = False
     mira_shared_to_px: bool = False
+    mira_dictation_source: str | None = None
 
 
 class GaNotePublicOut(BaseModel):

@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 ENTERED = threading.Event()
@@ -17,10 +17,19 @@ RELEASE = threading.Event()
 
 
 class Origin(BaseHTTPRequestHandler):
+    def do_POST(self):
+        first = self.rfile.read(1)
+        ENTERED.set()
+        if not RELEASE.wait(30):
+            self.send_error(408)
+            return
+        remaining = self.rfile.read(int(self.headers["Content-Length"]) - 1)
+        if first + remaining != b"held upload":
+            self.send_error(400)
+            return
+        self.do_GET()
+
     def do_GET(self):
-        if self.path == "/slow":
-            ENTERED.set()
-            RELEASE.wait(30)
         body = json.dumps({"status": "ok", "port": self.server.server_port}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -32,8 +41,9 @@ class Origin(BaseHTTPRequestHandler):
         pass
 
 
-def get(port, path="/health"):
-    with urlopen(f"http://127.0.0.1:{port}{path}", timeout=35) as response:
+def get(port, path="/health", data=None):
+    request = Request(f"http://127.0.0.1:{port}{path}", data=data)
+    with urlopen(request, timeout=35) as response:
         return int(response.headers["X-PrimeFlow-Origin"]), json.load(response)["port"]
 
 
@@ -72,7 +82,7 @@ def main():
                 except OSError:
                     time.sleep(0.1)
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                slow = pool.submit(get, 18080, "/slow")
+                slow = pool.submit(get, 18080, "/upload", b"held upload")
                 assert ENTERED.wait(5)
                 def sample():
                     for _ in range(150):

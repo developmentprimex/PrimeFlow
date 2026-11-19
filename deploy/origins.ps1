@@ -44,6 +44,12 @@ function Set-PrimeFlowRoute([ValidateSet('web','api')][string]$Surface, [int]$Po
     }
     try {
         Test-PrimeFlowOrigin $Surface $Port -Public
+        if ($Surface -eq 'api') {
+            # Publish only after verification. A stale signal must never retire
+            # sockets on the origin currently selected by the gateway.
+            $verified = Join-Path (Split-Path $route.marker) 'notification-origin'
+            [IO.File]::WriteAllText($verified, [string]$Port)
+        }
     } catch {
         if ($route.port -ne $Port) {
             Test-PrimeFlowOrigin $Surface $route.port
@@ -55,7 +61,7 @@ function Set-PrimeFlowRoute([ValidateSet('web','api')][string]$Surface, [int]$Po
 
 function Wait-PrimeFlowDrain([int]$Port) {
     # Caddy uses a separate upstream connection per request. WebSockets stay
-    # established until their clients leave. Never kill them to meet a timeout.
+    # established until their clients leave. HTTP requests always finish here.
     $deadline = [datetime]::UtcNow.AddMinutes(20)
     do {
         $gatewayPids = @(Get-NetTCPConnection -State Listen -LocalPort 13000,18080 -ErrorAction Stop |
@@ -63,7 +69,11 @@ function Wait-PrimeFlowDrain([int]$Port) {
         if ($gatewayPids.Count -ne 1) { throw 'Cannot identify the public gateway for connection draining.' }
         $busy = @(Get-NetTCPConnection -OwningProcess $gatewayPids[0] -ErrorAction Stop |
             Where-Object { $_.RemotePort -eq $Port -and $_.State -in @('Established','SynSent','CloseWait') })
-        if ($busy.Count -eq 0) { return }
+        if ($busy.Count -eq 0) { Write-Host "Port $Port drained."; return }
+        if ($busy.Count -ne $previousCount) {
+            Write-Host "Port $Port waiting for $($busy.Count) gateway connection(s)."
+            $previousCount = $busy.Count
+        }
         Start-Sleep -Seconds 3
     } while ([datetime]::UtcNow -lt $deadline)
     throw "Port $Port still has active connections. Both versions remain available."

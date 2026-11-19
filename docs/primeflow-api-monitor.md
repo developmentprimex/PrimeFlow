@@ -24,4 +24,21 @@ The monitoring files live outside the Actions checkout. The monitor queries the
 existing PM2 daemon through its local RPC pipe. It does not start a daemon or
 stop or restart any services. `/health` covers HTTP availability. Database
 readiness requires a separate check. A host outage also stops this monitor, so
-detecting a host outage requires a probe on another host.
+the independent probe keeps its own observations during a host outage.
+
+The Windows logon task `PrimeFlow-ExternalMonitor` on DESKTOP-0I1307I runs
+`primeflow_external_monitor.py` every 30 seconds while the account is signed
+in and the computer is awake. It checks the public API health payload and the
+public login HTML in parallel. UTC timestamps, HTTP status (when available),
+and elapsed milliseconds are retained in rotating logs under
+`%LOCALAPPDATA%\PrimeFlowOps\ExternalMonitor\state\external.log`. It publishes
+the latest sample to the server monitor's state directory as `external.json`.
+The server checks its age and reports external endpoint failures or missing
+measurements through the existing delivery channels. Discord delivery requires
+the server monitor to be running.
+
+To review a deploy, take the UTC start and finish times from GitHub Actions.
+Compare the external samples before, during, and after that window with
+`monitor.log` on PX. Each server cycle records CPU utilization during
+collection, available physical memory in MiB, and milliseconds per probe.
+Keep gaps and failed samples visible when reporting availability.

@@ -5,8 +5,9 @@ from app.models.ga_note import GaNote
 
 
 def mira_note_expression():
-    return or_(GaNote.from_mira, GaNote.from_mira_desktop)
+    return or_(GaNote.from_mira, GaNote.from_mira_desktop, GaNote.mira_dictation_source.is_not(None))
 
 
 def is_mira_note(note) -> bool:
-    return bool(getattr(note, "from_mira", False) or getattr(note, "from_mira_desktop", False))
+    return bool(getattr(note, "from_mira", False) or getattr(note, "from_mira_desktop", False)
+                or getattr(note, "mira_dictation_source", None))

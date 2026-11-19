@@ -1,11 +1,15 @@
 """One read-only monitoring cycle for the two PrimeFlow APIs and public route."""
 import argparse
+import ctypes
 import hashlib
+import http.client
 import json
 import logging
 import os
 import subprocess
+import time
 import urllib.request
+from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -30,10 +34,25 @@ def command(args, timeout):
 
 
 def http_probe(url):
-    return json.loads(command(
-        [str(POWERSHELL), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-         "-File", str(HERE / "primeflow_monitor_http.ps1"), "-Url", url], 9
-    ))
+    target = urlsplit(url)
+    transport = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection
+    connection = transport(target.hostname, target.port, timeout=5)
+    try:
+        connection.request("GET", target.path, headers={"User-Agent": "PrimeFlow-ApiMonitor/1"})
+        response = connection.getresponse()
+        result = {"status": str(response.status)}
+        if response.status == 200:
+            try:
+                data = json.loads(response.read(8193))
+            except (ValueError, UnicodeError):
+                return result
+            if isinstance(data, dict) and data.get("status") == "ok":
+                result.update(ok=True, build=data.get("build", ""))
+        return result
+    except (OSError, http.client.HTTPException) as exc:
+        return {"error": type(exc).__name__}
+    finally:
+        connection.close()
 
 
 def process_snapshot():
@@ -48,20 +67,63 @@ def port_snapshot():
     ))
 
 
+def cpu_times():
+    values = [ctypes.c_ulonglong() for _ in range(3)]
+    if ctypes.windll.kernel32.GetSystemTimes(*(ctypes.byref(v) for v in values)):
+        idle, kernel, user = (v.value for v in values)
+        return idle, kernel + user
+
+
+def timed_probe(fn, args):
+    start = time.monotonic()
+    try:
+        value = fn(*args)
+    except subprocess.CalledProcessError as exc:
+        value = {"error": f"exit {exc.returncode}", "collector_error": True}
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        value = {"error": type(exc).__name__, "collector_error": True}
+    return value, round((time.monotonic() - start) * 1000)
+
+
 def collect():
     work = {name: (http_probe, (url,)) for name, url in URLS.items()}
     work.update(pm2=(process_snapshot, ()), ports=(port_snapshot, ()))
-    result = {}
+    before = cpu_times()
+    result = {"elapsed_ms": {}}
     with ThreadPoolExecutor(max_workers=len(work)) as executor:
-        pending = {name: executor.submit(fn, *args) for name, (fn, args) in work.items()}
+        pending = {name: executor.submit(timed_probe, fn, args) for name, (fn, args) in work.items()}
         for name, future in pending.items():
-            try:
-                result[name] = future.result()
-            except subprocess.CalledProcessError as exc:
-                result[name] = {"error": f"exit {exc.returncode}", "collector_error": True}
-            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
-                result[name] = {"error": type(exc).__name__, "collector_error": True}
+            result[name], result["elapsed_ms"][name] = future.result()
+    after = cpu_times()
+    if before and after and after[1] > before[1]:
+        result["cpu_percent"] = round(100 * (1 - (after[0]-before[0]) / (after[1]-before[1])), 1)
+    # MEMORYSTATUSEX begins with two DWORDs followed by seven DWORDLONGs.
+    class MemoryStatus(ctypes.Structure):
+        _fields_ = [("length", ctypes.c_uint32), ("load", ctypes.c_uint32),
+                    ("total", ctypes.c_uint64), ("available", ctypes.c_uint64),
+                    ("remaining", ctypes.c_uint64 * 5)]
+    memory = MemoryStatus()
+    memory.length = ctypes.sizeof(memory)
+    if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):
+        result["available_memory_mb"] = memory.available // (1024 * 1024)
     return result
+
+
+def external_findings(path):
+    try:
+        sample = json.loads(path.read_text(encoding="utf-8"))
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(sample["at"])).total_seconds()
+        if not 0 <= age <= 100:
+            raise ValueError("stale sample")
+        issues = {"Monitori i jashtëm": None}
+        for name in ("api", "login"):
+            item = sample["checks"][name]
+            issues[f"Jashtë serverit | {name}"] = None if item["ok"] else (
+                "Kontrolli i jashtëm dështoi", f"{item['url']} — HTTP {item.get('status', '—')}, "
+                f"{item.get('error', 'përgjigje e papritur')}, {item['elapsed_ms']} ms. {sample['at']}")
+        return issues
+    except (OSError, ValueError, TypeError, KeyError):
+        return {"Monitori i jashtëm": ("Matja mungon", "Matja e jashtme mungon ose është vonuar.")}
 
 
 def belongs_to(owner, root, parents):
@@ -151,6 +213,8 @@ def group_port_issues(issues):
 
 
 def alert_target(name, snapshot):
+    if name.startswith(("Jashtë serverit", "Monitori i jashtëm")):
+        return name, "Kontroll nga kompjuteri i jashtëm."
     port = name.removeprefix("Port ")
     if port.isdecimal() and int(port) in SERVICES:
         service = SERVICES[int(port)]
@@ -215,8 +279,14 @@ def notify(path, state, sinks, snapshot=None, *, prefix=""):
             target, processes = alert_target(name, snapshot or {})
             event_at = check["event_at"]
             error = (check.get("current_code") or active) if active else previous
+            if active and (error == "monitor probe failed" or
+                           (name in ("PM2", "Windows listeners") and error == "unavailable")):
+                title = "Monitori lokal nuk përfundoi kontrollin"
+            elif not active:
+                title = "Kontrolli po kalon përsëri"
+            error_label = "Gabimi" if active else "Gabimi i mëparshëm"
             message = (f"{prefix}{title}\n{target}\nKoha: {event_at}\n"
-                       f"Gabimi: {error}\n{processes}\n{check['detail']}")
+                       f"{error_label}: {error}\n{processes}\n{check['detail']}")
             try:
                 receipt = send(message, active is None)
             except Exception as exc:
@@ -248,6 +318,9 @@ def main():
             state[name] = previous
     snapshot = collect()
     issues = group_port_issues(findings(snapshot))
+    external = args.state_dir / "external.json"
+    if external.exists() or "Monitori i jashtëm" in state:
+        issues.update(external_findings(external))
     log.info("%s snapshot=%s", datetime.now(timezone.utc).isoformat(),
              json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")))
     evaluate(state, issues)

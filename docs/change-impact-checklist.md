@@ -93,7 +93,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   `app/services/ga_identity.py` (`GA_USER_EMAIL` / `GA_USERNAME`); mos shto konstante të reja
   `GA_EMAIL` / `GA_USERNAME` nëpër module.
 
-- M3 PIKAT PER RAP: **NËNNGARKESË** merr stafin nga caktimet kryesore dhe
+- M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
+  e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
+  kufirit të gjenerimit. Kontrollo faqet, preview dhe emailin për të dy raportet.
+
+- M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
+  importi nga Common View të mos krijojnë kopje në grupin manual të M2.
+
+- M3 PIKAT PER RAP: **NËNNGARKESË NESER?** merr stafin nga caktimet kryesore dhe
   shtesë të detyrave aktive që përmbajnë `NËNNGARKESË` në rreshtin e titullit
   për datën e raportit. Kontrollo titujt me tekst para dhe pas fjalës.
   Kontrollo faqen, pamjen paraprake, emailin dhe bashkëngjitjet HTML, Word dhe PNG.
@@ -111,6 +118,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 - M2: **PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU** shfaq PO/JO për VS,
   VL, MST dhe TT sipas kodeve në titujt e detyrave të caktuara stafit PCM.
+  MST dhe TT kërkojnë një detyrë të lidhur me projekt (`project_id`), ndërsa
+  VS dhe VL llogarisin edhe detyrat pa projekt.
   Data e raportit duhet të bjerë brenda Start Date–Due Date. Kontrollo caktimet
   kryesore dhe shtesë, rigjenerimin, preview, emailin dhe bashkëngjitjet e M2.
 
@@ -565,6 +574,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Kontrollo përmbajtjen te Mira → Shënimet, PX Notes dhe rezultati në Discord
   për ruajtje manuale. Pas dështimit përfundimtar të përmbledhjes, transkripti
   vazhdon të ruhet. Mira Host ka përmbledhje të veçantë te Mira → Takimet.
+- “Mira, shëno … fund shënimi” nga një folës me llogari Discord të lidhur
+  krijon një shënim më vete direkt te PX Notes. Kontrollo komandat e ndara
+  në segmente, folësit që ndërhyjnë dhe riprovimet. Në All Tasks/Notes burimi
+  shfaqet me tekst të thjeshtë. Diktimet nuk shtohen në listën Mira → Shënimet
+  ose në listat e shënimeve të raporteve që përjashtojnë shënimet e Mirës.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
   Radha e raportimit ka përjashtime sipas slotit: LH, EH, EF dhe RA nuk marrin
@@ -660,7 +674,10 @@ ndryshimit. Për lidhësin në serverin e PrimeFlow përdoren këto destinacione
 Gjatë deploy-it gateway lexon dy skedarë lokalë për të zgjedhur destinacionin
 e çdo kërkese të re. Proceset në portat 3301 dhe 8000 marrin përkohësisht
 trafikun përkatës pasi kalojnë kontrollin. Lidhjet e hapura përfundojnë te
-procesi i vjetër. Nëse një WebSocket ose kërkesë e gjatë e mban atë të zënë
+procesi i vjetër. Pas verifikimit publik, lidhja e njoftimeve rilidhet te
+origjina e zgjedhur. Kontrollo rikuperimin e njoftimeve të humbura gjatë
+kalimit, numëruesin në shiritin e sipërm dhe komentet me shenjues.
+Nëse një lidhje tjetër ose kërkesë e gjatë e mban procesin të zënë
 për 20 minuta, workflow dështon para ndaljes së tij dhe lë trafikun në
 destinacionin e verifikuar. Nëse deploy ndërpritet, kontrollo të dyja
 origjinat dhe header-in publik përpara rinisjes. Testi në Windows përdor

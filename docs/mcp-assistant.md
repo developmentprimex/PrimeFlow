@@ -138,7 +138,7 @@ ri-autorizimit.
 
 ## Hapat manualë
 
-1. **Migrimi**: `alembic upgrade head` (0191, katër tabela të reja, pa prekur tabelat ekzistuese).
+1. **Migrimi**: `alembic upgrade head` (0192, katër tabela të reja, pa prekur tabelat ekzistuese).
    E ekzekuton deploy-i.
 2. **Azure app registration**: shto lejen delegated `Tasks.ReadWrite` (Microsoft Graph).
    Jep admin consent nëse tenant-i e kërkon.

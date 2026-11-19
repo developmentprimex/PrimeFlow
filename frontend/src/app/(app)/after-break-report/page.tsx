@@ -50,11 +50,17 @@ const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?
 const PCM_PROJECTS_SECTION = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
 const AUTOMATED_SECTIONS = new Set([GA_REPLIES_SECTION, PCM_PROJECTS_SECTION])
 
+function isWaitingClientSection(section: Section) {
+  return [section.section_key, section.title].some((value) =>
+    /^(?:MANUAL)?\d*DTWFE$/.test((value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "")),
+  )
+}
+
 function sectionGroupLabel(section: Section) {
+  if (isWaitingClientSection(section)) return "Auto-filled from PrimeFlow"
   const knownAuto = [
     ...AUTOMATED_SECTIONS,
     "DET TE PAKRYERA, 08:00/DEADLINE",
-    "DT WFE",
     "DET E KRYERA NE AM",
     "TAK INT/EXT TE PAMBAJTURA",
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
@@ -648,7 +654,7 @@ export default function AfterBreakReportPage() {
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
                             <Pencil className="h-4 w-4" /> Edit
                           </Button>
-                          {user?.role === "ADMIN" && isCustomManualReportSection(section) ? (
+                          {user?.role === "ADMIN" && !isWaitingClientSection(section) && isCustomManualReportSection(section) ? (
                             <ManualReportQuestionDelete title={section.title} disabled={saving} onDelete={() => deleteManualQuestion(section.section_key!)} />
                           ) : null}
                         </div>
@@ -667,9 +673,7 @@ export default function AfterBreakReportPage() {
                       <ReportSectionPreview
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         body={reportSectionPreviewText(section.body)}
-                        filterWfeAge={[section.section_key, section.title].some(
-                          (value) => value?.trim().toUpperCase() === "DT WFE",
-                        )}
+                        filterWfeAge={isWaitingClientSection(section)}
                       />
                     )}
                   </div>
