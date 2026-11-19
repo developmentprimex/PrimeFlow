@@ -508,5 +508,18 @@ class TestNewToolsRegistered(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(expected.issubset(tools), expected - tools)
 
 
+class TestDeleteIsBlockedByDefault(unittest.IsolatedAsyncioTestCase):
+    async def test_api_request_refuses_delete_unless_enabled(self) -> None:
+        with patch.object(mcp_server, "ALLOW_DELETE", False), patch.object(mcp_server, "_headers", AsyncMock()) as headers:
+            with self.assertRaisesRegex(ValueError, "DELETE is disabled"):
+                await mcp_server.primeflow_api_request("DELETE", "/api/tasks/11111111-1111-1111-1111-111111111111")
+            headers.assert_not_called()
+
+    async def test_full_profile_does_not_expose_assistant_only_tools(self) -> None:
+        tools = {tool.name for tool in await mcp_server.mcp.list_tools()}
+        self.assertFalse(tools & mcp_server.ASSISTANT_ONLY_TOOLS)
+        self.assertEqual(len(tools), 75)
+
+
 if __name__ == "__main__":
     unittest.main()

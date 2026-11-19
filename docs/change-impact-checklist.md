@@ -84,6 +84,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Asistentja e GA-së (MCP, `docs/mcp-assistant.md`): `app/services/ga_assistant.py` përsërit
+  në Python rregullat e tabelës së parë të **Admin Tasks** (GA TASKS / BZ ME GA TASKS,
+  `koha_bz`, dita e planifikuar), të **GA Time Table** për takimet (externe + interne manuale,
+  Mbajtur/Anuluar) dhe të **M1 “FIZIKISHT ME GA?”** për simbolin `F`. Kur ndryshon ndonjë nga
+  këto rregulla, kontrollo edhe `ga_agenda`, `ga_leftovers`, `ga_untimed_today` dhe testet
+  `tests/test_ga_assistant*.py`. Identiteti i GA-së lexohet vetëm nga
+  `app/services/ga_identity.py` (`GA_USER_EMAIL` / `GA_USERNAME`); mos shto konstante të reja
+  `GA_EMAIL` / `GA_USERNAME` nëpër module.
+
 - M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
   e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
   kufirit të gjenerimit. Kontrollo faqet, preview dhe emailin për të dy raportet.

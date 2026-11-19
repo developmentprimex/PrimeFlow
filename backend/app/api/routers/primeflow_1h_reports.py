@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apscheduler.triggers.cron import CronTrigger
 
 from app.api.deps import get_current_user
+from app.services.ga_identity import is_ga_username
 from app.db import get_db
 from app.models.audit_log import AuditLog
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
@@ -302,7 +303,7 @@ async def preview(
         return _file_response(render_plain_text(document).encode(), "text/plain; charset=utf-8", filename + ".txt")
     # GA's supplementary tables belong only to the authenticated GA account,
     # regardless of the configured email recipients or the viewer's role.
-    if not payload.notes_only and (getattr(user, "username", None) or "").strip().casefold() == "gane.arifaj":
+    if not payload.notes_only and is_ga_username(getattr(user, "username", None)):
         email_html = await render_ga_recipient_email_html(db, document, payload.report_date, source_data=source_data)
     else:
         email_html = render_html(document)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.report_attendance import filter_task_context, filter_report_sections
+from app.services.ga_identity import is_ga_username
 
 import html
 import os
@@ -2268,7 +2269,7 @@ async def _bz_alignment_lines(
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
-    ga_user = next((user for user in users if (user.username or "").lower() == "gane.arifaj"), None)
+    ga_user = next((user for user in users if is_ga_username(user.username)), None)
     ga_user_id = ga_user.id if ga_user else None
     if ga_user_id is None:
         ga_candidates = [user for user in users if _initials(user.full_name or user.username or user.email) == "GA"]

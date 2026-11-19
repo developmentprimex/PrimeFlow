@@ -71,6 +71,7 @@ from app.services.ga_time_table import get_ga_time_table_rows
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.task_marker import one_h_marker_label
 from app.services.note_markup import parse_marked_note_content
+from app.services.ga_identity import resolve_ga_user
 
 
 router = APIRouter()
@@ -148,17 +149,8 @@ def _initials_filename(label: str | None) -> str:
     return "_".join(list(compact))
 
 
-GA_USERNAME = "gane.arifaj"
-GA_EMAIL = "ga@primexeu.com"
-
-
 async def _resolve_ga_user(db: AsyncSession) -> User | None:
-    stmt = select(User).where(User.work_staff_filter()).where(func.lower(User.username) == GA_USERNAME)
-    ga_user = (await db.execute(stmt)).scalar_one_or_none()
-    if ga_user:
-        return ga_user
-    stmt = select(User).where(User.work_staff_filter()).where(func.lower(User.email) == GA_EMAIL)
-    return (await db.execute(stmt)).scalar_one_or_none()
+    return await resolve_ga_user(db, work_staff_only=True)
 
 
 def _format_excel_date(d: date) -> str:

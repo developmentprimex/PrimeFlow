@@ -44,6 +44,7 @@ from app.services.ga_time_table import (
 )
 from app.services.ga_caldav import CALDAV_USERNAME, PRINCIPAL_HREF, build_caldav_profile
 from app.services.ga_calendar_feed import build_ga_calendar, caldav_password, feed_token, is_valid_feed_token
+from app.services.ga_identity import is_ga_username, resolve_ga_user
 from app.services.ga_icloud_sync import (
     TimeRow,
     connection_id_from_token,
@@ -57,25 +58,14 @@ from app.services.ga_icloud_sync import (
 
 router = APIRouter()
 
-GA_USERNAME = "gane.arifaj"
-GA_EMAIL = "ga@primexeu.com"
-
-
 async def _resolve_ga_user(db: AsyncSession) -> User | None:
-    stmt = select(User).where(
-        func.lower(User.username) == GA_USERNAME,
-    )
-    ga_user = (await db.execute(stmt)).scalar_one_or_none()
-    if ga_user:
-        return ga_user
-    stmt = select(User).where(func.lower(User.email) == GA_EMAIL)
-    return (await db.execute(stmt)).scalar_one_or_none()
+    return await resolve_ga_user(db)
 
 
 def _ensure_can_edit(current_user: User) -> None:
     if current_user.role == UserRole.ADMIN:
         return
-    if (current_user.username or "").lower() == GA_USERNAME:
+    if is_ga_username(current_user.username):
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
 

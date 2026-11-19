@@ -18,6 +18,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
+from app.services.ga_identity import is_ga_username
 from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
@@ -1397,7 +1398,7 @@ async def _build_common_view(
         for tid, uid in alignment_user_rows:
             alignment_users_map.setdefault(tid, []).append(uid)
 
-        gane_user = next((u for u in users_map.values() if (u.username or "").lower() == "gane.arifaj"), None)
+        gane_user = next((u for u in users_map.values() if is_ga_username(u.username)), None)
         gane_user_id = gane_user.id if gane_user else None
         week_dates = _week_dates(week_start_date)
 

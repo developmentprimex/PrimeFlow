@@ -16,6 +16,7 @@ from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.user import User
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.ga_identity import ga_email, ga_username
 
 
 async def _pcm_project_ids(db, tasks) -> set[uuid.UUID]:
@@ -35,8 +36,8 @@ async def _gane_assignee_ids(db, tasks) -> set[uuid.UUID]:
         return set()
     return set((await db.execute(
         select(User.id).where(User.id.in_(assignee_ids), or_(
-            func.lower(func.trim(User.email)) == "ga@primexeu.com",
-            func.lower(func.trim(User.username)).in_(["gane.arifaj", "gane_arifaj", "gane"]),
+            func.lower(func.trim(User.email)) == ga_email(),
+            func.lower(func.trim(User.username)).in_([ga_username(), "gane_arifaj", "gane"]),
             func.lower(func.trim(User.full_name)) == "gane arifaj",
         ))
     )).scalars().all())
