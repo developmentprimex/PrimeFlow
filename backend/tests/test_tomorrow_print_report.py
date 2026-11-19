@@ -29,8 +29,38 @@ from app.services.tomorrow_print_report import (
     build_today_print_report,
     build_tomorrow_print_report,
     ensure_required_shtypi_recipient,
+    render_marked_tomorrow_tasks,
     send_tomorrow_print_report,
 )
+
+
+def test_m3_symbol_table_reuses_tomorrow_cards_for_marked_tasks_only() -> None:
+    from app.services.meetings_report import TOMORROW_SYMBOLS_TITLE, render_html, section_report_attachments
+
+    target = date(2026, 9, 8)
+    item = {"date": target.isoformat(), "oneHReportSlot": "10:00", "assignees": ["Elsa Ferati"]}
+    payload = {"items": {"oneH": [
+        {**item, "title": "Marked task", "oneHMarker": "F,QUESTION", "taskId": "marked"},
+        {**item, "title": "No marker", "oneHMarkerComment": "Comment only"},
+        {**item, "title": "Finished task", "status": "DONE", "oneHMarker": "M3"},
+        {**item, "title": "Wrong date", "date": "2026-09-07", "oneHMarker": "KA"},
+    ]}}
+    body, table = render_marked_tomorrow_tasks(payload, target)
+    source_rows = [row for row in _task_rows({"oneH": payload["items"]["oneH"][:1]}, target) if row[1]]
+    assert table == _html_table(source_rows, report_date=target)
+    assert 'data-task-marker="F,QUESTION"' in table
+    assert "10:00" in table and 'data-task-badge="one-h-marker"' in table
+    for output in (body, table):
+        assert "Marked task" in output
+        assert all(title not in output for title in ("No marker", "Finished task", "Wrong date"))
+    assert render_marked_tomorrow_tasks({"items": {}}, target) == ("Asnjë detyrë me simbol.", "")
+    sections = [{"title": TOMORROW_SYMBOLS_TITLE, "body": body}]
+    assert table in render_html("M3", date(2026, 9, 7), target, sections, tomorrow_symbols_html=table)
+    attachments = section_report_attachments("M3", "M3", date(2026, 9, 7), sections, tomorrow=target)
+    from docx import Document
+    doc = Document(BytesIO(attachments[0][1]))
+    assert any("Marked task" in cell.text for table in doc.tables for row in table.rows for cell in row.cells)
+    assert attachments[1][1].startswith(b"\x89PNG")
 
 
 @pytest.mark.parametrize("tomorrow", [False, True])

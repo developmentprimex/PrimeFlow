@@ -11,7 +11,7 @@ from app.db import SessionLocal
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.services.meetings_report import (
     build_meetings_report_sections,
-    without_retired_meetings_sections,
+    meetings_sections_for_snapshot,
     render_html,
     render_plain_text,
     send_meetings_report,
@@ -45,14 +45,15 @@ async def main() -> None:
             await db.commit()
             await db.refresh(row)
 
-        sections = without_retired_meetings_sections(row.sections)
+        sections = meetings_sections_for_snapshot(row.sections, row.generated_snapshot)
         plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, sections)
         if args.send:
             message = await send_meetings_report(
                 row.subject,
                 await configured_recipients(),
                 plain_text,
-                render_html(row.subject, row.report_date, row.tomorrow_date, sections),
+                render_html(row.subject, row.report_date, row.tomorrow_date, sections,
+                            tomorrow_symbols_html=(row.generated_snapshot or {}).get("tomorrow_symbols_html")),
                 db=db,
                 report_day=row.report_date,
                 tomorrow=row.tomorrow_date,

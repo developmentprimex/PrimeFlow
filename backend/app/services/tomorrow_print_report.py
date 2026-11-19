@@ -988,6 +988,27 @@ def _task_rows(
     return rows
 
 
+def render_marked_tomorrow_tasks(payload: dict[str, Any], target_date: date) -> tuple[str, str]:
+    rows = _task_rows(payload.get("items") or {}, target_date, users=payload.get("users"))
+    marked_rows = [
+        (label, marked, personal)
+        for label, items, personal in rows
+        if (marked := [item for item in items if _task_marker_label(item)])
+    ]
+    if not marked_rows:
+        return "Asnjë detyrë me simbol.", ""
+
+    columns = ("LLOJI DHE SLOTI", "STATUS", "SIMBOLI", "TITULLI")
+    border = "+" + "+".join("-" * (len(column) + 2) for column in columns) + "+"
+    lines = [border, f"| {' | '.join(columns)} |", border]
+    for label, items, personal in marked_rows:
+        for item in items:
+            title = _task_title(item, personal=personal).replace("|", "¦")
+            lines.append(f"| {' '.join(label.splitlines())} | {_task_status(item)} | {_task_marker_text_token(item)} | {title} |")
+    lines.append(border)
+    return "\n".join(lines), _html_table(marked_rows, report_date=target_date)
+
+
 def _meeting_status(item: dict[str, Any]) -> str:
     status = item.get("occurrenceStatus") or ""
     return status if status in ("held", "canceled") else ""

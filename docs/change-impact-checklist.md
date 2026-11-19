@@ -93,6 +93,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ruajtura, rigjenerimi dhe importi i pyetjeve manuale. Kontrollo gjithashtu
   faqen M3, preview, emailin dhe bashkëngjitjet.
 
+- M3 End of Day: **SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER** përdor të dhënat,
+  renditjen dhe tabelën e detyrave të SHTYPI Tomorrow për ditën tjetër të punës.
+  Hapja dhe rifreskimi i raportit të sotëm marrin tabelën aktuale. Faqja krijon
+  draftin e sotëm kur mungon. Raportet historike përdorin tabelën e ruajtur.
+  Fshehja e tabelës dhe zgjedhja e simboleve në faqen M3 veprojnë vetëm në pamjen e faqes.
+  Kontrollo filtrin për të gjitha simbolet, faqen M3, preview, emailin, Word dhe PNG.
+
 - M2: **PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU** shfaq PO/JO për VS,
   VL, MST dhe TT sipas kodeve në titujt e detyrave të caktuara stafit PCM.
   Data e raportit duhet të bjerë brenda Start Date–Due Date. Kontrollo caktimet

@@ -336,7 +336,7 @@ async def _compute_etag(
     week_start: date,
     week_end: date,
     requested: list[str],
-    user: User,
+    user: User | None,
     department_id: uuid.UUID | None,
     include_all_departments: bool,
     freeze_one_h_slots: bool,
@@ -351,7 +351,7 @@ async def _compute_etag(
         ",".join(sorted(requested)),
         str(department_id) if department_id else "",
         "1" if include_all_departments else "0",
-        str(user.role),
+        str(user.role) if user is not None else "internal-report",
         "1" if freeze_one_h_slots else "0",
         ",".join(day.isoformat() for day in one_h_slot_report_dates),
         one_h_slot_report_start.isoformat(),
@@ -465,12 +465,36 @@ async def get_common_view(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> CommonViewResponse | Response:
-    if department_id is not None and not include_all_departments:
-        ensure_department_access(user, department_id)
+    if not include_all_departments:
+        if department_id is not None:
+            ensure_department_access(user, department_id)
+        elif user.role == UserRole.STAFF:
+            department_id = user.department_id
+    return await _build_common_view(
+        db, week_start=week_start, include=include, department_id=department_id,
+        include_all_departments=include_all_departments, freeze_one_h_slots=freeze_one_h_slots,
+        max_items_per_bucket=max_items_per_bucket, debug=debug, user=user, request=request, response=response,
+    )
+
+
+async def load_report_common_view(db: AsyncSession, day: date) -> dict:
+    """Read Common View for an already authorized internal company report."""
+    payload = await _build_common_view(db, week_start=day, include_all_departments=True, max_items_per_bucket=5000)
+    report_data = payload.model_dump(mode="json")
+    if any(((report_data.get("guardrails") or {}).get("truncated") or {}).values()):
+        raise ValueError("Common View contains truncated buckets")
+    return report_data
+
+
+async def _build_common_view(
+    db: AsyncSession, *, week_start: date | None = None, include: str | None = None,
+    department_id: uuid.UUID | None = None, include_all_departments: bool = False,
+    freeze_one_h_slots: bool = False, max_items_per_bucket: int | None = None,
+    debug: int = 0, user: User | None = None, request: Request | None = None,
+    response: Response | None = None,
+) -> CommonViewResponse | Response:
     if include_all_departments:
         department_id = None
-    if user.role == UserRole.STAFF and department_id is None and not include_all_departments:
-        department_id = user.department_id
 
     requested: list[str] = []
     if include:
@@ -510,15 +534,15 @@ async def get_common_view(
         one_h_slot_report_start=one_h_slot_report_start,
         one_h_slot_report_end=one_h_slot_report_end,
     )
-    request_cache_control = request.headers.get("cache-control", "").lower()
+    request_cache_control = request.headers.get("cache-control", "").lower() if request is not None else "no-cache"
     bypass_cache = "no-cache" in request_cache_control or "no-store" in request_cache_control
-    if_match = request.headers.get("if-none-match")
+    if_match = request.headers.get("if-none-match") if request is not None else None
     if not bypass_cache and if_match and if_match.strip('"') == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
 
     cache_key = (
         f"{COMMON_VIEW_CACHE_VERSION}|{week_start_date}|{week_end}|{','.join(sorted(requested))}|"
-        f"{department_id}|{include_all_departments}|{user.role}|{freeze_one_h_slots}|"
+        f"{department_id}|{include_all_departments}|{user.role if user is not None else 'internal-report'}|{freeze_one_h_slots}|"
         f"{','.join(day.isoformat() for day in one_h_slot_report_dates)}|"
         f"{one_h_slot_report_start}|{one_h_slot_report_end}"
     )
@@ -531,7 +555,8 @@ async def get_common_view(
                     return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": cached_etag})
                 payload_copy = dict(payload)
                 payload_copy["trace_id"] = str(uuid.uuid4())
-                response.headers["ETag"] = cached_etag
+                if response is not None:
+                    response.headers["ETag"] = cached_etag
                 return CommonViewResponse(**payload_copy).copy(
                     update={"trace_id": payload_copy["trace_id"]}
                 )
@@ -1465,8 +1490,9 @@ async def get_common_view(
     if SERVER_CACHE_TTL_SECONDS > 0:
         _cache[cache_key] = (datetime.utcnow().timestamp() + SERVER_CACHE_TTL_SECONDS, etag, payload_dict)
 
-    response.headers["ETag"] = etag
-    if bypass_cache:
-        response.headers["Cache-Control"] = "no-store"
+    if response is not None:
+        response.headers["ETag"] = etag
+        if bypass_cache:
+            response.headers["Cache-Control"] = "no-store"
     response_payload = CommonViewResponse(**payload_dict)
     return response_payload.copy(update={"trace_id": trace_id})

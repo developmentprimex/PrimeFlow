@@ -37,7 +37,6 @@ from app.services.meeting_palette import MEETING_TONE_COLORS, meeting_report_ton
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.personal_task_owner import personal_task_owner
 from app.services.primeflow_report import GmailService, one_h_marker_symbol, report_timezone
-from app.services.primeflow_report import PrimeFlowClient
 from app.services.std_feedback_tickets import std_tickets_report_section
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
@@ -64,7 +63,7 @@ SECTION_TITLES = [
     "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
 ]
 DISPLAY_SECTION_TITLES = [
-    SECTION_TITLES[15],  # Manual symbol check first
+    SECTION_TITLES[15],  # Tomorrow's marked tasks first among auto-filled sections
     SECTION_TITLES[1],  # STD tickets first among auto-filled
     SECTION_TITLES[2],
     SECTION_TITLES[3],
@@ -80,9 +79,9 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[13],
     SECTION_TITLES[14],
 ]
-MANUAL_SECTION_TITLES = {
-    SECTION_TITLES[15],
-}
+TOMORROW_SYMBOLS_TITLE = SECTION_TITLES[15]
+TOMORROW_SYMBOLS_PENDING = "Tabela shfaqet pas gjenerimit të raportit."
+MANUAL_SECTION_TITLES: set[str] = set()
 SECTION_TITLE_ALIASES = {
     "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3": SECTION_TITLES[1],
     "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[1],
@@ -127,6 +126,32 @@ def without_retired_meetings_sections(sections: list[dict[str, Any]] | None) -> 
     return [section for section in sections or []
             if not is_retired_meetings_section_title(section.get("title"), section.get("section_key"))]
 
+
+def is_tomorrow_symbols_section(section: dict[str, Any]) -> bool:
+    return any(canonical_meetings_section_title(section.get(key)) == TOMORROW_SYMBOLS_TITLE
+               for key in ("section_key", "title"))
+
+
+def meetings_sections_for_snapshot(sections: list[dict[str, Any]] | None, snapshot: dict | None) -> list[dict[str, Any]]:
+    visible = without_retired_meetings_sections(sections)
+    if "tomorrow_symbols_html" in (snapshot or {}):
+        return visible
+    return [{**section, "title": TOMORROW_SYMBOLS_TITLE, "body": TOMORROW_SYMBOLS_PENDING}
+            if is_tomorrow_symbols_section(section) else section for section in visible]
+
+
+async def refresh_meetings_symbols(db: AsyncSession, tomorrow: date, sections: list[dict[str, Any]],
+                                  snapshot: dict | None) -> tuple[list[dict[str, Any]], dict]:
+    from app.api.routers.common_view import load_report_common_view
+    from app.services.tomorrow_print_report import render_marked_tomorrow_tasks
+
+    body, table = render_marked_tomorrow_tasks(await load_report_common_view(db, tomorrow), tomorrow)
+    current = {"section_key": TOMORROW_SYMBOLS_TITLE, "title": TOMORROW_SYMBOLS_TITLE, "body": body}
+    visible = [current if is_tomorrow_symbols_section(section) else section for section in sections]
+    if current not in visible:
+        visible.insert(0, current)
+    return visible, {**(snapshot or {}), "tomorrow_symbols_html": table}
+
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 # Personal KA/Genti ownership is encoded in task-title markers. WFC grouping
 # uses the linked confirmation assignee instead.
@@ -156,6 +181,8 @@ def canonical_meetings_section_title(raw_title: str | None) -> str:
     raw = (raw_title or "").strip()
     if not raw:
         return raw
+    if re.sub(r"^(?:MANUAL)?\d*", "", _compact_section_title(raw)) == _compact_section_title(TOMORROW_SYMBOLS_TITLE):
+        return TOMORROW_SYMBOLS_TITLE
     if raw in SECTION_TITLE_ALIASES:
         return SECTION_TITLE_ALIASES[raw]
 
@@ -213,7 +240,7 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
         raw_title = str(section.get("title") or "").strip()
         section_key = str(section.get("section_key") or "").strip()
         identity = section_key or raw_title
-        title = canonical_meetings_section_title(identity)
+        title = TOMORROW_SYMBOLS_TITLE if is_tomorrow_symbols_section(section) else canonical_meetings_section_title(identity)
         if not title:
             continue
         body = str(section.get("body") or "")
@@ -244,6 +271,8 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
             ordered.append(by_title[title])
         elif title in MANUAL_SECTION_TITLES:
             ordered.append({"section_key": title, "title": title, "body": DEFAULT_MANUAL_BODY})
+        elif title == TOMORROW_SYMBOLS_TITLE:
+            ordered.append({"section_key": title, "title": title, "body": TOMORROW_SYMBOLS_PENDING})
 
     # Keep Common View–synced manuals with the other manuals (after built-in manuals).
     from app.services.meeting_point_manual_sync import order_custom_manual_sections
@@ -1249,9 +1278,14 @@ async def _daily_rlz_values_by_task(
 
 
 async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> tuple[date, list[dict[str, str]], dict[str, Any]]:
+    from app.api.routers.common_view import load_report_common_view
+    from app.services.tomorrow_print_report import render_marked_tomorrow_tasks
+
     tomorrow = next_working_day(report_day)
     week_start = _week_start(report_day)
-    common_items = await _common_view_items(tomorrow)
+    common_view = await load_report_common_view(db, tomorrow)
+    common_items = common_view.get("items") or {}
+    symbols_body, symbols_html = render_marked_tomorrow_tasks(common_view, tomorrow)
     local_day_start = datetime.combine(report_day, time.min, tzinfo=report_timezone())
     completed_day_start = local_day_start.astimezone(timezone.utc)
     completed_day_end = (local_day_start + timedelta(days=1)).astimezone(timezone.utc)
@@ -1493,7 +1527,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     section_6 = await _today_meeting_status_section(db, today_meetings, report_day, meetings)
 
     by_title = {
-        SECTION_TITLES[15]: "(Ploteso manualisht)",
+        TOMORROW_SYMBOLS_TITLE: symbols_body,
         SECTION_TITLES[1]: std_tickets_section,
         SECTION_TITLES[2]: _normalize_section(section_1),
         SECTION_TITLES[3]: _normalize_section(
@@ -1655,6 +1689,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     snapshot = {
         "report_day": report_day.isoformat(),
         "tomorrow": tomorrow.isoformat(),
+        "tomorrow_symbols_html": symbols_html,
         "counts": {section["title"]: section["body"].count("\n- ") + (1 if section["body"].startswith("- ") else 0) for section in sections},
     }
     return tomorrow, await filter_report_sections(db, sections, report_day, tomorrow=tomorrow), snapshot
@@ -2100,23 +2135,6 @@ async def _today_meeting_status_section(
         *_meeting_group_title("TAK INTERNE"),
         *_meeting_status_checkbox_table(internal, status_by_meeting, external_by_id),
     ])
-
-
-async def _common_view_items(day: date) -> dict[str, list[dict[str, Any]]]:
-    base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
-    if not base_url:
-        return {}
-    client = PrimeFlowClient(
-        base_url.rstrip("/"),
-        os.getenv("PRIMEFLOW_EMAIL"),
-        os.getenv("PRIMEFLOW_PASSWORD"),
-        os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
-    )
-    try:
-        payload = await client.common_view(day)
-    except Exception:
-        return {}
-    return payload.get("items") or {}
 
 
 def _item_date(item: dict[str, Any]) -> date | None:
@@ -2709,14 +2727,14 @@ def _render_group_label_html(label: str) -> str:
     )
 
 
-def _render_section_block_html(index: int, title: str, body: str) -> str:
+def _render_section_block_html(index: int, title: str, body: str, *, table_html: str | None = None) -> str:
     return (
         "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
         "style=\"width:100%;border-collapse:collapse;margin:22px 0 0;\">"
         "<tr><td style=\"padding:0;\">"
         f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">"
         f"{index}. {html.escape(title)}</h2>"
-        f"{_render_section_body_html(body)}"
+        f"{table_html or _render_section_body_html(body)}"
         "</td></tr></table>"
     )
 
@@ -3530,7 +3548,8 @@ def _render_section_body_html(body: str) -> str:
     return "".join(chunk for chunk in chunks if chunk)
 
 
-def render_html(subject: str, report_day: date, tomorrow: date, sections: list[dict[str, str]]) -> str:
+def render_html(subject: str, report_day: date, tomorrow: date, sections: list[dict[str, str]], *,
+                tomorrow_symbols_html: str | None = None) -> str:
     section_chunks: list[str] = []
     current_group = ""
     for index, section in enumerate(sections, 1):
@@ -3539,7 +3558,8 @@ def render_html(subject: str, report_day: date, tomorrow: date, sections: list[d
             section_chunks.append(_render_group_label_html(group))
             current_group = group
         section_chunks.append(
-            _render_section_block_html(index, section["title"], section.get("body") or "")
+            _render_section_block_html(index, section["title"], section.get("body") or "",
+                                       table_html=tomorrow_symbols_html if is_tomorrow_symbols_section(section) else None)
         )
     return _wrap_report_email_html(
         subject,

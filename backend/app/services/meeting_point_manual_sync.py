@@ -381,9 +381,10 @@ async def merge_common_view_manual_sections(
             and not after_break_automated_section_title(section["title"], section.get(SECTION_KEY_FIELD))
         ]
     else:
-        from app.services.meetings_report import without_retired_meetings_sections
+        from app.services.meetings_report import is_tomorrow_symbols_section, without_retired_meetings_sections
 
-        extras = without_retired_meetings_sections(extras)
+        extras = [section for section in without_retired_meetings_sections(extras)
+                  if not is_tomorrow_symbols_section(section)]
     return order_custom_manual_sections(kind, _insert_manual_extras(sections, extras, manuals))
 
 
