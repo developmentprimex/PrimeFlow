@@ -1,5 +1,8 @@
 import os
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 os.environ.setdefault('DATABASE_URL','postgresql+asyncpg://test:test@127.0.0.1/primeflow_test')
@@ -7,6 +10,25 @@ os.environ.setdefault('JWT_SECRET','voice-tests-not-a-production-secret')
 import discord
 from discord_voice_meetings import MeetingCaptureCoordinator
 from discord_voice_ui import meeting_view
+
+
+def test_discord_workers_start_without_importing_api_routers():
+    startup = """
+import sys
+
+class BlockApiRouters:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith('app.api.routers'):
+            raise ImportError('Discord worker imported an API router: ' + fullname)
+
+sys.meta_path.insert(0, BlockApiRouters())
+import discord_bot
+import discord_ai_agent_bot
+"""
+    result = subprocess.run([sys.executable, '-c', startup],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
 
 class VoiceBotTests(unittest.IsolatedAsyncioTestCase):
     async def test_voice_send_uses_replacement_socket_after_disconnect(self):

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import discord
 from discord.http import handle_message_parameters
 from app.config import settings
-from app.services.discord_voice_openai import QUICK_SECTIONS, albanian_date
+from app.services.discord_voice_note_format import QUICK_SECTIONS, albanian_date
 
 
 def meeting_view(row):
