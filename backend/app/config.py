@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     OAUTH_REFRESH_TOKEN_DAYS: int = 30
     OAUTH_AUTH_CODE_SECONDS: int = 300
     OAUTH_PENDING_REQUEST_SECONDS: int = 900
+    # Read-only Discord bot that stores server messages mentioning the GA (discord_ga_mentions.py).
+    # Its token lives only in backend/.env; without it the bot process is not started.
+    GA_DISCORD_MENTIONS_BOT_TOKEN: str | None = None
+    # Optional override of the GA's Discord user id (default: her PrimeFlow Discord link).
+    GA_DISCORD_USER_ID: str | None = None
+    GA_DISCORD_MENTIONS_BACKFILL_HOURS: int = 72
     GA_PERSONAL_ENABLED: bool = False
     GA_PERSONAL_UNLOCK_MINUTES: int = 60
     GA_PERSONAL_DISCORD_BRIDGE_SECRET: str | None = None

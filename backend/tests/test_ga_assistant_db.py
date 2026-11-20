@@ -292,5 +292,97 @@ class GaAssistantDbTests(unittest.IsolatedAsyncioTestCase):
                          "GA_ASSISTANT_TODO_STEPS"} <= actions)
 
 
+    async def test_iphone_reminders_discord_mentions_and_dedupe(self) -> None:
+        from sqlalchemy import select
+        from app.models.discord_assistant import DiscordLink
+        from app.models.ga_discord_mention import GaDiscordMention
+        from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
+        from app.models.ga_time_slot_entry import GaTimeSlotEntry
+        from app.services import ga_discord_mentions as mentions
+
+        today = self.today
+        async with self.SessionLocal() as db:
+            conn = GaIcloudSyncConnection(ga_user_id=self.ga.id, calendar_name="cal", reminder_list_name="REMINDER",
+                                          token_hash="x" * 64, last_synced_at=self.at(today, 8))
+            db.add(conn)
+            await db.flush()
+
+            def row(day, content, key, start=time(0, 0)):
+                db.add(GaTimeSlotEntry(user_id=self.ga.id, day_date=day, start_time=start, end_time=time(0, 1),
+                                       content=content, sync_connection_id=conn.id, source_type="reminder",
+                                       source_external_id=key, source_name="REMINDER"))
+
+            row(today, "REMINDER 10:30: Thirr bankën", "timed", time(10, 0))
+            row(today, "REMINDER 00:00: Pagesa e qirasë", "dateonly")
+            row(today - timedelta(days=7), "REMINDER: Pa datë", "undated")
+            row(today - timedelta(days=2), "REMINDER 09:00: E vjetër", "late", time(9, 0))
+            row(today - timedelta(days=10), "REMINDER: Jashtë dritares", "stale")
+            db.add(DiscordLink(user_id=self.ga.id, discord_user_id="42", guild_id="1"))
+            db.add(DiscordLink(user_id=self.colleague.id, discord_user_id="77", guild_id="1"))
+            await db.commit()
+
+        with patch.object(settings, "GA_DISCORD_MENTIONS_BOT_TOKEN", "t"), patch.object(settings, "DISCORD_GUILD_ID", "1"):
+            bot = {"X-GA-Mentions-Secret": mentions.bridge_secret()}
+            bad = await self.client.get("/api/ga-discord-bot/context", headers={"X-GA-Mentions-Secret": "nope"})
+            self.assertEqual(bad.status_code, 401)
+            context = (await self.client.get("/api/ga-discord-bot/context", headers=bot)).json()
+            self.assertEqual(context["ga_discord_id"], "42")
+            sent = self.at(today, 9, 5).isoformat()
+            message = {"id": "1001", "guild_id": "1", "channel_id": "9", "channel_name": "development",
+                       "author_discord_id": "77", "author_name": "coll", "created_at": sent,
+                       "content": "Kontrolloje detyrën", "jump_url": "https://discord.com/channels/1/9/1001",
+                       "attachments": [{"name": "plan.pdf", "url": "https://cdn.discordapp.com/a/plan.pdf"}],
+                       "reasons": ["mention"]}
+            own = {**message, "id": "1002", "author_discord_id": "42", "jump_url": "https://discord.com/channels/1/9/1002"}
+            other_server = {**message, "id": "1003", "guild_id": "2", "jump_url": "https://discord.com/channels/2/9/1003"}
+            res = await self.client.post("/api/ga-discord-bot/mentions", headers=bot,
+                                         json={"messages": [message, own, other_server]})
+            self.assertEqual(res.json(), {"stored": 1, "skipped": 2})
+
+            agenda = await self.get("/agenda", start=self.at(today).isoformat(),
+                                    end=self.at(today + timedelta(days=1)).isoformat(), include_untimed="true")
+            by_id = {item["id"]: item for item in agenda["items"]}
+            self.assertEqual(by_id["tt:timed"]["start"][11:16], "10:30")
+            self.assertEqual((by_id["tt:timed"]["source"], by_id["tt:timed"]["can_complete"]), ("iphone_sync", False))
+            self.assertIsNone(by_id["tt:dateonly"]["start"])
+            self.assertEqual(by_id["tt:undated"]["day"], today.isoformat())  # undated: today until done
+            self.assertNotIn("tt:stale", by_id)
+            dc = by_id["dc:1001"]
+            self.assertEqual((dc["kind"], dc["assignees"]), ("DISCORD", ["Colleague Test"]))
+            self.assertTrue(dc["title"].startswith("CT në #development"))
+
+            leftovers = {item["id"]: item for item in (await self.get("/leftovers", as_of=self.at(today, 12).isoformat()))["items"]}
+            self.assertEqual(leftovers["tt:late"]["days_late"], 2)
+            self.assertIn("tt:timed", leftovers)
+            self.assertNotIn("tt:stale", leftovers)
+
+            res = await self.client.post("/api/ga-assistant/items/done", json={"item_id": "tt:timed"}, headers=self.h())
+            self.assertEqual(res.status_code, 409)
+            self.assertIn("iPhone", res.json()["detail"])
+            await self.post("/discord/mentions/dc:1001/status", {"status": "seen"})
+            listed = await self.get("/discord/mentions")
+            self.assertEqual([(m["id"], m["author_initials"], m["status"]) for m in listed["items"]], [("dc:1001", "CT", "seen")])
+            await self.post("/items/done", {"item_id": "dc:1001"})
+            self.assertEqual((await self.get("/discord/mentions"))["count"], 0)
+            self.assertEqual((await self.get("/discord/mentions", only_open="false"))["items"][0]["status"], "done")
+
+            # Same reminder in To Do and on the phone: returned once, as the To Do item.
+            from app.services import ga_assistant as svc
+            svc_item = svc.AgendaItem(id="todo:L::T", item_key="todo:L::T", source="microsoft_todo", kind="REMINDER",
+                                      title="thirr bankën", day=today, can_complete=True)
+            with patch("app.services.ga_assistant.collect_microsoft_items", AsyncMock(return_value=([svc_item], []))):
+                agenda = await self.get("/agenda", start=self.at(today).isoformat(),
+                                        end=self.at(today + timedelta(days=1)).isoformat(), include_untimed="true")
+            ids = [item["id"] for item in agenda["items"]]
+            self.assertIn("todo:L::T", ids)
+            self.assertNotIn("tt:timed", ids)
+            todo = next(item for item in agenda["items"] if item["id"] == "todo:L::T")
+            self.assertEqual((todo["linked_ids"], todo["start"][11:16]), (["tt:timed"], "10:30"))
+        async with self.SessionLocal() as db:
+            stored = await db.get(GaDiscordMention, "1001")
+            self.assertEqual(stored.status_changed_by, self.ga.id)
+            actions = set((await db.execute(select(self.AuditLog.action).where(self.AuditLog.actor_user_id == self.ga.id))).scalars().all())
+        self.assertIn("GA_ASSISTANT_DISCORD_MARK", actions)
+
 if __name__ == "__main__":
     unittest.main()

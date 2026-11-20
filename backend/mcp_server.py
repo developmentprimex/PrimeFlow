@@ -131,12 +131,14 @@ ASSISTANT_TOOLS = frozenset({
     "ga_agenda", "ga_leftovers", "ga_untimed_today", "ga_item_done", "ga_item_postpone", "ga_item_set_time",
     "ga_item_remove_from_day", "ga_add_comment",
     "todo_list", "todo_create", "todo_update", "todo_complete", "todo_set_steps",
+    "ga_time_table", "ga_discord_mentions", "ga_discord_mark",
 })
 # Tools that exist only in the assistant profile; the full profile stays as it was.
 ASSISTANT_ONLY_TOOLS = frozenset({
     "ga_agenda", "ga_leftovers", "ga_untimed_today", "ga_item_done", "ga_item_postpone", "ga_item_set_time",
     "ga_item_remove_from_day", "ga_add_comment",
     "todo_list", "todo_create", "todo_update", "todo_complete", "todo_set_steps",
+    "ga_time_table", "ga_discord_mentions", "ga_discord_mark",
 })
 # Existing allowlisted tools that change data (everything else allowlisted only reads).
 ASSISTANT_WRITE_TOOLS = frozenset({
@@ -356,11 +358,12 @@ def _cache_scope() -> str:
         return "anonymous:"
 
 
-async def _access_token() -> str:
+async def _access_token(*, force_refresh: bool = False) -> str:
     if IS_ASSISTANT:
         # Never the shared service account: act as the user who authorized the connector,
-        # with a JWT that is fresh for this message (see _current_access).
-        return str((await _current_access(force=bool(_token_cache.pop("assistant_force_refresh", None)))).api_token)
+        # with a JWT that is fresh for this message (see _current_access). force_refresh is
+        # per call (after a 401), so parallel tool calls never consume each other's retry.
+        return str((await _current_access(force=force_refresh)).api_token)
     cached_token = str(_token_cache.get("access_token") or "")
     cached_exp = int(_token_cache.get("expires_at") or 0)
     if cached_token and cached_exp > int(time.time()) + 30:
@@ -390,8 +393,8 @@ async def _access_token() -> str:
     )
 
 
-async def _headers() -> dict[str, str]:
-    token = await _access_token()
+async def _headers(*, force_refresh: bool = False) -> dict[str, str]:
+    token = await _access_token(force_refresh=force_refresh)
     if not token:
         raise RuntimeError(
             "PRIMEFLOW_ACCESS_TOKEN is not set. Log in to Primeflow and provide a valid API access token."
@@ -417,12 +420,15 @@ async def _request(method: str, path: str, *, params: dict[str, Any] | None = No
     transient = {429, 500, 502, 503, 504}
     delays = (0, 2, 5)
     refreshed = False
+    force_refresh = False
     last_error: Exception | None = None
     for attempt, delay in enumerate(delays, 1):
-        if delay:
+        if delay and not force_refresh:
             await asyncio.sleep(delay)
         try:
-            async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT, headers=await _headers()) as client:
+            headers = await _headers(force_refresh=force_refresh)
+            force_refresh = False
+            async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT, headers=headers) as client:
                 response = await client.request(method, path, params=clean_params, json=json)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
             last_error = exc
@@ -433,7 +439,9 @@ async def _request(method: str, path: str, *, params: dict[str, Any] | None = No
             _token_cache["access_token"] = None
             _token_cache["expires_at"] = 0
             if IS_ASSISTANT:
-                _token_cache["assistant_force_refresh"] = True
+                # Mint a new PrimeFlow JWT for this user and retry at once.
+                print(f"MCP assistant: API 401 on {method.upper()} {path}; re-validating the connector token and retrying")
+                force_refresh = True
             continue
         if response.status_code not in transient:
             break
@@ -3104,7 +3112,12 @@ async def ga_agenda(start: str, end: str, include_untimed: bool = False) -> Any:
     """
     GA's agenda for the window [start, end): GA TASKS, BZ ME GA TASKS (koha_bz, bz_with),
     tasks with the F symbol, PrimeFlow meetings (TAK INT/EXT), Outlook events and
-    Microsoft To Do reminders of info@, each with a source-prefixed id.
+    Microsoft To Do reminders of info@ (not "Flagged Emails"), GA's iPhone reminders from the
+    GA Time Table "R:" rows (source iphone_sync, id tt:..., read-only) and Discord messages
+    that mention GA (kind DISCORD, id dc:..., untimed on the day written), each with a
+    source-prefixed id. A reminder in both To Do and iPhone Sync is listed once (the To Do
+    item, with the tt: id in linked_ids). To Do/iPhone reminders without a date are untimed
+    items of today until done.
 
     start/end: ISO 8601 (e.g. 2026-11-19T08:00:00+01:00). Items without a time are left
     out unless include_untimed=true (then the untimed open items of the covered days are added).
@@ -3118,14 +3131,19 @@ async def ga_leftovers(as_of: str | None = None) -> Any:
     """
     Every unfinished item due before as_of (ISO 8601, default now): earlier days and
     earlier today, oldest first, with source and days late. Unmarked meetings count
-    only on their own day.
+    only on their own day; iPhone "R:" reminders still open on the phone and Discord
+    mentions not yet marked seen/done are included.
     """
     return await _request("GET", "/api/ga-assistant/leftovers", params={"as_of": as_of})
 
 
 @_tool(read_only=True)
 async def ga_untimed_today(date: str | None = None) -> Any:
-    """Open items without a time for a day (YYYY-MM-DD, default today): GA TASKS without koha_bz and To Do without a time."""
+    """
+    Open items without a time for a day (YYYY-MM-DD, default today): GA TASKS without koha_bz,
+    To Do and iPhone reminders without a time ("R: 00:00", or no date at all: shown every day
+    until done) and open Discord mentions of that day.
+    """
     return await _request("GET", "/api/ga-assistant/untimed", params={"day": _parse_date_arg(date) if date else None})
 
 
@@ -3138,7 +3156,9 @@ async def ga_item_done(item_id: str, comment: str | None = None, override_reason
     close). If PrimeFlow answers that a comment is required, ask GA for one; override_reason
     is only for an explicit exception.
     BZ where GA is not an assignee -> records "BZ u mbajt" (comment + audit) without closing
-    the colleague's task. Meeting -> "Mbajtur". To Do -> completed. Outlook events are read-only.
+    the colleague's task. Meeting -> "Mbajtur". To Do -> completed. Discord mention (dc:) -> done.
+    Outlook events and iPhone reminders (tt:, can_complete=false: the iPhone Sync is one-way)
+    are read-only: GA completes those on the iPhone.
     """
     return await _request(
         "POST",
@@ -3282,6 +3302,87 @@ async def todo_set_steps(id: str, steps: list[dict[str, Any]]) -> Any:
     Steps are stored as checkbox lines in the notes, because iPhone Reminders does not sync To Do checklist items.
     """
     return await _request("PUT", f"/api/ga-assistant/todo/{_todo_path(id)}/steps", json={"steps": steps})
+
+
+@_tool(read_only=True)
+async def ga_time_table(week_start: str | None = None) -> Any:
+    """
+    The GA Time Table of /admin-tasks for one work week, as GA sees it: the time rows (with
+    their notes) and, per day Monday-Friday, the entries in each row - weekly template
+    entries plus the iPhone Sync rows ("R: HH:MM: ..." reminders, "CALENDAR ..." events).
+    week_start: any date of the week (YYYY-MM-DD or sot/neser; default this week).
+    Meetings and tasks are not part of this grid; use ga_agenda for those.
+    """
+    day = _parse_day(week_start) if week_start else datetime.now(_local_tz()).date()
+    monday = day - timedelta(days=day.weekday())
+    rows, entries = await asyncio.gather(
+        _request("GET", "/api/ga-time-slots/rows"),
+        _request("GET", "/api/ga-time-slots", params={"week_start": monday.isoformat()}),
+    )
+
+    def plain(value: str | None) -> str:
+        text = re.sub(r"<br\s*/?>", "\n", value or "", flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]*>", "", text)
+        return re.sub(r"[ \t]+", " ", text).strip()
+
+    def display(entry: dict[str, Any]) -> str:
+        text = plain(entry.get("content"))
+        if entry.get("source_type") == "reminder":
+            text = re.sub(r"^\s*REMINDER\s*:?\s*", "R: ", text, flags=re.IGNORECASE)
+        return text
+
+    days = [monday + timedelta(days=offset) for offset in range(5)]
+    names = ["H", "M", "MR", "E", "P"]
+    grid = []
+    for row in sorted(rows or [], key=lambda item: item.get("sort_order") or 0):
+        start, end = str(row.get("start_time") or "")[:5], str(row.get("end_time") or "")[:5]
+        cells = {}
+        for index, current in enumerate(days):
+            cell = [
+                {
+                    "text": display(entry),
+                    "source": "iphone_sync" if entry.get("source_type") else "template",
+                    "kind": entry.get("source_type") or "entry",
+                }
+                for entry in entries or []
+                if str(entry.get("start_time") or "")[:5] == start
+                and str(entry.get("end_time") or "")[:5] == end
+                and (entry.get("occurrence_date") == current.isoformat()
+                     if entry.get("occurrence_date") else entry.get("day_of_week") == index)
+            ]
+            if cell:
+                cells[f"{names[index]} {current.isoformat()}"] = cell
+        notes = [plain(comment.get("content")) for comment in (row.get("comments") or []) if plain(comment.get("content"))]
+        grid.append({
+            "row": row.get("nr_label") or row.get("label") or "",
+            "label": row.get("label") or "",
+            "time": "pa orë" if start == "00:00" and end == "00:01" else f"{start}-{end}",
+            "notes": notes,
+            "days": cells,
+        })
+    return {"week_start": monday.isoformat(), "days": [f"{n} {d.isoformat()}" for n, d in zip(names, days)], "rows": grid}
+
+
+@_tool(read_only=True)
+async def ga_discord_mentions(since: str | None = None, until: str | None = None, only_open: bool = True) -> Any:
+    """
+    Discord messages in PrimEx server channels that mention GA (@GA or a role she has) or
+    reply to one of her messages, oldest first: who (name + initials, e.g. LH), channel,
+    time (Europe/Belgrade), text, message link, attachments and status (new/seen/done).
+    since/until: ISO 8601 (default: today 00:00 until now). only_open=true hides done ones.
+    DMs are never read. Use in the hourly report: "since" = the previous report time.
+    """
+    return await _request(
+        "GET", "/api/ga-assistant/discord/mentions", params={"since": since, "until": until, "only_open": only_open}
+    )
+
+
+@_tool(read_only=False, destructive=False, idempotent=True)
+async def ga_discord_mark(id: str, status: str) -> Any:
+    """Mark a Discord mention (id dc:<message id>) as "seen" or "done" ("new" undoes it). Nothing changes in Discord."""
+    if status not in {"new", "seen", "done"}:
+        raise ValueError('status must be "seen", "done" or "new"')
+    return await _request("POST", f"/api/ga-assistant/discord/mentions/{id.strip()}/status", json={"status": status})
 
 
 def _todo_path(item_id: str) -> str:

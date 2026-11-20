@@ -71,11 +71,35 @@ def _audit(db: AsyncSession, user: User, entity_id: uuid.UUID, action: str, afte
     )
 
 
+ITEM_PREFIXES = (svc.PREFIX_TASK, svc.PREFIX_MEETING, svc.PREFIX_EVENT, svc.PREFIX_TODO, svc.PREFIX_TIME_TABLE, svc.PREFIX_DISCORD)
+IPHONE_READ_ONLY = (
+    "iPhone reminders (tt:) come from the one-way iPhone Sync (iPhone -> PrimeFlow); PrimeFlow cannot change them "
+    "on the phone. Complete, move or edit the reminder in Reminders on the iPhone; the next sync updates PrimeFlow. "
+    "remove_from_day can still hide it from GA's assistant day."
+)
+
+
 def _parse_item(item_id: str) -> tuple[str, str]:
-    for prefix in (svc.PREFIX_TASK, svc.PREFIX_MEETING, svc.PREFIX_EVENT, svc.PREFIX_TODO):
+    for prefix in ITEM_PREFIXES:
         if item_id.startswith(prefix) and len(item_id) > len(prefix):
             return prefix, item_id[len(prefix):]
-    raise HTTPException(status_code=422, detail="item_id must start with pf_task:, pf_meeting:, ms_event: or todo:")
+    raise HTTPException(status_code=422, detail="item_id must start with pf_task:, pf_meeting:, ms_event:, todo:, tt: or dc:")
+
+
+async def _set_discord_status(db: AsyncSession, user: User, raw: str, new_status: str):
+    from app.models.ga_discord_mention import GaDiscordMention
+
+    if not is_ga_user(user) and user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only the GA account or an admin can mark GA's Discord mentions")
+    row = await db.get(GaDiscordMention, raw)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Discord mention not found")
+    previous = row.status
+    row.status, row.status_changed_at, row.status_changed_by = new_status, datetime.now(timezone.utc), user.id
+    _audit(db, user, _audit_id(f"{svc.PREFIX_DISCORD}{raw}"), "GA_ASSISTANT_DISCORD_MARK",
+           {"item_id": f"{svc.PREFIX_DISCORD}{raw}", "from": previous, "to": new_status})
+    await db.commit()
+    return row
 
 
 def _task_uuid(raw: str) -> uuid.UUID:
@@ -347,6 +371,11 @@ async def item_done(payload: ItemDoneIn, db: AsyncSession = Depends(get_db), use
         _audit(db, user, _audit_id(payload.item_id), "GA_ASSISTANT_TODO_DONE", {"item_id": payload.item_id})
         await db.commit()
         return {"item_id": payload.item_id, "result": "done", "status": "completed"}
+    if prefix == svc.PREFIX_DISCORD:
+        await _set_discord_status(db, user, raw, "done")
+        return {"item_id": payload.item_id, "result": "done", "status": "done"}
+    if prefix == svc.PREFIX_TIME_TABLE:
+        raise HTTPException(status_code=409, detail=IPHONE_READ_ONLY)
     raise HTTPException(status_code=409, detail="Outlook events are read-only here")
 
 
@@ -403,6 +432,10 @@ async def item_postpone(payload: ItemPostponeIn, db: AsyncSession = Depends(get_
         await db.commit()
         return {"item_id": payload.item_id, "result": "postponed", "new_date": payload.new_date.isoformat(),
                 "new_time": new_time.strftime("%H:%M") if new_time else None}
+    if prefix == svc.PREFIX_TIME_TABLE:
+        raise HTTPException(status_code=409, detail=IPHONE_READ_ONLY)
+    if prefix == svc.PREFIX_DISCORD:
+        raise HTTPException(status_code=409, detail="Discord mentions are marked seen/done, not postponed")
     raise HTTPException(status_code=409, detail="Meetings and Outlook events are moved in the calendar, not from the assistant")
 
 
@@ -443,7 +476,9 @@ async def item_set_time(payload: ItemSetTimeIn, db: AsyncSession = Depends(get_d
                {"item_id": payload.item_id, "day": day.isoformat(), "time": payload.time})
         await db.commit()
         return {"item_id": payload.item_id, "result": "time_set", "day": day.isoformat(), "time": payload.time}
-    raise HTTPException(status_code=409, detail="Meetings and Outlook events keep their calendar time")
+    if prefix == svc.PREFIX_TIME_TABLE:
+        raise HTTPException(status_code=409, detail=IPHONE_READ_ONLY)
+    raise HTTPException(status_code=409, detail="Meetings, Outlook events and Discord mentions keep their own time")
 
 
 @router.post("/items/remove-from-day")
@@ -486,6 +521,8 @@ async def item_comment(payload: ItemCommentIn, db: AsyncSession = Depends(get_db
         _audit(db, user, _audit_id(payload.item_id), "GA_ASSISTANT_TODO_COMMENT", {"item_id": payload.item_id})
         await db.commit()
         return {"item_id": payload.item_id, "result": "commented"}
+    if prefix == svc.PREFIX_TIME_TABLE:
+        raise HTTPException(status_code=409, detail=IPHONE_READ_ONLY)
     raise HTTPException(status_code=409, detail="Comments are supported on PrimeFlow tasks and To Do items")
 
 
@@ -651,3 +688,55 @@ async def todo_set_steps(item_id: str, payload: TodoStepsIn, db: AsyncSession = 
     _audit(db, user, _audit_id(item_id), "GA_ASSISTANT_TODO_STEPS", {"item_id": item_id, "steps": len(payload.steps)})
     await db.commit()
     return _todo_out(updated, {"id": list_id, "displayName": None})
+
+
+# ---------------------------------------------------------------- Discord mentions of the GA
+
+
+class DiscordMarkIn(BaseModel):
+    status: str = Field(pattern=r"^(new|seen|done)$")
+
+
+@router.get("/discord/mentions")
+async def discord_mentions(
+    since: str | None = None,
+    until: str | None = None,
+    only_open: bool = True,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Server-channel messages that mention GA (or a role of hers) or reply to her. Default: today."""
+    from app.services import ga_discord_mentions as mentions
+
+    ensure_assistant_user(user)
+    now = _now()
+    start = _parse_moment(since, default=datetime.combine(now.date(), time.min, tzinfo=svc.ga_tz()))
+    end = _parse_moment(until, default=now + timedelta(minutes=1))
+    if end <= start:
+        raise HTTPException(status_code=422, detail="until must be after since")
+    rows = await mentions.list_mentions(db, since=start, until=end, statuses=mentions.OPEN_STATUSES if only_open else None)
+    names = await mentions.author_names(db, rows)
+    items = [mentions.mention_out(row, names, svc.ga_tz()) for row in rows]
+    last = await mentions.last_message_at(db)
+    return {
+        "timezone": settings.GA_TIMEZONE,
+        "since": start.isoformat(),
+        "until": end.isoformat(),
+        "only_open": only_open,
+        "count": len(items),
+        "items": items,
+        "bot_configured": bool(settings.GA_DISCORD_MENTIONS_BOT_TOKEN),
+        "last_stored_message_at": last.astimezone(svc.ga_tz()).isoformat() if last else None,
+    }
+
+
+@router.post("/discord/mentions/{item_id}/status")
+async def discord_mark(item_id: str, payload: DiscordMarkIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    from app.services import ga_discord_mentions as mentions
+
+    ensure_assistant_user(user)
+    raw = item_id[len(svc.PREFIX_DISCORD):] if item_id.startswith(svc.PREFIX_DISCORD) else item_id
+    if not raw.isdigit():
+        raise HTTPException(status_code=422, detail="Discord mention ids look like dc:<message id>")
+    row = await _set_discord_status(db, user, raw, payload.status)
+    return mentions.mention_out(row, await mentions.author_names(db, [row]), svc.ga_tz())
