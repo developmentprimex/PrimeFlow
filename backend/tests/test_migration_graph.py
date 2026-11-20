@@ -18,6 +18,29 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_task_plan_feedback_recognizes_the_deployed_revision(self) -> None:
+        scripts = migration_scripts()
+        deployed = "0196_task_plan_feedback"
+        parent = "0195_ga_discord_mentions"
+        self.assertEqual(scripts.get_revision(deployed).down_revision, parent)
+        self.assertEqual(scripts._upgrade_revs(deployed, deployed), [])
+        self.assertEqual([step.revision.revision for step in scripts._upgrade_revs(deployed, parent)], [deployed])
+
+        output = StringIO()
+        operations = Operations(MigrationContext.configure(
+            dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output},
+        ))
+        migration = scripts.get_revision(deployed).module
+        with patch.object(migration, "op", operations):
+            migration.upgrade()
+        sql = output.getvalue()
+        self.assertIn("CREATE TABLE task_plan_feedback", sql)
+        self.assertIn("continuation VARCHAR(2)", sql)
+        self.assertIn("updated_at TIMESTAMP WITH TIME ZONE NOT NULL", sql)
+        self.assertIn("PRIMARY KEY (target_date, task_id, user_id)", sql)
+        self.assertIn("FOREIGN KEY(task_id) REFERENCES tasks (id) ON DELETE CASCADE", sql)
+        self.assertIn("FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE", sql)
+
     def test_discord_recorders_and_ga_personal_upgrade_from_either_deployed_branch(self) -> None:
         scripts = migration_scripts()
         merge = "0175_merge_discord_ga_personal"
