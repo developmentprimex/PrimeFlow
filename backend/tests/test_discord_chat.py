@@ -160,7 +160,9 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
                                                 "title_points": [], "description_points": []})
         message = SimpleNamespace(id=7, content="mbylle këtë detyrë", author=SimpleNamespace(id=12, bot=False),
             guild=SimpleNamespace(id=123), channel=SimpleNamespace(id=44, topic="PrimeFlow personal workspace: 12"))
-        with patch.object(bot.settings, "DISCORD_MESSAGE_CONTENT_ENABLED", True), patch.object(bot.settings, "DISCORD_GUILD_ID", "123"):
+        with patch.object(bot.settings, "DISCORD_MESSAGE_CONTENT_ENABLED", True), \
+             patch.object(bot.settings, "DISCORD_MEETING_NOTES_ENABLED", True), \
+             patch.object(bot.settings, "DISCORD_GUILD_ID", "123"):
             await client.on_message(message)
         self.assertEqual(client.bridge.call_args.args[1]["context_task_ids"], [item["id"]])
         kwargs = channel.send.call_args.kwargs

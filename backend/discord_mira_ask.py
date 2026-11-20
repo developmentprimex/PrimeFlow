@@ -53,10 +53,15 @@ def register(bot, guild):
 
 async def handle_mention(bot, message):
     """Consume direct questions even when DM delivery is blocked."""
-    if not settings.DISCORD_MEETING_NOTES_ENABLED or bot.user is None:
+    if not settings.DISCORD_MEETING_NOTES_ENABLED:
         return False
     content = message.content.strip()
-    for prefix in (f'<@{bot.user.id}>', f'<@!{bot.user.id}>'):
+    if not content.startswith('<@'):
+        return False
+    user = getattr(bot, 'user', None)
+    if user is None:
+        return False
+    for prefix in (f'<@{user.id}>', f'<@!{user.id}>'):
         if content.startswith(prefix):
             question = content[len(prefix):].strip()
             break
