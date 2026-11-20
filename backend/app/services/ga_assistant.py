@@ -11,6 +11,14 @@ Sources and the rules they mirror:
 * Meetings, like the GA Time Table: every visible external meeting plus manual
   internal meetings, expanded per day with their held/canceled status.
 * Outlook events and Microsoft To Do tasks of the organizer mailbox (GA only).
+  To Do tasks without a date show as untimed on every day until done; the
+  "Flagged Emails" list is not a reminder list and is skipped.
+* iPhone reminders imported by "iPhone Sync" into the GA Time Table (shown there as
+  "R: HH:MM: ..."), source ``iphone_sync`` (GA only). The sync is one-way
+  (iPhone -> PrimeFlow), so these are read-only here; a reminder that is also in
+  To Do is returned once, as the To Do item.
+* Discord messages that mention the GA (``ga_discord_mentions``, GA only): untimed
+  on the day they were written until marked seen/done.
 
 Times: a per-day assistant override (``ga_assistant_item_times``) wins, then the
 BZ time of the system template, then the 1H slot, then a due time on the task.
@@ -19,6 +27,7 @@ Items without any of these are "untimed" and carry only AM/PM when known.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
@@ -29,6 +38,9 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.ga_discord_mention import GaDiscordMention  # noqa: F401 - mapper registration
+from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
+from app.models.ga_time_slot_entry import GaTimeSlotEntry
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.oauth import GaAssistantItemTime
@@ -52,11 +64,19 @@ KIND_F_TASK = "F_TASK"
 KIND_MEETING = "MEETING"
 KIND_EVENT = "EVENT"
 KIND_REMINDER = "REMINDER"
+KIND_DISCORD = "DISCORD"
 
 PREFIX_TASK = "pf_task:"
 PREFIX_MEETING = "pf_meeting:"
 PREFIX_EVENT = "ms_event:"
 PREFIX_TODO = "todo:"
+PREFIX_TIME_TABLE = "tt:"
+PREFIX_DISCORD = "dc:"
+SOURCE_IPHONE_SYNC = "iphone_sync"
+# The iPhone Shortcut re-sends [today - 7 days, today + 60 days] on every run
+# (docs/GA_ICLOUD_SHORTCUT_SYNC.md); older rows are no longer refreshed.
+IPHONE_SYNC_LOOKBACK_DAYS = 7
+IPHONE_SYNC_STALE_HOURS = 24
 TODO_ID_SEPARATOR = "::"
 
 # How far back unfinished work is collected for leftovers and the "today" view.
@@ -156,6 +176,7 @@ class AgendaItem:
     markers: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     item_key: str = ""
+    linked_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -180,6 +201,7 @@ class AgendaItem:
             "url": self.url,
             "markers": self.markers,
             "assignees": self.assignees,
+            "linked_ids": self.linked_ids,
         }
 
 
@@ -473,7 +495,8 @@ async def collect_meeting_items(db: AsyncSession, owner: User, day_from: date, d
 
 
 async def collect_microsoft_items(
-    db: AsyncSession, owner: User, day_from: date, day_to: date, *, tz: ZoneInfo, include_completed: bool = False
+    db: AsyncSession, owner: User, day_from: date, day_to: date, *, tz: ZoneInfo, include_completed: bool = False,
+    today: date | None = None,
 ) -> tuple[list[AgendaItem], list[str]]:
     """Outlook events and To Do tasks of the organizer mailbox. Failures are reported, not raised."""
     from app.integrations.microsoft import fetch_calendar_events
@@ -523,10 +546,19 @@ async def collect_microsoft_items(
     try:
         ensure_todo_scope(token.scope)
         client = TodoClient(token.access_token)
+        current_day = today or datetime.now(tz).date()
+        # An undated open To Do belongs to "today" (and later days asked for) until it is done.
+        undated_day = max(day_from, current_day)
         for todo_list in await client.lists():
+            if is_flagged_email_list(todo_list):
+                continue
             for todo in await client.tasks(todo_list["id"], include_completed=include_completed):
                 item = todo_to_item(todo, todo_list, tz=tz, parse_due_date=parse_due_date, parse_graph_dt=parse_graph_dt, split_body=split_body)
-                if item.day is None or not (item.day <= day_to and (item.day >= day_from or item.is_open)):
+                if item.day is None:
+                    if not item.is_open or undated_day > day_to:
+                        continue
+                    item.day = undated_day
+                elif not (item.day <= day_to and (item.day >= day_from or item.is_open)):
                     continue
                 items.append(item)
     except TodoScopeMissing as exc:
@@ -535,6 +567,13 @@ async def collect_microsoft_items(
         logger.warning("GA assistant: To Do failed: %s", type(exc).__name__)
         warnings.append("Microsoft To Do could not be read.")
     return items, warnings
+
+
+def is_flagged_email_list(todo_list: dict) -> bool:
+    """Outlook's "Flagged Emails" list mirrors flagged mail; it is not a reminder list."""
+    wellknown = str(todo_list.get("wellknownListName") or "").casefold()
+    name = str(todo_list.get("displayName") or "").strip().casefold()
+    return wellknown == "flaggedemails" or name == "flagged emails"
 
 
 def todo_to_item(todo: dict, todo_list: dict, *, tz: ZoneInfo, parse_due_date, parse_graph_dt, split_body) -> AgendaItem:
@@ -565,6 +604,147 @@ def todo_to_item(todo: dict, todo_list: dict, *, tz: ZoneInfo, parse_due_date, p
     )
 
 
+_REMINDER_CONTENT = re.compile(r"^\s*REMINDER\s*(?:(\d{1,2}):(\d{2}))?\s*:\s*(.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def parse_reminder_content(content: str | None) -> tuple[time | None, bool, str, str | None]:
+    """Split an iPhone Sync row ("REMINDER 09:30: title · notes").
+
+    Returns (time, has_clock, title, notes). "REMINDER 00:00: ..." is a date-only
+    reminder (no time); "REMINDER: ..." has no clock at all.
+    """
+    match = _REMINDER_CONTENT.match(content or "")
+    if not match:
+        return None, False, (content or "").strip() or "(pa titull)", None
+    hours, minutes, rest = match.groups()
+    at: time | None = None
+    has_clock = hours is not None
+    if has_clock:
+        try:
+            at = time(int(hours), int(minutes))
+        except ValueError:
+            at = None
+        if at == time(0, 0):
+            at = None
+    title, sep, notes = rest.partition(" · ")
+    return at, has_clock, title.strip() or "(pa titull)", (notes.strip() or None) if sep else None
+
+
+async def collect_time_table_reminders(
+    db: AsyncSession, owner: User, day_from: date, day_to: date, *, tz: ZoneInfo, today: date, now: datetime | None = None,
+) -> tuple[list[AgendaItem], list[str]]:
+    """GA Time Table "R:" rows imported from the GA's iPhone (one-way, read-only here).
+
+    Each sync replaces its whole window and leaves completed reminders out, so a row
+    inside the last synced window is still open on the phone. Rows older than that
+    window are no longer refreshed (their completion is unknown) and are skipped.
+    """
+    rows = (
+        await db.execute(
+            select(GaTimeSlotEntry, GaIcloudSyncConnection.last_synced_at)
+            .join(GaIcloudSyncConnection, GaIcloudSyncConnection.id == GaTimeSlotEntry.sync_connection_id)
+            .where(
+                GaTimeSlotEntry.user_id == owner.id,
+                GaTimeSlotEntry.source_type == "reminder",
+                GaIcloudSyncConnection.revoked_at.is_(None),
+                GaTimeSlotEntry.day_date <= day_to,
+            )
+            .order_by(GaTimeSlotEntry.day_date, GaTimeSlotEntry.start_time)
+        )
+    ).all()
+    items: list[AgendaItem] = []
+    warnings: list[str] = []
+    last_sync: datetime | None = None
+    seen: set[str] = set()
+    for entry, synced_at in rows:
+        if synced_at is None:
+            continue
+        last_sync = synced_at if last_sync is None else max(last_sync, synced_at)
+        window_start = synced_at.astimezone(tz).date() - timedelta(days=IPHONE_SYNC_LOOKBACK_DAYS)
+        if entry.day_date < window_start:
+            continue
+        at, has_clock, title, notes = parse_reminder_content(entry.content)
+        day = entry.day_date
+        undated = not has_clock and day == window_start
+        if undated:
+            # The import files a reminder without a date on the window's first day; like an
+            # undated To Do it belongs to today until it is completed on the iPhone.
+            day = max(day_from, today)
+            if day > day_to:
+                continue
+        elif day < day_from and day >= today:
+            continue
+        key = f"{PREFIX_TIME_TABLE}{entry.source_external_id or entry.id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(
+            AgendaItem(
+                id=key, item_key=key, source=SOURCE_IPHONE_SYNC, kind=KIND_REMINDER, title=title, day=day,
+                start=datetime.combine(day, at, tzinfo=tz) if at else None,
+                time_basis="reminder" if at else None,
+                due_date=None if undated else entry.day_date.isoformat(),
+                status="open", comment=notes, can_complete=False, is_open=True,
+                frequency=entry.source_name, url=frontend_url("/admin-tasks"),
+            )
+        )
+    if last_sync is not None:
+        age = (now or datetime.now(timezone.utc)) - last_sync
+        if age > timedelta(hours=IPHONE_SYNC_STALE_HOURS):
+            warnings.append(
+                f"iPhone Sync last ran {last_sync.astimezone(tz):%d.%m.%Y %H:%M}; iPhone reminders may be out of date."
+            )
+    return items, warnings
+
+
+def _norm_title(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip().casefold()
+
+
+def dedupe_reminders(items: list[AgendaItem]) -> list[AgendaItem]:
+    """Return a reminder present in both To Do and iPhone Sync once (as the To Do item)."""
+    todo_by_key = {
+        (_norm_title(item.title), item.day): item
+        for item in items if item.source == "microsoft_todo" and item.day is not None
+    }
+    kept: list[AgendaItem] = []
+    for item in items:
+        if item.source == SOURCE_IPHONE_SYNC:
+            twin = todo_by_key.get((_norm_title(item.title), item.day))
+            if twin is not None:
+                twin.linked_ids.append(item.id)
+                if twin.start is None and item.start is not None:
+                    twin.start, twin.time_basis = item.start, "reminder"
+                continue
+        kept.append(item)
+    return kept
+
+
+async def collect_discord_items(db: AsyncSession, day_from: date, day_to: date, *, tz: ZoneInfo) -> list[AgendaItem]:
+    """Open (new/seen) Discord mentions of the GA, untimed on the day they were written."""
+    from app.services import ga_discord_mentions as mentions
+
+    start = datetime.combine(day_from, time.min, tzinfo=tz)
+    end = datetime.combine(day_to + timedelta(days=1), time.min, tzinfo=tz)
+    rows = await mentions.list_mentions(db, since=start, until=end, statuses=mentions.OPEN_STATUSES)
+    names = await mentions.author_names(db, rows)
+    items: list[AgendaItem] = []
+    for row in rows:
+        out = mentions.mention_out(row, names, tz)
+        local = row.created_at.astimezone(tz)
+        text = " ".join(row.content.split())
+        items.append(
+            AgendaItem(
+                id=out["id"], item_key=out["id"], source="discord", kind=KIND_DISCORD,
+                title=f"{out['author_initials']} në {out['channel']} ({local:%H:%M}): {text[:200] or '(bashkëngjitje)'}",
+                day=local.date(), status=row.status, comment=row.content or None,
+                can_complete=True, is_open=True, url=row.jump_url, assignees=[out["author"]],
+                markers=[f"📎 {attachment.get('name')}" for attachment in (row.attachments or [])],
+            )
+        )
+    return items
+
+
 def apply_day_states(items: list[AgendaItem], states: dict[tuple[str, date], DayState], tz: ZoneInfo) -> list[AgendaItem]:
     kept: list[AgendaItem] = []
     for item in items:
@@ -588,9 +768,12 @@ async def collect_items(
     items = await collect_task_items(db, owner, day_from, day_to, today=today, tz=tz)
     items += await collect_meeting_items(db, owner, day_from, day_to, tz=tz)
     warnings: list[str] = []
-    if include_microsoft:
-        ms_items, warnings = await collect_microsoft_items(db, owner, day_from, day_to, tz=tz)
-        items += ms_items
+    if include_microsoft:  # the GA's own sources: Outlook/To Do, iPhone reminders, Discord mentions
+        ms_items, warnings = await collect_microsoft_items(db, owner, day_from, day_to, tz=tz, today=today)
+        tt_items, tt_warnings = await collect_time_table_reminders(db, owner, day_from, day_to, tz=tz, today=today, now=now)
+        items = dedupe_reminders(items + ms_items + tt_items)
+        warnings += tt_warnings
+        items += await collect_discord_items(db, day_from, day_to, tz=tz)
     states = await load_day_states(db, owner.id, min(day_from, today) - timedelta(days=LEFTOVER_LOOKBACK_DAYS), day_to)
     return apply_day_states(items, states, tz), warnings
 
@@ -598,7 +781,7 @@ async def collect_items(
 def sort_key(item: AgendaItem):
     return (
         item.start or datetime.max.replace(tzinfo=timezone.utc),
-        {KIND_GA_TASK: 0, KIND_BZ: 1, KIND_F_TASK: 2, KIND_MEETING: 3, KIND_EVENT: 4, KIND_REMINDER: 5}.get(item.kind, 9),
+        {KIND_GA_TASK: 0, KIND_BZ: 1, KIND_F_TASK: 2, KIND_MEETING: 3, KIND_EVENT: 4, KIND_REMINDER: 5, KIND_DISCORD: 6}.get(item.kind, 9),
         item.title.casefold(),
     )
 
@@ -626,6 +809,8 @@ def select_leftovers(items: list[AgendaItem], as_of: datetime) -> list[AgendaIte
             continue
         if item.kind == KIND_MEETING and item.day != today:
             continue  # unmarked meetings only matter on the day itself
+        if item.kind == KIND_DISCORD and item.status != "new":
+            continue  # a mention GA has already seen is not a leftover
         if item.day < today or (item.day == today and item.start is not None and item.start < as_of):
             selected.append(item)
     for item in selected:
@@ -639,7 +824,7 @@ def select_untimed(items: list[AgendaItem], day: date) -> list[AgendaItem]:
         (
             item for item in items
             if item.is_open and item.start is None and item.day == day
-            and item.kind in {KIND_GA_TASK, KIND_BZ, KIND_F_TASK, KIND_REMINDER}
+            and item.kind in {KIND_GA_TASK, KIND_BZ, KIND_F_TASK, KIND_REMINDER, KIND_DISCORD}
         ),
         key=sort_key,
     )

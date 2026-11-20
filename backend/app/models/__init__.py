@@ -248,3 +248,4 @@ from app.models.ga_personal import (
     GaPersonalTemplate, GaPersonalOccurrence, GaPersonalEvent, GaPersonalDelivery, GaPersonalImport,
 )
 from app.models.oauth import GaAssistantItemTime, OAuthAuthorizationRequest, OAuthClient, OAuthToken  # noqa: E402,F401
+from app.models.ga_discord_mention import GaDiscordMention  # noqa: E402,F401

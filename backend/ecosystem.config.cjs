@@ -169,6 +169,17 @@ module.exports = {
     },
     {
       ...apiProcess,
+      name: "primeflow-ga-discord-mentions",
+      args: "discord_ga_mentions.py",
+      // Read-only bot (View Channels + Read Message History). Its token is read
+      // from backend/.env (GA_DISCORD_MENTIONS_BOT_TOKEN), never from this file.
+      env: {
+        ...sharedEnv,
+        PRIMEFLOW_API_BASE_URL: "http://127.0.0.1:8000",
+      },
+    },
+    {
+      ...apiProcess,
       name: "primeflow-discord-ai-agent",
       args: "discord_ai_agent_bot.py",
       env: {

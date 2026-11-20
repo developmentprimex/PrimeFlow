@@ -95,6 +95,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   `tests/test_ga_assistant*.py`. Identiteti i GA-së lexohet vetëm nga
   `app/services/ga_identity.py` (`GA_USER_EMAIL` / `GA_USERNAME`); mos shto konstante të reja
   `GA_EMAIL` / `GA_USERNAME` nëpër module.
+  Agjenda lexon edhe **iPhone Sync** të GA Time Table (formati `REMINDER HH:MM: titulli` i
+  `app/services/ga_icloud_sync.py` dhe dritarja sot−7 e Shortcut-it): kur ndryshon formati ose
+  dritarja, ndrysho edhe `parse_reminder_content` / `IPHONE_SYNC_LOOKBACK_DAYS`.
 
 - M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
   e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda

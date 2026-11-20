@@ -165,3 +165,7 @@ api_router.include_router(oauth_api_router, prefix="/oauth", tags=["oauth"])
 # GA assistant agenda and actions (MCP assistant profile).
 from app.api.routers.ga_assistant import router as ga_assistant_router
 api_router.include_router(ga_assistant_router, prefix="/ga-assistant", tags=["ga-assistant"])
+
+# Read-only GA Discord mentions bot bridge (discord_ga_mentions.py).
+from app.api.routers.ga_discord_bot import router as ga_discord_bot_router
+api_router.include_router(ga_discord_bot_router, prefix="/ga-discord-bot", tags=["ga-discord-bot"])

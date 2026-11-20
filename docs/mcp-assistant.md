@@ -55,6 +55,8 @@ ID-të mbajnë burimin:
 - `pf_meeting:<uuid>@YYYY-MM-DD`
 - `ms_event:<id>`
 - `todo:<list_id>::<task_id>`
+- `tt:<source_external_id>`: reminder i iPhone-it nga GA Time Table (“R:”), vetëm lexim
+- `dc:<discord message id>`: mesazh Discord që e përmend GA-në
 
 Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 
@@ -69,6 +71,46 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 | `ga_item_remove_from_day(item_id, reason, date?)` | E fsheh elementin nga agjenda e GA-së për atë ditë (soft; s'fshihet asgjë) |
 | `ga_add_comment(item_id, text)` | Detyrë → shtohet te komenti i GA-së; To Do → te shënimet |
 | `todo_list / todo_create / todo_update / todo_complete / todo_set_steps` | Microsoft To Do i `info@` |
+| `ga_time_table(week_start?)` | GA Time Table e javës (H–P), si te faqja: rreshtat e orëve me shënimet, hyrjet e template-it dhe rreshtat e iPhone Sync (“R: …”, “CALENDAR …”). Takimet/detyrat janë te `ga_agenda` |
+| `ga_discord_mentions(since?, until?, only_open=true)` | Mesazhet në kanalet e serverit që e përmendin GA-në, një rol të saj, ose i përgjigjen asaj: kush (emri + inicialet), kanali, koha, teksti, linku, bashkëngjitjet, statusi |
+| `ga_discord_mark(id, status)` | `seen` / `done` (ose `new`); në Discord s'ndryshon asgjë |
+
+## Reminders “R:” të iPhone-it (GA Time Table)
+
+- Burimi: rreshtat që iPhone Sync i importon te `ga_time_slot_entries` (`source_type=reminder`),
+  me `source: iphone_sync`, `kind: REMINDER`, id `tt:…` (i qëndrueshëm mes sinkronizimeve).
+- Ora merret nga “R: HH:MM”. “R: 00:00” = pa orë → untimed për ditën e kolonës.
+  Reminder pa datë (iPhone Sync e vendos në ditën e parë të dritares) del si untimed **çdo ditë**
+  derisa të kryhet.
+- Sinkronizimi është vetëm iPhone → PrimeFlow, prandaj `can_complete=false` dhe
+  `ga_item_done/postpone/set_time/add_comment` kthejnë 409 me shpjegim. Kryhet në iPhone;
+  sinkronizimi i radhës e heq. `ga_item_remove_from_day` lejohet (fshehje për një ditë).
+- Të pakryerat e ditëve të kaluara dalin te `ga_leftovers` me `days_late`, vetëm brenda dritares
+  së fundit të sinkronizimit (sot − 7 ditë); më të vjetrat s'rifreskohen më nga telefoni.
+  Kur sinkronizimi i fundit është më i vjetër se 24 orë, del një warning.
+- I njëjti reminder në To Do dhe në iPhone Sync (titull + ditë) kthehet një herë: si element To Do,
+  me `linked_ids: ["tt:…"]`.
+
+## Microsoft To Do: rregulla shtesë
+
+- Lista “Flagged Emails” (`wellknownListName=flaggedEmails`) s'lexohet si reminders.
+- To Do pa datë del te `ga_untimed_today` (dhe te `ga_agenda` me `include_untimed`) çdo ditë
+  derisa të kryhet.
+
+## Discord: mentions e GA-së
+
+- Bot i veçantë, vetëm lexim: `backend/discord_ga_mentions.py`, procesi PM2
+  `primeflow-ga-discord-mentions`. Intents: Guilds, Guild Messages, Message Content.
+  Leje: View Channels + Read Message History. S'shkruan, s'reagon, s'fshin; DM-të s'lexohen.
+- Ruan te `ga_discord_mentions` (migrimi 0195) çdo mesazh që përmend GA-në (`@` e saj ose një
+  rol që ka), ose që i përgjigjet një mesazhi të saj. GA-ja njihet nga lidhja e saj Discord
+  në PrimeFlow (`discord_links`) ose nga `GA_DISCORD_USER_ID`.
+- Pas çdo rilidhjeje lexon edhe mesazhet e humbura (deri në `GA_DISCORD_MENTIONS_BACKFILL_HOURS`).
+- Boti flet me API-në te `/api/ga-discord-bot/*` me sekret që nxirret nga `JWT_SECRET`
+  (s'ka sekret të ri për t'u vendosur).
+- Te `ga_agenda` (me `include_untimed`) dhe `ga_untimed_today`: `kind: DISCORD`, pa orë, në ditën
+  kur u shkrua, derisa të shënohet `done`. Te `ga_leftovers`: vetëm ato me status `new`.
+  `ga_item_done("dc:…")` = `done`.
 
 ### Si klasifikohen elementet
 
@@ -139,6 +181,9 @@ ri-autorizimit.
 | `PRIMEFLOW_MCP_ALLOW_DELETE` | opsionale | `false` si parazgjedhje |
 | `PRIMEFLOW_MCP_ASSISTANT_HOST`, `PRIMEFLOW_MCP_ASSISTANT_PORT` | opsionale | `127.0.0.1` / `8011` |
 | `INSTALL_BACKEND_REQUIREMENTS` | Actions variable | parazgjedhja `false`; `true` e ndez `pip install -r requirements.txt` në deploy |
+| `GA_DISCORD_MENTIONS_BOT_TOKEN` | vetëm `backend\.env` në server | tokeni i botit të ri; pa të procesi s'niset |
+| `GA_DISCORD_USER_ID` | opsionale | ID-ja Discord e GA-së, nëse s'ka lidhje Discord në PrimeFlow |
+| `GA_DISCORD_MENTIONS_BACKFILL_HOURS` | opsionale | 72 |
 | `MS_TODO_ENABLED` | Actions variable → `.env` | parazgjedhja `false`: lidhja Microsoft kërkon të njëjtat leje si më parë dhe tools e To Do janë të fikura. Vendose `true` vetëm pasi Azure ka `Tasks.ReadWrite`, pastaj ri-autorizo `info@` |
 
 ## Hapat manualë
@@ -159,6 +204,14 @@ ri-autorizimit.
 6. **Cloudflare Tunnel**: public hostname `mcp-flow.primexeu.com` → `http://127.0.0.1:18011`.
    Verifiko që **asnjë** hostname s'shkon te `127.0.0.1:8010`.
 7. **PM2**: deploy-i e nis `primeflow-mcp-assistant`. Me dorë: `pm2 start ecosystem.config.cjs --only primeflow-mcp-assistant`.
+8. **Bot Discord për mentions** (Discord Developer Portal):
+   - New Application → Bot → kopjo tokenin → `GA_DISCORD_MENTIONS_BOT_TOKEN=…` te `backend\.env` në server.
+   - Bot → Privileged Gateway Intents: ndiz **Message Content Intent** (Server Members s'duhet).
+   - Bot → çaktivizo “Public Bot”.
+   - OAuth2 → URL Generator: scope `bot`, leje **View Channels** + **Read Message History**
+     (permissions=66560), hape linkun dhe shtoje në serverin PrimEx.
+   - Nëse ka kanale private ku GA përmendet, jepi botit leje leximi edhe atje.
+   - Deploy-i i radhës (ose `pm2 start ecosystem.config.cjs --only primeflow-ga-discord-mentions`) e nis.
 
 ## Testimi
 
