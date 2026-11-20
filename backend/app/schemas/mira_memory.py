@@ -1,3 +1,4 @@
+from uuid import UUID
 from typing import Literal
 from pydantic import BaseModel, Field
 
@@ -11,3 +12,9 @@ class MemoryEdit(BaseModel):
 class MemoryStatusChange(BaseModel):
     version: int
     action: Literal['close', 'reopen', 'wrong']
+
+
+class MemoryClarification(BaseModel):
+    meeting_id: UUID
+    question: str = Field(min_length=1, max_length=240)
+    answer: str = Field(min_length=1, max_length=2000)

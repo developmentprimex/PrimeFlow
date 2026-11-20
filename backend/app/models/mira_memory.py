@@ -1,4 +1,4 @@
-"""Mira's living register of what was said in meetings, shared by all staff."""
+"""Mira's living register of what was said in meetings."""
 from __future__ import annotations
 
 import uuid
@@ -33,8 +33,9 @@ class MiraMemoryEvent(Base):
     item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('mira_memory_items.id', ondelete='CASCADE'), index=True)
     kind: Mapped[str] = mapped_column(String(20))
     text: Mapped[str] = mapped_column(Text, default='')
-    meeting_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('discord_voice_meetings.id', ondelete='SET NULL'))
+    meeting_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('discord_voice_meetings.id', ondelete='SET NULL'), index=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'))
     partial: Mapped[bool] = mapped_column(Boolean, default=False)
     refs: Mapped[list] = mapped_column(JSONB, default=list)
+    details: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

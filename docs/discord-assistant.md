@@ -258,19 +258,22 @@ lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 
 ## Kujtesa e Mira-s
 
-Pas çdo takimi Mira përditëson një regjistër të vetëm të gjallë me atë që u tha:
-detyrat dhe premtimet, temat e hapura, vendimet dhe informacionet që mund të duhen
-më vonë. Regjistri nxirret nga transkripti i plotë, jo nga shënimet. Kur shkruan
-shënimet e takimit të radhës, Mira e lexon regjistrin dhe e lidh takimin me të
-kaluarën vetëm kur është qartë e njëjta çështje, p.sh. "(1H, 21.10 09:58)".
+Pas takimit, Mira nxjerr nga transkripti vendimet, udhëzimet, veprimet, pyetjet,
+pengesat dhe faktet e rëndësishme. Kur e njëjta çështje diskutohet sërish, Mira
+shton një ngjarje me burimin e atij takimi. Mbyllja automatike
+kërkon një citim nga transkripti që konfirmon zgjidhjen.
 
-- Aktivizimi: GitHub Actions variable `MIRA_MEMORY_ENABLED=true`, pastaj deploy.
-  Si parazgjedhje është `false`, dhe shënimet punojnë saktësisht si më parë.
+- Për staging, zbato migrimin `0194_mira_memory_evidence` në pipeline dhe vendos
+  variablën ekzistuese `MIRA_MEMORY_ENABLED=true` për mjedisin ku po testohet.
+  Parazgjedhja është `false`.
 - Hyjnë të gjitha takimet, edhe ato të `/takimi fillo` që nuk u ruajtën në PX Notes.
-  Takimet para aktivizimit nuk përfshihen; regjistri nis bosh.
-- Tabi **Kujtesa** te faqja **Mira** (`/mira?tab=kujtesa`) e tregon regjistrin për të gjithë
-  stafin. Çdokush mund ta korrigjojë një pikë, ta mbyllë, ta rihapë ose ta shënojë si
-  të gabuar. Korrigjimi i një personi ka përparësi; asgjë nuk fshihet nga historiku.
+  Përpunimi i ri zbatohet për takimet që hyjnë në radhë pas aktivizimit. Shënimet,
+  transkriptet dhe regjistri historik vazhdojnë të jenë të disponueshme sipas lejeve ekzistuese.
+- **Mira → Notetaker** shfaq takimet e përpunuara, burimet dhe sqarimet për çdo
+  përdorues të autentikuar. Pikat e hapura kanë filtër sipas projektit ose temës.
+  Përgjigjet në **Kërkohet sqarim** ruhen si ngjarje me autor, veç transkriptit origjinal.
+- **Mira → Kujtesa** shfaq regjistrin e përbashkët. Korrigjimet njerëzore dhe
+  ndryshimet e statusit ruhen në historik.
 - Shënimet nuk e presin kurrë kujtesën. Një përditësim që dështon provohet deri në 5
   herë; pastaj takimi shfaqet në fund të faqes si "nuk u përfshi" dhe një admin ose
   menaxher mund ta provojë sërish.

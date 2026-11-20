@@ -78,8 +78,10 @@ test("a stale correction shows the conflict and reloads the item", async ({ page
 test("on a phone the list and the item take turns", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await shell(page)
-  // The app opens its navigation on small screens; close it like a person would.
-  await page.getByRole("button", { name: "Close sidebar" }).click()
+  const closeSidebar = page.getByRole("button", { name: "Close sidebar" })
+  if (await closeSidebar.evaluate((button) => button.getBoundingClientRect().right > 0)) {
+    await closeSidebar.click()
+  }
   await page.screenshot({ path: "test-results/mira-memory-phone-list.png", fullPage: true })
   await page.getByRole("button", { name: /Oferta për klientin Albaniaplast/ }).click()
   await expect(page.getByRole("button", { name: "Kthehu te lista" })).toBeVisible()
@@ -87,4 +89,56 @@ test("on a phone the list and the item take turns", async ({ page }) => {
   await page.screenshot({ path: "test-results/mira-memory-phone-detail.png", fullPage: true })
   await page.getByRole("button", { name: "Kthehu te lista" }).click()
   await expect(page.getByRole("button", { name: /Printeri/ })).toBeVisible()
+})
+
+test("Notetaker shows a clarification and links its evidence to the transcript", async ({ page }) => {
+  const meeting = "44444444-4444-4444-8444-444444444444"
+  const source = { id: "source", speaker: "GA", start_ms: 316000, end_ms: 330000 }
+  const question = "Kush është përgjegjës?"
+  const { id, title, kind, status } = list.items[0]
+  const writes: unknown[] = []
+  await shell(page)
+  await page.route(`**/api/mira/notetaker/meetings/${meeting}`, route => route.fulfill({ json: {
+    id: meeting, title: "Takimi Modeco", started_at: "2026-11-19T09:00:00+01:00",
+    partial: true, quick_summary: null, full_notes: "Shënime", error: null,
+    transcript: [{ ...source, text: "Kontrollojeni ofertën deri nesër." }],
+    memory: { points: [{ id, title, kind, status, text: "Kontrolli i ofertës u kërkua nga GA.",
+      correction: null, project: "Modeco", requested_by: "GA", assignee: null, deadline_text: "nesër",
+      deadline_date: "2026-11-20", questions: [question], answers: {}, sources: [source], discussion_state: "REPEATED" }], previous: [] },
+  } }))
+  await page.route(`**/api/mira-memory/items/${offer}/clarifications`, async route => {
+    const body = route.request().postDataJSON()
+    writes.push(body)
+    await route.fulfill({ json: { question, answer: body.answer } })
+  })
+  await page.goto(`/mira?tab=notetaker&meeting=${meeting}&view=quick`)
+  await expect(page.getByText("Regjistrimi ose transkripti është i pjesshëm.")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Kërkohet sqarim" })).toBeVisible()
+  await page.getByRole("button", { name: "Përgjigju" }).click()
+  await page.getByRole("textbox", { name: question }).fill("Arta.")
+  await page.getByRole("button", { name: "Ruaj sqarimin" }).click()
+  await expect(page.getByRole("heading", { name: "Kërkohet sqarim" })).toHaveCount(0)
+  expect(writes).toEqual([{ meeting_id: meeting, question, answer: "Arta." }])
+  await page.getByRole("link", { name: "Kujtesa e takimit" }).click()
+  await expect(page.getByText(/Diskutuar më parë/)).toBeVisible()
+  await expect(page.getByText("Arta.", { exact: true })).toBeVisible()
+  await page.getByRole("link", { name: "GA · 05:16–05:30" }).click()
+  await expect(page).toHaveURL(/view=transcript#segment-source/)
+  await expect(page.getByText("Kontrollojeni ofertën deri nesër.")).toBeVisible()
+})
+
+test("Notetaker can filter open points before the next meeting", async ({ page }) => {
+  await shell(page)
+  const point = { id: offer, title: "Oferta Modeco", text: "Pritet përgjigjja.", meeting_id: offer,
+    meeting_title: "Takimi Modeco", date: "2026-11-19T09:00:00+01:00" }
+  await page.route(/\/api\/mira\/notetaker\/meetings\?/, route => {
+    const query = new URL(route.request().url()).searchParams.get("follow_up_query")
+    return route.fulfill({ json: { items: [], follow_up: query === "Dantese" ? [] : [point] } })
+  })
+  await page.goto("/mira?tab=notetaker")
+  await expect(page.getByText("Oferta Modeco")).toBeVisible()
+  await page.getByLabel("Kërko pika të hapura sipas projektit ose temës").fill("Dantese")
+  await page.getByRole("button", { name: "Kërko", exact: true }).click()
+  await expect(page.getByText("Nuk u gjetën pika të hapura për këtë kërkim.")).toBeVisible()
+  await expect(page.getByText("Oferta Modeco")).toHaveCount(0)
 })

@@ -1,13 +1,14 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { eventLabel, mentionText, type MemoryDetail, type MemoryList, type MemoryTab } from "@/lib/mira-memory"
+import { eventLabel, memoryKindLabels, mentionText, type MemoryDetail, type MemoryList, type MemoryTab } from "@/lib/mira-memory"
 
 // One accent marks what is still open; everything else stays neutral.
 const ACCENT = "#2f5d8a"
@@ -28,11 +29,11 @@ async function json<T>(response: Response): Promise<T> {
   return body as T
 }
 
-export function MiraMemoryPage() {
+export function MiraMemoryPage({ itemId = null }: { itemId?: string | null }) {
   const { apiFetch, user } = useAuth()
-  const [tab, setTab] = React.useState<MemoryTab>("open")
+  const [tab, setTab] = React.useState<MemoryTab>(itemId ? "all" : "open")
   const [list, setList] = React.useState<MemoryList | null>(null)
-  const [selected, setSelected] = React.useState<string | null>(null)
+  const [selected, setSelected] = React.useState<string | null>(itemId)
   const [detail, setDetail] = React.useState<MemoryDetail | null>(null)
   const [editing, setEditing] = React.useState(false)
   const [draft, setDraft] = React.useState({ title: "", description: "" })
@@ -56,6 +57,12 @@ export function MiraMemoryPage() {
   }, [apiFetch])
 
   React.useEffect(() => { void loadList() }, [loadList])
+  React.useEffect(() => {
+    if (itemId) {
+      setTab("all")
+      setSelected(itemId)
+    }
+  }, [itemId])
   React.useEffect(() => {
     setEditing(false)
     if (selected) void loadDetail(selected)
@@ -181,6 +188,7 @@ export function MiraMemoryPage() {
                 ) : (
                   <>
                     <h2 className="text-lg font-semibold leading-snug">{detail.title}</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">{memoryKindLabels[detail.kind]}</p>
                     {detail.description && <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-foreground/80">{detail.description}</p>}
                     {detail.people.length > 0 && <p className="mt-2 text-xs text-muted-foreground">{detail.people.join(", ")}</p>}
                     <div className="mt-4 flex flex-wrap gap-2">
@@ -208,6 +216,7 @@ export function MiraMemoryPage() {
                         style={{ background: event.user_name ? "var(--muted-foreground)" : ACCENT }} />
                       <p className="text-xs font-medium">{eventLabel(event)}{event.partial && <span className="font-normal text-muted-foreground"> (takim i pjesshëm)</span>}</p>
                       {event.text && <p className="mt-1 max-w-[62ch] text-sm leading-relaxed text-muted-foreground">{event.text}</p>}
+                      {event.meeting_id && <Link href={`/mira?tab=notetaker&meeting=${event.meeting_id}&view=memory`} className="mt-1 inline-block text-xs underline">Hap takimin</Link>}
                     </li>
                   ))}
                 </ol>

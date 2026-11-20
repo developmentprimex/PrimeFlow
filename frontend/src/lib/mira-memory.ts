@@ -2,11 +2,16 @@
 
 export type MemoryStatus = "OPEN" | "CLOSED" | "WRONG"
 export type MemoryTab = "open" | "closed" | "all"
+export const memoryKindLabels = {
+  TASK: "Detyrë", TOPIC: "Temë", DECISION: "Vendim", INFO: "Informacion",
+  ACTION: "Veprim", INSTRUCTION: "Udhëzim", OPEN_QUESTION: "Pyetje e hapur",
+  BLOCKER: "Pengesë", FOLLOW_UP: "Për t’u ndjekur", IMPORTANT_INFO: "Informacion i rëndësishëm",
+} as const
 
 export type MemoryListItem = {
   id: string
   title: string
-  kind: "TASK" | "TOPIC" | "DECISION" | "INFO"
+  kind: keyof typeof memoryKindLabels
   status: MemoryStatus
   quiet: boolean
   mention_count: number
@@ -14,10 +19,11 @@ export type MemoryListItem = {
 }
 
 export type MemoryEvent = {
-  kind: "MENTION" | "CHANGE" | "CLOSE" | "REOPEN" | "EDIT" | "WRONG"
+  kind: "MENTION" | "CHANGE" | "CLOSE" | "REOPEN" | "EDIT" | "WRONG" | "ANSWER"
   text: string
   created_at: string
   meeting_title: string | null
+  meeting_id?: string | null
   user_name: string | null
   partial: boolean
 }
@@ -51,6 +57,7 @@ const BY_PERSON: Record<string, string> = {
   CLOSE: "Mbyllur nga",
   REOPEN: "Rihapur nga",
   WRONG: "Shënuar si e gabuar nga",
+  ANSWER: "Sqaruar nga",
 }
 
 export function eventLabel(event: MemoryEvent): string {

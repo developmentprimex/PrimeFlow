@@ -119,9 +119,15 @@ class MemoryApiTests(MemoryServiceTests):
     async def test_router_requires_authentication(self):
         import httpx
         from fastapi import FastAPI
+        from app.api.routers.mira import router as mira_router
         from app.api.routers.mira_memory import router
         app = FastAPI()
+        app.include_router(mira_router, prefix='/api/mira')
         app.include_router(router, prefix='/api/mira-memory')
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
-            response = await client.get('/api/mira-memory/items')
-        self.assertEqual(response.status_code, 401)
+            for path in ('/api/mira-memory/items', '/api/mira/notetaker/meetings',
+                    f'/api/mira/notetaker/meetings/{uuid.uuid4()}'):
+                self.assertEqual((await client.get(path)).status_code, 401)
+            clarification = {'meeting_id': str(uuid.uuid4()), 'question': 'Kush?', 'answer': 'Arta.'}
+            response = await client.post(f'/api/mira-memory/items/{uuid.uuid4()}/clarifications', json=clarification)
+            self.assertEqual(response.status_code, 401)

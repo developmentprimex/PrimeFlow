@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Summary } from "@/components/mira/meetings-tab"
 import { useAuth } from "@/lib/auth"
 import { json } from "@/lib/mira"
+import { memoryKindLabels, type MemoryListItem } from "@/lib/mira-memory"
 
 const sections = {
   discussion: "U diskutua",
@@ -16,17 +19,34 @@ const sections = {
 } as const
 
 type Meeting = { id: string; title: string; started_at: string; partial: boolean }
+type Source = { id: string; speaker: string; start_ms: number; end_ms: number }
+type MemoryPoint = Pick<MemoryListItem, "id" | "title" | "kind" | "status"> & {
+  text: string
+  correction: string | null
+  project: string | null
+  project_id?: string | null
+  requested_by: string | null
+  assignee: string | null
+  deadline_text: string | null
+  deadline_date: string | null
+  questions: string[]
+  answers: Record<string, string>
+  sources: Source[]
+  discussion_state?: "NEW" | "REPEATED" | "RESOLVED"
+}
+type PreviousPoint = { id: string; title: string; text: string; meeting_id: string; meeting_title: string; date: string; status?: MemoryListItem["status"] }
 type MeetingDetail = Meeting & {
   quick_summary: Record<keyof typeof sections, string[]> | null
   full_notes: string | null
   error: string | null
-  transcript: { id: string; speaker: string; start_ms: number; end_ms: number; text: string }[]
+  transcript: (Source & { text: string })[]
+  memory?: { points: MemoryPoint[]; previous: PreviousPoint[]; status?: string | null }
 }
 
 const base = "/mira?tab=notetaker"
 const endpoint = "/mira/notetaker/meetings"
 const pageSize = 30
-const views = { quick: "Përmbledhja e shpejtë", full: "Shënimet e plota", transcript: "Transkripti" } as const
+const views = { quick: "Përmbledhja e shpejtë", full: "Shënimet e plota", transcript: "Transkripti", memory: "Kujtesa e takimit" } as const
 const dateTime = new Intl.DateTimeFormat("sq-AL", { dateStyle: "medium", timeStyle: "short" })
 
 function timestamp(ms: number) {
@@ -35,13 +55,131 @@ function timestamp(ms: number) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
 }
 
+function PreviousPoints({ points, title }: { points: PreviousPoint[]; title: string }) {
+  if (!points.length) return null
+  return <section className="space-y-2 text-sm">
+    <h3 className="font-semibold">{title}</h3>
+    <ul className="divide-y rounded-md border">
+      {points.map((point) => <li key={point.id} className="space-y-1 px-3 py-2">
+        <p className="font-medium">{point.title}{point.status === "CLOSED" && <span className="ml-2 text-xs text-muted-foreground">Mbyllur</span>}</p>
+        <p>{point.text}</p>
+        <Link className="text-xs underline" href={`${base}&meeting=${point.meeting_id}&view=memory`}>{point.meeting_title} · {dateTime.format(new Date(point.date))}</Link>
+      </li>)}
+    </ul>
+  </section>
+}
+
+function Clarifications({ detail, onAnswer }: {
+  detail: MeetingDetail
+  onAnswer: (itemId: string, question: string, answer: string) => void
+}) {
+  const { apiFetch } = useAuth()
+  const [editing, setEditing] = useState<{ itemId: string; question: string } | null>(null)
+  const [answer, setAnswer] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const points = detail.memory?.points.filter((point) => point.questions.length > 0) ?? []
+  if (!points.length) return null
+
+  async function submit() {
+    if (!editing || !answer.trim() || busy) return
+    setBusy(true)
+    setError("")
+    try {
+      const result = await json<{ question: string; answer: string }>(await apiFetch(`/mira-memory/items/${editing.itemId}/clarifications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meeting_id: detail.id, question: editing.question, answer }),
+      }))
+      onAnswer(editing.itemId, result.question, result.answer)
+      setEditing(null)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Përgjigjja nuk u ruajt.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <section className="text-sm">
+      <h3 className="font-semibold">Kërkohet sqarim</h3>
+      <ul className="mt-2 space-y-2">
+        {points.map((point) => <li key={point.id}>
+          <Link className="font-medium underline" href={`/mira?tab=kujtesa&item=${point.id}`}>{point.title}</Link>
+          <ul className="ml-5 list-disc">{point.questions.map((question) => <li key={question}>
+            {question} <button type="button" disabled={busy} className="ml-2 text-xs underline" onClick={() => {
+              setEditing({ itemId: point.id, question }); setAnswer(""); setError("")
+            }}>Përgjigju</button>
+            {editing?.itemId === point.id && editing.question === question && <form className="my-2 max-w-lg space-y-2"
+              onSubmit={(event) => { event.preventDefault(); void submit() }}>
+              <Textarea aria-label={question} value={answer} maxLength={2000} rows={2} disabled={busy}
+                onChange={(event) => setAnswer(event.target.value)} />
+              <Button type="submit" size="sm" disabled={busy || !answer.trim()}>Ruaj sqarimin</Button>
+              {error && <p role="alert">{error}</p>}
+            </form>}
+          </li>)}</ul>
+        </li>)}
+      </ul>
+    </section>
+}
+
+function MeetingMemory({ detail }: { detail: MeetingDetail }) {
+  const points = detail.memory?.points ?? []
+  if (!points.length && !detail.memory?.previous.length) {
+    const status = detail.memory?.status
+    const message = status === "PENDING" || status === "RUNNING" ? "MIRA po përpunon pikat e takimit."
+      : status === "FAILED" ? "Përpunimi i kujtesës dështoi."
+        : "Kujtesa e këtij takimi nuk ka pika për të shfaqur."
+    return <p className="text-sm">{message}</p>
+  }
+  return <>
+    {points.length > 0 && <section className="space-y-2 text-sm">
+      <h3 className="font-semibold">Pikat e takimit</h3>
+      <ul className="divide-y rounded-md border">
+        {points.map((point) => <li key={point.id} className="space-y-1 px-3 py-2">
+          <Link className="font-medium underline" href={`/mira?tab=kujtesa&item=${point.id}`}>{point.title}</Link>
+          <p className="text-xs text-muted-foreground">
+            {memoryKindLabels[point.kind]} · {point.status === "OPEN" ? "Hapur" : "Mbyllur"}
+            {point.discussion_state === "NEW" && " · Pikë e re"}
+            {point.discussion_state === "REPEATED" && " · Diskutuar më parë"}
+            {point.discussion_state === "RESOLVED" && " · Zgjidhur në këtë takim"}
+          </p>
+          <p>{point.text}</p>
+          {point.correction && <p><strong>Korrigjimi</strong> {point.correction}</p>}
+          {Object.entries(point.answers).map(([question, answer]) => <div key={question}>
+            <p className="font-medium">{question}</p><p>{answer}</p>
+          </div>)}
+          {(point.project || point.requested_by || point.assignee || point.deadline_text) && <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {point.project && <div><dt className="inline font-medium">Projekti ose klienti</dt> <dd className="inline">
+              {point.project_id ? <Link className="underline" href={`/projects/${point.project_id}`}>{point.project}</Link> : point.project}
+            </dd></div>}
+            {point.requested_by && <div><dt className="inline font-medium">Kërkuar nga</dt> <dd className="inline">{point.requested_by}</dd></div>}
+            {point.assignee && <div><dt className="inline font-medium">Përgjegjës</dt> <dd className="inline">{point.assignee}</dd></div>}
+            {point.deadline_text && <div><dt className="inline font-medium">Afati</dt> <dd className="inline">{point.deadline_date ?? point.deadline_text}</dd></div>}
+          </dl>}
+          {point.sources.length > 0 && <ul className="flex flex-wrap gap-x-3 text-xs">
+            {point.sources.map((source) => <li key={source.id}>
+              <Link className="underline" href={`${base}&meeting=${detail.id}&view=transcript#segment-${source.id}`}>
+                {source.speaker} · {timestamp(source.start_ms)}–{timestamp(source.end_ms)}
+              </Link>
+            </li>)}
+          </ul>}
+        </li>)}
+      </ul>
+    </section>}
+    <PreviousPoints points={detail.memory?.previous ?? []} title="Diskutimet e mëparshme" />
+  </>
+}
+
 export function NotetakerTab({ meetingId, view }: { meetingId: string | null; view: string | null }) {
   const { apiFetch } = useAuth()
   const [offset, setOffset] = useState(0)
   const [items, setItems] = useState<Meeting[] | null>(null)
   const [detail, setDetail] = useState<MeetingDetail | null>(null)
+  const [followUp, setFollowUp] = useState<{ query: string; points: PreviousPoint[] } | null>(null)
+  const [queryDraft, setQueryDraft] = useState("")
+  const [followUpQuery, setFollowUpQuery] = useState("")
   const [error, setError] = useState<{ key: string; message: string } | null>(null)
-  const selected = view === "full" || view === "transcript" ? view : "quick"
+  const selected = view === "full" || view === "transcript" || view === "memory" ? view : "quick"
   const requestKey = meetingId ?? `page-${offset}`
 
   useEffect(() => {
@@ -55,9 +193,12 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
             setError(null)
           }
         } else {
-          const result = await json<{ items: Meeting[] }>(await apiFetch(`${endpoint}?limit=${pageSize + 1}&offset=${offset}`))
+          const params = new URLSearchParams({ limit: String(pageSize + 1), offset: String(offset) })
+          if (followUpQuery) params.set("follow_up_query", followUpQuery)
+          const result = await json<{ items: Meeting[]; follow_up?: PreviousPoint[] }>(await apiFetch(`${endpoint}?${params}`))
           if (!ignore) {
             setItems(result.items)
+            setFollowUp({ query: followUpQuery, points: result.follow_up ?? [] })
             setError(null)
           }
         }
@@ -67,12 +208,29 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
     }
     void load()
     return () => { ignore = true }
-  }, [apiFetch, meetingId, offset, requestKey])
+  }, [apiFetch, meetingId, offset, requestKey, followUpQuery])
+
+  useEffect(() => {
+    const anchor = window.location.hash.slice(1)
+    if (selected === "transcript" && anchor && detail?.id === meetingId) {
+      document.getElementById(anchor)?.scrollIntoView({ block: "start" })
+    }
+  }, [detail, meetingId, selected])
 
   if (error?.key === requestKey) return <p role="alert" className="mt-4 text-sm">{error.message} {meetingId && <Link className="underline" href={base}>Kthehu te takimet</Link>}</p>
 
   if (!meetingId) return (
     <section className="mt-5 space-y-3">
+      {offset === 0 && (Boolean(followUp?.points.length) || followUpQuery) && <div className="space-y-3">
+        <form className="flex max-w-md gap-2" onSubmit={(event) => { event.preventDefault(); setFollowUpQuery(queryDraft.trim()) }}>
+          <Input value={queryDraft} maxLength={100} onChange={(event) => setQueryDraft(event.target.value)}
+            aria-label="Kërko pika të hapura sipas projektit ose temës" placeholder="Projekti ose tema" />
+          <Button type="submit" variant="outline">Kërko</Button>
+        </form>
+        {followUp?.query === followUpQuery && (followUp.points.length
+          ? <PreviousPoints points={followUp.points} title="Pika të hapura për takimet e radhës" />
+          : <p className="text-sm">Nuk u gjetën pika të hapura për këtë kërkim.</p>)}
+      </div>}
       {items === null ? <p role="status">Po ngarkohen takimet…</p> : items.length === 0 ? <p>Nuk ka takime për të shfaqur.</p> : (
         <ul className="divide-y rounded-md border text-sm">
           {items.slice(0, pageSize).map((item) => (
@@ -114,6 +272,14 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
         ) : <p className="text-muted-foreground">—</p>}</div>
       }) : <p className="text-sm">Përmbledhja e shpejtë nuk është e disponueshme.</p>)}
       {selected === "full" && (detail.full_notes ? <Summary text={detail.full_notes} /> : <p className="text-sm">{detail.error || "Shënimet nuk janë të disponueshme."}</p>)}
+      {(selected === "quick" || selected === "memory") && <Clarifications key={detail.id} detail={detail}
+        onAnswer={(itemId, question, answer) => setDetail((current) => {
+          if (!current?.memory || current.id !== detail.id) return current
+          return { ...current, memory: { ...current.memory, points: current.memory.points.map((point) => point.id === itemId
+            ? { ...point, questions: point.questions.filter((value) => value !== question), answers: { ...point.answers, [question]: answer } }
+            : point) } }
+        })} />}
+      {selected === "memory" && <MeetingMemory detail={detail} />}
       {selected === "transcript" && (detail.transcript.length ? <ul className="divide-y rounded-md border text-sm">
         {detail.transcript.map((segment) => <li id={`segment-${segment.id}`} key={segment.id} className="px-4 py-2">
           <p className="font-medium">{segment.speaker} <span className="font-normal text-muted-foreground">{timestamp(segment.start_ms)}–{timestamp(segment.end_ms)}</span></p>

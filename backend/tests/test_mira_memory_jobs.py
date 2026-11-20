@@ -95,6 +95,16 @@ class MemoryJobTests(MemoryTests):
             await jobs.process_mira_memory()
         self.assertEqual(await self.titles(), {'Më herët', 'Më vonë'})
 
+    async def test_invalid_sources_leave_memory_pending_for_retry(self):
+        sid = await self.meeting()
+        operations = add('Pa burim')
+        operations[0]['segments'] = [123]
+        with self.enabled(), patch('app.services.discord_voice_openai.extract_memory_operations', AsyncMock(return_value=operations)):
+            await jobs.process_mira_memory()
+        row = await self.get(sid)
+        self.assertEqual((row.memory_status, row.memory_error), ('PENDING', 'memory_no_valid_evidence'))
+        self.assertEqual(await self.titles(), set())
+
     async def test_later_meeting_waits_for_earlier_at_most_15_minutes(self):
         earlier = await self.meeting('Ende', started_minutes_ago=60, status='FINALIZING', memory_status=None,
             stopped_at=voice.now()-timedelta(minutes=5))
