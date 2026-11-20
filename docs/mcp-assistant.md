@@ -102,7 +102,7 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 - Bot i veçantë, vetëm lexim: `backend/discord_ga_mentions.py`, procesi PM2
   `primeflow-ga-discord-mentions`. Intents: Guilds, Guild Messages, Message Content.
   Leje: View Channels + Read Message History. S'shkruan, s'reagon, s'fshin; DM-të s'lexohen.
-- Ruan te `ga_discord_mentions` (migrimi 0194) çdo mesazh që përmend GA-në (`@` e saj ose një
+- Ruan te `ga_discord_mentions` (migrimi 0195) çdo mesazh që përmend GA-në (`@` e saj ose një
   rol që ka), ose që i përgjigjet një mesazhi të saj. GA-ja njihet nga lidhja e saj Discord
   në PrimeFlow (`discord_links`) ose nga `GA_DISCORD_USER_ID`.
 - Pas çdo rilidhjeje lexon edhe mesazhet e humbura (deri në `GA_DISCORD_MENTIONS_BACKFILL_HOURS`).

@@ -391,7 +391,9 @@ def parse_operations(text):
 async def extract_memory_operations(title, segments, *, meeting_date, memory, cache=None, checkpoint=None):
     """Register operations from the whole transcript; long meetings keep their details through a part step."""
     cache=dict(cache or {})
-    context={'title':title,'meeting_date':meeting_date.astimezone(ZoneInfo(settings.APP_TIMEZONE)).date().isoformat()
+    local_day=(meeting_date.astimezone(ZoneInfo(settings.APP_TIMEZONE)).date()
+        if hasattr(meeting_date,'astimezone') else meeting_date)  # datetime or plain date
+    context={'title':title,'meeting_date':local_day.isoformat()
         if meeting_date else None}
     def payload(system,content,structured):
         body={'model':settings.DISCORD_AI_MODEL,'store':False,'input':[{'role':'system','content':system},

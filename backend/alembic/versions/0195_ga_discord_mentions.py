@@ -6,8 +6,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0194_ga_discord_mentions"
-down_revision = "0193_merge_mira_quick_oauth"
+revision = "0195_ga_discord_mentions"
+down_revision = "0194_mira_memory_evidence"
 branch_labels = None
 depends_on = None
 
