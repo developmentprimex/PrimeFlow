@@ -100,7 +100,7 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 ## Discord: mentions e GA-së
 
 - Bot i veçantë, vetëm lexim: `backend/discord_ga_mentions.py`, procesi PM2
-  `primeflow-ga-discord-mentions`. Intents: Guilds, Guild Messages, Message Content.
+  `primeflow-ga-discord-mentions`. Intents: Guilds, Guild Messages, Guild Message Reactions, Message Content.
   Leje: View Channels + Read Message History. S'shkruan, s'reagon, s'fshin; DM-të s'lexohen.
 - Ruan te `ga_discord_mentions` (migrimi 0195) çdo mesazh që përmend GA-në (`@` e saj ose një
   rol që ka), ose që i përgjigjet një mesazhi të saj. GA-ja njihet nga lidhja e saj Discord
@@ -111,6 +111,14 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 - Te `ga_agenda` (me `include_untimed`) dhe `ga_untimed_today`: `kind: DISCORD`, pa orë, në ditën
   kur u shkrua, derisa të shënohet `done`. Te `ga_leftovers`: vetëm ato me status `new`.
   `ga_item_done("dc:…")` = `done`.
+- **Reactions** (migrimi 0197): çdo mesazh ka `reactions` (`[{emoji, count, users:[{name, initials}]}]`),
+  `reviewed_by` (inicialet e kolegëve që reaguan me emoji aprovimi, pa autorin dhe pa GA-në) dhe
+  `ready_for_ga` (`true` kur `reviewed_by` s'është bosh). `ga_discord_mentions(only_ready=true)` kthen
+  vetëm ato gati. Boti dëgjon reaction add/remove/clear për mentions e 30 ditëve të fundit dhe e lexon
+  mesazhin me REST (`GET /channels/{id}/messages/{id}`); mentions e vjetra pa reactions lexohen një herë
+  pas nisjes. Emoji aprovimi: `GA_DISCORD_APPROVAL_EMOJIS` (default `✅,👍,✔️,☑️`; ngjyra e lëkurës s'ka
+  rëndësi); emoji të tjera shfaqen, por s'e bëjnë mesazhin gati. Te agjenda, një mesazh gati ka markerin
+  `✅ LH`.
 
 ### Si klasifikohen elementet
 
@@ -184,6 +192,7 @@ ri-autorizimit.
 | `GA_DISCORD_MENTIONS_BOT_TOKEN` | Actions **secret** → `backend\.env` (deploy-i e rikrijon `.env` çdo herë) | tokeni i botit të ri; pa të procesi s'niset |
 | `GA_DISCORD_USER_ID` | opsionale | ID-ja Discord e GA-së, nëse s'ka lidhje Discord në PrimeFlow |
 | `GA_DISCORD_MENTIONS_BACKFILL_HOURS` | opsionale | 72 |
+| `GA_DISCORD_APPROVAL_EMOJIS` | opsionale (default në `config.py`) | `✅,👍,✔️,☑️` |
 | `MS_TODO_ENABLED` | Actions variable → `.env` | parazgjedhja `false`: lidhja Microsoft kërkon të njëjtat leje si më parë dhe tools e To Do janë të fikura. Vendose `true` vetëm pasi Azure ka `Tasks.ReadWrite`, pastaj ri-autorizo `info@` |
 
 ## Hapat manualë

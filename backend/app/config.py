@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     # Optional override of the GA's Discord user id (default: her PrimeFlow Discord link).
     GA_DISCORD_USER_ID: str | None = None
     GA_DISCORD_MENTIONS_BACKFILL_HOURS: int = 72
+    # Reactions that count as "reviewed" (ready_for_ga). Other emoji are shown but do not count.
+    GA_DISCORD_APPROVAL_EMOJIS: str = "✅,👍,✔️,☑️"
     GA_PERSONAL_ENABLED: bool = False
     GA_PERSONAL_UNLOCK_MINUTES: int = 60
     GA_PERSONAL_DISCORD_BRIDGE_SECRET: str | None = None

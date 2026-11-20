@@ -339,6 +339,34 @@ class GaAssistantDbTests(unittest.IsolatedAsyncioTestCase):
                                          json={"messages": [message, own, other_server]})
             self.assertEqual(res.json(), {"stored": 1, "skipped": 2})
 
+            # Reactions: who reviewed the message before GA (approval emoji, not the author, not GA).
+            context = (await self.client.get("/api/ga-discord-bot/context", headers=bot)).json()
+            self.assertIn("1001", context["tracked_message_ids"])
+            self.assertIn({"id": "1001", "channel_id": "9"}, context["reactions_unsynced"])
+            first = (await self.get("/discord/mentions"))["items"][0]
+            self.assertEqual((first["reactions"], first["reviewed_by"], first["ready_for_ga"]), ([], [], False))
+            reactions = [
+                {"emoji": "✅", "count": 2, "users": [{"discord_id": "77", "name": "coll"}, {"discord_id": "42", "name": "ga"}]},
+                {"emoji": "😀", "count": 1, "users": [{"discord_id": "66", "name": "Arta Berisha"}]},
+            ]
+            res = await self.client.post("/api/ga-discord-bot/reactions", headers=bot, json={"message_id": "1001", "reactions": reactions})
+            self.assertEqual(res.json(), {"updated": True})
+            item = (await self.get("/discord/mentions"))["items"][0]
+            self.assertEqual(item["reactions"][0]["users"][0], {"name": "Colleague Test", "initials": "CT"})
+            self.assertEqual((item["reviewed_by"], item["ready_for_ga"]), ([], False))  # author + GA + non-approval emoji
+            self.assertEqual((await self.get("/discord/mentions", only_ready="true"))["count"], 0)
+            reactions.append({"emoji": "👍🏽", "count": 1, "users": [{"discord_id": "55", "name": "Laurent Hoxha"}]})
+            await self.client.post("/api/ga-discord-bot/reactions", headers=bot, json={"message_id": "1001", "reactions": reactions})
+            ready = await self.get("/discord/mentions", only_ready="true")
+            self.assertEqual([(m["id"], m["reviewed_by"], m["ready_for_ga"]) for m in ready["items"]], [("dc:1001", ["LH"], True)])
+            # An edit (no reactions in the payload) keeps the stored reactions; unknown messages are ignored.
+            await self.client.post("/api/ga-discord-bot/mentions", headers=bot, json={"messages": [{**message, "content": "ndryshuar"}]})
+            self.assertEqual(len((await self.get("/discord/mentions"))["items"][0]["reactions"]), 3)
+            res = await self.client.post("/api/ga-discord-bot/reactions", headers=bot, json={"message_id": "999", "reactions": []})
+            self.assertEqual(res.json(), {"updated": False})
+            context = (await self.client.get("/api/ga-discord-bot/context", headers=bot)).json()
+            self.assertNotIn({"id": "1001", "channel_id": "9"}, context["reactions_unsynced"])
+
             agenda = await self.get("/agenda", start=self.at(today).isoformat(),
                                     end=self.at(today + timedelta(days=1)).isoformat(), include_untimed="true")
             by_id = {item["id"]: item for item in agenda["items"]}

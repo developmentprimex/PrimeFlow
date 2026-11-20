@@ -37,6 +37,9 @@ class GaDiscordMention(Base):
     # "mention" (@GA), "role" (@a role GA has) or "reply" (reply to a GA message).
     reasons: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     reply_to_message_id: Mapped[str | None] = mapped_column(String(32))
+    # [{"emoji": "✅", "count": 2, "users": [{"discord_id": "…", "name": "…"}]}], refreshed by the bot.
+    reactions: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    reactions_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="new")
     status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status_changed_by: Mapped[uuid.UUID | None] = mapped_column(
