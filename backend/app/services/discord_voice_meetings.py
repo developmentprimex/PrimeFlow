@@ -1,7 +1,9 @@
 """Durable meeting state. Human actions and capture-worker credentials stay separate."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -10,6 +12,7 @@ from sqlalchemy import select, text, or_
 from app.api.routers import discord_assistant as bridge
 from app.api.access import ensure_department_access
 from app.config import settings
+from app.db import SessionLocal
 from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting, DiscordVoiceSegment as Segment
 from app.models.enums import UserRole
 from app.models.discord_assistant import DiscordLink
@@ -17,6 +20,9 @@ from app.models.user import User
 from app.schemas.ga_note import GaNoteCreate
 from app.services import mira_memory
 from app.services.ga_note_creation import build_ga_note
+
+log = logging.getLogger(__name__)
+QUICK_SUMMARY_LEASE = timedelta(minutes=10)
 
 
 def now():
@@ -276,6 +282,60 @@ def meeting_record_query():
     return select(Meeting).where(Meeting.status.in_(mira_memory.RECORD_STATUSES))
 
 
+def reserve_quick_summary(row):
+    if row.quick_summary is not None or (row.lease_until and row.lease_until > now()):
+        return None
+    row.lease_token = uuid.uuid4()
+    row.lease_until = now() + QUICK_SUMMARY_LEASE
+    return row.lease_token
+
+
+async def queue_saved_quick_summary(db, session_id):
+    row = await db.scalar(meeting_record_query().where(Meeting.id == session_id).with_for_update())
+    if row is None:
+        raise HTTPException(404, 'Takimi nuk u gjet.')
+    if row.quick_summary is not None or (row.lease_until and row.lease_until > now()):
+        return None
+    segment_id = await db.scalar(select(Segment.id).where(Segment.session_id == session_id, Segment.status == 'DONE',
+        Segment.transcript.is_not(None), Segment.transcript != '').limit(1))
+    if segment_id is None:
+        raise HTTPException(409, 'Nuk ka transkript nga i cili mund të krijohet përmbledhja.')
+    lease = reserve_quick_summary(row)
+    await db.commit()
+    return lease
+
+
+async def generate_saved_quick_summary(session_id, lease, *, sessions=None):
+    from app.services import discord_voice_openai as provider
+
+    sessions = SessionLocal if sessions is None else sessions
+    quick = None
+    async with sessions() as db:
+        row = await db.scalar(meeting_record_query().where(Meeting.id == session_id, Meeting.lease_token == lease))
+        if row is None:
+            return
+        title, meeting_date = row.title, row.started_at or row.created_at
+        segments = (await db.scalars(select(Segment).where(Segment.session_id == session_id, Segment.status == 'DONE',
+            Segment.transcript.is_not(None), Segment.transcript != '').order_by(Segment.start_ms, Segment.sequence))).all()
+        parts = provider.compact_transcript([{'sequence': s.sequence, 'speaker_id': s.speaker_id,
+            'speaker_name': s.speaker_name, 'start_ms': s.start_ms, 'end_ms': s.end_ms,
+            'transcript': s.transcript} for s in segments])
+    try:
+        async with asyncio.timeout(QUICK_SUMMARY_LEASE.total_seconds() - 30):
+            if parts:
+                quick = await provider.summarize_meeting(title, parts, meeting_date=meeting_date, quick=True)
+    except (ValueError, TimeoutError) as exc:
+        log.warning('MIRA_DIAGNOSTIC meeting=%s stage=saved_quick_notes error=%s', session_id, type(exc).__name__)
+    async with sessions() as db:
+        row = await db.scalar(meeting_record_query().where(Meeting.id == session_id, Meeting.lease_token == lease)
+            .with_for_update())
+        if row is not None:
+            if isinstance(quick, dict) and row.quick_summary is None:
+                row.quick_summary = quick
+            row.lease_until = None
+            await db.commit()
+
+
 async def list_meeting_records(db, limit, offset, follow_up_query=None):
     rows = (await db.execute(meeting_record_query()
         .with_only_columns(Meeting.id, Meeting.title, Meeting.started_at, Meeting.created_at, Meeting.partial)
@@ -293,6 +353,7 @@ async def meeting_record(db, session_id):
         Segment.transcript.is_not(None)).order_by(Segment.start_ms, Segment.sequence))).all()
     return {'id': str(row.id), 'title': row.title, 'started_at': (row.started_at or row.created_at).isoformat(),
         'partial': row.partial, 'quick_summary': row.quick_summary, 'full_notes': row.draft_text, 'error': row.error,
+        'quick_summary_pending': bool(row.quick_summary is None and row.lease_until and row.lease_until > now()),
         'memory': await mira_memory.meeting_points(db, row, segments),
         'transcript': [{'id': str(segment.id), 'speaker': segment.speaker_name, 'start_ms': segment.start_ms,
             'end_ms': segment.end_ms, 'text': segment.transcript} for segment in segments]}

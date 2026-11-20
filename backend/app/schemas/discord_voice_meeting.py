@@ -24,6 +24,12 @@ class ControlScope(StrictModel):
     guild_id: str = Field(pattern=r'^\d{1,32}$')
     channel_id: str = Field(pattern=r'^\d{1,32}$')
 
+
+class MeetingQuestion(StrictModel):
+    discord_user_id: str = Field(pattern=r'^\d{1,32}$')
+    guild_id: str = Field(pattern=r'^\d{1,32}$')
+    question: str = Field(min_length=3, max_length=500)
+
 class Worker(StrictModel):
     capture_token: str = Field(min_length=32, max_length=128)
     instance_id: uuid.UUID

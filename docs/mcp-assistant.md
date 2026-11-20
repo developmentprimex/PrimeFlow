@@ -181,7 +181,7 @@ ri-autorizimit.
 | `PRIMEFLOW_MCP_ALLOW_DELETE` | opsionale | `false` si parazgjedhje |
 | `PRIMEFLOW_MCP_ASSISTANT_HOST`, `PRIMEFLOW_MCP_ASSISTANT_PORT` | opsionale | `127.0.0.1` / `8011` |
 | `INSTALL_BACKEND_REQUIREMENTS` | Actions variable | parazgjedhja `false`; `true` e ndez `pip install -r requirements.txt` në deploy |
-| `GA_DISCORD_MENTIONS_BOT_TOKEN` | vetëm `backend\.env` në server | tokeni i botit të ri; pa të procesi s'niset |
+| `GA_DISCORD_MENTIONS_BOT_TOKEN` | Actions **secret** → `backend\.env` (deploy-i e rikrijon `.env` çdo herë) | tokeni i botit të ri; pa të procesi s'niset |
 | `GA_DISCORD_USER_ID` | opsionale | ID-ja Discord e GA-së, nëse s'ka lidhje Discord në PrimeFlow |
 | `GA_DISCORD_MENTIONS_BACKFILL_HOURS` | opsionale | 72 |
 | `MS_TODO_ENABLED` | Actions variable → `.env` | parazgjedhja `false`: lidhja Microsoft kërkon të njëjtat leje si më parë dhe tools e To Do janë të fikura. Vendose `true` vetëm pasi Azure ka `Tasks.ReadWrite`, pastaj ri-autorizo `info@` |
@@ -205,7 +205,7 @@ ri-autorizimit.
    Verifiko që **asnjë** hostname s'shkon te `127.0.0.1:8010`.
 7. **PM2**: deploy-i e nis `primeflow-mcp-assistant`. Me dorë: `pm2 start ecosystem.config.cjs --only primeflow-mcp-assistant`.
 8. **Bot Discord për mentions** (Discord Developer Portal):
-   - New Application → Bot → kopjo tokenin → `GA_DISCORD_MENTIONS_BOT_TOKEN=…` te `backend\.env` në server.
+   - New Application → Bot → kopjo tokenin → GitHub Actions **secret** `GA_DISCORD_MENTIONS_BOT_TOKEN` (jo me dorë te `.env`: deploy-i e mbishkruan).
    - Bot → Privileged Gateway Intents: ndiz **Message Content Intent** (Server Members s'duhet).
    - Bot → çaktivizo “Public Bot”.
    - OAuth2 → URL Generator: scope `bot`, leje **View Channels** + **Read Message History**

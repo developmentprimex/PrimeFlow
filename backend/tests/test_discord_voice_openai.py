@@ -39,6 +39,26 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, 'quick_summary_too_long'):
             provider.checked_quick_summary(json.dumps(quick))
 
+    async def test_normal_quick_summary_retries_when_combined_sections_exceed_250_words(self):
+        quick = dict.fromkeys(provider.QUICK_SECTIONS, [])
+        quick['discussion'] = [' '.join(['Temë'] * 140)]
+        quick['actions'] = [' '.join(['Veprim'] * 116)]
+        shortened = {**quick, 'discussion': [' '.join(['Temë'] * 104)]}
+
+        def response(data):
+            return {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps(data)}]}]}
+
+        with self.assertRaisesRegex(ValueError, 'quick_summary_word_limit'):
+            provider.checked_quick_summary(json.dumps(quick))
+        self.assertEqual(provider.checked_quick_summary(json.dumps(quick), max_words=275), quick)
+        with patch.object(provider, 'with_retries', AsyncMock(side_effect=[response(quick), response(shortened)])) as call:
+            result = await provider.summarize_meeting('Takim', [{'text': 'U diskutuan temat.'}], quick=True)
+        self.assertEqual(result, shortened)
+        self.assertEqual(call.await_count, 2)
+        payload = call.await_args.kwargs['json']
+        self.assertIn('Rishkruaje më shkurt', payload['input'][0]['content'])
+        self.assertEqual(json.loads(payload['input'][1]['content'])['max_words'], 250)
+
     async def test_long_quick_summary_reduces_all_parts_before_final_output(self):
         quick = dict.fromkeys(provider.QUICK_SECTIONS, [])
         quick['decisions'] = ['Vendimi i pjesës së fundit.']

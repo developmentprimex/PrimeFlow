@@ -129,5 +129,10 @@ async def process_voice_meetings():
                 except Exception as exc:
                     log.warning('MIRA_DIAGNOSTIC meeting=%s stage=px_notes error=%s detail=%s',
                         sid,type(exc).__name__,getattr(exc,'detail',None))
+            # The passive 1H recorder saves its original notes before generating
+            # the independent Notetaker summary.
+            quick_lease = service.reserve_quick_summary(current) if verbatim and not smart_notes else None
             await db.commit();stats['failed' if error else 'ready']+=1
+        if quick_lease:
+            await service.generate_saved_quick_summary(sid, quick_lease, sessions=SessionLocal)
     return stats

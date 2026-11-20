@@ -74,6 +74,15 @@ async def notetaker_meeting(meeting_id: uuid.UUID, db: AsyncSession = Depends(ge
     return await notetaker.meeting_record(db, meeting_id)
 
 
+@router.post('/notetaker/meetings/{meeting_id}/summarize', status_code=202)
+async def summarize_notetaker_meeting(meeting_id: uuid.UUID, background: BackgroundTasks,
+        db: AsyncSession = Depends(get_db), _user=Depends(require_manager_or_admin)):
+    lease = await notetaker.queue_saved_quick_summary(db, meeting_id)
+    if lease:
+        background.add_task(notetaker.generate_saved_quick_summary, meeting_id, lease)
+    return {'queued': lease is not None}
+
+
 @router.get('/meetings/{meeting_id}')
 async def meeting(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     return await host.meeting_detail(db, meeting_id)
