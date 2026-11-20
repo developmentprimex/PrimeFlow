@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
 import {
   ReportSectionFieldEditor,
   ReportSectionPreview,
@@ -24,6 +25,10 @@ type Section = { section_key?: string; title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
+type TaskFeedback = { continuation: "" | "PO" | "JO"; comment: string }
+type TaskFeedbackRow = TaskFeedback & { key: string; title: string; owners: string }
+type TaskFeedbackEdits = Record<string, Partial<TaskFeedback>>
+const TASK_FEEDBACK_SECTION = "GA/HV/DV TASKS"
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 const MARKER_TASK_SECTIONS = new Set(["FIZIKISHT ME GA?", "A KA PYTJE/SQARIME ME KA/GENTIN"])
 const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
@@ -41,6 +46,7 @@ type Draft = {
   subject: string
   recipients: Recipients
   sections: Section[]
+  task_feedback_rows?: Record<string, TaskFeedbackRow[]>
   status: string
   sent_at?: string | null
   gmail_message_id?: string | null
@@ -62,7 +68,7 @@ function sectionGroupLabel(section: Section) {
   // Built-in manuals are first; Common View–synced extras sit after them and before autos.
   const knownAuto = [
     GA_REPLIES_SECTION,
-    "GA/HV/DV TASKS",
+    TASK_FEEDBACK_SECTION,
     "GA TASKS",
     "HV TASKS",
     "DV TASKS",
@@ -88,6 +94,29 @@ function sectionGroupLabel(section: Section) {
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
   return sectionGroupLabel(sections[index]) !== sectionGroupLabel(sections[index - 1])
+}
+
+function InlineTaskComment({ row, onSave }: {
+  row: TaskFeedbackRow
+  onSave: (comment: string) => void
+}) {
+  const [comment, setComment] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    setComment((current) => current === row.comment ? null : current)
+  }, [row.comment])
+  return (
+    <Textarea
+      aria-label={`Koment për ${row.title} (${row.owners})`}
+      value={comment ?? row.comment}
+      onChange={(event) => setComment(event.target.value)}
+      onBlur={() => {
+        if (comment !== null && comment !== row.comment) onSave(comment)
+      }}
+      rows={1}
+      maxLength={4000}
+      className="min-h-6 min-w-36 resize-y border-slate-400 bg-white/60 px-1 py-0.5 text-xs print:border-0"
+    />
+  )
 }
 
 const API = "/morning-report"
@@ -169,6 +198,7 @@ export default function MorningReportPage() {
   const [reportDate, setReportDate] = React.useState(todayIso())
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)
+  const feedbackQueue = React.useRef(Promise.resolve())
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const [preview, setPreview] = React.useState<{ html: string; plain_text: string } | null>(null)
@@ -271,22 +301,47 @@ export default function MorningReportPage() {
     }
   }
 
-  const save = async (draftToSave: Draft | null = draft): Promise<Draft | null> => {
+  const save = async (draftToSave: Draft | null = draft, taskFeedback?: TaskFeedbackEdits): Promise<Draft | null> => {
     if (!draftToSave || !canEdit) return draftToSave
+    if (!taskFeedback) await feedbackQueue.current
     setSaving(true)
     try {
       const res = await apiFetch(`${API}/${draftToSave.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(taskFeedback ? { task_feedback: taskFeedback } : {
           subject: draftToSave.subject,
           recipients: draftToSave.recipients,
           sections: draftToSave.sections,
         }),
       })
       if (!res.ok) throw new Error(await responseError(res))
-      const data = await res.json()
-      applyDraft(data)
+      const data: Draft = await res.json()
+      if (taskFeedback) {
+        setDraft((current) => current?.id === data.id ? {
+          ...current,
+          task_feedback_rows: data.task_feedback_rows,
+          sections: current.sections.map((section) =>
+            (section.section_key || section.title) === TASK_FEEDBACK_SECTION
+              ? data.sections.find((next) => (next.section_key || next.title) === TASK_FEEDBACK_SECTION) ?? section
+              : section,
+          ),
+        } : current)
+      } else {
+        setDraft((current) => {
+          if (current?.id !== data.id) return current
+          const feedbackSection = current.sections.find((section) =>
+            (section.section_key || section.title) === TASK_FEEDBACK_SECTION,
+          )
+          return {
+            ...data,
+            task_feedback_rows: current.task_feedback_rows ?? data.task_feedback_rows,
+            sections: data.sections.map((section) =>
+              (section.section_key || section.title) === TASK_FEEDBACK_SECTION ? feedbackSection ?? section : section,
+            ),
+          }
+        })
+      }
       toast.success("Draft saved")
       return data
     } catch (error) {
@@ -295,6 +350,12 @@ export default function MorningReportPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const saveTaskFeedback = (row: TaskFeedbackRow, edit: Partial<TaskFeedback>) => {
+    feedbackQueue.current = feedbackQueue.current.then(async () => {
+      await save(draft, { [row.key]: edit })
+    })
   }
 
   const previewDraft = async () => {
@@ -619,7 +680,9 @@ export default function MorningReportPage() {
           <div className="space-y-4">
             {draft.sections.map((section, index) => {
               const isEditing = editingSection?.index === index
-              const isMarkerTaskSection = MARKER_TASK_SECTIONS.has(section.section_key || section.title)
+              const sectionKey = section.section_key || section.title
+              const isMarkerTaskSection = MARKER_TASK_SECTIONS.has(sectionKey)
+              const isTaskFeedbackSection = sectionKey === TASK_FEEDBACK_SECTION
               return (
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
@@ -654,7 +717,7 @@ export default function MorningReportPage() {
                           </div>
                         ) : null}
                       </div>
-                      {canEdit && !isEditing && !isMarkerTaskSection ? (
+                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
                             <Pencil className="h-4 w-4" /> Edit
@@ -679,6 +742,65 @@ export default function MorningReportPage() {
                         body={reportSectionPreviewText(section.body)}
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         emphasizeOwnerSeparator={isMarkerTaskSection}
+                        renderLine={isTaskFeedbackSection && canEdit ? (line) => {
+                          const plans = draft.task_feedback_rows?.plan ?? []
+                          const row = plans.find((plan) =>
+                            line.startsWith(`${plan.title} (${plan.owners}):`),
+                          )
+                          if (!row) {
+                            return plans.some((plan) =>
+                              line.trim() === `${plan.owners} TASKS:` &&
+                              section.body.includes(`${plan.title} (${plan.owners}):`),
+                            ) ? false : null
+                          }
+                          return (
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-slate-50 px-3 py-2">
+                              <span className="shrink-0 font-semibold">{row.owners} TASKS:</span>
+                              <label className="flex items-center gap-2 font-semibold">
+                                {row.title} <span className="sr-only">({row.owners})</span>
+                                <select
+                                  className={`rounded border px-2 py-0.5 ${
+                                    row.continuation === "PO"
+                                      ? "border-red-300 bg-red-100 font-semibold text-red-800"
+                                      : row.continuation === "JO"
+                                        ? "border-green-300 bg-green-100 font-semibold text-green-800"
+                                        : "border-slate-400 bg-background font-normal"
+                                  }`}
+                                  value={row.continuation}
+                                  onChange={(event) => saveTaskFeedback(row, { continuation: event.target.value as TaskFeedback["continuation"] })}
+                                >
+                                  <option value="">–</option>
+                                  <option value="PO">Po</option>
+                                  <option value="JO">Jo</option>
+                                </select>
+                              </label>
+                              <div className="min-w-44 flex-1">
+                                <InlineTaskComment key={row.key} row={row} onSave={(comment) => saveTaskFeedback(row, { comment })} />
+                              </div>
+                            </div>
+                          )
+                        } : undefined}
+                        renderCell={isTaskFeedbackSection && canEdit ? (label, number, header) => {
+                          if (!/^[1-9]\d*$/.test(number)) return null
+                          const row = draft.task_feedback_rows?.[label.trim().replace(/:$/, "").toUpperCase()]?.[Number(number) - 1]
+                          if (!row) return null
+                          if (header === "KOMENT") {
+                            return <InlineTaskComment key={row.key} row={row} onSave={(comment) => saveTaskFeedback(row, { comment })} />
+                          }
+                          if (header !== "VAZHDON?") return null
+                          return (
+                            <select
+                              aria-label={`Vazhdon? ${row.title} (${row.owners})`}
+                              className="w-full rounded border border-slate-400 bg-transparent px-1"
+                              value={row.continuation}
+                              onChange={(event) => saveTaskFeedback(row, { continuation: event.target.value as TaskFeedback["continuation"] })}
+                            >
+                              <option value="">–</option>
+                              <option value="PO" aria-label="Po">✓</option>
+                              <option value="JO" aria-label="Jo">X</option>
+                            </select>
+                          )
+                        } : undefined}
                       />
                     )}
                   </div>

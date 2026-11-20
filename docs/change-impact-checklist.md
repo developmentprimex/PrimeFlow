@@ -164,6 +164,41 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   pyetje manuale e ruajtur nuk shtohet për herë të dytë në M1. Common View,
   M1 PIKAT PER RAP, M2 dhe M3 përdorin rrjedhat e tyre.
 
+- M1: **GA/HV/DV TASKS** lexon përgjigjet e Discord-it nga
+  `discord_m3_questions` me llojin `tomorrow_task`, sipas ID-së së detyrës,
+  personit dhe datës së synuar. Për tabelën HV vlejnë personat e caktuar te
+  detyrat e Finance. Kontrollo PO, JO, shtyrjen, komentin pa përgjigje dhe
+  konfirmimin përmbledhës që plotëson përgjigjet individuale. Një detyrë
+  e hapur e zhvendosur pas përgjigjes JO mbetet në raportin e datës së synuar.
+  Ndryshimet manuale ruhen
+  për secilën fushë në draftin e M1 dhe kanë përparësi mbi Discord-in.
+  Te **Vazhdon?**, qeliza PO është e gjelbër, JO e kuqe dhe përgjigjja
+  bosh ruan ngjyrën e rreshtit në ekran, email, Word dhe PNG.
+  Në faqen M1 simboli zgjidhet direkt në qelizë dhe komenti ruhet
+  kur fusha humb fokusin. Numri i rreshtit lidh kontrollin me ID-në e detyrës
+  edhe kur filtri i mungesave heq rreshta nga tabela.
+  Kontrollo rifreskimin, rigjenerimin, preview, emailin manual dhe automatik,
+  Word/PNG dhe tekstin. M2, M3, Common View dhe 1H përdorin tabela të veçanta.
+  Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
+  dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
+
+- Pamja **Nesër** te **Finance** për HV dhe **Admin Tasks** për GA përdor
+  një buton të veçantë. Admin mund të redaktojë planin e HV kur zgjedh
+  Haxhere Spahiun te **People**. Auditimi regjistron Admin-in si autor.
+  Te **Admin Tasks**, përdoruesit e kyçur mund ta lexojnë planin e GA.
+  GA dhe Admin mund të ruajnë përgjigjet e GA. Auditimi regjistron Admin-in
+  si autor kur redakton në emër të GA.
+  Butoni **Nesër** është pas **Sot** te **ALL TASKS**, edhe në ekran të ngushtë.
+  Tabela e GA përdor kolonat e planifikimit të **ALL TASKS** dhe fushat
+  **Vazhdon?** dhe **Koment** për datën e ardhshme të punës.
+  Printimi dhe eksporti i **ALL TASKS** janë aktivë në pamjet e tjera të tabelës.
+  Lista përdor përzgjedhjen e Discord-it për ditën e ardhshme të punës. API-ja pranon vetëm
+  detyrat e caktuara te llogaria e kyçur dhe ruan përgjigjen sipas detyrës,
+  përdoruesit dhe datës te `task_plan_feedback` (migrimi `0196_task_plan_feedback`).
+  Kontrollo edhe fundjavën, detyrat e përbashkëta dhe ndryshimin e datës gjatë
+  redaktimit. M1 i bashkon me përgjigjet nga Discord-i dhe ruan përparësinë e
+  korrigjimit manual në M1. Excel i Finance dhe printimi i Admin Tasks përdorin pamjet e tyre.
+
 - M1: **PIKAT E DITES SOT** dhe **EP: A ESHTE LESHUAR MIRA? (PARA TAK 1-2 MIN)**
   hiqen gjatë leximit të raporteve të ruajtura dhe përjashtohen nga pyetjet e
   importuara nga TAK BORD/GA dhe nga pyetjet manuale

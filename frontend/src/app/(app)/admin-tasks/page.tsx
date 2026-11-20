@@ -1,5 +1,7 @@
 "use client"
 
+import { NextWorkdayTaskFeedback } from "@/components/next-workday-task-feedback"
+
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { toast } from "sonner"
@@ -2155,6 +2157,8 @@ function canceledMeetingsLast(a: Pick<ExternalItem, "occurrenceStatus">, b: Pick
 
 export default function AdminTasksPage() {
   const { apiFetch, user } = useAuth()
+  const [showTomorrow, setShowTomorrow] = React.useState(false)
+  const canConfirmTomorrow = user && (user.role === "ADMIN" || Boolean(findGaneUser([user])))
   const confirm = useConfirm()
   type AssigneeUser = User | UserLookup
   const [tasks, setTasks] = React.useState<Task[]>([])
@@ -2275,6 +2279,7 @@ export default function AdminTasksPage() {
   const thisCommonWeekIso = React.useMemo(() => toISODate(getMonday(new Date())), [])
   const nextCommonWeekIso = React.useMemo(() => toISODate(addDays(getMonday(new Date()), 7)), [])
   const setAllTasksQuickRange = (from: string, to: string) => {
+    setShowTomorrow(false)
     setAllTasksDateFrom(from)
     setAllTasksDateTo(to)
 
@@ -6526,159 +6531,172 @@ export default function AdminTasksPage() {
     )
   }
 
-  const AdminCommonWeekTable = () => {
-    const weekTitleRange =
-      commonWeekISOs.length >= 2
-        ? `${formatDateHuman(commonWeekISOs[0])} - ${formatDateHuman(commonWeekISOs[commonWeekISOs.length - 1])}`
-        : ""
-    const exportPayload = React.useMemo(() => {
-      const columns = ["NR", "LLOJI", ...commonWeekISOs.map((iso) => `${getDayCode(fromISODate(iso))} = ${formatDateHuman(iso)}`)]
+  const weekTitleRange =
+    commonWeekISOs.length >= 2
+      ? `${formatDateHuman(commonWeekISOs[0])} - ${formatDateHuman(commonWeekISOs[commonWeekISOs.length - 1])}`
+      : ""
+  const exportPayload = React.useMemo(() => {
+    const columns = ["NR", "LLOJI", ...commonWeekISOs.map((iso) => `${getDayCode(fromISODate(iso))} = ${formatDateHuman(iso)}`)]
 
-      const assigneesSuffix = (entry: any) => {
-        const initialsList = entryAssignees(entry).map((name: string) => commonViewInitials(name)).filter(Boolean)
-        return initialsList.length ? ` (${initialsList.join(", ")})` : ""
-      }
+    const assigneesSuffix = (entry: any) => {
+      const initialsList = entryAssignees(entry).map((name: string) => commonViewInitials(name)).filter(Boolean)
+      return initialsList.length ? ` (${initialsList.join(", ")})` : ""
+    }
 
-      const renderBzLines = (iso: string) => {
-        const bzEntries = commonGaRowsByDay[iso]?.bz || []
-        return bzEntries.map((e: BzItem, idx: number) => {
-          const bzLabel = e.bzWithLabel ? ` - ${e.bzWithLabel}` : ""
-          return `${idx + 1}. ${commonPrintTitleLine(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
-        })
-      }
-
-      const renderCellLines = (rowId: CommonType, iso: string) => {
-        const dayData = tableDataByDay?.[iso]
-        if (!dayData) return []
-        if (rowId === "det_ga") {
-          const combined = commonGaRowsByDay[iso]?.detGa || []
-          if (!combined.length) return []
-          return combined.map((entry, idx) => `${idx + 1}. ${commonPrintTitleLine(entry.title)}`)
-        }
-
-        const entries =
-          rowId === "late"
-            ? dayData.late
-            : rowId === "absent"
-              ? dayData.absent
-              : rowId === "leave"
-                ? dayData.leave
-                : rowId === "blocked"
-                  ? dayData.blocked
-                  : rowId === "oneH"
-                    ? dayData.oneH
-                    : rowId === "r1"
-                      ? dayData.r1
-                      : rowId === "personal"
-                        ? dayData.personal
-                        : rowId === "external"
-                          ? dayData.external
-                          : rowId === "internal"
-                            ? dayData.internal
-                            : rowId === "bz"
-                              ? dayData.bz
-                              : rowId === "priority"
-                                ? dayData.priority
-                                : rowId === "problem"
-                                  ? dayData.problems
-                                  : rowId === "feedback"
-                                    ? dayData.feedback
-                                    : []
-
-        if (rowId === "bz") {
-          return renderBzLines(iso)
-        }
-        if (!entries.length) return []
-
-        if (rowId === "late") {
-          return dayData.late.map((e: LateItem, idx: number) =>
-            `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`
-          )
-        }
-        if (rowId === "absent") {
-          return dayData.absent.map((e: AbsentItem, idx: number) => `${idx + 1}. ${e.from} - ${e.to}${assigneesSuffix(e)}`)
-        }
-        if (rowId === "leave") {
-          return dayData.leave.map((e: LeaveItem, idx: number) => {
-            const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
-            const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
-            const label = isAllUsers ? `${timeLabel} ALL` : timeLabel
-            const noteLabel = e.note ? ` - ${e.note}` : ""
-            return `${idx + 1}. ${label}${noteLabel}${isAllUsers ? "" : assigneesSuffix(e)}`
-          })
-        }
-        if (rowId === "blocked") {
-          return dayData.blocked.map((e: BlockedItem, idx: number) =>
-            `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
-          )
-        }
-        if (rowId === "problem" || rowId === "feedback") {
-          return (rowId === "problem" ? dayData.problems : dayData.feedback).map((e: ProblemItem | FeedbackItem, idx: number) => {
-            const dateLabel = e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)
-            const noteLabel = e.note ? ` - ${e.note}` : ""
-            return `${idx + 1}. ${e.title} - ${dateLabel}${noteLabel}${assigneesSuffix(e)}`
-          })
-        }
-        if (rowId === "oneH" || rowId === "r1") {
-          return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) =>
-            `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
-          )
-        }
-        if (rowId === "personal") {
-          return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) =>
-            `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
-          )
-        }
-        if (rowId === "external" || rowId === "internal") {
-          return dayData[rowId].map((e: ExternalItem | InternalItem, idx: number) => {
-            const status = meetingOccurrenceStatusLabel(e)
-            const prefix = status ? `[${status}${e.occurrenceStatus === "canceled" ? " X" : ""}] ` : ""
-            return `${idx + 1}. ${prefix}${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
-          })
-        }
-        if (rowId === "priority") {
-          return dayData.priority.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
-        }
-        return []
-      }
-
-      const rows = weekTableRows.map((row, rowIndex) => {
-        const cells = commonWeekISOs.map((iso) => renderCellLines(row.id as CommonType, iso).join("\n"))
-        return [String(rowIndex + 1), row.label.toUpperCase(), ...cells]
+    const renderBzLines = (iso: string) => {
+      const bzEntries = commonGaRowsByDay[iso]?.bz || []
+      return bzEntries.map((e: BzItem, idx: number) => {
+        const bzLabel = e.bzWithLabel ? ` - ${e.bzWithLabel}` : ""
+        return `${idx + 1}. ${commonPrintTitleLine(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
       })
+    }
 
-      return {
-        title: `COMMON VIEW - GANE TASKS${weekTitleRange ? ` (${weekTitleRange})` : ""}`,
-        columns,
-        rows,
-      }
-    }, [commonGaRowsByDay, commonWeekISOs, tableDataByDay, weekTableRows, weekTitleRange])
-
-    const repeatedTaskFirstDateByRow = React.useMemo(() => {
-      const entriesForRepeatCheck = (rowId: CommonType, iso: string): Array<{ taskId?: string | null; task_id?: string | null }> => {
-        if (rowId === "det_ga") return commonGaRowsByDay[iso]?.detGa || []
-        if (rowId === "bz") return commonGaRowsByDay[iso]?.bz || []
-
-        const dayData = tableDataByDay?.[iso]
-        if (!dayData) return []
-        if (rowId === "blocked") return dayData.blocked
-        if (rowId === "oneH") return dayData.oneH
-        if (rowId === "r1") return dayData.r1
-        if (rowId === "personal") return dayData.personal
-        return []
+    const renderCellLines = (rowId: CommonType, iso: string) => {
+      const dayData = tableDataByDay?.[iso]
+      if (!dayData) return []
+      if (rowId === "det_ga") {
+        const combined = commonGaRowsByDay[iso]?.detGa || []
+        if (!combined.length) return []
+        return combined.map((entry, idx) => `${idx + 1}. ${commonPrintTitleLine(entry.title)}`)
       }
 
-      const firstDateByRow = new Map<CommonType, Map<string, string>>()
-      for (const row of weekTableRows) {
-        const rowId = row.id as CommonType
-        firstDateByRow.set(
-          rowId,
-          buildRepeatedTaskFirstDateMap(commonWeekISOs, (iso) => entriesForRepeatCheck(rowId, iso))
+      const entries =
+        rowId === "late"
+          ? dayData.late
+          : rowId === "absent"
+            ? dayData.absent
+            : rowId === "leave"
+              ? dayData.leave
+              : rowId === "blocked"
+                ? dayData.blocked
+                : rowId === "oneH"
+                  ? dayData.oneH
+                  : rowId === "r1"
+                    ? dayData.r1
+                    : rowId === "personal"
+                      ? dayData.personal
+                      : rowId === "external"
+                        ? dayData.external
+                        : rowId === "internal"
+                          ? dayData.internal
+                          : rowId === "bz"
+                            ? dayData.bz
+                            : rowId === "priority"
+                              ? dayData.priority
+                              : rowId === "problem"
+                                ? dayData.problems
+                                : rowId === "feedback"
+                                  ? dayData.feedback
+                                  : []
+
+      if (rowId === "bz") {
+        return renderBzLines(iso)
+      }
+      if (!entries.length) return []
+
+      if (rowId === "late") {
+        return dayData.late.map((e: LateItem, idx: number) =>
+          `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`
         )
       }
-      return firstDateByRow
-    }, [commonGaRowsByDay, commonWeekISOs, tableDataByDay, weekTableRows])
+      if (rowId === "absent") {
+        return dayData.absent.map((e: AbsentItem, idx: number) => `${idx + 1}. ${e.from} - ${e.to}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "leave") {
+        return dayData.leave.map((e: LeaveItem, idx: number) => {
+          const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
+          const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
+          const label = isAllUsers ? `${timeLabel} ALL` : timeLabel
+          const noteLabel = e.note ? ` - ${e.note}` : ""
+          return `${idx + 1}. ${label}${noteLabel}${isAllUsers ? "" : assigneesSuffix(e)}`
+        })
+      }
+      if (rowId === "blocked") {
+        return dayData.blocked.map((e: BlockedItem, idx: number) =>
+          `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+        )
+      }
+      if (rowId === "problem" || rowId === "feedback") {
+        return (rowId === "problem" ? dayData.problems : dayData.feedback).map((e: ProblemItem | FeedbackItem, idx: number) => {
+          const dateLabel = e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)
+          const noteLabel = e.note ? ` - ${e.note}` : ""
+          return `${idx + 1}. ${e.title} - ${dateLabel}${noteLabel}${assigneesSuffix(e)}`
+        })
+      }
+      if (rowId === "oneH" || rowId === "r1") {
+        return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) =>
+          `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+        )
+      }
+      if (rowId === "personal") {
+        return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) =>
+          `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+        )
+      }
+      if (rowId === "external" || rowId === "internal") {
+        return dayData[rowId].map((e: ExternalItem | InternalItem, idx: number) => {
+          const status = meetingOccurrenceStatusLabel(e)
+          const prefix = status ? `[${status}${e.occurrenceStatus === "canceled" ? " X" : ""}] ` : ""
+          return `${idx + 1}. ${prefix}${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
+        })
+      }
+      if (rowId === "priority") {
+        return dayData.priority.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
+      }
+      return []
+    }
 
+    const rows = weekTableRows.map((row, rowIndex) => {
+      const cells = commonWeekISOs.map((iso) => renderCellLines(row.id as CommonType, iso).join("\n"))
+      return [String(rowIndex + 1), row.label.toUpperCase(), ...cells]
+    })
+
+    return {
+      title: `COMMON VIEW - GANE TASKS${weekTitleRange ? ` (${weekTitleRange})` : ""}`,
+      columns,
+      rows,
+    }
+  }, [commonGaRowsByDay, commonWeekISOs, tableDataByDay, weekTableRows, weekTitleRange])
+
+  const repeatedTaskFirstDateByRow = React.useMemo(() => {
+    const entriesForRepeatCheck = (rowId: CommonType, iso: string): Array<{ taskId?: string | null; task_id?: string | null }> => {
+      if (rowId === "det_ga") return commonGaRowsByDay[iso]?.detGa || []
+      if (rowId === "bz") return commonGaRowsByDay[iso]?.bz || []
+
+      const dayData = tableDataByDay?.[iso]
+      if (!dayData) return []
+      if (rowId === "blocked") return dayData.blocked
+      if (rowId === "oneH") return dayData.oneH
+      if (rowId === "r1") return dayData.r1
+      if (rowId === "personal") return dayData.personal
+      return []
+    }
+
+    const firstDateByRow = new Map<CommonType, Map<string, string>>()
+    for (const row of weekTableRows) {
+      const rowId = row.id as CommonType
+      firstDateByRow.set(
+        rowId,
+        buildRepeatedTaskFirstDateMap(commonWeekISOs, (iso) => entriesForRepeatCheck(rowId, iso))
+      )
+    }
+    return firstDateByRow
+  }, [commonGaRowsByDay, commonWeekISOs, tableDataByDay, weekTableRows])
+
+  const tomorrowFilter = user && (
+    <Button
+      type="button"
+      variant={showTomorrow ? "default" : "outline"}
+      aria-pressed={showTomorrow}
+      size="sm"
+      className="h-8 px-3"
+      onClick={() => setShowTomorrow(true)}
+    >
+      Nesër
+    </Button>
+  )
+
+  const renderAdminCommonWeekTable = () => {
     const repeatedTaskClassName = (
       rowId: CommonType,
       entry: { taskId?: string | null; task_id?: string | null },
@@ -7309,14 +7327,14 @@ export default function AdminTasksPage() {
                 <Button variant="outline" size="sm" onClick={() => setFastTaskOpen(true)}>
                   + Add Fast Task
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => handleSectionPrint("all-tasks")}>
+                <Button variant="outline" size="sm" onClick={() => handleSectionPrint("all-tasks")} disabled={showTomorrow}>
                   Print
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => void exportAllTasks()}
-                  disabled={exportingAllTasks}
+                  disabled={showTomorrow || exportingAllTasks}
                 >
                   {exportingAllTasks ? "Exporting..." : "Export"}
                 </Button>
@@ -7324,21 +7342,22 @@ export default function AdminTasksPage() {
             }
           >
           <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div>Total: {filteredAllTasksRows.length}</div>
+            <div>{!showTomorrow && <>Total: {filteredAllTasksRows.length}</>}</div>
             <div className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 sm:hidden">
               <div className="col-span-2 flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  variant={allTasksDateFrom === todayIso && allTasksDateTo === todayIso ? "default" : "outline"}
+                  variant={!showTomorrow && allTasksDateFrom === todayIso && allTasksDateTo === todayIso ? "default" : "outline"}
                   size="sm"
                   className="h-8 px-3"
                   onClick={() => setAllTasksQuickRange(todayIso, todayIso)}
                 >
                   Sot
                 </Button>
+                {tomorrowFilter}
                 <Button
                   type="button"
-                  variant={allTasksDateFrom === allTasksThisWeekFrom && allTasksDateTo === allTasksThisWeekTo ? "default" : "outline"}
+                  variant={!showTomorrow && allTasksDateFrom === allTasksThisWeekFrom && allTasksDateTo === allTasksThisWeekTo ? "default" : "outline"}
                   size="sm"
                   className="h-8 px-3"
                   onClick={() => setAllTasksQuickRange(allTasksThisWeekFrom, allTasksThisWeekTo)}
@@ -7347,7 +7366,7 @@ export default function AdminTasksPage() {
                 </Button>
                 <Button
                   type="button"
-                  variant={allTasksDateFrom === allTasksNextWeekFrom && allTasksDateTo === allTasksNextWeekTo ? "default" : "outline"}
+                  variant={!showTomorrow && allTasksDateFrom === allTasksNextWeekFrom && allTasksDateTo === allTasksNextWeekTo ? "default" : "outline"}
                   size="sm"
                   className="h-8 px-3"
                   onClick={() => setAllTasksQuickRange(allTasksNextWeekFrom, allTasksNextWeekTo)}
@@ -7356,7 +7375,7 @@ export default function AdminTasksPage() {
                 </Button>
                 <Button
                   type="button"
-                  variant={!allTasksDateFrom && !allTasksDateTo ? "default" : "outline"}
+                  variant={!showTomorrow && !allTasksDateFrom && !allTasksDateTo ? "default" : "outline"}
                   size="sm"
                   className="h-8 px-3"
                   onClick={() => setAllTasksQuickRange("", "")}
@@ -7369,30 +7388,37 @@ export default function AdminTasksPage() {
                 type="date"
                 className="h-8 w-full min-w-0 text-xs"
                 value={allTasksDateFrom || ""}
-                onChange={(event) => setAllTasksDateFrom(event.target.value)}
+                onChange={(event) => {
+                  setShowTomorrow(false)
+                  setAllTasksDateFrom(event.target.value)
+                }}
               />
               <span>To</span>
               <Input
                 type="date"
                 className="h-8 w-full min-w-0 text-xs"
                 value={allTasksDateTo || ""}
-                onChange={(event) => setAllTasksDateTo(event.target.value)}
+                onChange={(event) => {
+                  setShowTomorrow(false)
+                  setAllTasksDateTo(event.target.value)
+                }}
               />
             </div>
             <div className="hidden sm:flex sm:items-center sm:gap-2">
               <span>Date</span>
               <Button
                 type="button"
-                variant={allTasksDateFrom === todayIso && allTasksDateTo === todayIso ? "default" : "outline"}
+                variant={!showTomorrow && allTasksDateFrom === todayIso && allTasksDateTo === todayIso ? "default" : "outline"}
                 size="sm"
                 className="h-8 px-3"
                 onClick={() => setAllTasksQuickRange(todayIso, todayIso)}
               >
                 Sot
               </Button>
+              {tomorrowFilter}
               <Button
                 type="button"
-                variant={allTasksDateFrom === allTasksThisWeekFrom && allTasksDateTo === allTasksThisWeekTo ? "default" : "outline"}
+                variant={!showTomorrow && allTasksDateFrom === allTasksThisWeekFrom && allTasksDateTo === allTasksThisWeekTo ? "default" : "outline"}
                 size="sm"
                 className="h-8 px-3"
                 onClick={() => setAllTasksQuickRange(allTasksThisWeekFrom, allTasksThisWeekTo)}
@@ -7401,7 +7427,7 @@ export default function AdminTasksPage() {
               </Button>
               <Button
                 type="button"
-                variant={allTasksDateFrom === allTasksNextWeekFrom && allTasksDateTo === allTasksNextWeekTo ? "default" : "outline"}
+                variant={!showTomorrow && allTasksDateFrom === allTasksNextWeekFrom && allTasksDateTo === allTasksNextWeekTo ? "default" : "outline"}
                 size="sm"
                 className="h-8 px-3"
                 onClick={() => setAllTasksQuickRange(allTasksNextWeekFrom, allTasksNextWeekTo)}
@@ -7410,7 +7436,7 @@ export default function AdminTasksPage() {
               </Button>
               <Button
                 type="button"
-                variant={!allTasksDateFrom && !allTasksDateTo ? "default" : "outline"}
+                variant={!showTomorrow && !allTasksDateFrom && !allTasksDateTo ? "default" : "outline"}
                 size="sm"
                 className="h-8 px-3"
                 onClick={() => setAllTasksQuickRange("", "")}
@@ -7422,19 +7448,54 @@ export default function AdminTasksPage() {
                 type="date"
                 className="h-8 w-[160px] text-xs"
                 value={allTasksDateFrom || ""}
-                onChange={(event) => setAllTasksDateFrom(event.target.value)}
+                onChange={(event) => {
+                  setShowTomorrow(false)
+                  setAllTasksDateFrom(event.target.value)
+                }}
               />
               <span>To</span>
               <Input
                 type="date"
                 className="h-8 w-[160px] text-xs"
                 value={allTasksDateTo || ""}
-                onChange={(event) => setAllTasksDateTo(event.target.value)}
+                onChange={(event) => {
+                  setShowTomorrow(false)
+                  setAllTasksDateTo(event.target.value)
+                }}
               />
             </div>
           </div>
           <div className="mt-4">
-            {renderAllTasksTable(filteredAllTasksRows, {
+            {user && showTomorrow ? (
+              <NextWorkdayTaskFeedback
+                view="ga"
+                readOnly={!canConfirmTomorrow}
+                taskHeaders={["NR", "LL", "START DATE", "DUE DATE", "AM/PM", "TITLE", "FREQUENCY", "KOHA BZ", "BZ ME", "STATUS", "PRIORITY"].map((label) => (
+                  <TableHead key={label} className="h-8 whitespace-nowrap px-1.5 text-[10px] font-bold uppercase text-slate-600">{label}</TableHead>
+                ))}
+                renderTaskCells={(task, index) => {
+                  const row = allTasksTableRows.find((item) => item.taskId === task.id)
+                  const status = row?.status ?? task.status
+                  const shortDate = (value: string | null) => value ? value.slice(5, 10).split("-").reverse().join("/") : "–"
+                  const cellClass = "px-1.5 py-1 align-middle"
+                  return <>
+                    <TableCell className={`${cellClass} text-center font-semibold`}>{index + 1}</TableCell>
+                    <TableCell className={`${cellClass} font-semibold`}>{row?.ll ?? (task.is_system_task ? "SYS" : task.is_1h ? "1H" : "–")}</TableCell>
+                    <TableCell className={cellClass}>{row?.startDateLabel ?? shortDate(task.start_date)}</TableCell>
+                    <TableCell className={cellClass}>{row?.dateLabel ?? shortDate(task.due_date)}</TableCell>
+                    <TableCell className={cellClass}>{row?.period || "–"}</TableCell>
+                    <TableCell className={`${cellClass} min-w-[160px] whitespace-normal break-words font-medium sm:min-w-[220px]`}>
+                      {renderCommonMarkedTitle(row?.title ?? task.title)}
+                    </TableCell>
+                    <TableCell className={cellClass}>{row?.systemFrequencyDisplayLabel || "–"}</TableCell>
+                    <TableCell className={cellClass}>{row?.kohaBz || "–"}</TableCell>
+                    <TableCell className={cellClass}>{row ? renderAssignedBadges(row.assigned) : "–"}</TableCell>
+                    <TableCell className={`${cellClass} whitespace-nowrap ${weeklyPlanStatusBgClass(status)}`}>{reportStatusLabel(status)}</TableCell>
+                    <TableCell className={cellClass}>{row?.priority || "–"}</TableCell>
+                  </>
+                }}
+              />
+            ) : renderAllTasksTable(filteredAllTasksRows, {
               emptyLabel: "No tasks available.",
             })}
           </div>
@@ -8628,9 +8689,7 @@ export default function AdminTasksPage() {
   return (
     <div className="mx-4 bg-slate-50/30" data-print-target={printTarget || ""}>
       <div className="-mx-4 w-[calc(100%+2rem)] max-w-none space-y-6 px-1 py-4 sm:mx-0 sm:w-full sm:px-0">
-        <div className="space-y-8">
-          {AdminCommonWeekTable()}
-        </div>
+        <div className="space-y-8">{renderAdminCommonWeekTable()}</div>
       </div>
       <Dialog
         open={editOpen}

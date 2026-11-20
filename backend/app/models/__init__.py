@@ -233,6 +233,7 @@ from app.models.discord_assistant import DiscordLink, DiscordLinkCode, DiscordRe
 from app.models.discord_ga_reply_snapshot import DiscordGaReplySnapshot
 from app.models.discord_m2_question import DiscordM2Question
 from app.models.discord_m3_question import DiscordM3Question
+from app.models.task_plan_feedback import TaskPlanFeedback
 from app.models.discord_m2_postponement import DiscordM2Postponement
 from app.models.discord_agent_run import DiscordAgentRun
 from app.models.meeting_recording import MeetingRecording, MeetingRecordingChunk

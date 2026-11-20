@@ -3364,16 +3364,23 @@ async def ga_time_table(week_start: str | None = None) -> Any:
 
 
 @_tool(read_only=True)
-async def ga_discord_mentions(since: str | None = None, until: str | None = None, only_open: bool = True) -> Any:
+async def ga_discord_mentions(
+    since: str | None = None, until: str | None = None, only_open: bool = True, only_ready: bool = False
+) -> Any:
     """
     Discord messages in PrimEx server channels that mention GA (@GA or a role she has) or
     reply to one of her messages, oldest first: who (name + initials, e.g. LH), channel,
     time (Europe/Belgrade), text, message link, attachments and status (new/seen/done).
-    since/until: ISO 8601 (default: today 00:00 until now). only_open=true hides done ones.
+    reactions: [{emoji, count, users:[{name, initials}]}]. reviewed_by: initials of colleagues
+    who approved with ✅ 👍 ✔️ ☑️ (not the author, not GA); ready_for_ga = reviewed_by not empty.
+    since/until: ISO 8601 (default: today 00:00 until now). only_open=true hides done ones;
+    only_ready=true returns only ready_for_ga messages.
     DMs are never read. Use in the hourly report: "since" = the previous report time.
     """
     return await _request(
-        "GET", "/api/ga-assistant/discord/mentions", params={"since": since, "until": until, "only_open": only_open}
+        "GET",
+        "/api/ga-assistant/discord/mentions",
+        params={"since": since, "until": until, "only_open": only_open, "only_ready": only_ready},
     )
 
 

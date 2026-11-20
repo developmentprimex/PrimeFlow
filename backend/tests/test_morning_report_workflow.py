@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from io import BytesIO
 import unittest
 import uuid
 from datetime import date, datetime, time, timezone
@@ -19,7 +20,7 @@ from app.models.task import Task
 from app.services import morning_report_scheduler
 from app.services.morning_report_scheduler import _due_m1_send_slot
 from app.services.after_break_report import _personal_section
-from app.services.meetings_report import PERSONAL_GA
+from app.services.meetings_report import PERSONAL_GA, render_section_report_docx, render_section_report_png
 from app.services.meeting_point_manual_sync import is_known_report_title, merge_common_view_manual_sections, section_group_label, with_section_keys
 from app.services.morning_report import (
     DISPLAY_SECTION_TITLES,
@@ -29,10 +30,13 @@ from app.services.morning_report import (
     MARKER_TASK_SECTIONS,
     PHYSICAL_GA_TITLE,
     SECTION_TITLES,
+    TASK_FEEDBACK_OVERRIDES,
+    TASK_FEEDBACK_ROWS,
     _attendance_section,
     _day_context_section,
     _email_task_source_label,
     _ga_hv_dv_task_rows,
+    _ga_hv_dv_task_section,
     _ga_hv_dv_tables_body,
     _group_marked_tasks,
     _marker_task_table,
@@ -241,6 +245,8 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertNotIn("HV TASKS: 0", body)
         self.assertIn("(Asnje detyre)", body)
         self.assertIn("T/Y/O", body)
+        self.assertIn("VAZHDON?", body)
+        self.assertIn("KOMENT", body)
         report_html = render_html(
             subject_for(date(2026, 9, 1)),
             date(2026, 9, 1),
@@ -274,7 +280,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
             [{"title": GA_HV_DV_TASKS_TITLE, "body": body}],
         )
 
-        self.assertEqual(report_html.count("am-pm-divider"), 7)
+        self.assertEqual(report_html.count("am-pm-divider"), 9)
         self.assertIn("border-top:3px solid #334155!important", report_html)
 
         unrelated_body = _ga_hv_dv_tables_body({
@@ -385,7 +391,7 @@ class ScalarResult:
 
 class SchedulerDb:
     def __init__(self, settings, draft) -> None:
-        self.results = iter((ScalarResult(settings), ScalarResult(draft)))
+        self.results = iter((ScalarResult(settings), ScalarResult(draft), ScalarResult(None)))
 
     async def __aenter__(self):
         return self
@@ -413,6 +419,190 @@ def make_draft() -> MorningReportDraft:
 
 
 class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ga_next_workday_is_readable_by_staff_but_not_editable(self) -> None:
+        from fastapi import HTTPException
+
+        db = AsyncMock()
+        staff = SimpleNamespace(id=uuid.uuid4(), role=UserRole.STAFF, username="other-staff")
+        ga = SimpleNamespace(id=uuid.uuid4(), username="gane.arifaj", is_active=True)
+        target = date(2026, 11, 23)
+        with (
+            patch.object(morning_api, "resolve_ga_user", new=AsyncMock(return_value=ga)),
+            patch.object(morning_api, "_next_workday_tasks", new=AsyncMock(return_value=(target, []))) as tasks,
+        ):
+            result = await morning_api.get_next_workday_feedback("ga", db=db, user=staff)
+        tasks.assert_awaited_once_with(db, ga, "ga")
+        self.assertEqual(result, {"target_date": target, "tasks": []})
+        with self.assertRaises(HTTPException) as forbidden:
+            await morning_api.save_next_workday_feedback(
+                uuid.uuid4(), "ga",
+                morning_api.NextWorkdayFeedbackEdit(target_date=target, comment="Test"), db, staff,
+            )
+        self.assertEqual(forbidden.exception.status_code, 403)
+
+    async def test_admin_can_save_ga_next_workday_feedback_with_audit(self) -> None:
+        db = AsyncMock()
+        db.add = Mock()
+        ga = SimpleNamespace(id=uuid.uuid4(), username="gane.arifaj", is_active=True)
+        admin = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN)
+        task_id = uuid.uuid4()
+        target = date(2026, 11, 23)
+        with (
+            patch.object(morning_api, "resolve_ga_user", new=AsyncMock(return_value=ga)),
+            patch.object(morning_api, "_next_workday_tasks", new=AsyncMock(
+                return_value=(target, [{"task_id": str(task_id)}]),
+            )) as tasks,
+        ):
+            await morning_api.save_next_workday_feedback(
+                task_id, "ga", morning_api.NextWorkdayFeedbackEdit(target_date=target, continuation="PO"), db, admin,
+            )
+        tasks.assert_awaited_once_with(db, ga, "ga")
+        self.assertEqual(db.execute.await_args.args[0].compile().params["user_id"], ga.id)
+        self.assertEqual(db.add.call_args.args[0].actor_user_id, admin.id)
+        db.commit.assert_awaited_once()
+
+    async def test_friday_admin_finance_comment_is_saved_for_hv_on_monday(self) -> None:
+        from app.api.routers import discord_m3
+
+        friday = datetime(2026, 11, 20, 16, tzinfo=ZoneInfo("Europe/Budapest"))
+        monday = date(2026, 11, 23)
+        hv = SimpleNamespace(id=uuid.uuid4(), full_name="Haxhere Spahiu", is_active=True)
+        admin = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN)
+        task_id, department_id = uuid.uuid4(), uuid.uuid4()
+        db = AsyncMock()
+        db.add = Mock()
+        db.get.return_value = hv
+        db.execute.side_effect = [Mock(all=Mock(return_value=[(task_id, department_id, "FIN")])), Mock()]
+        with (
+            patch.object(morning_api, "datetime", wraps=datetime) as clock,
+            patch.object(discord_m3, "tomorrow_data", new=AsyncMock(
+                return_value=([{"task_id": str(task_id)}], {}, {}),
+            )) as tomorrow,
+        ):
+            clock.now.side_effect = lambda tz: friday.astimezone(tz)
+            await morning_api.save_next_workday_feedback(
+                task_id, "finance", morning_api.NextWorkdayFeedbackEdit(
+                    target_date=monday, continuation="JO", comment="Komenti i së premtes",
+                ), db, admin, person_id=hv.id,
+            )
+        tomorrow.assert_awaited_once_with(db, monday, user_id=hv.id)
+        params = db.execute.await_args.args[0].compile().params
+        self.assertEqual(params["target_date"], monday)
+        self.assertEqual(params["user_id"], hv.id)
+        self.assertEqual(params["comment"], "Komenti i së premtes")
+        self.assertEqual(db.add.call_args.args[0].actor_user_id, admin.id)
+        db.commit.assert_awaited_once()
+
+    async def test_next_workday_task_feedback_rejects_other_users_and_stale_dates(self) -> None:
+        from fastapi import HTTPException
+        db = AsyncMock()
+        outsider = SimpleNamespace(id=uuid.uuid4(), full_name="Other user")
+        with self.assertRaises(HTTPException) as forbidden:
+            await morning_api.get_next_workday_feedback("finance", db=db, user=outsider)
+        self.assertEqual(forbidden.exception.status_code, 403)
+        db.execute.assert_not_awaited()
+
+        task_id = uuid.uuid4()
+        target = date(2026, 11, 23)
+        user = SimpleNamespace(id=uuid.uuid4(), full_name="Haxhere Spahiu")
+        with patch.object(morning_api, "_next_workday_tasks", new=AsyncMock(
+            return_value=(target, [{"task_id": str(task_id)}]),
+        )):
+            with self.assertRaises(HTTPException) as stale:
+                await morning_api.save_next_workday_feedback(task_id, "finance",
+                    morning_api.NextWorkdayFeedbackEdit(target_date=date(2026, 11, 20), comment="Stale"), db, user)
+            self.assertEqual(stale.exception.status_code, 409)
+            db.execute.assert_not_awaited()
+            await morning_api.save_next_workday_feedback(task_id, "finance",
+                morning_api.NextWorkdayFeedbackEdit(target_date=target, comment=""), db, user)
+        self.assertIn("ON CONFLICT", str(db.execute.await_args.args[0]))
+        db.commit.assert_awaited_once()
+
+    async def test_task_feedback_uses_owner_and_task_id_and_keeps_manual_fields(self) -> None:
+        report_day = date(2026, 9, 1)
+        ga = GaHvDvTodayTaskRowsTests._task("Same title", id=uuid.uuid4())
+        dv = GaHvDvTodayTaskRowsTests._task(
+            "Same title", id=uuid.uuid4(), assigned_to="dv-user",
+            start_date=datetime(2026, 9, 2, 8, 0), due_date=datetime(2026, 9, 2, 16, 0),
+        )
+        finance = GaHvDvTodayTaskRowsTests._task(
+            "Finance task", id=uuid.uuid4(), assigned_to="hs-user", department_id="finance",
+        )
+        db = AsyncMock()
+        db.execute.side_effect = [
+            Mock(all=Mock(return_value=[
+                (ga.id, "ga-user", {"action": "PO"}, "Discord GA", None),
+                (ga.id, "other-user", {"action": "JO"}, "Wrong owner", None),
+                (dv.id, "dv-user", {"action": "postpone"}, "Discord DV", None),
+                (finance.id, "hs-user", {"action": "comment"}, "Older finance comment", None),
+            ])),
+            Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[
+                SimpleNamespace(task_id=finance.id, user_id="hs-user", continuation=None,
+                                comment="Finance comment from PrimeFlow", updated_at=datetime.now(timezone.utc)),
+            ])))),
+        ]
+        body, feedback = await _ga_hv_dv_task_section(
+            db, [ga, dv, finance],
+            {"ga-user": "Gane Arifaj", "dv-user": "Diellza Veliu", "hs-user": "Haxhere Spahiu"},
+            {}, report_day, {"finance": "FIN"},
+            {
+                f"GA TASKS:{ga.id}": {"comment": "Manual GA"},
+                "plan:HV": {"continuation": "PO", "comment": "Ndryshim në Finance"},
+                "plan:DV": {"continuation": "JO"},
+            },
+        )
+        self.assertEqual(feedback["GA TASKS"][0]["continuation"], "PO")
+        self.assertEqual(feedback["GA TASKS"][0]["comment"], "Manual GA")
+        self.assertEqual(feedback["DV TASKS"][0]["continuation"], "JO")
+        self.assertEqual(feedback["HV TASKS"][0]["continuation"], "")
+        self.assertIn("✓", body)
+        self.assertIn("Discord DV", body)
+        self.assertIn("Finance comment from PrimeFlow", body)
+        self.assertEqual(len(feedback["plan"]), 3)
+        self.assertIn("A prishet plani për sot? (HV): Po · Ndryshim në Finance", body)
+        self.assertIn("A prishet plani për sot? (DV): Jo", body)
+        self.assertIn("A prishet plani për sot? (GA): –", body)
+        self.assertNotIn("Older finance comment", body)
+        self.assertNotIn("Wrong owner", body)
+        sections = [{"title": GA_HV_DV_TASKS_TITLE, "body": body}]
+        subject = subject_for(report_day)
+        html = render_html(subject, report_day, sections)
+        self.assertIn("Ndryshim në Finance", html)
+        self.assertRegex(html, r'<td[^>]*bgcolor="#DCFCE7"[^>]*>✓</td>')
+        self.assertRegex(html, r'<td[^>]*bgcolor="#FEE2E2"[^>]*>X</td>')
+        from docx import Document
+        document = Document(BytesIO(render_section_report_docx(subject, "M1", report_day, sections)))
+        cells = [cell.text for table in document.tables for row in table.rows for cell in row.cells]
+        self.assertIn("✓", cells)
+        self.assertIn("X", cells)
+        self.assertIn("Discord DV", cells)
+        self.assertTrue(render_section_report_png(subject, "M1", report_day, sections).startswith(b"\x89PNG"))
+
+    async def test_task_feedback_patch_keeps_other_fields_and_saves_an_explicit_blank(self) -> None:
+        draft = make_draft()
+        key = f"GA TASKS:{uuid.uuid4()}"
+        draft.generated_snapshot = {TASK_FEEDBACK_OVERRIDES: {key: {"continuation": "JO"}}}
+        feedback_rows = {"GA TASKS": [{"key": key, "continuation": "JO", "comment": ""}]}
+        refreshed = [{
+            "section_key": GA_HV_DV_TASKS_TITLE, "title": GA_HV_DV_TASKS_TITLE,
+            "body": "Updated table", TASK_FEEDBACK_ROWS: feedback_rows,
+        }]
+        db = AsyncMock()
+        db.get.return_value = draft
+        with (
+            patch.object(morning_api, "refresh_morning_task_tables", new=AsyncMock(return_value=refreshed)) as refresh,
+            patch.object(morning_api, "filter_report_sections", new=AsyncMock(side_effect=lambda _, sections, __: sections)),
+        ):
+            result = await update_draft(
+                draft.id, DraftUpdate(task_feedback={key: {"comment": ""}}),
+                db, SimpleNamespace(id=uuid.uuid4(), role=UserRole.STAFF),
+            )
+        overrides = {key: {"continuation": "JO", "comment": ""}}
+        self.assertEqual(refresh.await_args.kwargs["task_feedback_overrides"], overrides)
+        self.assertEqual(draft.generated_snapshot[TASK_FEEDBACK_OVERRIDES], overrides)
+        self.assertEqual(result[TASK_FEEDBACK_ROWS], feedback_rows)
+        db.commit.assert_awaited_once()
+
     async def test_read_returns_refreshed_f_table_without_overwriting_draft(self) -> None:
         old = [{"section_key": PHYSICAL_GA_TITLE, "title": PHYSICAL_GA_TITLE, "body": "Old table"}]
         fresh = [{**old[0], "body": "Updated F table"}]
@@ -842,6 +1032,8 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_scheduler_regenerates_sections_before_sending(self) -> None:
         timezone = ZoneInfo("Europe/Tirane")
         draft = make_draft()
+        overrides = {f"GA TASKS:{uuid.uuid4()}": {"continuation": "JO"}}
+        draft.generated_snapshot = {TASK_FEEDBACK_OVERRIDES: overrides}
         settings = SimpleNamespace(
             is_active=True,
             timezone="Europe/Tirane",
@@ -853,7 +1045,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         )
         db = SchedulerDb(settings, draft)
         regenerated = [{"title": SECTION_TITLES[2], "body": "Fresh VONESA: 0"}]
-        build = AsyncMock(return_value=(regenerated, {"counts": {}}))
+        build = AsyncMock(return_value=(regenerated, {"counts": {}, TASK_FEEDBACK_OVERRIDES: overrides}))
         send = AsyncMock(return_value={"id": "gmail-id", "threadId": "thread-id"})
         render_plain = Mock(return_value="plain")
         render_html_mock = Mock(return_value="html")
@@ -870,8 +1062,9 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertTrue(sent)
-        build.assert_awaited_once()
+        build.assert_awaited_once_with(db, draft.report_date, task_feedback_overrides=overrides)
         self.assertEqual(draft.sections, regenerated)
+        self.assertEqual(draft.generated_snapshot[TASK_FEEDBACK_OVERRIDES], overrides)
         self.assertEqual(render_plain.call_args.args[2], regenerated)
         self.assertEqual(draft.recipients["to"], ["report@example.com"])
         self.assertEqual(draft.gmail_message_id, "gmail-id")
