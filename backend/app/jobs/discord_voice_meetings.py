@@ -29,6 +29,7 @@ async def process_voice_meetings():
             stopped_at=now(),error='Dëgjimi u ndërpre.'))
         stats['interrupted']=result.rowcount
         await db.commit()
+    await mira_voice_dictation.process_queued_tasks(SessionLocal)
     # Bound one tick's work; the next tick resumes persisted sessions/progress.
     async with SessionLocal() as db:
         ids=list((await db.execute(select(Meeting.id).where(Meeting.status.in_(['FINALIZING','INTERRUPTED']))

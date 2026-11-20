@@ -32,6 +32,7 @@ type MemoryPoint = Pick<MemoryListItem, "id" | "title" | "kind" | "status"> & {
   questions: string[]
   answers: Record<string, string>
   sources: Source[]
+  needs_follow_up: boolean
   discussion_state?: "NEW" | "REPEATED" | "RESOLVED"
 }
 type PreviousPoint = { id: string; title: string; text: string; meeting_id: string; meeting_title: string; date: string; status?: MemoryListItem["status"] }
@@ -47,7 +48,18 @@ type MeetingDetail = Meeting & {
 const base = "/mira?tab=notetaker"
 const endpoint = "/mira/notetaker/meetings"
 const pageSize = 30
-const views = { quick: "Përmbledhja e shpejtë", full: "Shënimet e plota", transcript: "Transkripti", memory: "Kujtesa e takimit" } as const
+const views = {
+  quick: "Përmbledhja e shpejtë",
+  full: "Shënimet e plota",
+  transcript: "Transkripti",
+  open: "Pikat e hapura",
+  history: "Historiku i takimeve",
+  memory: "Kujtesa e takimit",
+} as const
+
+function meetingView(value: string | null): keyof typeof views {
+  return value && Object.hasOwn(views, value) ? value as keyof typeof views : "quick"
+}
 const dateTime = new Intl.DateTimeFormat("sq-AL", { dateStyle: "medium", timeStyle: "short" })
 
 function timestamp(ms: number) {
@@ -123,18 +135,17 @@ function Clarifications({ detail, onAnswer }: {
     </section>
 }
 
-function MeetingMemory({ detail }: { detail: MeetingDetail }) {
-  const points = detail.memory?.points ?? []
-  if (!points.length && !detail.memory?.previous.length) {
+function MeetingMemory({ detail, openOnly = false }: { detail: MeetingDetail; openOnly?: boolean }) {
+  const points = (detail.memory?.points ?? []).filter((point) => !openOnly || point.needs_follow_up)
+  if (!points.length) {
     const status = detail.memory?.status
     const message = status === "PENDING" || status === "RUNNING" ? "MIRA po përpunon pikat e takimit."
       : status === "FAILED" ? "Përpunimi i kujtesës dështoi."
-        : "Kujtesa e këtij takimi nuk ka pika për të shfaqur."
+        : openOnly ? "Nuk ka pika të hapura të ruajtura për këtë takim." : "Kujtesa e këtij takimi nuk ka pika për të shfaqur."
     return <p className="text-sm">{message}</p>
   }
-  return <>
-    {points.length > 0 && <section className="space-y-2 text-sm">
-      <h3 className="font-semibold">Pikat e takimit</h3>
+  return <section className="space-y-2 text-sm">
+      <h3 className="font-semibold">{openOnly ? "Çështjet që mbeten për t’u ndjekur" : "Pikat e takimit"}</h3>
       <ul className="divide-y rounded-md border">
         {points.map((point) => <li key={point.id} className="space-y-1 px-3 py-2">
           <Link className="font-medium underline" href={`/mira?tab=kujtesa&item=${point.id}`}>{point.title}</Link>
@@ -166,9 +177,7 @@ function MeetingMemory({ detail }: { detail: MeetingDetail }) {
           </ul>}
         </li>)}
       </ul>
-    </section>}
-    <PreviousPoints points={detail.memory?.previous ?? []} title="Diskutimet e mëparshme" />
-  </>
+    </section>
 }
 
 export function NotetakerTab({ meetingId, view }: { meetingId: string | null; view: string | null }) {
@@ -181,7 +190,8 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
   const [followUpQuery, setFollowUpQuery] = useState("")
   const [error, setError] = useState<{ key: string; message: string } | null>(null)
   const [summaryRequest, setSummaryRequest] = useState<{ id: string; error?: string } | null>(null)
-  const selected = view === "full" || view === "transcript" || view === "memory" ? view : "quick"
+  const [transcriptAnchor, setTranscriptAnchor] = useState("")
+  const selected = meetingView(view)
   const requestKey = meetingId ?? `page-${offset}`
 
   useEffect(() => {
@@ -213,10 +223,15 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
   }, [apiFetch, meetingId, offset, requestKey, followUpQuery])
 
   useEffect(() => {
-    const anchor = window.location.hash.slice(1)
-    if (selected === "transcript" && anchor && detail?.id === meetingId) {
-      document.getElementById(anchor)?.scrollIntoView({ block: "start" })
+    if (selected !== "transcript" || detail?.id !== meetingId) return
+    function showSource() {
+      const anchor = window.location.hash.slice(1)
+      setTranscriptAnchor(anchor)
+      if (anchor.startsWith("segment-")) document.getElementById(anchor)?.scrollIntoView({ block: "start" })
     }
+    showSource()
+    window.addEventListener("hashchange", showSource)
+    return () => window.removeEventListener("hashchange", showSource)
   }, [detail, meetingId, selected])
 
   const pendingMeetingId = detail?.id === meetingId && detail.quick_summary_pending ? detail.id : null
@@ -324,7 +339,7 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
         {summaryRequest?.id === detail.id && summaryRequest.error && <p role="alert">{summaryRequest.error}</p>}
       </div>)}
       {selected === "full" && (detail.full_notes ? <Summary text={detail.full_notes} /> : <p className="text-sm">{detail.error || "Shënimet nuk janë të disponueshme."}</p>)}
-      {(selected === "quick" || selected === "memory") && <Clarifications key={detail.id} detail={detail}
+      {(selected === "quick" || selected === "open" || selected === "memory") && <Clarifications key={detail.id} detail={detail}
         onAnswer={(itemId, question, answer) => setDetail((current) => {
           if (!current?.memory || current.id !== detail.id) return current
           return { ...current, memory: { ...current.memory, points: current.memory.points.map((point) => point.id === itemId
@@ -332,8 +347,17 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
             : point) } }
         })} />}
       {selected === "memory" && <MeetingMemory detail={detail} />}
+      {selected === "open" && <MeetingMemory detail={detail} openOnly />}
+      {selected === "history" && (detail.memory?.previous.length
+        ? <PreviousPoints points={detail.memory.previous} title="Diskutimet e mëparshme" />
+        : <p className="text-sm">{detail.memory?.status === "PENDING" || detail.memory?.status === "RUNNING"
+          ? "MIRA po kontrollon lidhjet me takimet e mëparshme."
+          : detail.memory?.status === "FAILED" ? "Përpunimi i historikut dështoi."
+            : "Nuk ka diskutime të mëparshme të lidhura me këtë takim."}</p>)}
       {selected === "transcript" && (detail.transcript.length ? <ul className="divide-y rounded-md border text-sm">
-        {detail.transcript.map((segment) => <li id={`segment-${segment.id}`} key={segment.id} className="px-4 py-2">
+        {detail.transcript.map((segment) => <li id={`segment-${segment.id}`} key={segment.id}
+          data-source={transcriptAnchor === `segment-${segment.id}` ? "true" : undefined}
+          className="scroll-mt-20 break-words px-4 py-2 data-[source=true]:bg-muted">
           <p className="font-medium">{segment.speaker} <span className="font-normal text-muted-foreground">{timestamp(segment.start_ms)}–{timestamp(segment.end_ms)}</span></p>
           <p className="whitespace-pre-wrap">{segment.text}</p>
         </li>)}

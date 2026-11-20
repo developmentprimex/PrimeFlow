@@ -351,6 +351,7 @@ async def meeting_points(db, meeting, segments):
         details = event.details or {}
         point = points.setdefault(item.id, {
             'id': str(item.id), 'title': item.title, 'kind': item.kind, 'status': item.status,
+            'needs_follow_up': item.status == 'OPEN' and item.kind in FOLLOW_UP_KINDS,
             'text': event.text, 'correction': item.description if item.human_edited else None,
             'sources': {}, 'questions': [], 'answers': {}, 'project': None, 'project_id': None, 'requested_by': None,
             'assignee': None, 'deadline_text': None, 'deadline_date': None,

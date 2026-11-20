@@ -94,6 +94,7 @@ test("on a phone the list and the item take turns", async ({ page }) => {
 
 test("Notetaker shows a clarification and links its evidence to the transcript", async ({ page }) => {
   const meeting = "44444444-4444-4444-8444-444444444444"
+  const priorMeeting = "55555555-5555-4555-8555-555555555555"
   const source = { id: "source", speaker: "GA", start_ms: 316000, end_ms: 330000 }
   const question = "Kush është përgjegjës?"
   const { id, title, kind, status } = list.items[0]
@@ -103,9 +104,17 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
     id: meeting, title: "Takimi Modeco", started_at: "2026-11-19T09:00:00+01:00",
     partial: true, quick_summary: null, full_notes: "Shënime", error: null,
     transcript: [{ ...source, text: "Kontrollojeni ofertën deri nesër." }],
-    memory: { points: [{ id, title, kind, status, text: "Kontrolli i ofertës u kërkua nga GA.",
+    memory: { points: [{ id, title, kind, status, needs_follow_up: true, text: "Kontrolli i ofertës u kërkua nga GA.",
       correction: null, project: "Modeco", requested_by: "GA", assignee: null, deadline_text: "nesër",
-      deadline_date: "2026-11-20", questions: [question], answers: {}, sources: [source], discussion_state: "REPEATED" }], previous: [] },
+      deadline_date: "2026-11-20", questions: [question], answers: {}, sources: [source], discussion_state: "REPEATED" },
+    { id: "decision", title: "Vendimi për ofertën", kind: "DECISION", status: "OPEN", needs_follow_up: false,
+      text: "Oferta u miratua.", questions: [], answers: {}, sources: [] }],
+    previous: [{ id, title, text: "U diskutua oferta.", meeting_id: priorMeeting, meeting_title: "Takimi paraprak Modeco",
+      date: "2026-11-18T09:00:00+01:00" }] },
+  } }))
+  await page.route(`**/api/mira/notetaker/meetings/${priorMeeting}`, route => route.fulfill({ json: {
+    id: priorMeeting, title: "Takimi paraprak Modeco", started_at: "2026-11-18T09:00:00+01:00",
+    partial: false, quick_summary: null, full_notes: "Shënimet e mëparshme", error: null, transcript: [],
   } }))
   await page.route(`**/api/mira-memory/items/${offer}/clarifications`, async route => {
     const body = route.request().postDataJSON()
@@ -123,9 +132,16 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
   await page.getByRole("link", { name: "Kujtesa e takimit" }).click()
   await expect(page.getByText(/Diskutuar më parë/)).toBeVisible()
   await expect(page.getByText("Arta.", { exact: true })).toBeVisible()
+  await expect(page.getByText("Vendimi për ofertën")).toBeVisible()
+  await page.getByRole("link", { name: "Pikat e hapura" }).click()
+  await expect(page.getByText("Kontrolli i ofertës u kërkua nga GA.")).toBeVisible()
+  await expect(page.getByText("Vendimi për ofertën")).toHaveCount(0)
   await page.getByRole("link", { name: "GA · 05:16–05:30" }).click()
   await expect(page).toHaveURL(/view=transcript#segment-source/)
-  await expect(page.getByText("Kontrollojeni ofertën deri nesër.")).toBeVisible()
+  await expect(page.locator('#segment-source[data-source="true"]')).toContainText("Kontrollojeni ofertën deri nesër.")
+  await page.getByRole("link", { name: "Historiku i takimeve" }).click()
+  await page.getByRole("link", { name: /Takimi paraprak Modeco/ }).click()
+  await expect(page.getByRole("heading", { name: "Takimi paraprak Modeco" })).toBeVisible()
 })
 
 test("Notetaker can filter open points before the next meeting", async ({ page }) => {

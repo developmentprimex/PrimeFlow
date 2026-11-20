@@ -8,8 +8,33 @@ from app.config import settings
 FALLBACK = 'Për përgjigjen private përdor **/mira pyet**.'
 
 
+def _answer_card(question, answer, sources):
+    question = discord.utils.escape_markdown(question, ignore_links=False)
+    answer = discord.utils.escape_markdown(answer, ignore_links=False)
+    description = f'**Pyetja**\n{question}\n\n**Përgjigjja**\n{answer}'
+    card = discord.Embed(title='MIRA · Pyet për takimet', description=description)
+    if not sources:
+        return [card]
+
+    lines = []
+    for source in sources:
+        speaker = discord.utils.escape_markdown(source['speaker'], ignore_links=False)
+        label = f"{source['date']} – {speaker} – {source['time']}".replace('[', '').replace(']', '')
+        lines.append(f"[{label}]({source['url']})")
+    source_title = 'Burimi' if len(lines) == 1 else 'Burimet'
+    source_list = '\n'.join(lines)
+    with_sources = f'{description}\n\n**{source_title}**\n{source_list}'
+    if len(with_sources) <= 4096:
+        card.description = with_sources
+        return [card]
+
+    # Keep links intact when the sources don't fit in the main embed.
+    return [card, discord.Embed(title=source_title, description=source_list)]
+
+
 async def answer(bot, user_id, guild_id, question):
-    if not question.strip():
+    question = question.strip()
+    if not question:
         return 'Shkruaj një pyetje për takimet e MIRA-s.', []
     if len(question) > 500:
         return 'Shkurtoje pyetjen në 500 shenja.', []
@@ -19,20 +44,7 @@ async def answer(bot, user_id, guild_id, question):
         })
     except Exception as exc:
         return bot.error_message(exc), []
-    content = discord.utils.escape_markdown(result['answer'], ignore_links=False)
-    sources = result['sources']
-    embeds = []
-    if sources:
-        lines = []
-        for source in sources:
-            speaker = discord.utils.escape_markdown(source['speaker'], ignore_links=False)
-            label = f"{source['date']} – {speaker} – {source['time']}".replace('[', '').replace(']', '')
-            lines.append(f"[{label}]({source['url']})")
-        embeds.append(discord.Embed(title='Burimet', description='\n'.join(lines)))
-    if len(content.encode('utf-16-le')) > 1900:
-        embeds.insert(0, discord.Embed(title='MIRA', description=content))
-        return None, embeds
-    return content, embeds
+    return None, _answer_card(question, result['answer'], result['sources'])
 
 
 def register(bot, guild):

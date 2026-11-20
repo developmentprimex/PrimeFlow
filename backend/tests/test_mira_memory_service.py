@@ -175,6 +175,7 @@ class MemoryServiceTests(MemoryTests):
             detail = await voice.meeting_record(db, first.id)
             point = detail['memory']['points'][0]
             self.assertEqual(point['discussion_state'], 'NEW')
+            self.assertTrue(point['needs_follow_up'])
             self.assertEqual(point['questions'], ['Kush është përgjegjës?'])
             self.assertEqual(point['sources'][0], {'id': str(segment_id), 'speaker': 'GA', 'start_ms': 1200, 'end_ms': 5000})
             self.assertEqual((await mira_memory.upcoming_points(db))[0]['meeting_id'], str(first.id))
@@ -201,6 +202,7 @@ class MemoryServiceTests(MemoryTests):
             detail = await voice.meeting_record(db, third.id)
             self.assertEqual(detail['memory']['previous'][0]['meeting_id'], str(second.id))
             self.assertEqual(detail['memory']['points'][0]['discussion_state'], 'RESOLVED')
+            self.assertFalse(detail['memory']['points'][0]['needs_follow_up'])
             previous = await voice.meeting_record(db, second.id)
             self.assertEqual(previous['memory']['points'][0]['discussion_state'], 'REPEATED')
             visible = await mira_memory.get_item(db, item.id)

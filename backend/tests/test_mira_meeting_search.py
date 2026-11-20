@@ -104,8 +104,11 @@ class MeetingSearchTests(MemoryTests):
 class DiscordQuestionTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_reuses_mira_group_and_replies_ephemerally(self):
         group = discord.app_commands.Group(name='mira', description='Existing Host group')
+        url = 'https://primeflow.example/mira?tab=notetaker&meeting=meeting&view=transcript#segment-record'
         bot = SimpleNamespace(tree=SimpleNamespace(get_command=Mock(return_value=group), add_command=Mock()),
-            bridge=AsyncMock(return_value={'answer': 'Përgjigjja.', 'sources': []}))
+            bridge=AsyncMock(return_value={'answer': 'U kërkua kontrolli i ofertës.', 'sources': [
+                {'date': '16.11.2026', 'speaker': 'GA', 'time': '09:00–09:10', 'url': url},
+            ]}))
         interaction = SimpleNamespace(user=SimpleNamespace(id=42), guild_id=123,
             response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
         with patch.object(search.settings, 'DISCORD_MEETING_NOTES_ENABLED', True):
@@ -113,7 +116,30 @@ class DiscordQuestionTests(unittest.IsolatedAsyncioTestCase):
         bot.tree.add_command.assert_not_called()
         await group.get_command('pyet').callback(interaction, 'Çfarë tha GA?')
         interaction.response.defer.assert_awaited_once_with(thinking=True, ephemeral=True)
-        self.assertTrue(interaction.followup.send.await_args.kwargs['ephemeral'])
+        response = interaction.followup.send.await_args.kwargs
+        self.assertTrue(response['ephemeral'])
+        self.assertEqual(len(response['embeds']), 1)
+        self.assertEqual(response['embeds'][0].description,
+            '**Pyetja**\nÇfarë tha GA?\n\n**Përgjigjja**\nU kërkua kontrolli i ofertës.\n\n'
+            f'**Burimi**\n[16.11.2026 – GA – 09:00–09:10]({url})')
+
+    async def test_answer_without_evidence_displays_question_and_no_sources(self):
+        bot = SimpleNamespace(bridge=AsyncMock(return_value={'answer': search.NO_EVIDENCE, 'sources': []}))
+        content, cards = await discord_mira_ask.answer(bot, 42, 123, '  Çfarë u vendos për **Modeco**?  ')
+        self.assertIsNone(content)
+        question = discord.utils.escape_markdown('Çfarë u vendos për **Modeco**?')
+        self.assertEqual(cards[0].description, f'**Pyetja**\n{question}\n\n**Përgjigjja**\n{search.NO_EVIDENCE}')
+
+    async def test_long_answer_preserves_all_source_links_in_one_message(self):
+        urls = [f'https://primeflow.example/mira?tab=notetaker&meeting={uuid.uuid4()}'
+                f'&view=transcript#segment-{uuid.uuid4()}' for _ in range(8)]
+        sources = [{'date': '16.11.2026', 'speaker': 'A' * 100, 'time': '09:00–09:10', 'url': url} for url in urls]
+        bot = SimpleNamespace(bridge=AsyncMock(return_value={'answer': '*' * 1200, 'sources': sources}))
+        _, cards = await discord_mira_ask.answer(bot, 42, 123, 'A' * 500)
+        self.assertEqual(len(cards), 2)
+        self.assertLessEqual(sum(map(len, cards)), 6000)
+        for url in urls:
+            self.assertIn(f'({url})', cards[1].description)
 
     async def test_failed_dm_only_sends_generic_instruction_to_channel(self):
         dm = SimpleNamespace(send=AsyncMock(side_effect=discord.Forbidden(
@@ -124,5 +150,6 @@ class DiscordQuestionTests(unittest.IsolatedAsyncioTestCase):
             author=SimpleNamespace(id=42, create_dm=AsyncMock(return_value=dm)), channel=SimpleNamespace(send=AsyncMock()))
         with patch.object(search.settings, 'DISCORD_MEETING_NOTES_ENABLED', True):
             self.assertTrue(await discord_mira_ask.handle_mention(bot, message))
-        self.assertEqual(dm.send.await_args.args[0], 'Informacion nga takimi.')
+        self.assertEqual(dm.send.await_args.kwargs['embeds'][0].description,
+            '**Pyetja**\nÇfarë tha GA?\n\n**Përgjigjja**\nInformacion nga takimi.')
         self.assertEqual(message.channel.send.await_args.args[0], discord_mira_ask.FALLBACK)

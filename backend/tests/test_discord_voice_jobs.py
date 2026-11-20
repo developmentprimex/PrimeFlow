@@ -1,3 +1,4 @@
+import asyncio
 import os
 import unittest
 import uuid
@@ -13,6 +14,89 @@ from app.services import discord_voice_meetings as service
 from app.jobs import discord_voice_meetings as jobs
 
 class VoiceJobTests(PostgresMeetingTests):
+    async def test_task_dictation_assigns_by_initials_once_on_both_recorders(self):
+        from sqlalchemy import select
+        from app.api.routers import tasks
+        from app.db import Base
+        from app.models.notification import Notification
+        from app.models.task import Task
+        from app.models.task_assignee import TaskAssignee
+        from app.models.user import User
+
+        tables = {Task.__table__, TaskAssignee.__table__, Notification.__table__}
+        while (expanded := tables | {fk.column.table for table in tables for fk in table.foreign_keys}) != tables:
+            tables = expanded
+        async with self.engine.begin() as conn:
+            await conn.run_sync(lambda connection: Base.metadata.create_all(connection, tables=list(tables)))
+        employee_id = uuid.uuid4()
+        async with self.sessions() as db:
+            db.add_all([
+                User(id=employee_id, username="ef", full_name="Elsa Ferati", email="ef@example.com",
+                     password_hash="test", department_id=self.did),
+                User(username="old_ef", full_name="Erin Ferati", email="old@example.test", is_active=False,
+                     password_hash="test", department_id=self.did),
+                User(username="ambiguous1", full_name="Arta Dema", email="ad1@example.test",
+                     password_hash="test", department_id=self.did),
+                User(username="ambiguous2", full_name="Ana Dema", email="ad2@example.test",
+                     password_hash="test", department_id=self.did),
+            ])
+            await db.commit()
+
+        for recorder, channel_setting in (("primary", "DISCORD_1H_VOICE_CHANNEL_ID"),
+                                          ("ai_agent", "DISCORD_AI_AGENT_VOICE_CHANNEL_ID")):
+            session_id, instance_id = uuid.uuid4(), uuid.uuid4()
+            token = "x" * 40
+            async with self.sessions() as db:
+                db.add(Meeting(id=session_id, user_id=self.uid, link_id=self.lid, department_id=self.did,
+                    guild_id="123", voice_channel_id="55", private_channel_id="44", request_id=session_id.hex,
+                    recorder=recorder, instance_id=instance_id, capture_token_hash=service.token_hash(token),
+                    title="Takimi", status="LISTENING"))
+                await db.commit()
+
+            spoken = [
+                ("12", "Mira, detyrë për E. F."),
+                ("99", "Mira detyrë EF, Detyrë e paautorizuar. Fund detyre."),
+                ("12", f"Kontrollo ofertën {recorder}. Fund detyrës."),
+                ("12", "Mira, detyrë AD, Inicialet nuk janë unike. Fund detyre."),
+                ("12", "Mira, detyrë ZZ, Nuk ka punonjës. Fund detyre."),
+            ]
+            with patch.object(service.settings, "DISCORD_GUILD_ID", "123"), patch.object(service.settings, channel_setting, "55"):
+                for sequence, (speaker, text) in enumerate(spoken):
+                    meta = SegmentMeta(capture_token=token, instance_id=instance_id, sequence=sequence,
+                        speaker_id=speaker, speaker_name=speaker, start_ms=sequence * 1000, end_ms=(sequence + 1) * 1000)
+                    with patch.object(jobs.provider, "transcribe_segment", AsyncMock(return_value=text)):
+                        async with self.sessions() as db:
+                            await service.receive_segment(db, session_id, meta, wav())
+                            await service.receive_segment(db, session_id, meta, wav())
+            async with self.sessions() as db:
+                meeting = await db.get(Meeting, session_id)
+                self.assertEqual(len(meeting.dictation_progress["tasks"]), 3)
+
+            with (
+                patch.object(jobs, "SessionLocal", self.sessions),
+                patch.object(tasks, "ensure_daily_baselines_for_departments", AsyncMock()),
+                patch.object(tasks, "publish_notification", AsyncMock()),
+                self.assertNoLogs("app.services.mira_voice_dictation", level="WARNING"),
+            ):
+                await asyncio.gather(jobs.process_voice_meetings(), jobs.process_voice_meetings())
+                for _ in range(3):
+                    await jobs.process_voice_meetings()
+            async with self.sessions() as db:
+                meeting = await db.get(Meeting, session_id)
+                self.assertNotIn("tasks", meeting.dictation_progress)
+                self.assertEqual(meeting.status, "LISTENING")
+
+        async with self.sessions() as db:
+            records = (await db.scalars(select(Task).order_by(Task.title))).all()
+            self.assertEqual([task.title for task in records], ["Kontrollo ofertën ai_agent", "Kontrollo ofertën primary"])
+            for task in records:
+                self.assertEqual((task.assigned_to, task.created_by, task.department_id), (employee_id, self.uid, self.did))
+                self.assertTrue(task.is_1h_report)
+                self.assertIsNone(task.one_h_report_slot)
+                self.assertIsNone(task.due_date)
+                self.assertIsNone(task.project_id)
+            self.assertEqual((await db.scalars(select(Notification.user_id))).all(), [employee_id, employee_id])
+
     async def test_dictation_saves_once_in_px_notes_before_the_meeting_ends(self):
         from sqlalchemy import select
         from app.api.routers.ga_notes import _note_out
