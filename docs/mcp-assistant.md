@@ -101,6 +101,11 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 | `status=completed` | ✓ |
 | `body` (text) | shënimet; hapat ruhen si rreshta `☐`/`☑`, sepse `checklistItems` nuk sinkronizohen me iPhone |
 
+Listat: agjenda dhe `todo_list` lexojnë **të gjitha** listat e `info@`. `todo_create` pa `list_name` krijon te
+lista me aktivitetin më të fundit, pra aty ku sinkronizohen kujtesat e iPhone-it (te `info@` ka dy lista "Tasks").
+Lista mund të fiksohet me `MS_TODO_CREATE_LIST` (id e listës, ose emër unik). Datat e kujtesave lexohen në
+`GA_TIMEZONE`. iPhone e ruan mesnatën lokale si 23:00 UTC të ditës para, dhe pa konvertim kujtesat do të dilnin një ditë më herët.
+
 Leja `Tasks.ReadWrite` kërkohet **vetëm në autorizim dhe vetëm kur `MS_TODO_ENABLED=true`**
 (`authorize_scope_str()`). Refresh-i i token-it
 vazhdon me scope-t e kalendarit, që sinkronizimi ekzistues i kalendarit të mos prishet para

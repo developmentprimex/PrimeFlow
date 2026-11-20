@@ -571,7 +571,10 @@ async def todo_create(payload: TodoCreateIn, db: AsyncSession = Depends(get_db),
     if payload.time and payload.due_date is None:
         raise HTTPException(status_code=422, detail="A time needs a due_date")
     client = await _todo_client(db)
-    todo_list = await _graph_call(client.resolve_list(payload.list_name))
+    # Without an explicit list, create where iPhone Reminders sync (see TodoClient.create_list).
+    todo_list = await _graph_call(
+        client.resolve_list(payload.list_name) if payload.list_name else client.create_list(settings.MS_TODO_CREATE_LIST)
+    )
     body: dict = {"title": payload.title.strip()}
     if payload.notes:
         body["body"] = {"contentType": "text", "content": payload.notes.strip()}

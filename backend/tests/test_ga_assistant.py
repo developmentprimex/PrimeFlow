@@ -210,6 +210,42 @@ class IphoneReminderTests(unittest.TestCase):
         self.assertEqual(microsoft.refresh_scope_str(None), microsoft.SCOPE_STR)
 
 
+class TodoListChoiceTests(unittest.IsolatedAsyncioTestCase):
+    """info@ has two lists called "Tasks": the empty default one and the one iPhone syncs into."""
+
+    def client(self):
+        from unittest.mock import AsyncMock
+
+        c = todo_mod.TodoClient("token")
+        lists = [
+            {"id": "DEFAULT", "displayName": "Tasks", "wellknownListName": "defaultList"},
+            {"id": "IPHONE", "displayName": "Tasks", "wellknownListName": "none"},
+            {"id": "OTHER", "displayName": "Blerje", "wellknownListName": "none"},
+        ]
+        tasks = {
+            "DEFAULT": [],
+            "IPHONE": [{"id": "t1", "lastModifiedDateTime": "2026-11-20T07:01:00Z"}],
+            "OTHER": [{"id": "t2", "lastModifiedDateTime": "2026-11-18T10:00:00Z"}],
+        }
+        c.lists = AsyncMock(return_value=lists)
+        c.tasks = AsyncMock(side_effect=lambda list_id, include_completed: tasks[list_id])
+        return c
+
+    async def test_new_reminders_go_to_the_list_iphone_uses(self) -> None:
+        self.assertEqual((await self.client().create_list(""))["id"], "IPHONE")
+
+    async def test_duplicate_names_resolve_to_the_active_list(self) -> None:
+        self.assertEqual((await self.client().resolve_list("Tasks"))["id"], "IPHONE")
+        self.assertEqual((await self.client().resolve_list("Blerje"))["id"], "OTHER")
+        self.assertEqual((await self.client().resolve_list(None))["id"], "DEFAULT")
+
+    async def test_override_by_id_or_unique_name(self) -> None:
+        self.assertEqual((await self.client().create_list("DEFAULT"))["id"], "DEFAULT")
+        self.assertEqual((await self.client().create_list("Blerje"))["id"], "OTHER")
+        with self.assertRaises(ValueError):
+            await self.client().create_list("Tasks")  # ambiguous name: use the id
+
+
 class MicrosoftScopeTests(unittest.TestCase):
     def test_connect_flow_is_unchanged_unless_todo_is_enabled(self) -> None:
         from unittest.mock import patch
