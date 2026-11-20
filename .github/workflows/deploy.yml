@@ -220,6 +220,7 @@ jobs:
           MCP_ASSISTANT_ALLOWED_EMAILS: ${{ vars.MCP_ASSISTANT_ALLOWED_EMAILS }}
           MCP_ASSISTANT_INTERNAL_SECRET: ${{ secrets.MCP_ASSISTANT_INTERNAL_SECRET }}
           MS_TODO_ENABLED: ${{ vars.MS_TODO_ENABLED || 'false' }}
+          GA_DISCORD_MENTIONS_BOT_TOKEN: ${{ secrets.GA_DISCORD_MENTIONS_BOT_TOKEN }}
         run: |
           if not defined MS_CLIENT_ID (echo ::error::MS_CLIENT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
           if not defined MS_TENANT_ID (echo ::error::MS_TENANT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
@@ -293,6 +294,8 @@ jobs:
           echo OAUTH_ISSUER_URL=https://api-flow.primexeu.com >> backend\.env
           echo GA_TIMEZONE=Europe/Belgrade >> backend\.env
           echo MS_TODO_ENABLED=%MS_TODO_ENABLED% >> backend\.env
+          REM Read-only GA Discord mentions bot. backend\.env is rebuilt on every deploy, so the token comes from Actions.
+          if defined GA_DISCORD_MENTIONS_BOT_TOKEN echo GA_DISCORD_MENTIONS_BOT_TOKEN=%GA_DISCORD_MENTIONS_BOT_TOKEN%>> backend\.env
  
       - name: Configure Discord Assistant
         shell: powershell
