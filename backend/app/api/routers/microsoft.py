@@ -128,7 +128,7 @@ async def upsert_token(db: AsyncSession, user_id: uuid.UUID, token_data: dict) -
         row.access_token = access_token
         if refresh_token:
             row.refresh_token = refresh_token
-        row.scope = token_data.get("scope")
+        row.scope = token_data.get("scope") or row.scope
         row.expires_at = compute_expires_at(expires_in)
 
     await db.commit()
@@ -137,12 +137,12 @@ async def upsert_token(db: AsyncSession, user_id: uuid.UUID, token_data: dict) -
 
 
 async def refresh_token_row(db: AsyncSession, row: MicrosoftToken, redirect_uri: str) -> MicrosoftToken:
-    token_data = await refresh_access_token(row.refresh_token, redirect_uri)
+    token_data = await refresh_access_token(row.refresh_token, redirect_uri, row.scope)
     expires_in = int(token_data.get("expires_in", 3600))
     row.access_token = token_data["access_token"]
     if token_data.get("refresh_token"):
         row.refresh_token = token_data["refresh_token"]
-    row.scope = token_data.get("scope")
+    row.scope = token_data.get("scope") or row.scope
     row.expires_at = compute_expires_at(expires_in)
     await db.commit()
     await db.refresh(row)

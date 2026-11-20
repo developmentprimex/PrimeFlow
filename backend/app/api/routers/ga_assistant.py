@@ -429,7 +429,7 @@ async def item_set_time(payload: ItemSetTimeIn, db: AsyncSession = Depends(get_d
         list_id, task_id = _todo_ref(raw)
         client = await _todo_client(db)
         current = await _graph_call(client.get(list_id, task_id))
-        day = payload.day or parse_due_date(current.get("dueDateTime")) or today
+        day = payload.day or parse_due_date(current.get("dueDateTime"), tz) or today
         if payload.time is None:
             body: dict = {"isReminderOn": False, "reminderDateTime": None}
         else:
@@ -602,7 +602,7 @@ async def todo_update(item_id: str, payload: TodoUpdateIn, db: AsyncSession = De
     body: dict = {}
     if payload.title is not None:
         body["title"] = payload.title.strip()
-    day = payload.due_date or parse_due_date(current.get("dueDateTime"))
+    day = payload.due_date or parse_due_date(current.get("dueDateTime"), svc.ga_tz())
     if payload.due_date is not None:
         body["dueDateTime"] = due_payload(payload.due_date)
     if payload.clear_time:

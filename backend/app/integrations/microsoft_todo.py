@@ -83,29 +83,76 @@ def due_payload(day: date | None) -> dict[str, str] | None:
     return {"dateTime": f"{day.isoformat()}T00:00:00", "timeZone": "UTC"}
 
 
+# Exchange/iPhone reminders often carry Windows zone names. ZoneInfo knows only IANA
+# names, so the common ones are mapped here; anything unknown is treated as UTC.
+WINDOWS_ZONES = {
+    "utc": "UTC",
+    "coordinated universal time": "UTC",
+    "tzone://microsoft/utc": "UTC",
+    "gmt standard time": "Europe/London",
+    "greenwich standard time": "Atlantic/Reykjavik",
+    "w. europe standard time": "Europe/Berlin",
+    "central europe standard time": "Europe/Budapest",
+    "central european standard time": "Europe/Warsaw",
+    "romance standard time": "Europe/Paris",
+    "gtb standard time": "Europe/Bucharest",
+    "e. europe standard time": "Europe/Chisinau",
+    "fle standard time": "Europe/Kiev",
+    "turkey standard time": "Europe/Istanbul",
+    "russian standard time": "Europe/Moscow",
+    "eastern standard time": "America/New_York",
+    "central standard time": "America/Chicago",
+    "mountain standard time": "America/Denver",
+    "pacific standard time": "America/Los_Angeles",
+}
+
+
+def resolve_zone(name: str | None):
+    """IANA zone for a Graph ``timeZone`` value (IANA or Windows name); UTC when unknown."""
+    raw = (name or "UTC").strip()
+    mapped = WINDOWS_ZONES.get(raw.casefold(), raw)
+    if mapped.upper() in {"UTC", "GMT", "ETC/UTC"}:
+        return timezone.utc
+    try:
+        return ZoneInfo(mapped)
+    except Exception:
+        return timezone.utc
+
+
+def _naive(value: dict[str, Any]) -> datetime | None:
+    raw = str(value["dateTime"]).split(".")[0]
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
 def parse_graph_dt(value: dict[str, Any] | None, tz: ZoneInfo) -> datetime | None:
     if not value or not value.get("dateTime"):
         return None
-    raw = str(value["dateTime"]).split(".")[0]
-    try:
-        parsed = datetime.fromisoformat(raw)
-    except ValueError:
+    parsed = _naive(value)
+    if parsed is None:
         return None
-    zone_name = str(value.get("timeZone") or "UTC")
-    try:
-        zone = timezone.utc if zone_name.upper() in {"UTC", "GMT"} else ZoneInfo(zone_name)
-    except Exception:  # Windows zone names: Graph returns UTC when asked, so fall back.
-        zone = timezone.utc
-    return parsed.replace(tzinfo=zone).astimezone(tz)
+    return parsed.replace(tzinfo=resolve_zone(value.get("timeZone"))).astimezone(tz)
 
 
-def parse_due_date(value: dict[str, Any] | None) -> date | None:
+def parse_due_date(value: dict[str, Any] | None, tz: ZoneInfo | None = None) -> date | None:
+    """Calendar date of a To Do ``dueDateTime`` in the GA's timezone.
+
+    iPhone/Exchange reminders store the due day as local midnight, which Graph often
+    returns in UTC (``2026-11-19T23:00:00`` UTC = 20 Nov in Belgrade). Taking the raw
+    date part would move such reminders one day back, so the value is converted to
+    ``tz`` first. Without ``tz`` the raw date part is used (legacy behaviour).
+    """
     if not value or not value.get("dateTime"):
         return None
-    try:
-        return date.fromisoformat(str(value["dateTime"])[:10])
-    except ValueError:
-        return None
+    if tz is None:
+        try:
+            return date.fromisoformat(str(value["dateTime"])[:10])
+        except ValueError:
+            return None
+    local = parse_graph_dt(value, tz)
+    return local.date() if local is not None else None
 
 
 class TodoClient:
