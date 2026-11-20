@@ -727,10 +727,8 @@ async def collect_discord_items(db: AsyncSession, day_from: date, day_to: date, 
     start = datetime.combine(day_from, time.min, tzinfo=tz)
     end = datetime.combine(day_to + timedelta(days=1), time.min, tzinfo=tz)
     rows = await mentions.list_mentions(db, since=start, until=end, statuses=mentions.OPEN_STATUSES)
-    names = await mentions.author_names(db, rows)
     items: list[AgendaItem] = []
-    for row in rows:
-        out = mentions.mention_out(row, names, tz)
+    for row, out in zip(rows, await mentions.render(db, rows, tz)):
         local = row.created_at.astimezone(tz)
         text = " ".join(row.content.split())
         items.append(
@@ -739,7 +737,8 @@ async def collect_discord_items(db: AsyncSession, day_from: date, day_to: date, 
                 title=f"{out['author_initials']} në {out['channel']} ({local:%H:%M}): {text[:200] or '(bashkëngjitje)'}",
                 day=local.date(), status=row.status, comment=row.content or None,
                 can_complete=True, is_open=True, url=row.jump_url, assignees=[out["author"]],
-                markers=[f"📎 {attachment.get('name')}" for attachment in (row.attachments or [])],
+                markers=[f"📎 {attachment.get('name')}" for attachment in (row.attachments or [])]
+                + ([f"✅ {', '.join(out['reviewed_by'])}"] if out["ready_for_ga"] else []),
             )
         )
     return items

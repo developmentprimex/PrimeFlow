@@ -34,6 +34,17 @@ class Attachment(BaseModel):
     url: str = Field(max_length=1000)
 
 
+class ReactionUser(BaseModel):
+    discord_id: str = Field(pattern=SNOWFLAKE)
+    name: str = Field(default="", max_length=200)
+
+
+class ReactionIn(BaseModel):
+    emoji: str = Field(min_length=1, max_length=100)
+    count: int = Field(ge=0, le=100000)
+    users: list[ReactionUser] = Field(default_factory=list, max_length=100)
+
+
 class MentionIn(BaseModel):
     id: str = Field(pattern=SNOWFLAKE)
     guild_id: str = Field(pattern=SNOWFLAKE)
@@ -48,16 +59,26 @@ class MentionIn(BaseModel):
     attachments: list[Attachment] = Field(default_factory=list, max_length=20)
     reasons: list[str] = Field(min_length=1, max_length=3)
     reply_to_message_id: str | None = Field(default=None, pattern=SNOWFLAKE)
+    # Present only when the bot read the reactions (backfill); live messages keep the stored ones.
+    reactions: list[ReactionIn] | None = Field(default=None, max_length=50)
 
 
 class MentionBatch(BaseModel):
     messages: list[MentionIn] = Field(max_length=500)
 
 
+class ReactionsUpdate(BaseModel):
+    message_id: str = Field(pattern=SNOWFLAKE)
+    reactions: list[ReactionIn] = Field(max_length=50)
+
+
 @router.get("/context", dependencies=[Depends(require_mentions_bot)])
 async def context(db: AsyncSession = Depends(get_db)) -> dict:
     last = await mentions.last_message_at(db)
+    tracked_ids, unsynced = await mentions.tracked(db)
     return {
+        "tracked_message_ids": tracked_ids,
+        "reactions_unsynced": unsynced,
         "guild_id": settings.DISCORD_GUILD_ID,
         "ga_discord_id": await mentions.ga_discord_id(db),
         "last_message_at": last.isoformat() if last else None,
@@ -78,7 +99,8 @@ async def store_mentions(payload: MentionBatch, db: AsyncSession = Depends(get_d
         if not reasons:
             continue
         accepted.append({
-            **message.model_dump(exclude={"attachments", "reasons"}),
+            **message.model_dump(exclude={"attachments", "reasons", "reactions"}),
+            "reactions": None if message.reactions is None else [reaction.model_dump() for reaction in message.reactions],
             "created_at": message.created_at.astimezone(timezone.utc),
             "edited_at": message.edited_at.astimezone(timezone.utc) if message.edited_at else None,
             "attachments": [attachment.model_dump() for attachment in message.attachments],
@@ -86,3 +108,10 @@ async def store_mentions(payload: MentionBatch, db: AsyncSession = Depends(get_d
         })
     stored = await mentions.store(db, accepted)
     return {"stored": stored, "skipped": len(payload.messages) - stored}
+
+
+@router.post("/reactions", dependencies=[Depends(require_mentions_bot)])
+async def store_reactions(payload: ReactionsUpdate, db: AsyncSession = Depends(get_db)) -> dict:
+    """Current reactions of a stored mention (ignored for any other message)."""
+    updated = await mentions.set_reactions(db, payload.message_id, [reaction.model_dump() for reaction in payload.reactions])
+    return {"updated": updated}

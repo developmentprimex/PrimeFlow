@@ -92,6 +92,36 @@ class MentionStoreTests(unittest.TestCase):
         self.assertEqual(out["time"], "2026-11-20T09:15:00+01:00")
 
 
+class ReactionTests(unittest.TestCase):
+    def row(self, reactions):
+        return SimpleNamespace(
+            id="123", author_user_id=None, author_name="Arta", author_discord_id="77", channel_name="general",
+            channel_id="9", created_at=datetime(2026, 11, 20, 8, 15, tzinfo=ZoneInfo("UTC")), edited_at=None,
+            content="x", jump_url="u", attachments=[], reasons=["mention"], status="new", reactions=reactions,
+        )
+
+    def test_normalize_emoji(self) -> None:
+        self.assertEqual(mentions.normalize_emoji("✔️"), "✔")
+        self.assertEqual(mentions.normalize_emoji("👍🏽"), "👍")
+
+    def test_reviewed_by_counts_approvals_only_and_skips_author_and_ga(self) -> None:
+        row = self.row([
+            {"emoji": "✅", "count": 3, "users": [{"discord_id": "77", "name": "Arta"}, {"discord_id": "42", "name": "GA"},
+                                                {"discord_id": "5", "name": "x"}]},
+            {"emoji": "😀", "count": 1, "users": [{"discord_id": "6", "name": "Driton Veliu"}]},
+            {"emoji": "✔️", "count": 1, "users": [{"discord_id": "5", "name": "x"}]},
+        ])
+        out = mentions.mention_out(row, {}, TZ, people={"5": "Laurent Hoxha"}, ga_id="42", approvals=mentions.approval_emojis())
+        self.assertEqual(out["reactions"][0], {"emoji": "✅", "count": 3, "users": [
+            {"name": "Arta", "initials": mentions.initials("Arta")}, {"name": "GA", "initials": mentions.initials("GA")},
+            {"name": "Laurent Hoxha", "initials": "LH"}]})
+        self.assertEqual((out["reviewed_by"], out["ready_for_ga"]), (["LH"], True))
+
+    def test_no_reactions(self) -> None:
+        out = mentions.mention_out(self.row([]), {}, TZ)
+        self.assertEqual((out["reactions"], out["reviewed_by"], out["ready_for_ga"]), ([], [], False))
+
+
 class BotFilterTests(unittest.TestCase):
     """The bot keeps only messages that concern the GA."""
 
@@ -120,6 +150,42 @@ class BotFilterTests(unittest.TestCase):
         self.assertEqual(self.bot.mention_reasons(self.message(roles=[7]), ga, roles), ["role"])
         self.assertEqual(self.bot.mention_reasons(self.message(reply_author=42), ga, roles), ["reply"])
         self.assertEqual(self.bot.mention_reasons(self.message(users=[1], roles=[8], reply_author=3), ga, roles), [])
+
+    def test_reaction_events_only_for_tracked_server_messages(self) -> None:
+        client = object.__new__(self.bot.GaMentionsBot)
+        client.context, client.tracked, client.pending_reactions = {"guild_id": "1"}, {500}, {}
+        client.reaction_changed(SimpleNamespace(guild_id=None, message_id=500, channel_id=9))  # DM
+        client.reaction_changed(SimpleNamespace(guild_id=2, message_id=500, channel_id=9))  # other server
+        client.reaction_changed(SimpleNamespace(guild_id=1, message_id=501, channel_id=9))  # not a GA mention
+        self.assertEqual(client.pending_reactions, {})
+
+    def test_read_reactions(self) -> None:
+        import asyncio
+
+        class Users:
+            def __init__(self, users):
+                self.users = users
+
+            def __aiter__(self):
+                self.it = iter(self.users)
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self.it)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        user = SimpleNamespace(id=5, display_name="Laurent", global_name=None, name="lh")
+        custom = SimpleNamespace(id=9, name="ok")
+        message = SimpleNamespace(reactions=[
+            SimpleNamespace(emoji="✅", count=1, users=lambda limit: Users([user])),
+            SimpleNamespace(emoji=custom, count=2, users=lambda limit: Users([])),
+        ])
+        self.assertEqual(asyncio.run(self.bot.read_reactions(message)), [
+            {"emoji": "✅", "count": 1, "users": [{"discord_id": "5", "name": "Laurent"}]},
+            {"emoji": ":ok:", "count": 2, "users": []},
+        ])
 
 
 if __name__ == "__main__":

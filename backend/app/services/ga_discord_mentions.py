@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -24,6 +24,7 @@ from app.models.ga_discord_mention import GaDiscordMention
 from app.models.user import User
 
 STATUSES = ("new", "seen", "done")
+TRACKED_DAYS = 30  # reactions are followed on mentions of the last 30 days
 OPEN_STATUSES = ("new", "seen")
 REASONS = ("mention", "role", "reply")
 BRIDGE_LABEL = b"primeflow-ga-discord-mentions-bridge-v1"
@@ -85,23 +86,104 @@ async def store(db: AsyncSession, messages: list[dict[str, Any]]) -> int:
     users = await _linked_users(db, messages[0]["guild_id"], {m["author_discord_id"] for m in messages})
     for message in messages:
         values = {**message, "author_user_id": users.get(message["author_discord_id"])}
+        if values.get("reactions") is None:
+            values.pop("reactions", None)  # a live message/edit carries no reaction users: keep the stored ones
+        else:
+            values["reactions_synced_at"] = datetime.now(timezone.utc)
         statement = insert(GaDiscordMention).values(**values)
-        await db.execute(
-            statement.on_conflict_do_update(
-                index_elements=[GaDiscordMention.id],
-                set_={
-                    "content": statement.excluded.content,
-                    "edited_at": statement.excluded.edited_at,
-                    "attachments": statement.excluded.attachments,
-                    "reasons": statement.excluded.reasons,
-                    "channel_name": statement.excluded.channel_name,
-                    "author_name": statement.excluded.author_name,
-                    "author_user_id": statement.excluded.author_user_id,
-                },
-            )
-        )
+        update = {
+            "content": statement.excluded.content,
+            "edited_at": statement.excluded.edited_at,
+            "attachments": statement.excluded.attachments,
+            "reasons": statement.excluded.reasons,
+            "channel_name": statement.excluded.channel_name,
+            "author_name": statement.excluded.author_name,
+            "author_user_id": statement.excluded.author_user_id,
+        }
+        if "reactions" in values:
+            update["reactions"] = statement.excluded.reactions
+            update["reactions_synced_at"] = statement.excluded.reactions_synced_at
+        await db.execute(statement.on_conflict_do_update(index_elements=[GaDiscordMention.id], set_=update))
     await db.commit()
     return len(messages)
+
+
+async def set_reactions(db: AsyncSession, message_id: str, reactions: list[dict[str, Any]]) -> bool:
+    """Replace the reactions of a stored mention (False when the message is not a stored mention)."""
+    row = await db.get(GaDiscordMention, message_id)
+    if row is None:
+        return False
+    row.reactions = reactions
+    row.reactions_synced_at = datetime.now(timezone.utc)
+    await db.commit()
+    return True
+
+
+async def tracked(db: AsyncSession) -> tuple[list[str], list[dict[str, str]]]:
+    """Recent stored mention ids (reactions followed) and those whose reactions were never read."""
+    since = datetime.now(timezone.utc) - timedelta(days=TRACKED_DAYS)
+    rows = (
+        await db.execute(
+            select(GaDiscordMention.id, GaDiscordMention.channel_id, GaDiscordMention.reactions_synced_at)
+            .where(GaDiscordMention.created_at >= since)
+            .order_by(GaDiscordMention.created_at.desc())
+            .limit(5000)
+        )
+    ).all()
+    ids = [row.id for row in rows]
+    unsynced = [{"id": row.id, "channel_id": row.channel_id} for row in rows if row.reactions_synced_at is None][:500]
+    return ids, unsynced
+
+
+def approval_emojis() -> set[str]:
+    return {normalize_emoji(item) for item in settings.GA_DISCORD_APPROVAL_EMOJIS.split(",") if item.strip()}
+
+
+def normalize_emoji(value: str) -> str:
+    """✔️ == ✔ and 👍🏽 == 👍 (variation selector and skin tones do not matter)."""
+    return "".join(ch for ch in value.strip() if ch != "\ufe0f" and not 0x1F3FB <= ord(ch) <= 0x1F3FF)
+
+
+async def reactor_names(db: AsyncSession, rows: list[GaDiscordMention]) -> dict[str, str]:
+    """Discord user id -> PrimeFlow name for everyone who reacted (linked users only)."""
+    ids = {str(user.get("discord_id")) for row in rows for reaction in (row.reactions or []) for user in reaction.get("users") or []}
+    if not ids:
+        return {}
+    result = await db.execute(
+        select(DiscordLink.discord_user_id, User.full_name, User.username)
+        .join(User, User.id == DiscordLink.user_id)
+        .where(DiscordLink.discord_user_id.in_(ids))
+    )
+    return {discord_id: (full_name or username or "") for discord_id, full_name, username in result.all()}
+
+
+def reactions_out(
+    row: GaDiscordMention, people: dict[str, str], ga_id: str | None, approvals: set[str]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Reactions with names/initials, and initials of the reviewers (approval emoji, not author, not GA)."""
+    out: list[dict[str, Any]] = []
+    reviewed: list[str] = []
+    for reaction in getattr(row, "reactions", None) or []:
+        users = []
+        for user in reaction.get("users") or []:
+            discord_id = str(user.get("discord_id") or "")
+            name = people.get(discord_id) or user.get("name") or ""
+            users.append({"name": name, "initials": initials(name)})
+            counts = normalize_emoji(str(reaction.get("emoji") or "")) in approvals
+            if counts and discord_id not in {row.author_discord_id, ga_id or ""}:
+                code = initials(name)
+                if code and code not in reviewed:
+                    reviewed.append(code)
+        out.append({"emoji": reaction.get("emoji"), "count": int(reaction.get("count") or len(users)), "users": users})
+    return out, reviewed
+
+
+async def render(db: AsyncSession, rows: list[GaDiscordMention], tz: ZoneInfo) -> list[dict[str, Any]]:
+    names = await author_names(db, rows)
+    people = await reactor_names(db, rows)
+    ga_id = await ga_discord_id(db)
+    approvals = approval_emojis()
+    return [mention_out(row, names, tz, people=people, ga_id=ga_id, approvals=approvals) for row in rows]
 
 
 async def author_names(db: AsyncSession, rows: list[GaDiscordMention]) -> dict[uuid.UUID, str]:
@@ -112,8 +194,17 @@ async def author_names(db: AsyncSession, rows: list[GaDiscordMention]) -> dict[u
     return {user_id: (full_name or username or "") for user_id, full_name, username in result.all()}
 
 
-def mention_out(row: GaDiscordMention, names: dict[uuid.UUID, str], tz: ZoneInfo) -> dict[str, Any]:
+def mention_out(
+    row: GaDiscordMention,
+    names: dict[uuid.UUID, str],
+    tz: ZoneInfo,
+    *,
+    people: dict[str, str] | None = None,
+    ga_id: str | None = None,
+    approvals: set[str] | None = None,
+) -> dict[str, Any]:
     name = names.get(row.author_user_id) if row.author_user_id else None
+    reactions, reviewed_by = reactions_out(row, people or {}, ga_id, approval_emojis() if approvals is None else approvals)
     return {
         "id": f"dc:{row.id}",
         "author": name or row.author_name,
@@ -127,6 +218,9 @@ def mention_out(row: GaDiscordMention, names: dict[uuid.UUID, str], tz: ZoneInfo
         "attachments": row.attachments or [],
         "reasons": row.reasons or [],
         "status": row.status,
+        "reactions": reactions,
+        "reviewed_by": reviewed_by,
+        "ready_for_ga": bool(reviewed_by),
     }
 
 

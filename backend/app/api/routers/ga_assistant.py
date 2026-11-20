@@ -702,10 +702,14 @@ async def discord_mentions(
     since: str | None = None,
     until: str | None = None,
     only_open: bool = True,
+    only_ready: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Server-channel messages that mention GA (or a role of hers) or reply to her. Default: today."""
+    """Server-channel messages that mention GA (or a role of hers) or reply to her. Default: today.
+
+    only_ready=true keeps only messages a colleague already approved with a reaction (ready_for_ga).
+    """
     from app.services import ga_discord_mentions as mentions
 
     ensure_assistant_user(user)
@@ -715,14 +719,17 @@ async def discord_mentions(
     if end <= start:
         raise HTTPException(status_code=422, detail="until must be after since")
     rows = await mentions.list_mentions(db, since=start, until=end, statuses=mentions.OPEN_STATUSES if only_open else None)
-    names = await mentions.author_names(db, rows)
-    items = [mentions.mention_out(row, names, svc.ga_tz()) for row in rows]
+    items = await mentions.render(db, rows, svc.ga_tz())
+    if only_ready:
+        items = [item for item in items if item["ready_for_ga"]]
     last = await mentions.last_message_at(db)
     return {
         "timezone": settings.GA_TIMEZONE,
         "since": start.isoformat(),
         "until": end.isoformat(),
         "only_open": only_open,
+        "only_ready": only_ready,
+        "approval_emojis": [item.strip() for item in settings.GA_DISCORD_APPROVAL_EMOJIS.split(",") if item.strip()],
         "count": len(items),
         "items": items,
         "bot_configured": bool(settings.GA_DISCORD_MENTIONS_BOT_TOKEN),
@@ -739,4 +746,4 @@ async def discord_mark(item_id: str, payload: DiscordMarkIn, db: AsyncSession = 
     if not raw.isdigit():
         raise HTTPException(status_code=422, detail="Discord mention ids look like dc:<message id>")
     row = await _set_discord_status(db, user, raw, payload.status)
-    return mentions.mention_out(row, await mentions.author_names(db, [row]), svc.ga_tz())
+    return (await mentions.render(db, [row], svc.ga_tz()))[0]
