@@ -77,6 +77,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | Regjistrime dhe Mira | Regjistrimet, Mira, Meetings, PX Notes, Task Details |
 | Mira Notetaker / Smart Notes | Mira → Notetaker dhe API-ja e historikut shfaqin çdo takim të përpunuar për të gjithë përdoruesit e autentikuar të PrimeFlow, pavarësisht organizatorit ose kanalit të nisjes. Përmbledhja ruhet veç shënimeve dhe transkriptit. Kontrollo Discord (`/takimi`, AI Agent, `mira-kontrolli`, kanalet personale), Mira → Shënimet, PX Notes, lidhjet e transkriptit dhe përjashtimin ekzistues të Mira Notes nga 1H Reports, After Break Report dhe M1 PIKAT. |
 | Nisja e botëve të regjistrimit | Boti kryesor i Discord-it dhe AI Agent përdorin të njëjtin format të shënimeve. Moduli `discord_voice_note_format.py` ndan etiketat dhe datën nga klienti OpenAI dhe router-at FastAPI. Kontrollo importin e të dy botëve në një proces të pastër dhe gatishmërinë në Discord pas deployment-it. |
+| Ask MIRA | Komanda `/mira pyet`, përmendjet e botit kryesor, API-ja Discord dhe lidhjet te segmentet e Notetaker. Transkripti është burimi, kujtesa mban kontekstin dhe qasja verifikohet sërish para kthimit të burimeve. Kontrollo dërgimin privat, identitetin e revokuar, kufirin e pyetjeve, hapjen e lidhjeve dhe komandat e raportimit 1H që ndajnë grupin `/mira`. |
 | Mira Notetaker / Kujtesa e takimit | Notetaker dhe Kujtesa shfaqin pikat, sqarimet, burimet dhe historikun për përdoruesit e autentikuar. Çdo përdorues mund të japë sqarim dhe historiku ruan autorin. Projekti lidhet nga një përputhje unike në departamentin e takimit. Kontrollo që një çështje e përsëritur të ruajë burimet edhe kur takimet u nisën nga dy persona dhe që sqarimet të ruhen veç transkriptit. Kontrollo regresionin te raportimi orar, PX Notes dhe dërgimi në Discord. |
 | Mira AI Agent / hyrja automatike | Discord AI Agent (orari, prania, regjistrimi), mira-kontrolli (paneli AI Agent), Mira / shënimet, PX Notes (shikimi dhe ruajtja). Orari dhe request_id `autoai-` janë të veçantë nga regjistruesi 1H (`auto1h-`) dhe Mira Host. Finalizuesi i përbashkët ruan automatikisht shënimet e `auto1h-` dhe të `autoai-` me recorder `ai_agent`; nisjet manuale mbeten me ruajtje manuale. Kontrollo deduplikimin, lidhjen me transkriptin, statusin Ruajtur dhe kthimin te ruajtja manuale pas dështimit. |
 | Takimet (shënimet e takimeve) | Takimet, Takimi (seancat), Historia e klientit, Regjistrimet (Shënim / Injoro / screenshot), PX Notes (Dërgo / Bashko në PX), Meeting Scheduler (Trajnim), Sidebar |
@@ -86,6 +87,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | GA PERSONAL - grupet dhe filtrat | Pamja ditore dhe javore e GA PERSONAL, filtri i grupeve dhe etiketat e tabelave; klasifikimi i eventeve ndahet përmes `frontend/src/lib/ga-personal-week.ts`, përfshirë eventet e vjetra të volejbollit. Të dhënat e modulit mbeten të ndara nga detyrat dhe raportet e kompanisë. |
 
 ## Varësi që nuk duhen harruar
+
+- Përmbledhja e shpejtë përdoret si në Notetaker, ashtu edhe në Discord. Për
+  takimet normale numërohen të pesë seksionet së bashku, me kufi 250 fjalë dhe
+  me riprovim për shkurtim. Kontrollo përmbledhjet e reja, shënimet e plota në
+  PX Notes dhe transkriptin. Përmbledhjet ekzistuese lexohen nga vlera e ruajtur.
+  Regjistruesi 1H krijon përmbledhjen e Notetaker-it pas përfundimit të ruajtjes
+  ekzistuese. Administratorët dhe menaxherët mund ta gjenerojnë për takime të
+  ruajtura me transkript, përfshirë regjistrimet e pjesshme. Kontrollo që
+  rigjenerimi të ndryshojë vetëm përmbledhjen e shpejtë, të mos dërgojë njoftim
+  tjetër në Discord dhe të mos krijojë kopje në PX Notes.
 
 - Asistentja e GA-së (MCP, `docs/mcp-assistant.md`): `app/services/ga_assistant.py` përsërit
   në Python rregullat e tabelës së parë të **Admin Tasks** (GA TASKS / BZ ME GA TASKS,

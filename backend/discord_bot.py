@@ -31,6 +31,7 @@ import discord_m2_approvals as m2_approvals
 import discord_answer_sync as answer_sync
 import discord_voice_meetings as voice_meetings
 import mira_host
+import discord_mira_ask
 
 log = logging.getLogger("primeflow.discord")
 ACTION_CHOICES = [
@@ -359,6 +360,7 @@ class PrimeFlowBot(discord.Client):
 
         voice_meetings.register_meeting_commands(self, guild)
         mira_host.register_host_commands(self, guild)
+        discord_mira_ask.register(self, guild)
         await self.tree.sync(guild=guild)
         if settings.DISCORD_MEETING_NOTES_ENABLED:
             self.voice_meeting_results.start()
@@ -868,6 +870,8 @@ class PrimeFlowBot(discord.Client):
 
     async def on_message(self, message: discord.Message):
         if not settings.DISCORD_MESSAGE_CONTENT_ENABLED or message.author.bot or not message.guild or not message.content.strip():
+            return
+        if str(message.guild.id) == settings.DISCORD_GUILD_ID and await discord_mira_ask.handle_mention(self, message):
             return
         if str(message.guild.id) != settings.DISCORD_GUILD_ID or getattr(message.channel, "topic", None) != f"PrimeFlow personal workspace: {message.author.id}":
             return
