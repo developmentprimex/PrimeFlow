@@ -13,6 +13,7 @@ from app.models.morning_report_settings import MorningReportSettings
 from app.services.morning_report import (
     MANUAL_SECTION_TITLES,
     SECTION_TITLES,
+    TASK_FEEDBACK_OVERRIDES,
     build_morning_report_sections,
     is_generated_subject,
     render_html,
@@ -65,7 +66,7 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
         if local_now.weekday() not in (settings.weekdays or []):
             return False
         row = (
-            await db.execute(select(MorningReportDraft).where(MorningReportDraft.report_date == report_day))
+            await db.execute(select(MorningReportDraft).where(MorningReportDraft.report_date == report_day).with_for_update())
         ).scalar_one_or_none()
         sent_slots = {str(slot) for slot in (getattr(row, "auto_sent_slots", None) or [])}
         delivery_slot = _due_m1_send_slot(local_now, sent_slots)
@@ -79,7 +80,10 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
 
         # Always rebuild from live data at send time so auto-filled sections stay current.
         # Keep any manual answers already saved on today's draft.
-        sections, snapshot = await build_morning_report_sections(db, report_day)
+        overrides = (getattr(row, "generated_snapshot", None) or {}).get(TASK_FEEDBACK_OVERRIDES)
+        sections, snapshot = await build_morning_report_sections(
+            db, report_day, task_feedback_overrides=overrides,
+        )
         existing_sections = row.sections if row is not None else None
         if row is not None:
             sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)

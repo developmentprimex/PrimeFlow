@@ -11,6 +11,7 @@ from app.db import SessionLocal
 from app.models.morning_report_draft import MorningReportDraft
 from app.services.discord_ga_replies import refresh_m1_section
 from app.services.morning_report import (
+    TASK_FEEDBACK_OVERRIDES,
     build_morning_report_sections,
     normalize_morning_report_sections,
     refresh_morning_task_tables,
@@ -48,6 +49,7 @@ async def main() -> None:
         else:
             sections = await refresh_morning_task_tables(
                 db, normalize_morning_report_sections(row.sections), row.report_date,
+                task_feedback_overrides=(row.generated_snapshot or {}).get(TASK_FEEDBACK_OVERRIDES),
             )
             sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                                 sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)

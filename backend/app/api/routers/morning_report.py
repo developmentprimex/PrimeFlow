@@ -4,12 +4,14 @@ from app.services.report_attendance import filter_report_sections
 from app.services.discord_ga_replies import refresh_m1_section
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_manager_or_admin
@@ -18,6 +20,13 @@ from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.models.enums import UserRole
 from app.models.user import User
+from app.models.department import Department
+from app.models.task import Task
+from app.models.task_plan_feedback import TaskPlanFeedback
+from app.services.discord_m3 import target_day
+from app.services.ga_identity import is_ga_user, resolve_ga_user
+from app.services.audit import add_audit_log
+from app.services.task_plan_feedback import finance_feedback_user, load_task_plan_feedback
 from app.services.meeting_point_manual_sync import (
     custom_manual_questions,
     merge_common_view_manual_sections,
@@ -27,8 +36,11 @@ from app.services.meeting_point_manual_sync import (
 )
 from app.services.morning_report import (
     MANUAL_SECTION_TITLES,
+    GA_HV_DV_TASKS_TITLE,
     MARKER_TASK_SECTIONS,
     SECTION_TITLES,
+    TASK_FEEDBACK_OVERRIDES,
+    TASK_FEEDBACK_ROWS,
     build_morning_report_sections,
     is_removed_morning_manual_question,
     normalize_morning_report_sections,
@@ -59,10 +71,117 @@ class RecipientsPayload(BaseModel):
     bcc: list[str] = Field(default_factory=list)
 
 
+class TaskFeedbackEdit(BaseModel):
+    continuation: Literal["", "PO", "JO"] | None = None
+    comment: str | None = Field(default=None, max_length=4000)
+
+
+class NextWorkdayFeedbackEdit(TaskFeedbackEdit):
+    target_date: date
+
+
+async def _next_workday_tasks(db, user, view):
+    from app.api.routers.discord_m3 import tomorrow_data
+    from app.services.meetings_report import _m3_department_code_label
+
+    if not (is_ga_user(user) if view == "ga" else finance_feedback_user(user)):
+        raise HTTPException(status_code=403, detail="Kjo pamje është personale.")
+    target_date = target_day(datetime.now(report_timezone()).date())
+    rows, _, _ = await tomorrow_data(db, target_date, user_id=user.id)
+    if rows:
+        departments = (await db.execute(
+            select(Task.id, Task.department_id, Department.code)
+            .outerjoin(Department, Department.id == Task.department_id)
+            .where(Task.work_staff_filter(), Task.id.in_([uuid.UUID(row["task_id"]) for row in rows]))
+        )).all()
+        eligible_ids = {
+            str(task_id) for task_id, dep_id, code in departments
+            if view == "ga" or _m3_department_code_label(dep_id, {dep_id: code}) == "FIN"
+        }
+        rows = [row for row in rows if row["task_id"] in eligible_ids]
+    return target_date, rows
+
+
+async def _next_workday_owner(db, user, view, person_id):
+    owner = user
+    if person_id is not None and person_id != user.id:
+        if view != "finance" or user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Kjo pamje është personale.")
+        owner = await db.get(User, person_id)
+        if owner is None or not owner.is_active or not finance_feedback_user(owner):
+            raise HTTPException(status_code=403, detail="Kjo pamje është personale.")
+    return owner
+
+
+async def _ga_plan_owner(db):
+    owner = await resolve_ga_user(db, work_staff_only=True)
+    if owner is None or not owner.is_active:
+        raise HTTPException(status_code=404, detail="Llogaria e GA nuk u gjet.")
+    return owner
+
+
+@router.get("/next-workday")
+async def get_next_workday_feedback(
+    view: Literal["ga", "finance"],
+    person_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    if view == "ga" and person_id is None and not is_ga_user(user):
+        owner = await _ga_plan_owner(db)
+    else:
+        owner = await _next_workday_owner(db, user, view, person_id)
+    target_date, rows = await _next_workday_tasks(db, owner, view)
+    feedback = await load_task_plan_feedback(db, target_date, [uuid.UUID(row["task_id"]) for row in rows])
+    tasks = []
+    for row in rows:
+        continuation, comment = feedback.get(uuid.UUID(row["task_id"]), {}).get(owner.id, ("", ""))
+        tasks.append({
+            "id": row["task_id"], "title": row["title"], "continuation": continuation, "comment": comment,
+            "start_date": row["start_date"], "due_date": row["due_date"], "status": row["status"],
+            "slot": row["slot"], "is_system_task": row["is_system_task"], "is_1h": row["is_1h"],
+        })
+    return {"target_date": target_date, "tasks": tasks}
+
+
+@router.patch("/next-workday/{task_id}")
+async def save_next_workday_feedback(
+    task_id: uuid.UUID,
+    view: Literal["ga", "finance"],
+    payload: NextWorkdayFeedbackEdit,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    person_id: uuid.UUID | None = None,
+) -> dict:
+    if view == "ga" and person_id is None and user.role == UserRole.ADMIN and not is_ga_user(user):
+        owner = await _ga_plan_owner(db)
+    else:
+        owner = await _next_workday_owner(db, user, view, person_id)
+    target_date, rows = await _next_workday_tasks(db, owner, view)
+    if payload.target_date != target_date or not any(row["task_id"] == str(task_id) for row in rows):
+        raise HTTPException(status_code=409, detail="Plani ndryshoi. Rifresko pamjen Nesër.")
+    fields = payload.model_dump(exclude={"target_date"}, exclude_none=True)
+    if fields:
+        fields["updated_at"] = datetime.now(timezone.utc)
+        statement = insert(TaskPlanFeedback).values(
+            target_date=target_date, task_id=task_id, user_id=owner.id, **fields,
+        )
+        await db.execute(statement.on_conflict_do_update(
+            index_elements=["target_date", "task_id", "user_id"], set_=fields,
+        ))
+        if owner.id != user.id:
+            add_audit_log(db=db, actor_user_id=user.id, entity_type="task", entity_id=task_id,
+                          action="task_plan_feedback.update",
+                          after={"user_id": str(owner.id), "target_date": target_date.isoformat()})
+        await db.commit()
+    return {"ok": True}
+
+
 class DraftUpdate(BaseModel):
     subject: str | None = Field(default=None, min_length=1, max_length=255)
     recipients: RecipientsPayload | None = None
     sections: list[SectionPayload] | None = None
+    task_feedback: dict[str, TaskFeedbackEdit] = Field(default_factory=dict)
 
 
 class SettingsPayload(BaseModel):
@@ -144,14 +263,21 @@ def _settings(row: MorningReportSettings) -> dict:
 
 
 async def _draft(db: AsyncSession, row: MorningReportDraft, sections: list[dict[str, str]] | None = None) -> dict:
+    visible_sections = row.sections if sections is None else sections
+    snapshot = row.generated_snapshot or {}
+    feedback_rows = next(
+        (section[TASK_FEEDBACK_ROWS] for section in visible_sections if TASK_FEEDBACK_ROWS in section),
+        snapshot.get(TASK_FEEDBACK_ROWS, {}),
+    )
     return {
         "id": str(row.id),
         "report_date": row.report_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
         "sections": with_section_keys("morning", await filter_report_sections(
-            db, row.sections if sections is None else sections, row.report_date,
+            db, visible_sections, row.report_date,
         )),
+        TASK_FEEDBACK_ROWS: feedback_rows,
         "generated_snapshot": row.generated_snapshot,
         "auto_sent_slots": list(row.auto_sent_slots or []),
         "status": row.status,
@@ -240,7 +366,10 @@ async def get_draft(
     # Apply section migrations to saved reports too.  Otherwise retired prompts
     # remain visible in a previously generated or sent report indefinitely.
     sections = normalize_morning_report_sections(row.sections)
-    sections = await refresh_morning_task_tables(db, sections, row.report_date)
+    sections = await refresh_morning_task_tables(
+        db, sections, row.report_date,
+        task_feedback_overrides=(row.generated_snapshot or {}).get(TASK_FEEDBACK_OVERRIDES),
+    )
     sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     settings = await _get_or_create_settings(db)
@@ -259,13 +388,15 @@ async def generate_draft(
     user: User = Depends(require_morning_report_user),
 ) -> dict:
     try:
-        sections, snapshot = await build_morning_report_sections(db, report_date)
         recipients = await _default_draft_recipients(db)
+        settings = await _get_or_create_settings(db)
+        row = (await db.execute(
+            select(MorningReportDraft).where(MorningReportDraft.report_date == report_date).with_for_update(),
+        )).scalar_one_or_none()
+        overrides = (row.generated_snapshot or {}).get(TASK_FEEDBACK_OVERRIDES) if row is not None else None
+        sections, snapshot = await build_morning_report_sections(db, report_date, task_feedback_overrides=overrides)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Generate failed: {exc}") from exc
-    row = (
-        await db.execute(select(MorningReportDraft).where(MorningReportDraft.report_date == report_date))
-    ).scalar_one_or_none()
     existing_sections = row.sections if row is not None else None
     if row is not None:
         sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
@@ -287,7 +418,6 @@ async def generate_draft(
             }
             for section in sections
         ]
-    settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
         db, sections, "morning", existing_sections, settings.manual_questions
     )
@@ -325,7 +455,9 @@ async def update_draft(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_morning_report_user),
 ) -> dict:
-    row = await db.get(MorningReportDraft, draft_id)
+    row = await db.get(
+        MorningReportDraft, draft_id, **({"with_for_update": True} if payload.task_feedback else {}),
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     if payload.subject is not None:
@@ -361,6 +493,21 @@ async def update_draft(
                 settings.manual_questions, previous_questions, current_questions
             )
         row.sections = normalize_morning_report_sections(saved)
+    if payload.task_feedback:
+        snapshot = row.generated_snapshot or {}
+        overrides = dict(snapshot.get(TASK_FEEDBACK_OVERRIDES, {}))
+        for key, edit in payload.task_feedback.items():
+            overrides[key] = {**overrides.get(key, {}), **edit.model_dump(exclude_none=True)}
+        sections = await refresh_morning_task_tables(
+            db, normalize_morning_report_sections(row.sections), row.report_date, task_feedback_overrides=overrides,
+        )
+        section = next(section for section in sections if section["section_key"] == GA_HV_DV_TASKS_TITLE)
+        feedback_rows = section.pop(TASK_FEEDBACK_ROWS)
+        valid_keys = {item["key"] for rows in feedback_rows.values() for item in rows}
+        if payload.task_feedback.keys() - valid_keys:
+            raise HTTPException(status_code=409, detail="Lista e detyrave ndryshoi. Rifresko raportin dhe provo përsëri.")
+        row.sections = sections
+        row.generated_snapshot = {**snapshot, TASK_FEEDBACK_OVERRIDES: overrides, TASK_FEEDBACK_ROWS: feedback_rows}
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()
@@ -378,7 +525,10 @@ async def preview_draft(
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     sections = normalize_morning_report_sections(row.sections)
-    sections = await refresh_morning_task_tables(db, sections, row.report_date)
+    sections = await refresh_morning_task_tables(
+        db, sections, row.report_date,
+        task_feedback_overrides=(row.generated_snapshot or {}).get(TASK_FEEDBACK_OVERRIDES),
+    )
     sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
@@ -401,7 +551,10 @@ async def send_draft(
     if not recipients["to"]:
         raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
     sections = normalize_morning_report_sections(row.sections)
-    sections = await refresh_morning_task_tables(db, sections, row.report_date)
+    sections = await refresh_morning_task_tables(
+        db, sections, row.report_date,
+        task_feedback_overrides=(row.generated_snapshot or {}).get(TASK_FEEDBACK_OVERRIDES),
+    )
     sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)

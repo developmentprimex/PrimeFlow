@@ -38,6 +38,8 @@ const HEADER_LABELS = new Set([
   "DATE",
   "LATE",
   "T/Y/O",
+  "VAZHDON?",
+  "KOMENT",
   "STATUS",
   "MBAJTUR",
   "MBAJTUR?",
@@ -159,6 +161,7 @@ function isNarrowTableHeader(header: string) {
     header === "COUNT" ||
     header === "LATE" ||
     header === "T/Y/O" ||
+    header === "VAZHDON?" ||
     header === "DATA" ||
     header === "DATE" ||
     header === "TIME"
@@ -369,6 +372,13 @@ function diskCellTone(headers: string[], cells: string[], cellIndex: number) {
   return "text-center"
 }
 
+function continuationCellTone(header: string, value: string) {
+  if (header !== "VAZHDON?") return ""
+  if (value.trim() === "✓") return "!bg-green-100 !text-green-800 font-semibold"
+  if (value.trim() === "X") return "!bg-red-100 !text-red-800 font-semibold"
+  return ""
+}
+
 function tyoCellTone(headers: string[], cells: string[], cellIndex: number) {
   if (normalizeHeader(headers[cellIndex] || "") !== "T/Y/O") return ""
   const value = cells[cellIndex]?.trim().toUpperCase()
@@ -564,6 +574,8 @@ export function ReportSectionPreview({
   projectColumnWidth,
   largerTableText = false,
   emphasizeOwnerSeparator = false,
+  renderCell,
+  renderLine,
 }: {
   body: string
   filterCreatedWeek?: boolean
@@ -571,6 +583,8 @@ export function ReportSectionPreview({
   projectColumnWidth?: string
   largerTableText?: boolean
   emphasizeOwnerSeparator?: boolean
+  renderCell?: (label: string, rowNumber: string, header: string) => React.ReactNode
+  renderLine?: (text: string) => React.ReactNode
 }) {
   const [createdWeekFilter, setCreatedWeekFilter] = React.useState<"all" | "this" | "last">("all")
   const [wfeAgeFilter, setWfeAgeFilter] = React.useState("all")
@@ -856,7 +870,7 @@ export function ReportSectionPreview({
                 const amPmDivider = hasAmPmDivider(row.label, visibleDataRows, rowIndex)
                 const strongStartDueDivider = hasStrongStartDueDivider(row.label)
                 return (
-                  <tr key={row.key} className={tone}>
+                  <tr key={renderCell ? (visible.cells[0]?.trim() || row.key) : row.key} className={tone}>
                     {visible.cells.map((cell, cellIndex) => {
                       const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
                       const narrow = isNarrowTableHeader(header)
@@ -871,6 +885,7 @@ export function ReportSectionPreview({
                           }
                         : undefined
                       const displayedCell = previewTableCell(cell, header)
+                      const customCell = renderCell?.(row.label, visible.cells[0]?.trim() ?? "", header)
                       const stackedDate = displayedCell.includes("\n")
                       const meetingFrame = highlightedMeeting
                         ? `border-y-[3px] border-y-blue-600 ${cellIndex === 0 ? "border-l-[3px] border-l-blue-600" : ""} ${cellIndex === visible.cells.length - 1 ? "border-r-[3px] border-r-blue-600" : ""}`
@@ -888,7 +903,7 @@ export function ReportSectionPreview({
                               : header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
                               ? "px-1 text-center"
                               : "px-2"
-                          } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${tyoCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
+                          } ${continuationCellTone(header, cell)} ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${tyoCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
                             createdWeekCellTone(visible.headers, visible.cells, cellIndex, canFilterWfeAge || row.label.toUpperCase().includes("DT WFE"))
                           } ${
                             stackedDate
@@ -900,7 +915,7 @@ export function ReportSectionPreview({
                             highlightedMeeting && header === "TITLE" ? "text-blue-700 font-semibold" : ""
                           } ${amPmDivider ? "border-t-[3px] border-t-slate-700" : ""}`}
                         >
-                          {stackedDate ? (
+                          {customCell ?? (stackedDate ? (
                             displayedCell.split("\n").map((line, lineIndex) => (
                               <span
                                 key={`${lineIndex}-${line}`}
@@ -924,7 +939,7 @@ export function ReportSectionPreview({
                             ))
                           ) : (
                             renderPreviewTableCell(displayedCell, header)
-                          )}
+                          ))}
                         </td>
                       )
                     })}
@@ -1003,6 +1018,13 @@ export function ReportSectionPreview({
   const renderedItems: React.ReactNode[] = []
   for (let index = 0; index < previewItems.length; index += 1) {
     const item = previewItems[index]
+    if (item.kind === "text" || item.kind === "label") {
+      const customLine = renderLine?.(item.text)
+      if (customLine != null) {
+        renderedItems.push(<React.Fragment key={item.key}>{customLine}</React.Fragment>)
+        continue
+      }
+    }
     if (item.kind === "blank") {
       renderedItems.push(<div key={item.key} className="h-2" />)
       continue

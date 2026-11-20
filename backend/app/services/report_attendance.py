@@ -329,7 +329,7 @@ async def filter_report_sections(db, sections: list[dict], day: date, *, tomorro
                     if not owner and row[owner_column] not in {"", "-", "—"}:
                         continue
                     row[owner_column] = owner or row[owner_column]
-                    if header[0].upper() == "NR":
+                    if header[0].upper() == "NR" and "VAZHDON?" not in header:
                         row[0] = str(len(kept) + 1)
                     kept.append(row)
                 widths = [max([len(label), 1] + [len(part) for row in kept for part in str(row[i]).splitlines()]) for i, label in enumerate(header)]

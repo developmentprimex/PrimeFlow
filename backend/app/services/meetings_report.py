@@ -2975,6 +2975,11 @@ def _table_cell_style_override(header: str, value: str) -> tuple[str, str, bool]
             return "#DCFCE7", "#166534", True
         if value.strip() == "\u2715":
             return "#FEE2E2", "#991B1B", True
+    if header_name == "VAZHDON?":
+        if normalized == "✓":
+            return "#DCFCE7", "#166534", True
+        if normalized == "X":
+            return "#FEE2E2", "#991B1B", True
     if header_name == "ADDED":
         if normalized in {"THIS W", "SOT"}:
             return "#BAE6FD", "#0C4A6E", True
@@ -3193,6 +3198,14 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                     ' bgcolor="#dc2626" style="background-color:#dc2626!important;'
                     'color:#ffffff!important;font-weight:400;text-align:left;"'
                 )
+            if _normalized_table_header(header[index]) == "VAZHDON?":
+                override = _table_cell_style_override(header[index], current_cell)
+                if override:
+                    background, foreground, _ = override
+                    cell_style = (
+                        f' bgcolor="{background}" style="background-color:{background}!important;'
+                        f'color:{foreground}!important;font-weight:700;"'
+                    )
             if _is_stacked_start_due_cell(header[index], current_cell):
                 cell_style = ' style="padding:0!important;"'
             if has_am_pm_divider:
@@ -3332,7 +3345,7 @@ def _email_column_widths(
     }
     content_names = {
         "TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION", "PYETJA",
-        "REASON", "COMMENT",
+        "REASON", "COMMENT", "KOMENT",
     }
     normalized = [_normalized_table_header(cell) for cell in header]
     widths = ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]

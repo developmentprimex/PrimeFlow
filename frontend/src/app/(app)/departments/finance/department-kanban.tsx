@@ -4,6 +4,7 @@ import * as React from "react"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
+import { NextWorkdayTaskFeedback } from "@/components/next-workday-task-feedback"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
 
@@ -292,6 +293,7 @@ function rowPriorityRank(row: RowView) {
 
 export default function DepartmentKanban() {
   const { apiFetch, user } = useAuth()
+  const canConfirmTomorrow = user?.full_name?.trim().toLowerCase() === "haxhere spahiu"
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<User[]>([])
@@ -299,6 +301,11 @@ export default function DepartmentKanban() {
   const [error, setError] = React.useState<string | null>(null)
   const [selectedUserId, setSelectedUserId] = React.useState<string>(ALL_USERS_VALUE)
   const [viewFilter, setViewFilter] = React.useState<ViewFilter>(VIEW_ALL)
+  const [tomorrowOpen, setTomorrowOpen] = React.useState(false)
+  const selectedFinanceOwner = users.find((entry) => entry.id === selectedUserId)
+  const canInspectTomorrow = user?.role === "ADMIN" && selectedFinanceOwner?.full_name?.trim().toLowerCase() === "haxhere spahiu"
+  const canOpenTomorrow = canConfirmTomorrow || canInspectTomorrow
+  const showTomorrow = canOpenTomorrow && tomorrowOpen
   const [dateFrom, setDateFrom] = React.useState("")
   const [dateTo, setDateTo] = React.useState("")
   const [showDone, setShowDone] = React.useState(false)
@@ -749,6 +756,16 @@ export default function DepartmentKanban() {
     }
   }, [apiFetch, exportingExcel, financeExportRows])
 
+  const tomorrowButton = canOpenTomorrow && (
+    <Button
+      variant={showTomorrow ? "default" : "outline"}
+      aria-pressed={showTomorrow}
+      onClick={() => setTomorrowOpen((open) => !open)}
+    >
+      Nesër
+    </Button>
+  )
+
   return (
     <div className="space-y-6">
       <Card>
@@ -756,11 +773,9 @@ export default function DepartmentKanban() {
           <div className="space-y-1">
             <CardTitle>{department?.name || "Finance"} Department Tasks</CardTitle>
           </div>
-          <Button onClick={() => void loadData()} variant="outline">
-            Refresh
-          </Button>
+          {!showTomorrow && <Button onClick={() => void loadData()} variant="outline">Refresh</Button>}
         </CardHeader>
-        <CardContent className="space-y-4">
+        {!showTomorrow && <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label>People</Label>
@@ -801,10 +816,39 @@ export default function DepartmentKanban() {
               <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
             </div>
           </div>
-        </CardContent>
+        </CardContent>}
       </Card>
 
-      <Card>
+      {showTomorrow ? (
+        <NextWorkdayTaskFeedback
+          view="finance"
+          personId={canConfirmTomorrow ? undefined : selectedUserId}
+          headerAction={tomorrowButton}
+          taskHeaders={["NR", "Title", "Freq.", "Type", "Slot", "Asg", "Created", "Start Date", "Due Date", "Late", "Symbol", "Status"].map((label) => (
+            <TableHead key={label} className={label === "Title" ? "min-w-72" : "whitespace-nowrap"}>{label}</TableHead>
+          ))}
+          renderTaskCells={(task, index) => {
+            const row = rows.find((item) => item.id === task.id)
+            const status = row?.status ?? task.status
+            return <>
+              <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
+              <TableCell className="min-w-72 whitespace-normal font-medium text-slate-800">
+                <CollapsibleTaskTitle title={row?.title ?? task.title} renderTitle={renderMarkedNoteContent} />
+              </TableCell>
+              <TableCell>{row?.systemFrequencyDisplayLabel || "–"}</TableCell>
+              <TableCell><Badge variant="outline">{row?.typeLabel ?? (task.is_system_task ? "SYS" : task.is_1h ? "1H" : "P")}</Badge></TableCell>
+              <TableCell>{task.slot || (row ? getFinanceSlotDisplay(row.task) : "–")}</TableCell>
+              <TableCell>{row?.assigneeInitials || initials(selectedFinanceOwner?.full_name || user?.full_name || "") || "–"}</TableCell>
+              <TableCell className="text-xs text-slate-400">{row ? formatDateDMY(row.createdDateIso) : "–"}</TableCell>
+              <TableCell>{formatDateDMY(row?.startDateIso || task.start_date || "")}</TableCell>
+              <TableCell>{formatDateDMY(row?.dueDateIso || task.due_date || "")}</TableCell>
+              <TableCell>{row?.lateDays ? <Badge variant="destructive">{row.lateDays}</Badge> : "–"}</TableCell>
+              <TableCell>{row?.typeLabel === "SYS" || task.is_system_task ? "SYS" : row?.task.one_h_marker || "–"}</TableCell>
+              <TableCell><span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${weeklyPlanStatusBgClass(status)}`}>{status}</span></TableCell>
+            </>
+          }}
+        />
+      ) : <Card>
         <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
             <CardTitle>Finance Tasks</CardTitle>
@@ -812,13 +856,16 @@ export default function DepartmentKanban() {
               {filteredRows.length} rows for {selectedUserLabel}
             </CardDescription>
           </div>
-          <Button
-            variant="outline"
-            onClick={() => void handleExportExcel()}
-            disabled={loading || !!error || !financeExportRows.length || exportingExcel}
-          >
-            {exportingExcel ? "Exporting..." : "Export Excel"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {tomorrowButton}
+            <Button
+              variant="outline"
+              onClick={() => void handleExportExcel()}
+              disabled={loading || !!error || !financeExportRows.length || exportingExcel}
+            >
+              {exportingExcel ? "Exporting..." : "Export Excel"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -1020,7 +1067,7 @@ export default function DepartmentKanban() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card>}
 
       <TaskEditDialog
         task={editingTask}

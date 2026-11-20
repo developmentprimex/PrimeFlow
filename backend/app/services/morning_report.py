@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.services.report_attendance import filter_task_context, filter_report_sections
 
 import re
+from collections.abc import Sequence, Set
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.common_entry import CommonEntry
 from app.models.department import Department
+from app.services.task_plan_feedback import load_task_plan_feedback
 from app.models.enums import CommonCategory
 from app.models.meeting import Meeting
 from app.models.task import Task
@@ -96,8 +98,11 @@ DISPLAY_SECTION_TITLES = [
 MANUAL_SECTION_TITLES: set[str] = set()
 GA_HV_DV_TASK_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7),
-    ("STATUS", 18), ("T/Y/O", 5), ("TITULLI", 52),
+    ("STATUS", 18), ("T/Y/O", 5), ("TITULLI", 52), ("VAZHDON?", 8), ("KOMENT", 45),
 ]
+TASK_FEEDBACK_OVERRIDES = "task_feedback_overrides"
+TASK_FEEDBACK_ROWS = "task_feedback_rows"
+CONTINUATION_ICONS = {"PO": "✓", "JO": "X"}
 EMAIL_TASK_SOURCES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("EM: INFO PX", re.compile(r"^\s*EM\s*:\s*INFO\s+PX\b", re.I)),
     ("EM: IT", re.compile(r"^\s*EM\s*:\s*IT\b", re.I)),
@@ -444,6 +449,9 @@ def _ga_hv_dv_task_rows(
     report_day: date,
     department_codes: dict[Any, str] | None = None,
     target_initials: str | None = None,
+    *,
+    selected_tasks: list[Task] | None = None,
+    feedback_task_ids: Set[Any] = frozenset(),
 ) -> list[list[str]]:
     """Today's open tasks plus open overdue tasks for the GA/HV/DV tables.
 
@@ -463,7 +471,7 @@ def _ga_hv_dv_task_rows(
     def belongs_to_report_day(task: Task) -> bool:
         due_day = _local_date(task.due_date)
         is_open_overdue = _is_open(task) and due_day is not None and due_day < report_day
-        return _belongs_to_day(task, report_day) or is_open_overdue
+        return _belongs_to_day(task, report_day) or is_open_overdue or task.id in feedback_task_ids
 
     selected = [
         task
@@ -496,6 +504,8 @@ def _ga_hv_dv_task_rows(
         )
 
     selected.sort(key=m1_sort_key)
+    if selected_tasks is not None:
+        selected_tasks.extend(selected)
     rows: list[list[str]] = []
     for index, task in enumerate(selected, start=1):
         planned_start, planned_end = planned_range_for_daily_report(task, None)
@@ -528,16 +538,95 @@ def _ga_hv_dv_task_rows(
     return rows
 
 
-def _ga_hv_dv_tables_body(rows_by_title: dict[str, list[list[str]]]) -> str:
+def _ga_hv_dv_tables_body(
+    rows_by_title: dict[str, list[list[str]]], plan_rows: Sequence[dict[str, str]] = (),
+) -> str:
     lines: list[str] = []
+    plans = {row["owners"]: row for row in plan_rows}
     for title in (HV_TASKS_TITLE, DV_TASKS_TITLE, GA_TASKS_TITLE):
         if lines:
             lines.append("")
+        if plan := plans.get(title[:2]):
+            answer = {"PO": "Po", "JO": "Jo"}.get(plan["continuation"], "–")
+            comment = " ".join(plan["comment"].split())
+            lines.append(f'{plan["title"]} ({plan["owners"]}): {answer}' + (f" · {comment}" if comment else ""))
         rows = rows_by_title.get(title, [])
         if not rows:
             rows = [["-", "-", "-", "-", "-", "-", "-", "(Asnje detyre)"]]
-        lines.extend(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, rows))
+        values = [row + [""] * (len(GA_HV_DV_TASK_COLUMNS) - len(row)) for row in rows]
+        lines.extend(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, values))
     return _normalize_section(lines)
+
+
+async def _ga_hv_dv_task_section(
+    db: AsyncSession,
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    report_day: date,
+    department_codes: dict[Any, str],
+    overrides: dict,
+) -> tuple[str, dict]:
+    feedback_by_task = await load_task_plan_feedback(db, report_day, [task.id for task in tasks])
+
+    rows_by_title = {}
+    feedback_rows = {}
+    for title, initials in ((HV_TASKS_TITLE, "HV"), (DV_TASKS_TITLE, "DV"), (GA_TASKS_TITLE, "GA")):
+        responses_by_task = {}
+        for task in tasks:
+            answers_by_user = feedback_by_task.get(task.id)
+            if not answers_by_user:
+                continue
+            owners = set(assignee_ids_by_task.get(task.id, ()))
+            if task.assigned_to:
+                owners.add(task.assigned_to)
+            allowed = owners if title == HV_TASKS_TITLE else {
+                owner for owner in owners if _initials(names.get(owner)) == initials
+            }
+            responses_by_task[task.id] = [
+                (owner, action, comment)
+                for owner, (action, comment) in answers_by_user.items()
+                if owner in allowed
+            ]
+        selected: list[Task] = []
+        rows = _ga_hv_dv_task_rows(
+            tasks, names, assignee_ids_by_task, report_day, department_codes, initials,
+            selected_tasks=selected,
+            feedback_task_ids={
+                task_id for task_id, responses in responses_by_task.items()
+                if any(action or comment for _, action, comment in responses)
+            },
+        )
+        rows_by_title[title] = rows
+        feedback_rows[title] = []
+        for row, task in zip(rows, selected):
+            responses = responses_by_task.get(task.id, [])
+            actions = {action for _, action, _ in responses}
+            continuation = "JO" if "JO" in actions else "PO" if "PO" in actions else ""
+            comments = [(owner, comment) for owner, _, comment in responses if comment]
+            comment = " / ".join(
+                f"{_initials(names.get(owner))}: {value}" if len(comments) > 1 else value
+                for owner, value in sorted(comments, key=lambda item: (names.get(item[0], ""), str(item[0])))
+            )
+            key = f"{title}:{task.id}"
+            manual = overrides.get(key, {})
+            continuation = manual.get("continuation", continuation)
+            comment = manual.get("comment", comment)
+            row.extend((CONTINUATION_ICONS.get(continuation, ""), comment.replace("|", "│")))
+            feedback_rows[title].append({
+                "key": key, "title": row[7], "owners": row[1],
+                "continuation": continuation, "comment": comment,
+            })
+    plan_rows = []
+    for owners in ("HV", "DV", "GA"):
+        key = f"plan:{owners}"
+        saved = overrides.get(key, {})
+        plan_rows.append({
+            "key": key, "title": "A prishet plani për sot?", "owners": owners,
+            "continuation": saved.get("continuation", ""), "comment": saved.get("comment", ""),
+        })
+    feedback_rows["plan"] = plan_rows
+    return _ga_hv_dv_tables_body(rows_by_title, plan_rows), feedback_rows
 
 
 def _marked_tasks_for_day(tasks: list[Task], report_day: date, markers: set[str]) -> list[Task]:
@@ -605,7 +694,9 @@ async def refresh_morning_task_tables(
     db: AsyncSession,
     sections: list[dict[str, str]],
     report_day: date,
-) -> list[dict[str, str]]:
+    *,
+    task_feedback_overrides: dict | None = None,
+) -> list[dict[str, Any]]:
     """Refresh the auto-filled task tables in an existing M1 draft."""
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
@@ -616,19 +707,21 @@ async def refresh_morning_task_tables(
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
     await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task, department_codes)
-    rows_by_title = {
-        GA_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "GA"),
-        HV_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "HV"),
-        DV_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "DV"),
-    }
-    bodies = {GA_HV_DV_TASKS_TITLE: _ga_hv_dv_tables_body(rows_by_title)}
+    body, feedback_rows = await _ga_hv_dv_task_section(
+        db, tasks, names, assignee_ids_by_task, report_day, department_codes, task_feedback_overrides or {},
+    )
+    bodies = {GA_HV_DV_TASKS_TITLE: body}
     for title, (markers, caption) in MARKER_TASK_SECTIONS.items():
         marked_tasks, owners = _group_marked_tasks(
             _marked_tasks_for_day(tasks, report_day, markers), names, assignee_ids_by_task,
         )
         bodies[title] = _marker_task_table(caption, marked_tasks, names, owners, department_codes)
     return [
-        {**section, "body": bodies[section["section_key"]]}
+        {
+            **section,
+            "body": bodies[section["section_key"]],
+            **({TASK_FEEDBACK_ROWS: feedback_rows} if section["section_key"] == GA_HV_DV_TASKS_TITLE else {}),
+        }
         if section.get("section_key") in bodies
         else section
         for section in sections
@@ -756,7 +849,7 @@ async def _day_context_section(
 
 
 async def build_morning_report_sections(
-    db: AsyncSession, report_day: date
+    db: AsyncSession, report_day: date, *, task_feedback_overrides: dict | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     generated_at = datetime.now(timezone.utc)
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
@@ -809,17 +902,9 @@ async def build_morning_report_sections(
         department_codes,
         all_participant_ids,
     )
-    task_rows_by_title = {
-        title: _ga_hv_dv_task_rows(
-            tasks, names, assignee_ids_by_task, report_day, department_codes, initials
-        )
-        for title, initials in (
-            (GA_TASKS_TITLE, "GA"),
-            (HV_TASKS_TITLE, "HV"),
-            (DV_TASKS_TITLE, "DV"),
-        )
-    }
-    task_tables = _ga_hv_dv_tables_body(task_rows_by_title)
+    task_tables, feedback_rows = await _ga_hv_dv_task_section(
+        db, tasks, names, assignee_ids_by_task, report_day, department_codes, task_feedback_overrides or {},
+    )
     day_context, day_context_count = await _day_context_section(
         db,
         entries,
@@ -918,9 +1003,11 @@ async def build_morning_report_sections(
     snapshot = {
         "report_day": report_day.isoformat(),
         "ga_replies_generated_at": generated_at.isoformat(),
+        TASK_FEEDBACK_ROWS: feedback_rows,
+        TASK_FEEDBACK_OVERRIDES: task_feedback_overrides or {},
         "counts": {
             SECTION_TITLES[0]: 0,
-            GA_HV_DV_TASKS_TITLE: sum(len(rows) for rows in task_rows_by_title.values()),
+            GA_HV_DV_TASKS_TITLE: sum(len(rows) for title, rows in feedback_rows.items() if title != "plan"),
             SECTION_TITLES[1]: email_task_count,
             SECTION_TITLES[2]: sum(
                 1
