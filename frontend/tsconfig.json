@@ -44,7 +44,9 @@
     ".next-recorder-test/direct-markers/types/**/*.ts",
     ".next-recorder-test/direct-markers/dev/types/**/*.ts",
     ".next-recorder-test/task-markers/types/**/*.ts",
-    ".next-recorder-test/task-markers/dev/types/**/*.ts"
+    ".next-recorder-test/task-markers/dev/types/**/*.ts",
+    ".next-recorder-test/mira-browser/types/**/*.ts",
+    ".next-recorder-test/mira-browser/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

@@ -1,11 +1,15 @@
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from sqlalchemy import select
 from tests.test_mira_memory_model import MemoryTests
 from app.config import settings
-from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting
+from app.models.discord_assistant import DiscordLink
+from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting, DiscordVoiceSegment as Segment
 from app.models.mira_memory import MiraMemoryItem as Item, MiraMemoryEvent as Event
+from app.models.project import Project
+from app.models.user import User
+from app.schemas.mira_memory import MemoryClarification, MemoryEdit
 from app.services import discord_voice_meetings as voice
 from app.services import mira_memory
 
@@ -37,10 +41,10 @@ class MemoryServiceTests(MemoryTests):
             await db.commit()
         return row
 
-    async def apply(self, meeting, operations, versions):
+    async def apply(self, meeting, operations, versions, **options):
         async with self.sessions() as db:
             row = await db.get(Meeting, meeting.id)
-            stats = await mira_memory.apply_operations(db, row, operations, versions)
+            stats = await mira_memory.apply_operations(db, row, operations, versions, **options)
             await db.commit()
         return stats
 
@@ -135,3 +139,149 @@ class MemoryServiceTests(MemoryTests):
         async with self.sessions() as db:
             row = await db.get(Item, item.id)
             self.assertEqual((row.status, row.description, row.mention_count, row.version), ('CLOSED', 'U dërgua sot.', 2, 3))
+
+    async def test_evidence_follow_up_and_confirmed_closure(self):
+        first = await self.meeting(60)
+        second = await self.meeting(30)
+        third = await self.meeting()
+        source = {'speaker_name': 'GA', 'transcript': 'Kontrollojeni Dantese deri nesër.'}
+        segment_id = uuid.uuid4()
+        project_id = uuid.uuid4()
+        async with self.sessions() as db:
+            db.add(Project(id=project_id, title='Dantese', department_id=self.did))
+            colleague = User(id=uuid.uuid4(), username='second_organizer', full_name='Arta Test',
+                email='organizer@example.test', password_hash='not-a-password', department_id=self.did)
+            db.add(colleague)
+            await db.flush()
+            link = DiscordLink(id=uuid.uuid4(), user_id=colleague.id, discord_user_id='32', guild_id='123', channel_id='45')
+            db.add(link)
+            await db.flush()
+            next_meeting = await db.get(Meeting, second.id)
+            next_meeting.user_id, next_meeting.link_id, next_meeting.private_channel_id = colleague.id, link.id, '45'
+            db.add(Segment(id=segment_id, session_id=first.id, sequence=0, speaker_id='32', speaker_name='GA',
+                start_ms=1200, end_ms=5000, content_hash='dantese', status='DONE', transcript=source['transcript']))
+            await db.commit()
+        operation = op('add', title='Fotografitë Dantese', description='Kontrolli i fotografive.', kind='INSTRUCTION')
+        operation.update(project='Dantese', requested_by='GA', assignee='Arta', deadline_text='deri nesër',
+            deadline_date='2099-01-01', questions=['Kush është përgjegjës?'])
+        await self.apply(first, [operation], {}, source_segments={0: source})
+        async with self.sessions() as db:
+            item = (await db.scalars(select(Item))).one()
+            event = (await db.scalars(select(Event))).one()
+            self.assertEqual((event.details['speakers'], event.details['requested_by'], event.details['project_id']),
+                (['GA'], 'GA', str(project_id)))
+            self.assertIsNone(event.details['assignee'])
+            self.assertNotEqual(event.details['deadline_date'], '2099-01-01')
+            detail = await voice.meeting_record(db, first.id)
+            point = detail['memory']['points'][0]
+            self.assertEqual(point['discussion_state'], 'NEW')
+            self.assertEqual(point['questions'], ['Kush është përgjegjës?'])
+            self.assertEqual(point['sources'][0], {'id': str(segment_id), 'speaker': 'GA', 'start_ms': 1200, 'end_ms': 5000})
+            self.assertEqual((await mira_memory.upcoming_points(db))[0]['meeting_id'], str(first.id))
+            self.assertEqual(len(await mira_memory.upcoming_points(db, 'Dantese')), 1)
+            self.assertEqual(await mira_memory.upcoming_points(db, 'Modeco'), [])
+
+        repeated = {**operation, 'title': 'Fotografite - DANTESE', 'said': 'Ende në pritje.'}
+        await self.apply(second, [repeated, repeated], {}, source_segments={0: source})
+        versions = {str(item.id): 1}
+        attempted = op('close', str(item.id), said='U mbyll.', segments=(90,))
+        self.assertEqual((await self.apply(third, [attempted], versions, source_segments={0: source}))['rejected'], 1)
+        attempted.update(segments=[0], confirmation='U rregullua.')
+        self.assertEqual((await self.apply(third, [attempted], versions, source_segments={0: source}))['dropped'], 1)
+        attempted['confirmation'] = 'Nuk u rregulluan.'
+        negative = {**source, 'transcript': 'Nuk u rregulluan.'}
+        self.assertEqual((await self.apply(third, [attempted], versions, source_segments={0: negative}))['dropped'], 1)
+        confirmed = {**source, 'transcript': 'Fotografitë Dantese u rregulluan.'}
+        attempted['confirmation'] = 'Fotografitë Dantese u rregulluan.'
+        self.assertEqual((await self.apply(third, [attempted], versions, source_segments={0: confirmed}))['applied'], 1)
+        async with self.sessions() as db:
+            item = (await db.scalars(select(Item))).one()
+            self.assertEqual((item.status, item.mention_count), ('CLOSED', 3))
+            self.assertEqual(await mira_memory.upcoming_points(db), [])
+            detail = await voice.meeting_record(db, third.id)
+            self.assertEqual(detail['memory']['previous'][0]['meeting_id'], str(second.id))
+            self.assertEqual(detail['memory']['points'][0]['discussion_state'], 'RESOLVED')
+            previous = await voice.meeting_record(db, second.id)
+            self.assertEqual(previous['memory']['points'][0]['discussion_state'], 'REPEATED')
+            visible = await mira_memory.get_item(db, item.id)
+            self.assertTrue(any(event['meeting_id'] for event in visible['events']))
+
+    async def test_later_model_change_preserves_human_correction(self):
+        item = await self.item('Oferta')
+        async with self.sessions() as db:
+            user = await db.get(User, self.uid)
+            await mira_memory.edit_item(db, user, item.id,
+                MemoryEdit(version=1, title='Oferta', description='Afati i korrigjuar nga stafi.'))
+        meeting = await self.meeting()
+        model = op('change', str(item.id), description='Afati i sugjeruar.')
+        source = {'speaker_name': 'GA', 'transcript': 'Mbase ta shtyjmë afatin.'}
+        result = await self.apply(meeting, [model], {str(item.id): 2}, source_segments={0: source})
+        async with self.sessions() as db:
+            item = await db.get(Item, item.id)
+        self.assertEqual(result['dropped'], 1)
+        self.assertEqual(item.description, 'Afati i korrigjuar nga stafi.')
+
+    async def test_same_title_for_different_projects_keeps_distinct_issues(self):
+        first = await self.meeting(60)
+        second = await self.meeting()
+        operation = op('add', title='Kontrolli i fotografive', description='Duhet kontrolluar.', kind='ACTION')
+        for meeting, project in [(first, 'Dantese'), (second, 'Modeco')]:
+            source = {'speaker_name': 'GA', 'transcript': f'Kontrolloni fotografitë për {project}.'}
+            await self.apply(meeting, [{**operation, 'project': project}], {}, source_segments={0: source})
+        async with self.sessions() as db:
+            items = (await db.scalars(select(Item))).all()
+            self.assertEqual(len(items), 2)
+            detail = await voice.meeting_record(db, second.id)
+            self.assertEqual(detail['memory']['points'][0]['project'], 'Modeco')
+            self.assertEqual(detail['memory']['previous'], [])
+            original = next(item for item in items if item.id != uuid.UUID(detail['memory']['points'][0]['id']))
+        invalid = op('change', str(original.id), description='Çështje tjetër.', said='Është projekt tjetër.')
+        invalid['project'] = 'Modeco'
+        result = await self.apply(second, [invalid], {str(original.id): original.version},
+            source_segments={0: {'speaker_name': 'GA', 'transcript': 'Kjo është për Modeco.'}})
+        self.assertEqual(result['rejected'], 1)
+
+    async def test_staff_clarification_is_persisted_with_history_and_original_transcript(self):
+        meeting = await self.meeting()
+        transcript = 'Arta pret përgjigje.'
+        operation = op('add', title='Përgjigjja e klientit', description=transcript, kind='OPEN_QUESTION')
+        question = 'Kur pritet përgjigjja?'
+        operation['questions'] = [question]
+        await self.apply(meeting, [operation], {}, source_segments={0: {'transcript': transcript}})
+        async with self.sessions() as db:
+            segment = Segment(id=uuid.uuid4(), session_id=meeting.id, sequence=0, speaker_id='32', speaker_name='GA',
+                start_ms=1200, end_ms=5000, content_hash='reply', status='DONE', transcript=transcript)
+            db.add(segment)
+            colleague = User(id=uuid.uuid4(), username='colleague', full_name='Arta Test',
+                email='colleague@example.test', password_hash='not-a-password', department_id=self.did)
+            db.add(colleague)
+            await db.commit()
+            item = (await db.scalars(select(Item))).one()
+            payload = MemoryClarification(meeting_id=meeting.id, question=question, answer='Të premten.')
+            await mira_memory.answer_clarification(db, colleague, item.id, payload)
+            await mira_memory.answer_clarification(db, colleague, item.id, payload)
+            result = await voice.meeting_record(db, meeting.id)
+            self.assertEqual(result['transcript'][0]['text'], transcript)
+            point = result['memory']['points'][0]
+            self.assertEqual((point['questions'], point['answers']), ([], {question: 'Të premten.'}))
+            visible = await mira_memory.get_item(db, item.id)
+            answers = [value for value in visible['events'] if value['kind'] == 'ANSWER']
+            self.assertEqual([(value['user_name'], value['meeting_id']) for value in answers],
+                [('Arta Test', str(meeting.id))])
+            context = (await mira_memory.snapshot(db, include_evidence=True))['items'][0]
+            self.assertEqual(context['clarifications'], {question: 'Të premten.'})
+            self.assertEqual((await mira_memory.snapshot(db))['items'], [])
+            self.assertEqual((await mira_memory.list_items(db, 'all'))['items'][0]['id'], str(item.id))
+            edited = await mira_memory.edit_item(db, colleague, item.id,
+                MemoryEdit(version=2, title='Përgjigjja e klientit', description='Pritet deri të premten.'))
+            self.assertEqual(edited['description'], 'Pritet deri të premten.')
+
+
+def test_relative_deadline_uses_meeting_date_in_local_timezone():
+    when = datetime(2026, 11, 19, 23, 10, tzinfo=timezone.utc)
+    details = mira_memory.meeting_evidence({'deadline_text': 'deri nesër'}, [0],
+        {0: {'transcript': 'Rregullojeni deri nesër.'}}, {}, 'add', 'INSTRUCTION', when)
+    assert details['deadline_date'] == '2026-11-21'
+    assert mira_memory.resolve_deadline('deri më 25.11.2026', when) == '2026-11-25'
+    assert mira_memory.resolve_deadline('sa më shpejt', when) is None
+    assert mira_memory.resolve_deadline('deri nesër ose më 25.11.2026', when) is None

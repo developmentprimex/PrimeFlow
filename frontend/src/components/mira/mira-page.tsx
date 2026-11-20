@@ -75,7 +75,7 @@ export function MiraPage() {
       {tab === "notetaker" && <NotetakerTab meetingId={params.get("meeting")} view={params.get("view")} />}
       {tab === "shenimet" && <NotesTab />}
       {tab === "knowledge" && <KnowledgeTab canManage={canManage} />}
-      {tab === "kujtesa" && <div className="-mx-4 md:-mx-8"><MiraMemoryPage /></div>}
+      {tab === "kujtesa" && <div className="-mx-4 md:-mx-8"><MiraMemoryPage itemId={params.get("item")} /></div>}
       {/* The form starts from the loaded settings; it remounts once they arrive. */}
       {tab === "cilesimet" && <SettingsTab key={status ? "ready" : "loading"} canManage={canManage} status={status}
         onChange={(next) => setStatus({ ...next, live: status?.live ?? null })} />}

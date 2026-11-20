@@ -32,10 +32,13 @@ class PostgresMeetingTests(unittest.IsolatedAsyncioTestCase):
         from app.models.mira_desktop import MiraDesktopSession
         from app.models.audit_log import AuditLog
         from app.models.meeting_note import MeetingNote
+        from app.models.mira_memory import MiraMemoryEvent, MiraMemoryItem
+        from app.models.project import Project
         # GaNote loads attachments and origin flags from Mira and meeting notes;
         # reverse references are not reached by the foreign-key expansion below.
         tables = {Segment.__table__, Meeting.__table__, GaNote.__table__, DiscordLink.__table__, GaNoteAttachment.__table__,
-            Mira1HEvent.__table__, MiraDesktopSession.__table__, AuditLog.__table__, MeetingNote.__table__}
+            Mira1HEvent.__table__, MiraDesktopSession.__table__, AuditLog.__table__, MeetingNote.__table__,
+            MiraMemoryEvent.__table__, MiraMemoryItem.__table__, Project.__table__}
         while True:
             expanded = tables | {fk.column.table for t in tables for fk in t.foreign_keys}
             if expanded == tables: break

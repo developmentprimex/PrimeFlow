@@ -69,7 +69,7 @@ async def process_mira_memory():
         await db.commit()
     try:
         async with SessionLocal() as db:
-            memory = await mira_memory.snapshot(db)
+            memory = await mira_memory.snapshot(db, include_evidence=True)
         operations = await provider.extract_memory_operations(title, segments, meeting_date=meeting_date, memory=memory)
         async with SessionLocal() as db:
             current = (await db.execute(select(Meeting).where(Meeting.id == sid).with_for_update()
@@ -77,7 +77,10 @@ async def process_mira_memory():
             if current.memory_status != 'RUNNING' or current.memory_attempts != fence:
                 return stats
             result = await mira_memory.apply_operations(db, current, operations,
-                {item['id']: item['version'] for item in memory['items']})
+                {item['id']: item['version'] for item in memory['items']},
+                source_segments={segment['sequence']: segment for segment in segments})
+            if result['rejected'] and not (result['applied'] or result['dropped']):
+                raise ValueError('memory_no_valid_evidence')
             current.memory_status, current.memory_error, current.memory_lease_until = 'APPLIED', None, None
             await db.commit()
         log.warning('MIRA_DIAGNOSTIC memory meeting=%s applied=%s rejected=%s dropped=%s omitted=%s partial=%s',

@@ -64,13 +64,14 @@ async def meetings(limit: int = 50, offset: int = 0, db: AsyncSession = Depends(
 
 @router.get('/notetaker/meetings')
 async def notetaker_meetings(limit: int = Query(default=30, ge=1, le=100), offset: int = Query(default=0, ge=0),
-                             db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    return await notetaker.list_meeting_records(db, user, limit, offset)
+                             follow_up_query: str | None = Query(default=None, max_length=100),
+                             db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+    return await notetaker.list_meeting_records(db, limit, offset, (follow_up_query or '').strip())
 
 
 @router.get('/notetaker/meetings/{meeting_id}')
-async def notetaker_meeting(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    return await notetaker.meeting_record(db, user, meeting_id)
+async def notetaker_meeting(meeting_id: uuid.UUID, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+    return await notetaker.meeting_record(db, meeting_id)
 
 
 @router.get('/meetings/{meeting_id}')

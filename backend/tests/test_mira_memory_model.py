@@ -21,14 +21,8 @@ class MemoryTests(PostgresMeetingTests):
     test_concurrent_start_and_save_use_real_database_locks = None
     test_frozen_migration_creates_matching_columns_in_postgresql = None
 
-    async def asyncSetUp(self):
-        await super().asyncSetUp()
-        async with self.engine.begin() as conn:
-            await conn.run_sync(lambda c: Item.metadata.create_all(c, tables=[Item.__table__, Event.__table__]))
-
-
-def migration():
-    path = Path(__file__).resolve().parents[1]/'alembic/versions/0156_mira_memory.py'
+def migration(filename='0156_mira_memory.py'):
+    path = Path(__file__).resolve().parents[1]/'alembic/versions'/filename
     spec = importlib.util.spec_from_file_location('memory_migration', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -47,8 +41,9 @@ class MemoryMigrationTests(MemoryTests):
             if before:
                 await before(conn)
             def upgrade(c):
-                with patch.object(module, 'op', Operations(MigrationContext.configure(c))):
-                    module.upgrade()
+                for candidate in (module, migration('0194_mira_memory_evidence.py')):
+                    with patch.object(candidate, 'op', Operations(MigrationContext.configure(c))):
+                        candidate.upgrade()
             await conn.run_sync(upgrade)
             return await conn.run_sync(lambda c: {
                 table: {x['name'] for x in inspect(c).get_columns(table, schema=self.schema)}

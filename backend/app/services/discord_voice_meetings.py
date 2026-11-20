@@ -6,7 +6,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import select, text, or_
 from app.api.routers import discord_assistant as bridge
 from app.api.access import ensure_department_access
 from app.config import settings
@@ -15,6 +15,7 @@ from app.models.enums import UserRole
 from app.models.discord_assistant import DiscordLink
 from app.models.user import User
 from app.schemas.ga_note import GaNoteCreate
+from app.services import mira_memory
 from app.services.ga_note_creation import build_ga_note
 
 
@@ -271,36 +272,27 @@ async def ack_delivery(db,session_id,payload):
     return {'success':True}
 
 
-def meeting_record_query(user):
-    visible = Meeting.user_id == user.id
-    if settings.DISCORD_GUILD_ID:
-        shared_sources = [
-            and_(Meeting.recorder == 'primary', Meeting.request_id.like('auto1h-%')),
-            and_(Meeting.recorder == 'ai_agent', Meeting.request_id.like('autoai-%')),
-        ]
-        if settings.DISCORD_MEETING_CONTROL_CHANNEL_ID:
-            shared_sources.append(Meeting.private_channel_id == settings.DISCORD_MEETING_CONTROL_CHANNEL_ID)
-        # Scheduled team meetings can deliver their Discord result in the
-        # organizer's private channel. Delivery does not determine web access.
-        visible = or_(visible, and_(Meeting.guild_id == settings.DISCORD_GUILD_ID, or_(*shared_sources)))
-    return select(Meeting).where(visible, Meeting.status.in_(['READY', 'SAVED', 'FAILED']))
+def meeting_record_query():
+    return select(Meeting).where(Meeting.status.in_(mira_memory.RECORD_STATUSES))
 
 
-async def list_meeting_records(db, user, limit, offset):
-    rows = (await db.execute(meeting_record_query(user)
+async def list_meeting_records(db, limit, offset, follow_up_query=None):
+    rows = (await db.execute(meeting_record_query()
         .with_only_columns(Meeting.id, Meeting.title, Meeting.started_at, Meeting.created_at, Meeting.partial)
         .order_by(Meeting.created_at.desc(), Meeting.id).limit(limit).offset(offset))).all()
     return {'items': [{'id': str(row.id), 'title': row.title, 'started_at': (row.started_at or row.created_at).isoformat(),
-        'partial': row.partial} for row in rows]}
+        'partial': row.partial} for row in rows],
+        'follow_up': await mira_memory.upcoming_points(db, follow_up_query) if offset == 0 else []}
 
 
-async def meeting_record(db, user, session_id):
-    row = await db.scalar(meeting_record_query(user).where(Meeting.id == session_id))
+async def meeting_record(db, session_id):
+    row = await db.scalar(meeting_record_query().where(Meeting.id == session_id))
     if row is None:
         raise HTTPException(404, 'Takimi nuk u gjet.')
     segments = (await db.scalars(select(Segment).where(Segment.session_id == row.id, Segment.status == 'DONE',
         Segment.transcript.is_not(None)).order_by(Segment.start_ms, Segment.sequence))).all()
     return {'id': str(row.id), 'title': row.title, 'started_at': (row.started_at or row.created_at).isoformat(),
         'partial': row.partial, 'quick_summary': row.quick_summary, 'full_notes': row.draft_text, 'error': row.error,
+        'memory': await mira_memory.meeting_points(db, row, segments),
         'transcript': [{'id': str(segment.id), 'speaker': segment.speaker_name, 'start_ms': segment.start_ms,
             'end_ms': segment.end_ms, 'text': segment.transcript} for segment in segments]}
