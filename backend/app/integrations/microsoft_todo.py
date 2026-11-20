@@ -83,29 +83,76 @@ def due_payload(day: date | None) -> dict[str, str] | None:
     return {"dateTime": f"{day.isoformat()}T00:00:00", "timeZone": "UTC"}
 
 
+# Exchange/iPhone reminders often carry Windows zone names. ZoneInfo knows only IANA
+# names, so the common ones are mapped here; anything unknown is treated as UTC.
+WINDOWS_ZONES = {
+    "utc": "UTC",
+    "coordinated universal time": "UTC",
+    "tzone://microsoft/utc": "UTC",
+    "gmt standard time": "Europe/London",
+    "greenwich standard time": "Atlantic/Reykjavik",
+    "w. europe standard time": "Europe/Berlin",
+    "central europe standard time": "Europe/Budapest",
+    "central european standard time": "Europe/Warsaw",
+    "romance standard time": "Europe/Paris",
+    "gtb standard time": "Europe/Bucharest",
+    "e. europe standard time": "Europe/Chisinau",
+    "fle standard time": "Europe/Kiev",
+    "turkey standard time": "Europe/Istanbul",
+    "russian standard time": "Europe/Moscow",
+    "eastern standard time": "America/New_York",
+    "central standard time": "America/Chicago",
+    "mountain standard time": "America/Denver",
+    "pacific standard time": "America/Los_Angeles",
+}
+
+
+def resolve_zone(name: str | None):
+    """IANA zone for a Graph ``timeZone`` value (IANA or Windows name); UTC when unknown."""
+    raw = (name or "UTC").strip()
+    mapped = WINDOWS_ZONES.get(raw.casefold(), raw)
+    if mapped.upper() in {"UTC", "GMT", "ETC/UTC"}:
+        return timezone.utc
+    try:
+        return ZoneInfo(mapped)
+    except Exception:
+        return timezone.utc
+
+
+def _naive(value: dict[str, Any]) -> datetime | None:
+    raw = str(value["dateTime"]).split(".")[0]
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
 def parse_graph_dt(value: dict[str, Any] | None, tz: ZoneInfo) -> datetime | None:
     if not value or not value.get("dateTime"):
         return None
-    raw = str(value["dateTime"]).split(".")[0]
-    try:
-        parsed = datetime.fromisoformat(raw)
-    except ValueError:
+    parsed = _naive(value)
+    if parsed is None:
         return None
-    zone_name = str(value.get("timeZone") or "UTC")
-    try:
-        zone = timezone.utc if zone_name.upper() in {"UTC", "GMT"} else ZoneInfo(zone_name)
-    except Exception:  # Windows zone names: Graph returns UTC when asked, so fall back.
-        zone = timezone.utc
-    return parsed.replace(tzinfo=zone).astimezone(tz)
+    return parsed.replace(tzinfo=resolve_zone(value.get("timeZone"))).astimezone(tz)
 
 
-def parse_due_date(value: dict[str, Any] | None) -> date | None:
+def parse_due_date(value: dict[str, Any] | None, tz: ZoneInfo | None = None) -> date | None:
+    """Calendar date of a To Do ``dueDateTime`` in the GA's timezone.
+
+    iPhone/Exchange reminders store the due day as local midnight, which Graph often
+    returns in UTC (``2026-11-19T23:00:00`` UTC = 20 Nov in Belgrade). Taking the raw
+    date part would move such reminders one day back, so the value is converted to
+    ``tz`` first. Without ``tz`` the raw date part is used (legacy behaviour).
+    """
     if not value or not value.get("dateTime"):
         return None
-    try:
-        return date.fromisoformat(str(value["dateTime"])[:10])
-    except ValueError:
-        return None
+    if tz is None:
+        try:
+            return date.fromisoformat(str(value["dateTime"])[:10])
+        except ValueError:
+            return None
+    local = parse_graph_dt(value, tz)
+    return local.date() if local is not None else None
 
 
 class TodoClient:
@@ -138,16 +185,52 @@ class TodoClient:
         lists = await self.lists()
         if list_name:
             wanted = list_name.strip().casefold()
-            for item in lists:
-                if str(item.get("displayName") or "").strip().casefold() == wanted:
-                    return item
-            raise ValueError(f"To Do list '{list_name}' was not found.")
+            matches = [item for item in lists if str(item.get("displayName") or "").strip().casefold() == wanted]
+            if not matches:
+                raise ValueError(f"To Do list '{list_name}' was not found.")
+            if len(matches) == 1:
+                return matches[0]
+            # Same name twice (e.g. two "Tasks" lists): take the one in use.
+            return await self._most_active(matches)
         for item in lists:
             if item.get("wellknownListName") == "defaultList":
                 return item
         if not lists:
             raise ValueError("The organizer mailbox has no To Do lists.")
         return lists[0]
+
+    async def _most_active(self, lists: list[dict[str, Any]]) -> dict[str, Any]:
+        newest: tuple[str, dict[str, Any]] | None = None
+        for item in lists:
+            for task in await self.tasks(item["id"], include_completed=True):
+                stamp = str(task.get("lastModifiedDateTime") or task.get("createdDateTime") or "")
+                if stamp and (newest is None or stamp > newest[0]):
+                    newest = (stamp, item)
+        if newest is not None:
+            return newest[1]
+        return next((item for item in lists if item.get("wellknownListName") == "defaultList"), lists[0])
+
+    async def create_list(self, override: str | None = None) -> dict[str, Any]:
+        """List for new reminders: the one iPhone Reminders syncs into.
+
+        Exchange may sync iPhone reminders into a list that is not To Do's default
+        ("Tasks" can exist twice), so the default is the list with the most recently
+        modified reminder. ``override`` (MS_TODO_CREATE_LIST) can pin a list by id or
+        by a unique display name.
+        """
+        lists = await self.lists()
+        if not lists:
+            raise ValueError("The organizer mailbox has no To Do lists.")
+        wanted = (override or "").strip()
+        if wanted:
+            by_id = [item for item in lists if item.get("id") == wanted]
+            by_name = [item for item in lists if str(item.get("displayName") or "").strip().casefold() == wanted.casefold()]
+            if by_id:
+                return by_id[0]
+            if len(by_name) == 1:
+                return by_name[0]
+            raise ValueError(f"MS_TODO_CREATE_LIST '{wanted}' matches {len(by_name)} lists; use the list id.")
+        return await self._most_active(lists)
 
     async def tasks(self, list_id: str, *, include_completed: bool) -> list[dict[str, Any]]:
         params = {"$top": "100"}

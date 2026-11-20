@@ -538,7 +538,7 @@ async def collect_microsoft_items(
 
 
 def todo_to_item(todo: dict, todo_list: dict, *, tz: ZoneInfo, parse_due_date, parse_graph_dt, split_body) -> AgendaItem:
-    due = parse_due_date(todo.get("dueDateTime"))
+    due = parse_due_date(todo.get("dueDateTime"), tz)
     reminder = parse_graph_dt(todo.get("reminderDateTime"), tz) if todo.get("isReminderOn") else None
     day = due or (reminder.date() if reminder else None)
     notes, steps = split_body((todo.get("body") or {}).get("content"))

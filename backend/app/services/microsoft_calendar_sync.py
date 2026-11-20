@@ -108,11 +108,11 @@ async def get_shared_calendar_token(
     for row in rows:
         try:
             if row.expires_at <= datetime.now(timezone.utc) + timedelta(seconds=30):
-                token_data = await refresh_access_token(row.refresh_token, redirect_uri)
+                token_data = await refresh_access_token(row.refresh_token, redirect_uri, row.scope)
                 row.access_token = token_data["access_token"]
                 if token_data.get("refresh_token"):
                     row.refresh_token = token_data["refresh_token"]
-                row.scope = token_data.get("scope")
+                row.scope = token_data.get("scope") or row.scope
                 row.expires_at = compute_expires_at(int(token_data.get("expires_in", 3600)))
                 refreshed = True
             profile = await fetch_user_profile(row.access_token)

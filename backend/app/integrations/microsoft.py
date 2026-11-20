@@ -25,6 +25,14 @@ def authorize_scope_str() -> str:
     return " ".join([*SCOPES, TODO_SCOPE] if settings.MS_TODO_ENABLED else SCOPES)
 
 
+def refresh_scope_str(granted_scope: str | None) -> str:
+    """Scopes for a token refresh: the calendar scopes, plus To Do only when the stored
+    grant already contains Tasks.ReadWrite (so a refresh never asks for anything new
+    and never drops the To Do permission after the mailbox was re-authorized)."""
+    granted = {item.rsplit("/", 1)[-1].casefold() for item in (granted_scope or "").split()}
+    return " ".join([*SCOPES, TODO_SCOPE] if "tasks.readwrite" in granted else SCOPES)
+
+
 def format_datetime(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -61,7 +69,7 @@ async def exchange_code_for_token(code: str, redirect_uri: str) -> dict[str, Any
     return res.json()
 
 
-async def refresh_access_token(refresh_token: str, redirect_uri: str) -> dict[str, Any]:
+async def refresh_access_token(refresh_token: str, redirect_uri: str, granted_scope: str | None = None) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=15.0) as client:
         res = await client.post(
             f"{OAUTH_BASE_URL}/token",
@@ -71,7 +79,7 @@ async def refresh_access_token(refresh_token: str, redirect_uri: str) -> dict[st
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "redirect_uri": redirect_uri,
-                "scope": SCOPE_STR,
+                "scope": refresh_scope_str(granted_scope),
             },
         )
     res.raise_for_status()

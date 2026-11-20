@@ -135,6 +135,9 @@ class Settings(BaseSettings):
     MS_ORGANIZER_EMAIL: str = "info@primexeu.com"
     # Microsoft To Do for the GA assistant; off = Microsoft connect asks for the same permissions as before.
     MS_TODO_ENABLED: bool = False
+    # Optional: To Do list (id, or a unique name) for reminders created by the GA assistant.
+    # Empty = the list with the most recent reminder activity (where iPhone Reminders sync).
+    MS_TODO_CREATE_LIST: str = ""
     MS_CALENDAR_SYNC_ENABLED: bool = True
     MS_CALENDAR_SYNC_INTERVAL_MINUTES: int = 5
     MS_CALENDAR_SYNC_PAST_DAYS: int = 0

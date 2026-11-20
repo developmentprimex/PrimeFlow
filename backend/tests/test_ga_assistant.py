@@ -9,6 +9,7 @@ os.environ.setdefault("JWT_SECRET", "test-only-secret")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://u:p@localhost/db")
 
 from app.integrations import microsoft_todo as todo  # noqa: E402
+from app.integrations import microsoft_todo as todo_mod  # noqa: E402
 from app.services import ga_assistant as svc  # noqa: E402
 from app.services.ga_identity import is_ga_user  # noqa: E402
 
@@ -150,6 +151,99 @@ class TodoBodyTests(unittest.TestCase):
         self.assertEqual(
             todo.graph_datetime(date(2026, 11, 19), time(11, 0), TZ), {"dateTime": "2026-11-19T10:00:00", "timeZone": "UTC"}
         )
+
+
+class IphoneReminderTests(unittest.TestCase):
+    """Real-world shapes of iPhone Reminders synced through Exchange into To Do."""
+
+    def item(self, **todo):
+        raw = {"id": "T", "title": "Kujtese", "status": "notStarted", **todo}
+        return svc.todo_to_item(raw, {"id": "L", "displayName": "Reminders"}, tz=TZ, parse_due_date=todo_mod.parse_due_date,
+                                parse_graph_dt=todo_mod.parse_graph_dt, split_body=todo_mod.split_body)
+
+    def test_local_midnight_due_returned_in_utc_keeps_its_day(self) -> None:
+        # 20 Nov 00:00 in Belgrade comes back as 19 Nov 23:00 UTC.
+        due = {"dateTime": "2026-11-19T23:00:00.0000000", "timeZone": "UTC"}
+        self.assertEqual(todo_mod.parse_due_date(due, TZ), date(2026, 11, 20))
+        untimed = self.item(dueDateTime=due, isReminderOn=False)
+        self.assertEqual(untimed.day, date(2026, 11, 20))
+        self.assertIsNone(untimed.start)
+        self.assertIsNone(untimed.time_basis)
+
+    def test_windows_zone_names_are_resolved(self) -> None:
+        due = {"dateTime": "2026-11-20T00:00:00.0000000", "timeZone": "W. Europe Standard Time"}
+        self.assertEqual(todo_mod.parse_due_date(due, TZ), date(2026, 11, 20))
+        at = todo_mod.parse_graph_dt({"dateTime": "2026-11-20T09:30:00", "timeZone": "Central Europe Standard Time"}, TZ)
+        self.assertEqual(at, datetime(2026, 11, 20, 9, 30, tzinfo=TZ))
+
+    def test_timed_reminder_starts_at_reminder_time(self) -> None:
+        timed = self.item(
+            dueDateTime={"dateTime": "2026-11-19T23:00:00.0000000", "timeZone": "UTC"},
+            reminderDateTime={"dateTime": "2026-11-20T08:15:00.0000000", "timeZone": "UTC"}, isReminderOn=True,
+        )
+        self.assertEqual(timed.day, date(2026, 11, 20))
+        self.assertEqual(timed.start, datetime(2026, 11, 20, 9, 15, tzinfo=TZ))
+        self.assertEqual(timed.time_basis, "reminder")
+        self.assertTrue(timed.id.startswith("todo:"))
+
+    def test_reminder_without_due_date_uses_reminder_day(self) -> None:
+        timed = self.item(reminderDateTime={"dateTime": "2026-11-20T15:00:00", "timeZone": "UTC"}, isReminderOn=True)
+        self.assertEqual(timed.day, date(2026, 11, 20))
+        self.assertEqual(timed.start.hour, 16)
+
+    def test_completed_reminders_are_not_open_and_old_open_ones_are_leftovers(self) -> None:
+        done = self.item(status="completed", dueDateTime={"dateTime": "2026-11-18T23:00:00", "timeZone": "UTC"})
+        self.assertFalse(done.is_open)
+        self.assertFalse(done.can_complete)
+        late = self.item(dueDateTime={"dateTime": "2026-11-16T23:00:00", "timeZone": "UTC"})  # 17 Nov
+        result = svc.select_leftovers([done, late], datetime(2026, 11, 20, 8, 0, tzinfo=TZ))
+        self.assertEqual([i.id for i in result], [late.id])
+        self.assertEqual(result[0].days_late, 3)
+        self.assertEqual(svc.select_untimed([late], date(2026, 11, 20)), [])  # only on its own day
+
+    def test_refresh_keeps_todo_scope_only_when_already_granted(self) -> None:
+        from app.integrations import microsoft
+
+        self.assertNotIn("Tasks", microsoft.refresh_scope_str("offline_access Calendars.ReadWrite"))
+        self.assertIn("Tasks.ReadWrite", microsoft.refresh_scope_str(
+            "https://graph.microsoft.com/Calendars.ReadWrite https://graph.microsoft.com/Tasks.ReadWrite"))
+        self.assertEqual(microsoft.refresh_scope_str(None), microsoft.SCOPE_STR)
+
+
+class TodoListChoiceTests(unittest.IsolatedAsyncioTestCase):
+    """info@ has two lists called "Tasks": the empty default one and the one iPhone syncs into."""
+
+    def client(self):
+        from unittest.mock import AsyncMock
+
+        c = todo_mod.TodoClient("token")
+        lists = [
+            {"id": "DEFAULT", "displayName": "Tasks", "wellknownListName": "defaultList"},
+            {"id": "IPHONE", "displayName": "Tasks", "wellknownListName": "none"},
+            {"id": "OTHER", "displayName": "Blerje", "wellknownListName": "none"},
+        ]
+        tasks = {
+            "DEFAULT": [],
+            "IPHONE": [{"id": "t1", "lastModifiedDateTime": "2026-11-20T07:01:00Z"}],
+            "OTHER": [{"id": "t2", "lastModifiedDateTime": "2026-11-18T10:00:00Z"}],
+        }
+        c.lists = AsyncMock(return_value=lists)
+        c.tasks = AsyncMock(side_effect=lambda list_id, include_completed: tasks[list_id])
+        return c
+
+    async def test_new_reminders_go_to_the_list_iphone_uses(self) -> None:
+        self.assertEqual((await self.client().create_list(""))["id"], "IPHONE")
+
+    async def test_duplicate_names_resolve_to_the_active_list(self) -> None:
+        self.assertEqual((await self.client().resolve_list("Tasks"))["id"], "IPHONE")
+        self.assertEqual((await self.client().resolve_list("Blerje"))["id"], "OTHER")
+        self.assertEqual((await self.client().resolve_list(None))["id"], "DEFAULT")
+
+    async def test_override_by_id_or_unique_name(self) -> None:
+        self.assertEqual((await self.client().create_list("DEFAULT"))["id"], "DEFAULT")
+        self.assertEqual((await self.client().create_list("Blerje"))["id"], "OTHER")
+        with self.assertRaises(ValueError):
+            await self.client().create_list("Tasks")  # ambiguous name: use the id
 
 
 class MicrosoftScopeTests(unittest.TestCase):

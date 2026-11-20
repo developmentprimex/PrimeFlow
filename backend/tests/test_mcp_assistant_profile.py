@@ -66,13 +66,70 @@ class AssistantProfileTests(unittest.IsolatedAsyncioTestCase):
             api_token_expires_at: float = 0.0
             email: str | None = "ga@example.com"
 
-        access = Fake(token="pfm_at_x", client_id="c", scopes=["primeflow"], subject="user-1")
+        import time
+
+        access = Fake(token="pfm_at_x", client_id="c", scopes=["primeflow"], subject="user-1",
+                      api_token_expires_at=time.time() + 900)
         with patch("mcp.server.auth.middleware.auth_context.get_access_token", return_value=access), \
                 patch.dict(os.environ, {"PRIMEFLOW_EMAIL": "service@example.com", "PRIMEFLOW_PASSWORD": "x"}):
             self.assertEqual(await self.server._access_token(), "jwt-of-ga")
             self.assertEqual(await self.server._headers(), {"Authorization": "Bearer jwt-of-ga"})
             self.assertEqual(self.server._cache_scope(), "user-1:")
         self.assertIsNotNone(token_cls)
+
+    async def test_api_calls_use_the_current_message_token_not_the_session_one(self) -> None:
+        """Regression: after 15 minutes the session's first JWT expired and every API call
+        returned 401 "Invalid token". Each message must use its own bearer and a fresh JWT."""
+        import time
+        from types import SimpleNamespace
+
+        from mcp.server.auth.provider import AccessToken
+
+        class Fake(AccessToken):
+            api_token: str = ""
+            api_token_expires_at: float = 0.0
+            email: str | None = None
+
+        stale = Fake(token="pfm_at_first", client_id="c", scopes=["primeflow"], subject="ga",
+                     api_token="expired-jwt", api_token_expires_at=time.time() - 10)
+        fresh = Fake(token="pfm_at_current", client_id="c", scopes=["primeflow"], subject="ga",
+                     api_token="fresh-jwt", api_token_expires_at=time.time() + 900)
+        request = SimpleNamespace(headers={"authorization": "Bearer pfm_at_current"})
+        verifier = self.server.ASSISTANT_VERIFIER
+        with patch("mcp.server.auth.middleware.auth_context.get_access_token", return_value=stale),                 patch.object(type(self.server.mcp._mcp_server), "request_context",
+                             new=property(lambda _self: SimpleNamespace(request=request))),                 patch.object(verifier, "verify_token", AsyncMock(return_value=fresh)) as verify:
+            self.assertEqual(await self.server._access_token(), "fresh-jwt")
+            verify.assert_awaited_with("pfm_at_current")
+
+    async def test_api_401_forces_a_new_jwt_once(self) -> None:
+        verifier = self.server.ASSISTANT_VERIFIER
+        calls = []
+
+        class Resp:
+            def __init__(self, code):
+                self.status_code = code
+                self.content = b"{}"
+                self.is_error = code >= 400
+                self.headers = {}
+
+            def json(self):
+                return {}
+
+        async def fake_request(self_client, method, path, params=None, json=None):
+            calls.append(self_client.headers.get("authorization"))
+            return Resp(401 if len(calls) == 1 else 200)
+
+        tokens = iter(["old-jwt", "new-jwt"])
+
+        async def fake_current_access(*, force=False):
+            from types import SimpleNamespace
+            return SimpleNamespace(api_token=next(tokens), force=force)
+
+        with patch.object(self.server, "_current_access", side_effect=fake_current_access) as current,                 patch("httpx.AsyncClient.request", fake_request):
+            await self.server._request("GET", "/api/common-view")
+        self.assertEqual(calls, ["Bearer old-jwt", "Bearer new-jwt"])
+        self.assertTrue(current.call_args_list[1].kwargs["force"])
+        self.assertIsNotNone(verifier)
 
     async def test_unauthenticated_call_is_refused(self) -> None:
         with patch("mcp.server.auth.middleware.auth_context.get_access_token", return_value=None):

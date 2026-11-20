@@ -173,11 +173,16 @@ def _assistant_auth_kwargs() -> dict[str, Any]:
         def __init__(self) -> None:
             self._cache: dict[str, PrimeflowAccessToken] = {}
 
+        def invalidate(self, token: str) -> None:
+            self._cache.pop(hashlib.sha256(token.encode("utf-8")).hexdigest(), None)
+
         async def verify_token(self, token: str) -> AccessToken | None:
             key = hashlib.sha256(token.encode("utf-8")).hexdigest()
             cached = self._cache.get(key)
             now = time.time()
-            if cached is not None and cached.api_token_expires_at - 60 > now and (cached.expires_at or 0) > now:
+            # Re-validate well before the 15-minute PrimeFlow JWT expires, so a tool call
+            # never starts with a JWT that can lapse while it runs.
+            if cached is not None and cached.api_token_expires_at - 120 > now and (cached.expires_at or 0) > now:
                 return cached
             if not MCP_INTERNAL_SECRET:
                 print("MCP assistant: MCP_ASSISTANT_INTERNAL_SECRET is not set; rejecting tokens")
@@ -215,11 +220,13 @@ def _assistant_auth_kwargs() -> dict[str, Any]:
             self._cache[key] = verified
             return verified
 
+    global ASSISTANT_VERIFIER
+    ASSISTANT_VERIFIER = PrimeflowTokenVerifier()
     public_host = urlsplit(MCP_RESOURCE_URL).netloc
     allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"] + ([public_host] if public_host else [])
     allowed_origins = ["http://127.0.0.1:*", "http://localhost:*", "https://claude.ai"]
     return {
-        "token_verifier": PrimeflowTokenVerifier(),
+        "token_verifier": ASSISTANT_VERIFIER,
         "auth": AuthSettings(
             issuer_url=OAUTH_ISSUER_URL,
             resource_server_url=MCP_RESOURCE_URL,
@@ -233,6 +240,8 @@ def _assistant_auth_kwargs() -> dict[str, Any]:
         "streamable_http_path": "/mcp",
     }
 
+
+ASSISTANT_VERIFIER: Any = None
 
 if IS_ASSISTANT:
     mcp = FastMCP("primeflow-assistant", instructions=PRIMEFLOW_GUIDE, host=MCP_HOST, port=MCP_PORT, **_assistant_auth_kwargs())
@@ -287,12 +296,53 @@ def _jwt_exp(token: str) -> int:
 
 
 def _caller_access() -> Any:
-    """The verified OAuth token of the current assistant request (assistant profile only)."""
+    """The verified OAuth token the assistant session was opened with (identity only).
+
+    With Streamable HTTP the tool handlers run inside the session task, so this
+    context value belongs to the request that *opened* the session. It identifies the
+    user, but its PrimeFlow JWT may be stale: API calls use _current_access() instead.
+    """
     from mcp.server.auth.middleware.auth_context import get_access_token
 
     access = get_access_token()
     if access is None or not getattr(access, "api_token", ""):
         raise RuntimeError("This assistant request is not authenticated.")
+    return access
+
+
+def _current_bearer() -> str | None:
+    """Bearer token of the HTTP request that carried the current MCP message."""
+    try:
+        request = mcp._mcp_server.request_context.request  # noqa: SLF001 - per-message HTTP request
+    except (LookupError, AttributeError):
+        return None
+    header = str(getattr(request, "headers", {}).get("authorization") or "")
+    scheme, _, value = header.partition(" ")
+    return value.strip() if scheme.lower() == "bearer" and value.strip() else None
+
+
+async def _current_access(*, force: bool = False) -> Any:
+    """Verified access for *this* message, with a PrimeFlow JWT that is still valid.
+
+    Uses the current request's OAuth token (Claude refreshes it over time) and asks the
+    verifier, which mints a fresh 15-minute PrimeFlow JWT whenever the cached one is
+    close to expiry. force=True drops the cache first (after an API 401).
+    """
+    token = _current_bearer()
+    if token is None:
+        context_access = _caller_access()
+        # No HTTP request for this message (e.g. in-process calls): the context token is
+        # fine while its JWT is still valid; otherwise re-validate it below.
+        if not force and float(getattr(context_access, "api_token_expires_at", 0) or 0) - 120 > time.time():
+            return context_access
+        token = getattr(context_access, "token", None)
+    if not token or ASSISTANT_VERIFIER is None:
+        return _caller_access()
+    if force:
+        ASSISTANT_VERIFIER.invalidate(token)
+    access = await ASSISTANT_VERIFIER.verify_token(token)
+    if access is None or not getattr(access, "api_token", ""):
+        raise RuntimeError("The PrimeFlow sign-in of this connector has expired; reconnect PrimeFlow in Claude.")
     return access
 
 
@@ -308,8 +358,9 @@ def _cache_scope() -> str:
 
 async def _access_token() -> str:
     if IS_ASSISTANT:
-        # Never the shared service account: act as the user who authorized the connector.
-        return str(_caller_access().api_token)
+        # Never the shared service account: act as the user who authorized the connector,
+        # with a JWT that is fresh for this message (see _current_access).
+        return str((await _current_access(force=bool(_token_cache.pop("assistant_force_refresh", None)))).api_token)
     cached_token = str(_token_cache.get("access_token") or "")
     cached_exp = int(_token_cache.get("expires_at") or 0)
     if cached_token and cached_exp > int(time.time()) + 30:
@@ -381,6 +432,8 @@ async def _request(method: str, path: str, *, params: dict[str, Any] | None = No
             refreshed = True
             _token_cache["access_token"] = None
             _token_cache["expires_at"] = 0
+            if IS_ASSISTANT:
+                _token_cache["assistant_force_refresh"] = True
             continue
         if response.status_code not in transient:
             break
@@ -3179,7 +3232,7 @@ async def todo_create(
     notes: str | None = None,
     list_name: str | None = None,
 ) -> Any:
-    """Create a To Do item (iPhone reminder). due_date YYYY-MM-DD/sot/neser; time HH:MM needs due_date; default list when list_name is omitted."""
+    """Create a To Do item (iPhone reminder). due_date YYYY-MM-DD/sot/neser; time HH:MM needs due_date. Without list_name it goes to the list iPhone Reminders syncs into."""
     return await _request(
         "POST",
         "/api/ga-assistant/todo",
