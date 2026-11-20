@@ -20,15 +20,16 @@ const detail = (version: number, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
-async function shell(page: Page, { conflict = false } = {}) {
+async function shell(page: Page, { conflict = false, role = "STAFF" } = {}) {
   const writes: { method: string; path: string; body: unknown }[] = []
+  const viewer = { ...user, role }
   await page.addInitScript(({ user }) => {
     localStorage.setItem("primex_access_token", "test-only-browser-token")
     localStorage.setItem("primex_user", JSON.stringify(user))
-  }, { user })
+  }, { user: viewer })
   await page.route("http://127.0.0.1:8012/api/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname
-    if (path === "/api/auth/me") return route.fulfill({ json: user })
+    if (path === "/api/auth/me") return route.fulfill({ json: viewer })
     if (path === "/api/mira-memory/items") return route.fulfill({ json: list })
     if (path === `/api/mira-memory/items/${offer}`) {
       if (request.method() === "PATCH") {
@@ -141,4 +142,28 @@ test("Notetaker can filter open points before the next meeting", async ({ page }
   await page.getByRole("button", { name: "Kërko", exact: true }).click()
   await expect(page.getByText("Nuk u gjetën pika të hapura për këtë kërkim.")).toBeVisible()
   await expect(page.getByText("Oferta Modeco")).toHaveCount(0)
+})
+
+test("an admin can generate a missing 1H summary from its saved transcript", async ({ page }) => {
+  await shell(page, { role: "ADMIN" })
+  const meeting = "44444444-4444-4444-8444-444444444444"
+  const endpoint = `**/api/mira/notetaker/meetings/${meeting}`
+  let queued = false
+  await page.route(endpoint, route => route.fulfill({ json: {
+    id: meeting, title: "Takimi 1H", started_at: "2026-11-20T11:51:00+01:00",
+    partial: true, full_notes: "Shënimet e ruajtura.", error: null,
+    transcript: [{ id: "source", speaker: "Ana", start_ms: 0, end_ms: 1000, text: "Dërgohet raporti." }],
+    quick_summary: queued ? { discussion: ["U diskutua raporti."], decisions: [], actions: [], open_points: [], follow_up: [] } : null,
+  } }))
+  await page.route(`${endpoint}/summarize`, route => {
+    expect(route.request().method()).toBe("POST")
+    queued = true
+    return route.fulfill({ status: 202, json: { queued: true } })
+  })
+  await page.goto(`/mira?tab=notetaker&meeting=${meeting}`)
+  await expect(page.getByRole("link", { name: "Hap transkriptin" })).toBeVisible()
+  await page.getByRole("button", { name: "Gjenero përmbledhjen" }).click()
+  await expect(page.getByText("MIRA po përgatit përmbledhjen nga transkripti.")).toBeVisible()
+  await expect(page.getByText("U diskutua raporti.")).toBeVisible()
+  await expect(page.getByText("Regjistrimi ose transkripti është i pjesshëm.")).toBeVisible()
 })

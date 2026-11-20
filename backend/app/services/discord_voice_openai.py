@@ -72,11 +72,18 @@ Përdor vetëm të dhënat nga ky takim. Kthe tekst të thjeshtë, pa titull, li
 
 QUICK_SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': list(QUICK_SECTIONS),
     'properties': {name: {'type': 'array', 'items': {'type': 'string'}} for name in QUICK_SECTIONS}}
+QUICK_WORD_LIMIT = 250
+COMPLEX_QUICK_WORD_LIMIT = 275
+COMPLEX_TRANSCRIPT_WORDS = 4000
+QUICK_WORD_PATTERN = re.compile(r"\b\w+(?:[’'\-]\w+)*\b")
 QUICK_SYSTEM = RULES + '''
-Shkruaj përmbledhjen e shpejtë të këtij takimi, zakonisht 200–250 fjalë gjithsej.
-Për takime të shkurtra përdor më pak fjalë. Për takime komplekse ruaj vendimet,
-zotimet dhe rreziqet kritike edhe nëse duhen pak më shumë fjalë.
-discussion: deri në 7 pika. Bashko temat e lidhura dhe ruaj faktet, numrat, klientët dhe projektet.
+Syno 200–220 fjalë gjithsej për një takim normal, të numëruara në të pesë seksionet bashkë.
+Për takime të shkurtra përdor më pak fjalë. Respekto kufirin te "max_words".
+Kalo 250 fjalë vetëm nëse kufiri e lejon dhe duhen ruajtur pika kritike.
+Përdor një fjali të shkurtër për pikë. Përmend secilin fakt një herë. Në "follow_up"
+shkruaj vetëm hapin konkret për takimin tjetër, pa rrëfyer sërish çështjen e hapur.
+discussion: zakonisht 3–5 pika, deri në 7 kur ka tema vërtet të ndryshme. Bashko temat e lidhura.
+Ruaj emrat, numrat, vendimet, zotimet, afatet dhe rreziqet kryesore.
 decisions: vetëm vendime të konfirmuara. Përmend vendimmarrësin kur është i qartë dhe ka rëndësi.
 actions: vetëm kërkesa, udhëzime dhe hapa konkretë. Përgjegjësi dhe afati vetëm kur janë shprehur.
 Kur përdoret një afat relativ, ruaj formulimin dhe saktëso datën vetëm kur ajo është e qartë nga data e takimit.
@@ -313,7 +320,7 @@ def checked_summary(text):
     return text
 
 
-def checked_quick_summary(text):
+def checked_quick_summary(text, *, max_words=QUICK_WORD_LIMIT):
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -325,6 +332,8 @@ def checked_quick_summary(text):
             raise ValueError('invalid_quick_summary')
     if len(data['discussion']) > 7 or sum(len(item) for items in data.values() for item in items) > 3500:
         raise ValueError('quick_summary_too_long')
+    if sum(len(QUICK_WORD_PATTERN.findall(item)) for items in data.values() for item in items) > max_words:
+        raise ValueError('quick_summary_word_limit')
     return data
 
 
@@ -332,6 +341,10 @@ async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, c
                             scope: CredentialScope = 'notes', brief=False, quick=False):
     cache=dict(cache or {})
     final_system = QUICK_SYSTEM if quick else BRIEF_SYSTEM if brief else FINAL_SYSTEM
+    max_words = QUICK_WORD_LIMIT
+    if quick and sum(len(QUICK_WORD_PATTERN.findall(segment.get('text', '')))
+            for segment in segments) >= COMPLEX_TRANSCRIPT_WORDS:
+        max_words = COMPLEX_QUICK_WORD_LIMIT
     async def summarize(parts,final=False):
         system=final_system if final else PART_SYSTEM
         content={'title':title,'segments':parts}
@@ -344,12 +357,24 @@ async def summarize_meeting(title, segments, *, meeting_date=None, cache=None, c
             {'role':'user','content':json.dumps(content,ensure_ascii=False)}]}
         parse = checked_summary
         if final and quick:
+            content['max_words'] = max_words
             if meeting_date:
                 content['meeting_date'] = meeting_date.astimezone(ZoneInfo(settings.APP_TIMEZONE)).date().isoformat()
-                payload['input'][1]['content'] = json.dumps(content, ensure_ascii=False)
+            payload['input'][1]['content'] = json.dumps(content, ensure_ascii=False)
             payload['text'] = {'format': {'type': 'json_schema', 'name': 'mira_quick_summary',
                 'strict': True, 'schema': QUICK_SCHEMA}}
-            parse = checked_quick_summary
+            def parse(text):
+                return checked_quick_summary(text, max_words=max_words)
+
+            try:
+                return await cached(payload, cache, checkpoint, parse, scope=scope)
+            except ValueError as exc:
+                if str(exc) not in ('quick_summary_word_limit', 'quick_summary_too_long'):
+                    raise
+                payload['input'][0]['content'] += (
+                    '\nRishkruaje më shkurt. Kthe deri në 220 fjalë gjithsej. '
+                    'Përdor deri në 5 pika te discussion dhe hiq hollësitë e përsëritura. '
+                    'Ruaj vendimet, angazhimet, afatet dhe rreziqet kritike.')
         return await cached(payload,cache,checkpoint,parse,scope=scope)
     parts=[json.dumps(segment,ensure_ascii=False) for segment in segments]
     if not parts:raise ValueError('empty_transcript')

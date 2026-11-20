@@ -37,6 +37,7 @@ type MemoryPoint = Pick<MemoryListItem, "id" | "title" | "kind" | "status"> & {
 type PreviousPoint = { id: string; title: string; text: string; meeting_id: string; meeting_title: string; date: string; status?: MemoryListItem["status"] }
 type MeetingDetail = Meeting & {
   quick_summary: Record<keyof typeof sections, string[]> | null
+  quick_summary_pending?: boolean
   full_notes: string | null
   error: string | null
   transcript: (Source & { text: string })[]
@@ -171,7 +172,7 @@ function MeetingMemory({ detail }: { detail: MeetingDetail }) {
 }
 
 export function NotetakerTab({ meetingId, view }: { meetingId: string | null; view: string | null }) {
-  const { apiFetch } = useAuth()
+  const { apiFetch, user } = useAuth()
   const [offset, setOffset] = useState(0)
   const [items, setItems] = useState<Meeting[] | null>(null)
   const [detail, setDetail] = useState<MeetingDetail | null>(null)
@@ -179,6 +180,7 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
   const [queryDraft, setQueryDraft] = useState("")
   const [followUpQuery, setFollowUpQuery] = useState("")
   const [error, setError] = useState<{ key: string; message: string } | null>(null)
+  const [summaryRequest, setSummaryRequest] = useState<{ id: string; error?: string } | null>(null)
   const selected = view === "full" || view === "transcript" || view === "memory" ? view : "quick"
   const requestKey = meetingId ?? `page-${offset}`
 
@@ -216,6 +218,43 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
       document.getElementById(anchor)?.scrollIntoView({ block: "start" })
     }
   }, [detail, meetingId, selected])
+
+  const pendingMeetingId = detail?.id === meetingId && detail.quick_summary_pending ? detail.id : null
+  useEffect(() => {
+    if (!pendingMeetingId) return
+    let ignore = false
+    let timer: number
+    async function poll() {
+      try {
+        const status = await json<MeetingDetail>(await apiFetch(`${endpoint}/${pendingMeetingId}`))
+        if (ignore) return
+        setDetail((current) => current?.id === pendingMeetingId
+          ? { ...current, quick_summary: status.quick_summary, quick_summary_pending: status.quick_summary_pending } : current)
+        if (!status.quick_summary_pending) {
+          if (!status.quick_summary && pendingMeetingId) {
+            setSummaryRequest({ id: pendingMeetingId, error: "Përmbledhja nuk u krijua. Mund të provohet përsëri." })
+          }
+          return
+        }
+      } catch {
+        // A transient request error can recover on the next poll.
+      }
+      if (!ignore) timer = window.setTimeout(poll, 5000)
+    }
+    timer = window.setTimeout(poll, 5000)
+    return () => { ignore = true; window.clearInterval(timer) }
+  }, [apiFetch, pendingMeetingId])
+
+  async function requestSummary(id: string) {
+    setSummaryRequest({ id })
+    try {
+      await json(await apiFetch(`${endpoint}/${id}/summarize`, { method: "POST" }))
+      setDetail((current) => current?.id === id ? { ...current, quick_summary_pending: true } : current)
+      setSummaryRequest(null)
+    } catch (error) {
+      setSummaryRequest({ id, error: error instanceof Error ? error.message : "Përmbledhja nuk u kërkua." })
+    }
+  }
 
   if (error?.key === requestKey) return <p role="alert" className="mt-4 text-sm">{error.message} {meetingId && <Link className="underline" href={base}>Kthehu te takimet</Link>}</p>
 
@@ -270,7 +309,20 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
         return <div key={key} className="text-sm"><h3 className="font-semibold">{label}</h3>{points.length ? (
           <ul className="ml-5 mt-1 list-disc space-y-1">{points.map((point, index) => <li key={index}>{point}</li>)}</ul>
         ) : <p className="text-muted-foreground">—</p>}</div>
-      }) : <p className="text-sm">Përmbledhja e shpejtë nuk është e disponueshme.</p>)}
+      }) : <div className="space-y-2 text-sm">
+        {detail.quick_summary_pending ? <p role="status">MIRA po përgatit përmbledhjen nga transkripti.</p>
+          : <p>{detail.transcript.length
+            ? "Ky takim ka transkript të ruajtur. Përmbledhja e shpejtë ende mungon."
+            : "Nuk ka të folur të transkriptuar nga i cili të krijohet përmbledhja."}</p>}
+        {detail.transcript.length > 0 && <div className="flex flex-wrap items-center gap-3">
+          {(user?.role === "ADMIN" || user?.role === "MANAGER") && !detail.quick_summary_pending &&
+            <Button size="sm" variant="outline" disabled={summaryRequest?.id === detail.id && !summaryRequest.error}
+              onClick={() => void requestSummary(detail.id)}>Gjenero përmbledhjen</Button>}
+          {detail.full_notes && <Link className="underline" href={`${base}&meeting=${detail.id}&view=full`}>Hap shënimet e plota</Link>}
+          <Link className="underline" href={`${base}&meeting=${detail.id}&view=transcript`}>Hap transkriptin</Link>
+        </div>}
+        {summaryRequest?.id === detail.id && summaryRequest.error && <p role="alert">{summaryRequest.error}</p>}
+      </div>)}
       {selected === "full" && (detail.full_notes ? <Summary text={detail.full_notes} /> : <p className="text-sm">{detail.error || "Shënimet nuk janë të disponueshme."}</p>)}
       {(selected === "quick" || selected === "memory") && <Clarifications key={detail.id} detail={detail}
         onAnswer={(itemId, question, answer) => setDetail((current) => {

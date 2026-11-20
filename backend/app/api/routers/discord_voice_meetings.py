@@ -4,11 +4,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.api.routers.discord_assistant import require_bot
 from app.schemas.discord_voice_meeting import VoiceActor, VoiceStart, Worker, Finish, Interrupt, SegmentMeta, DeliveryAck
-from app.schemas.discord_voice_meeting import ControlScope, DeliveryClaim
+from app.schemas.discord_voice_meeting import ControlScope, DeliveryClaim, MeetingQuestion
 from typing import Literal
 from app.services import discord_voice_meetings as service
 
 router = APIRouter(dependencies=[Depends(require_bot)])
+
+
+@router.post('/ask')
+async def ask(payload: MeetingQuestion, db: AsyncSession = Depends(get_db)):
+    from app.services.mira_meeting_search import ask_meetings
+
+    return await ask_meetings(db, payload)
 
 @router.post('/control/{recorder}/status')
 async def control_status(recorder: Literal['primary', 'ai_agent'], payload: ControlScope, db: AsyncSession = Depends(get_db)):

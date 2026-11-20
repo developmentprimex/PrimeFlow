@@ -256,6 +256,17 @@ njëpërdorimësh vlen 10 minuta dhe përdoret me `/lidh kodi:...` në serverin 
 Fjalëkalimet dhe tokenët PrimeFlow nuk vendosen në Discord. Një llogari Discord
 lidhet me një llogari PrimeFlow; kodi i ri anulon kodin e mëparshëm.
 
+## Ask MIRA në Discord
+
+`/mira pyet pyetja:Çfarë tha GA për Modeco?` kthen përgjigjen private brenda
+Discord-it. Mesazhi `@MIRA Çfarë vendosëm për Dantese?` dërgon përgjigjen në DM
+kur është aktiv leximi i mesazheve. Kur DM-ja dështon, kanali merr vetëm
+udhëzimin për komandën.
+
+Komanda kërkon një llogari Discord të lidhur me një përdorues aktiv të
+PrimeFlow dhe përdor vetëm takimet e përpunuara në serverin e konfiguruar.
+Përgjigjja jep datën, folësin dhe lidhjen te segmenti i transkriptit.
+
 ## Kujtesa e Mira-s
 
 Pas takimit, Mira nxjerr nga transkripti vendimet, udhëzimet, veprimet, pyetjet,

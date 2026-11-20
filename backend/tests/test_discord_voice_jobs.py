@@ -78,9 +78,10 @@ class VoiceJobTests(PostgresMeetingTests):
                 patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='U diskutua raporti.')) as summary:
             await jobs.process_voice_meetings()
             # One speaker's consecutive chunks reach the notes model as one passage.
-            self.assertEqual(summary.call_args.args[1],[{'segment':0,'speaker':'Ana','time':'00:00–00:02',
+            self.assertEqual(summary.await_args_list[0].args[1],[{'segment':0,'speaker':'Ana','time':'00:00–00:02',
                 'text':'Kontrollo raportin. Kontrollo raportin.'}])
-            self.assertTrue(summary.call_args.kwargs['brief'])
+            self.assertTrue(summary.await_args_list[0].kwargs['brief'])
+            self.assertTrue(summary.await_args_list[1].kwargs['quick'])
             async with self.sessions() as db:
                 row=await db.get(Meeting,sid)
                 self.assertEqual(row.status,'READY')
@@ -116,18 +117,59 @@ class VoiceJobTests(PostgresMeetingTests):
             db.add(Segment(id=uuid.uuid4(),session_id=sid,sequence=0,speaker_id='12',speaker_name='Ana',start_ms=0,
                 end_ms=1000,content_hash='h',status='DONE',transcript='Ana dërgon raportin.'))
             await db.commit()
-        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting',AsyncMock(return_value='U diskutua raporti.')) as summary:
+        quick = dict.fromkeys(jobs.provider.QUICK_SECTIONS, [])
+        quick['discussion'] = ['U diskutua raporti.']
+
+        async def summarize(*args, **options):
+            if options.get('quick'):
+                async with self.sessions() as db:
+                    self.assertEqual((await db.get(Meeting, sid)).status, 'SAVED')
+                return quick
+            return 'U diskutua raporti.'
+
+        with patch.object(jobs,'SessionLocal',self.sessions),patch('app.services.discord_voice_openai.summarize_meeting', AsyncMock(side_effect=summarize)) as summary:
             await jobs.process_voice_meetings()
-            self.assertTrue(summary.call_args.kwargs['brief'])
+            self.assertTrue(summary.await_args_list[0].kwargs['brief'])
         async with self.sessions() as db:
             row=await db.get(Meeting,sid)
             self.assertEqual(row.status,'SAVED');self.assertIsNotNone(row.delivered_at)
+            self.assertEqual(row.quick_summary, quick)
             note=await db.get(GaNote,row.saved_note_id)
             self.assertTrue(note.content.endswith('**Transkripti fjalë për fjalë**\n\n'
                 'Ana: Ana dërgon raportin.\n\n**Përmbledhje e shkurtër**\n\nU diskutua raporti.'))
             self.assertEqual(note.created_by,self.uid)
         async with self.sessions() as db:
             self.assertEqual((await service.claim_deliveries(db))['jobs'],[])
+
+    async def test_saved_quick_summary_uses_transcript_and_fences_duplicate_requests(self):
+        from fastapi import HTTPException
+        from sqlalchemy import delete
+        from app.models.discord_voice_meeting import DiscordVoiceSegment as Segment
+
+        sid = await self.scheduled_meeting(timedelta(minutes=2))
+        async with self.sessions() as db:
+            row = await db.get(Meeting, sid)
+            row.status, row.partial, row.draft_text = 'SAVED', True, 'Shënimet historike.'
+            await db.commit()
+            lease = await service.queue_saved_quick_summary(db, sid)
+        async with self.sessions() as db:
+            self.assertIsNone(await service.queue_saved_quick_summary(db, sid))
+        quick = dict.fromkeys(jobs.provider.QUICK_SECTIONS, [])
+        quick['discussion'] = ['Ana dërgon raportin.']
+        with patch.object(jobs.provider, 'summarize_meeting', AsyncMock(return_value=quick)) as summary:
+            await service.generate_saved_quick_summary(sid, lease, sessions=self.sessions)
+            self.assertTrue(summary.await_args.kwargs['quick'])
+            self.assertEqual(summary.await_args.args[1][0]['text'], 'Ana dërgon raportin.')
+        async with self.sessions() as db:
+            row = await db.get(Meeting, sid)
+            self.assertEqual((row.status, row.partial, row.draft_text, row.quick_summary, row.lease_until),
+                ('SAVED', True, 'Shënimet historike.', quick, None))
+            await db.execute(delete(Segment).where(Segment.session_id == sid))
+            row.quick_summary = None
+            await db.commit()
+            with self.assertRaises(HTTPException) as missing:
+                await service.queue_saved_quick_summary(db, sid)
+            self.assertEqual(missing.exception.status_code, 409)
 
     async def test_a_mira_note_opens_the_transcript_it_was_written_from(self):
         from fastapi import HTTPException
