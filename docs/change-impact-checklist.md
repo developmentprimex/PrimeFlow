@@ -142,6 +142,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 - Statusi i taskut: përveç API-së dhe pamjeve, kontrollo listat e vlerave të
   pranuara në `backend/mcp_server.py` dhe udhëzimet në `discord_task_tools.py`.
   Për taskat nga PX Notes kontrollo edhe kufizimin `ck_tasks_ga_note_status_valid`.
+  Provo migrimin me detyra ekzistuese në `WAITING_CLIENT` dhe
+  `WAITING_CONFIRMATION`, që të dyja statuset të ruhen gjatë kalimit.
   Për taskat me sasi produktesh, kontrollo rillogaritjen e statusit në `tasks.py`
   si gjatë ruajtjes, ashtu edhe gjatë leximit, dhe përparësinë e statusit ditor
   ndaj sasive në `planners.py`. `PAUSED` shfaqet si **Stopped** dhe mban

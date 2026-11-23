@@ -9,6 +9,8 @@ branch_labels = None
 depends_on = None
 
 CONSTRAINT = "ck_tasks_ga_note_status_valid"
+# The task API already accepted both waiting statuses before PAUSED was added.
+NOTE_STATUSES = "'TODO', 'IN_PROGRESS', 'WAITING_CLIENT', 'WAITING_CONFIRMATION', 'DONE'"
 
 
 def _drop_note_status_constraint() -> None:
@@ -29,7 +31,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         op.f(CONSTRAINT),
         "tasks",
-        "ga_note_origin_id IS NULL OR status IN ('TODO', 'IN_PROGRESS', 'PAUSED', 'DONE')",
+        f"ga_note_origin_id IS NULL OR status IN ({NOTE_STATUSES}, 'PAUSED')",
     )
 
 
@@ -42,6 +44,6 @@ def downgrade() -> None:
     op.create_check_constraint(
         op.f(CONSTRAINT),
         "tasks",
-        "ga_note_origin_id IS NULL OR status IN ('TODO', 'IN_PROGRESS', 'DONE')",
+        f"ga_note_origin_id IS NULL OR status IN ({NOTE_STATUSES})",
     )
     op.drop_column("tasks", "resumed_from_pause")

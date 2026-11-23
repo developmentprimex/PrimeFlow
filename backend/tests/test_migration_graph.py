@@ -37,6 +37,8 @@ class MigrationGraphTests(unittest.TestCase):
                 self.assertIn("DROP CONSTRAINT IF EXISTS ck_tasks_ck_tasks_ga_note_status_valid", sql)
                 self.assertIn("ADD CONSTRAINT ck_tasks_ga_note_status_valid CHECK", sql)
                 self.assertNotIn("ADD CONSTRAINT ck_tasks_ck_tasks_ga_note_status_valid", sql)
+                self.assertIn("'WAITING_CLIENT', 'WAITING_CONFIRMATION'", sql)
+                self.assertEqual("'DONE', 'PAUSED')" in sql, direction == "upgrade")
 
     def test_task_plan_feedback_recognizes_the_deployed_revision(self) -> None:
         scripts = migration_scripts()
