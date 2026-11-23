@@ -105,6 +105,8 @@ async def list_marker_comments(
         "revision": str(item.revision), "title": title,
         "marker": item.marker, "marker_by_ga": bool(marker_by_ga), "symbol": one_h_marker_label(item.marker, bool(marker_by_ga)),
         "comment": item.comment, "author_name": author_name,
+        "author_id": str(item.author_id) if item.author_id else None,
+        "comment_created_at": item.comment_created_at,
         "updated_at": item.updated_at, "read_at": item.read_at if is_mine else None,
         "is_mine": bool(is_mine), "can_mark_read": bool(is_mine),
         **progress[item.task_id],

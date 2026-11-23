@@ -1,4 +1,7 @@
 import os
+from datetime import datetime, timedelta
+from pathlib import Path
+import tempfile
 import uuid
 import unittest
 from types import SimpleNamespace
@@ -17,6 +20,61 @@ from tests.test_discord_voice_model import PostgresMeetingTests
 
 
 class PanelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_release_probe_requires_live_start_button_and_voice_permissions(self):
+        for recorder, setting in [('primary', 'DISCORD_1H_VOICE_CHANNEL_ID'),
+                                  ('ai_agent', 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID')]:
+            with self.subTest(recorder=recorder), patch.object(settings, setting, '55'):
+                bot = SimpleNamespace(voice_recorder=recorder, user=SimpleNamespace(id=29))
+                panel = MeetingCaptureCoordinator(bot).panel
+                panel.message = SimpleNamespace(id=70)
+                voice = Mock(spec=discord.VoiceChannel)
+                voice.permissions_for.return_value = SimpleNamespace(view_channel=True, connect=True, send_messages=True)
+                button = SimpleNamespace(custom_id=f'pf:mc:{recorder}:start:none')
+                channel = SimpleNamespace(
+                    guild=SimpleNamespace(me=object(), get_channel=Mock(return_value=voice)),
+                    fetch_message=AsyncMock(return_value=SimpleNamespace(
+                        author=bot.user, components=[SimpleNamespace(children=[button])],
+                    )),
+                )
+                with patch.object(panel, 'channel', AsyncMock(return_value=channel)), \
+                        patch.object(panel, 'refresh', AsyncMock()) as refresh:
+                    self.assertEqual(await panel.verify_release(), (True, True))
+                    refresh.assert_awaited_once_with(force=True)
+                    button.custom_id = f'pf:mc:{recorder}:refresh:none'
+                    voice.permissions_for.return_value.connect = False
+                    self.assertEqual(await panel.verify_release(), (False, False))
+
+    async def test_unverified_candidate_does_not_start_a_recording(self):
+        coordinator = MeetingCaptureCoordinator(SimpleNamespace())
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
+            'PRIMEFLOW_MIRA_TRAFFIC_FILE': str(Path(temp) / 'traffic.ready'),
+        }), patch.object(coordinator, 'preflight', AsyncMock()) as preflight:
+            with self.assertRaisesRegex(ValueError, 'pas përditësimit'):
+                await coordinator.begin(actor={}, guild=None, voice=None, request_id='1', title=None,
+                                        department_id=None, notify=None)
+        preflight.assert_not_awaited()
+
+    async def test_release_verification_does_not_consume_scheduled_join_attempts(self):
+        from discord_ai_agent_bot import AIAgentCapture
+
+        slot = datetime(2026, 11, 23, 10, 0)
+        for capture, prefix in ((MeetingCaptureCoordinator, 'DISCORD_1H'), (AIAgentCapture, 'DISCORD_AI_AGENT')):
+            with self.subTest(recorder=prefix), tempfile.TemporaryDirectory() as temp:
+                marker = Path(temp) / 'traffic.ready'
+                coordinator = capture(SimpleNamespace())
+                with patch.dict(os.environ, {'PRIMEFLOW_MIRA_TRAFFIC_FILE': str(marker)}), \
+                        patch.object(settings, f'{prefix}_AUTO_JOIN_TIMES', '10:00'), \
+                        patch.object(settings, f'{prefix}_AUTO_OWNER_DISCORD_ID', '42'), \
+                        patch.object(coordinator, 'check_presence', AsyncMock()), \
+                        patch.object(coordinator, 'auto_start', AsyncMock()) as start:
+                    for seconds in (0, 10, 20):
+                        await coordinator.tick(slot + timedelta(seconds=seconds))
+                    start.assert_not_awaited()
+                    self.assertEqual(coordinator.attempts, {})
+                    marker.touch()
+                    await coordinator.tick(slot + timedelta(seconds=30))
+                    start.assert_awaited_once_with(slot, '42', 1)
+
     async def test_expired_stop_is_logged_without_running_it_or_replying_again(self):
         from discord_meeting_control import MeetingControlPanel
         from discord_voice_meetings import handle_meeting_interaction

@@ -27,9 +27,12 @@ class VoiceDeployTests(unittest.IsolatedAsyncioTestCase):
             finally:await bot.close()
 
     def test_workflow_has_isolated_locked_install_and_preflight(self):
-        workflow=(Path(__file__).resolve().parents[2]/'.github/workflows/deploy.yml').read_text()
+        root=Path(__file__).resolve().parents[2]
+        workflow=(root/'.github/workflows/deploy.yml').read_text()
+        release=(root/'backend/scripts/deploy_mira_release.py').read_text()
         self.assertIn('DISCORD_MEETING_NOTES_ENABLED',workflow)
-        self.assertIn('check_discord_voice.py',workflow)
+        self.assertIn('scripts.deploy_mira_release prepare',workflow)
+        self.assertIn('scripts/check_discord_voice.py',release)
 
     def test_node_version_floor_is_checked_before_install(self):
         for version in ['v20.19.0','v22.11.0','unknown']:self.assertFalse(supported_node(version))

@@ -34,14 +34,17 @@ async def record_initial_marker_comments(db: AsyncSession, tasks: list[Task], *,
 
 async def record_marker_change(
     db: AsyncSession, tasks: list[Task], *, marker: str | None, comment: str | None,
-    actor_email: str | None,
+    actor_email: str | None, previous_comment: str | None = None,
 ) -> None:
     """Record each assignee task's change within the marker write transaction."""
     if not tasks:
         return
     if len(tasks) > 1:
         for task in {task.id: task for task in tasks}.values():
-            await record_marker_change(db, [task], marker=marker, comment=comment, actor_email=actor_email)
+            await record_marker_change(
+                db, [task], marker=marker, comment=comment, actor_email=actor_email,
+                previous_comment=previous_comment,
+            )
         return
     from app.services.task_marker import one_h_marker_label
 
@@ -65,17 +68,34 @@ async def record_marker_change(
             choose_recipient(task.assigned_to, task)
     active_ids = set((await db.execute(select(User.id).where(User.id.in_(recipients), User.is_active.is_(True)))).scalars())
     source_key = marker_comment_source_key(tasks[0])
+    existing_rows = list((await db.execute(
+        select(TaskMarkerCommentInbox).where(TaskMarkerCommentInbox.task_id == tasks[0].id)
+    )).scalars())
+    existing = {item.user_id: item for item in existing_rows if item.source_key == source_key}
+    now = datetime.now(timezone.utc)
+    revision = uuid.uuid4()
+    comment = (comment or "").strip()
+    previous_comment = (previous_comment or "").strip()
+    comment_created_at = None
+    if comment:
+        # The latest receipt reflects any write that committed while this task
+        # update was waiting for its database row lock.
+        current_receipt = max(existing.values(), key=lambda item: item.updated_at, default=None)
+        if current_receipt:
+            comment_created_at = current_receipt.comment_created_at if current_receipt.comment else now
+        elif not previous_comment:
+            comment_created_at = now
+        else:
+            comment_created_at = min(
+                (item.comment_created_at for item in existing_rows
+                 if item.comment == previous_comment and item.comment_created_at is not None),
+                default=None,
+            )
     # Replace legacy shared receipts for this task only, preserving siblings.
     await db.execute(delete(TaskMarkerCommentInbox).where(
         TaskMarkerCommentInbox.task_id == tasks[0].id,
         TaskMarkerCommentInbox.source_key != source_key,
     ))
-    existing = {item.user_id: item for item in (await db.execute(
-        select(TaskMarkerCommentInbox).where(TaskMarkerCommentInbox.source_key == source_key)
-    )).scalars()}
-    now = datetime.now(timezone.utc)
-    revision = uuid.uuid4()
-    comment = (comment or "").strip()
     has_content = bool(marker or comment)
     # A symbol or a standalone comment requires acknowledgement.
     await db.execute(delete(TaskMarkerCommentInbox).where(
@@ -96,14 +116,16 @@ async def record_marker_change(
             stmt = insert(TaskMarkerCommentInbox).values(
                 id=inbox_id, source_key=source_key, user_id=user_id, task_id=task.id,
                 task_ids=[str(value) for value in task_ids], author_id=actor.id if actor else None,
-                revision=revision, marker=marker or "", comment=comment, updated_at=now,
+                revision=revision, marker=marker or "", comment=comment,
+                comment_created_at=comment_created_at, updated_at=now,
                 # Writing a comment never acknowledges it, even for its author.
                 read_at=None,
             )
             inbox_id = (await db.execute(stmt.on_conflict_do_update(
                 constraint="uq_marker_comment_source_user",
                 set_={key: getattr(stmt.excluded, key) for key in (
-                    "task_id", "task_ids", "author_id", "revision", "marker", "comment", "updated_at", "read_at",
+                    "task_id", "task_ids", "author_id", "revision", "marker", "comment",
+                    "comment_created_at", "updated_at", "read_at",
                 )},
             ).returning(TaskMarkerCommentInbox).execution_options(populate_existing=True))).scalar_one().id
         if not marker_alert_enabled(task) or (actor and user_id == actor.id):

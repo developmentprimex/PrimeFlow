@@ -13,6 +13,7 @@ import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskGroupMarkerEditor } from "@/components/task-group-marker-editor"
 import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
+import { miraDictationLabel } from "@/lib/mira"
 import { MeetingDetailsDialog } from "@/components/meeting-details-dialog"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
@@ -449,6 +450,7 @@ type FastTaskItemMeta = {
   oneHMarker?: OneHMarker | null
   oneHMarkerByGa?: boolean
   oneHMarkerComment?: string | null
+  mira_dictation_source?: string | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -957,6 +959,7 @@ type SwimlaneCell = {
   oneHMarker?: OneHMarker | null
   oneHMarkerByGa?: boolean
   oneHMarkerComment?: string | null
+  mira_dictation_source?: string | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -5988,8 +5991,11 @@ export default function CommonViewPage() {
                                       ? dayData.feedback
                                       : []
       if (!entries.length) return []
-      const markerCommentPrefix = (entry: { oneHMarkerComment?: string | null }) =>
-        entry.oneHMarkerComment?.trim() ? `COM: ${entry.oneHMarkerComment.trim()}\n` : ""
+      const markerCommentPrefix = (entry: { oneHMarkerComment?: string | null; mira_dictation_source?: string | null }) => {
+        const source = miraDictationLabel(entry.mira_dictation_source)
+        const comment = entry.oneHMarkerComment?.trim()
+        return `${source ? `${source}\n` : ""}${comment ? `COM: ${comment}\n` : ""}`
+      }
 
       if (rowId === "late") {
         return (entries as LateItem[]).map((e, idx: number) => `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`)
@@ -8320,6 +8326,7 @@ export default function CommonViewPage() {
       oneHMarker: x.oneHMarker,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
+      mira_dictation_source: x.mira_dictation_source,
       dueDate: x.dueDate,
       startDate: x.startDate,
       createdAt: x.createdAt,
@@ -8347,6 +8354,7 @@ export default function CommonViewPage() {
       oneHMarker: x.oneHMarker,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
+      mira_dictation_source: x.mira_dictation_source,
       dueDate: x.dueDate,
       startDate: x.startDate,
       createdAt: x.createdAt,
@@ -8376,6 +8384,7 @@ export default function CommonViewPage() {
         oneHMarker: x.oneHMarker,
         entryDate: x.date,
         isDeadlineImportant: x.isDeadlineImportant,
+        mira_dictation_source: x.mira_dictation_source,
         dueDate: x.dueDate,
         startDate: x.startDate,
         createdAt: x.createdAt,
@@ -8480,6 +8489,7 @@ export default function CommonViewPage() {
       oneHMarker: x.oneHMarker,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
+      mira_dictation_source: x.mira_dictation_source,
       dueDate: x.dueDate,
       startDate: x.startDate,
       createdAt: x.createdAt,
@@ -8559,6 +8569,7 @@ export default function CommonViewPage() {
       oneHMarker: entry.oneHMarker,
       entryDate: entry.date,
       isDeadlineImportant: entry.isDeadlineImportant,
+      mira_dictation_source: entry.mira_dictation_source,
       dueDate: entry.dueDate,
       startDate: entry.startDate,
       createdAt: entry.createdAt,
@@ -16642,7 +16653,7 @@ export default function CommonViewPage() {
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
                                   {renderCommonTaskStatusIndicator(e)}
-                                  <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintTaskTitle(e))}</span>
+                                  <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintTaskTitle(e))}{e.mira_dictation_source && <span className="text-xs text-muted-foreground">{miraDictationLabel(e.mira_dictation_source)}</span>}</span>
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -17470,6 +17481,7 @@ export default function CommonViewPage() {
                                       </span>
                                     ) : null}
                                     <div className="swimlane-title">
+                                      {cell.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(cell.mira_dictation_source)}</span>}
                                       {!cell.assignees?.length && !cell.assigneeLabels?.length ? taskStatusIndicator : null}
                                       {isFastTaskRowId(row.id) ? <TaskMarkerComment comment={cell.oneHMarkerComment} taskId={cell.taskId} /> : null}
                                       <span className="swimlane-print-title">

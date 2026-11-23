@@ -29,6 +29,7 @@ class PreparedSyncItem:
     source_type: str
     source_external_id: str
     source_name: str
+    is_completed: bool = False
 
 
 def generate_connection_token(connection_id: uuid.UUID) -> tuple[str, str]:
@@ -141,6 +142,7 @@ def prepare_reminder_item(
     fallback_date: date,
     zone: ZoneInfo,
     rows: list[TimeRow],
+    is_completed: bool = False,
 ) -> PreparedSyncItem:
     safe_title = clean_text(title, limit=600) or "Untitled reminder"
     safe_notes = clean_text(notes or "", limit=300)
@@ -167,4 +169,5 @@ def prepare_reminder_item(
         source_type="reminder",
         source_external_id=source_key(external_id, safe_title, due_key),
         source_name=reminder_list_name,
+        is_completed=is_completed,
     )

@@ -116,7 +116,10 @@ async def sync_task_marker(
         from app.services.task_marker_comment_title import sync_comment_title
 
         await sync_comment_title(db, [task], previous_comment, marker_comment, update_notes=False)
-        await record_marker_change(db, [task], marker=marker, comment=marker_comment, actor_email=actor_email)
+        await record_marker_change(
+            db, [task], marker=marker, comment=marker_comment, actor_email=actor_email,
+            previous_comment=previous_comment,
+        )
 
 
 async def sync_note_assignee_markers(db, tasks, states, *, actor_email=None):

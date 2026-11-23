@@ -17,6 +17,7 @@ function CommentsInbox() {
   const scope = params.get("scope") === "all" ? "all" : "mine"
   const requestedRead = params.get("read")
   const readFilter = requestedRead === "all" || requestedRead === "read" || requestedRead === "unread" ? requestedRead : "all"
+  const userFilter = scope === "all" ? params.get("user") || "" : ""
   const requestedId = params.get("comment")
   const handledId = React.useRef<string | null>(null)
   const [allItems, setAllItems] = React.useState<MarkerComment[]>([])
@@ -44,10 +45,12 @@ function CommentsInbox() {
     }
   }, [apiFetch])
   React.useEffect(() => { void loadAll() }, [comments?.items, loadAll])
-  const changeFilters = (nextScope: "mine" | "all", nextRead: string) => {
+  const changeFilters = (nextScope: "mine" | "all", nextRead: string, nextUser = userFilter) => {
     const next = new URLSearchParams(params.toString())
     next.set("scope", nextScope)
     next.set("read", nextRead)
+    if (nextScope === "all" && nextUser) next.set("user", nextUser)
+    else next.delete("user")
     next.delete("comment")
     router.replace(`/comments?${next.toString()}`, { scroll: false })
   }
@@ -59,6 +62,14 @@ function CommentsInbox() {
     else toast.error("Ky koment nuk është më i disponueshëm.")
   }, [comments, requestedId, allItems, allLoading, scope])
   if (!comments) return null
+  const peopleById = new Map<string, string>()
+  if (scope === "all") {
+    for (const item of allItems) {
+      if (item.author_id && item.author_name) peopleById.set(item.author_id, item.author_name)
+      for (const person of item.recipients) peopleById.set(person.user_id, person.name)
+    }
+  }
+  const people = [...peopleById].sort(([, first], [, second]) => first.localeCompare(second, "sq"))
   const ownById = new Map(comments.items.map((item) => [item.id, item]))
   const source = scope === "all" ? allItems.map((item) => {
     const own = ownById.get(item.id)
@@ -67,7 +78,10 @@ function CommentsInbox() {
   }) : comments.items
   const isUnread = (item: MarkerComment) => scope === "all" ? item.recipient_count > 0 && !item.all_read : !item.read_at
   const isRead = (item: MarkerComment) => scope === "all" ? item.all_read : Boolean(item.read_at)
-  const filtered = readFilter === "all" ? source : source.filter((item) => readFilter === "unread" ? isUnread(item) : isRead(item))
+  const byUser = userFilter ? source.filter((item) =>
+    item.author_id === userFilter || item.recipients.some((person) => person.user_id === userFilter)
+  ) : source
+  const filtered = readFilter === "all" ? byUser : byUser.filter((item) => readFilter === "unread" ? isUnread(item) : isRead(item))
   const loading = scope === "all" ? allLoading && !allItems.length : comments.loading
   const error = scope === "all" ? allError : comments.error
   const query = search.trim().toLocaleLowerCase()
@@ -85,9 +99,14 @@ function CommentsInbox() {
         </div>
         <select aria-label="Gjendja e leximit" value={readFilter} onChange={(event) => changeFilters(scope, event.target.value)} className="h-9 rounded-md border bg-white px-3 text-sm">
           <option value="all">Çdo gjendje leximi</option>
-          <option value="unread">Të palexuara ({source.filter(isUnread).length})</option>
+          <option value="unread">Të palexuara ({byUser.filter(isUnread).length})</option>
           <option value="read">Të lexuara</option>
         </select>
+        {scope === "all" && <select aria-label="Përdoruesi (autor ose marrës)" value={userFilter} onChange={(event) => changeFilters(scope, readFilter, event.target.value)} className="h-9 max-w-full rounded-md border bg-white px-3 text-sm">
+          <option value="">Çdo përdorues</option>
+          {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          {userFilter && !peopleById.has(userFilter) && <option value={userFilter}>Përdorues i padisponueshëm</option>}
+        </select>}
         <input aria-label="Kërko komentet" placeholder="Kërko detyrën, simbolin, komentin ose personin…" value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 min-w-60 flex-1 rounded-md border bg-background px-3 text-sm" />
       </div>
       {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
@@ -99,13 +118,13 @@ function CommentsInbox() {
             <col className="w-20" /><col className="w-28" /><col className="w-36" /><col className="w-40" /><col className="w-44" />
           </colgroup>
           <thead className="sticky top-0 z-10 bg-white">
-            <tr>{["NR", "SIMBOLI", "DETYRA", "KOMENTI", "NGA", "PËR", "DATA, ORA", "LEXIMI", "VEPRIMET"].map((label) =>
+            <tr>{["NR", "SIMBOLI", "DETYRA", "KOMENTI", "NGA", "PËR", "SHTUAR MË", "LEXIMI", "VEPRIMET"].map((label) =>
               <th key={label} scope="col" className="h-10 border border-slate-600 bg-white px-2 text-left align-bottom text-xs font-medium text-slate-950">{label}</th>
             )}</tr>
           </thead>
           <tbody>
             {loading || !items.length ? <tr><td colSpan={9} className="border border-slate-600 p-6 text-center text-sm text-slate-600">
-              {loading ? "Duke ngarkuar komentet…" : error ? "Komentet nuk u ngarkuan. Përdor Ringarko." : query ? "Nuk u gjet asnjë koment." : readFilter === "unread" ? "Nuk ke komente të palexuara." : "Nuk ka komente për filtrat e zgjedhur."}
+              {loading ? "Duke ngarkuar komentet…" : error ? "Komentet nuk u ngarkuan. Përdor Ringarko." : query || userFilter ? "Nuk u gjet asnjë koment." : readFilter === "unread" ? "Nuk ke komente të palexuara." : "Nuk ka komente për filtrat e zgjedhur."}
             </td></tr> : items.map((item, index) => <tr key={item.id} className={isUnread(item) ? "group bg-blue-100 text-blue-950 hover:bg-blue-200" : "group bg-white hover:bg-slate-50"}>
               <td className="border border-slate-600 px-2 py-2 align-top text-xs">{index + 1}</td>
               <td className="border border-slate-600 px-2 py-2 align-top">
@@ -127,7 +146,10 @@ function CommentsInbox() {
               <td className="border border-slate-600 px-2 py-2 align-top text-xs"><div className="flex flex-wrap gap-1">
                 {item.recipients.length ? item.recipients.map((person) => <span key={person.user_id} title={person.name} aria-label={person.name} className="inline-flex min-h-6 min-w-7 items-center justify-center rounded-full border border-slate-300 bg-slate-100 px-1.5 text-[11px] font-bold text-slate-800">{person.initials}</span>) : <span className="text-slate-500">—</span>}
               </div></td>
-              <td className="border border-slate-600 px-2 py-2 align-top text-xs"><time dateTime={item.updated_at}>{commentDate(item.updated_at)}</time></td>
+              <td className="border border-slate-600 px-2 py-2 align-top text-xs">
+                <time dateTime={item.comment_created_at || item.updated_at}>{commentDate(item.comment_created_at || item.updated_at)}</time>
+                {item.comment && !item.comment_created_at && <span className="block text-slate-500">Datë orientuese</span>}
+              </td>
               <td className="border border-slate-600 px-2 py-2 align-top">{scope === "all"
                 ? <span className={`inline-block rounded border px-2 py-0.5 text-[11px] ${item.all_read ? "border-emerald-200 bg-emerald-50 text-emerald-700" : item.recipient_count ? "border-blue-600 bg-[#0055FF] font-bold text-white" : "border-slate-200 bg-slate-50 text-slate-600"}`} title={item.recipients.map((person) => `${person.name}: ${person.read_at ? `Lexuar ${commentDate(person.read_at)}` : "Pa lexuar"}`).join("\n")}>
                   {!item.recipient_count ? "Pa përgjegjës" : item.recipient_count === 1 ? item.all_read ? `Lexuar nga ${item.recipients[0].initials}` : "Pa lexuar" : `Lexuar ${item.read_count}/${item.recipient_count}`}

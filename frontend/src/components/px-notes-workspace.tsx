@@ -26,6 +26,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
+import { miraDictationLabel } from "@/lib/mira"
 import { TeamMarkerCommentsButton } from "@/components/team-marker-comments-button"
 import { KNOWLEDGE_CONFIG, knowledgeText, type KnowledgeType } from "@/components/knowledge/knowledge-config"
 import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/prompt-link"
@@ -4412,6 +4413,12 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 
                 // Clone the table and clean up React-specific attributes
                 const clonedTable = table.cloneNode(true) as HTMLElement
+                const noteCells = table.querySelectorAll<HTMLTableCellElement>('tbody > tr > td:nth-child(2)')
+                const clonedNoteCells = clonedTable.querySelectorAll<HTMLTableCellElement>('tbody > tr > td:nth-child(2)')
+                clonedNoteCells.forEach((cell, index) => {
+                  const originalCell = noteCells[index]
+                  if (originalCell) cell.style.backgroundColor = window.getComputedStyle(originalCell).backgroundColor
+                })
                 setNotesRenderLimit(previousNotesRenderLimit)
                 const allElements = clonedTable.querySelectorAll('*')
                 allElements.forEach((el) => {
@@ -4519,6 +4526,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                           max-width: 350px;
                           white-space: normal;
                           word-wrap: break-word;
+                        }
+                        tbody td:nth-child(2) {
+                          print-color-adjust: exact;
+                          -webkit-print-color-adjust: exact;
                         }
                         th { 
                           background-color: #D9D9D9; 
@@ -4719,9 +4730,8 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                       : "Edit"
                     const canCreateTask = !isPxJavNote && !isClosed && (!hasProject || isDevLinked)
                     const showManualOnly = hasProject && !isDevLinked
-                    const dictationSource = note.mira_dictation_source === "1h" ? "Nga Mira 1H"
-                      : note.mira_dictation_source === "ai_agent" ? "Nga Mira AI Agent" : null
-                    const shenimiCellClass = dictationSource ? "" : isClosed
+                    const dictationSource = miraDictationLabel(note.mira_dictation_source)
+                    const shenimiCellClass = dictationSource && !hasTask ? "" : isClosed
                       ? "bg-slate-300 opacity-70"
                       : hasTask
                         ? aggregatedStatus === "TODO"
@@ -5168,7 +5178,11 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
-                            {hasTask ? (
+                            {dictationSource && taskInfo?.taskId ? (
+                              <Link href={`/tasks/${taskInfo.taskId}`} className="inline-flex h-7 items-center rounded-md border border-purple-200 bg-purple-50 px-1.5 text-center text-[10px] text-purple-700 hover:underline">
+                                Task Created
+                              </Link>
+                            ) : hasTask ? (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center text-center">
                                 Task Created
                               </Badge>

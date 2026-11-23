@@ -9,6 +9,7 @@ import { ProjectActivityControl, ProjectActivityFilterControl, ProjectListEmptyS
 import { useBrowserTabTitle } from "@/components/browser-tab-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
+import { miraDictationLabel } from "@/lib/mira"
 import { TaskOneHMarkerLegend } from "@/components/task-one-h-marker-legend"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
@@ -1963,7 +1964,11 @@ export default function DepartmentKanban() {
             : task.ga_note_origin_id || task.plan_note_origin_id || isTaskStartingOnSelectedAllDate(task)
               ? renderMarkedNoteContent(visibleTitle, visibleTitle)
               : getPlainMarkedText(visibleTitle)
-          return <>{systemTitleOnly ? null : <TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />}{title}</>
+          return <>
+            {systemTitleOnly ? null : <TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />}
+            {title}
+            {task.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(task.mira_dictation_source)}</span>}
+          </>
         }}
       />
     ),

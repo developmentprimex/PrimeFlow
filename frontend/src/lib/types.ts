@@ -338,6 +338,7 @@ export interface Task {
   assignees?: TaskAssignee[] | null
   created_by?: string | null
   ga_note_origin_id?: string | null
+  mira_dictation_source?: "1h" | "ai_agent" | null
   plan_note_origin_id?: string | null
   planning_brief?: PxJavPlanningBrief | null
   system_template_origin_id?: string | null

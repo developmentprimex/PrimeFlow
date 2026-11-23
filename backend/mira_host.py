@@ -261,6 +261,9 @@ class MiraHost:
 
     async def join_now(self, guild, slot: str, discord_user_id: str, *, command_context: dict | None = None, test_mode: bool = False):
         """One explicit meeting; do not enable the daily automatic schedule."""
+        from discord_meeting_control import release_accepts_meetings
+        if not release_accepts_meetings():
+            raise ValueError('Mira po kontrollohet pas përditësimit. Provo pas pak.')
         if not guild or str(guild.id) != str(settings.DISCORD_GUILD_ID):
             raise ValueError("Përdore komandën në serverin Discord të Primex.")
         if slot not in SLOTS:
@@ -320,7 +323,8 @@ class MiraHost:
     # ------------------------------------------------------------ scheduler
 
     async def tick(self, now: datetime):
-        if self.ticking:
+        from discord_meeting_control import release_accepts_meetings
+        if self.ticking or not release_accepts_meetings():
             return
         self.ticking = True
         try:

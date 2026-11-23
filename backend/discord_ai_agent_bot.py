@@ -1,6 +1,7 @@
 """Receive-only Mira AI Agent, isolated from the 1H recorder and Mira Host."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -154,7 +155,7 @@ class AIAgentBot(discord.Client):
         except (OSError, ValueError):
             pass
 
-    def publish_status(self):
+    def publish_status(self, *, panel_ready=None, voice_ready=None):
         guild = self.get_guild(int(settings.DISCORD_GUILD_ID))
         channel = guild.get_channel(int(settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID)) if guild else None
         if not guild or not isinstance(channel, discord.VoiceChannel) or not self.user:
@@ -170,6 +171,8 @@ class AIAgentBot(discord.Client):
             'auto_join_times': settings.DISCORD_AI_AGENT_AUTO_JOIN_TIMES,
             'auto_join_timezone': settings.APP_TIMEZONE,
             'recording': bool(self.meeting_capture.active and self.meeting_capture.active.get('listening') and not self.meeting_capture.active.get('finishing'))}
+        if panel_ready is not None:
+            status.update(panel_ready=panel_ready, voice_ready=voice_ready)
         temporary = STATUS_FILE.with_suffix('.json.tmp')
         temporary.write_text(json.dumps(status, ensure_ascii=False), encoding='utf-8')
         temporary.replace(STATUS_FILE)
@@ -178,10 +181,22 @@ class AIAgentBot(discord.Client):
     async def on_ready(self):
         await self.meeting_capture.cleanup_idle_voice()
         self.publish_status()
+        await self.verify_release()
 
     async def on_resumed(self):
         await self.meeting_capture.cleanup_idle_voice()
         self.publish_status()
+        await self.verify_release()
+
+    async def verify_release(self):
+        if not os.getenv('PRIMEFLOW_MIRA_RELEASE_PROBE'):
+            return
+        try:
+            panel, voice_ready = await asyncio.wait_for(self.meeting_capture.panel.verify_release(), timeout=45)
+        except Exception as exc:
+            log.warning('Mira AI Agent release verification failed: %s', type(exc).__name__)
+            return
+        self.publish_status(panel_ready=panel, voice_ready=voice_ready)
 
     async def on_disconnect(self):
         self.clear_status()
@@ -198,7 +213,10 @@ class AIAgentBot(discord.Client):
 
 class AIAgentCapture(voice.MeetingCaptureCoordinator):
     async def tick(self, now):
+        from discord_meeting_control import release_accepts_meetings
         await self.check_presence(now)
+        if not release_accepts_meetings():
+            return
         slot = voice.auto_join_slot(now, settings.DISCORD_AI_AGENT_AUTO_JOIN_TIMES)
         owner = settings.DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID
         if not owner or slot is None or slot in self.scheduled or self.active:

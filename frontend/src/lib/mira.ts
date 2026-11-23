@@ -1,5 +1,11 @@
 export type MiraTab = "takimet" | "notetaker" | "shenimet" | "knowledge" | "kujtesa" | "cilesimet"
 
+export function miraDictationLabel(source?: string | null): string | null {
+  if (source === "1h") return "Nga Mira 1H"
+  if (source === "ai_agent") return "Nga Mira AI Agent"
+  return null
+}
+
 export type TurnPerson = { initials: string; status: string }
 
 export type MeetingRow = {

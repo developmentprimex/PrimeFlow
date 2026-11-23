@@ -894,6 +894,7 @@ async def _build_common_view(
                 users_map.get(t.confirmation_assignee_id) if t.confirmation_assignee_id else None
             )
             confirmation_fields = {
+                "mira_dictation_source": getattr(t, "mira_dictation_source", None),
                 "confirmation_assignee_id": str(t.confirmation_assignee_id) if t.confirmation_assignee_id else None,
                 "confirmation_owner": confirmation_owner,
                 "is_system_task": is_system_task,

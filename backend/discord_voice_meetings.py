@@ -70,6 +70,9 @@ class MeetingCaptureCoordinator:
             request_id=str(interaction.id),title=title,department_id=department_id,notify=notify)
 
     async def begin(self,*,actor,guild,voice,request_id,title,department_id,notify):
+        from discord_meeting_control import release_accepts_meetings
+        if not release_accepts_meetings():
+            raise ValueError('Mira po kontrollohet pas përditësimit. Provo pas pak.')
         channel=voice
         async with self.lock:
             if self.active:raise ValueError('Një takim po dëgjohet tashmë.')
@@ -206,7 +209,10 @@ class MeetingCaptureCoordinator:
 
     async def tick(self,now):
         """Scheduler step: watch who is in the meeting, then join the next 1H slot."""
+        from discord_meeting_control import release_accepts_meetings
         await self.check_presence(now)
+        if not release_accepts_meetings():
+            return
         owner=settings.DISCORD_1H_AUTO_OWNER_DISCORD_ID
         slot=auto_join_slot(now,settings.DISCORD_1H_AUTO_JOIN_TIMES)
         if not owner or slot is None or slot in self.scheduled or self.active:return

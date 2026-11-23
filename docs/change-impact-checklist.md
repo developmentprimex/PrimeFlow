@@ -164,6 +164,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   njëjtit interval. Kur zgjerohet dritarja e Shortcut-it, kontrollo që të dyja
   listat të mbulojnë intervalin dhe verifiko hyrjet e importuara në eksportin
   `ga-time.xlsx` dhe në tabelën GA të emailit 1H (HTML dhe PNG).
+  Importi ruan `is_completed` për Reminders. GA Time Table dhe printimi ditor
+  që përdor PDF-ja e NEWS-PX shfaqin `✓ Done`. Eksporti `ga-time.xlsx`,
+  bashkëngjitjet GA të 1H dhe agjenda e Asistentes GA i përjashtojnë hyrjet e
+  kryera. Verifiko të dyja gjendjet pas një sinkronizimi të përsëritur.
 
 - M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
   e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
@@ -409,6 +413,20 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   e kontrollit dhe në kanalet personale, si dhe ruajtjen te Mira / PX Notes.
   Kur Discord kthen `10062`, logu i botit tregon moshën e klikimit në hyrje
   dhe kohën e kërkesës së konfirmimit. Veprimi i skaduar nuk ekzekutohet.
+- Deploy-et me ndryshime të verifikuara vetëm në API i mbajnë 1H dhe AI Agent
+  aktivë. Të dy botët përdorin gateway-n lokal `18080` që ndjek API-në aktive.
+  Kontrollo panelin `mira-kontrolli`, komandat personale, raportet Discord dhe
+  njoftimin e përfundimit të `/push` me botin që vazhdon të punojë. Kur duhet
+  rinisje, kontrolli i takimeve aktive vazhdon të zbatohet për të dy regjistruesit.
+- Release-i i Mirës përgatit kodin, konfigurimin dhe varësitë në një dosje të
+  izoluar. Pas ndërrimit verifikon lidhjen, leximin dhe përditësimin e panelit,
+  butonin “Fillo” dhe lejet në kanalin zanor për secilin regjistrues. Nëse
+  verifikimi dështon, deploy-i rikthen release-in e mëparshëm. Testo klikimin
+  dhe hyrjen reale në Discord në një provë të veçantë. Kontrolli i deploy-it
+  nuk nis një regjistrim. Ruaj radhën e rikuperimit të transkripteve të Mira Host
+  në të njëjtën dosje, pavarësisht versionit të botit.
+  Nisjet automatike të 1H dhe AI Agent nuk harxhojnë tentativa gjatë
+  verifikimit. Ato rifillojnë brenda dritares ekzistuese prej katër minutash.
 
 - Taskat e krijuara drejtpërdrejt nga Regjistrimet krijojnë PX Note me
   `knowledge_type=RECORDING` dhe lidhjen `ga_note_origin_id`. PX Notes shfaq
@@ -539,6 +557,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   COM përdor `TaskMarkerComment` edhe në faqe të tjera, ndaj ndryshimet lokale
   kalojnë përmes klasës `common-marker-comment`. Printimi i ditës së ardhshme
   nga Common View ka stil të veçantë `.print-marker-comment`.
+- Simbolet dhe komentet (`/comments`) lexon `/marker-comments` për datën
+  origjinale të shtimit të komentit, veç datës së përditësimit. Komentet e
+  vjetra pa datë origjinale shfaqin datën e regjistruar si orientuese. Filtri
+  “Çdo përdorues” te “Të gjitha” përputh autorin ose marrësin sipas ID-së.
+  PX Notes lidh te “Të gjitha”; shiritat e njoftimeve dhe dialogu i përbashkët
+  i komenteve përdorin gjendjen dhe datën e përditësimit të listës bazë.
+  Raportet dhe eksportet lexojnë simbolin dhe tekstin nga të dhënat e detyrës.
 - SHTYPI Today dhe Tomorrow ndajnë komponentin dhe gjeneruesin bazë, por kanë
   dallime në data, gjenerim dhe historik. 1H Reports ka gjenerues tjetër.
   Mungesa ose PV tërëditore (08:00–16:00) përjashton detyrat nga gjenerimi i ri
@@ -715,6 +740,20 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   në segmente, folësit që ndërhyjnë dhe riprovimet. Në All Tasks/Notes burimi
   shfaqet me tekst të thjeshtë. Diktimet nuk shtohen në listën Mira → Shënimet
   ose në listat e shënimeve të raporteve që përjashtojnë shënimet e Mirës.
+- Të dy regjistruesit pranojnë edhe variantet e transkriptuara “Mira shëna”,
+  “Mirëa shëno”, “Mirashënë”, “fund shënime”, “Mira detyr” dhe “fund detyra”.
+  Në diktimin e detyrave, `EFA` përputhet
+  edhe me profilin “Elsa Ferati”. Nëse përputhen dy profile aktive, detyra
+  nuk krijohet.
+- Diktimi i një detyre nga 1H ose AI Agent ruan në të njëjtin transaksion
+  detyrën 1H dhe shënimin e lidhur në PX Notes. Kontrollo që “Task Created”
+  të hapë detyrën ekzistuese dhe që burimi të shfaqet te Task Details,
+  Common View, My View, Development, Graphic Design, Product Content,
+  Finance dhe eksportet përkatëse. Raportet që përjashtojnë shënimet e
+  Mirës vazhdojnë ta përjashtojnë shënimin e lidhur.
+- Kur diktimi i Mirës ka detyrë të lidhur, qeliza SHËNIMI në PX Notes merr
+  ngjyrën sipas statusit të detyrës. Printimi kopjon ngjyrën nga tabela.
+  Excel-i përdor hartën e vet të ngjyrave të statusit.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
   Radha e raportimit ka përjashtime sipas slotit: LH, EH, EF dhe RA nuk marrin

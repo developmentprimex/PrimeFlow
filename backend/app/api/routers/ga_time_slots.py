@@ -135,6 +135,9 @@ def _entry_out(entry: GaTimeSlotTemplate) -> GaTimeSlotEntryOut:
 
 
 def _dated_entry_out(entry: GaTimeSlotEntry) -> GaTimeSlotEntryOut:
+    background_color = "#E0F2FE" if entry.source_type == "calendar" else "#FEF3C7"
+    if entry.is_completed:
+        background_color = "#DCFCE7"
     return GaTimeSlotEntryOut(
         id=entry.id,
         user_id=entry.user_id,
@@ -143,7 +146,7 @@ def _dated_entry_out(entry: GaTimeSlotEntry) -> GaTimeSlotEntryOut:
         end_time=entry.end_time,
         content=entry.content,
         sort_order=0,
-        background_color="#E0F2FE" if entry.source_type == "calendar" else "#FEF3C7",
+        background_color=background_color,
         text_color="#0F172A",
         is_bold=False,
         is_italic=False,
@@ -152,6 +155,7 @@ def _dated_entry_out(entry: GaTimeSlotEntry) -> GaTimeSlotEntryOut:
         occurrence_date=entry.day_date,
         source_type=entry.source_type,
         source_name=entry.source_name,
+        is_completed=entry.is_completed,
     )
 
 
@@ -1067,7 +1071,7 @@ async def import_icloud_timetable_data(
         prepared.append(item)
     for reminder in payload.reminders:
         source_name = (reminder.reminder_list_name or payload.reminder_list_name).strip()
-        if reminder.is_completed or source_name.casefold() != connection.reminder_list_name.casefold():
+        if source_name.casefold() != connection.reminder_list_name.casefold():
             skipped += 1
             continue
         item = prepare_reminder_item(
@@ -1080,6 +1084,7 @@ async def import_icloud_timetable_data(
             fallback_date=payload.sync_window_start,
             zone=zone,
             rows=time_rows,
+            is_completed=reminder.is_completed,
         )
         if not payload.sync_window_start <= item.day_date <= payload.sync_window_end or item.day_date.weekday() > 4:
             skipped += 1
@@ -1106,6 +1111,7 @@ async def import_icloud_timetable_data(
             source_type=item.source_type,
             source_external_id=item.source_external_id,
             source_name=item.source_name,
+            is_completed=item.is_completed,
         )
         for item in unique_items.values()
     ]

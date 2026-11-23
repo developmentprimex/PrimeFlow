@@ -61,6 +61,7 @@ class GaTimeSlotEntryOut(GaTimeSlotFormatting):
     occurrence_date: date | None = None
     source_type: Literal["calendar", "reminder"] | None = None
     source_name: str | None = None
+    is_completed: bool = False
 
 
 class GaTimeSlotEntryPosition(BaseModel):

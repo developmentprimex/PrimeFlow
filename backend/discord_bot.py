@@ -155,6 +155,7 @@ class PrimeFlowBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.task_details = {}
         self.task_cards = {}
+        self.last_announced_build = None
         self.http_bridge = httpx.AsyncClient(base_url=settings.PRIMEFLOW_API_BASE_URL.rstrip("/") + "/api/discord",
             timeout=90, headers={"X-Primeflow-Discord-Secret": settings.DISCORD_BRIDGE_SECRET})
 
@@ -176,30 +177,56 @@ class PrimeFlowBot(discord.Client):
         except (OSError, ValueError):
             pass
 
-    def publish_ready_status(self):
+    def publish_ready_status(self, *, panel_ready=None, voice_ready=None):
         if not self.get_guild(int(settings.DISCORD_GUILD_ID)):
             self.clear_ready_status()
             log.error("Bot connected but is not a member of the configured Discord server")
             return
         path = Path(__file__).with_name(".discord-worker-status.json")
         temporary = path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps({"guild_id": settings.DISCORD_GUILD_ID,
+        status = {"guild_id": settings.DISCORD_GUILD_ID,
             "pid": os.getpid(), "build": os.getenv("APP_BUILD_SHA", "unknown"),
-            "connected_at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
+            "connected_at": datetime.now(timezone.utc).isoformat()}
+        if panel_ready is not None:
+            status.update(panel_ready=panel_ready, voice_ready=voice_ready)
+        temporary.write_text(json.dumps(status), encoding="utf-8")
         temporary.replace(path)
         log.info("Discord bot connected; slash commands registered")
 
     async def on_ready(self):
         self.publish_ready_status()
-        await self.announce_push_done()
+        await self.verify_release()
+
+    async def verify_release(self):
+        if not os.getenv("PRIMEFLOW_MIRA_RELEASE_PROBE") or not settings.DISCORD_MEETING_NOTES_ENABLED:
+            return
+        try:
+            panel, voice = await asyncio.wait_for(self.meeting_capture.panel.verify_release(), timeout=45)
+        except Exception as exc:
+            log.warning("Mira 1H release verification failed: %s", type(exc).__name__)
+            return
+        self.publish_ready_status(panel_ready=panel, voice_ready=voice)
+
+    def deployed_build(self):
+        marker = os.getenv("PRIMEFLOW_BACKEND_RELEASE_FILE")
+        if marker:
+            try:
+                build = Path(marker).read_text(encoding="ascii").strip()
+            except (OSError, UnicodeError):
+                return "unknown"
+            return build if re.fullmatch(r"[0-9a-f]{40}", build) else "unknown"
+        return os.getenv("APP_BUILD_SHA", "unknown")
 
     async def announce_push_done(self):
-        """After /push the deploy restarts the bot with the new build; tell everyone it is over."""
+        build = self.deployed_build()
+        if build == "unknown" or build == self.last_announced_build:
+            return
         try:
-            targets = (await self.bridge("/bot/push/complete", {"build": os.getenv("APP_BUILD_SHA", "unknown")}))["targets"]
+            targets = (await self.bridge("/bot/push/complete", {"build": build}))["targets"]
         except Exception as exc:
             log.warning("Push completion check failed: %s", type(exc).__name__)
             return
+        self.last_announced_build = build
         await self.broadcast(targets, ui.push_done)
 
     async def broadcast(self, targets, render) -> int:
@@ -217,9 +244,7 @@ class PrimeFlowBot(discord.Client):
 
     async def on_resumed(self):
         self.publish_ready_status()
-
-    async def on_disconnect(self):
-        self.clear_ready_status()
+        await self.verify_release()
 
     @staticmethod
     def error_message(exc, *, read_only=False):
@@ -349,7 +374,7 @@ class PrimeFlowBot(discord.Client):
             await interaction.response.defer(ephemeral=True, thinking=True)
             try:
                 result = await self.bridge("/bot/push", {"discord_user_id": str(interaction.user.id), "guild_id": str(interaction.guild_id),
-                    "request_id": str(interaction.id), "build": os.getenv("APP_BUILD_SHA", "unknown")})
+                    "request_id": str(interaction.id), "build": self.deployed_build()})
                 if result["status"] != "SENT":
                     await interaction.followup.send("ℹ " + result["message"], ephemeral=True)
                     return
@@ -373,6 +398,7 @@ class PrimeFlowBot(discord.Client):
         self.meeting_alerts.start()
         self.agent_results.start()
         self.ga_reply_evidence.start()
+        self.deploy_notices.start()
 
     async def show_personal_report(self, interaction, kind):
         await interaction.response.defer(thinking=True)
@@ -1049,8 +1075,17 @@ class PrimeFlowBot(discord.Client):
             await self.meeting_capture.gateway(event)
 
     async def on_disconnect(self):
+        self.clear_ready_status()
         if settings.DISCORD_MEETING_NOTES_ENABLED:
             await self.meeting_capture.interrupt("gateway_disconnected")
+
+    @tasks.loop(seconds=30)
+    async def deploy_notices(self):
+        await self.announce_push_done()
+
+    @deploy_notices.before_loop
+    async def before_deploy_notices(self):
+        await self.wait_until_ready()
 
     @tasks.loop(seconds=15)
     async def voice_meeting_results(self):
@@ -1100,6 +1135,7 @@ class PrimeFlowBot(discord.Client):
         await self.wait_until_ready()
 
     async def close(self):
+        self.deploy_notices.cancel()
         self.ga_reply_evidence.cancel()
         self.voice_meeting_schedule.cancel()
         self.voice_meeting_results.cancel()

@@ -21,7 +21,9 @@ export type MarkerComment = {
   marker_by_ga?: boolean
   symbol: string
   comment: string
+  author_id?: string | null
   author_name: string | null
+  comment_created_at?: string | null
   updated_at: string
   read_at: string | null
   is_mine?: boolean

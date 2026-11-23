@@ -11,3 +11,8 @@ def mira_note_expression():
 def is_mira_note(note) -> bool:
     return bool(getattr(note, "from_mira", False) or getattr(note, "from_mira_desktop", False)
                 or getattr(note, "mira_dictation_source", None))
+
+
+def append_mira_dictation_label(content: str, source: str | None) -> str:
+    label = {"1h": "Nga Mira 1H", "ai_agent": "Nga Mira AI Agent"}.get(source)
+    return f"{content}\n{label}" if label else content

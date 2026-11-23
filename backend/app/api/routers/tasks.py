@@ -972,6 +972,7 @@ def _task_to_out(
         assignees=assignees,
         created_by=task.created_by,
         ga_note_origin_id=task.ga_note_origin_id,
+        mira_dictation_source=getattr(task, "mira_dictation_source", None),
         plan_note_origin_id=task.plan_note_origin_id,
         question_origin_id=task.question_origin_id,
         system_template_origin_id=task.system_template_origin_id,

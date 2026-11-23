@@ -58,7 +58,6 @@ Intervali i dërguar nuk mund të jetë më i gjatë se 93 ditë.
 1. Përdor **Find Reminders**.
 2. Vendos filtrat:
    - List is `REMINDER`
-   - Is Completed is false
 3. Për çdo reminder, krijo një Dictionary me:
    - `title`: Title
    - `due_at`: Due Date i formatuar ISO 8601, vetëm kur ka datë dhe orë
@@ -113,7 +112,8 @@ Një përgjigje e suksesshme ka këtë formë:
 1. Ekzekuto Shortcut-in manualisht.
 2. Kur iPhone pyet, jep leje për Calendar, Reminders dhe lidhjen me PrimeFlow.
 3. Në PrimeFlow, hap javën përkatëse te GA Time Table.
-4. Calendar shfaqet me sfond të kaltër; Reminders me sfond të verdhë.
+4. Calendar shfaqet me sfond të kaltër. Reminders e hapur kanë sfond të verdhë;
+   ata të kryer kanë sfond të gjelbër dhe shenjën `✓ Done` në tabelë dhe në printim.
 5. Eventet/reminders me orë vendosen në rreshtin përkatës. Ata pa orë vendosen
    në rreshtin e posaçëm pa orë të asaj date.
 

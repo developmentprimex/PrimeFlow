@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 import uuid
 from datetime import date, datetime, time, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
+from app.api.routers import ga_time_slots
+from app.schemas.ga_time_slot import GaIcloudSyncImport
 from app.services.ga_icloud_sync import (
     TimeRow,
     connection_id_from_token,
@@ -115,6 +119,36 @@ class TestGaIcloudSync(unittest.TestCase):
 
         self.assertEqual(item.day_date, date(2026, 9, 7))
         self.assertEqual(item.source_name, "REMINDER")
+
+
+class TestGaIcloudReminderImport(unittest.IsolatedAsyncioTestCase):
+    async def test_import_preserves_completed_reopened_and_legacy_reminders(self) -> None:
+        connection = SimpleNamespace(
+            id=uuid.uuid4(), ga_user_id=uuid.uuid4(), calendar_name="Calendar", reminder_list_name="REMINDER"
+        )
+        db = SimpleNamespace(execute=AsyncMock(), add_all=Mock(), commit=AsyncMock())
+        day = date(2026, 9, 7)
+        with (
+            patch.object(ga_time_slots, "_connection_from_sync_token", AsyncMock(return_value=connection)),
+            patch.object(ga_time_slots, "get_ga_time_table_rows", AsyncMock(return_value=[])),
+        ):
+            for status, expected_completed in (({"is_completed": "true"}, True), ({"is_completed": "false"}, False), ({}, False)):
+                payload = GaIcloudSyncImport.model_validate({
+                    "sync_window_start": day,
+                    "sync_window_end": day,
+                    "calendar_name": "Calendar",
+                    "reminder_list_name": "REMINDER",
+                    "reminders": [{"title": "Follow up", "due_date": day, **status}],
+                })
+                result = await ga_time_slots.import_icloud_timetable_data(payload, "test-token", db)
+                self.assertEqual((result.reminders_imported, result.skipped), (1, 0))
+
+                entry, = db.add_all.call_args.args[0]
+                entry.id = uuid.uuid4()
+                entry.created_at = entry.updated_at = datetime(2026, 9, 7, 9, tzinfo=timezone.utc)
+                response = ga_time_slots._dated_entry_out(entry)
+                self.assertIs(response.is_completed, expected_completed)
+                self.assertEqual(response.background_color, "#DCFCE7" if expected_completed else "#FEF3C7")
 
 
 if __name__ == "__main__":

@@ -27,16 +27,19 @@ class VoiceDependencyInstallTests(unittest.TestCase):
                     self.assertEqual(result.stdout.split(), [str(exit_code == 0), 'cleanup-continued'])
                     self.assertEqual(result.stderr, '')
 
-    def test_deploy_releases_voice_library_before_locked_install_and_restarts_the_bot(self):
+    def test_deploy_prepares_and_verifies_the_isolated_bot_release(self):
         workflow = (ROOT / '.github/workflows/deploy.yml').read_text(encoding='utf-8')
-        release = workflow.index('- name: Release Mira Voice Dependencies')
-        prepare = workflow.index('- name: Prepare Backend')
-        install = workflow.index('check_discord_voice.py --install')
-        start = workflow.index('- name: Start Discord Assistant')
-        self.assertLess(release, prepare)
-        self.assertLess(prepare, install)
-        self.assertLess(install, start)
-        self.assertIn('stop_discord_voice_workers.ps1', workflow[release:prepare])
+        prepare = workflow.index('- name: Prepare isolated Mira release')
+        backend = workflow.index('- name: Prepare Backend')
+        migrate = workflow.index('- name: Apply Database Migrations')
+        activate = workflow.index('- name: Activate and verify Mira release')
+        record = workflow.index('- name: Record verified backend release')
+        self.assertLess(prepare, backend)
+        self.assertLess(backend, migrate)
+        self.assertLess(migrate, activate)
+        self.assertLess(activate, record)
+        self.assertIn('-m scripts.deploy_mira_release prepare', workflow[prepare:backend])
+        self.assertIn('-m scripts.deploy_mira_release activate', workflow[activate:record])
 
     @unittest.skipUnless(os.name == 'nt', 'Deployment runs on Windows')
     def test_worker_selection_excludes_frontend_and_other_workspaces(self):

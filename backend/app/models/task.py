@@ -5,10 +5,11 @@ from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, event, func, and_, or_, select
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from app.db import Base
 from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskSkillCategory, TaskStatus
+from app.models.ga_note import GaNote
 
 
 class Task(Base):
@@ -43,6 +44,12 @@ class Task(Base):
     )
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     ga_note_origin_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ga_notes.id"))
+    mira_dictation_source: Mapped[str | None] = column_property(
+        select(GaNote.mira_dictation_source)
+        .where(GaNote.id == ga_note_origin_id)
+        .correlate_except(GaNote)
+        .scalar_subquery()
+    )
     plan_note_origin_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("plan_notes.id"), index=True
     )

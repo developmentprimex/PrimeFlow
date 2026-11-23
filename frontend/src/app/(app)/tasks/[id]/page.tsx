@@ -17,6 +17,7 @@ import { TaskReviewsPanel } from "@/components/task-reviews-panel"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { useTaskMarkerUpdates, type TaskMarkerUpdate } from "@/lib/task-marker-updates"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
+import { miraDictationLabel } from "@/lib/mira"
 import { PromptLinkButton } from "@/components/knowledge/prompt-link"
 import { clearDepartmentBootstrapCacheByPrefix } from "@/lib/department-bootstrap-cache"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
@@ -954,6 +955,7 @@ export default function TaskDetailsPage() {
                 <div className="flex flex-wrap gap-2">
                   {task.is_bllok ? <Badge variant="secondary">BLLOK</Badge> : null}
                   {task.is_1h_report ? <Badge variant="secondary">1H</Badge> : null}
+                  {task.mira_dictation_source ? <Badge variant="outline">{miraDictationLabel(task.mira_dictation_source)}</Badge> : null}
                   {task.is_r1 ? <Badge variant="secondary">R1</Badge> : null}
                   {task.is_personal ? <Badge variant="secondary">P</Badge> : null}
                   {!task.is_bllok && !task.is_1h_report && !task.is_r1 && !task.is_personal ? (

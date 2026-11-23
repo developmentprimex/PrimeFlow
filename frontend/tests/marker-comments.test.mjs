@@ -15,7 +15,8 @@ let teamItems = []
 const item = {
   id: "receipt", task_id: "task", task_ids: ["task", "copy"], revision: "revision",
   title: "Task title", marker: "QUESTION", symbol: "?", comment: "Review with KA",
-  author_name: "Comment author", updated_at: "2026-10-19T08:30:00Z", read_at: null,
+  author_id: "author", author_name: "Comment author", comment_created_at: "2026-10-18T10:00:00Z",
+  updated_at: "2026-10-19T08:30:00Z", read_at: null,
   can_mark_read: true, is_mine: true, recipients: [{ user_id: "user", name: "First", initials: "F", read_at: null }],
   recipient_count: 1, read_count: 0, all_read: false,
 }
@@ -36,6 +37,7 @@ function load(relativePath, mockContextHook = false) {
     if (name === "@/components/comment-task-edit-dialog") return { CommentTaskEditDialog: component() }
     if (name === "@/lib/note-markup") return load("../src/lib/note-markup.tsx")
     if (name === "@/lib/task-markers") return load("../src/lib/task-markers.ts")
+    if (name === "@/components/task-marker-display") return load("../src/components/task-marker-display.tsx")
     if (name === "@/components/task-marker-select") return load("../src/components/task-marker-select.tsx")
     if (name === "@/lib/utils") return { cn: (...values) => values.filter(Boolean).join(" ") }
     if (name === "@/components/ui/button") return { Button: ({ children, ...props }) => {
@@ -126,11 +128,32 @@ test("the dedicated inbox displays unread comments with authors and both filters
   assert.match(html, /<tr class="group bg-blue-100 text-blue-950 hover:bg-blue-200">/)
   assert.match(html, /Leximin e konfirmojnë vetëm personat përgjegjës të detyrës/)
   assert.match(html, /<table/)
-  for (const column of ["NR", "SIMBOLI", "DETYRA", "KOMENTI", "NGA", "PËR", "DATA, ORA", "LEXIMI", "VEPRIMET"]) {
+  for (const column of ["NR", "SIMBOLI", "DETYRA", "KOMENTI", "NGA", "PËR", "SHTUAR MË", "LEXIMI", "VEPRIMET"]) {
     assert.match(html, new RegExp(`scope="col"[^>]*>${column}</th>`))
   }
   assert.match(html, /Already read/)
+  assert.match(html, /<time dateTime="2026-10-18T10:00:00Z"/i)
+  assert.doesNotMatch(html, /Përdoruesi \(autor ose marrës\)/)
   assert.match(html, /option value="all" selected=""/)
+})
+
+test("team comments filter by recipient or author ID together with reading status", () => {
+  setContext([])
+  teamItems = [
+    { ...item, comment: "By selected user", author_id: "selected", author_name: "A Person" },
+    { ...item, id: "to", comment: "For selected user", recipients: [{ ...item.recipients[0], user_id: "selected", name: "A Person" }] },
+    { ...item, id: "other", comment: "Same name, another user", author_id: "different", author_name: "A Person" },
+    { ...item, id: "read", comment: "Completed by selected user", author_id: "selected", author_name: "A Person", all_read: true },
+  ]
+  searchParams = "scope=all&read=unread&user=selected"
+  try {
+    const html = renderToStaticMarkup(React.createElement(CommentsPage))
+    assert.match(html, /<option value="selected" selected="">A Person<\/option>/)
+    assert.match(html, /By selected user/)
+    assert.match(html, /For selected user/)
+    assert.match(html, /Të palexuara \(2\)/)
+    assert.doesNotMatch(html, /Same name, another user|Completed by selected user/)
+  } finally { searchParams = ""; teamItems = [] }
 })
 
 test("team viewers can only view; blue rows show pending recipients and completion names", () => {

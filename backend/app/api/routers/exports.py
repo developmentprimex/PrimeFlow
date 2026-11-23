@@ -72,6 +72,7 @@ from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.task_marker import one_h_marker_label
 from app.services.note_markup import parse_marked_note_content
 from app.services.ga_identity import resolve_ga_user
+from app.services.report_note_visibility import append_mira_dictation_label
 
 
 router = APIRouter()
@@ -1578,6 +1579,7 @@ async def export_ga_time_xlsx(
             .where(
                 GaTimeSlotEntry.user_id == ga_user.id,
                 GaTimeSlotEntry.sync_connection_id.is_not(None),
+                GaTimeSlotEntry.is_completed.is_(False),
                 GaTimeSlotEntry.day_date >= week_dates[0],
                 GaTimeSlotEntry.day_date <= week_dates[-1],
             )
@@ -3103,7 +3105,7 @@ async def export_open_tasks_xlsx(
             idx,
             str(task.id),
             group,
-            source_label,
+            append_mira_dictation_label(source_label, task.mira_dictation_source),
             "Yes" if task.plan_note_origin_id else "",
             _department_short(_display_department_name(department.name if department else "")) if department else "",
             assignee_label(task),
@@ -4518,7 +4520,7 @@ async def _daily_report_rows_for_user(
                         _fast_subtype_short(task),
                         period,
                         department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
-                        _strip_html(task.title) or "-",
+                        append_mira_dictation_label(_strip_html(task.title) or "-", task.mira_dictation_source),
                         _strip_html_keep_breaks(task.description),
                         (status or "").upper(),
                         "-",
@@ -4546,7 +4548,7 @@ async def _daily_report_rows_for_user(
                     "-",
                     period,
                     department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
-                    f"{project_label} - {_strip_html(task.title) or '-'}",
+                    append_mira_dictation_label(f"{project_label} - {_strip_html(task.title) or '-'}", task.mira_dictation_source),
                     _strip_html_keep_breaks(task.description),
                     (status or "").upper(),
                     "-",
@@ -6121,7 +6123,8 @@ async def export_common_xlsx(
             add_for_day(day.isoformat(), "blocked", f"{task.title} ({_initials(owner_label)})")
         if task.is_1h_report:
             owner_label = assignee_names[0] if assignee_names else (user_map.get(task.assigned_to, "") if task.assigned_to else "Unknown")
-            add_for_day(day.isoformat(), "oneH", f"{task.title} ({_initials(owner_label)})")
+            title = append_mira_dictation_label(task.title, task.mira_dictation_source)
+            add_for_day(day.isoformat(), "oneH", f"{title} ({_initials(owner_label)})")
         if task.is_personal:
             owner_label = assignee_names[0] if assignee_names else (user_map.get(task.assigned_to, "") if task.assigned_to else "Unknown")
             add_for_day(day.isoformat(), "personal", f"{task.title} ({_initials(owner_label)})")
@@ -7426,6 +7429,7 @@ async def export_ga_notes_xlsx(
         
         # Clean content (remove HTML if any)
         content = _strip_html(note.content) if note.content else ""
+        content = append_mira_dictation_label(content, getattr(note, "mira_dictation_source", None))
 
         if note.status == GaNoteStatus.CLOSED:
             shenimi_fill = shenimi_fills["CLOSED"]

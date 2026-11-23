@@ -32,6 +32,7 @@ class TaskOut(BaseModel):
     assignees: list[TaskAssigneeOut] = Field(default_factory=list)
     created_by: uuid.UUID | None = None
     ga_note_origin_id: uuid.UUID | None = None
+    mira_dictation_source: str | None = None
     plan_note_origin_id: uuid.UUID | None = None
     planning_brief: PxJavPlanningBrief | None = None
     question_origin_id: uuid.UUID | None = None

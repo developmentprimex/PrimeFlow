@@ -47,6 +47,41 @@ class DictationCommandTests(unittest.TestCase):
         for body in ("EF", "Për EF.", "Kontrollo ofertën."):
             self.assertIsNone(task_fields(body))
 
+    def test_transcribed_variants_from_discord(self):
+        pending, commands = consume(
+            "Po. Mira, detyrë për EFA. Kontrollo ofertën e Modeco. Fund detyra.", 0, 1000, None,
+        )
+        self.assertIsNone(pending)
+        self.assertEqual([kind for kind, _ in commands], ["task"])
+        self.assertEqual(task_fields(commands[0][1]), ("EFA", "Kontrollo ofertën e Modeco"))
+
+        pending, commands = consume(
+            "Mira Shëna, përmodako presim përgjigjen nga Juliana. Fund shënime.", 0, 1000, None,
+        )
+        self.assertIsNone(pending)
+        self.assertEqual(commands, [("note", "përmodako presim përgjigjen nga Juliana.")])
+
+    def test_short_task_start_requires_word_boundary(self):
+        for start in ("Mira detyr", "Mira detyrë", "Mira detyre"):
+            with self.subTest(start=start):
+                self.assertEqual(
+                    consume(f"{start} për EF. Kontrollo ofertën. Fund detyre.", 0, 1000, None),
+                    (None, [("task", "për EF. Kontrollo ofertën.")]),
+                )
+
+        self.assertEqual(consume("Mira detyra për EF. Fund detyre.", 0, 1000, None), (None, []))
+
+    def test_note_start_with_mistranscribed_name_or_joined_words(self):
+        examples = (
+            ("Mirëa shëno. Elsa ka vazhdu me një detyrë për modako. Fund shënimi.",
+             "Elsa ka vazhdu me një detyrë për modako."),
+            ("Mirashënë, Rinisa ka një detyrë për fragmentin. Bël shënime. Fund shënime.",
+             "Rinisa ka një detyrë për fragmentin. Bël shënime."),
+        )
+        for transcript, content in examples:
+            with self.subTest(transcript=transcript):
+                self.assertEqual(consume(transcript, 0, 1000, None), (None, [("note", content)]))
+
     def test_pending_note_from_previous_release_still_works(self):
         pending, commands = consume("Fund shënimi.", 1000, 2000, {
             "started": 0, "end_ms": 1000, "text": "Shënim i diktuar.",
