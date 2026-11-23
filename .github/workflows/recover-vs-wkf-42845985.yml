@@ -1,0 +1,95 @@
+name: Recover one partial meeting recording
+
+on:
+  push:
+    branches: [ops/recover-vs-wkf-42845985]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: primeflow-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - name: Verify, remux and publish the retained fragments
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location -LiteralPath 'C:\actions-runner\_work\PrimeFlow\PrimeFlow\backend'
+          @'
+          import asyncio
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from uuid import UUID
+
+          from sqlalchemy import select
+
+          from app.config import settings
+          from app.db import SessionLocal, engine
+          from app.models.audit_log import AuditLog
+          from app.models.meeting_recording import MeetingRecording, MeetingRecordingChunk
+          from app.services.meeting_recording_storage import LocalMeetingStorage
+
+          RECORDING_ID = UUID('42845985-4745-4910-9352-ef73678bc605')
+          STORAGE_KEY = '2026/11/42845985-4745-4910-9352-ef73678bc605'
+
+          async def main():
+              storage = LocalMeetingStorage(settings.MEETING_RECORDINGS_ROOT)
+              if storage.root != Path(r'C:\PrimeFlowData\MeetingRecordings').resolve():
+                  raise RuntimeError('Unexpected recording storage root')
+              async with SessionLocal() as db, db.begin():
+                  row = await db.scalar(select(MeetingRecording).where(
+                      MeetingRecording.id == RECORDING_ID, MeetingRecording.deleted_at.is_(None),
+                  ).with_for_update())
+                  if not row or row.storage_key != STORAGE_KEY or row.mime_type != 'video/webm':
+                      raise RuntimeError('The recording does not match the selected target')
+                  if row.status == 'READY':
+                      if not storage.available_media(row.storage_key, row.mime_type, row.size_bytes):
+                          raise RuntimeError('Existing READY recording has no verified file')
+                      print(json.dumps({'status': row.status, 'partial': row.is_partial, 'seconds': row.duration_seconds}))
+                      return
+                  if row.status != 'FAILED' or row.files_purged_at or row.chunks_received != 168 or row.size_bytes != 85648411:
+                      raise RuntimeError('Recording state or fragment totals changed')
+                  chunks = (await db.scalars(select(MeetingRecordingChunk).where(
+                      MeetingRecordingChunk.recording_id == RECORDING_ID,
+                  ).order_by(MeetingRecordingChunk.index))).all()
+                  if [chunk.index for chunk in chunks] != list(range(168)) or sum(chunk.size_bytes for chunk in chunks) != 85648411:
+                      raise RuntimeError('Server receipts do not cover every retained fragment')
+                  stopped = datetime(2026, 11, 23, 10, 20, 16, tzinfo=timezone.utc)
+                  result = await asyncio.to_thread(
+                      storage.finalize, row.storage_key, chunks, row.mime_type,
+                      settings.MEETING_RECORDINGS_FFMPEG, settings.MEETING_RECORDINGS_FFPROBE,
+                      settings.MEETING_RECORDINGS_MAX_DURATION_SECONDS,
+                  )
+                  if not storage.available_media(row.storage_key, result['mime_type'], result['size_bytes']):
+                      raise RuntimeError('Final recording file is unavailable')
+                  for key in ('duration_seconds', 'size_bytes', 'video_width', 'video_height', 'mime_type'):
+                      setattr(row, key, result[key])
+                  if not result['has_audio']:
+                      row.has_microphone_audio = row.has_system_audio = False
+                  row.status = 'READY'
+                  row.error_message = None
+                  row.is_partial = True
+                  row.recording_stopped_at = stopped
+                  row.upload_completed_at = datetime.now(timezone.utc)
+                  db.add(AuditLog(entity_type='meeting_recording', entity_id=row.id, action='recording_ready',
+                                  after={'source': 'retained_server_fragments', 'partial': True,
+                                         'chunks': len(chunks), 'size_bytes': row.size_bytes}))
+              print(json.dumps({'status': 'READY', 'partial': True, 'seconds': result['duration_seconds'],
+                                'size_bytes': result['size_bytes'], 'has_audio': result['has_audio']}))
+
+          async def run():
+              try:
+                  await main()
+              finally:
+                  await engine.dispose()
+
+          asyncio.run(run())
+          '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
+          if ($LASTEXITCODE -ne 0) { throw 'The partial recording could not be verified and published.' }
