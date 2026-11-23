@@ -642,9 +642,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   shfaqet me tekst të thjeshtë. Diktimet nuk shtohen në listën Mira → Shënimet
   ose në listat e shënimeve të raporteve që përjashtojnë shënimet e Mirës.
 - Të dy regjistruesit pranojnë edhe variantet e transkriptuara “Mira shëna”,
-  “fund shënime” dhe “fund detyra”. Në diktimin e detyrave, `EFA` përputhet
+  “Mirëa shëno”, “Mirashënë”, “fund shënime”, “Mira detyr” dhe “fund detyra”.
+  Në diktimin e detyrave, `EFA` përputhet
   edhe me profilin “Elsa Ferati”. Nëse përputhen dy profile aktive, detyra
   nuk krijohet.
+- Diktimi i një detyre nga 1H ose AI Agent ruan në të njëjtin transaksion
+  detyrën 1H dhe shënimin e lidhur në PX Notes. Kontrollo që “Task Created”
+  të hapë detyrën ekzistuese dhe që burimi të shfaqet te Task Details,
+  Common View, My View, Development, Graphic Design, Product Content,
+  Finance dhe eksportet përkatëse. Raportet që përjashtojnë shënimet e
+  Mirës vazhdojnë ta përjashtojnë shënimin e lidhur.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
   Radha e raportimit ka përjashtime sipas slotit: LH, EH, EF dhe RA nuk marrin

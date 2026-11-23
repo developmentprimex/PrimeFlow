@@ -15,9 +15,15 @@ from app.jobs import discord_voice_meetings as jobs
 
 class VoiceJobTests(PostgresMeetingTests):
     async def test_task_dictation_assigns_by_initials_once_on_both_recorders(self):
+        from io import BytesIO
+
+        from openpyxl import load_workbook
         from sqlalchemy import select
         from app.api.routers import tasks
+        from app.api.routers.exports import export_ga_notes_xlsx
+        from app.api.routers.ga_notes import list_ga_notes
         from app.db import Base
+        from app.models.ga_note import GaNote
         from app.models.notification import Notification
         from app.models.task import Task
         from app.models.task_assignee import TaskAssignee
@@ -97,7 +103,25 @@ class VoiceJobTests(PostgresMeetingTests):
                 self.assertIsNone(task.one_h_report_slot)
                 self.assertIsNone(task.due_date)
                 self.assertIsNone(task.project_id)
+                note = await db.get(GaNote, task.ga_note_origin_id)
+                self.assertEqual((note.content, note.created_by, note.department_id), (task.title, self.uid, self.did))
+                self.assertTrue(note.is_converted_to_task)
+                self.assertEqual(note.mira_dictation_source, "ai_agent" if task.title.endswith("ai_agent") else "1h")
+                self.assertEqual(task.mira_dictation_source, note.mira_dictation_source)
+            self.assertEqual(len((await db.scalars(select(GaNote))).all()), 2)
             self.assertEqual((await db.scalars(select(Notification.user_id))).all(), [employee_id, employee_id])
+            creator = await db.get(User, self.uid)
+            notes = await list_ga_notes(db=db, user=creator)
+            self.assertEqual({note.id for note in notes}, {task.ga_note_origin_id for task in records})
+            self.assertTrue(all(note.is_converted_to_task for note in notes))
+            response = await export_ga_notes_xlsx(db=db, user=creator)
+            data = b"".join([chunk async for chunk in response.body_iterator])
+            workbook = load_workbook(BytesIO(data))
+            self.assertEqual(
+                {workbook.active[f"B{row}"].value for row in (5, 6)},
+                {"Kontrollo ofertën ai_agent\nNga Mira AI Agent", "Kontrollo ofertën primary\nNga Mira 1H"},
+            )
+            workbook.close()
 
     async def test_dictation_saves_once_in_px_notes_before_the_meeting_ends(self):
         from sqlalchemy import select
@@ -128,7 +152,7 @@ class VoiceJobTests(PostgresMeetingTests):
             with patch.object(service.settings, 'DISCORD_GUILD_ID', '123'), \
                  patch.object(service.settings, channel_setting, '55'):
                 await upload(3, '12', 'Fund shënime.' if recorder == 'ai_agent' else 'Fund shënimi.')
-                start = 'Mira Shëna,' if recorder == 'ai_agent' else 'Mira, shëno.'
+                start = 'Mirashënë,' if recorder == 'ai_agent' else 'Mirëa shëno.'
                 await upload(0, '12', f'{start} Po, po, e kam dërgu.')
                 await upload(1, '99', 'Fund shënimi. Mira shëno, Mos e ruaj. Fund shënimi.')
                 await upload(2, '12', 'Kontrolloje edhe një herë.')

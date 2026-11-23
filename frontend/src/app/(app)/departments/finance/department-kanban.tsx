@@ -4,6 +4,7 @@ import * as React from "react"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
+import { miraDictationLabel } from "@/lib/mira"
 import { NextWorkdayTaskFeedback } from "@/components/next-workday-task-feedback"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
@@ -594,7 +595,7 @@ export default function DepartmentKanban() {
         kohaBz: "-",
         department: departmentLabel,
         period: resolvePeriod(task.finish_period),
-        title: task.title || "-",
+        title: [task.title || "-", miraDictationLabel(task.mira_dictation_source)].filter(Boolean).join("\n"),
         description: task.description || "",
         details: formatInternalDetails(task.internal_notes),
         status: row.status,
@@ -834,6 +835,7 @@ export default function DepartmentKanban() {
               <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
               <TableCell className="min-w-72 whitespace-normal font-medium text-slate-800">
                 <CollapsibleTaskTitle title={row?.title ?? task.title} renderTitle={renderMarkedNoteContent} />
+                {row?.task.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(row.task.mira_dictation_source)}</span>}
               </TableCell>
               <TableCell>{row?.systemFrequencyDisplayLabel || "–"}</TableCell>
               <TableCell><Badge variant="outline">{row?.typeLabel ?? (task.is_system_task ? "SYS" : task.is_1h ? "1H" : "P")}</Badge></TableCell>
@@ -917,6 +919,7 @@ export default function DepartmentKanban() {
                                 alignToggle
                                 renderTitle={(title) => title.includes("[[") ? renderMarkedNoteContent(title, title) : title}
                               />
+                              {row.task.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(row.task.mira_dictation_source)}</span>}
                             </span>
                           </div>
                         </TableCell>
