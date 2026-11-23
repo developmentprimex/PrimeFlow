@@ -182,6 +182,7 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
                 .where(
                     GaTimeSlotEntry.user_id == ga_user.id,
                     GaTimeSlotEntry.sync_connection_id.is_not(None),
+                    GaTimeSlotEntry.is_completed.is_(False),
                     GaTimeSlotEntry.day_date >= week_dates[0],
                     GaTimeSlotEntry.day_date <= week_dates[-1],
                 )
@@ -404,6 +405,7 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
                 .where(
                     GaTimeSlotEntry.user_id == ga_user.id,
                     GaTimeSlotEntry.sync_connection_id.is_not(None),
+                    GaTimeSlotEntry.is_completed.is_(False),
                     GaTimeSlotEntry.day_date >= week_dates[0],
                     GaTimeSlotEntry.day_date <= week_dates[-1],
                 )

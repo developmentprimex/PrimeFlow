@@ -817,6 +817,7 @@ type GaTimeSlotEntry = {
   updated_at: string
   occurrence_date?: string | null
   source_type?: "calendar" | "reminder" | null
+  is_completed?: boolean
   source_name?: string | null
 }
 
@@ -1084,6 +1085,9 @@ function GaTimeEntryContent({ entry }: { entry: GaTimeSlotEntry }) {
   const isReminder = entry.source_type === "reminder" || /^\s*R\s*:/i.test(plainContent)
   return (
     <span className={isReminder ? "ga-time-reminder-preview" : undefined} title={isReminder ? plainContent : undefined}>
+      {entry.source_type === "reminder" && entry.is_completed ? (
+        <span className="ga-time-reminder-done">✓ Done{" "}</span>
+      ) : null}
       <GaTimeRichTextContent value={content} backgroundColor={entry.background_color} />
     </span>
   )
@@ -9874,6 +9878,11 @@ export default function AdminTasksPage() {
         }
         .admin-week-table .ga-time-entry-text:disabled {
           cursor: default;
+        }
+        .ga-time-reminder-done {
+          color: #166534;
+          font-weight: 700;
+          white-space: nowrap;
         }
         .admin-week-table .ga-time-reminder-preview {
           display: -webkit-box;

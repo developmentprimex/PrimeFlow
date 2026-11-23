@@ -53,10 +53,12 @@ class VoiceJobTests(PostgresMeetingTests):
                     title="Takimi", status="LISTENING"))
                 await db.commit()
 
+            initials = "EFA" if recorder == "ai_agent" else "E. F."
+            ending = "Fund detyra" if recorder == "ai_agent" else "Fund detyrës"
             spoken = [
-                ("12", "Mira, detyrë për E. F."),
+                ("12", f"Mira, detyrë për {initials}"),
                 ("99", "Mira detyrë EF, Detyrë e paautorizuar. Fund detyre."),
-                ("12", f"Kontrollo ofertën {recorder}. Fund detyrës."),
+                ("12", f"Kontrollo ofertën {recorder}. {ending}."),
                 ("12", "Mira, detyrë AD, Inicialet nuk janë unike. Fund detyre."),
                 ("12", "Mira, detyrë ZZ, Nuk ka punonjës. Fund detyre."),
             ]
@@ -125,8 +127,9 @@ class VoiceJobTests(PostgresMeetingTests):
 
             with patch.object(service.settings, 'DISCORD_GUILD_ID', '123'), \
                  patch.object(service.settings, channel_setting, '55'):
-                await upload(3, '12', 'Fund shënimi.')
-                await upload(0, '12', 'Mira, shëno. Po, po, e kam dërgu.')
+                await upload(3, '12', 'Fund shënime.' if recorder == 'ai_agent' else 'Fund shënimi.')
+                start = 'Mira Shëna,' if recorder == 'ai_agent' else 'Mira, shëno.'
+                await upload(0, '12', f'{start} Po, po, e kam dërgu.')
                 await upload(1, '99', 'Fund shënimi. Mira shëno, Mos e ruaj. Fund shënimi.')
                 await upload(2, '12', 'Kontrolloje edhe një herë.')
                 await upload(3, '12', 'Nuk duhet të transkriptohet përsëri.')

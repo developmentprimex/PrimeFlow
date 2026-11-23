@@ -14,8 +14,11 @@ const dates = ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-
 test("print table includes only the selected day's column and entries", () => {
   const start = source.indexOf('<table className={cn("ga-time-table-table",')
   const table = source.slice(start, source.indexOf("</table>", start) + 8)
-  const code = transpile(`const render = () => (${table});`)
-  const entries = new Map(dates.map((date, day) => [`${day}|08:00`, [{ id: date, content: date }]]))
+  const entryContent = source.slice(source.indexOf("const gaTimeEntryDisplayContent"), source.indexOf("function GaTimeRichTextEditor"))
+  const code = transpile(`${entryContent}\nconst render = () => (${table});`)
+  const entries = new Map(dates.map((date, day) => [`${day}|08:00`, [
+    { id: date, content: `REMINDER: ${date}`, source_type: "reminder", is_completed: day === 1 },
+  ]]))
   for (const selected of ["", dates[1], dates[4]]) {
     const args = {
       React, cn: (...classes) => classes.filter(Boolean).join(" "),
@@ -24,12 +27,14 @@ test("print table includes only the selected day's column and entries", () => {
       formatDateHuman: iso => iso, toDayOfWeek: iso => dates.indexOf(iso),
       gaTimeRows: [{ start: "08:00", end: "09:00", nrLabel: "1", label: "08:00 - 09:00" }],
       gaTimeCommentsForRow: () => [], gaTimeEntriesByCell: entries, gaMeetingsByCell: new Map(),
-      gaTimeEntryStyle: () => ({}), GaTimeEntryContent: ({ entry }) => entry.content,
+      gaTimeEntryStyle: () => ({}), getPlainGaTimeRichText: value => value,
+      GaTimeRichTextContent: ({ value }) => value,
     }
     const render = new Function(...Object.keys(args), `${code}; return render;`)(...Object.values(args))
     const html = renderToStaticMarkup(React.createElement(render))
     assert.equal((html.match(/<th\s/g) || []).length, selected ? 4 : 9)
     assert.equal((html.match(/<td\s/g) || []).length, selected ? 4 : 9)
+    assert.equal((html.match(/✓ Done/g) || []).length, !selected || selected === dates[1] ? 1 : 0)
     for (const date of dates) {
       assert.equal(html.includes(date), !selected || date === selected)
     }

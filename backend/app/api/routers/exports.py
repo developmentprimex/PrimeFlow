@@ -1578,6 +1578,7 @@ async def export_ga_time_xlsx(
             .where(
                 GaTimeSlotEntry.user_id == ga_user.id,
                 GaTimeSlotEntry.sync_connection_id.is_not(None),
+                GaTimeSlotEntry.is_completed.is_(False),
                 GaTimeSlotEntry.day_date >= week_dates[0],
                 GaTimeSlotEntry.day_date <= week_dates[-1],
             )

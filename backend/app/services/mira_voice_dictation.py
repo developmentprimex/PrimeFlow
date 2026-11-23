@@ -18,8 +18,8 @@ from app.services.ga_note_creation import build_ga_note
 
 log = logging.getLogger(__name__)
 COMMAND = re.compile(
-    r"(?<!\w)(?:mira[\s,:.]+(?:(?P<note>sh[ëe]no)|(?P<task>detyr[ëe]))"
-    r"|fund[\s,:.]+(?:(?P<end_note>sh[ëe]nimi)|(?P<end_task>detyr[ëe]s?)))(?!\w)",
+    r"(?<!\w)(?:mira[\s,:.]+(?:(?P<note>sh[ëe]n[oa])|(?P<task>detyr[ëe]))"
+    r"|fund[\s,:.]+(?:(?P<end_note>sh[ëe]nim[ie])|(?P<end_task>detyr(?:[ëe]s?|a))))(?!\w)",
     re.IGNORECASE,
 )
 START_PREFIX = re.compile(r"(?<!\w)mira[\s,:.]*$", re.IGNORECASE)
@@ -32,6 +32,7 @@ TASK_BODY = re.compile(
 MAX_DICTATION_MS = 120_000
 MAX_DICTATION_CHARS = 8_000
 TASK_LIMIT_PER_TICK = 10
+DICTATED_ASSIGNEE_ALIASES = {"EFA": "elsa ferati"}
 
 
 def consume(text, start_ms, end_ms, pending):
@@ -168,7 +169,12 @@ async def _create_task(db, meeting):
     assignees = []
     if creator is not None and str(creator.id) == command["creator_id"]:
         users = await db.scalars(select(User).where(User.is_active.is_(True), User.work_staff_filter()))
-        assignees = [user for user in users if _initials(user.full_name or "") == command["initials"]]
+        initials = command["initials"]
+        alias_name = DICTATED_ASSIGNEE_ALIASES.get(initials)
+        for user in users:
+            name = " ".join((user.full_name or "").split())
+            if _initials(name) == initials or name.casefold() == alias_name:
+                assignees.append(user)
     if len(assignees) != 1:
         log.info("MIRA task skipped meeting=%s command=%s", meeting.id, command["command"])
         _consume_task(meeting)

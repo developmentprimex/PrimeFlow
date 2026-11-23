@@ -635,9 +635,8 @@ async def collect_time_table_reminders(
 ) -> tuple[list[AgendaItem], list[str]]:
     """GA Time Table "R:" rows imported from the GA's iPhone (one-way, read-only here).
 
-    Each sync replaces its whole window and leaves completed reminders out, so a row
-    inside the last synced window is still open on the phone. Rows older than that
-    window are no longer refreshed (their completion is unknown) and are skipped.
+    Each sync replaces its whole window. Only open reminders belong in the agenda.
+    Rows older than that window are no longer refreshed and are skipped.
     """
     rows = (
         await db.execute(
@@ -646,6 +645,7 @@ async def collect_time_table_reminders(
             .where(
                 GaTimeSlotEntry.user_id == owner.id,
                 GaTimeSlotEntry.source_type == "reminder",
+                GaTimeSlotEntry.is_completed.is_(False),
                 GaIcloudSyncConnection.revoked_at.is_(None),
                 GaTimeSlotEntry.day_date <= day_to,
             )

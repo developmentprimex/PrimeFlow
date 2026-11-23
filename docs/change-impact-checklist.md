@@ -115,6 +115,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   njëjtit interval. Kur zgjerohet dritarja e Shortcut-it, kontrollo që të dyja
   listat të mbulojnë intervalin dhe verifiko hyrjet e importuara në eksportin
   `ga-time.xlsx` dhe në tabelën GA të emailit 1H (HTML dhe PNG).
+  Importi ruan `is_completed` për Reminders. GA Time Table dhe printimi ditor
+  që përdor PDF-ja e NEWS-PX shfaqin `✓ Done`. Eksporti `ga-time.xlsx`,
+  bashkëngjitjet GA të 1H dhe agjenda e Asistentes GA i përjashtojnë hyrjet e
+  kryera. Verifiko të dyja gjendjet pas një sinkronizimi të përsëritur.
 
 - M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
   e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
@@ -637,6 +641,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   në segmente, folësit që ndërhyjnë dhe riprovimet. Në All Tasks/Notes burimi
   shfaqet me tekst të thjeshtë. Diktimet nuk shtohen në listën Mira → Shënimet
   ose në listat e shënimeve të raporteve që përjashtojnë shënimet e Mirës.
+- Të dy regjistruesit pranojnë edhe variantet e transkriptuara “Mira shëna”,
+  “fund shënime” dhe “fund detyra”. Në diktimin e detyrave, `EFA` përputhet
+  edhe me profilin “Elsa Ferati”. Nëse përputhen dy profile aktive, detyra
+  nuk krijohet.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
   Radha e raportimit ka përjashtime sipas slotit: LH, EH, EF dhe RA nuk marrin
