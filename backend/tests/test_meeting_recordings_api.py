@@ -105,6 +105,23 @@ class RecordingApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/meeting-recordings/{id}/download", headers=self.auth()).status_code, 200)
         self.assertEqual(self.client.post(f"/api/meeting-recordings/{id}/complete", headers=self.auth(), json={"chunks": 2}).json()["status"], "READY")
 
+    def test_owner_recovers_retained_fragments_from_failed_recording(self):
+        id = self.create()
+        path = f"/api/meeting-recordings/{id}"
+        for index, part in enumerate((self.media[:100], self.media[100:])):
+            self.assertEqual(self.upload(id, index, part).status_code, 200)
+
+        request = {"chunks": 2, "partial": True, "recover_retained": True}
+        self.assertEqual(self.client.post(path + "/complete", headers=self.auth(), json=request).status_code, 409)
+        self.assertEqual(self.client.post(path + "/fail", headers=self.auth(), json={"reason": "discarded"}).status_code, 200)
+        self.assertEqual(self.client.post(path + "/complete", headers=self.auth("other"), json=request).status_code, 404)
+        self.assertEqual(self.client.post(path + "/complete", headers=self.auth(), json={**request, "partial": False}).status_code, 409)
+        saved = self.client.post(path + "/complete", headers=self.auth(), json=request)
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["status"], "READY")
+        self.assertTrue(saved.json()["is_partial"])
+        self.assertTrue(self.client.get(path, headers=self.auth()).json()["media_available"])
+
     def test_all_users_can_read_but_only_owner_can_write(self):
         id = self.ready(meeting=True)
         for operation, path, kwargs in [

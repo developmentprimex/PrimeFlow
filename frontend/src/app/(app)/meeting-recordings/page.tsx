@@ -5,6 +5,7 @@ import Link from "next/link"
 import type { Department, Project } from "@/lib/types"
 import { RecordingProjectOptions } from "@/components/meeting-recordings/project-options"
 import { RecorderPanel } from "@/components/meeting-recordings/recorder-panel"
+import { RecoverRetainedButton } from "@/components/meeting-recordings/recover-retained-button"
 import { useRecorder } from "@/components/meeting-recordings/recorder-provider"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -98,6 +99,7 @@ export default function MeetingRecordingsPage() {
             <td className="p-2 tabular-nums">{row.duration_seconds == null ? "—" : recordingTime(row.duration_seconds)}</td><td className="p-2">{recordingSize(row.size_bytes)}</td>
             <td className="p-2">{row.media_available === false ? <span className="text-destructive">Skedari nuk është i arritshëm</span> : RECORDING_STATUS[row.status]}{row.is_partial && <p className="text-amber-700">Pjesë e rikuperuar</p>}{row.error_message && <p className="max-w-64 text-destructive">{row.error_message}</p>}</td>
             <td className="space-y-2 p-2"><Button asChild size="sm" variant="outline"><Link href={`/meeting-recordings/${row.id}`}>Open</Link></Button>
+              <RecoverRetainedButton recording={row} />
               <Button size="sm" variant="outline" className="ml-2" disabled={savingTitle || deletingId !== null} onClick={() => { setEditingId(row.id); setEditTitle(row.title); setEditProjectId(row.project_id || ""); setTitleError("") }}>Edit</Button>
               {canDelete && ["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="destructive" className="ml-2" disabled={deletingId !== null || row.id === manifest?.id} onClick={() => void removeRecording(row)}>{deletingId === row.id ? "Deleting…" : "Delete"}</Button>}
               {row.created_by === user?.id && row.id !== manifest?.id && !["READY", "FAILED"].includes(row.status) && <Button size="sm" variant="ghost" disabled={saving} onClick={async () => {

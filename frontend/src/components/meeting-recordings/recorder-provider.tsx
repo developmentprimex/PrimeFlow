@@ -22,6 +22,7 @@ type RecorderContextValue = View & {
   cancel: () => void; stop: () => void; pause: () => void; resume: () => void
   toggle: (input: "microphone" | "system") => void
   retry: (id?: string, partial?: boolean) => Promise<void>; discard: (id: string) => Promise<void>
+  recoverRetained: (id: string, chunks: number) => Promise<void>
 }
 const RecorderContext = React.createContext<RecorderContextValue | null>(null)
 const initial: View = { screenSharing: false, selectingScreen: false, state: "idle", info: { source: "unknown", microphone: false, system: false, mime: "" }, inputs: { microphone: "unavailable", system: "unavailable" }, seconds: 0, manifest: null, recoveries: [], error: null, busy: false, saving: false, savedId: null, savedPartial: false, available: false, uploadWaiting: false, uploadError: null, interruption: null }
@@ -251,7 +252,9 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
       r.capture.cancel()
       if (r.id) {
         await r.outbox.stop(r.id, message).catch(() => {})
-        await api.current(`/meeting-recordings/${r.id}/fail`, { method: "POST" }).catch(() => {})
+        await api.current(`/meeting-recordings/${r.id}/fail`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "start_failed" }),
+        }).catch(() => {})
         r.id = undefined
         r.uploader = undefined
       }
@@ -309,7 +312,9 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
     const retryWasPending = ownsSession && r.retryTimer !== undefined
     if (ownsSession) clearUploadRetry(r)
     const discardSession = async () => {
-      const response = await api.current(`/meeting-recordings/${id}/fail`, { method: "POST" })
+      const response = await api.current(`/meeting-recordings/${id}/fail`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "discarded" }),
+      })
       if (!response.ok) throw new Error("Serveri nuk konfirmoi mbylljen e sesionit.")
       await r.outbox.remove(id)
       if (r.id === id) {
@@ -331,7 +336,32 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
       setView(v => ({ ...v, uploadError: error instanceof Error ? error.message : String(error) }))
     } finally { r.finishing = false }
   }
-  const value: RecorderContextValue = { ...view, prepare, start, cancel, retry, discard,
+  const recoverRetained = async (id: string, chunks: number) => {
+    const r = runtime.current
+    if (!user || !r || r.id || r.starting || r.finishing || !navigator.locks) {
+      throw new Error("Përfundo regjistrimin ose rikuperimin aktiv para se të vazhdosh.")
+    }
+    r.finishing = true
+    setView(v => ({ ...v, saving: true }))
+    try {
+      await navigator.locks.request("primeflow-screen-recorder", { ifAvailable: true }, async lock => {
+        if (!lock) throw new Error("Një skedë tjetër ka një regjistrim ose rikuperim aktiv.")
+        if ((await r.outbox.list(user.id)).some(recording => recording.id === id)) {
+          throw new Error("Ky regjistrim ka pjesë në këtë shfletues. Përdor rikuperimin te paneli i regjistrimit.")
+        }
+        const saved = await recordingJson(await api.current(`/meeting-recordings/${id}/complete`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chunks, partial: true, recover_retained: true }),
+        }))
+        setView(v => ({ ...v, savedId: id, savedPartial: Boolean(saved.is_partial) }))
+      })
+    } finally {
+      r.finishing = false
+      setView(v => ({ ...v, saving: false }))
+      await refresh()
+    }
+  }
+  const value: RecorderContextValue = { ...view, prepare, start, cancel, retry, discard, recoverRetained,
     shareScreen: async source => {
       setView(v => ({ ...v, sharingError: null }))
       try { await runtime.current?.capture.shareScreen(source) }
@@ -343,6 +373,33 @@ export function RecorderProvider({ children }: { children: React.ReactNode }) {
   }
   const active = ["recording", "paused", "stopping", "prepared", "selecting"].includes(view.state) || view.saving || view.uploadWaiting || (!!view.interruption && !view.savedId)
   const capturing = view.state === "recording" || view.state === "paused"
+  React.useEffect(() => {
+    const wakeLock = navigator.wakeLock
+    if (!capturing || !wakeLock) return
+    let lock: WakeLockSentinel | undefined
+    let pending = false
+    let stopped = false
+    const keepScreenOn = async () => {
+      if (stopped || pending || (lock && !lock.released) || document.visibilityState !== "visible") return
+      pending = true
+      try {
+        const acquired = await wakeLock.request("screen")
+        if (stopped) await acquired.release()
+        else lock = acquired
+      } catch {
+        // The browser or device can deny wake lock. Capture can still continue.
+      } finally {
+        pending = false
+      }
+    }
+    document.addEventListener("visibilitychange", keepScreenOn)
+    void keepScreenOn()
+    return () => {
+      stopped = true
+      document.removeEventListener("visibilitychange", keepScreenOn)
+      void lock?.release().catch(() => {})
+    }
+  }, [capturing])
   const audioOnly = view.info.source === "microphone"
   return <RecorderContext.Provider value={value}>
     {active && <div role="status" aria-live="polite" className="sticky top-0 z-50 flex flex-wrap items-center gap-3 border-b border-red-300 bg-red-50 px-4 py-2 text-sm text-red-950 dark:bg-red-950 dark:text-red-100">

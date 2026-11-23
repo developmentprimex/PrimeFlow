@@ -489,6 +489,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Kontrollo që “Pauzë” / “Vazhdo” të veprojnë vetëm me kërkesë të përdoruesit
   dhe që historiku e detajet të dallojnë skedarin e plotë nga pjesa e ruajtur
   pas ndërprerjes së shfletuesit ose arritjes së kufirit të ruajtjes lokale.
+  Gjatë kapjes, regjistruesi kërkon mbajtjen e ekranit ndezur në shfletuesit që
+  e mbështesin. Pronari i një regjistrimi të dështuar me fragmente në server
+  mund ta rikuperojë si pjesë nga historiku ose detajet. Nëse ka fragmente
+  lokale, paneli i rikuperimit ka përparësi. Kontrollo finalizimin, luajtjen,
+  arkivën FILES dhe analizën. Auditimi dallon dështimin e nisjes nga braktisja.
 
 - Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
   `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe

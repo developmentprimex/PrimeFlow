@@ -8,6 +8,8 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth"
+import { RecoverRetainedButton } from "@/components/meeting-recordings/recover-retained-button"
+import { useRecorder } from "@/components/meeting-recordings/recorder-provider"
 import { RecordingAnalysisPanel } from "@/components/meeting-recordings/analysis-panel"
 import { recordingJson } from "@/lib/recording-outbox"
 import { saveRecordingFile } from "@/lib/recording-save"
@@ -16,6 +18,7 @@ import { RECORDING_STATUS, isAudioRecording, recordingKindLabel, recordingSize, 
 export default function RecordingDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { apiFetch } = useAuth()
+  const { savedId } = useRecorder()
   const videoRef = React.useRef<HTMLVideoElement>(null)
   const audioRef = React.useRef<HTMLAudioElement>(null)
   const [row, setRow] = React.useState<MeetingRecording | null>(null)
@@ -24,6 +27,7 @@ export default function RecordingDetailPage() {
   const [capturing, setCapturing] = React.useState(false)
   const [videoVisible, setVideoVisible] = React.useState(false)
   const [savingFile, setSavingFile] = React.useState(false)
+  const recoveredHere = savedId === id
   const audioOnly = isAudioRecording(row?.mime_type)
   const seekFromLink = (event: React.SyntheticEvent<HTMLMediaElement>) => {
     const seconds = Number(new URLSearchParams(window.location.search).get("t"))
@@ -83,7 +87,7 @@ export default function RecordingDetailPage() {
     void authorize()
     const timer = setInterval(() => { void authorize() }, 5 * 60_000)
     return () => { active = false; clearInterval(timer) }
-  }, [id, apiFetch])
+  }, [id, apiFetch, recoveredHere])
   return <div className="w-full min-w-0 space-y-4">
     <div className="flex items-center">
       <Button asChild variant="outline" size="sm" className="gap-2">
@@ -101,6 +105,7 @@ export default function RecordingDetailPage() {
       {row.is_partial && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Pjesë e rikuperuar nga një regjistrim i ndërprerë. Fundi i takimit mund të mungojë.</p>}
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm">{recordingKindLabel(row.mime_type)} · {recordingTime(row.duration_seconds)} · {recordingSize(row.size_bytes)} · {row.mime_type}{!audioOnly && row.video_width && row.video_height ? ` · ${row.video_width} × ${row.video_height}` : ""}</p>
+        <RecoverRetainedButton recording={row} />
         {row.status === "READY" && <Button asChild className="shadow-sm">
           <a href="#recording-tasks"><ListTodo aria-hidden="true" />Shiko detyrat</a>
         </Button>}

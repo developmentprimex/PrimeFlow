@@ -21,7 +21,7 @@ from app.models.meeting import Meeting
 from app.models.meeting_recording import MeetingRecording as Recording, MeetingRecordingChunk as Chunk
 from app.models.user import User
 from app.models.project import Project
-from app.schemas.meeting_recording import RecordingComplete, RecordingCreate, RecordingOut, RecordingUpdate
+from app.schemas.meeting_recording import RecordingComplete, RecordingCreate, RecordingFailure, RecordingOut, RecordingUpdate
 from app.services.audit import add_audit_log
 from app.services.meeting_recording_storage import LocalMeetingStorage, StorageBusy, StorageError, durable_replace, recording_extension
 
@@ -223,6 +223,8 @@ async def upload_chunk(recording_id: uuid.UUID, request: Request, index: int = P
 async def complete_recording(recording_id: uuid.UUID, payload: RecordingComplete,
                              db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     row = await load_recording(db, recording_id, user, write=True)
+    if payload.recover_retained and (not payload.partial or row.status not in {"FAILED", "READY"}):
+        raise HTTPException(409, "Only failed recordings can be recovered from retained server fragments")
     if payload.chunks != row.chunks_received:
         raise HTTPException(409, "Required recording chunks are missing")
     if row.status == "READY":
@@ -253,19 +255,24 @@ async def complete_recording(recording_id: uuid.UUID, payload: RecordingComplete
     # Audio-source attribution is a browser declaration, not a forensic claim.
     row.status, row.error_message = "READY", None
     row.upload_completed_at = datetime.now(timezone.utc)
-    audit(db, user, row, "recording_ready", size_bytes=row.size_bytes, chunks=row.chunks_received)
+    details = {"size_bytes": row.size_bytes, "chunks": row.chunks_received}
+    if payload.recover_retained:
+        details.update(source="retained_server_fragments", partial=True)
+    audit(db, user, row, "recording_ready", **details)
     await db.commit()
     await db.refresh(row)
     return row
 
 
 @router.post("/{recording_id}/fail", response_model=RecordingOut)
-async def fail_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def fail_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+                         *, payload: RecordingFailure | None = None):
     row = await load_recording(db, recording_id, user, write=True)
     if row.status == "READY":
         raise HTTPException(409, "A saved recording cannot be abandoned")
     row.status, row.error_message = "FAILED", "Capture interrupted or abandoned; never confirmed as saved."
-    audit(db, user, row, "recording_abandoned")
+    details = {"reason": payload.reason} if payload else {}
+    audit(db, user, row, "recording_abandoned", **details)
     await db.commit()
     await db.refresh(row)
     return row

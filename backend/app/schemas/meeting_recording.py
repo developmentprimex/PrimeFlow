@@ -50,6 +50,11 @@ class RecordingUpdate(BaseModel):
 class RecordingComplete(BaseModel):
     chunks: int = Field(ge=1, le=100000)
     partial: bool = False
+    recover_retained: bool = False
+
+
+class RecordingFailure(BaseModel):
+    reason: Literal["start_failed", "discarded"]
 
 
 class RecordingOut(BaseModel):

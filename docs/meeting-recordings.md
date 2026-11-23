@@ -210,10 +210,12 @@ never emitted a complete header or ended in an invalid media fragment.
 
 If server completion succeeded but its response was lost, repeating complete
 returns the existing READY result and clears the local outbox. If browser storage
-was cleared, the history still shows the server session but missing local chunks
-cannot be reconstructed automatically. Abandon that session; retained server
-chunks can be examined through an authorized maintenance procedure. This MVP
-does not silently guess that an interrupted session was complete.
+was cleared, the history still shows the server session. The owner can close an
+interrupted session and choose **Rikupero nga serveri** in its history or details
+to validate and save the retained fragments as partial. Recover through the
+recorder panel when the browser still has a local copy so pending fragments can
+be uploaded first. Fragments that never reached the server and are no longer
+available in the browser cannot be recovered.
 
 No automatic retention/deletion is enabled. READY recordings currently retain
 their verified chunks for recovery, so provision roughly **3×** the maximum
