@@ -39,6 +39,24 @@ def processes():
     return {item["name"]: item for item in json.loads(pm2("jlist")) if item["name"] in PROCESSES}
 
 
+def matches_worker_pid(launcher_pid, worker_pid):
+    if not all(isinstance(pid, int) and pid > 0 for pid in (launcher_pid, worker_pid)):
+        return False
+    if launcher_pid == worker_pid:
+        return True
+    # The Windows venv executable is a redirector. PM2 tracks it, while the
+    # Python child writes the readiness file with its own PID.
+    if os.name != "nt":
+        return False
+    query = f"(Get-CimInstance Win32_Process -Filter 'ProcessId = {worker_pid}').ParentProcessId"
+    try:
+        parent = subprocess.check_output(["powershell.exe", "-NoProfile", "-Command", query],
+                                         text=True, timeout=8, stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return parent == str(launcher_pid)
+
+
 class Deployment:
     def __init__(self):
         state = Path(os.environ["PM2_HOME"]) / "primeflow-deploy"
@@ -134,30 +152,48 @@ class Deployment:
     def verify(release):
         roles = set(release["roles"])
         pending = roles.copy()
+        backend = (Path(release["path"]) / "backend").resolve()
+        diagnostics = {}
+        verified_pids = {}
         deadline = time.monotonic() + 90
         while pending and time.monotonic() < deadline:
             pending = roles.copy()
             current = processes()
             for name in pending.copy():
                 process = current.get(name, {})
-                if process.get("pm2_env", {}).get("status") != "online":
+                environment = process.get("pm2_env", {})
+                if environment.get("status") != "online":
+                    diagnostics[name] = "PM2 process is not online"
                     continue
-                file = Path(release["path"]) / "backend" / PROCESSES[name]
-                status = read_json(file)
-                if not status or status.get("pid") != process.get("pid"):
+                if not environment.get("pm_cwd") or Path(environment["pm_cwd"]).resolve() != backend:
+                    diagnostics[name] = "PM2 is running a different release directory"
                     continue
+                status = read_json(backend / PROCESSES[name])
+                if not status:
+                    diagnostics[name] = "Discord has not published readiness"
+                    continue
+                pids = (process.get("pid"), status.get("pid"))
+                if verified_pids.get(name) != pids:
+                    if not matches_worker_pid(*pids):
+                        diagnostics[name] = "readiness PID does not belong to the PM2 process"
+                        continue
+                    verified_pids[name] = pids
                 if name == "primeflow-discord" and status.get("build") != release["build"]:
+                    diagnostics[name] = "Discord worker reported a different build"
                     continue
                 if name == "primeflow-discord-ai-agent" and status.get("ready") is not True:
+                    diagnostics[name] = "AI Agent did not verify voice-channel permissions"
                     continue
                 if release["probe"] and (release["voice"] or name == "primeflow-discord-ai-agent"):
                     if status.get("panel_ready") is not True or status.get("voice_ready") is not True:
+                        diagnostics[name] = "Discord panel or voice-channel checks have not passed"
                         continue
                 pending.remove(name)
             if pending:
                 time.sleep(2)
         if pending:
-            raise RuntimeError(f"Mira readiness checks timed out for {', '.join(sorted(pending))}")
+            details = "; ".join(f"{name}: {diagnostics.get(name, 'no status')}" for name in sorted(pending))
+            raise RuntimeError(f"Mira readiness checks timed out: {details}")
 
     def prune(self, *retained):
         root = self.root.resolve()

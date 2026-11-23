@@ -1,6 +1,8 @@
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -60,7 +62,7 @@ class MiraReleaseTests(unittest.TestCase):
         name = "primeflow-discord"
         status = {"pid": 7, "build": self.new["build"], "panel_ready": True, "voice_ready": True}
         file = Path(self.new["path"]) / "backend" / releases.PROCESSES[name]
-        current = {name: {"pid": 7, "pm2_env": {"status": "online"}}}
+        current = {name: {"pid": 7, "pm2_env": {"status": "online", "pm_cwd": str(file.parent)}}}
         file.write_text(json.dumps({**status, "voice_ready": False}), encoding="utf-8")
         with patch.object(releases, "processes", return_value=current), \
                 patch.object(releases.time, "monotonic", side_effect=[0, 0, 91]), \
@@ -70,3 +72,16 @@ class MiraReleaseTests(unittest.TestCase):
         file.write_text(json.dumps(status), encoding="utf-8")
         with patch.object(releases, "processes", return_value=current):
             self.deployment.verify(self.new)
+
+    @unittest.skipUnless(os.name == "nt", "Windows venv executables use a redirector")
+    def test_matches_the_actual_python_worker_started_by_the_windows_venv_launcher(self):
+        with subprocess.Popen(
+            [sys.executable, "-c", "import os; print(os.getpid(), flush=True); input()"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+        ) as launcher:
+            try:
+                pid = int(launcher.stdout.readline())
+                self.assertTrue(releases.matches_worker_pid(launcher.pid, pid))
+                self.assertFalse(releases.matches_worker_pid(os.getpid(), pid if launcher.pid != pid else 0))
+            finally:
+                launcher.communicate("\n", timeout=10)

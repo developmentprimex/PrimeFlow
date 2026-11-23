@@ -153,10 +153,14 @@ jobs:
                   $agent = $processes | Where-Object { $_.name -eq 'primeflow-discord-ai-agent' }
                   $gateway = 'http://127.0.0.1:18080'
                   $primaryStatus = Get-Content -LiteralPath (Join-Path $primary.pm2_env.pm_cwd '.discord-worker-status.json') -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                  $workerPid = [int]$primaryStatus.pid
+                  $primaryPid = [int]$primary.pid
+                  $primaryOwnsWorker = $workerPid -gt 0 -and $primaryPid -gt 0 -and ($workerPid -eq $primaryPid -or
+                    (Get-CimInstance Win32_Process -Filter "ProcessId = $workerPid" -ErrorAction Stop).ParentProcessId -eq $primaryPid)
                   $agentReady = -not (Test-Path -LiteralPath 'C:\PrimeFlowOps\MiraAIAgent\.env') -or
                     ($agent.pm2_env.status -eq 'online' -and $agent.pm2_env.PRIMEFLOW_API_BASE_URL -eq $gateway)
                   $miraRestart = -not ($primary.pm2_env.status -eq 'online' -and
-                    $primary.pm2_env.PRIMEFLOW_API_BASE_URL -eq $gateway -and $primary.pid -eq $primaryStatus.pid -and $agentReady)
+                    $primary.pm2_env.PRIMEFLOW_API_BASE_URL -eq $gateway -and $primaryOwnsWorker -and $agentReady)
                 } catch {
                   Write-Host 'Mira readiness could not be verified. Using the guarded restart.'
                 }
