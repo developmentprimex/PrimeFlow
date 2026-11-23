@@ -29,6 +29,7 @@ from app.models.user import User
 from app.services import discord_meetings
 from app.services import discord_one_h as one_h
 from app.services import discord_ga_replies as ga_replies
+from app.services.discord_ga_reactions import ReactionEvidence, record_reaction
 from app.services import discord_task_tools as tools
 from app.services.primeflow_report import report_timezone
 
@@ -69,6 +70,12 @@ async def save_ga_reply_snapshot(payload: ga_replies.ChannelEvidence, db: AsyncS
         set_={"captured_at": statement.excluded.captured_at, "evidence": statement.excluded.evidence},
         where=DiscordGaReplySnapshot.captured_at <= statement.excluded.captured_at))
     await db.commit()
+    return {"ok": True}
+
+
+@router.post("/bot/ga-reactions", dependencies=[Depends(require_bot)])
+async def save_ga_reaction(payload: ReactionEvidence, db: AsyncSession = Depends(get_db)):
+    await record_reaction(db, payload)
     return {"ok": True}
 
 

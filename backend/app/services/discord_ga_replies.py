@@ -12,7 +12,7 @@ from app.config import settings
 from app.models.discord_assistant import DiscordLink
 from app.models.discord_ga_reply_snapshot import DiscordGaReplySnapshot
 from app.models.user import User
-from app.services.primeflow_report import report_timezone
+from app.services.primeflow_report import previous_working_day, report_timezone
 
 NO_REPLY = "Nuk ka përgjigje ose komente nga GA për këtë raport."
 LEGACY_NO_REPLY = "Nuk ka përgjigje të lidhura nga GA."
@@ -184,7 +184,11 @@ def _has_reply(evidence, message_ids):
 
 def _report_window(day, report, cutoff):
     tz = report_timezone()
-    start = datetime.combine(day - timedelta(days=1), time(16, 30), tz) if report == "M1" else datetime.combine(day, time(8), tz)
+    if report == "M1":
+        start_day = previous_working_day(day) if day.weekday() == 0 else day - timedelta(days=1)
+        start = datetime.combine(start_day, time(16, 30), tz)
+    else:
+        start = datetime.combine(day, time(8), tz)
     end_of_day = datetime.combine(day, time.max, tz)
     return start, min(cutoff, end_of_day)
 

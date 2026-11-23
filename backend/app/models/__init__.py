@@ -231,6 +231,7 @@ from app.services import knowledge_task_guard as _knowledge_task_guard  # noqa: 
 from app.models.realization_task_confirmation import RealizationTaskConfirmation
 from app.models.discord_assistant import DiscordLink, DiscordLinkCode, DiscordReminder, DiscordAction, DiscordMeetingAlert
 from app.models.discord_ga_reply_snapshot import DiscordGaReplySnapshot
+from app.models.discord_ga_reaction import DiscordGaReaction
 from app.models.discord_m2_question import DiscordM2Question
 from app.models.discord_m3_question import DiscordM3Question
 from app.models.task_plan_feedback import TaskPlanFeedback

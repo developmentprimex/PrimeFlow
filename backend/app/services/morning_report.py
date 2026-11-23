@@ -29,6 +29,12 @@ from app.services.common_leave import parse_common_view_annual_leave
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
 from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE
+from app.services.discord_ga_reactions import (
+    GA_REACTIONS_SECTION_KEY,
+    GA_REACTIONS_SECTION_TITLE,
+    REACTIONS_UNAVAILABLE,
+    reaction_summary_for_day,
+)
 from app.services.task_marker import active_one_h_marker
 from app.services.meetings_report import (
     PERSONAL_GA,
@@ -90,9 +96,10 @@ SECTION_TITLES = [
     "DET PERSONALISHT ME KA/GENTIN?",
     "WFC ME KA/GENTIN?",
     *MARKER_TASK_SECTIONS,
+    GA_REACTIONS_SECTION_KEY,
 ]
 DISPLAY_SECTION_TITLES = [
-    SECTION_TITLES[0], *MARKER_TASK_SECTIONS, GA_HV_DV_TASKS_TITLE,
+    SECTION_TITLES[0], GA_REACTIONS_SECTION_KEY, *MARKER_TASK_SECTIONS, GA_HV_DV_TASKS_TITLE,
     *SECTION_TITLES[1:6], SECTION_TITLES[7], SECTION_TITLES[8],
 ]
 MANUAL_SECTION_TITLES: set[str] = set()
@@ -115,6 +122,7 @@ LEGACY_NOTES_TITLE = (
     "VENDOS DET: STATUS (1H: EM(08:00),08:00,DL,AM,AM&PM,PM/P/R1)"
 )
 SECTION_TITLE_ALIASES = {
+    GA_REACTIONS_SECTION_TITLE: GA_REACTIONS_SECTION_KEY,
     "(GA/KA/GENTI) KUSH KA DET PERSONALISHT?": SECTION_TITLES[7],
     "TASKS PERSONALISHT ME KA/GENTIN?": SECTION_TITLES[7],
     "WFC TASKS (KA/GENTI)": SECTION_TITLES[8],
@@ -141,6 +149,8 @@ def _emails_default_body() -> str:
 
 
 def _default_body(title: str) -> str:
+    if title == GA_REACTIONS_SECTION_KEY:
+        return REACTIONS_UNAVAILABLE
     if title == SECTION_TITLES[0]:
         return "Përgjigjet GA nga Discord përditësohen kur gjenerohet raporti."
     if title == SECTION_TITLES[1]:
@@ -300,15 +310,20 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         if title == SECTION_TITLES[1]:
             body = _separate_keyed_prompt_lines(_without_retired_task_status_prompt(body)) or _emails_default_body()
         if title not in by_title:
+            visible_title = title if title == GA_HV_DV_TASKS_TITLE or title in MARKER_TASK_SECTIONS else (raw_title if section_key else title)
+            if title == GA_REACTIONS_SECTION_KEY:
+                visible_title = GA_REACTIONS_SECTION_TITLE
             by_title[title] = {
                 "section_key": title,
-                "title": title if title == GA_HV_DV_TASKS_TITLE or title in MARKER_TASK_SECTIONS else (raw_title if section_key else title),
+                "title": visible_title,
                 "body": body,
             }
 
     # Keep Common View–synced manuals after built-in manuals and before auto sections.
     known = [
-        by_title.get(title, {"section_key": title, "title": title, "body": _default_body(title)})
+        by_title.get(title, {"section_key": title,
+                             "title": GA_REACTIONS_SECTION_TITLE if title == GA_REACTIONS_SECTION_KEY else title,
+                             "body": _default_body(title)})
         for title in DISPLAY_SECTION_TITLES
     ]
     from app.services.meeting_point_manual_sync import order_custom_manual_sections
@@ -991,6 +1006,8 @@ async def build_morning_report_sections(
     from app.services.discord_ga_replies import summary_for_day
     sections = [
         {"title": SECTION_TITLES[0], "body": await summary_for_day(db, report_day, report="M1", generated_at=generated_at)},
+        {"section_key": GA_REACTIONS_SECTION_KEY, "title": GA_REACTIONS_SECTION_TITLE,
+         "body": await reaction_summary_for_day(db, report_day, report="M1", generated_at=generated_at)},
         {"title": GA_HV_DV_TASKS_TITLE, "body": task_tables},
         {"title": SECTION_TITLES[1], "body": email_tasks},
         {"title": SECTION_TITLES[2], "body": attendance},
@@ -1032,7 +1049,7 @@ async def build_morning_report_sections(
             "body": _marker_task_table(caption, marked_tasks, names, owners, department_codes),
         })
         snapshot["counts"][title] = len(marked_tasks)
-    sections_by_title = {section["title"]: section for section in sections}
+    sections_by_title = {section.get("section_key", section["title"]): section for section in sections}
     ordered = [sections_by_title[title] for title in DISPLAY_SECTION_TITLES]
     return await filter_report_sections(db, ordered, report_day), snapshot
 
