@@ -488,6 +488,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   COM përdor `TaskMarkerComment` edhe në faqe të tjera, ndaj ndryshimet lokale
   kalojnë përmes klasës `common-marker-comment`. Printimi i ditës së ardhshme
   nga Common View ka stil të veçantë `.print-marker-comment`.
+- Simbolet dhe komentet (`/comments`) lexon `/marker-comments` për datën
+  origjinale të shtimit të komentit, veç datës së përditësimit. Komentet e
+  vjetra pa datë origjinale shfaqin datën e regjistruar si orientuese. Filtri
+  “Çdo përdorues” te “Të gjitha” përputh autorin ose marrësin sipas ID-së.
+  PX Notes lidh te “Të gjitha”; shiritat e njoftimeve dhe dialogu i përbashkët
+  i komenteve përdorin gjendjen dhe datën e përditësimit të listës bazë.
+  Raportet dhe eksportet lexojnë simbolin dhe tekstin nga të dhënat e detyrës.
 - SHTYPI Today dhe Tomorrow ndajnë komponentin dhe gjeneruesin bazë, por kanë
   dallime në data, gjenerim dhe historik. 1H Reports ka gjenerues tjetër.
   Mungesa ose PV tërëditore (08:00–16:00) përjashton detyrat nga gjenerimi i ri

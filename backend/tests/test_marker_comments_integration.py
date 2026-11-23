@@ -68,16 +68,17 @@ async def _exercise_inbox():
                     await db.flush()
 
                     def migrate(sync_connection):
-                        migration_file = Path(__file__).parents[1] / "alembic/versions/0150_marker_comment_inbox.py"
-                        spec = importlib.util.spec_from_file_location("inbox_migration", migration_file)
-                        migration = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(migration)
                         ops = Operations(MigrationContext.configure(sync_connection))
                         def create_temp_table(name, *columns, **kwargs):
                             return ops.create_table(name, *columns, prefixes=["TEMPORARY"], **kwargs)
                         with Operations.context(MigrationContext.configure(sync_connection)):
                             with patch("alembic.op.create_table", side_effect=create_temp_table):
-                                migration.upgrade()
+                                for filename in ("0150_marker_comment_inbox.py", "0201_marker_comment_created_at.py"):
+                                    migration_file = Path(__file__).parents[1] / "alembic/versions" / filename
+                                    spec = importlib.util.spec_from_file_location("inbox_migration", migration_file)
+                                    migration = importlib.util.module_from_spec(spec)
+                                    spec.loader.exec_module(migration)
+                                    migration.upgrade()
                     await connection.run_sync(migrate)
 
                     # Backfill groups copies, includes both assignees and creator,
@@ -107,6 +108,8 @@ async def _exercise_inbox():
                     assert second_item["task_id"] == str(tasks[1].id)
                     assert first_item["read_at"] is None and second_item["read_at"] is None
                     assert first_item["author_name"] == actor.full_name
+                    assert first_item["author_id"] == str(actor.id)
+                    assert first_item["comment_created_at"] is None
                     assert all(task.title == "Shared test task\nCOM: New comment" for task in tasks)
                     assert first_item["title"] == "Shared test task\nCOM: New comment"
                     assert first_item["is_mine"] is True
@@ -379,7 +382,7 @@ async def _exercise_inbox():
                     await db.flush()
                     assert len((await list_marker_comments(db, outsider))["items"]) == 1
                     assert (await unread_notification_count(db, outsider))["count"] == baseline_notifications + 2
-                    notification_rows = await list_notifications(False, db, outsider)
+                    notification_rows = await list_notifications(db=db, user=outsider)
                     assert not any(row.data and row.data.get("kind") in ("task_marker", "task_marker_comment")
                                    and row.data.get("task_id") == str(status_tasks[0].id) for row in notification_rows)
                     assert any(row.title == "Unrelated assignment" for row in notification_rows)
@@ -390,6 +393,19 @@ async def _exercise_inbox():
                     await db.flush()
                     restored = next(item for item in (await list_marker_comments(db, outsider))["items"] if item["id"] == todo_item["id"])
                     assert restored["revision"] == todo_item["revision"] and restored["read_at"] is None
+
+                    async def save_comment(marker, comment):
+                        await sync_task_marker(db, status_tasks[0], marker, marker_comment=comment, actor_email=actor.email)
+                        return next(item for item in (await list_marker_comments(db, outsider))["items"] if item["id"] == todo_item["id"])
+
+                    added = await save_comment("QUESTION", "First comment")
+                    assert added["comment_created_at"] == added["updated_at"]
+                    edited = await save_comment("M2", "Edited comment")
+                    assert edited["comment_created_at"] == added["comment_created_at"]
+                    assert edited["updated_at"] > added["updated_at"]
+                    assert (await save_comment("M2", None))["comment_created_at"] is None
+                    added_again = await save_comment("M2", "Another comment")
+                    assert added_again["comment_created_at"] > added["comment_created_at"]
 
                     # A completed person's copy does not keep shared tasks unread
                     # or expose that copy in their personal list.

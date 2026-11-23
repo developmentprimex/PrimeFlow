@@ -25,5 +25,6 @@ class TaskMarkerCommentInbox(Base):
     revision: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
     marker: Mapped[str] = mapped_column(String(32), nullable=False)
     comment: Mapped[str] = mapped_column(Text, nullable=False)
+    comment_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
