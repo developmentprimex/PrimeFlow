@@ -639,10 +639,12 @@ def _normalize_task_status(value: str | None) -> str:
 def _status_rank(value: str | None) -> int:
     normalized = _normalize_task_status(value)
     if normalized == "DONE":
-        return 5
+        return 6
     if normalized == "WAITING_CONFIRMATION":
-        return 4
+        return 5
     if normalized == "WAITING_CLIENT":
+        return 4
+    if normalized == "PAUSED":
         return 3
     if normalized == "IN_PROGRESS":
         return 2
@@ -732,10 +734,8 @@ def _status_for_day(
         return "DONE"
     if normalized_daily == "IN_PROGRESS":
         return "IN_PROGRESS"
-    if normalized_daily == "WAITING_CLIENT":
-        return "WAITING_CLIENT"
-    if normalized_daily == "WAITING_CONFIRMATION":
-        return "WAITING_CONFIRMATION"
+    if normalized_daily in {"PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION"}:
+        return normalized_daily
     if normalized_daily is not None:
         return "TODO"
 
@@ -748,7 +748,7 @@ def _status_for_day(
     if normalized == "DONE" and completed_date is None:
         return "DONE"
 
-    if normalized in {"WAITING_CLIENT", "WAITING_CONFIRMATION"}:
+    if normalized in {"PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION"}:
         return normalized
     return "TODO" if normalized == "TODO" else "IN_PROGRESS"
 
@@ -756,9 +756,11 @@ def _status_for_day(
 def _override_daily_status_from_progress(
     daily_status: TaskStatus | None,
     progress_counts: tuple[int, int] | None,
+    *,
+    resumed_from_pause: bool = False,
 ) -> TaskStatus | None:
-    """When per-day product counts are complete, treat the day as DONE even if daily_status is stale."""
-    if progress_counts is None:
+    """Use complete counts for stale daily statuses while honoring manual pause and resume."""
+    if progress_counts is None or daily_status == TaskStatus.PAUSED or resumed_from_pause:
         return daily_status
     completed, total = progress_counts
     if total > 0 and completed >= total:
@@ -1798,6 +1800,7 @@ async def weekly_table_planner(
 ) -> WeeklyTableResponse:
     """Get weekly planner in table format organized by departments, users, days, and AM/PM"""
     today = datetime.now(timezone.utc).date()
+    today_local = _today_app_date()
     
     # Determine which week to show
     if is_this_week:
@@ -2934,6 +2937,7 @@ async def weekly_table_planner(
                         daily_status_value = _override_daily_status_from_progress(
                             _daily_status_for_task_day(t, day_date),
                             progress_counts,
+                            resumed_from_pause=t.resumed_from_pause and day_date >= today_local,
                         )
                         status_for_day = _status_for_day(
                             status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
@@ -3004,6 +3008,7 @@ async def weekly_table_planner(
                         daily_status_value = _override_daily_status_from_progress(
                             _daily_status_for_task_day(t, day_date),
                             progress_counts,
+                            resumed_from_pause=t.resumed_from_pause and day_date >= today_local,
                         )
                         status_for_day = _status_for_day(
                             status=TaskStatus(t.status) if t.status else TaskStatus.TODO,

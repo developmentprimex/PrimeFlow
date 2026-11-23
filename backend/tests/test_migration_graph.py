@@ -18,6 +18,28 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_paused_note_tasks_migration_handles_both_existing_constraint_names(self) -> None:
+        scripts = migration_scripts()
+        migration = scripts.get_revision("0203_allow_paused_note_tasks").module
+        metadata = sa.MetaData(naming_convention={"ck": "ck_%(table_name)s_%(constraint_name)s"})
+
+        for direction in ("upgrade", "downgrade"):
+            with self.subTest(direction=direction):
+                output = StringIO()
+                operations = Operations(MigrationContext.configure(
+                    dialect_name="postgresql",
+                    opts={"as_sql": True, "output_buffer": output, "target_metadata": metadata},
+                ))
+                with patch.object(migration, "op", operations):
+                    getattr(migration, direction)()
+                sql = output.getvalue()
+                self.assertIn("DROP CONSTRAINT IF EXISTS ck_tasks_ga_note_status_valid", sql)
+                self.assertIn("DROP CONSTRAINT IF EXISTS ck_tasks_ck_tasks_ga_note_status_valid", sql)
+                self.assertIn("ADD CONSTRAINT ck_tasks_ga_note_status_valid CHECK", sql)
+                self.assertNotIn("ADD CONSTRAINT ck_tasks_ck_tasks_ga_note_status_valid", sql)
+                self.assertIn("'WAITING_CLIENT', 'WAITING_CONFIRMATION'", sql)
+                self.assertEqual("'DONE', 'PAUSED')" in sql, direction == "upgrade")
+
     def test_task_plan_feedback_recognizes_the_deployed_revision(self) -> None:
         scripts = migration_scripts()
         deployed = "0196_task_plan_feedback"

@@ -70,6 +70,7 @@ export default function ReportsPage() {
     if (normalized === "completed") return weeklyPlanStatusBgClass("DONE")
     if (normalized === "pending") return weeklyPlanStatusBgClass("TODO")
     if (normalized === "in progress") return weeklyPlanStatusBgClass("IN_PROGRESS")
+    if (normalized === "paused" || normalized === "stopped") return weeklyPlanStatusBgClass("PAUSED")
     return weeklyPlanStatusBgClass(value)
   }
 

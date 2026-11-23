@@ -205,7 +205,7 @@ function isIsoWithinInclusiveRange(value: string, from: string, to: string) {
 }
 
 function isOpenStatus(status: string) {
-  return status === "TODO" || status === "IN_PROGRESS" || status === "WAITING_CONFIRMATION"
+  return status === "TODO" || status === "IN_PROGRESS" || status === "PAUSED" || status === "WAITING_CONFIRMATION"
 }
 
 function apiErrorMessage(payload: unknown, fallback: string) {
@@ -991,7 +991,7 @@ export default function SystemTaskInstancesPage() {
                         <TableCell>{row.kohaBarazimeve}</TableCell>
                         <TableCell>
                           <span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${row.statusClassName}`}>
-                            {row.status}
+                            {row.status === "PAUSED" ? "Stopped" : row.status}
                           </span>
                         </TableCell>
                         <TableCell>

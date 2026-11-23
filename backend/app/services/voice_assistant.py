@@ -43,7 +43,7 @@ class VersionedTask(TaskRef):
 
 
 class Status(VersionedTask):
-    status: Literal["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"]
+    status: Literal["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"]
 
 
 class Points(VersionedTask):

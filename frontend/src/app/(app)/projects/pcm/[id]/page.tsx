@@ -522,7 +522,7 @@ const MEETING_TABS = [
 
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
-const PCM_SELECTABLE_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
+const PCM_SELECTABLE_STATUSES = ["TODO", "IN_PROGRESS", "PAUSED", "DONE"] as const
 const LEGACY_WAITING_STATUS = "WAITING_CONFIRMATION"
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
@@ -563,6 +563,7 @@ function initialsWithDots(src: string) {
 }
 
 function statusLabel(status?: string) {
+  if (status === "PAUSED") return "Stopped"
   if (!status) return "-"
   if (status === "WAITING_CLIENT") return "WFE"
   return status
@@ -6088,7 +6089,6 @@ export default function PcmProjectPage() {
         }
         const totalNum = toNonNegativeInt(totalValue)
         const completedNum = toNonNegativeInt(completed)
-        const nextStatus = computeStatusFromCompleted(totalNum, completedNum)
 
         // Preserve origin_task_id if it exists
         const originTaskId = getOriginTaskId(currentNotes)
@@ -6145,7 +6145,7 @@ export default function PcmProjectPage() {
             assigned_to: task.phase === "CONTROL"
               ? (editingTaskKoUserId === "__unassigned__" ? null : editingTaskKoUserId)
               : (editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee),
-            status: nextStatus,
+            status: updated.status,
           },
         }))
         cancelEditTask()
@@ -6674,7 +6674,7 @@ export default function PcmProjectPage() {
                           ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
                           : controlEdits[task.id]?.completed || "0"
                         const completedNum = toNonNegativeInt(completedValue)
-                        const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
+                        const autoStatus = task.status ?? computeStatusFromCompleted(totalVal, completedNum)
                         return (
                           <div key={task.id} className="grid grid-cols-12 gap-4 py-4 -mx-6 px-6 text-sm items-center hover:bg-slate-50/70 transition-colors group">
                             <div className="col-span-3 pr-2">
@@ -7669,7 +7669,7 @@ export default function PcmProjectPage() {
                           ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
                           : controlEdits[task.id]?.completed || "0"
                         const completedNum = toNonNegativeInt(completedValue)
-                        const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
+                        const autoStatus = task.status ?? computeStatusFromCompleted(totalVal, completedNum)
                         return (
                           <div key={task.id} className="grid grid-cols-12 gap-4 py-4 -mx-6 px-6 text-sm items-center hover:bg-slate-50/70 transition-colors group">
                             <div className="col-span-2 pr-2">

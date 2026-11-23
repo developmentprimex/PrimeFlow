@@ -50,7 +50,7 @@ const FINISH_PERIOD_NONE_VALUE = "__none__"
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH", "BLLOK"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
-const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
+const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 const SYSTEM_STATUS_OPTIONS = ["OPEN", "DONE"] as const
 type AdminTasksSectionId = "all-tasks" | "common" | "ga-time" | "one-h-print"
 
@@ -613,6 +613,7 @@ function getDisplayPriority(task: Task): TaskPriority {
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "PAUSED") return "Stopped"
   if (status === "WAITING_CLIENT") return "WFE"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "To Do"
@@ -630,6 +631,7 @@ function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
   if (status === "TODO") return "To Do"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "PAUSED") return "Stopped"
   if (status === "WAITING_CLIENT") return "WFE"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "NOT_DONE") return "Not Done"

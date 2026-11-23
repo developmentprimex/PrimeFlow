@@ -33,7 +33,7 @@ import { fetchUsersLookupCached } from "@/lib/users-cache"
 import type { Department, GaNote, Project, SkillCategory, Task, UserLookup } from "@/lib/types"
 
 type OpenTaskDateFilter = "all" | OpenTaskDateBucket
-type OpenTaskStatusFilter = "all" | "todo" | "in_progress"
+type OpenTaskStatusFilter = "all" | "todo" | "in_progress" | "paused"
 type OpenTaskTypeFilter = "project" | "system" | "personal" | "hourly" | "normal" | "high" | "r1" | "blocked" | "plan" | "fast"
 type PlannerTaskDialogMode = "plan" | "edit"
 type OpenTaskEditType = "normal" | "high" | "hourly" | "r1" | "personal" | "blocked"
@@ -94,6 +94,7 @@ function formatDate(value: string) {
 function statusLabel(value?: string | null) {
   const normalized = (value || "TODO").toUpperCase()
   if (normalized === "IN_PROGRESS") return "In Progress"
+  if (normalized === "PAUSED") return "Stopped"
   if (normalized === "WAITING_CLIENT") return "WFE"
   if (normalized === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (normalized === "DONE") return "Done"
@@ -124,6 +125,7 @@ function bucketBadgeClass(bucket: OpenTaskDateBucket) {
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To Do" },
   { value: "IN_PROGRESS", label: "In Progress" },
+  { value: "PAUSED", label: "Stopped" },
   { value: "WAITING_CLIENT", label: "WFE" },
   { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
   { value: "DONE", label: "Done" },
@@ -151,6 +153,7 @@ const OPEN_TASK_STATUS_FILTER_OPTIONS: Array<{ value: OpenTaskStatusFilter; labe
   { value: "all", label: "All statuses" },
   { value: "todo", label: "To Do" },
   { value: "in_progress", label: "In Progress" },
+  { value: "paused", label: "Stopped" },
 ]
 
 const OPEN_TASK_TYPE_FILTER_OPTIONS: Array<{ value: OpenTaskTypeFilter; label: string }> = [
@@ -399,6 +402,7 @@ export default function OpenTasksPage() {
       if (dateFilter !== "all" && dateBucket !== dateFilter) return false
       if (statusFilter === "todo" && (task.status || "TODO").toUpperCase() !== "TODO") return false
       if (statusFilter === "in_progress" && (task.status || "").toUpperCase() !== "IN_PROGRESS") return false
+      if (statusFilter === "paused" && (task.status || "").toUpperCase() !== "PAUSED") return false
       if (skillFilter !== ALL_VALUE && task.skill_category !== skillFilter) return false
       if (typeFilters.length && !typeFilters.some((value) => taskMatchesTypeFilter(task, value))) return false
       if (query) {
@@ -954,7 +958,8 @@ export default function OpenTasksPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {TASK_STATUS_OPTIONS.filter((option) =>
-                        !(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id) || ["TODO", "IN_PROGRESS", "DONE"].includes(option.value)
+                        (option.value !== "PAUSED" || !selectedTask.question_origin_id) &&
+                        (!(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id) || ["TODO", "IN_PROGRESS", "PAUSED", "DONE"].includes(option.value))
                       ).map((option) => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}

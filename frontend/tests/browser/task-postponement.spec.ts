@@ -7,8 +7,8 @@ const user = { id: owner, full_name: "Test owner", email: "owner@example.com", r
 const day = (offset = 0) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10)
 const inputDay = (offset: number) => day(offset).split("-").reverse().join("/")
 
-async function shell(page: Page) {
-  let task = { id: taskId, title: "DT: Test postponement", status: "TODO", priority: "NORMAL", created_at: `${day()}T08:00:00Z`,
+async function shell(page: Page, initialStatus = "TODO") {
+  let task = { id: taskId, title: "DT: Test postponement", status: initialStatus, priority: "NORMAL", created_at: `${day()}T08:00:00Z`,
     start_date: `${day()}T10:00:00Z`, due_date: `${day(14)}T10:00:00Z`, system_template_origin_id: taskId,
     assigned_to: owner, assignees: [user], is_active: true, department_id: department }
   const writes: Record<string, unknown>[] = []
@@ -26,7 +26,10 @@ async function shell(page: Page) {
     if (path === `/api/tasks/${taskId}` && request.method() === "PATCH") {
       const body = request.postDataJSON()
       writes.push(body)
-      if (!body.postponement_reason_code || !body.postponement_comment?.trim()) {
+      const movesDateForward = ["start_date", "due_date"].some(field =>
+        body[field]?.slice(0, 10) > task[field as "due_date"].slice(0, 10),
+      )
+      if (movesDateForward && (!body.postponement_reason_code || !body.postponement_comment?.trim())) {
         return route.fulfill({ status: 409, json: { detail: { code: "TASK_POSTPONEMENT_EXPLANATION_REQUIRED",
           task_id: taskId, task_title: task.title, changes: ["start_date", "due_date"].flatMap(field =>
             body[field]?.slice(0, 10) > task[field as "due_date"].slice(0, 10)
@@ -42,6 +45,29 @@ async function shell(page: Page) {
   await expect(page.getByRole("dialog", { name: "Edit task" })).toBeVisible()
   return { writes }
 }
+
+test("a task can be stopped, reloaded, and resumed without moving its dates", async ({ page }) => {
+  const { writes } = await shell(page, "IN_PROGRESS")
+  const edit = page.getByRole("dialog", { name: "Edit task" })
+  await edit.getByRole("combobox").filter({ hasText: "In progress" }).click()
+  await page.getByRole("option", { name: "Stopped", exact: true }).click()
+  await edit.getByRole("button", { name: "Save changes" }).click()
+  await expect(edit).toHaveCount(0)
+
+  await page.reload()
+  await expect(page.getByText("Stopped", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await edit.getByRole("combobox").filter({ hasText: "Stopped" }).click()
+  await page.getByRole("option", { name: "In progress", exact: true }).click()
+  await edit.getByRole("button", { name: "Save changes" }).click()
+  await expect(edit).toHaveCount(0)
+
+  expect(writes.map(write => write.status)).toEqual(["PAUSED", "IN_PROGRESS"])
+  for (const write of writes) {
+    if (write.start_date) expect(String(write.start_date).slice(0, 10)).toBe(day())
+    if (write.due_date) expect(String(write.due_date).slice(0, 10)).toBe(day(14))
+  }
+})
 
 for (const movement of ["start", "due", "both"]) {
   test(`${movement} postponement cannot save until both explanation fields are filled`, async ({ page }) => {

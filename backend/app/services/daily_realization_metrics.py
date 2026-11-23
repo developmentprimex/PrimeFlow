@@ -179,6 +179,9 @@ def _realization_item(row: Mapping[str, object], *, extra_weight: float) -> dict
     if wfe:
         kind = "WFE" if planned else "EXTRA_WFE"
         credit = share * WFE_CREDIT
+    elif classification == "PAUSED":
+        kind = "PAUSED"
+        credit = share if planned and row.get("multi_day_before_deadline") and row_has_progress(row) else 0.0
     elif not planned:
         kind = "EXTRA_COMPLETED" if completed else "EXTRA_OPEN"
         credit = share if completed else 0.0

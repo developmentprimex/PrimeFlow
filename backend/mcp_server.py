@@ -45,7 +45,7 @@ Core language and business rules:
 - After the app's slot rollover time, Primeflow may apply 1H slot work to the next effective workday. Let the backend enforce this.
 - Initials such as LH should be resolved to users before assignment. LH normally means Laurent Hoxha if that is the unique matching user.
 - For task assignment, prefer assignee_name or assignee_ids in MCP tools. The MCP server resolves names/initials and sends assignees=[user_id] plus assigned_to.
-- Status values commonly include TODO, IN_PROGRESS, WAITING_CONFIRMATION, DONE, and related backend enum values.
+- Status values commonly include TODO, IN_PROGRESS, PAUSED, WAITING_CONFIRMATION, DONE, and related backend enum values.
 - Priority values commonly include NORMAL and HIGH.
 - Dates should be ISO strings. For day filters, use local-day bounds such as 2026-07-09T00:00:00+02:00 to 2026-07-10T00:00:00+02:00.
 - Albanian time words: sot=today, neser/nesër=tomorrow, dje=yesterday, kete jave/këtë javë=current week, and javen tjeter/javën tjetër=next week.
@@ -1995,8 +1995,8 @@ async def create_task(
     if normalized_priority and normalized_priority not in {"NORMAL", "HIGH"}:
         raise ValueError("priority must be NORMAL or HIGH")
     normalized_status = status.upper() if status else None
-    if normalized_status and normalized_status not in {"TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"}:
-        raise ValueError("status must be TODO, IN_PROGRESS, WAITING_CONFIRMATION, or DONE")
+    if normalized_status and normalized_status not in {"TODO", "IN_PROGRESS", "PAUSED", "WAITING_CONFIRMATION", "DONE"}:
+        raise ValueError("status must be TODO, IN_PROGRESS, PAUSED, WAITING_CONFIRMATION, or DONE")
     if progress_percentage is not None and not 0 <= progress_percentage <= 100:
         raise ValueError("progress_percentage must be between 0 and 100")
     if one_h_report_slot and one_h_report_slot not in {"10:00", "11:00", "11:50", "14:20", "16:00"}:

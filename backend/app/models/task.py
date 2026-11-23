@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, event, func, and_, or_, select
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, event, false, func, and_, or_, select
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
@@ -82,6 +82,7 @@ class Task(Base):
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="TODO"
     )
+    resumed_from_pause: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
     priority: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="NORMAL"
     )

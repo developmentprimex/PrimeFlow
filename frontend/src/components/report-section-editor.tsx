@@ -347,6 +347,7 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   }
   if (resolvedStatus.includes("WAITING")) return "bg-orange-100 text-orange-900"
   if (resolvedStatus.includes("IN PROGRESS")) return "bg-yellow-100"
+  if (resolvedStatus === "PAUSED" || resolvedStatus === "STOPPED") return "bg-slate-200"
   if (resolvedStatus === "TODO") return "bg-pink-200"
   if (resolvedStatus === "DONE") return "bg-green-100"
   if (typeValue.includes("08:00")) return "bg-white text-slate-950"

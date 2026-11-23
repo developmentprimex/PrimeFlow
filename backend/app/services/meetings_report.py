@@ -1709,7 +1709,7 @@ def _normalize_report_status(value: str | None) -> str:
         return "WAITING_CLIENT"
     if status in {"WAITING", "WAITING_CONFIRMATION", "PENDING_CONFIRMATION"}:
         return "WAITING_CONFIRMATION"
-    if status in {"TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"}:
+    if status in {"TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"}:
         return status
     return "TODO"
 
@@ -1829,6 +1829,7 @@ def _status_group_section(
     today_tasks = [task for task in tasks if _task_day(task) == report_day]
     todo = [task for task in today_tasks if str(task.status or "").upper() == "TODO" and _is_open(task)]
     in_progress = [task for task in today_tasks if str(task.status or "").upper() == "IN_PROGRESS" and _is_open(task)]
+    paused = [task for task in today_tasks if _normalize_report_status(task.status) == "PAUSED" and _is_open(task)]
     done = [
         task for task in tasks
         if str(task.status or "").upper() in {"DONE", "COMPLETED"}
@@ -1846,6 +1847,7 @@ def _status_group_section(
         "",
         *_m3_status_table("IN PROGRESS", in_progress, names, **table_kwargs),
         "",
+        *(_m3_status_table("STOPPED", paused, names, **table_kwargs) + [""] if paused else []),
         *_m3_status_table("DONE", done, names, **table_kwargs),
         "",
         *_m3_status_table("LATE", late, names, include_late_days=True, **table_kwargs),
@@ -2278,7 +2280,7 @@ async def _bz_alignment_lines(
 
     task_owners_by_template: dict[Any, list[str]] = {}
     task_status_by_template: dict[Any, str] = {}
-    status_rank = {"IN_PROGRESS": 4, "WAITING_CLIENT": 3, "WAITING_CONFIRMATION": 2, "TODO": 1, "DONE": 0}
+    status_rank = {"IN_PROGRESS": 5, "PAUSED": 4, "WAITING_CLIENT": 3, "WAITING_CONFIRMATION": 2, "TODO": 1, "DONE": 0}
     for task in tasks:
         template_id = task.system_template_origin_id
         if not template_id:
@@ -2813,7 +2815,7 @@ h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700;border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table td{{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table .gmail-sender{{max-width:140px;overflow-wrap:anywhere;word-wrap:break-word}}
-.report-table .n{{white-space:nowrap}}.report-table .prjk{{max-width:110px;white-space:normal;overflow-wrap:break-word;word-break:normal}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
+.report-table .n{{white-space:nowrap}}.report-table .prjk{{max-width:110px;white-space:normal;overflow-wrap:break-word;word-break:normal}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.paused td{{background:#CBD5E1;color:#1E293B}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
 @media only screen and (max-width:600px){{
 body{{padding:8px!important}}
 h1{{font-size:18px!important;line-height:1.2!important}}
@@ -2921,6 +2923,8 @@ def _table_tone_from_label(label: str) -> str:
         or "DET TE REJA" in normalized
     ):
         return "todo"
+    if normalized in {"PAUSED", "STOPPED"}:
+        return "paused"
     if "IN PROGRESS" in normalized:
         return "in-progress"
     if (
@@ -2992,6 +2996,8 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
         return MEETING_TONE_COLORS[tone], "#111827"
     if tone == "todo":
         return "#fbcfe8", "#111827"
+    if tone == "paused":
+        return "#CBD5E1", "#1E293B"
     if tone == "in-progress":
         return "#fef3c7", "#111827"
     if tone == "waiting":

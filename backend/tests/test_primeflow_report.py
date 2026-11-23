@@ -612,6 +612,21 @@ class PrimeFlowReportTests(unittest.TestCase):
         )
         self.assertIn("Afternoon bucket task", render_plain_text(document))
 
+    def test_paused_task_is_visible_as_stopped_in_report_outputs(self) -> None:
+        report_day = date(2026, 8, 13)
+        document = build_report_document(
+            {"items": {"oneH": [{
+                "id": "paused", "date": report_day.isoformat(), "slot": "10:00",
+                "person": "Anisa", "title": "Waiting for internal decision", "status": "PAUSED",
+            }]}},
+            report_day,
+            "10:00",
+        )
+        word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml")
+        self.assertIn(b"[STOPPED]", word_xml)
+        self.assertIn("[STOPPED]", render_plain_text(document))
+        self.assertIn("[STOPPED]", render_html(document))
+
     def test_status_sort_numbering_order_and_description_preservation(self) -> None:
         tasks = [
             {"id": "d", "date": "2026-07-28", "slot": "10:00", "employee": "Besa", "title": "Done EXACT", "description": "Zeile 1\n\nZeile 3", "status": "DONE"},

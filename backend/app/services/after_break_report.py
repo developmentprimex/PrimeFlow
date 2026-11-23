@@ -135,6 +135,7 @@ WAITING_CLIENT_COLUMNS = [
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
     ("IN PROGRESS", "IN_PROGRESS"),
+    ("STOPPED", "PAUSED"),
     ("WFE", "WAITING_CLIENT"),
     ("WAITING CONFIRMATION", "WAITING_CONFIRMATION"),
     ("DONE", "DONE"),
@@ -945,7 +946,9 @@ async def _personal_section(
 
     known = {key for _, key in PERSONAL_GROUPS}
     other = [task for key, rows in grouped.items() if key not in known for task in rows]
-    groups = [*PERSONAL_GROUPS, ("TJERA", "TJERA")] if other else PERSONAL_GROUPS
+    groups = [(label, key) for label, key in PERSONAL_GROUPS if key != "PAUSED" or grouped.get(key)]
+    if other:
+        groups.append(("TJERA", "TJERA"))
     grouped["TJERA"] = other
 
     lines: list[str] = []

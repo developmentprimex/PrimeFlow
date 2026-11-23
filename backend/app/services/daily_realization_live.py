@@ -125,7 +125,7 @@ def additional_task_has_day_evidence(
         before = event.before or {}
         after = event.after or {}
         if action == "task.status_changed" and str(after.get("value") or "").upper() in {
-            "IN_PROGRESS", "DONE",
+            "IN_PROGRESS", "PAUSED", "DONE",
         }:
             return True
         if action == "task.progress_changed":

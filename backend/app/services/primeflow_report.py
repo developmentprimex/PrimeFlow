@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
 REPORT_SENDER_EMAIL = "130primex.eu@gmail.com"
 SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00")
-STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "WAITING_CLIENT": 2, "DONE": 3}
+STATUS_ORDER = {"IN_PROGRESS": 0, "PAUSED": 1, "TODO": 2, "WAITING_CLIENT": 3, "DONE": 4}
 STATUS_MARKERS = {
+    "PAUSED": "⏸ STOPPED",
     "IN_PROGRESS": "🟡 IN PROGRESS",
     "TODO": "⚪ TODO",
     "WAITING_CLIENT": "🟣 WFE",
@@ -56,6 +57,7 @@ NUMBERED_ITEM = re.compile(r"(?<!\S)(\d+)\.\s*")
 TRANSIENT_CODES = {429, 500, 502, 503, 504}
 STATUS_COLORS = {
     "TODO": ("#fbcfe8", "#111827", "#ec4899"),
+    "PAUSED": ("#e2e8f0", "#1e293b", "#64748b"),
     "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
     "WAITING_CLIENT": ("#e2c15b", "#4f3a00", "#b8860b"),
     "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
@@ -119,6 +121,12 @@ class ReportTask(BaseModel):
     marker: str
     one_h_marker: str = ""
     strike_count: int | None = None
+
+    def display_title(self) -> tuple[str, list[str]]:
+        heading, details = split_task_display(self.title)
+        if self.status == "PAUSED":
+            heading = f"{heading} [STOPPED]".strip()
+        return heading, details
 
 
 def one_h_marker_symbol(value: Any) -> str:
@@ -811,7 +819,7 @@ def render_plain_text(document: ReportDocument) -> str:
         for employee in section.employees:
             lines.append(employee.name)
             for task in employee.tasks:
-                heading, detail_lines = split_task_display(task.title)
+                heading, detail_lines = task.display_title()
                 if heading:
                     lines.append(f"{task.one_h_marker} {heading}".strip())
                 lines.extend(detail_lines)
@@ -924,7 +932,7 @@ def render_html(
             for task in employee.tasks:
                 number += 1
                 background, _, accent = STATUS_COLORS[task.status]
-                heading, detail_lines = split_task_display(task.title)
+                heading, detail_lines = task.display_title()
                 details = "".join(
                     detail_row(marked_html(item, task.marked_title)) for item in detail_lines
                 )
@@ -1156,7 +1164,7 @@ def render_html(
             )
             for task in employee.tasks:
                 background, _, accent = STATUS_COLORS[task.status]
-                heading, detail_lines = split_task_display(task.title)
+                heading, detail_lines = task.display_title()
                 detail_html = "".join(
                     detail_row(marked_html(item, task.marked_title)) for item in detail_lines
                 )
@@ -1411,7 +1419,7 @@ def render_docx(document: ReportDocument) -> bytes:
                 background, _, _ = STATUS_COLORS[task.status]
                 card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
                 shade(card_cell, background)
-                heading, detail_lines = split_task_display(task.title)
+                heading, detail_lines = task.display_title()
                 if task.one_h_marker:
                     marker_run = card_cell.paragraphs[0].add_run(f"{task.one_h_marker} ")
                     marker_run.bold = True
@@ -1674,7 +1682,7 @@ def render_png(document: ReportDocument) -> bytes:
             y += 38
             for task in employee.tasks:
                 background, _, accent = STATUS_COLORS[task.status]
-                task_heading, detail_items = split_task_display(task.title)
+                task_heading, detail_items = task.display_title()
                 title_lines = textwrap.wrap(task_heading or task.title, 95) or [""]
                 detail_lines = [
                     line for item in detail_items

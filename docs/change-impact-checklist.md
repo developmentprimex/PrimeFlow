@@ -150,6 +150,19 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tomorrow mbajnë ID-në e Note-s. Raportet e vjetra përputhen me tekstin, inicialet
   dhe orën kur ka një burim të vetëm. Emaili, printimi dhe eksportet ruajnë formatin e tyre.
 
+- Statusi i taskut: përveç API-së dhe pamjeve, kontrollo listat e vlerave të
+  pranuara në `backend/mcp_server.py` dhe udhëzimet në `discord_task_tools.py`.
+  Për taskat nga PX Notes kontrollo edhe kufizimin `ck_tasks_ga_note_status_valid`.
+  Provo migrimin me detyra ekzistuese në `WAITING_CLIENT` dhe
+  `WAITING_CONFIRMATION`, që të dyja statuset të ruhen gjatë kalimit.
+  Për taskat me sasi produktesh, kontrollo rillogaritjen e statusit në `tasks.py`
+  si gjatë ruajtjes, ashtu edhe gjatë leximit, dhe përparësinë e statusit ditor
+  ndaj sasive në `planners.py`. `PAUSED` shfaqet si **Stopped** dhe mban
+  taskun të hapur me afatin dhe progresin e ruajtur. Kalimi në **In Progress**
+  rifillon taskun. Te taskat me sasi, rifillimi ka përparësi deri te ndryshimi
+  i radhës i sasive. Kontrollo etiketën në SHTYPI Today/Tomorrow, 1H Reports,
+  M1/M2/M3, PIKAT, eksportin Open Tasks dhe klasifikimin ditor në Realization.
+
 - Përmbledhja e shpejtë përdoret si në Notetaker, ashtu edhe në Discord. Për
   takimet normale numërohen të pesë seksionet së bashku, me kufi 250 fjalë dhe
   me riprovim për shkurtim. Kontrollo përmbledhjet e reja, shënimet e plota në
@@ -489,6 +502,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Kontrollo që “Pauzë” / “Vazhdo” të veprojnë vetëm me kërkesë të përdoruesit
   dhe që historiku e detajet të dallojnë skedarin e plotë nga pjesa e ruajtur
   pas ndërprerjes së shfletuesit ose arritjes së kufirit të ruajtjes lokale.
+  Gjatë kapjes, regjistruesi kërkon mbajtjen e ekranit ndezur në shfletuesit që
+  e mbështesin. Pronari i një regjistrimi të dështuar me fragmente në server
+  mund ta rikuperojë si pjesë nga historiku ose detajet. Nëse ka fragmente
+  lokale, paneli i rikuperimit ka përparësi. Kontrollo finalizimin, luajtjen,
+  arkivën FILES dhe analizën. Auditimi dallon dështimin e nisjes nga braktisja.
 
 - Krijimi i detyrave të sistemit përjashton `User.is_active = false` në
   `system_task_instances.py`, rrugën e vjetër `system_task_occurrences.py` dhe

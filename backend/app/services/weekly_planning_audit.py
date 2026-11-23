@@ -29,7 +29,7 @@ from app.services.daily_report_logic import ko_rule_applies_for_task, parse_ko_u
 
 REPORT_VERSION = "1.2"
 DEFAULT_TIMEZONE = "Europe/Tirane"
-VALID_STATUSES = {"TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"}
+VALID_STATUSES = {"TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"}
 VALID_PRIORITIES = {"NORMAL", "HIGH"}
 TECHNICAL_MARKUP = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
 NUMBERED_INSTRUCTION = re.compile(r"(?:^|\s)(?:\d+[.)]|[-•])\s+", re.MULTILINE)
@@ -593,7 +593,7 @@ def validate_task_occurrence(
     elif status not in VALID_STATUSES:
         errors.append(_error(
             occurrence, problem=f"Statusi '{occurrence.status}' nuk është i vlefshëm.",
-            correction="Përdor TODO, IN_PROGRESS, WAITING_CLIENT, WAITING_CONFIRMATION ose DONE.",
+            correction="Përdor TODO, IN_PROGRESS, PAUSED, WAITING_CLIENT, WAITING_CONFIRMATION ose DONE.",
             rule="STATUS_INVALID", severity="HIGH",
         ))
 

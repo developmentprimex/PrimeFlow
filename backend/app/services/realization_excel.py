@@ -74,6 +74,8 @@ VALUE_LABELS = {
 }
 SOURCE_LABELS = {"system": "Sistem", "project": "Projekt", "fast": "Fast task"}
 STATUS_LABELS = {
+    "PAUSED": "Stopped",
+    "paused": "Stopped",
     "completed": "Mbyllur",
     "completed_on_time": "Mbyllur në kohë",
     "completed_late": "Mbyllur me vonesë",

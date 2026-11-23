@@ -41,6 +41,7 @@ class TaskFinishPeriod(str, enum.Enum):
 class TaskStatus(str, enum.Enum):
     TODO = "TODO"
     IN_PROGRESS = "IN_PROGRESS"
+    PAUSED = "PAUSED"
     WAITING_CLIENT = "WAITING_CLIENT"
     WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
     DONE = "DONE"
@@ -61,6 +62,7 @@ class TaskStatus(str, enum.Enum):
             return cls.TODO
         normalized = str(value).strip().upper()
         aliases = {
+            "STOPPED": cls.PAUSED,
             "WFE": cls.WAITING_CLIENT,
             "WAITING_CLIENT": cls.IN_PROGRESS,
             "WAITING": cls.WAITING_CONFIRMATION,

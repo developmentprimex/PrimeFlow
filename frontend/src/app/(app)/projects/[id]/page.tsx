@@ -93,7 +93,7 @@ type TaskChecklist = {
   items: ChecklistItem[]
 }
 
-const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 const PROJECT_TASK_TYPES = ["NORMAL", "HIGH", "1H", "R1", "PERSONAL", "BLLOK"] as const
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
@@ -104,6 +104,7 @@ const ME_FILTER = "__me__"
 const TASK_STATUS_LABELS: Record<(typeof TASK_STATUSES)[number], string> = {
   TODO: "To Do",
   IN_PROGRESS: "In Progress",
+  PAUSED: "Stopped",
   WAITING_CLIENT: "WFE",
   WAITING_CONFIRMATION: "Waiting Confirmation",
   DONE: "Done",
@@ -186,6 +187,7 @@ function matchesAssignee(task: Task, filterId: string, currentUserId?: string | 
 
 function statusLabel(status?: string) {
   if (!status) return "-"
+  if (status === "PAUSED") return "Stopped"
   if (status === "WAITING_CLIENT") return "WFE"
   return status
     .replace(/_/g, " ")
@@ -2754,13 +2756,16 @@ export default function ProjectPage() {
     const buckets: Record<(typeof TASK_STATUSES)[number], Task[]> = {
       TODO: [],
       IN_PROGRESS: [],
+      PAUSED: [],
       WAITING_CLIENT: [],
       WAITING_CONFIRMATION: [],
       DONE: [],
     }
     for (const task of filteredVisibleTasks) {
       const statusValue = (task.status || "TODO") as (typeof TASK_STATUSES)[number]
-      if (statusValue === "IN_PROGRESS") {
+      if (statusValue === "PAUSED") {
+        buckets.PAUSED.push(task)
+      } else if (statusValue === "IN_PROGRESS") {
         buckets.IN_PROGRESS.push(task)
       } else if (statusValue === "WAITING_CLIENT") {
         buckets.WAITING_CLIENT.push(task)
@@ -2782,6 +2787,7 @@ export default function ProjectPage() {
     }
     buckets.TODO.sort(sortNewestFirst)
     buckets.IN_PROGRESS.sort(sortNewestFirst)
+    buckets.PAUSED.sort(sortNewestFirst)
     buckets.WAITING_CLIENT.sort(sortNewestFirst)
     buckets.WAITING_CONFIRMATION.sort(sortNewestFirst)
     buckets.DONE.sort(sortNewestFirst)

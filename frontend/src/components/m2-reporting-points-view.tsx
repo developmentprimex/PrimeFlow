@@ -24,7 +24,7 @@ export type ReportingPointsReport = {
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
-const TASK_COLORS: Record<string, string> = { TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", DONE: "#C4FDC4", WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#FFEDD5" }
+const TASK_COLORS: Record<string, string> = { TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", PAUSED: "#CBD5E1", DONE: "#C4FDC4", WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#FFEDD5" }
 
 function text(row: TaskRow, key: keyof TaskRow) { return String(row[key] ?? "—") }
 function dateChange(row: TaskRow, old: boolean) {
@@ -98,7 +98,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
                 disabled={disabled} maxLength={10000} rows={1} autoResize
                 className="min-h-9 min-w-[180px] bg-white text-black" placeholder="Shëno komentin." onChange={(event) => onAnswerChange(commentKey, event.target.value)} />
                 : field === "reason" ? dailyRlzReasonLabel(answers[`unfinished_reason:${row.task_id}`]) || row.reason || "—" : String(row[field] || "—"))]
-            return <tr key={row.task_id || index} style={{ background: row.deadline_important ? "#dc2626" : row.status === "IN_PROGRESS" ? "#FFFF00" : "#FFC4ED", color: row.deadline_important ? "white" : "black" }}>
+            return <tr key={row.task_id || index} style={{ background: row.deadline_important ? "#dc2626" : row.status === "PAUSED" ? "#CBD5E1" : row.status === "IN_PROGRESS" ? "#FFFF00" : "#FFC4ED", color: row.deadline_important ? "white" : "black" }}>
               {cells.map((value, columnIndex) => <td key={columnIndex} className={`border p-2 align-top ${columnIndex === 6 ? "min-w-[280px]" : columnIndex >= 8 ? "min-w-[160px] whitespace-pre-wrap break-words" : "w-px whitespace-nowrap"}`} style={row.eight_am ? {
                 borderTop: "3px solid #dc2626", borderBottom: "3px solid #dc2626",
                 ...(columnIndex === 0 ? { borderLeft: "3px solid #dc2626" } : {}),

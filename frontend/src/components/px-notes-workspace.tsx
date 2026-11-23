@@ -111,6 +111,7 @@ const TASK_PRIORITY_STYLES: Record<string, string> = {
 }
 const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: string }> = {
   TODO: { label: "TODO", dot: "bg-slate-500", pill: "bg-slate-100 text-slate-700" },
+  PAUSED: { label: "Stopped", dot: "bg-slate-500", pill: "bg-slate-200 text-slate-800" },
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
   WAITING_CLIENT: { label: "WFE", dot: "bg-[#B8860B]", pill: "bg-[#E2C15B] text-[#4F3A00]" },
   WAITING_CONFIRMATION: { label: "Waiting Confirmation", dot: "bg-blue-600", pill: "bg-blue-50 text-blue-700" },
@@ -143,7 +144,7 @@ function shouldPreferCloudDictation(): boolean {
   return isIOSDevice || isSafari
 }
 
-type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
+type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "PAUSED" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "mira" | "tasks" | "open" | "closed" | NormalizedTaskStatus
 type ContentFilter = "all" | "emails"
 type TextMarkRange = { start: number; end: number }
@@ -153,7 +154,7 @@ type ParsedMarkedNoteContent = {
   doneRanges: TextMarkRange[]
   addedRanges: TextMarkRange[]
 }
-type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE"
+type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "PAUSED" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE"
 type GaAssigneeTaskType = "NORMAL" | "HIGH" | "1H" | "R1" | "PERSONAL" | "BLLOK"
 type GaNotesTableNote = GaNote & { source?: "GA_KA" | "PX_JAV" }
 type GaAssigneeTaskState = {
@@ -1043,6 +1044,7 @@ function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, "_")
   if (["todo", "to_do", "to-do", "to do"].includes(normalized)) return "TODO"
   if (["in_progress", "in-progress", "in progress"].includes(normalized)) return "IN_PROGRESS"
+  if (normalized === "paused") return "PAUSED"
   if (["waiting_client", "waiting-client", "waiting for client", "wfe"].includes(normalized)) return "WAITING_CLIENT"
   if (["waiting_confirmation", "waiting-confirmation", "waiting confirmation"].includes(normalized)) return "WAITING_CONFIRMATION"
   if (["done"].includes(normalized)) return "DONE"
@@ -1063,6 +1065,7 @@ function aggregateTaskStatus(statuses: Array<string | null | undefined>): Normal
   if (allWaitingClient) return "WAITING_CLIENT"
   const anyInProgress = normalized.some((status) => status === "IN_PROGRESS")
   if (anyInProgress) return "IN_PROGRESS"
+  if (normalized.some((status) => status === "PAUSED")) return "PAUSED"
   const anyWaiting = normalized.some((status) => status === "WAITING_CONFIRMATION" || status === "WAITING_CLIENT")
   const anyTodo = normalized.some((status) => status === "TODO")
   if (anyWaiting && anyTodo) return "IN_PROGRESS"
@@ -1779,7 +1782,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
             [t.assigned_to]: {
               taskId: t.id,
               type: gaAssigneeTaskType(t),
-              status: normalizedStatus === "IN_PROGRESS" || normalizedStatus === "WAITING_CLIENT" || normalizedStatus === "WAITING_CONFIRMATION" || normalizedStatus === "DONE"
+              status: normalizedStatus === "IN_PROGRESS" || normalizedStatus === "PAUSED" || normalizedStatus === "WAITING_CLIENT" || normalizedStatus === "WAITING_CONFIRMATION" || normalizedStatus === "DONE"
                 ? normalizedStatus
                 : "TODO",
               confirmationAssigneeId: t.confirmation_assignee_id || "",
@@ -3757,6 +3760,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                 <SelectContent>
                                   <SelectItem value="TODO">To do</SelectItem>
                                   <SelectItem value="IN_PROGRESS">In progress</SelectItem>
+                                  <SelectItem value="PAUSED">Stopped</SelectItem>
                                   <SelectItem value="WAITING_CLIENT">WFE</SelectItem>
                                   <SelectItem value="WAITING_CONFIRMATION">Waiting Confirmation</SelectItem>
                                   <SelectItem value="DONE">Done</SelectItem>

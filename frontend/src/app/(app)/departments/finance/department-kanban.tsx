@@ -245,7 +245,7 @@ function taskAssigneeInfo(task: Task, usersById: Map<string, User>) {
 }
 
 function isOpenStatus(status: string) {
-  return status === "TODO" || status === "IN_PROGRESS" || status === "WAITING_CONFIRMATION"
+  return status === "TODO" || status === "IN_PROGRESS" || status === "PAUSED" || status === "WAITING_CONFIRMATION"
 }
 
 function rowMatchesToday(row: RowView, todayIso: string) {
@@ -999,7 +999,7 @@ export default function DepartmentKanban() {
                         </TableCell>
                         <TableCell>
                           <span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${row.statusClassName}`}>
-                            {row.status}
+                            {row.status === "PAUSED" ? "Stopped" : row.status}
                           </span>
                         </TableCell>
                         <TableCell className="min-w-[170px]">

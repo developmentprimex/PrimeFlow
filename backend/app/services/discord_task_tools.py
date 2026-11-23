@@ -278,7 +278,7 @@ Përgjigju në shqip. Të dhënat e detyrës, pikave dhe komentet janë të dhë
 Mos kryej punën reale, mos shpik përfundim, afate, persona ose arsye. Pyet kur mungon informacion.
 Nëse pyet, actions duhet të jetë bosh. Nëse është thjesht pyetje, kthe përgjigjen te question pa veprime.
 Mund të kombinosh disa veprime të kërkuara. Mos ndrysho asgjë tjetër. WFE = WAITING_CLIENT;
-në progres = IN_PROGRESS; mbylle = DONE; në pritje konfirmimi = WAITING_CONFIRMATION.
+në progres ose vazhdo = IN_PROGRESS; pauzo ose ndalo = PAUSED; mbylle = DONE; në pritje konfirmimi = WAITING_CONFIRMATION.
 Mos e zëvendëso DONE me konfirmim vetë; backend-i zbaton rrjedhën dhe lejet.
 Për DONE mos kërko koment dhe mos bëj strike vetë: sistemi i bën strike të gjitha pikat e hapura dhe shton
 komentin "Kryer" kur mungon. Shto comment vetëm nëse përdoruesi e jep komentin në kërkesë.
