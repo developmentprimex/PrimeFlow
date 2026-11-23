@@ -4412,6 +4412,12 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 
                 // Clone the table and clean up React-specific attributes
                 const clonedTable = table.cloneNode(true) as HTMLElement
+                const noteCells = table.querySelectorAll<HTMLTableCellElement>('tbody > tr > td:nth-child(2)')
+                const clonedNoteCells = clonedTable.querySelectorAll<HTMLTableCellElement>('tbody > tr > td:nth-child(2)')
+                clonedNoteCells.forEach((cell, index) => {
+                  const originalCell = noteCells[index]
+                  if (originalCell) cell.style.backgroundColor = window.getComputedStyle(originalCell).backgroundColor
+                })
                 setNotesRenderLimit(previousNotesRenderLimit)
                 const allElements = clonedTable.querySelectorAll('*')
                 allElements.forEach((el) => {
@@ -4519,6 +4525,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                           max-width: 350px;
                           white-space: normal;
                           word-wrap: break-word;
+                        }
+                        tbody td:nth-child(2) {
+                          print-color-adjust: exact;
+                          -webkit-print-color-adjust: exact;
                         }
                         th { 
                           background-color: #D9D9D9; 
@@ -4720,7 +4730,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     const canCreateTask = !isPxJavNote && !isClosed && (!hasProject || isDevLinked)
                     const showManualOnly = hasProject && !isDevLinked
                     const dictationSource = miraDictationLabel(note.mira_dictation_source)
-                    const shenimiCellClass = dictationSource ? "" : isClosed
+                    const shenimiCellClass = dictationSource && !hasTask ? "" : isClosed
                       ? "bg-slate-300 opacity-70"
                       : hasTask
                         ? aggregatedStatus === "TODO"

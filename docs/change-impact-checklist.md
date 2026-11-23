@@ -335,6 +335,20 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   e kontrollit dhe në kanalet personale, si dhe ruajtjen te Mira / PX Notes.
   Kur Discord kthen `10062`, logu i botit tregon moshën e klikimit në hyrje
   dhe kohën e kërkesës së konfirmimit. Veprimi i skaduar nuk ekzekutohet.
+- Deploy-et me ndryshime të verifikuara vetëm në API i mbajnë 1H dhe AI Agent
+  aktivë. Të dy botët përdorin gateway-n lokal `18080` që ndjek API-në aktive.
+  Kontrollo panelin `mira-kontrolli`, komandat personale, raportet Discord dhe
+  njoftimin e përfundimit të `/push` me botin që vazhdon të punojë. Kur duhet
+  rinisje, kontrolli i takimeve aktive vazhdon të zbatohet për të dy regjistruesit.
+- Release-i i Mirës përgatit kodin, konfigurimin dhe varësitë në një dosje të
+  izoluar. Pas ndërrimit verifikon lidhjen, leximin dhe përditësimin e panelit,
+  butonin “Fillo” dhe lejet në kanalin zanor për secilin regjistrues. Nëse
+  verifikimi dështon, deploy-i rikthen release-in e mëparshëm. Testo klikimin
+  dhe hyrjen reale në Discord në një provë të veçantë. Kontrolli i deploy-it
+  nuk nis një regjistrim. Ruaj radhën e rikuperimit të transkripteve të Mira Host
+  në të njëjtën dosje, pavarësisht versionit të botit.
+  Nisjet automatike të 1H dhe AI Agent nuk harxhojnë tentativa gjatë
+  verifikimit. Ato rifillojnë brenda dritares ekzistuese prej katër minutash.
 
 - Taskat e krijuara drejtpërdrejt nga Regjistrimet krijojnë PX Note me
   `knowledge_type=RECORDING` dhe lidhjen `ga_note_origin_id`. PX Notes shfaq
@@ -652,6 +666,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Common View, My View, Development, Graphic Design, Product Content,
   Finance dhe eksportet përkatëse. Raportet që përjashtojnë shënimet e
   Mirës vazhdojnë ta përjashtojnë shënimin e lidhur.
+- Kur diktimi i Mirës ka detyrë të lidhur, qeliza SHËNIMI në PX Notes merr
+  ngjyrën sipas statusit të detyrës. Printimi kopjon ngjyrën nga tabela.
+  Excel-i përdor hartën e vet të ngjyrave të statusit.
 - Mira Host lexon Done/strike përmes filtrimit dhe snapshot-it të përbashkët me
   1H Reports; ndryshimet te këta ndihmës kontrollohen edhe te raportet/SHTYPI.
   Radha e raportimit ka përjashtime sipas slotit: LH, EH, EF dhe RA nuk marrin

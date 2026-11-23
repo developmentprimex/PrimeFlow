@@ -40,6 +40,35 @@ test("regular notes and shared Mira tasks retain their ordinary status filters",
   assert.equal(matches(miraTask, "DONE", taskInfo), false)
 })
 
+test("dictated tasks inherit PX Notes status colors", () => {
+  const start = source.indexOf("const shenimiCellClass =")
+  const end = source.indexOf("// Only show department", start)
+  assert(start >= 0 && end > start)
+  const color = (aggregatedStatus, hasTask = true) => vm.runInNewContext(
+    source.slice(start, end) + "\nshenimiCellClass",
+    { dictationSource: "Nga Mira 1H", isClosed: false, hasTask, aggregatedStatus, note: {} },
+  )
+  assert.equal(color("TODO"), "bg-pink-200")
+  assert.equal(color("IN_PROGRESS"), "bg-yellow-200")
+  assert.equal(color("DONE"), "bg-emerald-200")
+  assert.equal(color("UNKNOWN", false), "")
+})
+
+test("print copies the displayed note cell backgrounds", () => {
+  const start = source.indexOf("const noteCells = table.querySelectorAll")
+  const end = source.indexOf("setNotesRenderLimit", start)
+  assert(start >= 0 && end > start)
+  const originals = [{ backgroundColor: "rgb(251, 207, 232)" }, { backgroundColor: "rgba(0, 0, 0, 0)" }]
+  const clones = originals.map(() => ({ style: {} }))
+  const code = ts.transpileModule(source.slice(start, end), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  vm.runInNewContext(code, {
+    table: { querySelectorAll: () => originals },
+    clonedTable: { querySelectorAll: () => clones },
+    window: { getComputedStyle: cell => cell },
+  })
+  assert.deepEqual(clones.map(cell => cell.style), originals)
+})
+
 test("explicitly shared older closed Mira notes remain visible in the default all range", () => {
   const start = source.indexOf("const withinRange = (note: GaNote) => {")
   const end = source.indexOf("const matchesTaskStatusFilter", start)

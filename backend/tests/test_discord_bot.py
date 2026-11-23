@@ -107,6 +107,24 @@ class DiscordBotTests(unittest.IsolatedAsyncioTestCase):
                 instance.publish_ready_status()
                 self.assertFalse(status_path.exists())
 
+    async def test_push_completion_tracks_backend_releases_without_reconnecting(self):
+        instance = object.__new__(bot.PrimeFlowBot)
+        instance.last_announced_build = None
+        instance.bridge = AsyncMock(return_value={"targets": []})
+        instance.broadcast = AsyncMock()
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "backend.sha"
+            with patch.dict(os.environ, {"PRIMEFLOW_BACKEND_RELEASE_FILE": str(marker)}):
+                await instance.announce_push_done()
+                instance.bridge.assert_not_called()
+                for build in ("a" * 40, "b" * 40):
+                    marker.write_text(build, encoding="ascii")
+                    self.assertEqual(instance.deployed_build(), build)
+                    await instance.announce_push_done()
+                    await instance.announce_push_done()
+                    instance.bridge.assert_awaited_with("/bot/push/complete", {"build": build})
+        self.assertEqual(instance.bridge.await_count, 2)
+
     async def test_privacy_is_repaired_before_returning_channel(self):
         instance = object.__new__(bot.PrimeFlowBot)
         member = Mock(spec=discord.Member, id=20)

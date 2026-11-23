@@ -139,7 +139,7 @@ class DiscordDeployTests(unittest.TestCase):
         backend = Path(__file__).resolve().parents[1]
         script = "const c=require('./ecosystem.config.cjs'); console.log(JSON.stringify(c.apps.filter(a=>a.name==='primeflow-discord').map(a=>({args:a.args,instances:a.instances,mode:a.exec_mode,url:a.env.PRIMEFLOW_API_BASE_URL}))));"
         result = subprocess.run(["node", "-e", script], cwd=backend, capture_output=True, text=True, check=True)
-        self.assertEqual(json.loads(result.stdout), [{"args": "discord_bot.py", "instances": 1, "mode": "fork", "url": "http://127.0.0.1:8000"}])
+        self.assertEqual(json.loads(result.stdout), [{"args": "discord_bot.py", "instances": 1, "mode": "fork", "url": "http://127.0.0.1:18080"}])
 
     def test_agent_model_and_all_discord_tests_reach_deploy(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/deploy.yml").read_text(encoding="utf-8")

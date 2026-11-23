@@ -164,7 +164,8 @@ module.exports = {
       // those secrets in command-line arguments or the ecosystem source.
       env: {
         ...sharedEnv,
-        PRIMEFLOW_API_BASE_URL: "http://127.0.0.1:8000",
+        PRIMEFLOW_API_BASE_URL: "http://127.0.0.1:18080",
+        PRIMEFLOW_BACKEND_RELEASE_FILE: path.join(process.env.PM2_HOME ?? "C:/pm2-system", "primeflow-deploy", "backend.sha"),
       },
     },
     {
@@ -184,6 +185,7 @@ module.exports = {
       args: "discord_ai_agent_bot.py",
       env: {
         ...sharedEnv,
+        PRIMEFLOW_API_BASE_URL: "http://127.0.0.1:18080",
         DISCORD_AI_AGENT_ENV_FILE: process.env.DISCORD_AI_AGENT_ENV_FILE ?? "C:\\PrimeFlowOps\\MiraAIAgent\\.env",
       },
     },

@@ -2,12 +2,19 @@
 import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 import time
 import discord
 from app.config import settings
 
 log = logging.getLogger('primeflow.discord.control')
 PREFIX = '/bot/voice-meetings'
+
+
+def release_accepts_meetings():
+    marker = os.getenv('PRIMEFLOW_MIRA_TRAFFIC_FILE')
+    return not marker or Path(marker).is_file()
 
 
 async def acknowledge_button(interaction, *, recorder, action, ephemeral):
@@ -166,6 +173,23 @@ class MeetingControlPanel:
             await self.refresh()
         except Exception as exc:
             log.warning('Shared meeting panel update failed: %s',type(exc).__name__)
+
+    async def verify_release(self):
+        """Refresh the live panel and verify the voice channel without joining it."""
+        await self.refresh(force=True)
+        channel = await self.channel()
+        message = await channel.fetch_message(self.message.id)
+        panel_ready = message.author.id == self.bot.user.id and any(
+            (getattr(button, 'custom_id', '') or '').startswith(f'pf:mc:{self.recorder}:start:')
+            for row in message.components for button in row.children
+        )
+        voice_id = (settings.DISCORD_1H_VOICE_CHANNEL_ID if self.recorder == 'primary'
+                    else settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID)
+        voice = channel.guild.get_channel(int(voice_id or 0))
+        if not isinstance(voice, discord.VoiceChannel):
+            return panel_ready, False
+        permissions = voice.permissions_for(channel.guild.me)
+        return panel_ready, all((permissions.view_channel, permissions.connect, permissions.send_messages))
 
     async def start(self, interaction, title=None, department_id=None):
         require_control(interaction)
