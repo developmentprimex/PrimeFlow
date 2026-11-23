@@ -712,7 +712,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
 
     async def test_smtp_email_preserves_full_report_colors_thick_dividers_and_html_attachment(self):
-        statuses = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"]
+        statuses = ["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"]
         rows = [{"task_id": str(uuid.uuid4()), "title": f"Detyrë {status}", "status": status,
                  "assignees": "EF", "department": "DEV", "am_pm": "PM", "task_type": "1H",
                  "old_start_date": "2026-10-05", "old_due_date": "2026-10-05",

@@ -209,6 +209,7 @@ const timeToMinutes = (value?: string | null) => {
 
 const getStatusCardClasses = (status?: string | null) => {
   const normalized = (status || "TODO").toUpperCase()
+  if (normalized === "PAUSED") return "border-[#64748B] bg-[#CBD5E1] text-[#1E293B]"
   if (normalized === "IN_PROGRESS") {
     return "border-[#000000] bg-[#FFFF00] text-[#000000]"
   }
@@ -243,6 +244,7 @@ const getStatusCardClassesForDay = (
   if (normalizedDaily === "WAITING_CONFIRMATION") {
     return getStatusCardClasses("WAITING_CONFIRMATION")
   }
+  if (normalizedDaily === "PAUSED") return getStatusCardClasses("PAUSED")
   if (normalizedDaily === "WAITING_CLIENT") {
     return getStatusCardClasses("WAITING_CLIENT")
   }
@@ -272,6 +274,7 @@ const getStatusCardClassesForDay = (
   if (normalized === "WAITING_CONFIRMATION") {
     return getStatusCardClasses("TODO")
   }
+  if (normalized === "PAUSED") return getStatusCardClasses("PAUSED")
   if (normalized === "WAITING_CLIENT") {
     return getStatusCardClasses("WAITING_CLIENT")
   }
@@ -294,6 +297,7 @@ const getStatusValueForDay = (
   if (normalizedDaily === "WAITING_CONFIRMATION") {
     return "WAITING_CONFIRMATION"
   }
+  if (normalizedDaily === "PAUSED") return "PAUSED"
   if (normalizedDaily === "WAITING_CLIENT") {
     return "WAITING_CLIENT"
   }
@@ -323,6 +327,7 @@ const getStatusValueForDay = (
   if (normalized === "WAITING_CONFIRMATION") {
     return "TODO"
   }
+  if (normalized === "PAUSED") return "PAUSED"
   if (normalized === "WAITING_CLIENT") {
     return "WAITING_CLIENT"
   }
@@ -358,6 +363,7 @@ const getTaskCardClassesForDay = (
     if (statusValue === "WAITING_CONFIRMATION") {
       return getStatusCardClasses("WAITING_CONFIRMATION")
     }
+    if (statusValue === "PAUSED") return getStatusCardClasses("PAUSED")
     if (statusValue === "IN_PROGRESS") {
       return getStatusCardClasses("IN_PROGRESS")
     }
@@ -1307,12 +1313,14 @@ export function WeeklyPlannerSnapshotsView({
         if (statusValue === "DONE") return "task-status-new-done"
         if (statusValue === "WAITING_CONFIRMATION") return "task-status-waiting"
         if (statusValue === "WAITING_CLIENT") return "task-status-waiting-client"
+        if (statusValue === "PAUSED") return "task-status-paused"
         if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
         return "task-status-new-open"
       }
       if (statusValue === "DONE") return "task-status-done"
       if (statusValue === "WAITING_CONFIRMATION") return "task-status-waiting"
       if (statusValue === "WAITING_CLIENT") return "task-status-waiting-client"
+      if (statusValue === "PAUSED") return "task-status-paused"
       if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
       return "task-status-todo"
     }
@@ -1773,6 +1781,7 @@ export function WeeklyPlannerSnapshotsView({
             .task-marker { color: #dc2626; font-weight: 900; margin-right: 2px; }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
+            .task-status-paused { background-color: #CBD5E1; }
             .task-status-waiting { background-color: #FFEDD5; border-color: #C2410C; color: #9A3412; }
             .task-status-waiting-client { background-color: #E2C15B; border-color: #B8860B; color: #4F3A00; }
             .task-status-done { background-color: #C4FDC4; }

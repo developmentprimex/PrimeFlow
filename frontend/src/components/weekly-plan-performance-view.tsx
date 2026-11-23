@@ -109,6 +109,7 @@ const formatDateTime = (iso: string) => {
 const getStatusCardClasses = (status?: string | null) => {
   const normalized = (status || "TODO").toUpperCase()
   if (normalized === "IN_PROGRESS") return "border-[#000000] bg-[#FFFF00] text-[#000000]"
+  if (normalized === "PAUSED") return "border-[#64748B] bg-[#CBD5E1] text-[#1E293B]"
   if (normalized === "WAITING_CONFIRMATION") return "border-[#C2410C] bg-[#FFEDD5] text-[#9A3412]"
   if (normalized === "DONE") return "border-[#000000] bg-[#C4FDC4] text-[#000000]"
   if (normalized === "TODO") return "border-[#000000] bg-[#FFC4ED] text-[#000000]"
@@ -121,6 +122,7 @@ const formatPlannerStatusLabel = (value?: string | null) => {
     .toUpperCase()
     .replace(/\s+/g, "_")
   if (normalized === "IN_PROGRESS") return "In Progress"
+  if (normalized === "PAUSED") return "Stopped"
   if (normalized === "WAITING_CLIENT") return "WFE"
   if (normalized === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (normalized === "DONE") return "Done"

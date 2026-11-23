@@ -874,6 +874,7 @@ const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
 
   if (normalized === "DONE") return "task-state-done"
   if (normalized === "IN_PROGRESS") return "task-state-in-progress"
+  if (normalized === "PAUSED") return "task-state-paused"
   if (normalized === "WAITING_CONFIRMATION") return "task-state-waiting"
   if (normalized === "WAITING_CLIENT") return "task-state-waiting-client"
   if (normalized === "TODO") return "task-state-todo"
@@ -884,12 +885,13 @@ const renderCommonTaskStatusIndicator = (
   entry: { status?: string | null; isDone?: boolean; isDeadlineImportant?: boolean },
   isPersonal = false,
 ) => {
-  if (!entry.isDeadlineImportant && !isPersonal) return null
+  if (!entry.isDeadlineImportant && !isPersonal && entry.status !== "PAUSED") return null
   if (entry.status == null && typeof entry.isDone !== "boolean") return null
   const status = normalizeCommonTaskStatus(entry.status, entry.isDone)
   const indicators: Record<string, { label: string; symbol: string; tone: string }> = {
     TODO: { label: "To do", symbol: "○", tone: "todo" },
     IN_PROGRESS: { label: "In progress", symbol: "◔", tone: "in-progress" },
+    PAUSED: { label: "Stopped", symbol: "||", tone: "paused" },
     DONE: { label: "Done", symbol: "✓", tone: "done" },
     WAITING_CONFIRMATION: { label: "Waiting confirmation", symbol: "◷", tone: "waiting" },
     WAITING_CLIENT: { label: "Waiting client", symbol: "◷", tone: "waiting-client" },
@@ -903,7 +905,7 @@ const renderCommonTaskStatusIndicator = (
   )
 }
 
-type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange" | "gold"
+type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange" | "gold" | "slate"
 type CommonTaskFocusFilter = "all" | "new" | "eightAm" | "deadline" | "startToday"
 
 const getCommonTaskColor = (entry: {
@@ -918,6 +920,7 @@ const getCommonTaskColor = (entry: {
   if (normalized === "DONE") return "green"
   if (isCommonTaskDeadlineActiveOnDate(entry)) return "red"
   if (normalized === "IN_PROGRESS") return "yellow"
+  if (normalized === "PAUSED") return "slate"
   if (normalized === "WAITING_CONFIRMATION") return "orange"
   if (normalized === "WAITING_CLIENT") return "gold"
   if (normalized === "TODO") return "pink"
@@ -929,6 +932,7 @@ const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
 
   if (normalized === "DONE") return 3
   if (normalized === "WAITING_CONFIRMATION") return 2
+  if (normalized === "PAUSED") return 1.5
   if (normalized === "IN_PROGRESS") return 1
   return 0
 }
@@ -991,6 +995,7 @@ const COMMON_COLOR_FILTER_OPTIONS: {
 }[] = [
   { value: "pink", label: "Pink", swatch: "#fbcfe8" },
   { value: "yellow", label: "Yellow", swatch: "#fef3c7" },
+  { value: "slate", label: "Stopped", swatch: "#cbd5e1" },
   { value: "red", label: "Red", swatch: "#dc2626" },
   { value: "green", label: "Green", swatch: "#d4ffe1" },
   { value: "orange", label: "Orange", swatch: "#ffedd5" },
@@ -4858,7 +4863,9 @@ export default function CommonViewPage() {
       return isUserHiddenOn(dateStr, uid)
     }
     const matchesColorFilter = (entry: FastTaskEntry) =>
-      colorFilter === "all" || getCommonTaskColor(entry) === colorFilter
+      colorFilter === "all" ||
+      (colorFilter === "slate" && normalizeCommonTaskStatus(entry.status, entry.isDone) === "PAUSED") ||
+      getCommonTaskColor(entry) === colorFilter
     const matchesOneHMarkerFilter = (entry: FastTaskEntry) => {
       const marker = entry.oneHMarker || null
       if (oneHMarkerFilters.size === 0) return true
@@ -12329,6 +12336,12 @@ export default function CommonViewPage() {
         .common-task-status-indicator.status-todo {
           background: #fbcfe8 !important;
           color: #831843 !important;
+        }
+        .swimlane-cell.task-state-paused,
+        .week-table-entry.task-state-paused,
+        .common-task-status-indicator.status-paused {
+          background-color: #cbd5e1;
+          color: #1e293b;
         }
         .common-task-status-indicator.status-in-progress {
           background: #fef08a !important;

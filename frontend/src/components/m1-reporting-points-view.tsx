@@ -24,7 +24,7 @@ export type ReportingPointsReport = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", DONE: "#C4FDC4",
+  TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", PAUSED: "#CBD5E1", DONE: "#C4FDC4",
   WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#FFEDD5",
 }
 const cellClass = "border border-black px-2 py-2 whitespace-pre-wrap break-words"

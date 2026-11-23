@@ -104,7 +104,7 @@ type TabId =
   | (typeof FINAL_TABS)[number]["id"]
 
 // Task statuses and priorities
-const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 const PROJECT_TASK_TYPES = ["NORMAL", "HIGH", "1H"] as const
 
@@ -119,6 +119,7 @@ function initials(src: string) {
 }
 
 function statusLabel(status?: string) {
+  if (status === "PAUSED") return "Stopped"
   if (!status) return "-"
   if (status === "WAITING_CLIENT") return "WFE"
   return status

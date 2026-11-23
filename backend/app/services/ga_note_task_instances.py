@@ -475,12 +475,13 @@ def apply_ga_note_assignee_execution_states(
         if state.status not in {
             TaskStatus.TODO,
             TaskStatus.IN_PROGRESS,
+            TaskStatus.PAUSED,
             TaskStatus.WAITING_CLIENT,
             TaskStatus.WAITING_CONFIRMATION,
             TaskStatus.DONE,
         }:
             raise ValueError(
-                "GA task status must be TODO, IN_PROGRESS, WAITING_CLIENT, "
+                "GA task status must be TODO, IN_PROGRESS, PAUSED, WAITING_CLIENT, "
                 "WAITING_CONFIRMATION, or DONE"
             )
         if state.start_date is not None and state.due_date is not None and state.start_date > state.due_date:

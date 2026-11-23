@@ -1147,6 +1147,8 @@ def _format_task_status(status: str | None) -> str:
         return "-"
     if status == "IN_PROGRESS":
         return "In Progress"
+    if status == "PAUSED":
+        return "Stopped"
     if status == "WAITING_CLIENT":
         return "WFE"
     if status == "WAITING_CONFIRMATION":
@@ -3019,6 +3021,8 @@ async def export_open_tasks_xlsx(
             continue
         if normalized_status_filter == "in_progress" and task_status != TaskStatusEnum.IN_PROGRESS.value:
             continue
+        if normalized_status_filter == "paused" and task_status != TaskStatusEnum.PAUSED.value:
+            continue
         if normalized_filter == "ga" and not (task.ga_note_origin_id or task.plan_note_origin_id):
             continue
         if normalized_filter == "plan" and not task.plan_note_origin_id:
@@ -4567,7 +4571,7 @@ async def _daily_report_rows_for_user(
         raw_status = (str(task.status or "")).upper()
         if task.completed_at or raw_status == "DONE":
             return "DONE"
-        if raw_status in {"TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION"}:
+        if raw_status in {"TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION"}:
             return raw_status
         return "TODO"
 

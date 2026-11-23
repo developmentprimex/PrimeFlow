@@ -22,6 +22,7 @@ import { useWaitingConfirmationGa } from "@/components/waiting-confirmation-ga-c
 const TASK_STATUS_STYLES: Record<string, string> = {
   WAITING_CONFIRMATION: "bg-blue-50 text-blue-700 border-blue-200",
   IN_PROGRESS: "bg-amber-50 text-amber-700 border-amber-200",
+  PAUSED: "bg-slate-200 text-slate-800 border-slate-400",
   TODO: "bg-slate-100 text-slate-700 border-slate-200",
   DONE: "bg-emerald-50 text-emerald-700 border-emerald-200",
 }
@@ -299,6 +300,7 @@ export default function WaitingConfirmationGaPage() {
                             <SelectContent>
                               <SelectItem value="TODO">To do</SelectItem>
                               <SelectItem value="IN_PROGRESS">In progress</SelectItem>
+                              <SelectItem value="PAUSED">Stopped</SelectItem>
                             </SelectContent>
                           </Select>
                           <Button
@@ -380,6 +382,7 @@ export default function WaitingConfirmationGaPage() {
                           <SelectContent>
                             <SelectItem value="TODO">To do</SelectItem>
                             <SelectItem value="IN_PROGRESS">In progress</SelectItem>
+                              <SelectItem value="PAUSED">Stopped</SelectItem>
                           </SelectContent>
                         </Select>
                         <Button

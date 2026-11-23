@@ -338,6 +338,7 @@ export interface Task {
   assignees?: TaskAssignee[] | null
   created_by?: string | null
   ga_note_origin_id?: string | null
+  question_origin_id?: string | null
   mira_dictation_source?: "1h" | "ai_agent" | null
   plan_note_origin_id?: string | null
   planning_brief?: PxJavPlanningBrief | null
@@ -942,7 +943,7 @@ export interface RealizationDeadlineTask {
   history?: RealizationDeadlineOccurrence[]
 }
 
-export type RealizationItemKind = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS" | "REASSIGNED_OUT" | "EXTRA_COMPLETED" | "EXTRA_OPEN" | "WFE" | "EXTRA_WFE"
+export type RealizationItemKind = "COMPLETED" | "IN_PROGRESS" | "PAUSED" | "POSTPONED" | "NO_PROGRESS" | "REASSIGNED_OUT" | "EXTRA_COMPLETED" | "EXTRA_OPEN" | "WFE" | "EXTRA_WFE"
 
 /** How one task moved a person's Plan RLZ for the day. */
 export interface RealizationItem {

@@ -73,7 +73,7 @@ const MEETING_TABS = [
 
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
-const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "DONE"] as const
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 const PROJECT_TASK_TYPES = ["NORMAL", "HIGH", "1H", "R1", "PERSONAL", "BLLOK"] as const
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
@@ -143,6 +143,7 @@ function isOverdue(task: Task) {
 }
 
 function statusLabel(status?: string) {
+  if (status === "PAUSED") return "Stopped"
   if (!status) return "-"
   if (status === "WAITING_CLIENT") return "WFE"
   return status

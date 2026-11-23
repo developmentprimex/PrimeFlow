@@ -10,6 +10,7 @@ from app.services.task_daily_progress import (
     _derive_daily_status,
     sync_task_daily_finish_period,
     upsert_explicit_task_daily_status,
+    upsert_task_daily_progress,
 )
 
 
@@ -34,6 +35,20 @@ class TestDeriveDailyStatus(unittest.TestCase):
 
 
 class TestOverrideDailyStatusFromProgress(unittest.TestCase):
+    def test_pause_is_preserved_even_when_product_counts_are_complete(self) -> None:
+        self.assertEqual(
+            _override_daily_status_from_progress(TaskStatus.PAUSED, (3, 3)),
+            TaskStatus.PAUSED,
+        )
+
+    def test_resumed_status_is_preserved_even_when_previous_counts_were_complete(self) -> None:
+        self.assertEqual(
+            _override_daily_status_from_progress(
+                TaskStatus.IN_PROGRESS, (3, 3), resumed_from_pause=True,
+            ),
+            TaskStatus.IN_PROGRESS,
+        )
+
     def test_complete_progress_overrides_stale_in_progress(self) -> None:
         self.assertEqual(
             _override_daily_status_from_progress(TaskStatus.IN_PROGRESS, (3, 3)),
@@ -69,6 +84,21 @@ class TestCompletedTaskStatusForDay(unittest.TestCase):
 
 
 class TestExplicitDailyStatusSync(unittest.IsolatedAsyncioTestCase):
+    async def test_quantity_change_preserves_explicit_pause_and_records_progress(self) -> None:
+        existing = SimpleNamespace(
+            completed_value=2, total_value=3, completed_delta=1,
+            daily_status="PAUSED", finish_period="AM",
+        )
+        result = Mock()
+        result.scalar_one_or_none.return_value = existing
+        db = SimpleNamespace(execute=AsyncMock(return_value=result), add=Mock())
+        await upsert_task_daily_progress(
+            db, task_id=uuid.uuid4(), day_date=date(2026, 9, 16),
+            old_completed=2, new_completed=3, total=3, finish_period="AM",
+        )
+        self.assertEqual(existing.daily_status, "PAUSED")
+        self.assertEqual((existing.completed_value, existing.total_value, existing.completed_delta), (3, 3, 2))
+
     async def test_explicit_period_changes_replace_the_old_period_and_keep_products(self) -> None:
         for status in (TaskStatus.TODO, TaskStatus.WAITING_CLIENT, TaskStatus.DONE):
             for period, expected in (("PM", "PM"), ("AM", "AM"), (None, "ALL")):

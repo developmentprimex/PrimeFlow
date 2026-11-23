@@ -204,6 +204,7 @@ function taskPalette(task: RealizationTaskFact) {
       ? "border-l-4 border-l-emerald-600 border-y border-r border-emerald-300 bg-emerald-100 text-emerald-950"
       : "border-l-4 border-l-emerald-700 border-y border-r border-emerald-300 bg-emerald-100/80 text-emerald-950"
   }
+  if (task.status?.toUpperCase() === "PAUSED") return "border-slate-400 bg-slate-200 text-slate-800"
   if (task.classification === "in_progress" || task.status?.toUpperCase() === "IN_PROGRESS") {
     return "border-l-4 border-l-amber-600 border-y border-r border-amber-300 bg-amber-100 text-amber-950"
   }

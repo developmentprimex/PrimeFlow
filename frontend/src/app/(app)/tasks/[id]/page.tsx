@@ -28,7 +28,8 @@ import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from 
 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
-  { value: "IN_PROGRESS", label: "In progress" },
+  { value: "IN_PROGRESS", label: "In Progress" },
+  { value: "PAUSED", label: "Stopped" },
   { value: "WAITING_CLIENT", label: "WFE" },
   { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
   { value: "DONE", label: "Done" },
@@ -213,7 +214,7 @@ export default function TaskDetailsPage() {
     setTitle(getPlainMarkedText(task.title))
     setDescription(task.description || "")
     setStatusValue(
-      (task.ga_note_origin_id || task.plan_note_origin_id) && !["TODO", "IN_PROGRESS", "DONE"].includes(task.status || "")
+      (task.ga_note_origin_id || task.plan_note_origin_id) && !["TODO", "IN_PROGRESS", "PAUSED", "DONE"].includes(task.status || "")
         ? "TODO"
         : (task.status || "")
     )
@@ -366,7 +367,7 @@ export default function TaskDetailsPage() {
       let gaMembershipChanged = false
       let removedCurrentCopy = false
       if (statusValue) payload.status = statusValue
-      if (isNoteOriginTask && statusValue && !["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"].includes(statusValue)) {
+      if (isNoteOriginTask && statusValue && !["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"].includes(statusValue)) {
         toast.error("Note task status must be To Do, In Progress, WFE, Waiting Confirmation, or Done")
         return
       }
@@ -628,7 +629,8 @@ export default function TaskDetailsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {TASK_STATUS_OPTIONS.filter((option) =>
-                      !isNoteOriginTask || ["TODO", "IN_PROGRESS", "DONE"].includes(option.value)
+                      (option.value !== "PAUSED" || !task.question_origin_id) &&
+                      (!isNoteOriginTask || ["TODO", "IN_PROGRESS", "PAUSED", "DONE"].includes(option.value))
                     ).map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}

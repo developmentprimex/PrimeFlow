@@ -87,7 +87,7 @@ export function reportTime(value?: string | null) {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", WAITING_CLIENT: "#E2C15B",
+  TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", PAUSED: "#CBD5E1", WAITING_CLIENT: "#E2C15B",
   WAITING_CONFIRMATION: "#FFEDD5", DONE: "#C4FDC4",
 }
 

@@ -377,7 +377,7 @@ TABLE_COLUMNS = {
               ("title", "DETYRA", 490), ("marker", "SIMBOLI", 60),
               ("planned_for", "PËR KUR", 100), ("created", "KRIJUAR", 135)],
 }
-TASK_FILLS = {"TODO": "#ffc4ed", "IN_PROGRESS": "#ffff00", "DONE": "#c4fdc4",
+TASK_FILLS = {"TODO": "#ffc4ed", "IN_PROGRESS": "#ffff00", "PAUSED": "#cbd5e1", "DONE": "#c4fdc4",
               "WAITING_CLIENT": "#e2c15b", "WAITING_CONFIRMATION": "#ffedd5"}
 
 

@@ -625,8 +625,9 @@ def _ga_hv_dv_task_rows(
             "LATE": 0,
             "TODO": 1,
             "IN_PROGRESS": 2,
-            "WAITING_CLIENT": 3,
-            "WAITING_CONFIRMATION": 4,
+            "PAUSED": 3,
+            "WAITING_CLIENT": 4,
+            "WAITING_CONFIRMATION": 5,
         }.get(status, 6)
         return (
             1 if is_late_system else 0,
@@ -654,7 +655,9 @@ def _ga_hv_dv_task_rows(
             _m3_am_pm_label(task),
             _m3_task_type_label(task),
             (
-                "LATE"
+                "STOPPED"
+                if _normalize_report_status(task.status) == "PAUSED"
+                else "LATE"
                 if _is_open(task)
                 and (due_day := _local_date(task.due_date)) is not None
                 and due_day < report_day

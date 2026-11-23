@@ -28,6 +28,7 @@ import { fetchUsersLookupCached } from "@/lib/users-cache"
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
+  { value: "PAUSED", label: "Stopped" },
   { value: "WAITING_CLIENT", label: "WFE" },
   { value: "WAITING_CONFIRMATION", label: "Waiting for Confirmation" },
   { value: "DONE", label: "Done" },
@@ -186,6 +187,7 @@ export function TaskEditDialog({
   const statusOptions = React.useMemo(() => {
     if (!task) return TASK_STATUS_OPTIONS
     return TASK_STATUS_OPTIONS.filter((option) => {
+      if (option.value === "PAUSED" && task.question_origin_id) return false
       if (isNoteOriginTask) return true
       if (option.value !== "WAITING_CONFIRMATION") return true
       return supportsWaitingConfirmation

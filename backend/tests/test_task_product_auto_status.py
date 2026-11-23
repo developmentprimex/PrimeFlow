@@ -41,6 +41,22 @@ class TestTaskProductAutoStatus(unittest.TestCase):
             TaskStatus.IN_PROGRESS,
         )
 
+    def test_paused_task_keeps_its_status_regardless_of_product_counts(self) -> None:
+        for completed in (0, 4, 10):
+            with self.subTest(completed=completed):
+                self.assertEqual(
+                    _product_count_status_for_output(TaskStatus.PAUSED, total=10, completed=completed),
+                    TaskStatus.PAUSED,
+                )
+
+    def test_resumed_task_is_in_progress_even_before_product_work_changes(self) -> None:
+        self.assertEqual(
+            _product_count_status_for_output(
+                TaskStatus.IN_PROGRESS, total=10, completed=0, resumed_from_pause=True,
+            ),
+            TaskStatus.IN_PROGRESS,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

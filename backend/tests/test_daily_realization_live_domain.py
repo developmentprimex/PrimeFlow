@@ -76,6 +76,7 @@ def test_live_daily_excludes_full_day_leave_without_counting_its_tasks(monkeypat
 
 @pytest.mark.parametrize("historical_status, current_status, expected", [
     ("IN_PROGRESS", "DONE", "IN_PROGRESS"),
+    ("PAUSED", "IN_PROGRESS", "PAUSED"),
     ("TODO", "IN_PROGRESS", "NO_PROGRESS"),
     ("WAITING_CLIENT", "DONE", "NO_PROGRESS"),
     (None, "IN_PROGRESS", "IN_PROGRESS"),

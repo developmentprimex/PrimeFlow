@@ -317,10 +317,14 @@ def _product_count_status_for_output(
     stored_status: str | TaskStatus,
     total: int | None,
     completed: int,
+    *,
+    resumed_from_pause: bool = False,
 ) -> TaskStatus | None:
-    """Keep an explicitly completed product task completed in API responses."""
-    if _enum_value(stored_status) == TaskStatus.DONE.value:
-        return TaskStatus.DONE
+    """Keep explicit completion and pause states in API responses."""
+    if _enum_value(stored_status) in {TaskStatus.DONE.value, TaskStatus.PAUSED.value}:
+        return TaskStatus(stored_status)
+    if resumed_from_pause and stored_status == TaskStatus.IN_PROGRESS:
+        return TaskStatus.IN_PROGRESS
     return _compute_status_from_completed(total, completed)
 
 
@@ -340,6 +344,7 @@ def _should_auto_status_from_product_counts(
 _GA_NOTE_VALID_STATUSES = {
     TaskStatus.TODO.value,
     TaskStatus.IN_PROGRESS.value,
+    TaskStatus.PAUSED.value,
     TaskStatus.WAITING_CLIENT.value,
     TaskStatus.WAITING_CONFIRMATION.value,
     TaskStatus.DONE.value,
@@ -1606,7 +1611,9 @@ async def list_tasks(
         status_override: TaskStatus | None = None
         if is_mst_tt_project and t.phase in (ProjectPhaseStatus.PRODUCT.value, ProjectPhaseStatus.CONTROL.value):
             total, completed = _extract_total_and_completed(t.daily_products, t.internal_notes)
-            status_override = _product_count_status_for_output(t.status, total, completed)
+            status_override = _product_count_status_for_output(
+                t.status, total, completed, resumed_from_pause=t.resumed_from_pause,
+            )
         if t.id in question_status_overrides:
             status_override = question_status_overrides[t.id]
         if not include_done and status_override == TaskStatus.DONE:
@@ -1865,7 +1872,9 @@ async def get_task(
         project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
         if project is not None and _is_mst_or_tt_project(project):
             total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
-            status_override = _product_count_status_for_output(task.status, total, completed)
+            status_override = _product_count_status_for_output(
+                task.status, total, completed, resumed_from_pause=task.resumed_from_pause,
+            )
     question_status_overrides = await _question_task_status_overrides(db, [task], user.id)
     if task.id in question_status_overrides:
         status_override = question_status_overrides[task.id]
@@ -2210,7 +2219,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 actor=user,
             )
 
-    if _should_auto_status_from_product_counts(project, phase_value):
+    if status_value != TaskStatus.PAUSED and _should_auto_status_from_product_counts(project, phase_value):
         total, completed = _extract_total_and_completed(payload.daily_products, payload.internal_notes)
         auto_status = _compute_status_from_completed(total, completed)
         if auto_status is not None:
@@ -2783,6 +2792,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 new_completed=completed,
                 total=total,
                 finish_period=_daily_progress_finish_period_value(task.finish_period),
+                explicit_status=TaskStatus.PAUSED if status_value == TaskStatus.PAUSED else None,
             )
 
     # Optional: store alignment users for this task (fast-task alignment).
@@ -2929,9 +2939,15 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     )
 
     prepared_date_departments = None
-    if any(_payload_has_field(payload, field) for field in ("start_date", "due_date")):
+    product_phases = {ProjectPhaseStatus.PRODUCT, ProjectPhaseStatus.CONTROL}
+    if (
+        any(_payload_has_field(payload, field) for field in ("start_date", "due_date"))
+        or payload.status is not None
+        or task.phase in product_phases
+        or payload.phase in product_phases
+    ):
         # Baselines must precede task row locks, as in the other mutation routes.
-        # Then reload locked dates so a concurrent edit cannot bypass the rule.
+        # Reload dates and status before applying a postponement or deriving progress.
         owner_ids = set((await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id))).scalars().all())
         owner_ids.update(payload.assignees or [])
         owner_ids.update(value for value in (task.assigned_to, payload.assigned_to) if value)
@@ -2949,6 +2965,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         if task is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
         ensure_task_editor(user, task)
+        is_assigned_to_task = await _is_user_assigned_to_task(db, task, user.id)
         postponement = await check_task_postponement_explanation(
             db,
             task=task,
@@ -2966,6 +2983,11 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Each assignee must update their own question task status",
         )
+    if question_status_requested == TaskStatus.PAUSED:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Question tasks use per-assignee completion and cannot be paused",
+        )
 
     if task.ga_note_origin_id is not None or task.plan_note_origin_id is not None:
         normalized_status = _normalize_ga_note_task_status(task.status)
@@ -2980,7 +3002,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Note task status must be TODO, IN_PROGRESS, or DONE",
+            detail="Unsupported note task status",
         )
 
     # Prevent DB constraint failures when updating legacy/system tasks.
@@ -3344,6 +3366,10 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         )
 
     if payload.status is not None and payload.status != task.status:
+        task.resumed_from_pause = (
+            current_status_raw == TaskStatus.PAUSED.value
+            and payload.status == TaskStatus.IN_PROGRESS
+        )
         task.status = payload.status
         if task.status == TaskStatus.DONE:
             task.completed_at = task.completed_at or datetime.now(timezone.utc)
@@ -3571,10 +3597,14 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     # Only auto-compute status if status wasn't explicitly set by user.
     if _should_auto_status_from_product_counts(project_for_product_status, task.phase):
         total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
+        values_changed = completed != old_completed or total != old_total
+        if values_changed and not status_was_explicitly_set:
+            task.resumed_from_pause = False
 
-        # Only auto-compute status if status wasn't explicitly set in payload.
-        # This preserves user's explicit status changes.
-        if not status_was_explicitly_set:
+        preserve_status = task.status == TaskStatus.PAUSED or (
+            task.status == TaskStatus.IN_PROGRESS and task.resumed_from_pause
+        )
+        if not status_was_explicitly_set and not preserve_status:
             auto_status = _compute_status_from_completed(total, completed)
             if auto_status is not None:
                 task.status = auto_status
@@ -3591,7 +3621,6 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             made_progress = completed > old_completed
             became_done_today = completed >= total and old_completed < total
             is_already_done = completed >= total
-            values_changed = completed != old_completed or total != old_total
             # Update if there's progress, just became done, is already done, or values changed (to keep status accurate).
             if made_progress or became_done_today or is_already_done or values_changed:
                 today = _realization_today()
@@ -3606,7 +3635,9 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
                     # Check if there's an existing TaskDailyProgress for today with explicit status.
                     # If status was explicitly set today, preserve it.
                     explicit_status_for_today: TaskStatus | None = None
-                    if status_was_explicitly_set and progress_day == today:
+                    if preserve_status and progress_day == today:
+                        explicit_status_for_today = TaskStatus(task.status)
+                    elif status_was_explicitly_set and progress_day == today:
                         # Check if we just set a status for today in the status change block above.
                         existing_today_progress = (
                             await db.execute(

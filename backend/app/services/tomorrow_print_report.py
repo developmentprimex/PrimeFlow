@@ -174,6 +174,7 @@ WFC_TOKEN_RE = re.compile(r"\bWFC\b", re.I)
 STATUS_COLORS = {
     "TODO": "#FFC4ED",
     "IN_PROGRESS": "#FFFF00",
+    "PAUSED": "#CBD5E1",
     "WAITING_CLIENT": "#E2C15B",
     "WAITING_CONFIRMATION": "#FFEDD5",
     "DONE": "#C4FDC4",
@@ -654,12 +655,13 @@ def _is_system_task_item(item: dict[str, Any]) -> bool:
 
 def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = _report_text(_first_line(item.get("title")))
+    status_label = " [STOPPED]" if _task_status(item) == "PAUSED" else ""
     if personal:
-        return normalize_email_task_title(title, is_system_task=_is_system_task_item(item))
+        return normalize_email_task_title(title, is_system_task=_is_system_task_item(item)) + status_label
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)
     title = normalize_email_task_title(title, is_system_task=_is_system_task_item(item))
     owners = _assignees(item)
-    return f"{'/'.join(owners)}: {title}" if owners else title
+    return (f"{'/'.join(owners)}: {title}" if owners else title) + status_label
 
 
 def _task_title_html(value: str, *, red_background: bool) -> str:

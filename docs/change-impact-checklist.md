@@ -139,6 +139,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tomorrow mbajnë ID-në e Note-s. Raportet e vjetra përputhen me tekstin, inicialet
   dhe orën kur ka një burim të vetëm. Emaili, printimi dhe eksportet ruajnë formatin e tyre.
 
+- Statusi i taskut: përveç API-së dhe pamjeve, kontrollo listat e vlerave të
+  pranuara në `backend/mcp_server.py` dhe udhëzimet në `discord_task_tools.py`.
+  Për taskat nga PX Notes kontrollo edhe kufizimin `ck_tasks_ga_note_status_valid`.
+  Për taskat me sasi produktesh, kontrollo rillogaritjen e statusit në `tasks.py`
+  si gjatë ruajtjes, ashtu edhe gjatë leximit, dhe përparësinë e statusit ditor
+  ndaj sasive në `planners.py`. `PAUSED` shfaqet si **Stopped** dhe mban
+  taskun të hapur me afatin dhe progresin e ruajtur. Kalimi në **In Progress**
+  rifillon taskun. Te taskat me sasi, rifillimi ka përparësi deri te ndryshimi
+  i radhës i sasive. Kontrollo etiketën në SHTYPI Today/Tomorrow, 1H Reports,
+  M1/M2/M3, PIKAT, eksportin Open Tasks dhe klasifikimin ditor në Realization.
+
 - Përmbledhja e shpejtë përdoret si në Notetaker, ashtu edhe në Discord. Për
   takimet normale numërohen të pesë seksionet së bashku, me kufi 250 fjalë dhe
   me riprovim për shkurtim. Kontrollo përmbledhjet e reja, shënimet e plota në

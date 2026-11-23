@@ -79,6 +79,7 @@ async def upsert_task_daily_progress(
     if explicit_status is not None:
         existing.daily_status = status.value
     elif (existing.daily_status or "").upper() not in {
+        TaskStatus.PAUSED.value,
         TaskStatus.WAITING_CLIENT.value,
         TaskStatus.WAITING_CONFIRMATION.value,
     }:
