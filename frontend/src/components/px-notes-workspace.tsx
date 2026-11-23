@@ -1191,16 +1191,15 @@ function normalizeNoteTextareaInput(textarea: HTMLTextAreaElement): string {
   return normalized
 }
 
-function noteToTaskTitle(content: string) {
+function noteToTaskTitle(content: string, fromGmail = false) {
   const cleaned = content
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .split("\n")
     .map((line) => line.trim().replace(/[ \t\f\v]+/g, " "))
     .filter(Boolean)
-    .join("\n")
-  if (!cleaned) return "GA/KA note task"
-  return cleaned
+  const title = fromGmail ? cleaned[0] : cleaned.join("\n")
+  return title || "GA/KA note task"
 }
 
 function getDueTone(value?: string | null) {
@@ -2673,12 +2672,14 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       toast.error("Tasks for non-development project notes must be created manually")
       return
     }
-    const noteTitle = noteToTaskTitle(note.content || "")
+    const fromGmail = note.knowledge_type === "GMAIL"
+    const noteTitle = noteToTaskTitle(note.content || "", fromGmail)
+    const taskContext = fromGmail ? noteTitle : note.content || ""
     // Knowledge PX: the prompt creator's task is "PROMPT: …" (renamed to the prompt title once it is saved).
     const defaultTitle = isKnowledgeNote(note) ? `${KNOWLEDGE_CONFIG[note.knowledge_type || "PROMPT"].prefix}: ${noteTitle}` : noteTitle
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
-    setTaskDescription("") // start empty so creator can add detailed description
+    setTaskDescription(fromGmail ? (note.content || "").split(/\r?\n/).slice(2).join("\n").trim() : "")
     setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
@@ -2690,11 +2691,11 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     setTaskPromptTesterId(note.knowledge_tester_id ?? "")
     setTaskDepartmentIds([])
     setTaskProjectId(note.project_id && projects.some((project) => project.id === note.project_id && project.is_active !== false) ? note.project_id : "NONE")
-    const inferredCategory = inferSkillCategory(defaultTitle, note.content)
+    const inferredCategory = inferSkillCategory(defaultTitle, taskContext)
     setTaskSkillCategory(inferredCategory)
     setTaskSkillAutoSuggested(Boolean(inferredCategory))
     setTaskSkillAiReason("")
-    void requestAiSkillCategory(defaultTitle, note.content || "")
+    void requestAiSkillCategory(defaultTitle, taskContext)
   }
 
   const openTaskDialogRef = React.useRef(openTaskDialog)
@@ -2875,7 +2876,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: taskTitle.trim() || noteToTaskTitle(note.content || ""),
+          title: taskTitle.trim() || noteToTaskTitle(note.content || "", note.knowledge_type === "GMAIL"),
           description: taskDescription.trim() || null,
           status: "TODO",
           priority: actualPriority,
@@ -3234,7 +3235,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     }
     const matchesContentFilter = (note: GaNote) => {
       if (contentFilter === "all") return true
-      return EMAIL_MARKER_RE.test(note.content || "")
+      return note.knowledge_type === "INFO_PX_MAIL" || EMAIL_MARKER_RE.test(note.content || "")
     }
     const matchesOneHMarkerFilter = (note: GaNote) => {
       const markers = noteDisplayMarkers(note, noteTaskInfo.get(note.id))

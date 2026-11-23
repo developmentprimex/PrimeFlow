@@ -2,6 +2,8 @@
 
 import * as React from "react"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
+import { InfoPxOutlook } from "@/components/info-px-outlook"
+import { installReportNoteControls, ReportNoteAttachmentDialog, ReportNoteCell, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
 import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
@@ -30,8 +32,11 @@ type TaskFeedbackRow = TaskFeedback & { key: string; title: string; owners: stri
 type TaskFeedbackEdits = Record<string, Partial<TaskFeedback>>
 const TASK_FEEDBACK_SECTION = "GA/HV/DV TASKS"
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
+const NOTES_SECTION = "(GA) NOTES TE REJA ( NOT DISSCUSED)?"
 const MARKER_TASK_SECTIONS = new Set(["FIZIKISHT ME GA?", "A KA PYTJE/SQARIME ME KA/GENTIN"])
 const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
+const GA_REACTIONS_SECTION = "A KA REACTION TE GRUPI?"
+const GA_PF_COMMENTS_SECTION = "(GA) A KA KOMENTE NE PF?"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -46,6 +51,7 @@ type Draft = {
   subject: string
   recipients: Recipients
   sections: Section[]
+  note_attachments?: ReportNoteAttachments
   task_feedback_rows?: Record<string, TaskFeedbackRow[]>
   status: string
   sent_at?: string | null
@@ -68,6 +74,7 @@ function sectionGroupLabel(section: Section) {
   // Built-in manuals are first; Common View–synced extras sit after them and before autos.
   const knownAuto = [
     GA_REPLIES_SECTION,
+    GA_REACTIONS_SECTION,
     TASK_FEEDBACK_SECTION,
     "GA TASKS",
     "HV TASKS",
@@ -201,7 +208,8 @@ export default function MorningReportPage() {
   const feedbackQueue = React.useRef(Promise.resolve())
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
-  const [preview, setPreview] = React.useState<{ html: string; plain_text: string } | null>(null)
+  const [preview, setPreview] = React.useState<{ html: string; plain_text: string; note_attachments?: ReportNoteAttachments } | null>(null)
+  const [noteFiles, setNoteFiles] = React.useState<ReportNoteAttachment[] | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState<RecipientInputs>({ to: "", cc: "", bcc: "" })
   const [settings, setSettings] = React.useState<ReportSettings | null>(null)
   const [settingsInputs, setSettingsInputs] = React.useState<RecipientInputs>({ to: "", cc: "", bcc: "" })
@@ -420,7 +428,10 @@ export default function MorningReportPage() {
           }
         : section
     )
-    const nextDraft = { ...draft, sections }
+    const editedSection = draft.sections[editingSection.index]
+    const noteAttachments = (editedSection.section_key || editedSection.title) === NOTES_SECTION
+      ? undefined : draft.note_attachments
+    const nextDraft = { ...draft, sections, note_attachments: noteAttachments }
     setDraft(nextDraft)
     setEditingSection(null)
     void save(nextDraft)
@@ -428,7 +439,9 @@ export default function MorningReportPage() {
 
   const addManualQuestion = async (title: string, position: number) => {
     if (!draft) return false
-    const sections = addManualReportSection(draft.sections, title, position, (section) => sectionGroupLabel(section) === "Manual questions")
+    const sections = addManualReportSection(draft.sections, title, position, (section) =>
+      sectionGroupLabel(section) === "Manual questions" && (section.section_key || section.title) !== GA_PF_COMMENTS_SECTION,
+    )
     if (!sections) {
       toast.error("Kjo pikë ekziston tashmë")
       return false
@@ -513,182 +526,196 @@ export default function MorningReportPage() {
         </TabsList>
 
         <TabsContent value="report" className="space-y-5">
-          <ReportTaskSymbolsPanel key={reportDate} reportDate={reportDate} />
-      <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-[220px_1fr_auto]">
-        <div>
-          <Label>Date</Label>
-          <Input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
-        </div>
-        <div>
-          <Label>Subject</Label>
-          <Input
-            value={draft?.subject || ""}
-            onChange={(event) => draft && setDraft({ ...draft, subject: event.target.value })}
-            placeholder="Generate a draft first"
-            readOnly={!canEdit}
-          />
-        </div>
-        <div className="flex items-end gap-2">
-          {canEdit ? (
-            <Button variant="outline" onClick={() => void save()} disabled={!draft || saving}>
-              <Save /> Save
-            </Button>
-          ) : null}
-          <Button variant="outline" onClick={() => void previewDraft()} disabled={!draft || saving}>
-            <Eye /> Preview
-          </Button>
-          {canManageDelivery ? (
-            <Button onClick={() => void sendDraft()} disabled={!draft || sending}>
-              <Send /> Send
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      {canManageDelivery ? (
-      <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-3">
-        <div>
-          <Label>To</Label>
-            <Input
-            value={recipientInputs.to}
-            onChange={(event) => draft && updateRecipients("to", event.target.value)}
-            placeholder="email@example.com"
-            readOnly={!canEdit}
-          />
-        </div>
-        <div>
-          <Label>Cc</Label>
-          <Input
-            value={recipientInputs.cc}
-            onChange={(event) => draft && updateRecipients("cc", event.target.value)}
-            placeholder="Optional"
-            readOnly={!canEdit}
-          />
-        </div>
-        <div>
-          <Label>Bcc</Label>
-          <Input
-            value={recipientInputs.bcc}
-            onChange={(event) => draft && updateRecipients("bcc", event.target.value)}
-            placeholder="Optional"
-            readOnly={!canEdit}
-          />
-        </div>
-      </div>
-      ) : null}
-
-      {canManageDelivery && settings ? (
-        <div className="space-y-3 rounded-lg border bg-white p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic Send</div>
-              <div className="text-sm text-muted-foreground">
-                {settings.is_active
-                  ? "Automatic sending is ON. This report regenerates and sends at 07:00 and 09:00 on the selected days."
-                  : "Automatic sending is OFF. This report will not send by itself."}
-              </div>
-            </div>
-            <button
-              type="button"
-              aria-pressed={settings.is_active}
-              aria-label={settings.is_active ? "Turn automatic send off" : "Turn automatic send on"}
-              onClick={() => setSettings({ ...settings, is_active: !settings.is_active })}
-              className={
-                settings.is_active
-                  ? "relative h-8 w-14 rounded-full bg-emerald-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                  : "relative h-8 w-14 rounded-full bg-red-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              }
-            >
-              <span
-                className={
-                  settings.is_active
-                    ? "absolute right-1 top-1 size-6 rounded-full bg-white shadow transition-all"
-                    : "absolute left-1 top-1 size-6 rounded-full bg-white shadow transition-all"
-                }
-              />
-            </button>
-          </div>
-          <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
-            <div>
-              <Label>Automatic times</Label>
-              <div className="mt-1 flex h-9 items-center rounded-md border bg-slate-50 px-3 text-sm font-medium">
-                07:00 and 09:00
-              </div>
-            </div>
-            <div>
-              <Label>Timezone</Label>
-              <Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} />
-            </div>
-            <div>
-              <Label>Days</Label>
-              <div className="flex flex-wrap gap-2">
-                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, day) => (
-                  <Button
-                    key={label}
-                    type="button"
-                    variant={settings.weekdays.includes(day) ? "default" : "outline"}
-                    onClick={() => toggleWeekday(day)}
-                  >
-                    {label}
+          <details className="group rounded-lg border bg-white">
+            <summary className="flex cursor-pointer list-none items-center gap-3 rounded-lg bg-slate-50 px-4 py-3 text-sm font-semibold group-open:rounded-b-none [&::-webkit-details-marker]:hidden">
+              <span aria-hidden="true" className="w-4 text-center text-xl leading-none group-open:hidden">+</span>
+              <span aria-hidden="true" className="hidden w-4 text-center text-xl leading-none group-open:inline">−</span>
+              Menaxhimi i raportit dhe email-it
+            </summary>
+            <div className="space-y-5 border-t p-4">
+              <ReportTaskSymbolsPanel key={reportDate} reportDate={reportDate} />
+              <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-[220px_1fr_auto]">
+                <div>
+                  <Label>Date</Label>
+                  <Input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
+                </div>
+                <div>
+                  <Label>Subject</Label>
+                  <Input
+                    value={draft?.subject || ""}
+                    onChange={(event) => draft && setDraft({ ...draft, subject: event.target.value })}
+                    placeholder="Generate a draft first"
+                    readOnly={!canEdit}
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  {canEdit ? (
+                    <Button variant="outline" onClick={() => void save()} disabled={!draft || saving}>
+                      <Save /> Save
+                    </Button>
+                  ) : null}
+                  <Button variant="outline" onClick={() => void previewDraft()} disabled={!draft || saving}>
+                    <Eye /> Preview
                   </Button>
-                ))}
+                  {canManageDelivery ? (
+                    <Button onClick={() => void sendDraft()} disabled={!draft || sending}>
+                      <Send /> Send
+                    </Button>
+                  ) : null}
+                </div>
               </div>
+
+              {canManageDelivery ? (
+              <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-3">
+                <div>
+                  <Label>To</Label>
+                    <Input
+                    value={recipientInputs.to}
+                    onChange={(event) => draft && updateRecipients("to", event.target.value)}
+                    placeholder="email@example.com"
+                    readOnly={!canEdit}
+                  />
+                </div>
+                <div>
+                  <Label>Cc</Label>
+                  <Input
+                    value={recipientInputs.cc}
+                    onChange={(event) => draft && updateRecipients("cc", event.target.value)}
+                    placeholder="Optional"
+                    readOnly={!canEdit}
+                  />
+                </div>
+                <div>
+                  <Label>Bcc</Label>
+                  <Input
+                    value={recipientInputs.bcc}
+                    onChange={(event) => draft && updateRecipients("bcc", event.target.value)}
+                    placeholder="Optional"
+                    readOnly={!canEdit}
+                  />
+                </div>
+              </div>
+              ) : null}
+
+              {canManageDelivery && settings ? (
+                <div className="space-y-3 rounded-lg border bg-white p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic Send</div>
+                      <div className="text-sm text-muted-foreground">
+                        {settings.is_active
+                          ? "Automatic sending is ON. This report regenerates and sends at 07:00 and 09:00 on the selected days."
+                          : "Automatic sending is OFF. This report will not send by itself."}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      aria-pressed={settings.is_active}
+                      aria-label={settings.is_active ? "Turn automatic send off" : "Turn automatic send on"}
+                      onClick={() => setSettings({ ...settings, is_active: !settings.is_active })}
+                      className={
+                        settings.is_active
+                          ? "relative h-8 w-14 rounded-full bg-emerald-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                          : "relative h-8 w-14 rounded-full bg-red-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                      }
+                    >
+                      <span
+                        className={
+                          settings.is_active
+                            ? "absolute right-1 top-1 size-6 rounded-full bg-white shadow transition-all"
+                            : "absolute left-1 top-1 size-6 rounded-full bg-white shadow transition-all"
+                        }
+                      />
+                    </button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
+                    <div>
+                      <Label>Automatic times</Label>
+                      <div className="mt-1 flex h-9 items-center rounded-md border bg-slate-50 px-3 text-sm font-medium">
+                        07:00 and 09:00
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Timezone</Label>
+                      <Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} />
+                    </div>
+                    <div>
+                      <Label>Days</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, day) => (
+                          <Button
+                            key={label}
+                            type="button"
+                            variant={settings.weekdays.includes(day) ? "default" : "outline"}
+                            onClick={() => toggleWeekday(day)}
+                          >
+                            {label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div>
+                      <Label>Default To</Label>
+                      <Input value={settingsInputs.to} onChange={(event) => updateSettingsRecipients("to", event.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Default Cc</Label>
+                      <Input value={settingsInputs.cc} onChange={(event) => updateSettingsRecipients("cc", event.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Default Bcc</Label>
+                      <Input value={settingsInputs.bcc} onChange={(event) => updateSettingsRecipients("bcc", event.target.value)} />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm text-muted-foreground">
+                      Last automatic run: {formatDateTimeInTimezone(settings.last_run_date, settings.timezone)}
+                    </div>
+                      <Button variant="outline" onClick={() => void saveSettings()} disabled={savingSettings}>
+                        <Save /> Save settings
+                      </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {draft ? (
+                <div className="grid gap-3 text-sm md:grid-cols-3">
+                  <div className="rounded-lg border bg-white p-3">
+                    <div className="text-muted-foreground">Report date</div>
+                    <div className="font-medium">{draft.report_date}</div>
+                  </div>
+                  <div className="rounded-lg border bg-white p-3">
+                    <div className="text-muted-foreground">Status</div>
+                    <div className="font-medium">{draft.status}</div>
+                  </div>
+                  <div className="rounded-lg border bg-white p-3">
+                    <div className="text-muted-foreground">Sent to</div>
+                    <div className="truncate font-medium">{draft.recipients.to.join(", ") || "-"}</div>
+                  </div>
+                </div>
+              ) : null}
             </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <div>
-              <Label>Default To</Label>
-              <Input value={settingsInputs.to} onChange={(event) => updateSettingsRecipients("to", event.target.value)} />
-            </div>
-            <div>
-              <Label>Default Cc</Label>
-              <Input value={settingsInputs.cc} onChange={(event) => updateSettingsRecipients("cc", event.target.value)} />
-            </div>
-            <div>
-              <Label>Default Bcc</Label>
-              <Input value={settingsInputs.bcc} onChange={(event) => updateSettingsRecipients("bcc", event.target.value)} />
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm text-muted-foreground">
-              Last automatic run: {formatDateTimeInTimezone(settings.last_run_date, settings.timezone)}
-            </div>
-              <Button variant="outline" onClick={() => void saveSettings()} disabled={savingSettings}>
-                <Save /> Save settings
-              </Button>
-          </div>
-        </div>
-      ) : null}
+          </details>
 
       {draft ? (
         <>
-          <div className="grid gap-3 text-sm md:grid-cols-3">
-            <div className="rounded-lg border bg-white p-3">
-              <div className="text-muted-foreground">Report date</div>
-              <div className="font-medium">{draft.report_date}</div>
-            </div>
-            <div className="rounded-lg border bg-white p-3">
-              <div className="text-muted-foreground">Status</div>
-              <div className="font-medium">{draft.status}</div>
-            </div>
-            <div className="rounded-lg border bg-white p-3">
-              <div className="text-muted-foreground">Sent to</div>
-              <div className="truncate font-medium">{draft.recipients.to.join(", ") || "-"}</div>
-            </div>
-          </div>
-
           <div className="space-y-4">
             {draft.sections.map((section, index) => {
               const isEditing = editingSection?.index === index
               const sectionKey = section.section_key || section.title
+              const group = sectionGroupLabel(section)
+              const showAddPoint = group === "Manual questions" && canEdit &&
+                (index === 0 || sectionGroupLabel(draft.sections[0]) !== "Manual questions")
               const isMarkerTaskSection = MARKER_TASK_SECTIONS.has(sectionKey)
               const isTaskFeedbackSection = sectionKey === TASK_FEEDBACK_SECTION
               return (
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
                     <div className="flex items-center justify-between gap-2 rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                      {sectionGroupLabel(section)}
-                      {sectionGroupLabel(section) === "Manual questions" && canEdit ? <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} /> : null}
+                      {group}
+                      {showAddPoint ? <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} /> : null}
                     </div>
                   ) : null}
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -699,6 +726,7 @@ export default function MorningReportPage() {
                             <span className="mt-2 text-sm font-semibold tabular-nums">{index + 1}.</span>
                             <Input
                               value={editingSection.title}
+                              readOnly={sectionKey === GA_PF_COMMENTS_SECTION}
                               onChange={(event) =>
                                 setEditingSection((current) =>
                                   current ? { ...current, title: event.target.value } : current
@@ -717,7 +745,7 @@ export default function MorningReportPage() {
                           </div>
                         ) : null}
                       </div>
-                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection ? (
+                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection && sectionKey !== GA_REACTIONS_SECTION ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
                             <Pencil className="h-4 w-4" /> Edit
@@ -741,6 +769,8 @@ export default function MorningReportPage() {
                       <ReportSectionPreview
                         body={reportSectionPreviewText(section.body)}
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
+                        discordReplyReport={(section.section_key || section.title) === GA_REPLIES_SECTION
+                          ? { report: "M1", date: draft.report_date } : undefined}
                         emphasizeOwnerSeparator={isMarkerTaskSection}
                         renderLine={isTaskFeedbackSection && canEdit ? (line) => {
                           const plans = draft.task_feedback_rows?.plan ?? []
@@ -780,7 +810,12 @@ export default function MorningReportPage() {
                             </div>
                           )
                         } : undefined}
-                        renderCell={isTaskFeedbackSection && canEdit ? (label, number, header) => {
+                        renderCell={sectionKey === NOTES_SECTION ? (label, number, header, text) => {
+                          const files = draft.note_attachments?.[number]
+                          return label === "NOTES:" && header === "NOTE" && files?.length
+                            ? <ReportNoteCell text={text} files={files} onOpen={setNoteFiles} />
+                            : null
+                        } : isTaskFeedbackSection && canEdit ? (label, number, header) => {
                           if (!/^[1-9]\d*$/.test(number)) return null
                           const row = draft.task_feedback_rows?.[label.trim().replace(/:$/, "").toUpperCase()]?.[Number(number) - 1]
                           if (!row) return null
@@ -802,6 +837,9 @@ export default function MorningReportPage() {
                           )
                         } : undefined}
                       />
+                    )}
+                    {sectionKey === "(GA) DET NGA EMAILS TE REJA" && !isEditing && (
+                      <InfoPxOutlook key={draft.report_date} reportDate={draft.report_date} />
                     )}
                   </div>
                 </React.Fragment>
@@ -866,9 +904,15 @@ export default function MorningReportPage() {
           <DialogHeader>
             <DialogTitle>Email preview</DialogTitle>
           </DialogHeader>
-          {preview ? <iframe title={`${REPORT_LABEL} preview`} srcDoc={preview.html} className="h-[650px] w-full rounded border bg-white" /> : null}
+          {preview ? <iframe
+            title={`${REPORT_LABEL} preview`}
+            srcDoc={preview.html}
+            className="h-[650px] w-full rounded border bg-white"
+            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles)}
+          /> : null}
         </DialogContent>
       </Dialog>
+      <ReportNoteAttachmentDialog files={noteFiles} onClose={() => setNoteFiles(null)} />
 
     </div>
   )

@@ -90,6 +90,55 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- INFO PX në pikën 8 të M1 lexon trupin e mesazheve nga Inbox i Outlook-ut
+  me Microsoft Graph `Mail.Read`. Çdo përdorues i kyçur që hap M1 mund ta
+  shohë tabelën dhe vetëm administratori autorizon mailbox-in. Rifreskimi
+  ruan nga një PX Note për çdo ID mesazhi, me prefiksin `EM INFO PX -`,
+  subjektin, dërguesin dhe tekstin. Kontrollo pikën e shënimeve në M1,
+  M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow dhe Excel të PX Notes,
+  si edhe përjashtimin nga API-ja publike. Tabela e Outlook-ut në pikën 8
+  lexohet veç përmbajtjes së draftit.
+
+- Renditja e pikave në M1 Start of Day përdoret edhe nga preview-ja, teksti
+  dhe emaili me bashkëngjitjet Word/PNG, në dërgimin manual dhe automatik.
+  Pyetja manuale për komentet në PrimeFlow qëndron mes reagimeve të GA dhe
+  Notes. Kontrollo ruajtjen e përgjigjes kur rigjenerohet raporti i së njëjtës
+  datë dhe renditjen e pyetjeve të shtuara nga M1 ose nga Common View.
+
+- Pika «DET NGA EMAILS TE REJA» në M1 Start of Day ka edhe një pilot lokal për leximin e subjektit,
+  dërguesit, orës dhe përmbajtjes
+  nga etiketa `PrimeFlow-M1-Test` në Gmail. Tabela e pilotit hyn në ekranin
+  M1, preview, dërgimin manual dhe automatik, tekstin dhe bashkëngjitjet e M1.
+  Tabela rendit DËRGUESI, PËRMBAJTJA dhe ORA dhe përdor gjerësi të kufizuar
+  për titullin dhe dërguesin në ekran dhe në formatet e raportit.
+  Kontrollo gjenerimin, rifreskimin pa dublime dhe ruajtjen e historikut të
+  raporteve të dërguara. Ekrani dhe preview i ditës aktuale rifreskojnë Gmail-in
+  edhe pas dërgimit, pa shkruar mbi raportin e ruajtur. Tabela e Gmail nuk
+  krijon detyra të PrimeFlow.
+
+- Importi lokal Gmail në PX Notes përdor etiketën `PrimeFlow-M1-Test` dhe
+  një ID të qëndrueshme për çdo mesazh. Shënimet në pritje shfaqen te pika 9
+  e M1, M2 Post-Break, M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow me
+  filtrat e secilit raport. Eksporti Excel i PX Notes përfshin shënimet Gmail.
+  Trupi i emailit lexohet me OAuth `gmail.readonly` dhe ruhet si tekst në
+  vetë shënimin. Kontrollo tekstin në çdo dalje që lexon shënimin, si edhe
+  titullin dhe përshkrimin e parambushur kur shënimi kthehet në detyrë.
+  Kontrollo shënimin si të diskutuar, kthimin në detyrë dhe rifreskimin pa
+  dublime. Para aktivizimit në një databazë të përbashkët, verifiko që çdo
+  version aktiv i endpoint-it publik i përjashton shënimet Gmail.
+
+- Bashkëngjitjet e PX Notes shfaqen në rreshtat përkatës te M1 Start of Day,
+  M2 Post-Break, 1H SHTYPI Tomorrow dhe 1H Reports, edhe me filtrin Vetëm Notes.
+  Kontrollo edhe pamjen paraprake në M1/M2. Hapja dhe shkarkimi përdorin API-në
+  e autentikuar të PX Notes. Ngarkimet e reja ruajnë përmbajtjen dhe metadata-n
+  në të njëjtin transaksion të databazës, që dy backend-e me disqe të veçanta
+  të mund të hapin të njëjtin skedar. Kopja në disk mbetet për kompatibilitet
+  dhe për skedarët e vjetër. Kontrollo preview, download dhe fshirjen e
+  bashkëngjitjes pas migrimit `0199_ga_note_attachment_contents`.
+  Draftet e M1/M2 dhe snapshot-et e reja të 1H SHTYPI
+  Tomorrow mbajnë ID-në e Note-s. Raportet e vjetra përputhen me tekstin, inicialet
+  dhe orën kur ka një burim të vetëm. Emaili, printimi dhe eksportet ruajnë formatin e tyre.
+
 - Përmbledhja e shpejtë përdoret si në Notetaker, ashtu edhe në Discord. Për
   takimet normale numërohen të pesë seksionet së bashku, me kufi 250 fjalë dhe
   me riprovim për shkurtim. Kontrollo përmbledhjet e reja, shënimet e plota në
@@ -158,11 +207,20 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   simbolesh shfaqen në një rresht me përgjegjësit përkatës pas filtrit të
   mungesave. Kur janë disa përgjegjës, kolona KUSH i ndan me `/` dhe faqja M1
   e thekson vijën ndarëse. Kontrollo numrin e rreshtave dhe kolonën KUSH.
-  Të dyja pikat renditen menjëherë pas pikës së përgjigjeve të GA nga Discord.
+  Të dyja pikat renditen pas përgjigjeve dhe reagimeve të GA nga Discord.
   Kontrollo gjenerimin, rifreskimin e draftit, preview, emailin manual dhe
   automatik dhe bashkëngjitjet Word/PNG. Titulli nga TAK BORD/GA ose nga një
   pyetje manuale e ruajtur nuk shtohet për herë të dytë në M1. Common View,
   M1 PIKAT PER RAP, M2 dhe M3 përdorin rrjedhat e tyre.
+
+- M1 dhe M2: **(GA) A KA REACTION NGA GA TEK DETYRAT NGA STAFI PER GA?** vjen pas komenteve të GA dhe
+  përdor të njëjtin kanal Discord, të njëjtin interval dhe të njëjtën kohë
+  gjenerimi si komentet e raportit përkatës. Boti ruan kohën kur merr
+  reagimin e GA ndaj një mesazhi nga stafi me lidhje aktive Discord.
+  Kontrollo reagimet ndaj mesazheve ekzistuese, kufirin e së premtes për M1
+  të së hënës, kufirin 08:00 për M2, preview, emailin dhe Word/PNG.
+  Reagimet historike pa orë të regjistruar nuk mund të futen në interval.
+  M3 dhe sinkronizimi i reagimeve për përmendjet e GA kanë rrjedha të veçanta.
 
 - M1: **GA/HV/DV TASKS** lexon përgjigjet e Discord-it nga
   `discord_m3_questions` me llojin `tomorrow_task`, sipas ID-së së detyrës,
@@ -207,14 +265,27 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 - M1 dhe M2: pyetja **A ka reply nga GA tek detyrat nga stafi për GA?** përdor
   evidencën ditore `discord_ga_reply_snapshots` nga kanali Discord
   `1572160944358953042`, përmes `discord_ga_replies.py` në bot dhe shërbimit
-  përkatës të API-së. M1 përfshin mesazhet e GA nga 16:30 e ditës së kaluar;
-  M2 nga 08:00 e datës së raportit. Kufiri i fundit është momenti i gjenerimit,
+  përkatës të API-së. M1 nis nga 16:30 e ditës së kaluar. Të hënën nis nga
+  e premtja në 16:30 dhe përfshin fundjavën. M2 nis nga 08:00 e datës së
+  raportit. Kufiri i fundit është momenti i gjenerimit,
   sipas orës së raportit. Preview dhe dërgimi manual përdorin tabelën e ruajtur.
-  Evidenca prej 30 ditësh jep edhe kontekstin e mesazhit origjinal. Tabela shfaq
-  tekstin e GA, inicialet e autorit dhe fjalinë e parë të mesazhit të cilit iu përgjigj,
-  pa URL, në tabelë me nga një rresht për mesazh. Komentet e pavarura brenda
-  intervalit plotësojnë vetëm kolonën e përgjigjes. Kur burimi konfirmon se
-  s’ka Reply, tabela shfaq `Asnjë reply`. Kontrollo
+  Një tabelë e ruajtur bosh të hënën me rregullin e vjetër rilexohet me orën e
+  gjenerimit fillestar, edhe kur raporti është dërguar.
+  Evidenca prej 30 ditësh jep edhe kontekstin e mesazhit origjinal. Çdo rresht
+  shfaq tekstin e GA, inicialet e autorit dhe fjalinë e parë të mesazhit të cilit
+  iu përgjigj. URL-të hiqen nga teksti i komenteve. Komentet e pavarura brenda
+  intervalit plotësojnë kolonën e përgjigjes. M1/M2 shfaqin datën dhe orën e
+  postimit sipas zonës së raportit. Qeliza SKEDARËT lexon skedarët e mesazhit
+  në Discord kur hapet nga faqja. Miniatura e hap fotografinë brenda raportit.
+  Backend-i që shërben faqen kërkon `DISCORD_BOT_TOKEN` dhe qasje në kanalin
+  e mesazhit. Kur token-i mungon, faqja e tregon dhe ofron lidhjen te Discord. Burimi ruan
+  numrin e skedarëve dhe identifikuesit e mesazhit, ndërsa URL-të e përkohshme të
+  skedarëve merren me kërkesë. Preview dhe emaili HTML lidhin mesazhin në
+  Discord dhe Word/PNG shfaqin numrin e skedarëve. Raportet e ruajtura
+  plotësohen nga evidenca e datës kur rreshti përputhet në mënyrë unike.
+  Kur burimi konfirmon se s’ka mesazhe të GA-së në interval, tabela shfaq
+  `Asnjë reply`. Raportet me komente, përgjigje ose skedarë të GA-së e heqin
+  atë rresht edhe kur janë ruajtur më herët. Kontrollo
   gjenerimin, grupin Auto-filled në M1 dhe M2,
   rifreskimin, preview, emailin manual/automatik dhe Word/PNG/Text të secilit
   raport. Dështimet/lejet e pamjaftueshme, identiteti GA i revokuar, kufijtë e
@@ -303,6 +374,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   sotme për një raport të një periudhe tjetër; personi përjashtohet nga
   përmbledhja e periudhës kur është i padisponueshëm në të gjitha ato ditë.
   Pikat dhe tabelat e ruajtura filtrohen edhe gjatë leximit/preview/email/eksportit.
+  Tabela PV në M1 tregon pushimet e ditës së raportit dhe tabela PV në M3
+  pushimet e ditës pasuese të punës. Këto dy tabela ruajnë edhe personat me
+  pushim tërëditor. Pika e parë Auto-filled në M1 rendit Vonesa, Mungesa dhe
+  PV, pastaj shënimin manual për planin. Draftet e vjetra zhvendosin vetëm
+  tabelën PV nga pika e festave dhe takimeve. Për raportet e sotme të ruajtura para korrigjimit, tabela
+  PV rindërtohet nga Common View gjatë hapjes dhe preview-t. Kontrollo edhe
+  emailin dhe bashkëngjitjet Word/PNG të gjeneruara nga M1 dhe M3.
   Snapshot-et aktuale të SHTYPI kanë `attendance_filter_version=2`; kopjet e
   vjetra aktualizohen para mbylljes. Arkivat e ngrira në 16:00 dhe skedarët e
   dërguar më parë mbeten dokumente historike dhe nuk rishkruhen me të dhëna të reja.

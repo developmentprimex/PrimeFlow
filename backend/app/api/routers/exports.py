@@ -7220,10 +7220,13 @@ async def export_ga_notes_xlsx(
     from datetime import timedelta
     from app.api.routers.plan_notes import list_plan_notes
     from app.models.enums import GaNoteStatus
+    from app.services.gmail_px_notes import sync_gmail_px_notes
     
     # Build query
     closed_cutoff = datetime.utcnow() - timedelta(days=30)
 
+    if project_id is None and department_id is None:
+        await sync_gmail_px_notes()
     stmt = select(GaNote).order_by(GaNote.created_at.desc())
 
     # Include all open notes; include closed notes only if recently closed

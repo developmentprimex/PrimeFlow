@@ -215,6 +215,10 @@ jobs:
           MS_CLIENT_ID: ${{ vars.MS_CLIENT_ID || secrets.MS_CLIENT_ID }}
           MS_TENANT_ID: ${{ vars.MS_TENANT_ID || secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          MS_MAIL_CLIENT_ID: ${{ vars.MS_MAIL_CLIENT_ID }}
+          MS_MAIL_TENANT_ID: ${{ vars.MS_MAIL_TENANT_ID }}
+          MS_MAIL_CLIENT_SECRET: ${{ secrets.MS_MAIL_CLIENT_SECRET }}
+          MS_MAIL_SIGNING_KEY: ${{ secrets.MS_MAIL_SIGNING_KEY }}
           GA_PERSONAL_DISCORD_BRIDGE_SECRET: ${{ secrets.GA_PERSONAL_DISCORD_BRIDGE_SECRET }}
           MCP_ASSISTANT_ENABLED: ${{ vars.MCP_ASSISTANT_ENABLED || 'false' }}
           MCP_ASSISTANT_ALLOWED_EMAILS: ${{ vars.MCP_ASSISTANT_ALLOWED_EMAILS }}
@@ -254,6 +258,9 @@ jobs:
           echo MS_CLIENT_SECRET=%MS_CLIENT_SECRET% >> backend\.env
           echo MS_REDIRECT_URI=https://api-flow.primexeu.com/api/microsoft/callback >> backend\.env
           echo MS_ORGANIZER_EMAIL=info@primexeu.com >> backend\.env
+          REM Pass optional mail settings by environment so secrets are not interpolated into cmd.
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "import json,os; from pathlib import Path; names=('MS_MAIL_CLIENT_ID','MS_MAIL_TENANT_ID','MS_MAIL_CLIENT_SECRET','MS_MAIL_SIGNING_KEY'); settings={name:os.environ.get(name,'') for name in names}; settings['MS_MAIL_REDIRECT_URI']='https://api-flow.primexeu.com/api/microsoft-mail/callback'; Path('backend/.env').open('a',encoding='utf-8').writelines(f'{name}={json.dumps(value)}\n' for name,value in settings.items() if value)"
+          if errorlevel 1 exit /b 1
           echo MS_CALENDAR_SYNC_PAST_DAYS=0 >> backend\.env
           echo MS_CALENDAR_SYNC_FUTURE_DAYS=14 >> backend\.env
           echo DEVELOPMENT_CLIENTS_PATH=\\192.168.10.8\Files\10_ZHVILLIM\05_CLIENTS >> backend\.env

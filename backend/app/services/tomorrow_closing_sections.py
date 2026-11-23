@@ -14,7 +14,7 @@ from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.models.department import Department
 from app.models.project import Project
 from app.models.task import Task
-from app.services.after_break_report import _blue_note_rows
+from app.services.after_break_report import BLUE_NOTE_COLUMNS, load_blue_notes
 from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
 from app.services.meetings_report import (
     _all_participant_user_ids,
@@ -44,6 +44,7 @@ class ClosingTableRow:
     status: str = ""
     is_deadline: bool = False
     is_eight_am: bool = False
+    note_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -259,7 +260,7 @@ async def build_tomorrow_closing_sections(
             result.append(row)
         return result
 
-    note_rows = [ClosingTableRow(values=row) for row in await _blue_note_rows(db)]
+    note_rows = [ClosingTableRow(values=values, note_id=note_id) for note_id, values in await load_blue_notes(db)]
 
     sections = [
         ClosingSection(
@@ -312,7 +313,7 @@ async def build_tomorrow_closing_sections(
             tables=[
                 ClosingTable(
                     label="NOTES",
-                    columns=["NR", "DISK", "NOTE", "FROM", "TIME"],
+                    columns=[column for column, _ in BLUE_NOTE_COLUMNS],
                     rows=note_rows,
                     tone="notes",
                 )

@@ -12,16 +12,16 @@ from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.services.morning_report import (
     MANUAL_SECTION_TITLES,
-    SECTION_TITLES,
     TASK_FEEDBACK_OVERRIDES,
     build_morning_report_sections,
     is_generated_subject,
+    preserve_morning_plan_note,
     render_html,
     render_plain_text,
     send_morning_report,
     subject_for,
 )
-from app.services.report_section_merge import preserve_keyed_line, preserve_manual_sections
+from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 
 logger = logging.getLogger(__name__)
@@ -87,24 +87,7 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
         existing_sections = row.sections if row is not None else None
         if row is not None:
             sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
-            existing_by_title = {
-                str(section.get("title") or ""): str(section.get("body") or "")
-                for section in (row.sections or [])
-            }
-            attendance_title = SECTION_TITLES[2]
-            sections = [
-                {
-                    **section,
-                    "body": preserve_keyed_line(
-                        section["body"],
-                        existing_by_title.get(section["title"]),
-                        "NDRYSHON PLANI",
-                    )
-                    if section["title"] == attendance_title
-                    else section["body"],
-                }
-                for section in sections
-            ]
+            sections = preserve_morning_plan_note(sections, row.sections)
         from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
 
         sections = await merge_common_view_manual_sections(

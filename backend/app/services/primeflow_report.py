@@ -152,6 +152,7 @@ class ReportUndiscussedNote(BaseModel):
     content: str
     author: str = "-"
     created_at: datetime | None = None
+    note_id: str | None = Field(default=None, exclude=True)
 
 
 def _board_reminder_questions(report_day: date | None = None) -> list[ReportReminderQuestion]:

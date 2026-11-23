@@ -6,6 +6,7 @@ import { Plus, Save, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { DiscordReplyFiles, type DiscordReplyReport } from "@/components/discord-reply-files"
 
 type EditorTableBlock = { headerIndex: number; rowIndexes: number[]; endIndex: number }
 
@@ -113,6 +114,7 @@ function compactWidthForHeader(header: string) {
   if (value === "NR") return "48px"
   if (value === "WHO" || value === "DEP" || value === "FROM" || value === "TO" || value === "PER") return "64px"
   if (value === "PRJK") return "fit-content(120px)"
+  if (value === "DERGUESI") return "minmax(100px, 180px)"
   if (value === "DISK") return "40px"
   if (value === "TIME") return "76px"
   if (value === "DATA" || value === "DATE") return "96px"
@@ -129,7 +131,10 @@ function compactWidthForHeader(header: string) {
 }
 
 function tableGridTemplate(cells: string[]) {
-  return cells.map(compactWidthForHeader).join(" ")
+  const hasGmailSender = cells.some((header) => normalizeHeader(header) === "DERGUESI")
+  return cells.map((header) => (
+    hasGmailSender && normalizeHeader(header) === "TITLE" ? "180px" : compactWidthForHeader(header)
+  )).join(" ")
 }
 
 function isCompactMetricTable(headers: string[]) {
@@ -163,6 +168,8 @@ function isNarrowTableHeader(header: string) {
     header === "T/Y/O" ||
     header === "VAZHDON?" ||
     header === "DATA" ||
+    header === "DATA / ORA" ||
+    header === "SKEDARËT" ||
     header === "DATE" ||
     header === "TIME"
   )
@@ -574,6 +581,7 @@ export function ReportSectionPreview({
   projectColumnWidth,
   largerTableText = false,
   emphasizeOwnerSeparator = false,
+  discordReplyReport,
   renderCell,
   renderLine,
 }: {
@@ -583,7 +591,8 @@ export function ReportSectionPreview({
   projectColumnWidth?: string
   largerTableText?: boolean
   emphasizeOwnerSeparator?: boolean
-  renderCell?: (label: string, rowNumber: string, header: string) => React.ReactNode
+  discordReplyReport?: DiscordReplyReport
+  renderCell?: (label: string, rowNumber: string, header: string, text: string) => React.ReactNode
   renderLine?: (text: string) => React.ReactNode
 }) {
   const [createdWeekFilter, setCreatedWeekFilter] = React.useState<"all" | "this" | "last">("all")
@@ -777,6 +786,7 @@ export function ReportSectionPreview({
       const name = normalizeHeader(header)
       return name === "TITLE" || name === "NOTE" || name === "PYETJA" || name === "PËRGJIGJJA E GA"
     })
+    const hasGmailSender = headers.some((header) => normalizeHeader(header) === "DERGUESI")
     return (
       <div
         key={key}
@@ -815,7 +825,7 @@ export function ReportSectionPreview({
                               : "px-2 text-left"
                           } ${narrow ? "w-[1%] whitespace-nowrap" : ""} ${
                             header === "NR" ? "w-8" : ""
-                          } ${header === "WHO" || header === "DEP" ? "w-10" : ""}`}
+                          } ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${header === "DERGUESI" || (hasGmailSender && header === "TITLE") ? "w-[180px]" : ""}`}
                         >
                           {header === "ADDED" && canFilterWfeAge ? (
                             <label className="flex flex-col gap-1 text-left">
@@ -885,7 +895,7 @@ export function ReportSectionPreview({
                           }
                         : undefined
                       const displayedCell = previewTableCell(cell, header)
-                      const customCell = renderCell?.(row.label, visible.cells[0]?.trim() ?? "", header)
+                      const customCell = renderCell?.(row.label, visible.cells[0]?.trim() ?? "", header, displayedCell)
                       const stackedDate = displayedCell.includes("\n")
                       const meetingFrame = highlightedMeeting
                         ? `border-y-[3px] border-y-blue-600 ${cellIndex === 0 ? "border-l-[3px] border-l-blue-600" : ""} ${cellIndex === visible.cells.length - 1 ? "border-r-[3px] border-r-blue-600" : ""}`
@@ -911,7 +921,7 @@ export function ReportSectionPreview({
                               : narrow
                                 ? "w-[1%] whitespace-nowrap"
                                 : "whitespace-pre-wrap break-words"
-                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${meetingFrame} ${eightAmFrame} ${
+                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${header === "DERGUESI" || (hasGmailSender && header === "TITLE") ? "max-w-[180px] [overflow-wrap:anywhere]" : ""} ${meetingFrame} ${eightAmFrame} ${
                             highlightedMeeting && header === "TITLE" ? "text-blue-700 font-semibold" : ""
                           } ${amPmDivider ? "border-t-[3px] border-t-slate-700" : ""}`}
                         >
@@ -938,7 +948,9 @@ export function ReportSectionPreview({
                               </React.Fragment>
                             ))
                           ) : (
-                            renderPreviewTableCell(displayedCell, header)
+                            header === "SKEDARËT" && discordReplyReport
+                              ? <DiscordReplyFiles key={`${discordReplyReport.date}:${displayedCell}`} value={displayedCell} report={discordReplyReport} />
+                              : renderPreviewTableCell(displayedCell, header)
                           ))}
                         </td>
                       )

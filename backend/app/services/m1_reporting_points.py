@@ -15,6 +15,7 @@ from app.models.common_entry import CommonEntry
 from app.models.department import Department
 from app.models.enums import CommonCategory, GaNoteStatus
 from app.models.ga_note import GaNote
+from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN, sync_gmail_px_notes
 from app.models.plan_note import PlanNote
 from app.models.m1_reporting_points import M1ReportingPointsReport
 from app.models.task import Task
@@ -130,6 +131,8 @@ def select_sections(entries, ga_notes, _plan_notes, tasks, day: date, *, now: da
     for note in ga_notes:
         if (note_start <= _local(note.created_at) <= cutoff
                 and not getattr(note, "is_converted_to_task", False)
+                and not (getattr(note, "knowledge_type", None) == GMAIL_NOTE_ORIGIN
+                         and getattr(note, "is_discussed", False))
                 and not is_mira_note(note)
                 and getattr(note, "status", GaNoteStatus.OPEN) != GaNoteStatus.CLOSED):
             author = users.get(getattr(note, "created_by", None))
@@ -169,7 +172,8 @@ async def excluded_note_ids(db: AsyncSession, row: M1ReportingPointsReport) -> s
         return set()
     result = await db.execute(select(GaNote.id).where(
         GaNote.id.in_(ids), or_(GaNote.is_converted_to_task.is_(True), GaNote.status == GaNoteStatus.CLOSED,
-                               mira_note_expression())))
+                               mira_note_expression(),
+                               (GaNote.knowledge_type == GMAIL_NOTE_ORIGIN) & GaNote.is_discussed.is_(True))))
     return {str(note_id) for note_id in result.scalars().all()}
 
 
@@ -294,6 +298,7 @@ async def build_ga_task_data(db: AsyncSession, day: date, cutoff: datetime) -> d
 
 
 async def build_data(db: AsyncSession, day: date, now: datetime | None = None) -> dict:
+    await sync_gmail_px_notes()
     note_start, task_start, cutoff = reporting_windows(day, now)
     week_start = day - timedelta(days=day.weekday())
     week_end = week_start + timedelta(days=6)

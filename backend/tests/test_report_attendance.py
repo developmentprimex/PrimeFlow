@@ -2,7 +2,7 @@ import asyncio
 import re
 import uuid
 from copy import deepcopy
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -143,6 +143,78 @@ def test_saved_m1_m2_m3_ascii_tables_filter_by_the_section_date(monkeypatch, own
     assert "RA" not in filtered[-1]["body"]
     assert "Absent solo" in filtered[-1]["body"]
     assert all(section["body"] == table for section in original)
+
+
+def test_m1_and_m3_keep_leave_rosters_while_filtering_the_task_tables():
+    from app.services import meetings_report, morning_report
+
+    leave = entry(CommonCategory.annual_leave, "Date range: 2026-11-09 to 2026-11-13 (Full day)")
+    db = AttendanceDb([leave])
+    roster = meetings_report._leave_lines(
+        [(leave, DAY, date(2026, 11, 13), True, None, None, None, False)],
+        {ABSENT: "Era Fana"}, {ABSENT: "DEV"},
+    )
+    work = _ascii_table("TASKS", [("NR", 2), ("KUSH", 8), ("TITULLI", 20)], [
+        ["1", "EF", "Absent solo"], ["2", "EF RA", "Shared work"],
+    ])
+    sections = [
+        {"title": morning_report.SECTION_TITLES[4], "body": "\n".join(["PV", *roster, "", *work])},
+        {"title": meetings_report.SECTION_TITLES[4], "body": "\n".join(roster)},
+        {"title": "N- DET TE REJA", "body": "\n".join(work)},
+    ]
+    result = asyncio.run(service.filter_report_sections(db, sections, DAY, tomorrow=date(2026, 11, 10)))
+    for section in result[:2]:
+        assert "\n".join(roster) in section["body"]
+        assert "13.11.2026" in section["body"]
+    for section in [result[0], result[2]]:
+        assert "Absent solo" not in section["body"]
+        assert "Shared work" in section["body"]
+    assert "EF" not in result[2]["body"]
+
+
+@pytest.mark.parametrize("m3", [False, True])
+def test_current_legacy_report_recovers_only_its_leave_table(monkeypatch, m3):
+    from app.services import meetings_report, morning_report
+
+    current = datetime.now(meetings_report.report_timezone()).date()
+    leave_day = current + timedelta(days=1) if m3 else current
+    leave = entry(CommonCategory.annual_leave, f"Date: {leave_day.isoformat()} (Full day)")
+    department_id = uuid.uuid4()
+
+    class LeaveDb(AttendanceDb):
+        async def execute(self, statement):
+            entity = statement.column_descriptions[0]["entity"]
+            if entity is Department:
+                return Result([(department_id, "DEV")])
+            if entity is User:
+                return Result([SimpleNamespace(**vars(USERS[0]), department_id=department_id)])
+            return await super().execute(statement)
+
+    db = LeaveDb([leave])
+    monkeypatch.setattr(meetings_report, "weekly_planner_user_sort_keys", AsyncMock(return_value={}))
+    empty_table = "\n".join(meetings_report._leave_lines([], {})[:3])
+    report_title = meetings_report.SECTION_TITLES[4] if m3 else morning_report.SECTION_TITLES[4]
+    other_tables = "" if m3 else "\n\nFESTA EXTERNE: 0\n\nTAKIMET EXTERNE: 0"
+    original = [{"title": report_title, "body": ("PV\n" if not m3 else "") + empty_table + other_tables}]
+    refreshed = asyncio.run(meetings_report.refresh_saved_leave_table(
+        db, original, section_title=report_title, report_day=current, leave_day=leave_day, snapshot={},
+    ))
+    assert re.search(r"\|\s*EF\s*\|\s*DEV\s*\|", refreshed[0]["body"])
+    assert leave_day.strftime("%d.%m.%Y") in refreshed[0]["body"]
+    assert refreshed[0]["body"].endswith(other_tables)
+    assert "EF" not in original[0]["body"]
+    if m3:
+        preview = meetings_report.render_html("M3", current, leave_day, refreshed)
+    else:
+        preview = morning_report.render_html("M1", current, refreshed)
+    assert re.search(r">EF</td>", preview)
+    assert "DEV" in preview
+    assert leave_day.strftime("%d.%m.%Y") in preview
+
+    historical = asyncio.run(meetings_report.refresh_saved_leave_table(
+        db, original, section_title=report_title, report_day=current - timedelta(days=1), leave_day=leave_day, snapshot={},
+    ))
+    assert historical == original
 
 
 @pytest.mark.parametrize("code", ["M1", "M2", "M3"])

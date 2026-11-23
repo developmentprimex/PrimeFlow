@@ -24,6 +24,7 @@ from app.models.enums import UserRole
 from app.services.audit import add_audit_log
 from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import ReportDocument, SLOTS, notes_only_document, render_docx, render_html, render_plain_text, render_png
+from app.services.report_note_attachments import note_attachments_by_row
 from app.services.primeflow_report_delivery import (
     configured_recipients,
     deliver_report,
@@ -313,6 +314,10 @@ async def preview(
         "document": document.model_dump(mode="json"), "html": email_html,
         "plain_text": render_plain_text(document), "task_count": document.task_count,
         "notes_html": render_html(notes_document), "note_count": len(document.undiscussed_notes),
+        "note_attachments": await note_attachments_by_row(db, {
+            str(index): note.note_id
+            for index, note in enumerate(document.undiscussed_notes, 1) if note.note_id is not None
+        }),
         "warning": "No tasks found" if document.task_count == 0 and not payload.notes_only else None,
     }
 

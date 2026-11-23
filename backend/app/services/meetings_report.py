@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.report_attendance import filter_task_context, filter_report_sections
+from app.services.report_attendance import LEAVE_TABLE_COLUMNS, filter_task_context, filter_report_sections
 from app.services.ga_identity import is_ga_username
 
 import html
@@ -1690,6 +1690,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     snapshot = {
         "report_day": report_day.isoformat(),
         "tomorrow": tomorrow.isoformat(),
+        "leave_table_preserved": True,
         "tomorrow_symbols_html": symbols_html,
         "counts": {section["title"]: section["body"].count("\n- ") + (1 if section["body"].startswith("- ") else 0) for section in sections},
     }
@@ -2691,6 +2692,56 @@ def _leave_lines(
     return lines
 
 
+async def refresh_saved_leave_table(
+    db: AsyncSession, sections: list[dict], *, section_title: str, report_day: date,
+    leave_day: date, snapshot: dict | None,
+) -> list[dict]:
+    """Recover the PV table of a current draft saved before task filtering exempted it."""
+    if (snapshot or {}).get("leave_table_preserved") or report_day != datetime.now(report_timezone()).date():
+        return sections
+    for section_index, section in enumerate(sections):
+        if (section.get("section_key") or section.get("title")) != section_title:
+            continue
+        lines = (section.get("body") or "").splitlines()
+        for start, line in enumerate(lines):
+            if not line.lstrip().startswith("+-"):
+                continue
+            block = _ascii_table_block(lines, start)
+            if not block:
+                continue
+            table_lines, end = block
+            header_line = next(row for row in table_lines if row.startswith("|"))
+            if tuple(_parse_ascii_cells(header_line)) != LEAVE_TABLE_COLUMNS:
+                continue
+
+            entries = (await db.execute(
+                select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave)
+            )).scalars().all()
+            active = []
+            for entry in entries:
+                leave = parse_common_view_annual_leave(entry)
+                if leave[0] <= leave_day <= leave[1]:
+                    active.append((entry, *leave))
+            user_ids = {
+                entry.assigned_to_user_id or entry.created_by_user_id for entry, *_ in active
+            } - {None}
+            users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all() if user_ids else []
+            names = {user.id: user.full_name or user.username or user.email for user in users}
+            codes = dict((await db.execute(select(Department.id, Department.code))).all()) if users else {}
+            departments = {
+                user.id: (
+                    _m3_department_code_label(user.department_id, codes)
+                    if section_title == SECTION_TITLES[4] else codes.get(user.department_id, "-") or "-"
+                )
+                for user in users
+            }
+            order = await weekly_planner_user_sort_keys(db, user_ids, codes)
+            body = "\n".join([*lines[:start], *_leave_lines(active, names, departments, order), *lines[end:]])
+            return [*sections[:section_index], {**section, "body": body}, *sections[section_index + 1:]]
+        break
+    return sections
+
+
 def _normalize_section(lines: list[str]) -> str:
     return "\n".join(lines).replace("\n\n\n", "\n\n").strip()
 
@@ -2761,6 +2812,7 @@ h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 .report-table{{width:100%;border-collapse:collapse;table-layout:auto;font:12px/1.3 Arial,sans-serif}}
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700;border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table td{{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
+.report-table .gmail-sender{{max-width:140px;overflow-wrap:anywhere;word-wrap:break-word}}
 .report-table .n{{white-space:nowrap}}.report-table .prjk{{max-width:110px;white-space:normal;overflow-wrap:break-word;word-break:normal}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
 @media only screen and (max-width:600px){{
 body{{padding:8px!important}}
@@ -3013,6 +3065,9 @@ def _render_table_cell_html(
     *,
     strong_start_due_divider: bool = False,
 ) -> str:
+    if header == "SKEDARËT" and (files := _discord_files_cell(value)):
+        label, url = files
+        return f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noreferrer">{label} në Discord</a>'
     if _normalized_table_header(header) == "TITLE":
         marked = _split_leading_task_marker(value)
         if marked:
@@ -3032,6 +3087,13 @@ def _render_table_cell_html(
         '<div style="padding:2px 5px 4px;">'
         f"{html.escape(due_line)}</div>"
     )
+
+
+def _discord_files_cell(value: str) -> tuple[str, str] | None:
+    match = re.fullmatch(r"(\d+)\s+(https://discord\.com/channels/\d+/\d+/\d+)", value.strip())
+    if match:
+        return ("1 skedar" if match[1] == "1" else f"{match[1]} skedarë", match[2])
+    return None
 
 
 def _is_overdue_tyo_value(value: str) -> bool:
@@ -3298,9 +3360,11 @@ def _email_column_width_attr(width: str) -> str:
 
 def _email_column_class_name(header_cell: str) -> str:
     name = _normalized_table_header(header_cell)
+    if name == "DERGUESI":
+        return "gmail-sender"
     if name == "PRJK":
         return "prjk"
-    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "T/Y/O", "FROM", "TO", "DATA", "DATE", "DEP", "TYPE", "AM/PM", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
+    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "T/Y/O", "FROM", "TO", "DATA", "DATE", "DATA / ORA", "DEP", "TYPE", "AM/PM", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
         return "n"
     return ""
 
@@ -3316,6 +3380,10 @@ def _email_column_widths(
     """Give utility columns only the space they need; reserve the rest for title/note text."""
     if not header:
         return []
+    normalized = [_normalized_table_header(cell) for cell in header]
+    if {"DERGUESI", "PËRMBAJTJA"}.issubset(normalized):
+        widths = {"NR": "24", "TITLE": "125", "DERGUESI": "140", "ORA": "46"}
+        return [widths.get(name, "auto") for name in normalized]
     # Keep utility columns content-sized; TITLE/NOTE take the remaining width.
     fixed_by_name = {
         "NR": "24",
@@ -3333,6 +3401,8 @@ def _email_column_widths(
         "KOHA": "46",
         "DATA": "62",
         "DATE": "62",
+        "DATA / ORA": "112",
+        "SKEDARËT": "80",
         "DISK": "42",
         "LATE": "54",
         "T/Y/O": "42",
@@ -3345,9 +3415,8 @@ def _email_column_widths(
     }
     content_names = {
         "TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION", "PYETJA",
-        "REASON", "COMMENT", "KOMENT",
+        "REASON", "COMMENT", "KOMENT", "MESAZHI ORIGJINAL", "PËRGJIGJJA E GA",
     }
-    normalized = [_normalized_table_header(cell) for cell in header]
     widths = ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
     if body_rows:
         for index, name in enumerate(normalized):
@@ -3640,6 +3709,7 @@ def _section_report_blocks(
     body: str,
     *,
     preserve_empty_tables: bool = False,
+    compact_attachment_links: bool = False,
 ) -> list[dict[str, Any]]:
     """Parse a section once so native attachments keep the email's structure."""
     blocks: list[dict[str, Any]] = []
@@ -3686,6 +3756,11 @@ def _section_report_blocks(
             tone = current_table_tone()
             caption = pop_current_table_label()
             header, rows, row_tones, highlights = _section_report_table_model(table_lines, tone)
+            if compact_attachment_links and "SKEDARËT" in header:
+                index = header.index("SKEDARËT")
+                for row in rows:
+                    if files := _discord_files_cell(row[index]):
+                        row[index] = files[0]
             flush_text()
             if header:
                 blocks.append({"kind": "table", "caption": caption, "header": header, "rows": rows, "tone": tone, "row_tones": row_tones, "highlights": highlights})
@@ -4102,7 +4177,7 @@ def render_section_report_docx(
         heading_run = heading.add_run(f"{index}. {report_section.get('title') or 'Untitled'}")
         heading_run.font.name, heading_run.font.size, heading_run.bold = "Arial", Pt(10.5), True
         heading_run.font.color.rgb = RGBColor(15, 23, 42)
-        for block in _section_report_blocks(str(report_section.get("body") or "")):
+        for block in _section_report_blocks(str(report_section.get("body") or ""), compact_attachment_links=True):
             add_table(block) if block["kind"] == "table" else add_text(block["lines"])
 
     output = __import__("io").BytesIO()
@@ -4169,6 +4244,7 @@ def render_section_report_png(
             _section_report_blocks(
                 str(report_section.get("body") or ""),
                 preserve_empty_tables=preserve_empty_tables,
+                compact_attachment_links=True,
             )
         )
 

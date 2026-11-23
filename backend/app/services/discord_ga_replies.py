@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import re
+from collections import Counter, defaultdict
 from datetime import datetime, time, timedelta, timezone
+from urllib.parse import urlsplit
 
+import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -12,7 +15,7 @@ from app.config import settings
 from app.models.discord_assistant import DiscordLink
 from app.models.discord_ga_reply_snapshot import DiscordGaReplySnapshot
 from app.models.user import User
-from app.services.primeflow_report import report_timezone
+from app.services.primeflow_report import previous_working_day, report_timezone
 
 NO_REPLY = "Nuk ka përgjigje ose komente nga GA për këtë raport."
 LEGACY_NO_REPLY = "Nuk ka përgjigje të lidhura nga GA."
@@ -22,6 +25,9 @@ STALE_REPLY_NOTE = "Discord i lexuar deri në"
 LEGACY_REPLY_LINK = re.compile(r"^Përgjigjja GA: https://discord\.com/channels/\d+/\d+/(\d+)[ \t]*\r?$", re.M)
 GA_MESSAGES_CAPTION = "Përgjigjet dhe komentet e GA"
 GA_REPLIES_SECTION_TITLE = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
+GA_REPLIES_WINDOW_VERSION = 2
+GA_FILES_HEADER = "SKEDARËT"
+_REPLY_COLUMNS = [("NR", 2), ("PËR KË", 7), ("MESAZHI ORIGJINAL", 40), ("PËRGJIGJJA E GA", 52)]
 
 
 class ChannelMessage(BaseModel):
@@ -33,7 +39,7 @@ class ChannelMessage(BaseModel):
     mentions_ga: bool = False
     reference_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
     thread_root_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
-    # Store filenames/count only; no attachment downloads or signed URLs.
+    # Signed attachment URLs are obtained on demand and never stored.
     attachments: int = Field(default=0, ge=0, le=100)
 
 
@@ -111,7 +117,7 @@ def _linked_reply_ids(evidence):
     return [row["reply_id"] for row in rows if row["reply_id"]]
 
 
-def _ga_message_rows(evidence, reply_ids, *, include_context=True, initials_by_user=None):
+def _ga_message_rows(evidence, reply_ids, *, include_context=True, initials_by_user=None, include_details=False):
     from app.services.meetings_report import _initials
 
     messages = {message["id"]: message for message in evidence["messages"]}
@@ -121,12 +127,13 @@ def _ga_message_rows(evidence, reply_ids, *, include_context=True, initials_by_u
         if not reply or reply["author_id"] != evidence["ga_user_id"]:
             continue
         text = _without_links(reply["content"])
-        if not text:
+        attachments = reply.get("attachments", 0) if include_details else 0
+        if not text and not attachments:
             continue
         author, first_sentence = "", ""
         if include_context:
             text = re.sub(r"<@!?\d+>\s*", "", text).strip()
-            if not text:
+            if not text and not attachments:
                 continue
             original = messages.get(reply.get("reference_id") or reply.get("thread_root_id"))
             if original:
@@ -138,7 +145,13 @@ def _ga_message_rows(evidence, reply_ids, *, include_context=True, initials_by_u
                 first_sentence = re.split(r"(?<=[!?])\s+|(?<!\d\.)(?<=\.)\s+", first_line, maxsplit=1)[0]
                 if len(first_sentence) > 240:
                     first_sentence = first_sentence[:239].rsplit(" ", 1)[0] + "…"
-        rows.append((author, first_sentence, text))
+        if include_details:
+            channel = reply.get("thread_root_id") or evidence["channel_id"]
+            files = f'{attachments} https://discord.com/channels/{evidence["guild_id"]}/{channel}/{reply_id}' if attachments else ""
+            posted = _message_time(reply).astimezone(report_timezone()).strftime("%d.%m.%Y %H:%M")
+            rows.append((author, first_sentence, text, files, posted))
+        else:
+            rows.append((author, first_sentence, text))
     return rows
 
 
@@ -163,15 +176,15 @@ def _previous_context_body(rows):
     return "\n\n".join(texts)
 
 
-def _render_reply_table(values):
+def _render_reply_table(values, *, include_details=False):
     from app.services.after_break_report import _ascii_table
 
-    return "\n".join(_ascii_table(GA_MESSAGES_CAPTION,
-        [("NR", 2), ("PËR KË", 7), ("MESAZHI ORIGJINAL", 40), ("PËRGJIGJJA E GA", 52)], values))
+    columns = [*_REPLY_COLUMNS, (GA_FILES_HEADER, 12), ("DATA / ORA", 16)] if include_details else _REPLY_COLUMNS
+    return "\n".join(_ascii_table(GA_MESSAGES_CAPTION, columns, values))
 
 
-def _empty_reply_table():
-    return _render_reply_table([["-", "", "", EMPTY_REPLY_ROW]])
+def _empty_reply_table(*, include_details=False):
+    return _render_reply_table([["-", "", "", EMPTY_REPLY_ROW, "", ""]], include_details=include_details)
 
 
 def _has_reply(evidence, message_ids):
@@ -184,13 +197,17 @@ def _has_reply(evidence, message_ids):
 
 def _report_window(day, report, cutoff):
     tz = report_timezone()
-    start = datetime.combine(day - timedelta(days=1), time(16, 30), tz) if report == "M1" else datetime.combine(day, time(8), tz)
+    if report == "M1":
+        start_day = previous_working_day(day) if day.weekday() == 0 else day - timedelta(days=1)
+        start = datetime.combine(start_day, time(16, 30), tz)
+    else:
+        start = datetime.combine(day, time(8), tz)
     end_of_day = datetime.combine(day, time.max, tz)
     return start, min(cutoff, end_of_day)
 
 
 def render_summary(evidence, captured_at, now, *, day=None, reply_ids=None, initials_by_user=None, window=None,
-                   allow_verified_stale=False):
+                   allow_verified_stale=False, include_details=False):
     if not evidence or evidence.get("status") == "UNAVAILABLE":
         return UNAVAILABLE
     stale = now - captured_at > timedelta(minutes=5)
@@ -204,14 +221,13 @@ def render_summary(evidence, captured_at, now, *, day=None, reply_ids=None, init
         linked_ids = []
     else:
         message_ids, linked_ids = _included_message_ids(evidence, day or captured_at.astimezone(report_timezone()).date(), reply_ids)
-    rows = _ga_message_rows(evidence, message_ids, initials_by_user=initials_by_user or {})
-    has_reply = bool(linked_ids) or _has_reply(evidence, message_ids)
-    if not rows and (stale or has_reply or evidence["status"] == "PARTIAL"):
-        return UNAVAILABLE
+    rows = _ga_message_rows(evidence, message_ids, initials_by_user=initials_by_user or {}, include_details=include_details)
+    if not rows:
+        if stale or linked_ids or _has_reply(evidence, message_ids) or evidence["status"] == "PARTIAL":
+            return UNAVAILABLE
+        return _empty_reply_table(include_details=include_details)
     values = [[str(index), *(value.replace("|", "¦") for value in row)] for index, row in enumerate(rows, 1)]
-    if not stale and not has_reply and evidence["status"] == "OK":
-        values.append(["-", "", "", EMPTY_REPLY_ROW])
-    table = _render_reply_table(values)
+    table = _render_reply_table(values, include_details=include_details)
     if stale:
         local_capture = captured_at.astimezone(report_timezone())
         return f"{STALE_REPLY_NOTE} {local_capture:%d.%m.%Y %H:%M}.\n\n{table}"
@@ -236,7 +252,7 @@ async def _recipient_initials(db, evidence):
     return {discord_id: _initials(full_name) for discord_id, full_name in links.all() if full_name}
 
 
-def _upgrade_old_reply_table(body, evidence, initials_by_user, day):
+def _upgrade_old_reply_table(body, evidence, initials_by_user):
     from app.services.meetings_report import _initials, _section_report_blocks
 
     by_display_name = {}
@@ -254,10 +270,6 @@ def _upgrade_old_reply_table(body, evidence, initials_by_user, day):
         options = by_display_name.get(author, set())
         initials = next(iter(options)) if len(options) == 1 else _initials(author) if author else ""
         values.append([number, initials, original, reply])
-    if not any(row[1] for row in values) and evidence.get("status") == "OK":
-        message_ids, _ = _included_message_ids(evidence, day, None)
-        if not _has_reply(evidence, message_ids):
-            values.append(["-", "", "", EMPTY_REPLY_ROW])
     return _render_reply_table(values)
 
 
@@ -288,7 +300,103 @@ async def summary_for_day(db, day, *, report=None, generated_at=None):
     reference = window[1] if verified_fallback else now if current else row.captured_at
     return render_summary(row.evidence, row.captured_at, reference,
                           day=day, initials_by_user=await _recipient_initials(db, row.evidence),
-                          window=window, allow_verified_stale=verified_fallback)
+                          window=window, allow_verified_stale=verified_fallback, include_details=verified_fallback)
+
+
+async def attachment_links_for_report(db, day, report, cutoff, message_id):
+    snapshot = await _snapshot_for_day(db, day)
+    evidence = snapshot.evidence if snapshot else {}
+    start, end = _report_window(day, report, cutoff)
+    message = next((item for item in evidence.get("messages", [])
+                    if item["id"] == message_id and item.get("attachments")
+                    and item["author_id"] == evidence["ga_user_id"]
+                    and start <= _message_time(item) <= end), None)
+    if not message:
+        raise HTTPException(404, "Mesazhi me bashkëngjitje nuk gjendet në këtë raport.")
+    if (day == datetime.now(report_timezone()).date()
+            and evidence["ga_user_id"] != await ga_identity(db, guild_id=evidence["guild_id"])):
+        raise HTTPException(404, "Mesazhi nuk përputhet me burimin e raportit.")
+    if not settings.DISCORD_BOT_TOKEN:
+        raise HTTPException(424, {
+            "code": "discord_preview_not_configured",
+            "message": "Ky server nuk ka të konfiguruar botin e Discord për pamjen paraprake.",
+        })
+    channel_id = message.get("thread_root_id") or evidence["channel_id"]
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
+            response = await client.get(
+                f"https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}",
+                headers={"Authorization": f"Bot {settings.DISCORD_BOT_TOKEN}"},
+            )
+            response.raise_for_status()
+            source = response.json()
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(502, "Bashkëngjitjet nuk mund të lexohen nga Discord.") from None
+    if (source.get("id") != message_id or source.get("channel_id") != channel_id
+            or source.get("author", {}).get("id") != message["author_id"]):
+        raise HTTPException(404, "Mesazhi nuk përputhet me burimin e raportit.")
+    files = []
+    for attachment in source.get("attachments", []):
+        url = attachment.get("url", "")
+        asset = urlsplit(url)
+        if (asset.scheme == "https" and asset.netloc in {"cdn.discordapp.com", "media.discordapp.net"}
+                and asset.path.startswith(f"/attachments/{channel_id}/")):
+            content_type = attachment.get("content_type") or ""
+            files.append({"url": url, "filename": attachment["filename"],
+                          "image": content_type in {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}})
+    return files
+
+
+def _saved_reply_table(body):
+    from app.services.meetings_report import _section_report_blocks
+
+    if not body.startswith((f"{GA_MESSAGES_CAPTION}:", STALE_REPLY_NOTE)):
+        return None
+    return next((block for block in _section_report_blocks(body)
+                 if block["kind"] == "table" and block["caption"] == f"{GA_MESSAGES_CAPTION}:"), None)
+
+
+def _without_redundant_empty_reply(section):
+    if (section.get("section_key") or section.get("title")) != GA_REPLIES_SECTION_TITLE:
+        return section
+    body = section.get("body") or ""
+    if EMPTY_REPLY_ROW not in body:
+        return section
+    table = _saved_reply_table(body)
+    if not table or not any(row[0].isdigit() and any(row[1:]) for row in table["rows"]):
+        return section
+    lines = body.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not (stripped.startswith("|") and stripped.endswith("|")):
+            continue
+        cells = [cell.strip() for cell in stripped[1:-1].split("|")]
+        if cells[:4] == ["-", "", "", EMPTY_REPLY_ROW] and not any(cells[4:]):
+            lines[index] = ""
+            if index + 1 < len(lines) and re.fullmatch(r"\+(?:-+\+)+", lines[index + 1].strip()):
+                lines[index + 1] = ""
+    return {**section, "body": "".join(lines).rstrip("\r\n")}
+
+
+def _add_saved_reply_details(table, refreshed):
+    source = _saved_reply_table(refreshed)
+    matches = defaultdict(list)
+    if source and GA_FILES_HEADER in source["header"]:
+        # Old reports omitted messages containing only files. Restore those
+        # too when the saved text still matches the generated table in order.
+        saved_comments = [row[1:4] for row in table["rows"] if (row[0], row[3]) != ("-", EMPTY_REPLY_ROW)]
+        source_comments = [row[1:4] for row in source["rows"] if row[0].isdigit() and row[3]]
+        if saved_comments == source_comments:
+            return refreshed
+        for row in source["rows"]:
+            matches[tuple(row[1:4])].append(row[4:])
+    saved_counts = Counter(tuple(row[1:4]) for row in table["rows"])
+    values = []
+    for row in table["rows"]:
+        key = tuple(row[1:4])
+        details = matches.get(key, [])
+        values.append([*row, *(details[0] if len(details) == saved_counts[key] == 1 else ("", ""))])
+    return _render_reply_table(values, include_details=True)
 
 
 async def refresh_m1_section(db, sections, day, *, refresh_current=True, sent_at=None, generated_snapshot=None):
@@ -298,17 +406,30 @@ async def refresh_m1_section(db, sections, day, *, refresh_current=True, sent_at
 
 async def refresh_ga_reply_section(db, sections, day, *, report=None, refresh_current=True, sent_at=None,
                                    populate_missing=False, generated_snapshot=None):
+    sections = [_without_redundant_empty_reply(section) for section in sections]
     if generated_at := (generated_snapshot or {}).get("ga_replies_generated_at"):
         if report not in {"M1", "M2"}:
             return sections
+        legacy_monday = (
+            report == "M1" and day.weekday() == 0
+            and generated_snapshot.get("ga_replies_window_version", 1) < GA_REPLIES_WINDOW_VERSION
+        )
         result = []
         for section in sections:
             body = section.get("body") or ""
-            if ((section.get("section_key") or section.get("title")) == GA_REPLIES_SECTION_TITLE
-                    and (body == UNAVAILABLE or body.startswith(STALE_REPLY_NOTE))):
-                refreshed = await summary_for_day(db, day, report=report, generated_at=datetime.fromisoformat(generated_at))
-                if refreshed != UNAVAILABLE:
-                    section = {**section, "body": refreshed}
+            if (section.get("section_key") or section.get("title")) == GA_REPLIES_SECTION_TITLE:
+                retry = body == UNAVAILABLE or body.startswith(STALE_REPLY_NOTE)
+                # The old Sunday cutoff could produce a confirmed empty table on Monday.
+                outdated_empty = legacy_monday and body == _empty_reply_table()
+                table = _saved_reply_table(body)
+                old_columns = table and table["header"] == [name for name, _ in _REPLY_COLUMNS]
+                if retry or outdated_empty or old_columns:
+                    refreshed = await summary_for_day(db, day, report=report, generated_at=datetime.fromisoformat(generated_at))
+                    if old_columns and not (outdated_empty or retry):
+                        if refreshed != UNAVAILABLE:
+                            section = {**section, "body": _add_saved_reply_details(table, refreshed)}
+                    elif refreshed != UNAVAILABLE or outdated_empty:
+                        section = {**section, "body": refreshed}
             result.append(section)
         return result
     current = refresh_current and day == datetime.now(report_timezone()).date()
@@ -325,14 +446,20 @@ async def refresh_ga_reply_section(db, sections, day, *, report=None, refresh_cu
             evidence = _evidence_until(snapshot.evidence, sent_at) if snapshot else None
             body = render_summary(evidence, snapshot.captured_at, snapshot.captured_at, day=day,
                                   initials_by_user=await _recipient_initials(db, evidence),
-                                  window=_report_window(day, report, sent_at or snapshot.captured_at) if report else None) if evidence else UNAVAILABLE
+                                  window=_report_window(day, report, sent_at or snapshot.captured_at) if report else None,
+                                  include_details=report in {"M1", "M2"}) if evidence else UNAVAILABLE
         elif body in {NO_REPLY, LEGACY_NO_REPLY}:
             body = _empty_reply_table()
         elif body.startswith(f"{GA_MESSAGES_CAPTION}:") and f"| {'PËR KË':<19} |" in body:
             snapshot = await _snapshot_for_day(db, day)
             evidence = snapshot.evidence if snapshot else {}
             initials = await _recipient_initials(db, evidence) if evidence else {}
-            body = _upgrade_old_reply_table(body, evidence, initials, day)
+            body = _upgrade_old_reply_table(body, evidence, initials)
+        elif (sent_at and report in {"M1", "M2"} and (table := _saved_reply_table(body))
+                and table["header"] == [name for name, _ in _REPLY_COLUMNS]):
+            refreshed = await summary_for_day(db, day, report=report, generated_at=sent_at)
+            if refreshed != UNAVAILABLE:
+                body = _add_saved_reply_details(table, refreshed)
         else:
             legacy = body.startswith(("GA është përgjigjur në ", "KONTROLL I PJESSHËM:")) and "Burimi: #det-nga-stafi-per-ga" in body
             can_upgrade = sent_at and not body.startswith(f"{GA_MESSAGES_CAPTION}:")

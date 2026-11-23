@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
 import { useMarkerComments } from "@/components/marker-comments-context"
+import { installReportNoteControls, ReportNoteAttachmentDialog, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
 import { isReportTaskDone, reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
 import { applyTaskStrikeBadges, taskHasStrikes, reportStrikeTotal, type OneHStrikeSummary } from "@/lib/one-h-strikes"
 
@@ -39,6 +40,7 @@ type Preview = {
   subject: string
   target_date: string
   html: string
+  note_attachments?: ReportNoteAttachments
   snapshot_id: string
   report_date: string
   generated_at: string | null
@@ -239,6 +241,11 @@ export function PrintReportPage({
   const [sending, setSending] = React.useState(false)
   const [generatingAction, setGeneratingAction] = React.useState<"generate" | null>(null)
   const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
+  const [noteFiles, setNoteFiles] = React.useState<ReportNoteAttachment[] | null>(null)
+  const noteAttachments = preview?.note_attachments
+  React.useEffect(() => {
+    if (!today) installReportNoteControls(previewFrameRef.current?.contentDocument, noteAttachments, setNoteFiles)
+  }, [noteAttachments, today])
   const syncPreviewCommentAttention = React.useCallback(() => {
     const frameDocument = previewFrameRef.current?.contentDocument
     if (!frameDocument) return
@@ -1085,11 +1092,13 @@ export function PrintReportPage({
           setupPreviewFilters()
           const document = previewFrameRef.current?.contentDocument
           if (today && document) applyTaskStrikeBadges(document, preview.one_h_strikes)
+          if (!today) installReportNoteControls(document, preview.note_attachments, setNoteFiles)
         }}
         title={`${reportName} generated email`}
         srcDoc={preview.html.replace('<div data-report-intro="true">', '<div data-report-intro="true" hidden>')}
         className={`w-full rounded border bg-white ${embedded ? "h-[620px]" : "h-dvh min-h-dvh"}`}
       />
+      <ReportNoteAttachmentDialog files={noteFiles} onClose={() => setNoteFiles(null)} />
       {previewFilterContainer ? createPortal(
         <>
           <style>{`

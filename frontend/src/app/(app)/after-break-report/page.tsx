@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
+import { installReportNoteControls, ReportNoteAttachmentDialog, ReportNoteCell, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
 import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
@@ -25,6 +26,7 @@ type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
+const NOTES_SECTION = "NOTES TE REJA ( NOT DISSCUSED)"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -39,6 +41,7 @@ type Draft = {
   subject: string
   recipients: Recipients
   sections: Section[]
+  note_attachments?: ReportNoteAttachments
   status: string
   sent_at?: string | null
   gmail_message_id?: string | null
@@ -47,8 +50,9 @@ type Draft = {
 }
 
 const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
+const GA_REACTIONS_SECTION = "A KA REACTION TE GRUPI?"
 const PCM_PROJECTS_SECTION = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
-const AUTOMATED_SECTIONS = new Set([GA_REPLIES_SECTION, PCM_PROJECTS_SECTION])
+const AUTOMATED_SECTIONS = new Set([GA_REPLIES_SECTION, GA_REACTIONS_SECTION, PCM_PROJECTS_SECTION])
 
 function isWaitingClientSection(section: Section) {
   return [section.section_key, section.title].some((value) =>
@@ -171,7 +175,8 @@ export default function AfterBreakReportPage() {
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
-  const [preview, setPreview] = React.useState<{ html: string; plain_text: string } | null>(null)
+  const [preview, setPreview] = React.useState<{ html: string; plain_text: string; note_attachments?: ReportNoteAttachments } | null>(null)
+  const [noteFiles, setNoteFiles] = React.useState<ReportNoteAttachment[] | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState<RecipientInputs>({ to: "", cc: "", bcc: "" })
   const [settings, setSettings] = React.useState<ReportSettings | null>(null)
   const [settingsInputs, setSettingsInputs] = React.useState<RecipientInputs>({ to: "", cc: "", bcc: "" })
@@ -357,7 +362,10 @@ export default function AfterBreakReportPage() {
           }
         : section
     )
-    const nextDraft = { ...draft, sections }
+    const editedSection = draft.sections[editingSection.index]
+    const noteAttachments = (editedSection.section_key || editedSection.title) === NOTES_SECTION
+      ? undefined : draft.note_attachments
+    const nextDraft = { ...draft, sections, note_attachments: noteAttachments }
     setDraft(nextDraft)
     setEditingSection(null)
     void save(nextDraft)
@@ -672,8 +680,16 @@ export default function AfterBreakReportPage() {
                     ) : (
                       <ReportSectionPreview
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
+                        discordReplyReport={(section.section_key || section.title) === GA_REPLIES_SECTION
+                          ? { report: "M2", date: draft.report_date } : undefined}
                         body={reportSectionPreviewText(section.body)}
                         filterWfeAge={isWaitingClientSection(section)}
+                        renderCell={(section.section_key || section.title) === NOTES_SECTION ? (label, number, header, text) => {
+                          const files = draft.note_attachments?.[number]
+                          return label === "NOTES:" && header === "NOTE" && files?.length
+                            ? <ReportNoteCell text={text} files={files} onOpen={setNoteFiles} />
+                            : null
+                        } : undefined}
                       />
                     )}
                   </div>
@@ -739,9 +755,15 @@ export default function AfterBreakReportPage() {
           <DialogHeader>
             <DialogTitle>Email preview</DialogTitle>
           </DialogHeader>
-          {preview ? <iframe title={`${REPORT_LABEL} preview`} srcDoc={preview.html} className="h-[650px] w-full rounded border bg-white" /> : null}
+          {preview ? <iframe
+            title={`${REPORT_LABEL} preview`}
+            srcDoc={preview.html}
+            className="h-[650px] w-full rounded border bg-white"
+            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles)}
+          /> : null}
         </DialogContent>
       </Dialog>
+      <ReportNoteAttachmentDialog files={noteFiles} onClose={() => setNoteFiles(null)} />
 
     </div>
   )

@@ -44,13 +44,17 @@ from app.services.morning_report import (
     build_morning_report_sections,
     is_removed_morning_manual_question,
     normalize_morning_report_sections,
+    preserve_morning_plan_note,
+    refresh_m1_gmail_section,
+    refresh_morning_leave_table,
     refresh_morning_task_tables,
     render_html,
     render_plain_text,
     send_morning_report,
     subject_for,
 )
-from app.services.report_section_merge import preserve_keyed_line, preserve_manual_sections
+from app.services.report_section_merge import preserve_manual_sections
+from app.services.report_note_attachments import section_note_attachments
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -269,14 +273,19 @@ async def _draft(db: AsyncSession, row: MorningReportDraft, sections: list[dict[
         (section[TASK_FEEDBACK_ROWS] for section in visible_sections if TASK_FEEDBACK_ROWS in section),
         snapshot.get(TASK_FEEDBACK_ROWS, {}),
     )
+    if sections is None:
+        visible_sections = normalize_morning_report_sections(visible_sections)
+    visible_sections = await refresh_morning_leave_table(db, visible_sections, row.report_date, snapshot)
+    visible_sections = with_section_keys("morning", await filter_report_sections(
+        db, visible_sections, row.report_date,
+    ))
     return {
         "id": str(row.id),
         "report_date": row.report_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": with_section_keys("morning", await filter_report_sections(
-            db, visible_sections, row.report_date,
-        )),
+        "sections": visible_sections,
+        "note_attachments": await section_note_attachments(db, visible_sections, SECTION_TITLES[3], snapshot),
         TASK_FEEDBACK_ROWS: feedback_rows,
         "generated_snapshot": row.generated_snapshot,
         "auto_sent_slots": list(row.auto_sent_slots or []),
@@ -372,6 +381,7 @@ async def get_draft(
     )
     sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
+    sections = await refresh_m1_gmail_section(sections, row.report_date, sent=row.status == "SENT")
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
         db, sections, "morning", row.sections, settings.manual_questions
@@ -400,24 +410,7 @@ async def generate_draft(
     existing_sections = row.sections if row is not None else None
     if row is not None:
         sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
-        existing_by_title = {
-            str(section.get("title") or ""): str(section.get("body") or "")
-            for section in (row.sections or [])
-        }
-        attendance_title = SECTION_TITLES[2]
-        sections = [
-            {
-                **section,
-                "body": preserve_keyed_line(
-                    section["body"],
-                    existing_by_title.get(section["title"]),
-                    "NDRYSHON PLANI",
-                )
-                if section["title"] == attendance_title
-                else section["body"],
-            }
-            for section in sections
-        ]
+        sections = preserve_morning_plan_note(sections, row.sections)
     sections = await merge_common_view_manual_sections(
         db, sections, "morning", existing_sections, settings.manual_questions
     )
@@ -531,10 +524,13 @@ async def preview_draft(
     )
     sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
+    sections = await refresh_m1_gmail_section(sections, row.report_date, sent=row.status == "SENT")
+    sections = await refresh_morning_leave_table(db, sections, row.report_date, row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
         "html": render_html(row.subject, row.report_date, sections),
+        "note_attachments": await section_note_attachments(db, sections, SECTION_TITLES[3], row.generated_snapshot),
     }
 
 
@@ -557,6 +553,8 @@ async def send_draft(
     )
     sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
+    sections = await refresh_m1_gmail_section(sections, row.report_date, sent=row.status == "SENT")
+    sections = await refresh_morning_leave_table(db, sections, row.report_date, row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
     row.sections = sections
     plain_text = render_plain_text(row.subject, row.report_date, sections)

@@ -4,6 +4,220 @@ import path from "node:path"
 
 const backend = path.resolve(__dirname, "../../../backend")
 
+test("M1 hides report controls initially and preserves edits when collapsed", async ({ page }) => {
+  const user = { id: "m1-test-admin", full_name: "Report admin", email: "admin@example.test", role: "ADMIN", is_active: true }
+  const recipients = { to: ["admin@example.test"], cc: [], bcc: [] }
+  await page.addInitScript((account) => {
+    localStorage.setItem("primex_access_token", "test-only-browser-token")
+    localStorage.setItem("primex_user", JSON.stringify(account))
+  }, user)
+  await page.route("**/api/**", (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname === "/api/auth/me") return route.fulfill({ json: user })
+    if (pathname.endsWith("/morning-report/settings")) return route.fulfill({ json: {
+      is_active: true, timezone: "Europe/Tirane", weekdays: [1, 2, 3, 4, 5], recipients,
+    } })
+    if (pathname.endsWith("/morning-report")) return route.fulfill({ json: {
+      id: "draft", status: "SENT", report_date: "2026-11-23", subject: "Morning report", recipients,
+      sections: [{ title: "First report point", body: "Report content" }],
+    } })
+    return route.fulfill({ json: [] })
+  })
+
+  await page.goto("/morning-report")
+  const toggle = page.locator("summary").filter({ hasText: "Menaxhimi i raportit dhe email-it" })
+  const point = page.getByText("1. First report point", { exact: true })
+  const symbols = page.getByRole("button", { name: "Simbolet e detyrave" })
+  const status = page.getByText("Sent to", { exact: true })
+  await expect(point).toBeVisible()
+  await expect(symbols).toBeHidden()
+  await expect(status).toBeHidden()
+  await expect(toggle.getByText("+", { exact: true })).toBeVisible()
+
+  await toggle.press("Enter")
+  await expect(toggle.getByText("−", { exact: true })).toBeVisible()
+  await expect(symbols).toBeVisible()
+  await expect(page.getByText("Automatic Send", { exact: true })).toBeVisible()
+  await expect(status).toBeVisible()
+  const subject = page.getByPlaceholder("Generate a draft first")
+  await subject.fill("Edited subject")
+
+  await toggle.click()
+  await expect(point).toBeVisible()
+  await expect(status).toBeHidden()
+  await toggle.click()
+  await expect(subject).toHaveValue("Edited subject")
+})
+
+for (const [pagePath, report] of [["morning-report", "M1"], ["after-break-report", "M2"]] as const) {
+  test(`${report} shows Discord comment time and opens its files`, async ({ page }) => {
+    const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test owner", email: "owner@example.test", role: "STAFF", is_active: true }
+    const day = "2026-11-23"
+    const url = "https://cdn.discordapp.com/attachments/2/4/screenshot.png?ex=test"
+    let previewConfigured = true
+    await page.addInitScript(({ user }) => {
+      localStorage.setItem("primex_access_token", "test-only-browser-token")
+      localStorage.setItem("primex_user", JSON.stringify(user))
+    }, { user })
+    await page.route(url, (route) => route.fulfill({
+      contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="blue"/></svg>',
+    }))
+    await page.route("**/api/**", async (route) => {
+      const request = new URL(route.request().url())
+      if (request.pathname === "/api/auth/me") return route.fulfill({ json: user })
+      if (request.pathname.includes("marker-comments")) return route.fulfill({ json: { items: [], unread_count: 0 } })
+      if (request.pathname.endsWith("/discord/ga-replies/attachments")) {
+        expect(Object.fromEntries(request.searchParams)).toEqual({ report, report_date: day, message_id: "3" })
+        expect(route.request().headers().authorization).toBe("Bearer test-only-browser-token")
+        if (!previewConfigured) return route.fulfill({ status: 424, json: {
+          detail: { code: "discord_preview_not_configured", message: "Ky server nuk ka të konfiguruar botin e Discord për pamjen paraprake." },
+        } })
+        return route.fulfill({ json: [{ url, filename: "screenshot.png", image: true }] })
+      }
+      if (request.pathname.endsWith(`/${pagePath}`)) return route.fulfill({ json: {
+        id: "draft", status: "SENT", report_date: day, subject: "GA replies",
+        recipients: { to: [], cc: [], bcc: [] },
+        sections: [{
+          title: "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
+          body: [
+            "Përgjigjet dhe komentet e GA:",
+            "| NR | PËR KË | MESAZHI ORIGJINAL | PËRGJIGJJA E GA | SKEDARËT | DATA / ORA |",
+            "| 1 | | | Shiko detyrat | 1 | 20.11.2026 22:49 |",
+            "| | | | | https://discord.com/channels/1/2/3 | |",
+            "| 2 | | | Koment tjetër | | 23.11.2026 08:12 |",
+          ].join("\n"),
+        }],
+      } })
+      return route.fulfill({ json: [] })
+    })
+    await page.goto(`/${pagePath}`)
+    const mediaRow = page.getByRole("row").filter({ hasText: "Shiko detyrat" })
+    await expect(mediaRow.getByRole("cell").last()).toHaveText("20.11.2026 22:49")
+    await expect(page.getByRole("row").filter({ hasText: "Koment tjetër" }).locator("details")).toHaveCount(0)
+    const thumbnail = mediaRow.getByRole("button", { name: "screenshot.png" })
+    await expect(thumbnail).toHaveCount(0)
+    await mediaRow.getByText("1 skedar").click()
+    await expect(thumbnail.locator("img")).toHaveAttribute("src", url)
+    await thumbnail.click()
+    const preview = page.getByRole("dialog", { name: "screenshot.png" })
+    await expect(preview.getByRole("img", { name: "screenshot.png" })).toBeVisible()
+    await preview.getByRole("button", { name: "Close" }).click()
+    await expect(mediaRow.getByRole("link", { name: "Hap në Discord" })).toHaveAttribute("href", "https://discord.com/channels/1/2/3")
+    previewConfigured = false
+    const summary = mediaRow.getByText("1 skedar")
+    await summary.click()
+    await expect(mediaRow.locator("details")).not.toHaveAttribute("open")
+    await summary.click()
+    await expect(mediaRow.getByRole("status")).toHaveText("Ky server nuk ka të konfiguruar botin e Discord për pamjen paraprake.")
+  })
+}
+
+function pxNoteReportFixtures() {
+  const python = process.env.ONE_H_FILTER_PYTHON || path.join(backend, process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python")
+  return JSON.parse(execFileSync(python, ["-c", `
+import json
+from datetime import date
+from app.services import after_break_report as m2, morning_report as m1
+from app.services.primeflow_report import ReportUndiscussedNote, render_html
+from app.services.tomorrow_closing_sections import ClosingSection, ClosingTable, ClosingTableRow
+from app.services.tomorrow_print_report import _closing_sections_html
+from tests.test_one_h_report_strike_counts import fresh_document
+day = date(2026, 11, 23)
+values = [["1", "NO", "Note with files", "GA", "09:15"], ["2", "NO", "Note without files", "GA", "09:16"]]
+body = m1._notes_section(values)
+sections = {"morning-report": [{"title": m1.SECTION_TITLES[3], "body": body}],
+            "after-break-report": [{"title": m2.SECTION_TITLES[9], "body": body}]}
+document, _, _ = fresh_document()
+document.undiscussed_notes = [ReportUndiscussedNote(content=row[2]) for row in values]
+closing = [ClosingSection("NOTES PA DISK", [ClosingTable("NOTES", ["NR", "DISK", "NOTE", "FROM", "TIME"],
+          [ClosingTableRow(values=row) for row in values], "notes")])]
+print(json.dumps({"sections": sections,
+  "morning-report": m1.render_html("M1", day, sections["morning-report"]),
+  "after-break-report": m2.render_html("M2", day, sections["after-break-report"]),
+  "tomorrow-print-report": _closing_sections_html(closing),
+  "1h-reports": render_html(document)}))
+`], { cwd: backend, encoding: "utf8", env: { ...process.env, PYTHONIOENCODING: "utf-8" } }))
+}
+
+for (const reportName of ["morning-report", "after-break-report", "tomorrow-print-report", "1h-reports"] as const) {
+  test(`${reportName} opens the files for the matching PX Note`, async ({ page }) => {
+    const fixture = pxNoteReportFixtures()
+    const reportDay = "2026-11-23"
+    const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test owner", email: "owner@example.com", role: "STAFF", is_active: true }
+    const noteAttachments = {
+      "1": [{ id: "file-one", original_filename: "First.docx" }, { id: "file-two", original_filename: "Second.xlsx" }],
+    }
+    await page.addInitScript(({ user }) => {
+      localStorage.setItem("primex_access_token", "test-only-browser-token")
+      localStorage.setItem("primex_user", JSON.stringify(user))
+    }, { user })
+    await page.route("**/api/**", async (route) => {
+      const pathname = new URL(route.request().url()).pathname
+      if (pathname === "/api/auth/me") return route.fulfill({ json: user })
+      if (pathname.includes("marker-comments")) return route.fulfill({ json: { items: [], unread_count: 0 } })
+      if (pathname.match(/\/attachments\/file-(one|two)\/preview$/)) {
+        expect(route.request().headers().authorization).toBe("Bearer test-only-browser-token")
+        return route.fulfill({ contentType: "text/html", body: `<p>${pathname.includes("file-two") ? "Spreadsheet" : "Document"} content</p>` })
+      }
+      if (pathname.endsWith("/attachments/file-two")) {
+        return route.fulfill({ contentType: "application/octet-stream", body: "Test download" })
+      }
+      const html = fixture[reportName]
+      const payload = { html, plain_text: "", note_attachments: noteAttachments }
+      if ((pathname.endsWith(`/${reportName}`) || pathname.endsWith(`/${reportName}/draft`)) && fixture.sections[reportName]) {
+        return route.fulfill({ json: {
+          ...payload, id: "draft", status: "DRAFT", report_date: reportDay, subject: "Notes report",
+          recipients: { to: [], cc: [], bcc: [] }, sections: fixture.sections[reportName],
+        } })
+      }
+      if (pathname.endsWith("/draft/preview")) return route.fulfill({ json: payload })
+      if (pathname.includes("/tomorrow-print-report/") && (pathname.endsWith("/snapshot") || pathname.endsWith("/generate"))) {
+        return route.fulfill({ json: { ...payload, snapshot_id: "sample", subject: "SHTYPI", report_date: reportDay, target_date: "2026-11-24" } })
+      }
+      if (pathname.endsWith("/primeflow-1h-reports/preview")) {
+        return route.fulfill({ json: {
+          ...payload, document: { subject: "1H", generated_at: reportDay, recipients: { to: [] } },
+          notes_html: html.replace("</body>", "<p>Notes-only view</p></body>"), note_count: 2, task_count: 1,
+        } })
+      }
+      return route.fulfill({ json: [] })
+    })
+    await page.goto(reportName === "1h-reports" ? "/admin/1h-reports" : `/${reportName}`)
+    const fullReport = page.frameLocator('iframe[title="Email preview"]')
+    if (reportName === "1h-reports") {
+      await page.getByRole("button", { name: "Generate report", exact: true }).click()
+      await expect(fullReport.getByRole("button", { name: "View (2)", exact: true })).toHaveCount(1)
+      await page.getByRole("button", { name: "Vetëm Notes", exact: true }).click()
+      await expect(fullReport.getByText("Notes-only view")).toBeVisible()
+    }
+    const notes = reportName === "tomorrow-print-report" ? page.frameLocator('iframe[title$="generated email"]')
+      : reportName === "1h-reports" ? fullReport : page
+    const view = notes.getByRole("button", { name: "View (2)", exact: true })
+    await expect(view).toHaveCount(1)
+    const fileRow = notes.locator("tr").filter({ hasText: "Note with files" }).last()
+    const emptyRow = notes.locator("tr").filter({ hasText: "Note without files" }).last()
+    await expect(fileRow.getByRole("button", { name: "View (2)" })).toBeVisible()
+    await expect(emptyRow.getByRole("button")).toHaveCount(0)
+    await view.click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog.frameLocator('iframe[title="First.docx"]').getByText("Document content")).toBeVisible()
+    await dialog.getByRole("combobox", { name: "Bashkëngjitjet" }).selectOption("file-two")
+    await expect(dialog.frameLocator('iframe[title="Second.xlsx"]').getByText("Spreadsheet content")).toBeVisible()
+    const download = page.waitForEvent("download")
+    await dialog.getByRole("button", { name: "Download" }).click()
+    expect((await download).suggestedFilename()).toBe("Second.xlsx")
+    if (reportName === "morning-report" || reportName === "after-break-report") {
+      await dialog.getByRole("button", { name: "Close" }).click()
+      await page.getByRole("button", { name: "Preview", exact: true }).click()
+      const previewButton = page.frameLocator('iframe[title$=" preview"]').getByRole("button", { name: "View (2)", exact: true })
+      await expect(previewButton).toBeVisible()
+      await previewButton.click()
+      await expect(page.getByRole("dialog", { name: "First.docx" }).frameLocator('iframe[title="First.docx"]')
+        .getByText("Document content")).toBeVisible()
+    }
+  })
+}
+
 function printFixture(legacy: boolean) {
   const python = process.env.ONE_H_FILTER_PYTHON || path.join(backend, process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python")
   return JSON.parse(execFileSync(python, ["-c", `
@@ -92,7 +306,7 @@ async function openReport(page: Page, role: "ADMIN" | "STAFF", slot = "11:00", e
   await page.goto("/admin/1h-reports")
   if (role === "ADMIN") await page.getByRole("tab", { name: "Reports", exact: true }).click()
   if (slot !== "10:00") {
-    await page.getByRole("combobox").first().click()
+    await page.getByRole("main").getByRole("combobox").click()
     await page.getByRole("option", { name: slot, exact: true }).click()
   }
   await page.getByRole("button", { name: role === "ADMIN" ? "Preview fresh report" : "Generate report", exact: true }).click()

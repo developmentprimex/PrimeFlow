@@ -20,11 +20,13 @@ from app.models.enums import UserRole
 from app.models.user import User
 from app.services.meetings_report import (
     MANUAL_SECTION_TITLES,
+    SECTION_TITLES,
     build_meetings_report_sections,
     is_tomorrow_symbols_section,
     meetings_sections_for_snapshot,
     normalize_meetings_report_sections,
     refresh_meetings_symbols,
+    refresh_saved_leave_table,
     without_retired_meetings_sections,
     render_html,
     render_plain_text,
@@ -156,6 +158,10 @@ def _is_current_report_day(report_date: date) -> bool:
 async def _draft_content(db: AsyncSession, row: MeetingsReportDraft, *, refresh_symbols: bool) -> tuple[list[dict], dict | None]:
     snapshot = row.generated_snapshot
     sections = meetings_sections_for_snapshot(row.sections, snapshot)
+    sections = await refresh_saved_leave_table(
+        db, sections, section_title=SECTION_TITLES[4], report_day=row.report_date,
+        leave_day=row.tomorrow_date, snapshot=snapshot,
+    )
     if refresh_symbols and _is_current_report_day(row.report_date):
         return await refresh_meetings_symbols(db, row.tomorrow_date, sections, snapshot)
     return sections, snapshot

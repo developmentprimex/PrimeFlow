@@ -10,8 +10,10 @@ from sqlalchemy import select
 from app.db import SessionLocal
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.services.meetings_report import (
+    SECTION_TITLES,
     build_meetings_report_sections,
     meetings_sections_for_snapshot,
+    refresh_saved_leave_table,
     render_html,
     render_plain_text,
     send_meetings_report,
@@ -46,6 +48,10 @@ async def main() -> None:
             await db.refresh(row)
 
         sections = meetings_sections_for_snapshot(row.sections, row.generated_snapshot)
+        sections = await refresh_saved_leave_table(
+            db, sections, section_title=SECTION_TITLES[4], report_day=row.report_date,
+            leave_day=row.tomorrow_date, snapshot=row.generated_snapshot,
+        )
         plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, sections)
         if args.send:
             message = await send_meetings_report(

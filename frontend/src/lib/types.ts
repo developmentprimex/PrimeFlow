@@ -612,7 +612,7 @@ export interface GaNote {
   next_week?: boolean
   project_id?: string | null
   department_id?: string | null
-  knowledge_type?: "PROMPT" | "DEFINITION" | "REGULATION" | "RECORDING" | null
+  knowledge_type?: "PROMPT" | "DEFINITION" | "REGULATION" | "RECORDING" | "GMAIL" | "INFO_PX_MAIL" | null
   knowledge_tester_id?: string | null
   created_at: string
   updated_at: string

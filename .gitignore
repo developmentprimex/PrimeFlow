@@ -25,6 +25,7 @@ backend/.venv
 backend/.python-version
 backend/alembic/versions/*.pyc
 backend/uploads/reports/
+backend/uploads/ga-notes/
 backend/uploads/meeting-recordings/
 tmp/recorder-pg/
 tmp/recorder-tools/

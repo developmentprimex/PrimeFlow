@@ -32,7 +32,16 @@ SECTION_KEY_FIELD = "section_key"
 
 def order_custom_manual_sections(kind: ReportKind, sections: list[dict[str, str]]) -> list[dict[str, str]]:
     """Place report-only questions at their requested 1-based manual position."""
-    manual = [section for section in sections if is_manual_section_title(kind, section.get("title"), section.get(SECTION_KEY_FIELD))]
+    manual: list[dict[str, str]] = []
+    in_template_order: list[dict[str, str]] = []
+    for section in sections:
+        title, key = section.get("title"), section.get(SECTION_KEY_FIELD)
+        if is_manual_section_title(kind, title, key) and (
+            kind != "morning" or canonical_report_section_key(kind, key or title) is None
+        ):
+            manual.append(section)
+        else:
+            in_template_order.append(section)
     numbered: list[tuple[int, int, dict[str, str]]] = []
     ordered: list[dict[str, str]] = []
     for index, section in enumerate(manual):
@@ -43,10 +52,7 @@ def order_custom_manual_sections(kind: ReportKind, sections: list[dict[str, str]
             ordered.append(section)
     for position, _, section in sorted(numbered, key=lambda entry: (entry[0], entry[1]), reverse=True):
         ordered.insert(min(position - 1, len(ordered)), section)
-    return ordered + [
-        section for section in sections
-        if not is_manual_section_title(kind, section.get("title"), section.get(SECTION_KEY_FIELD))
-    ]
+    return ordered + in_template_order
 
 
 def removes_custom_manual_section(

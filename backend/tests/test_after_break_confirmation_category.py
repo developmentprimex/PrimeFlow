@@ -12,7 +12,7 @@ from app.services.after_break_report import (
     UNFINISHED_PRIORITY_COLUMNS,
     UNFINISHED_PRIORITY_TABLE_LABEL,
     _ascii_table,
-    _blue_note_rows,
+    load_blue_notes,
     _format_confirmation_questions,
     _done_am_task_rows,
     _new_system_task_rows,
@@ -27,6 +27,7 @@ from app.services.after_break_report import (
 from app.services.meetings_report import _render_ascii_table_html, _table_tone_from_label
 from app.services.meeting_point_manual_sync import is_known_report_title, merge_common_view_manual_sections, section_group_label, with_section_keys
 from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE
+from app.services.discord_ga_reactions import GA_REACTIONS_SECTION_TITLE
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
@@ -64,16 +65,15 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
         sections = normalize_after_break_report_sections([])
 
         self.assertEqual(
-            [section["title"] for section in sections],
+            [section["section_key"] for section in sections],
             DISPLAY_SECTION_TITLES,
         )
         automatic = [section["title"] for section in sections
                      if section_group_label("after_break", section["title"], section["section_key"]) == "AUTO-FILLED FROM PRIMEFLOW"]
-        self.assertEqual(automatic[0], GA_REPLIES_SECTION_TITLE)
-        self.assertEqual(automatic[1], PCM_PROJECTS_TITLE)
-        self.assertEqual(automatic[2:7], ["NOTES TE REJA ( NOT DISSCUSED)", "TAK INT/EXT TE PAMBAJTURA",
+        self.assertEqual(automatic[:3], [GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_TITLE, PCM_PROJECTS_TITLE])
+        self.assertEqual(automatic[3:8], ["NOTES TE REJA ( NOT DISSCUSED)", "TAK INT/EXT TE PAMBAJTURA",
                                         "DET TE PAKRYERA, 08:00/DEADLINE", "DT WFE", "DET E KRYERA NE AM"])
-        self.assertEqual(automatic[9:11], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
+        self.assertEqual(automatic[10:12], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
 
     def test_pcm_projects_use_title_codes_on_tasks_covering_the_report_day(self) -> None:
         def task(title, start, due, project_id=None):
@@ -113,14 +113,15 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
             {"title": f"6. {board_title}", "section_key": "manual:custom:6:board", "body": "Old board answer"},
         ]
         sections = normalize_after_break_report_sections(retired)
-        self.assertEqual([section["title"] for section in sections], DISPLAY_SECTION_TITLES)
+        self.assertEqual([section["section_key"] for section in sections], DISPLAY_SECTION_TITLES)
         self.assertTrue(is_known_report_title("after_break", plan_title))
         self.assertTrue(is_known_report_title("after_break", board_title))
         self.assertFalse(is_known_report_title("morning", plan_title))
         with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles",
                    AsyncMock(return_value=[plan_title, board_title, "Another question"])):
             merged = asyncio.run(merge_common_view_manual_sections(None, sections, "after_break", retired, retired))
-        self.assertEqual([section["title"] for section in merged], [DISPLAY_SECTION_TITLES[0], "Another question", *DISPLAY_SECTION_TITLES[1:]])
+        expected_titles = [section["title"] for section in sections]
+        self.assertEqual([section["title"] for section in merged], [expected_titles[0], "Another question", *expected_titles[1:]])
         html = render_html("M2", date(2026, 11, 18), merged)
         for removed in (plan_title, board_title, "Old plan answer", "Old board answer"):
             self.assertNotIn(removed, html)
@@ -178,7 +179,7 @@ class NewSystemTaskRowsTests(unittest.IsolatedAsyncioTestCase):
             async def execute(self, _statement):
                 return FakeResult(next(self.results))
 
-        rows = await _blue_note_rows(FakeDb())
+        rows = [values for _, values in await load_blue_notes(FakeDb())]
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][1], "NO")

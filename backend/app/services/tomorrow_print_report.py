@@ -40,6 +40,7 @@ from app.services.tomorrow_closing_sections import (
     ClosingTableRow,
     build_tomorrow_closing_sections,
 )
+from app.services.after_break_report import NOTE_REFERENCES
 
 
 TASK_ROWS = (
@@ -3640,6 +3641,12 @@ async def _build_print_report(
         "plain_text": "\n".join(plain_rows),
         "ga_task_summary": [row.model_dump() for row in ga_summary],
     }
+    if closing_report_day is not None:
+        report[NOTE_REFERENCES] = {
+            row.values[0]: row.note_id
+            for section in closing_sections for table in section.tables for row in table.rows
+            if row.note_id is not None
+        }
     if include_attachment:
         attachment_missing_by_slot = {**missing_one_h_by_slot, "BLL": missing_blocked_users}
         attachment_covered_by_slot = {key: list(dict.fromkeys([*values, *personal_covered_by_slot.get(key, [])])) for key, values in project_covered_by_slot.items()}

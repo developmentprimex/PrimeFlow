@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import html
 import mimetypes
+import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,17 +11,18 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse
-from sqlalchemy import or_, select
+from sqlalchemy import insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
+from starlette.background import BackgroundTask
 
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.ga_note import GaNote
-from app.models.ga_note_attachment import GaNoteAttachment
+from app.models.ga_note_attachment import GaNoteAttachment, GaNoteAttachmentContent
 from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, NotificationType, TaskStatus, UserRole
 from app.models.project import Project
 from app.models.task import Task
@@ -36,6 +38,7 @@ from app.schemas.ga_note import (
     GaNoteUpdate,
 )
 from app.services.ga_note_creation import build_ga_note
+from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN, sync_gmail_px_notes
 from app.services.audit import add_audit_log
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
@@ -78,6 +81,18 @@ class GaNoteTaskDeadlineResponse(BaseModel):
 # Backward-compatible aliases retained for router tests and callers.
 _ga_note_task_title = ga_note_task_title
 _ga_note_default_task_description = ga_note_default_task_description
+
+
+def _title_for_note_task(note: GaNote, content: str) -> str:
+    if note.knowledge_type == GMAIL_NOTE_ORIGIN:
+        content = content.partition("\n")[0]
+    return _ga_note_task_title(content)
+
+
+def _description_for_note_task(note: GaNote, content: str) -> str | None:
+    if note.knowledge_type == GMAIL_NOTE_ORIGIN:
+        return "\n".join(content.splitlines()[2:]).strip() or None
+    return _ga_note_default_task_description(content)
 
 
 def _attachment_out(attachment: GaNoteAttachment) -> GaNoteAttachmentOut:
@@ -129,6 +144,29 @@ def _ga_note_upload_base_dir() -> Path:
     if not upload_base.is_absolute():
         upload_base = Path(__file__).resolve().parents[3] / upload_base
     return upload_base
+
+
+async def _open_ga_note_attachment(
+    db: AsyncSession, attachment: GaNoteAttachment,
+) -> tuple[Path, tempfile.TemporaryDirectory | None]:
+    stored_path = _ga_note_upload_base_dir() / str(attachment.note_id) / attachment.stored_filename
+    if stored_path.is_file() and stored_path.stat().st_size == attachment.size_bytes:
+        return stored_path, None
+
+    contents = await db.scalar(select(GaNoteAttachmentContent.data).where(
+        GaNoteAttachmentContent.attachment_id == attachment.id,
+    ))
+    if contents is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
+
+    temporary = tempfile.TemporaryDirectory(prefix="primeflow-px-note-")
+    path = Path(temporary.name) / f"attachment{Path(attachment.stored_filename).suffix}"
+    try:
+        await run_in_threadpool(path.write_bytes, contents)
+    except BaseException:
+        temporary.cleanup()
+        raise
+    return path, temporary
 
 
 def _preview_page(title: str, body: str) -> str:
@@ -269,23 +307,19 @@ async def _save_ga_note_attachments(
             stored_path = note_dir / stored_name
 
             size_bytes = 0
-            with stored_path.open("wb") as buffer:
+            with stored_path.open("xb") as buffer:
+                stored_paths.append(stored_path)
                 while True:
                     chunk = await upload.read(1024 * 1024)
                     if not chunk:
                         break
                     size_bytes += len(chunk)
                     if size_bytes > max_bytes:
-                        buffer.close()
-                        if stored_path.exists():
-                            stored_path.unlink()
-                        await upload.close()
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"File too large. Max {settings.GA_NOTES_MAX_FILE_MB}MB.",
                         )
                     buffer.write(chunk)
-            stored_paths.append(stored_path)
 
             attachment = GaNoteAttachment(
                 id=attachment_id,
@@ -297,6 +331,12 @@ async def _save_ga_note_attachments(
                 created_by=user.id,
             )
             db.add(attachment)
+            await db.flush()
+            # Keep the on-disk copy available to older API processes during rollout.
+            await db.execute(insert(GaNoteAttachmentContent).values(
+                attachment_id=attachment_id,
+                data=await run_in_threadpool(stored_path.read_bytes),
+            ))
             created.append(attachment)
             await upload.close()
 
@@ -318,6 +358,8 @@ async def list_ga_notes(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[GaNoteOut]:
+    if project_id is None and department_id is None:
+        await sync_gmail_px_notes()
     # Keep recent closed notes and any Mira note explicitly shared to PX Notes.
     closed_cutoff = datetime.utcnow() - timedelta(days=30)
 
@@ -393,9 +435,9 @@ async def update_ga_note(
 
     if payload.content is not None and payload.content != old_content and note.knowledge_type not in ("PROMPT", "DEFINITION", "REGULATION"):
         # Knowledge PX prompt-note tasks keep their "PROMPT: <prompt title>" titles.
-        new_task_title = _ga_note_task_title(note.content)
-        old_default_description = _ga_note_default_task_description(old_content)
-        new_default_description = _ga_note_default_task_description(note.content)
+        new_task_title = _title_for_note_task(note, note.content)
+        old_default_description = _description_for_note_task(note, old_content)
+        new_default_description = _description_for_note_task(note, note.content)
 
         linked_tasks = (
             await db.execute(select(Task).where(Task.ga_note_origin_id == note.id))
@@ -409,8 +451,8 @@ async def update_ga_note(
                 db,
                 task_id=task.id,
                 actor_user_id=user.id,
-                before_title=old_content,
-                after_title=note.content,
+                before_title=_title_for_note_task(note, old_content) if note.knowledge_type == GMAIL_NOTE_ORIGIN else old_content,
+                after_title=new_task_title if note.knowledge_type == GMAIL_NOTE_ORIGIN else note.content,
             )
             if task.description == old_default_description:
                 task.description = new_default_description
@@ -564,13 +606,13 @@ async def update_ga_note_task_bundle(
         reconcile_result = None
 
     title_before = {
-        task.id: old_content if "content" in fields_set else task.title
+        task.id: old_content if "content" in fields_set and note.knowledge_type != GMAIL_NOTE_ORIGIN else task.title
         for task in active_tasks
     }
     description_before = {task.id: task.description for task in active_tasks}
 
     title = (
-        _ga_note_task_title(note.content)
+        _title_for_note_task(note, note.content)
         if "content" in fields_set and note.knowledge_type not in ("PROMPT", "DEFINITION", "REGULATION")
         else None
     )
@@ -676,8 +718,8 @@ async def update_ga_note_task_bundle(
     # Preserve the legacy default-description behavior when only note content
     # changed and the description was never customized.
     if "content" in fields_set and not description_is_set:
-        old_default = _ga_note_default_task_description(old_content)
-        new_default = _ga_note_default_task_description(note.content)
+        old_default = _description_for_note_task(note, old_content)
+        new_default = _description_for_note_task(note, note.content)
         for task in active_tasks:
             if task.description == old_default and task.description != new_default:
                 task.description = new_default
@@ -1036,14 +1078,12 @@ async def preview_ga_note_attachment(
 
     await _ensure_note_access(attachment.note, user, db)
 
-    stored_path = _ga_note_upload_base_dir() / str(attachment.note_id) / attachment.stored_filename
-    if not stored_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
-
+    stored_path, temporary = await _open_ga_note_attachment(db, attachment)
     content_type = attachment.content_type or mimetypes.guess_type(attachment.original_filename)[0] or "application/octet-stream"
     suffix = stored_path.suffix.lower()
     if content_type.startswith(("image/", "audio/", "video/")) or content_type == "application/pdf" or suffix == ".pdf":
-        return FileResponse(stored_path, media_type=content_type)
+        return FileResponse(stored_path, media_type=content_type,
+                            background=BackgroundTask(temporary.cleanup) if temporary else None)
 
     try:
         preview_html = await run_in_threadpool(
@@ -1056,6 +1096,9 @@ async def preview_ga_note_attachment(
             attachment.original_filename,
             '<p>The preview could not be generated.</p><p class="muted">Use Download to open the original file.</p>',
         )
+    finally:
+        if temporary:
+            temporary.cleanup()
     return HTMLResponse(preview_html)
 
 
@@ -1077,15 +1120,12 @@ async def download_ga_note_attachment(
 
     await _ensure_note_access(attachment.note, user, db)
 
-    upload_base = _ga_note_upload_base_dir()
-    stored_path = upload_base / str(attachment.note_id) / attachment.stored_filename
-    if not stored_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
-
+    stored_path, temporary = await _open_ga_note_attachment(db, attachment)
     return FileResponse(
         stored_path,
         media_type=attachment.content_type or "application/octet-stream",
         filename=attachment.original_filename,
+        background=BackgroundTask(temporary.cleanup) if temporary else None,
     )
 
 

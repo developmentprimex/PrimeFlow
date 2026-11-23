@@ -147,6 +147,7 @@ class InstructionModal(discord.ui.Modal):
 class PrimeFlowBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
+        intents.guild_reactions = True
         intents.message_content = settings.DISCORD_MESSAGE_CONTENT_ENABLED
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none(), enable_debug_events=settings.DISCORD_MEETING_NOTES_ENABLED)
         self.meeting_capture = voice_meetings.MeetingCaptureCoordinator(self)
@@ -867,6 +868,15 @@ class PrimeFlowBot(discord.Client):
         except discord.HTTPException:
             log.warning("Could not read recent messages for task context")
         return []
+
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        observed_at = datetime.now(timezone.utc)
+        if payload.member is not None and payload.member.bot:
+            return
+        try:
+            await ga_replies_client.capture_reaction(self, payload, observed_at)
+        except (discord.DiscordException, httpx.HTTPError, ValueError) as exc:
+            log.warning("GA reaction capture failed: %s", type(exc).__name__)
 
     async def on_message(self, message: discord.Message):
         if not settings.DISCORD_MESSAGE_CONTENT_ENABLED or message.author.bot or not message.guild or not message.content.strip():

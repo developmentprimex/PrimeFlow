@@ -214,7 +214,10 @@ def _undiscussed_px_notes_statement():
 
 async def load_undiscussed_notes(*, show_full_mira_notes: bool = False) -> list[ReportUndiscussedNote]:
     """Load the PX Notes rows that still need discussion in the 1H report."""
+    from app.services.gmail_px_notes import sync_gmail_px_notes
+
     # Keep the legacy request option compatible; Mira notes are always excluded.
+    await sync_gmail_px_notes()
     async with SessionLocal() as db:
         rows = (await db.execute(_undiscussed_px_notes_statement())).all()
     notes = []
@@ -228,6 +231,7 @@ async def load_undiscussed_notes(*, show_full_mira_notes: bool = False) -> list[
             content=content,
             author=(full_name or username or email or "-"),
             created_at=note.created_at,
+            note_id=str(note.id),
         ))
     return notes
 

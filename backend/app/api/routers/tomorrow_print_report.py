@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
@@ -14,6 +15,8 @@ from app.models.tomorrow_print_report_settings import TomorrowPrintReportSetting
 from app.models.user import User
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
+from app.services.after_break_report import BLUE_NOTE_COLUMNS, NOTE_REFERENCES
+from app.services.report_note_attachments import match_note_attachments, note_attachments_by_row
 from app.services.one_h_print_report_snapshot import (
     get_one_h_print_snapshot,
     save_one_h_print_snapshot,
@@ -118,6 +121,29 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
     return _settings(row)
 
 
+async def _with_note_attachments(db: AsyncSession, report: dict) -> dict:
+    references = report.pop(NOTE_REFERENCES, None)
+    if references is not None:
+        attachments = await note_attachments_by_row(db, references)
+    else:
+        # Older snapshots only store HTML. Read the saved rows without
+        # regenerating or replacing the rest of the report.
+        document = BeautifulSoup(report.get("html", ""), "html.parser")
+        columns = [column for column, _ in BLUE_NOTE_COLUMNS]
+        rows = []
+        for table in document.select("table[data-closing-table]"):
+            headers = [cell.get_text(strip=True) for cell in table.select("thead th")]
+            if headers == columns:
+                rows.extend([
+                    [cell.get_text(" ", strip=True) for cell in row.select("td")]
+                    for row in table.select("tbody tr")
+                ])
+        attachments = await match_note_attachments(
+            db, [row for row in rows if len(row) == len(columns)], None, generated_at=report.get("generated_at"),
+        )
+    return {**report, "note_attachments": attachments}
+
+
 @router.get("/preview")
 async def preview(
     report_date: date | None = None,
@@ -125,7 +151,7 @@ async def preview(
     _: User = Depends(get_current_user),
 ) -> dict:
     delivery_date = report_date or datetime.now(report_timezone()).date()
-    return await build_tomorrow_print_report(delivery_date, db=db)
+    return await _with_note_attachments(db, await build_tomorrow_print_report(delivery_date, db=db))
 
 
 @router.get("/snapshot")
@@ -141,7 +167,7 @@ async def get_snapshot(
     if delivery_date == datetime.now(report_timezone()).date() and (row.report_payload or {}).get("attendance_filter_version") != 2:
         report = await build_tomorrow_print_report(delivery_date, db=db)
         row = await save_one_h_print_snapshot(db, report_kind="TOMORROW", report_date=delivery_date, report=report, user=_)
-    return await serialize_one_h_print_snapshot(db, row)
+    return await _with_note_attachments(db, await serialize_one_h_print_snapshot(db, row))
 
 
 @router.post("/generate")
@@ -163,7 +189,7 @@ async def generate_snapshot(
         report=report,
         user=user,
     )
-    return await serialize_one_h_print_snapshot(db, row)
+    return await _with_note_attachments(db, await serialize_one_h_print_snapshot(db, row))
 
 
 @router.post("/send")

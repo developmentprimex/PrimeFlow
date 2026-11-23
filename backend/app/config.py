@@ -141,6 +141,11 @@ class Settings(BaseSettings):
     MS_TENANT_ID: str | None = None
     MS_REDIRECT_URI: str | None = None
     MS_ORGANIZER_EMAIL: str = "info@primexeu.com"
+    MS_MAIL_CLIENT_ID: str | None = None
+    MS_MAIL_CLIENT_SECRET: str | None = None
+    MS_MAIL_SIGNING_KEY: str | None = None
+    MS_MAIL_TENANT_ID: str | None = None
+    MS_MAIL_REDIRECT_URI: str | None = None
     # Microsoft To Do for the GA assistant; off = Microsoft connect asks for the same permissions as before.
     MS_TODO_ENABLED: bool = False
     # Optional: To Do list (id, or a unique name) for reminders created by the GA assistant.
@@ -254,6 +259,7 @@ class Settings(BaseSettings):
     EMAIL_PORT: int = 587
     EMAIL_USER: str | None = None
     EMAIL_PASSWORD: str | None = None
+    M1_GMAIL_NOTES_IMPORT_ENABLED: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:

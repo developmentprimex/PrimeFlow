@@ -10,6 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
+from docx import Document
+
 from app.api.deps import require_admin
 from app.api.routers import morning_report as morning_api
 from app.api.routers.morning_report import DraftUpdate, SectionPayload, router, update_draft
@@ -18,6 +20,7 @@ from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.morning_report_draft import MorningReportDraft
 from app.models.task import Task
 from app.services import morning_report_scheduler
+from app.services.discord_ga_reactions import GA_REACTIONS_SECTION_KEY
 from app.services.morning_report_scheduler import _due_m1_send_slot
 from app.services.after_break_report import _personal_section
 from app.services.meetings_report import PERSONAL_GA, render_section_report_docx, render_section_report_png
@@ -25,6 +28,7 @@ from app.services.meeting_point_manual_sync import is_known_report_title, merge_
 from app.services.morning_report import (
     DISPLAY_SECTION_TITLES,
     GA_HV_DV_TASKS_TITLE,
+    MANUAL_SECTION_TITLES,
     GA_TASKS_TITLE,
     KA_GENT_QUESTIONS_TITLE,
     MARKER_TASK_SECTIONS,
@@ -43,8 +47,10 @@ from app.services.morning_report import (
     _marked_tasks_for_day,
     normalize_morning_report_sections,
     render_html,
+    render_plain_text,
     subject_for,
 )
+from app.services.report_section_merge import preserve_manual_sections
 
 
 class GaHvDvTodayTaskRowsTests(unittest.TestCase):
@@ -116,15 +122,36 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertEqual(tyo_by_title["Late"], "Y")
         self.assertEqual(tyo_by_title["Multi-day today"], "T")
 
-    def test_marker_tables_follow_ga_replies_in_m1_and_email(self) -> None:
-        expected = [SECTION_TITLES[0], PHYSICAL_GA_TITLE, KA_GENT_QUESTIONS_TITLE, GA_HV_DV_TASKS_TITLE]
-        sections = normalize_morning_report_sections([
+    def test_requested_section_order_is_used_in_m1_and_email(self) -> None:
+        comments = "(GA) A KA KOMENTE NE PF?"
+        expected = [
+            SECTION_TITLES[2], GA_HV_DV_TASKS_TITLE, PHYSICAL_GA_TITLE, SECTION_TITLES[1],
+            SECTION_TITLES[0], GA_REACTIONS_SECTION_KEY, comments, SECTION_TITLES[3],
+            SECTION_TITLES[4], SECTION_TITLES[5], KA_GENT_QUESTIONS_TITLE, *SECTION_TITLES[7:9],
+        ]
+        manual = {"title": "Pyetje manuale", "section_key": "manual:custom:1:test", "body": "Manual"}
+        saved = [
             {"title": title, "section_key": title, "body": "Saved content"}
-            for title in [SECTION_TITLES[0], GA_HV_DV_TASKS_TITLE, PHYSICAL_GA_TITLE, KA_GENT_QUESTIONS_TITLE]
-        ])
-        self.assertEqual([section["title"] for section in sections[:4]], expected)
-        html = render_html("M1", date(2026, 9, 1), sections)
-        self.assertEqual([html.index(title) for title in expected], sorted(html.index(title) for title in expected))
+            for title in reversed(expected) if title != comments
+        ]
+        sections = normalize_morning_report_sections([manual, *saved])
+        self.assertEqual([section["section_key"] for section in sections], [manual["section_key"], *expected])
+        self.assertEqual(sections[7]["body"], "(Ploteso manualisht)")
+        self.assertEqual(section_group_label("morning", comments, comments), "MANUAL QUESTIONS")
+        report_day = date(2026, 9, 1)
+        document = Document(BytesIO(render_section_report_docx("M1", "M1", report_day, sections)))
+        for output in (
+            render_html("M1", report_day, sections),
+            render_plain_text("M1", report_day, sections),
+            document.element.body.xml,
+        ):
+            offsets = [output.index(section["title"]) for section in sections]
+            self.assertEqual(offsets, sorted(offsets))
+
+        regenerated = preserve_manual_sections(normalize_morning_report_sections([]), [
+            {"title": comments, "section_key": comments, "body": "Dy komente për diskutim"},
+        ], MANUAL_SECTION_TITLES)
+        self.assertEqual(normalize_morning_report_sections(regenerated)[6]["body"], "Dy komente për diskutim")
 
     def test_physical_ga_includes_the_report_day_within_the_local_task_range(self) -> None:
         report_day = date(2026, 9, 1)
@@ -629,7 +656,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         ]
         retained = {"title": "Another question", "section_key": "manual:custom:2:retained", "body": "Keep this answer"}
         sections = normalize_morning_report_sections([*retired, retained, {"title": "PIKAT E DITES SOT", "body": "Legacy"}])
-        self.assertEqual([section["title"] for section in sections], [retained["title"], *DISPLAY_SECTION_TITLES])
+        self.assertEqual([section["section_key"] for section in sections], [retained["section_key"], *DISPLAY_SECTION_TITLES])
         for question in retired:
             self.assertTrue(is_known_report_title("morning", question["title"]))
             self.assertFalse(is_known_report_title("after_break", question["title"]))
@@ -650,15 +677,16 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             {"title": "5. A ka pyetje/sqarime me KA/Gentin?", "section_key": "manual:custom:5:questions", "body": "Manual"},
         ]
         sections = normalize_morning_report_sections(legacy)
-        self.assertEqual([section["title"] for section in sections], DISPLAY_SECTION_TITLES)
-        for section in sections[1:3]:
+        self.assertEqual([section["section_key"] for section in sections], DISPLAY_SECTION_TITLES)
+        for section in (section for section in sections if section["section_key"] in MARKER_TASK_SECTIONS):
             self.assertIn("Asnje detyre", section["body"])
             self.assertEqual(section_group_label("morning", section["title"]), "AUTO-FILLED FROM PRIMEFLOW")
 
         with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles", new_callable=AsyncMock) as load:
             load.return_value = [question["title"] for question in legacy] + ["Another question"]
             merged = await merge_common_view_manual_sections(None, sections, "morning", legacy, legacy)
-        self.assertEqual([section["title"] for section in merged], ["Another question", *DISPLAY_SECTION_TITLES])
+        self.assertEqual(merged[0]["title"], "Another question")
+        self.assertEqual([section["section_key"] for section in merged[1:]], DISPLAY_SECTION_TITLES)
 
     def test_personal_and_wfc_sections_are_labeled_as_auto_filled(self) -> None:
         self.assertEqual(SECTION_TITLES[7], "DET PERSONALISHT ME KA/GENTIN?")
@@ -670,14 +698,15 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         sections = normalize_morning_report_sections(
             with_section_keys("morning", [{"title": title, "body": str(i)} for i, title in enumerate(SECTION_TITLES)])
         )
-        sections[1]["title"] = "CUSTOM EMAIL TASKS TITLE"
+        email_index = DISPLAY_SECTION_TITLES.index(SECTION_TITLES[1])
+        sections[email_index]["title"] = "CUSTOM EMAIL TASKS TITLE"
 
         normalized = normalize_morning_report_sections(sections)
 
-        self.assertEqual(normalized[1]["title"], "CUSTOM EMAIL TASKS TITLE")
-        self.assertEqual(normalized[1]["section_key"], SECTION_TITLES[1])
+        self.assertEqual(normalized[email_index]["title"], "CUSTOM EMAIL TASKS TITLE")
+        self.assertEqual(normalized[email_index]["section_key"], SECTION_TITLES[1])
         self.assertEqual(
-            section_group_label("morning", normalized[1]["title"], normalized[1]["section_key"]),
+            section_group_label("morning", normalized[email_index]["title"], normalized[email_index]["section_key"]),
             "AUTO-FILLED FROM PRIMEFLOW",
         )
 
@@ -697,10 +726,45 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             [{"title": SECTION_TITLES[0], "body": "GA replied at 07:55"}]
         )
 
-        self.assertEqual([section["title"] for section in sections], SECTION_TITLES)
-        self.assertEqual(sections[0]["body"], "GA replied at 07:55")
-        self.assertIn("Email-source tasks load automatically", sections[1]["body"])
-        self.assertIn("NDRYSHON PLANI", sections[2]["body"])
+        self.assertEqual([section["section_key"] for section in sections], DISPLAY_SECTION_TITLES)
+        bodies = {section["section_key"]: section["body"] for section in sections}
+        self.assertEqual(bodies[SECTION_TITLES[0]], "GA replied at 07:55")
+        self.assertIn("Email-source tasks load automatically", bodies[SECTION_TITLES[1]])
+        self.assertIn("NDRYSHON PLANI", bodies[SECTION_TITLES[2]])
+
+    def test_old_pv_table_moves_into_first_automatic_section_once(self) -> None:
+        from io import BytesIO
+        from docx import Document
+        from app.services.meetings_report import render_section_report_docx
+        from app.services.morning_report import preserve_morning_plan_note, render_plain_text
+
+        pv = "PV\n+----+------+------+------------+------------+\n| NR | KUSH | DEP | NGA | DERI |\n+----+------+------+------------+------------+\n| 1 | DV | PCM | 23.11.2026 | 27.11.2026 |\n+----+------+------+------------+------------+"
+        existing = [
+            {"title": SECTION_TITLES[0], "body": "GA reply"},
+            {"title": SECTION_TITLES[2], "section_key": SECTION_TITLES[2],
+             "body": "VONESA: 0\n\nMUNGESA: 0\n\nNDRYSHON PLANI: Ruaje këtë vendim"},
+            {"title": SECTION_TITLES[4], "body": f"{pv}\n\nFESTA EXTERNE: 0\n\nTAKIMET EXTERNE: 0"},
+            {"title": "Pyetje manuale", "section_key": "manual:custom:1:test", "body": "Manual"},
+        ]
+        sections = normalize_morning_report_sections(existing)
+        self.assertEqual(sections[0]["title"], "Pyetje manuale")
+        first_auto = sections[1]
+        self.assertEqual(first_auto["section_key"], SECTION_TITLES[2])
+        self.assertIn("VONESA/MUNGESA/PV", first_auto["title"])
+        self.assertEqual(first_auto["body"], f"VONESA: 0\n\nMUNGESA: 0\n\n{pv}\n\nNDRYSHON PLANI: Ruaje këtë vendim")
+        context = next(section for section in sections if section["section_key"] == SECTION_TITLES[4])
+        self.assertEqual(context["body"], "FESTA EXTERNE: 0\n\nTAKIMET EXTERNE: 0")
+        self.assertEqual(normalize_morning_report_sections(sections), sections)
+        generated = preserve_morning_plan_note(normalize_morning_report_sections([]), existing)
+        self.assertIn("Ruaje këtë vendim", generated[0]["body"])
+        report_day = date(2026, 11, 23)
+        rendered = [
+            render_html("M1", report_day, sections),
+            render_plain_text("M1", report_day, sections),
+            Document(BytesIO(render_section_report_docx("M1", "M1", report_day, sections))).element.body.xml,
+        ]
+        for output in rendered:
+            self.assertLess(output.index("27.11.2026"), output.index("GA reply"))
 
     def test_standard_email_task_source_tags_are_detected(self) -> None:
         self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: INFO PX: Update catalogue")), "EM: INFO PX")
@@ -719,7 +783,9 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             [{"title": previous_title, "body": "NOTES: 2"}]
         )
 
-        self.assertEqual(sections[3], {"title": "(GA) NOTES TE REJA?", "body": "NOTES: 2"})
+        notes = next(section for section in sections if section["section_key"] == SECTION_TITLES[3])
+        self.assertEqual(notes["title"], "(GA) NOTES TE REJA ( NOT DISSCUSED)?")
+        self.assertEqual(notes["body"], "NOTES: 2")
 
     def test_normalization_drops_duplicate_near_match_email_section(self) -> None:
         variant_emails_title = (
@@ -734,10 +800,10 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        self.assertEqual(len(sections), 6)
-        self.assertEqual([section["title"] for section in sections], SECTION_TITLES)
-        self.assertEqual(sections[1]["body"], "EMAIL INFO PX (KO SPAM): first")
-        self.assertEqual(sections[5]["body"], "IN PROGRESS: 1")
+        self.assertEqual([section["section_key"] for section in sections], DISPLAY_SECTION_TITLES)
+        bodies = {section["section_key"]: section["body"] for section in sections}
+        self.assertEqual(bodies[SECTION_TITLES[1]], "EMAIL INFO PX (KO SPAM): first")
+        self.assertEqual(bodies[SECTION_TITLES[5]], "IN PROGRESS: 1")
 
     def test_normalization_splits_legacy_notes_emails_into_manual_section(self) -> None:
         legacy_notes = (
@@ -754,12 +820,10 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        self.assertEqual(
-            sections[1]["body"],
-            "EMAIL INFO PX (KO SPAM): checked",
-        )
-        self.assertIn("NOTES: 1", sections[3]["body"])
-        self.assertNotIn("EMAIL INFO PX", sections[3]["body"])
+        bodies = {section["section_key"]: section["body"] for section in sections}
+        self.assertEqual(bodies[SECTION_TITLES[1]], "EMAIL INFO PX (KO SPAM): checked")
+        self.assertIn("NOTES: 1", bodies[SECTION_TITLES[3]])
+        self.assertNotIn("EMAIL INFO PX", bodies[SECTION_TITLES[3]])
 
     def test_normalization_removes_retired_task_status_prompt(self) -> None:
         sections = normalize_morning_report_sections(
@@ -769,7 +833,8 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             }]
         )
 
-        self.assertEqual(sections[1]["body"], "EMAIL INFO PX (KO SPAM): checked")
+        emails = next(section for section in sections if section["section_key"] == SECTION_TITLES[1])
+        self.assertEqual(emails["body"], "EMAIL INFO PX (KO SPAM): checked")
 
     def test_attendance_section_formats_delays_absences_and_manual_plan_decision(self) -> None:
         user_id = uuid.uuid4()
@@ -970,13 +1035,13 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         result = await update_draft(
             draft.id,
             DraftUpdate(
-                sections=[SectionPayload(title=SECTION_TITLES[2], body="Plan changes after 10:00")]
+                sections=[SectionPayload(title=SECTION_TITLES[2], body="NDRYSHON PLANI: Changes after 10:00")]
             ),
             FakeDraftDb(draft),
             staff,
         )
 
-        self.assertEqual(result["sections"][2]["body"], "Plan changes after 10:00")
+        self.assertIn("NDRYSHON PLANI: Changes after 10:00", result["sections"][0]["body"])
 
     async def test_existing_m1_personal_section_remains_ga_only(self) -> None:
         assignee_id = uuid.uuid4()

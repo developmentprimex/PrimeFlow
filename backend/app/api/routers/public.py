@@ -8,6 +8,8 @@ from app.db import get_db
 from app.models.ga_note import GaNote
 from app.models.enums import GaNoteStatus
 from app.schemas.ga_note import GaNotePublicOut
+from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN
+from app.services.info_px_notes import INFO_PX_NOTE_ORIGIN
 
 
 router = APIRouter()
@@ -32,6 +34,8 @@ async def list_public_ga_notes(
     stmt = (
         select(GaNote)
         .where(GaNote.status != GaNoteStatus.CLOSED)
+        .where(GaNote.knowledge_type.is_distinct_from(GMAIL_NOTE_ORIGIN))
+        .where(GaNote.knowledge_type.is_distinct_from(INFO_PX_NOTE_ORIGIN))
         .order_by(GaNote.created_at.desc())
         .limit(PUBLIC_NOTES_LIMIT)
     )

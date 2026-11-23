@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.report_attendance import filter_report_sections
+from app.services.report_note_attachments import section_note_attachments
 
 import uuid
 from datetime import date, datetime
@@ -19,6 +20,7 @@ from app.models.enums import UserRole
 from app.models.user import User
 from app.services.after_break_report import (
     MANUAL_SECTION_TITLES,
+    SECTION_TITLES,
     apply_1h_confirmation_questions,
     apply_unfinished_priority_task_table,
     apply_waiting_client_task_table,
@@ -177,7 +179,11 @@ async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) ->
     sections = await merge_common_view_manual_sections(
         db, sections, "after_break", row.sections, settings.manual_questions
     )
-    return _draft(row, await filter_report_sections(db, sections, row.report_date))
+    draft = _draft(row, await filter_report_sections(db, sections, row.report_date))
+    draft["note_attachments"] = await section_note_attachments(
+        db, draft["sections"], SECTION_TITLES[9], row.generated_snapshot,
+    )
+    return draft
 
 
 def _delivery_history(row: AfterBreakReportDraft) -> dict:
@@ -385,6 +391,7 @@ async def preview_draft(
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
         "html": render_html(row.subject, row.report_date, sections),
+        "note_attachments": await section_note_attachments(db, sections, SECTION_TITLES[9], row.generated_snapshot),
     }
 
 

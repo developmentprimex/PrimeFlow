@@ -17,6 +17,8 @@ from app.services.common_leave import (
     parse_common_view_entry_day,
 )
 
+LEAVE_TABLE_COLUMNS = ("NR", "KUSH", "DEP", "NGA", "DERI")
+
 
 def _key(value: Any) -> str:
     return str(value or "").strip().casefold()
@@ -319,7 +321,8 @@ async def filter_report_sections(db, sections: list[dict], day: date, *, tomorro
             cells = [line.strip().strip("|").split("|") for line in table_lines if line.lstrip().startswith("|")]
             header = [cell.strip() for cell in cells[0]] if cells else []
             owner_column = next((i for i, label in enumerate(header) if label.upper() in {"KUSH", "WHO", "USER", "PER", "PERSONI", "PERSONAT", "ASSIGNEES", "FROM"}), None)
-            if owner_column is None:
+            # The PV roster lists the people whose absence filters the task tables.
+            if owner_column is None or tuple(header) == LEAVE_TABLE_COLUMNS:
                 output.extend(table_lines)
             else:
                 rows = _merge_ascii_continuation_rows(header, [[cell.strip() for cell in row] for row in cells[1:]])

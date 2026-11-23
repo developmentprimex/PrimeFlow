@@ -5,11 +5,11 @@ from app.services.report_attendance import load_report_attendance
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -29,6 +29,7 @@ from app.models.user import User
 from app.services import discord_meetings
 from app.services import discord_one_h as one_h
 from app.services import discord_ga_replies as ga_replies
+from app.services.discord_ga_reactions import ReactionEvidence, record_reaction
 from app.services import discord_task_tools as tools
 from app.services.primeflow_report import report_timezone
 
@@ -70,6 +71,35 @@ async def save_ga_reply_snapshot(payload: ga_replies.ChannelEvidence, db: AsyncS
         where=DiscordGaReplySnapshot.captured_at <= statement.excluded.captured_at))
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bot/ga-reactions", dependencies=[Depends(require_bot)])
+async def save_ga_reaction(payload: ReactionEvidence, db: AsyncSession = Depends(get_db)):
+    await record_reaction(db, payload)
+    return {"ok": True}
+
+
+@router.get("/ga-replies/attachments")
+async def ga_reply_attachments(
+    report_date: date,
+    report: Literal["M1", "M2"],
+    message_id: Annotated[str, Query(pattern=r"^\d{1,32}$")],
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    from app.models.after_break_report_draft import AfterBreakReportDraft
+    from app.models.morning_report_draft import MorningReportDraft
+
+    model = MorningReportDraft if report == "M1" else AfterBreakReportDraft
+    draft = (await db.execute(select(model).where(model.report_date == report_date))).scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Raporti nuk u gjet.")
+    generated_at = (draft.generated_snapshot or {}).get("ga_replies_generated_at")
+    cutoff = datetime.fromisoformat(generated_at) if generated_at else draft.sent_at or datetime.now(timezone.utc)
+    files = await ga_replies.attachment_links_for_report(db, report_date, report, cutoff, message_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    return files
 
 
 class Actor(BaseModel):
