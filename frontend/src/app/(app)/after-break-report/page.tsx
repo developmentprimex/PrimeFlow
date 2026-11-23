@@ -47,8 +47,9 @@ type Draft = {
 }
 
 const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
+const GA_REACTIONS_SECTION = "A KA REACTION TE GRUPI?"
 const PCM_PROJECTS_SECTION = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
-const AUTOMATED_SECTIONS = new Set([GA_REPLIES_SECTION, PCM_PROJECTS_SECTION])
+const AUTOMATED_SECTIONS = new Set([GA_REPLIES_SECTION, GA_REACTIONS_SECTION, PCM_PROJECTS_SECTION])
 
 function isWaitingClientSection(section: Section) {
   return [section.section_key, section.title].some((value) =>

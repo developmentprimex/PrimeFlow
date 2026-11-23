@@ -32,6 +32,7 @@ const TASK_FEEDBACK_SECTION = "GA/HV/DV TASKS"
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 const MARKER_TASK_SECTIONS = new Set(["FIZIKISHT ME GA?", "A KA PYTJE/SQARIME ME KA/GENTIN"])
 const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
+const GA_REACTIONS_SECTION = "A KA REACTION TE GRUPI?"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -68,6 +69,7 @@ function sectionGroupLabel(section: Section) {
   // Built-in manuals are first; Common View–synced extras sit after them and before autos.
   const knownAuto = [
     GA_REPLIES_SECTION,
+    GA_REACTIONS_SECTION,
     TASK_FEEDBACK_SECTION,
     "GA TASKS",
     "HV TASKS",
@@ -717,7 +719,7 @@ export default function MorningReportPage() {
                           </div>
                         ) : null}
                       </div>
-                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection ? (
+                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection && sectionKey !== GA_REACTIONS_SECTION ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
                             <Pencil className="h-4 w-4" /> Edit

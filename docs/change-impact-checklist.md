@@ -168,6 +168,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   pyetje manuale e ruajtur nuk shtohet për herë të dytë në M1. Common View,
   M1 PIKAT PER RAP, M2 dhe M3 përdorin rrjedhat e tyre.
 
+- M1 dhe M2: **(GA) A KA REACTION NGA GA TEK DETYRAT NGA STAFI PER GA?** vjen pas komenteve të GA dhe
+  përdor të njëjtin kanal Discord, të njëjtin interval dhe të njëjtën kohë
+  gjenerimi si komentet e raportit përkatës. Boti ruan kohën kur merr
+  reagimin e GA ndaj një mesazhi nga stafi me lidhje aktive Discord.
+  Kontrollo reagimet ndaj mesazheve ekzistuese, kufirin e së premtes për M1
+  të së hënës, kufirin 08:00 për M2, preview, emailin dhe Word/PNG.
+  Reagimet historike pa orë të regjistruar nuk mund të futen në interval.
+  M3 dhe sinkronizimi i reagimeve për përmendjet e GA kanë rrjedha të veçanta.
+
 - M1: **GA/HV/DV TASKS** lexon përgjigjet e Discord-it nga
   `discord_m3_questions` me llojin `tomorrow_task`, sipas ID-së së detyrës,
   personit dhe datës së synuar. Për tabelën HV vlejnë personat e caktuar te

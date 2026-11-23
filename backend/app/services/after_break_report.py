@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from app.services.report_attendance import filter_task_context, filter_report_sections
 from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE, UNAVAILABLE, summary_for_day
+from app.services.discord_ga_reactions import (
+    GA_REACTIONS_SECTION_KEY,
+    GA_REACTIONS_SECTION_TITLE,
+    REACTIONS_UNAVAILABLE,
+    reaction_summary_for_day,
+)
 
 import re
 from datetime import date, datetime, time, timedelta, timezone
@@ -69,7 +75,7 @@ PCM_PROJECT_CODES = ("VS", "VL", "MST", "TT")
 PCM_CODES_REQUIRING_PROJECT = {"MST", "TT"}
 PCM_PROJECT_CODE_PATTERN = re.compile(r"(?<![A-Z0-9])(?:VS|VL|MST|TT)(?![A-Z0-9])", re.IGNORECASE)
 PCM_PROJECT_SUMMARY_PATTERN = re.compile("\n".join(f"{code} - (?:PO|JO)" for code in PCM_PROJECT_CODES))
-AUTOMATED_SECTION_TITLES = {GA_REPLIES_SECTION_TITLE, PCM_PROJECTS_TITLE}
+AUTOMATED_SECTION_TITLES = {GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_KEY, PCM_PROJECTS_TITLE}
 SECTION_TITLES = [
     "DET NGA EMAIL/ PX INFO & ZHVILLIM",
     PCM_PROJECTS_TITLE,
@@ -85,11 +91,13 @@ SECTION_TITLES = [
     "HV MBYLLJA E DET",
     WAITING_CLIENT_TABLE_LABEL,
     GA_REPLIES_SECTION_TITLE,
+    GA_REACTIONS_SECTION_KEY,
 ]
 MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],
     GA_REPLIES_SECTION_TITLE,
+    GA_REACTIONS_SECTION_KEY,
     PCM_PROJECTS_TITLE,
     SECTION_TITLES[9],  # Undiscussed notes first among auto-filled sections.
     SECTION_TITLES[6],  # Unheld internal/external meetings immediately after notes.
@@ -101,6 +109,7 @@ DISPLAY_SECTION_TITLES = [
     *SECTION_TITLES[10:12],
 ]
 SECTION_TITLE_ALIASES = {
+    GA_REACTIONS_SECTION_TITLE: GA_REACTIONS_SECTION_KEY,
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[9],
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED?": SECTION_TITLES[9],
     # Preserve the user's edited display title while recovering this existing
@@ -801,9 +810,12 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         if title == PCM_PROJECTS_TITLE and not PCM_PROJECT_SUMMARY_PATTERN.fullmatch(body):
             body = ""
         if title in SECTION_TITLES and title not in by_title:
+            visible_title = raw_title if section_key or raw_title in SECTION_TITLE_ALIASES else title
+            if title == GA_REACTIONS_SECTION_KEY:
+                visible_title = GA_REACTIONS_SECTION_TITLE
             by_title[title] = {
                 "section_key": title,
-                "title": raw_title if section_key or raw_title in SECTION_TITLE_ALIASES else title,
+                "title": visible_title,
                 "body": body,
             }
         elif title:
@@ -838,6 +850,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             body = "(Ploteso manualisht)"
         elif title == GA_REPLIES_SECTION_TITLE:
             body = UNAVAILABLE
+        elif title == GA_REACTIONS_SECTION_KEY:
+            body = REACTIONS_UNAVAILABLE
         elif title == PCM_PROJECTS_TITLE:
             body = ""
         elif title == SECTION_TITLES[4]:
@@ -863,7 +877,9 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             body = "TODO: 0\n\nIN PROGRESS: 0\n\nDONE: 0\n\nLATE: 0"
         else:
             body = "NOTES: 0"
-        normalized.append({"section_key": title, "title": title, "body": body})
+        normalized.append({"section_key": title,
+                           "title": GA_REACTIONS_SECTION_TITLE if title == GA_REACTIONS_SECTION_KEY else title,
+                           "body": body})
     # Keep Common View–synced manuals with the other manuals (before auto sections).
     manual_count = len(MANUAL_SECTION_TITLES)
     from app.services.meeting_point_manual_sync import order_custom_manual_sections
@@ -1096,6 +1112,8 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         {"section_key": PCM_PROJECTS_TITLE, "title": PCM_PROJECTS_TITLE, "body": await _load_pcm_projects_summary(db, report_day)},
         {"section_key": GA_REPLIES_SECTION_TITLE, "title": GA_REPLIES_SECTION_TITLE,
          "body": await summary_for_day(db, report_day, report="M2", generated_at=generated_at)},
+        {"section_key": GA_REACTIONS_SECTION_KEY, "title": GA_REACTIONS_SECTION_TITLE,
+         "body": await reaction_summary_for_day(db, report_day, report="M2", generated_at=generated_at)},
         {
             "title": SECTION_TITLES[4],
             "body": _normalize_section(
@@ -1133,7 +1151,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         {"title": SECTION_TITLES[10], "body": ga_section},
         {"title": SECTION_TITLES[11], "body": hv_section},
     ]
-    sections_by_title = {section["title"]: section for section in sections}
+    sections_by_title = {section.get("section_key", section["title"]): section for section in sections}
     sections = [sections_by_title[title] for title in DISPLAY_SECTION_TITLES]
     snapshot = {
         "report_day": report_day.isoformat(),

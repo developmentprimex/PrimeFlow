@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from uuid import uuid4
 
 import discord
+import httpx
 
 from app.config import settings
 
@@ -79,3 +81,54 @@ async def sync(bot):
         # Never turn missing permissions, empty content, or a failed read into "0 pending".
         evidence = {**context, "status": "UNAVAILABLE", "messages": []}
     await bot.bridge("/bot/ga-replies/snapshot", evidence)
+
+
+async def capture_reaction(bot, event, observed_at):
+    """Read a public staff-channel message only after verifying the reactor is GA."""
+    guild_id = settings.DISCORD_GUILD_ID
+    channel_id = settings.DISCORD_GA_REPLIES_CHANNEL_ID
+    if not channel_id or event.guild_id is None or str(event.guild_id) != guild_id:
+        return
+    guild = bot.get_guild(event.guild_id)
+    if guild is None:
+        return
+    channel = guild.get_channel_or_thread(event.channel_id)
+    if channel is not None and not _in_staff_channel(channel, channel_id):
+        return
+    context = await bot.bridge("/bot/ga-replies/context", {})
+    if str(event.user_id) != context["ga_user_id"]:
+        return
+    # Uncached public threads may arrive as raw Gateway events.
+    channel = channel or await guild.fetch_channel(event.channel_id)
+    if not _in_staff_channel(channel, channel_id):
+        return
+    message = await channel.fetch_message(event.message_id)
+    if message.author.id == event.user_id:
+        return
+    evidence = message_evidence(message, context["ga_user_id"])
+    if evidence is None:
+        return
+
+    payload = {
+        "event_id": str(uuid4()),
+        "guild_id": guild_id,
+        "channel_id": channel_id,
+        "ga_user_id": context["ga_user_id"],
+        "message_id": evidence["id"],
+        "message_author_id": evidence["author_id"],
+        "message_content": evidence["content"],
+        "has_attachments": bool(evidence["attachments"]),
+        "emoji": event.emoji.name if event.emoji.id is None else f":{event.emoji.name}:",
+        "observed_at": observed_at.isoformat(),
+    }
+    try:
+        await bot.bridge("/bot/ga-reactions", payload)
+    except httpx.TransportError:
+        await asyncio.sleep(1)
+        await bot.bridge("/bot/ga-reactions", payload)
+
+
+def _in_staff_channel(channel, channel_id):
+    if isinstance(channel, discord.TextChannel):
+        return str(channel.id) == channel_id
+    return isinstance(channel, discord.Thread) and str(channel.parent_id) == channel_id and not channel.is_private()
