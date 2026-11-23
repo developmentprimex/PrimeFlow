@@ -146,6 +146,12 @@ class Settings(BaseSettings):
     MS_MAIL_SIGNING_KEY: str | None = None
     MS_MAIL_TENANT_ID: str | None = None
     MS_MAIL_REDIRECT_URI: str | None = None
+    MS_MAIL_IT_CLIENT_ID: str | None = None
+    MS_MAIL_IT_CLIENT_SECRET: str | None = None
+    MS_MAIL_IT_TENANT_ID: str | None = None
+    GMAIL_PX_EU_CLIENT_ID: str | None = None
+    GMAIL_PX_EU_CLIENT_SECRET: str | None = None
+    GMAIL_PX_EU_REDIRECT_URI: str | None = None
     # Microsoft To Do for the GA assistant; off = Microsoft connect asks for the same permissions as before.
     MS_TODO_ENABLED: bool = False
     # Optional: To Do list (id, or a unique name) for reminders created by the GA assistant.

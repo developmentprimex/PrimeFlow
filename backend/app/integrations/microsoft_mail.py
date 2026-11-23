@@ -1,11 +1,13 @@
-"""OAuth and read-only Microsoft Graph calls for INFO PX."""
+"""OAuth and read-only Microsoft Graph calls for company mailboxes."""
 
 from __future__ import annotations
 
 import base64
 import hashlib
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from urllib.parse import quote, urlencode
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -14,36 +16,59 @@ from bs4 import BeautifulSoup
 from app.config import settings
 
 
-MAILBOX = "info@primexeu.com"
 SCOPES = "offline_access User.Read Mail.Read"
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
+INFO_PX_NOTE_ORIGIN = "INFO_PX_MAIL"
+IT_NOTE_ORIGIN = "IT_MAIL"
 
 
-def _oauth_endpoint(action: str) -> str:
-    tenant = quote(settings.MS_MAIL_TENANT_ID or "", safe="")
+MailboxKey = Literal["info-px", "it"]
+
+
+@dataclass(frozen=True)
+class Mailbox:
+    token_id: int
+    email: str
+    label: str
+    note_origin: str
+    client_id: str | None
+    client_secret: str | None
+    tenant_id: str | None
+
+
+def mailbox_for(key: MailboxKey) -> Mailbox:
+    if key == "it":
+        return Mailbox(2, "it@forestdream.de", "EM IT", IT_NOTE_ORIGIN, settings.MS_MAIL_IT_CLIENT_ID,
+                       settings.MS_MAIL_IT_CLIENT_SECRET, settings.MS_MAIL_IT_TENANT_ID)
+    return Mailbox(1, "info@primexeu.com", "EM INFO PX", INFO_PX_NOTE_ORIGIN, settings.MS_MAIL_CLIENT_ID,
+                   settings.MS_MAIL_CLIENT_SECRET, settings.MS_MAIL_TENANT_ID)
+
+
+def _oauth_endpoint(action: str, mailbox: Mailbox) -> str:
+    tenant = quote(mailbox.tenant_id or "", safe="")
     return f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/{action}"
 
 
-def authorization_url(state: str, verifier: str) -> str:
+def authorization_url(state: str, verifier: str, mailbox: Mailbox) -> str:
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     params = {
-        "client_id": settings.MS_MAIL_CLIENT_ID,
+        "client_id": mailbox.client_id,
         "redirect_uri": settings.MS_MAIL_REDIRECT_URI,
         "response_type": "code",
         "response_mode": "query",
         "scope": SCOPES,
-        "login_hint": MAILBOX,
+        "login_hint": mailbox.email,
         "state": state,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
     }
-    return f"{_oauth_endpoint('authorize')}?{urlencode(params)}"
+    return f"{_oauth_endpoint('authorize', mailbox)}?{urlencode(params)}"
 
 
-async def request_token(client: httpx.AsyncClient, grant: dict[str, str]) -> dict:
-    response = await client.post(_oauth_endpoint("token"), data={
-        "client_id": settings.MS_MAIL_CLIENT_ID,
-        "client_secret": settings.MS_MAIL_CLIENT_SECRET,
+async def request_token(client: httpx.AsyncClient, grant: dict[str, str], mailbox: Mailbox) -> dict:
+    response = await client.post(_oauth_endpoint("token", mailbox), data={
+        "client_id": mailbox.client_id,
+        "client_secret": mailbox.client_secret,
         "redirect_uri": settings.MS_MAIL_REDIRECT_URI,
         "scope": SCOPES,
         **grant,
@@ -68,11 +93,11 @@ async def _get(client: httpx.AsyncClient, url: str, token: str, **kwargs) -> dic
     return response.json()
 
 
-async def validate_mailbox(client: httpx.AsyncClient, token: str) -> None:
+async def validate_mailbox(client: httpx.AsyncClient, token: str, mailbox: Mailbox) -> None:
     profile = await _get(client, f"{GRAPH_URL}/me", token, params={"$select": "mail,userPrincipalName"})
     email = (profile.get("mail") or profile.get("userPrincipalName") or "").strip().casefold()
-    if email != MAILBOX:
-        raise ValueError("Sign in as info@primexeu.com.")
+    if email != mailbox.email:
+        raise ValueError("The signed-in account does not match the selected mailbox.")
 
 
 async def _collection(client: httpx.AsyncClient, url: str, token: str, params: dict):

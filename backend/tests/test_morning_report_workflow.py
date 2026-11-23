@@ -28,6 +28,7 @@ from app.services.meeting_point_manual_sync import is_known_report_title, merge_
 from app.services.morning_report import (
     DISPLAY_SECTION_TITLES,
     GA_HV_DV_TASKS_TITLE,
+    GA_PF_COMMENTS_TITLE,
     MANUAL_SECTION_TITLES,
     GA_TASKS_TITLE,
     KA_GENT_QUESTIONS_TITLE,
@@ -45,6 +46,8 @@ from app.services.morning_report import (
     _group_marked_tasks,
     _marker_task_table,
     _marked_tasks_for_day,
+    _load_symbol_comments,
+    _symbol_comment_table,
     normalize_morning_report_sections,
     render_html,
     render_plain_text,
@@ -123,7 +126,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertEqual(tyo_by_title["Multi-day today"], "T")
 
     def test_requested_section_order_is_used_in_m1_and_email(self) -> None:
-        comments = "(GA) A KA KOMENTE NE PF?"
+        comments = GA_PF_COMMENTS_TITLE
         expected = [
             SECTION_TITLES[2], GA_HV_DV_TASKS_TITLE, PHYSICAL_GA_TITLE, SECTION_TITLES[1],
             SECTION_TITLES[0], GA_REACTIONS_SECTION_KEY, comments, SECTION_TITLES[3],
@@ -136,8 +139,8 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         ]
         sections = normalize_morning_report_sections([manual, *saved])
         self.assertEqual([section["section_key"] for section in sections], [manual["section_key"], *expected])
-        self.assertEqual(sections[7]["body"], "(Ploteso manualisht)")
-        self.assertEqual(section_group_label("morning", comments, comments), "MANUAL QUESTIONS")
+        self.assertIn("(Asnje koment te simbolet)", sections[7]["body"])
+        self.assertEqual(section_group_label("morning", comments, comments), "AUTO-FILLED FROM PRIMEFLOW")
         report_day = date(2026, 9, 1)
         document = Document(BytesIO(render_section_report_docx("M1", "M1", report_day, sections)))
         for output in (
@@ -151,7 +154,48 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         regenerated = preserve_manual_sections(normalize_morning_report_sections([]), [
             {"title": comments, "section_key": comments, "body": "Dy komente për diskutim"},
         ], MANUAL_SECTION_TITLES)
-        self.assertEqual(normalize_morning_report_sections(regenerated)[6]["body"], "Dy komente për diskutim")
+        self.assertIn("(Asnje koment te simbolet)", normalize_morning_report_sections(regenerated)[6]["body"])
+
+    def test_symbol_comments_use_a_saved_table_in_every_m1_format(self) -> None:
+        report_day = date(2026, 9, 1)
+        body = _symbol_comment_table([[
+            "1", "GA", "DEV", "AM", "SYS", "TODO", "!", "Verify task",
+            "Only the saved comment", "01.09.2026 08:35",
+        ]])
+        sections = [{"title": GA_PF_COMMENTS_TITLE, "section_key": GA_PF_COMMENTS_TITLE, "body": body}]
+        document = Document(BytesIO(render_section_report_docx("M1", "M1", report_day, sections)))
+        for output in (
+            render_html("M1", report_day, sections),
+            render_plain_text("M1", report_day, sections),
+            document.element.body.xml,
+        ):
+            self.assertIn("Verify task", output)
+            self.assertIn("Only the saved comment", output)
+        self.assertTrue(render_section_report_png("M1", "M1", report_day, sections).startswith(b"\x89PNG"))
+
+    def test_symbol_comments_use_the_previous_calendar_day_and_generation_cutoff(self) -> None:
+        import asyncio
+
+        zone = ZoneInfo("Europe/Budapest")
+        generated_at = datetime(2026, 9, 7, 8, 35, tzinfo=zone)
+        event = SimpleNamespace(
+            task_id="task", marker="P!", comment="New | comment",
+            created_at=datetime(2026, 9, 6, 16, 30, tzinfo=zone),
+        )
+        task = self._task("Review task", id="task", one_h_marker="F")
+        other = self._task("Without comment", id="other")
+        db = Mock()
+        result = Mock()
+        result.scalars.return_value.all.return_value = [event]
+        db.execute = AsyncMock(return_value=result)
+        with patch("app.services.morning_report.report_timezone", return_value=zone):
+            rows = asyncio.run(_load_symbol_comments(db, generated_at.date(), generated_at, [task, other], {}, {}, {}))
+        statement = db.execute.await_args.args[0]
+        self.assertEqual(list(statement.compile().params.values()), [
+            datetime(2026, 9, 6, 16, 30, tzinfo=zone), generated_at, datetime(2026, 9, 8, tzinfo=zone),
+        ])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][7:], ["Review task", "New ｜ comment", "06.09.2026 16:30"])
 
     def test_physical_ga_includes_the_report_day_within_the_local_task_range(self) -> None:
         report_day = date(2026, 9, 1)

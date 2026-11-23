@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from email.message import Message
 from pathlib import Path
 from tempfile import gettempdir
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -79,6 +81,17 @@ def extract_gmail_text(part: dict) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
+async def fetch_gmail_body_parts(get: Callable[..., Awaitable[dict]], message_id: str, part: dict) -> None:
+    if _is_attached_part(part):
+        return
+    body = part.get("body") or {}
+    if part.get("mimeType") in {"text/plain", "text/html"} and not body.get("data") and body.get("attachmentId"):
+        path = f"messages/{quote(message_id, safe='')}/attachments/{quote(body['attachmentId'], safe='')}"
+        part["body"] = await get(path, fields="data")
+    for child in part.get("parts") or []:
+        await fetch_gmail_body_parts(get, message_id, child)
+
+
 async def read_m1_gmail_messages(
     report_day: date,
     report_tz: ZoneInfo,
@@ -122,15 +135,6 @@ async def read_labeled_gmail_messages(*, include_body: bool = False) -> list[Gma
             response.raise_for_status()
             return response.json()
 
-        async def fetch_body_parts(message_id: str, part: dict) -> None:
-            if _is_attached_part(part):
-                return
-            body = part.get("body") or {}
-            if part.get("mimeType") in {"text/plain", "text/html"} and not body.get("data") and body.get("attachmentId"):
-                part["body"] = await get(f"messages/{message_id}/attachments/{body['attachmentId']}", fields="data")
-            for child in part.get("parts") or []:
-                await fetch_body_parts(message_id, child)
-
         profile = await get("profile", fields="emailAddress")
         if profile["emailAddress"].casefold() != _MAILBOX:
             raise ValueError("The authorized Gmail account does not match the M1 pilot.")
@@ -163,7 +167,7 @@ async def read_labeled_gmail_messages(*, include_body: bool = False) -> list[Gma
                     for header in payload.get("headers", [])
                 }
                 if include_body:
-                    await fetch_body_parts(message_id, payload)
+                    await fetch_gmail_body_parts(get, message_id, payload)
                 rows.append(GmailMessage(
                     message_id, headers.get("subject", ""), headers.get("from", ""), received_at,
                     extract_gmail_text(payload) if include_body else "",

@@ -90,20 +90,31 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
-- INFO PX në pikën 8 të M1 lexon trupin e mesazheve nga Inbox i Outlook-ut
+- INFO PX dhe EM IT në pikën 8 të M1 lexojnë tekstin nga Inbox-et e Outlook-ut
   me Microsoft Graph `Mail.Read`. Çdo përdorues i kyçur që hap M1 mund ta
   shohë tabelën dhe vetëm administratori autorizon mailbox-in. Rifreskimi
-  ruan nga një PX Note për çdo ID mesazhi, me prefiksin `EM INFO PX -`,
+  ruan nga një PX Note për çdo ID mesazhi dhe mailbox, me prefiksin
+  `EM INFO PX -` ose `EM IT -`,
   subjektin, dërguesin dhe tekstin. Kontrollo pikën e shënimeve në M1,
   M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow dhe Excel të PX Notes,
   si edhe përjashtimin nga API-ja publike. Tabela e Outlook-ut në pikën 8
   lexohet veç përmbajtjes së draftit.
 
+- EM PX EU lexon Inbox-in e Gmail për datën e M1 me `gmail.readonly`. Një
+  administrator autorizon llogarinë `primex.eu@gmail.com`. Hapja ose rifreskimi
+  i tabelës në pikën 8 ruan një PX Note për çdo mesazh me prefiksin `EM PX EU -`,
+  subjektin, dërguesin dhe tekstin. Verifiko filtrin Email në PX Notes, shënimet
+  në M1, M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow, Excel të PX Notes
+  dhe përjashtimin nga API-ja publike. Tabela burimore shfaqet në ekranin e M1.
+
 - Renditja e pikave në M1 Start of Day përdoret edhe nga preview-ja, teksti
   dhe emaili me bashkëngjitjet Word/PNG, në dërgimin manual dhe automatik.
-  Pyetja manuale për komentet në PrimeFlow qëndron mes reagimeve të GA dhe
-  Notes. Kontrollo ruajtjen e përgjigjes kur rigjenerohet raporti i së njëjtës
-  datë dhe renditjen e pyetjeve të shtuara nga M1 ose nga Common View.
+  Tabela automatike «A KA KOMENTE NE PF?» qëndron mes reagimeve të GA dhe
+  Notes. Gjenerimi merr ngjarjet e komentit te një simbol nga 16:30 e ditës
+  së mëparshme deri në kohën e gjenerimit për datën e raportit. Ndryshimi
+  vetëm i simbolit dhe komenti pa simbol nuk krijojnë rresht. Kontrollo që
+  daljet e M1 përdorin tabelën e ruajtur, si edhe renditjen e pyetjeve të
+  shtuara nga M1 ose Common View.
 
 - Pika «DET NGA EMAILS TE REJA» në M1 Start of Day ka edhe një pilot lokal për leximin e subjektit,
   dërguesit, orës dhe përmbajtjes

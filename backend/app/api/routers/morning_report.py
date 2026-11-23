@@ -28,6 +28,7 @@ from app.services.ga_identity import is_ga_user, resolve_ga_user
 from app.services.audit import add_audit_log
 from app.services.task_plan_feedback import finance_feedback_user, load_task_plan_feedback
 from app.services.meeting_point_manual_sync import (
+    canonical_report_section_key,
     custom_manual_questions,
     merge_common_view_manual_sections,
     reconcile_custom_manual_questions,
@@ -35,8 +36,9 @@ from app.services.meeting_point_manual_sync import (
     with_section_keys,
 )
 from app.services.morning_report import (
-    MANUAL_SECTION_TITLES,
     GA_HV_DV_TASKS_TITLE,
+    GA_PF_COMMENTS_TITLE,
+    MANUAL_SECTION_TITLES,
     MARKER_TASK_SECTIONS,
     SECTION_TITLES,
     TASK_FEEDBACK_OVERRIDES,
@@ -475,9 +477,14 @@ async def update_draft(
             }
             for section in payload.sections
             if section.section_key not in MARKER_TASK_SECTIONS
+            and canonical_report_section_key("morning", section.section_key or section.title) != GA_PF_COMMENTS_TITLE
             and not is_removed_morning_manual_question(section.title, section.section_key)
         ])
-        saved.extend(section for section in existing if section.get("section_key") in MARKER_TASK_SECTIONS)
+        saved.extend(
+            section for section in existing
+            if section.get("section_key") in MARKER_TASK_SECTIONS
+            or canonical_report_section_key("morning", section.get("section_key") or section["title"]) == GA_PF_COMMENTS_TITLE
+        )
         previous_questions = custom_manual_questions(existing)
         current_questions = custom_manual_questions(saved)
         if current_questions != previous_questions:

@@ -5,7 +5,7 @@ from app.services.report_attendance import LEAVE_TABLE_COLUMNS, filter_task_cont
 import logging
 import re
 from collections.abc import Sequence, Set
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -18,6 +18,7 @@ from app.services.task_plan_feedback import load_task_plan_feedback
 from app.models.enums import CommonCategory
 from app.models.meeting import Meeting
 from app.models.task import Task
+from app.models.task_symbol_comment_event import TaskSymbolCommentEvent
 from app.models.user import User
 from app.services.after_break_report import (
     BLUE_NOTE_COLUMNS,
@@ -39,7 +40,7 @@ from app.services.discord_ga_reactions import (
     REACTIONS_UNAVAILABLE,
     reaction_summary_for_day,
 )
-from app.services.task_marker import active_one_h_marker
+from app.services.task_marker import active_one_h_marker, one_h_marker_label
 from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
@@ -48,6 +49,7 @@ from app.services.meetings_report import (
     _assignee_names,
     apply_weekly_planner_task_order,
     _bz_alignment_lines,
+    _clean_task_title,
     _effective_task_assignee_ids,
     _initials,
     _is_open,
@@ -128,7 +130,11 @@ SECTION_DISPLAY_TITLES = {
     SECTION_TITLES[2]: "(GA) VONESA/MUNGESA/PV. A NDRYSHON PLANI PER SOT?",
     SECTION_TITLES[4]: "FESTA EXT/TAK EXT/TAK INT/BZ ME GA/BLLOK:",
 }
-MANUAL_SECTION_TITLES = {GA_PF_COMMENTS_TITLE}
+MANUAL_SECTION_TITLES: set[str] = set()
+SYMBOL_COMMENT_COLUMNS = [
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7),
+    ("STATUS", 18), ("SIMBOLI", 12), ("TITULLI", 52), ("KOMENT", 45), ("DATA / ORA", 16),
+]
 GA_HV_DV_TASK_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7),
     ("STATUS", 18), ("T/Y/O", 5), ("TITULLI", 52), ("VAZHDON?", 8), ("KOMENT", 45),
@@ -176,7 +182,7 @@ def _emails_default_body() -> str:
 
 def _default_body(title: str) -> str:
     if title == GA_PF_COMMENTS_TITLE:
-        return "(Ploteso manualisht)"
+        return _symbol_comment_table([])
     if title == SECTION_TITLES[0]:
         return "Përgjigjet GA nga Discord përditësohen kur gjenerohet raporti."
     if title == GA_REACTIONS_SECTION_KEY:
@@ -295,6 +301,8 @@ def is_removed_morning_manual_question(title: str | None, section_key: str | Non
     key = (section_key or "").strip()
     if key and not key.startswith("manual:"):
         return False
+    if key and _canonical_section_title(title or "") == GA_PF_COMMENTS_TITLE:
+        return True
     for value in (title, key):
         compact = _compact_section_title((value or "").upper().replace("Ë", "E"))
         compact = re.sub(r"^(?:MANUAL)?\d*", "", compact)
@@ -823,6 +831,73 @@ def _marker_task_table(
     ))
 
 
+def _symbol_comment_table(rows: list[list[str]]) -> str:
+    if not rows:
+        rows = [["-", "-", "-", "-", "-", "-", "-", "(Asnje koment te simbolet)", "-", "-"]]
+    return _normalize_section(_ascii_table("KOMENTET TE SIMBOLET", SYMBOL_COMMENT_COLUMNS, rows))
+
+
+async def _load_symbol_comments(
+    db: AsyncSession,
+    report_day: date,
+    generated_at: datetime,
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    department_codes: dict[Any, str],
+) -> list[list[str]]:
+    if not tasks:
+        return []
+    tz = report_timezone()
+    start = datetime.combine(report_day - timedelta(days=1), time(16, 30), tz)
+    next_day = datetime.combine(report_day + timedelta(days=1), time.min, tz)
+    events = (await db.execute(
+        select(TaskSymbolCommentEvent).where(
+            TaskSymbolCommentEvent.created_at >= start,
+            TaskSymbolCommentEvent.created_at <= generated_at,
+            TaskSymbolCommentEvent.created_at < next_day,
+        ).order_by(TaskSymbolCommentEvent.created_at.desc(), TaskSymbolCommentEvent.id.desc())
+    )).scalars().all()
+
+    by_task: dict[Any, list[TaskSymbolCommentEvent]] = {}
+    for event in events:
+        by_task.setdefault(event.task_id, []).append(event)
+    grouped: dict[tuple, tuple[Task, TaskSymbolCommentEvent, set[Any]]] = {}
+    ordered = sorted((task for task in tasks if task.id in by_task), key=lambda task: (
+        bool(task.completed_at) or _normalize_report_status(task.status) == "DONE",
+        common_view_task_sort_key(task, names, assignee_ids_by_task),
+        str(task.id),
+    ))
+    for task in ordered:
+        owners = assignee_ids_by_task.get(task.id, {task.assigned_to} if task.assigned_to else set())
+        for event in by_task[task.id]:
+            comment = " ".join(event.comment.split())
+            if not comment or not event.marker.strip():
+                continue
+            key = (_marked_task_identity(task), event.marker, comment)
+            representative, latest, combined = grouped.get(key, (task, event, set()))
+            combined.update(owners)
+            if event.created_at > latest.created_at:
+                latest = event
+            grouped[key] = representative, latest, combined
+
+    rows = []
+    for index, (task, event, owners) in enumerate(grouped.values(), 1):
+        title = _clean_task_title(
+            task.title,
+            is_system_task=bool(task.system_template_origin_id or getattr(task, "system_task_slot_id", None)),
+        )
+        rows.append([
+            str(index), _task_owners(task, names, {task.id: owners}, show_all_assignees=True),
+            _m3_department_label(task, department_codes), _m3_am_pm_label(task), _m3_task_type_label(task),
+            _normalize_report_status(task.status), one_h_marker_label(event.marker),
+            _strip_status_markers(title).replace("|", "｜"),
+            TECHNICAL_TAG.sub("", _strip_status_markers(event.comment)).replace("|", "｜"),
+            event.created_at.astimezone(tz).strftime("%d.%m.%Y %H:%M"),
+        ])
+    return rows
+
+
 async def refresh_morning_task_tables(
     db: AsyncSession,
     sections: list[dict[str, str]],
@@ -1129,11 +1204,15 @@ async def build_morning_report_sections(
     ]
 
     attendance = _attendance_section(entries, names, report_day)
+    symbol_comments = await _load_symbol_comments(
+        db, report_day, generated_at, tasks, names, assignee_ids_by_task, department_codes,
+    )
     from app.services.discord_ga_replies import summary_for_day
     sections = [
         {"title": SECTION_TITLES[0], "body": await summary_for_day(db, report_day, report="M1", generated_at=generated_at)},
         {"section_key": GA_REACTIONS_SECTION_KEY, "title": GA_REACTIONS_SECTION_TITLE,
          "body": await reaction_summary_for_day(db, report_day, report="M1", generated_at=generated_at)},
+        {"title": GA_PF_COMMENTS_TITLE, "body": _symbol_comment_table(symbol_comments)},
         {"title": GA_HV_DV_TASKS_TITLE, "body": task_tables},
         {"title": SECTION_TITLES[1], "body": email_tasks},
         {"title": SECTION_TITLES[2], "body": attendance},
@@ -1156,6 +1235,7 @@ async def build_morning_report_sections(
         TASK_FEEDBACK_OVERRIDES: task_feedback_overrides or {},
         "counts": {
             SECTION_TITLES[0]: 0,
+            GA_PF_COMMENTS_TITLE: len(symbol_comments),
             GA_HV_DV_TASKS_TITLE: sum(len(rows) for title, rows in feedback_rows.items() if title != "plan"),
             SECTION_TITLES[1]: email_task_count,
             SECTION_TITLES[2]: pv_count + sum(

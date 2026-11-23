@@ -17,7 +17,7 @@ from app.api.routers.ga_time_slots import router as ga_time_slots_router
 from app.api.routers.internal_meeting_sessions import router as internal_meeting_sessions_router
 from app.api.routers.internal_notes import router as internal_notes_router
 from app.api.routers.microsoft import router as microsoft_router
-from app.api.routers.microsoft_mail import router as microsoft_mail_router
+from app.api.routers.microsoft_mail import gmail_router, router as microsoft_mail_router
 from app.api.routers.meetings import router as meetings_router
 from app.api.routers.meeting_recordings import router as meeting_recordings_router
 from app.api.routers.meeting_notes import router as meeting_notes_router
@@ -97,6 +97,7 @@ api_router.include_router(internal_meeting_sessions_router, prefix="/internal-me
 api_router.include_router(internal_notes_router, prefix="/internal-notes", tags=["internal-notes"])
 api_router.include_router(microsoft_router, prefix="/microsoft", tags=["microsoft"])
 api_router.include_router(microsoft_mail_router, prefix="/microsoft-mail", tags=["microsoft-mail"])
+api_router.include_router(gmail_router, prefix="/gmail-mail", tags=["gmail-mail"])
 api_router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
 api_router.include_router(meeting_recordings_router, prefix="/meeting-recordings", tags=["meeting-recordings"])
 api_router.include_router(meeting_notes_router, prefix="/meeting-notes", tags=["meeting-notes"])

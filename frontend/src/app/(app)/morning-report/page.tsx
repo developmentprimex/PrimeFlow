@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
-import { InfoPxOutlook } from "@/components/info-px-outlook"
+import { ReportMailbox } from "@/components/report-mailbox"
 import { installReportNoteControls, ReportNoteAttachmentDialog, ReportNoteCell, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
 import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
@@ -75,6 +75,7 @@ function sectionGroupLabel(section: Section) {
   const knownAuto = [
     GA_REPLIES_SECTION,
     GA_REACTIONS_SECTION,
+    GA_PF_COMMENTS_SECTION,
     TASK_FEEDBACK_SECTION,
     "GA TASKS",
     "HV TASKS",
@@ -440,7 +441,7 @@ export default function MorningReportPage() {
   const addManualQuestion = async (title: string, position: number) => {
     if (!draft) return false
     const sections = addManualReportSection(draft.sections, title, position, (section) =>
-      sectionGroupLabel(section) === "Manual questions" && (section.section_key || section.title) !== GA_PF_COMMENTS_SECTION,
+      sectionGroupLabel(section) === "Manual questions",
     )
     if (!sections) {
       toast.error("Kjo pikë ekziston tashmë")
@@ -510,6 +511,9 @@ export default function MorningReportPage() {
           <p className="text-sm text-muted-foreground">Editable morning M1 summary for the start of the day.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {draft && canEdit && !draft.sections.some((section) => sectionGroupLabel(section) === "Manual questions") ? (
+            <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} />
+          ) : null}
           <Button variant="outline" onClick={() => void loadDraft()} disabled={loading}>
             <RefreshCw className={loading ? "animate-spin" : ""} /> Refresh
           </Button>
@@ -726,7 +730,6 @@ export default function MorningReportPage() {
                             <span className="mt-2 text-sm font-semibold tabular-nums">{index + 1}.</span>
                             <Input
                               value={editingSection.title}
-                              readOnly={sectionKey === GA_PF_COMMENTS_SECTION}
                               onChange={(event) =>
                                 setEditingSection((current) =>
                                   current ? { ...current, title: event.target.value } : current
@@ -745,7 +748,8 @@ export default function MorningReportPage() {
                           </div>
                         ) : null}
                       </div>
-                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection && sectionKey !== GA_REACTIONS_SECTION ? (
+                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection &&
+                        sectionKey !== GA_REACTIONS_SECTION && sectionKey !== GA_PF_COMMENTS_SECTION ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
                             <Pencil className="h-4 w-4" /> Edit
@@ -771,7 +775,7 @@ export default function MorningReportPage() {
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         discordReplyReport={(section.section_key || section.title) === GA_REPLIES_SECTION
                           ? { report: "M1", date: draft.report_date } : undefined}
-                        emphasizeOwnerSeparator={isMarkerTaskSection}
+                        emphasizeOwnerSeparator={isMarkerTaskSection || sectionKey === GA_PF_COMMENTS_SECTION}
                         renderLine={isTaskFeedbackSection && canEdit ? (line) => {
                           const plans = draft.task_feedback_rows?.plan ?? []
                           const row = plans.find((plan) =>
@@ -839,7 +843,11 @@ export default function MorningReportPage() {
                       />
                     )}
                     {sectionKey === "(GA) DET NGA EMAILS TE REJA" && !isEditing && (
-                      <InfoPxOutlook key={draft.report_date} reportDate={draft.report_date} />
+                      <React.Fragment key={draft.report_date}>
+                        <ReportMailbox source="info-px" reportDate={draft.report_date} />
+                        <ReportMailbox source="it" reportDate={draft.report_date} />
+                        <ReportMailbox source="px-eu" reportDate={draft.report_date} />
+                      </React.Fragment>
                     )}
                   </div>
                 </React.Fragment>

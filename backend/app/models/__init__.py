@@ -91,6 +91,7 @@ from app.models.system_task_template_alignment_role import SystemTaskTemplateAli
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
 from app.models.task_marker_comment_inbox import TaskMarkerCommentInbox
+from app.models.task_symbol_comment_event import TaskSymbolCommentEvent
 from app.models.task_assignee import TaskAssignee
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
