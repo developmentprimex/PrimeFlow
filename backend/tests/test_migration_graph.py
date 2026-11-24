@@ -9,6 +9,9 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 import sqlalchemy as sa
+from alembic.util import CommandError
+
+from scripts.check_deploy_migrations import planned_head
 
 
 def migration_scripts() -> ScriptDirectory:
@@ -18,6 +21,20 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_production_preflight_accepts_known_revisions(self) -> None:
+        scripts = migration_scripts()
+        head = scripts.get_current_head()
+        for current in ((head,), ("0205_px_note_email_source",)):
+            with self.subTest(current=current):
+                self.assertEqual(planned_head(scripts, current), head)
+
+    def test_production_preflight_rejects_unknown_or_missing_revision(self) -> None:
+        scripts = migration_scripts()
+        with self.assertRaisesRegex(CommandError, "not_in_the_deployment"):
+            planned_head(scripts, ("not_in_the_deployment",))
+        with self.assertRaisesRegex(CommandError, "has no Alembic revision"):
+            planned_head(scripts, ())
+
     def test_deployed_pause_and_symbol_comment_merge_is_recognized(self) -> None:
         scripts = migration_scripts()
         deployed = "0204_merge_pause_symbol_heads"

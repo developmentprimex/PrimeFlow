@@ -1073,6 +1073,14 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
   `/push` manual mbetet i ndarë. Nuk bllokon redaktimin në faqet e aplikacionit.
   Shih [njoftimet e deployment-it](discord-deployment-notices.md).
 
+- Apliko migrimet në prodhim nga workflow `Primex Auto Deploy`, pasi skedari
+  i migrimit të jetë në `main`. Për ndryshime të backend-it, `plan` lexon
+  revizionet nga konfigurimi i databazës në runner dhe kontrollon rrugën e
+  përditësimit për commit-in që publikohet. Kontrolli përsëritet me
+  konfigurimin e deployment-it para `upgrade head`. Nëse revizioni aktiv
+  mungon në Git, rikthe migrimin dhe verifiko skemën përpara një deployment-i
+  të ri. Workflow i pull request-it kontrollon grafin pa lidhje me prodhimin.
+
 - Integrimi i jashtëm NEWS-PX merr GA Time Table nga printimi ditor i Admin
   Tasks dhe `/api/exports/ga-time.xlsx` për email-et 07:00/21:00
   (Europe/Budapest). Ndryshimet në datë, kolonat, selektorët e printimit,
