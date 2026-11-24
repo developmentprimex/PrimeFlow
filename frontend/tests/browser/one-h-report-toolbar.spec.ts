@@ -20,6 +20,7 @@ test("PX Notes Emails opens the original email with the disclosure button", asyn
     if (pathname === "/api/marker-comments") return route.fulfill({ json: { items: [] } })
     if (pathname === "/api/ga-notes") return route.fulfill({ json: [
       { ...note, id: email.id, content: "Saved original email", knowledge_type: "IT_MAIL", email_preview: email },
+      { ...note, id: "manual-mail", content: "EM GA: 09:50 STD-STAUD\nKontrollo dokumentet." },
       { ...note, id: "ordinary", content: "Ordinary PX note" },
     ] })
     if (pathname === "/api/ga-notes/px-mail/email") {
@@ -36,15 +37,22 @@ test("PX Notes Emails opens the original email with the disclosure button", asyn
   await expect(page.getByText("Ordinary PX note", { exact: true })).toBeHidden()
   const content = page.locator("#ga-note-content-px-mail")
   await expect(content).toContainText(email.title)
-  await expect(content).toContainText(email.subject)
-  await expect(content).toContainText(email.sender)
+  await expect(content.getByText(email.subject, { exact: false })).toBeHidden()
+  await expect(content.getByText(email.sender, { exact: false })).toBeHidden()
   await expect(page.getByText("Saved original email", { exact: true })).toBeHidden()
   expect(requests).toBe(0)
   await content.getByLabel("Hap emailin").click()
+  await expect(content.getByText(email.subject, { exact: false })).toBeVisible()
+  await expect(content.getByText(email.sender, { exact: false })).toBeVisible()
   await expect(content.getByText("Complete source email")).toBeVisible()
   expect(requests).toBe(1)
   await content.getByLabel("Mbyll emailin").click()
   await expect(content.getByText("Complete source email")).toBeHidden()
+  const manual = page.locator("#ga-note-content-manual-mail")
+  await expect(manual.getByText("EM GA: 08:00 STD-STAUD")).toBeVisible()
+  await expect(manual.getByText("Kontrollo dokumentet.")).toBeHidden()
+  await manual.getByLabel("Hap emailin").click()
+  await expect(manual.getByText("Kontrollo dokumentet.")).toBeVisible()
 })
 
 test("M1 opens a previously imported email only on demand", async ({ page }) => {
@@ -71,8 +79,11 @@ test("M1 opens a previously imported email only on demand", async ({ page }) => 
         "+----+------+----------------------------+------+-------+",
         "| 1  | NO   | Saved original email text  | -    | 10:00 |",
         "+----+------+----------------------------+------+-------+",
+        "| 2  | NO   | EM GA: 09:50 STD-STAUD Kontrollo dokumentet. | GA | 10:04 |",
+        "+----+------+----------------------------+------+-------+",
       ].join("\n") }],
       note_emails: { "1": email },
+      note_email_headings: { "2": { original: "EM GA: 09:50 STD-STAUD", title: "EM GA: 08:00 STD-STAUD" } },
     } })
     if (path.endsWith("/ga-notes/old-import/email")) {
       emailRequests++
@@ -83,8 +94,8 @@ test("M1 opens a previously imported email only on demand", async ({ page }) => 
 
   await page.goto("/morning-report")
   const row = page.getByRole("row").filter({ hasText: email.title })
-  await expect(row.getByText(email.subject, { exact: false })).toBeVisible()
-  await expect(row.getByText(email.sender, { exact: false })).toBeVisible()
+  await expect(row.getByText(email.subject, { exact: false })).toBeHidden()
+  await expect(row.getByText(email.sender, { exact: false })).toBeHidden()
   await expect(page.getByText("Saved original email text")).toBeHidden()
   expect(emailRequests).toBe(0)
   await row.locator("summary").click()
@@ -92,6 +103,10 @@ test("M1 opens a previously imported email only on demand", async ({ page }) => 
   expect(emailRequests).toBe(1)
   await row.locator("summary").press("Enter")
   await expect(row.getByText("Full original email text")).toBeHidden()
+  const manual = page.getByRole("row").filter({ hasText: "EM GA: 08:00 STD-STAUD" })
+  await expect(manual.getByText("Kontrollo dokumentet.")).toBeHidden()
+  await manual.getByLabel("Hap emailin").click()
+  await expect(manual.getByText("Kontrollo dokumentet.")).toBeVisible()
 })
 
 test("M1 inbox shows the subject and expands only the selected email", async ({ page }) => {
@@ -123,7 +138,7 @@ test("M1 inbox shows the subject and expands only the selected email", async ({ 
       return route.fulfill({ json: {
         configured: true, connected: true, messages: [{
           id: "message", subject: `Subject ${source}`, sender: "Sender <sender@example.test>",
-          received_at: "09:08", body: `Full email ${source}\nSecond line`,
+          received_at: "09:08", body: `Full email ${source}\n${"Second line\n".repeat(100)}`,
         }],
       } })
     }
@@ -139,6 +154,7 @@ test("M1 inbox shows the subject and expands only the selected email", async ({ 
     await expect(fullEmail).toBeHidden()
     await row.getByRole("button", { name: `Hap emailin: Subject ${source}` }).press("Enter")
     await expect(fullEmail).toBeVisible()
+    await expect.poll(() => fullEmail.evaluate(element => element.scrollHeight > element.clientHeight && getComputedStyle(element).overflowY === "auto")).toBe(true)
     const collapse = row.getByRole("button", { name: `Mbyll emailin: Subject ${source}` })
     await expect(collapse).toHaveAttribute("aria-expanded", "true")
     await collapse.click()
@@ -279,7 +295,8 @@ from app.services.tomorrow_closing_sections import ClosingSection, ClosingTable,
 from app.services.tomorrow_print_report import _closing_sections_html
 from tests.test_one_h_report_strike_counts import fresh_document
 day = date(2026, 11, 23)
-values = [["1", "NO", "Note with files", "GA", "09:15"], ["2", "NO", "Note without files", "GA", "09:16"]]
+values = [["1", "NO", "Note with files", "GA", "09:15"], ["2", "NO", "Note without files", "GA", "09:16"],
+          ["3", "NO", "EM GA: 09:50 STD-STAUD Kontrollo dokumentet.", "GA", "09:50"]]
 body = m1._notes_section(values)
 sections = {"morning-report": [{"title": m1.SECTION_TITLES[3], "body": body}],
             "after-break-report": [{"title": m2.SECTION_TITLES[9], "body": body}]}
@@ -299,7 +316,7 @@ for (const reportName of ["morning-report", "after-break-report", "tomorrow-prin
   test(`${reportName} opens the files for the matching PX Note`, async ({ page }) => {
     const fixture = pxNoteReportFixtures()
     const reportDay = "2026-11-23"
-    const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test owner", email: "owner@example.com", role: "STAFF", is_active: true }
+    const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test owner", email: "owner@example.com", role: reportName === "morning-report" ? "ADMIN" : "STAFF", is_active: true }
     const noteAttachments = {
       "1": [{ id: "file-one", original_filename: "First.docx" }, { id: "file-two", original_filename: "Second.xlsx" }],
     }
@@ -318,8 +335,13 @@ for (const reportName of ["morning-report", "after-break-report", "tomorrow-prin
       if (pathname.endsWith("/attachments/file-two")) {
         return route.fulfill({ contentType: "application/octet-stream", body: "Test download" })
       }
+      if (pathname.endsWith(`/${reportName}/settings`)) return route.fulfill({ json: {
+        is_active: true, timezone: "Europe/Tirane", weekdays: [1, 2, 3, 4, 5], recipients: { to: [], cc: [], bcc: [] },
+      } })
       const html = fixture[reportName]
-      const payload = { html, plain_text: "", note_attachments: noteAttachments }
+      const payload = { html, plain_text: "", note_attachments: noteAttachments,
+        note_email_headings: { "3": { original: "EM GA: 09:50 STD-STAUD", title: "EM GA: 08:00 STD-STAUD" } },
+      }
       if ((pathname.endsWith(`/${reportName}`) || pathname.endsWith(`/${reportName}/draft`)) && fixture.sections[reportName]) {
         return route.fulfill({ json: {
           ...payload, id: "draft", status: "DRAFT", report_date: reportDay, subject: "Notes report",
@@ -350,6 +372,10 @@ for (const reportName of ["morning-report", "after-break-report", "tomorrow-prin
       : reportName === "1h-reports" ? fullReport : page
     const view = notes.getByRole("button", { name: "View (2)", exact: true })
     await expect(view).toHaveCount(1)
+    const emailNote = notes.locator("tr").filter({ hasText: "EM GA: 08:00 STD-STAUD" }).last()
+    await expect(emailNote.getByText("Kontrollo dokumentet.")).toBeHidden()
+    await emailNote.locator("summary").click()
+    await expect(emailNote.getByText("Kontrollo dokumentet.")).toBeVisible()
     const fileRow = notes.locator("tr").filter({ hasText: "Note with files" }).last()
     const emptyRow = notes.locator("tr").filter({ hasText: "Note without files" }).last()
     await expect(fileRow.getByRole("button", { name: "View (2)" })).toBeVisible()
@@ -364,8 +390,13 @@ for (const reportName of ["morning-report", "after-break-report", "tomorrow-prin
     expect((await download).suggestedFilename()).toBe("Second.xlsx")
     if (reportName === "morning-report" || reportName === "after-break-report") {
       await dialog.getByRole("button", { name: "Close" }).click()
+      if (reportName === "morning-report") await page.locator("summary").filter({ hasText: "Menaxhimi i raportit dhe email-it" }).click()
       await page.getByRole("button", { name: "Preview", exact: true }).click()
-      const previewButton = page.frameLocator('iframe[title$=" preview"]').getByRole("button", { name: "View (2)", exact: true })
+      const previewFrame = page.frameLocator('iframe[title$=" preview"]')
+      const previewNote = previewFrame.locator("tr").filter({ hasText: "EM GA: 08:00 STD-STAUD" }).last()
+      await previewNote.locator("summary").click()
+      await expect(previewNote.getByText("Kontrollo dokumentet.")).toBeVisible()
+      const previewButton = previewFrame.getByRole("button", { name: "View (2)", exact: true })
       await expect(previewButton).toBeVisible()
       await previewButton.click()
       await expect(page.getByRole("dialog", { name: "First.docx" }).frameLocator('iframe[title="First.docx"]')

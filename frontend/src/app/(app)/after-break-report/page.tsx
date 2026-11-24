@@ -3,8 +3,8 @@
 import * as React from "react"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
 import { installReportNoteControls, ReportNoteAttachmentDialog, ReportNoteCell, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
-import { NoteEmailPreview, useNoteEmailLoader } from "@/components/note-email-preview"
-import type { NoteEmailPreviews } from "@/lib/types"
+import { NoteEmailPreview, reportEmailNoteDetails, useNoteEmailLoader } from "@/components/note-email-preview"
+import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
@@ -45,6 +45,7 @@ type Draft = {
   sections: Section[]
   note_attachments?: ReportNoteAttachments
   note_emails?: NoteEmailPreviews
+  note_email_headings?: NoteEmailHeadings
   status: string
   sent_at?: string | null
   gmail_message_id?: string | null
@@ -179,7 +180,7 @@ export default function AfterBreakReportPage() {
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
-  const [preview, setPreview] = React.useState<{ html: string; plain_text: string; note_attachments?: ReportNoteAttachments; note_emails?: NoteEmailPreviews } | null>(null)
+  const [preview, setPreview] = React.useState<{ html: string; plain_text: string; note_attachments?: ReportNoteAttachments; note_emails?: NoteEmailPreviews; note_email_headings?: NoteEmailHeadings } | null>(null)
   const [noteFiles, setNoteFiles] = React.useState<ReportNoteAttachment[] | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState<RecipientInputs>({ to: "", cc: "", bcc: "" })
   const [settings, setSettings] = React.useState<ReportSettings | null>(null)
@@ -372,6 +373,7 @@ export default function AfterBreakReportPage() {
       ...draft, sections,
       note_attachments: notesEdited ? undefined : draft.note_attachments,
       note_emails: notesEdited ? undefined : draft.note_emails,
+      note_email_headings: notesEdited ? undefined : draft.note_email_headings,
     }
     setDraft(nextDraft)
     setEditingSection(null)
@@ -692,15 +694,15 @@ export default function AfterBreakReportPage() {
                         body={reportSectionPreviewText(section.body)}
                         filterWfeAge={isWaitingClientSection(section)}
                         renderCell={(section.section_key || section.title) === NOTES_SECTION ? (label, number, header, text) => {
+                          if (label !== "NOTES:" || header !== "NOTE") return null
                           const files = draft.note_attachments?.[number]
                           const email = draft.note_emails?.[number]
-                          if (label === "NOTES:" && header === "NOTE" && email) {
+                          if (email) {
                             const preview = <NoteEmailPreview key={email.id} email={email} />
                             return files?.length ? <ReportNoteCell text={preview} files={files} onOpen={setNoteFiles} /> : preview
                           }
-                          return label === "NOTES:" && header === "NOTE" && files?.length
-                            ? <ReportNoteCell text={text} files={files} onOpen={setNoteFiles} />
-                            : null
+                          const formatted = reportEmailNoteDetails(text, draft.note_email_headings?.[number])
+                          return files?.length ? <ReportNoteCell text={formatted ?? text} files={files} onOpen={setNoteFiles} /> : formatted
                         } : undefined}
                       />
                     )}
@@ -771,7 +773,7 @@ export default function AfterBreakReportPage() {
             title={`${REPORT_LABEL} preview`}
             srcDoc={preview.html}
             className="h-[650px] w-full rounded border bg-white"
-            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles, preview.note_emails, loadNoteEmail)}
+            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles, preview.note_emails, loadNoteEmail, preview.note_email_headings)}
           /> : null}
         </DialogContent>
       </Dialog>

@@ -3,7 +3,7 @@ from datetime import datetime
 from uuid import UUID
 
 from bs4 import BeautifulSoup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import noload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,10 +80,34 @@ async def mail_previews_by_row(db: AsyncSession, note_ids: dict[str, str]) -> di
     return {number: previews[note_id] for number, note_id in note_ids.items() if previews.get(note_id)}
 
 
-async def note_controls_by_row(db: AsyncSession, note_ids: dict[str, str]) -> dict:
+async def note_controls_by_row(db: AsyncSession, note_ids: dict[str, str], *, include_manual_emails=False) -> dict:
+    attachments = await note_attachments_by_row(db, note_ids)
+    emails = await mail_previews_by_row(db, note_ids)
+    controls = {"note_attachments": attachments, "note_emails": emails}
+    if include_manual_emails:
+        controls["note_email_headings"] = await manual_email_headings(
+            db, {number: note_id for number, note_id in note_ids.items() if number not in emails},
+        )
+    return controls
+
+
+def manual_email_heading(content: str) -> dict[str, str] | None:
+    heading = " ".join(content.lstrip().partition("\n")[0].split())
+    if title := email_title_from_content(heading):
+        return {"original": heading, "title": title}
+    return None
+
+
+async def manual_email_headings(db: AsyncSession, note_ids: dict[str, str]) -> dict[str, dict[str, str]]:
+    if not note_ids:
+        return {}
+    notes = dict((await db.execute(select(GaNote.id, GaNote.content).where(
+        GaNote.id.in_({UUID(note_id) for note_id in note_ids.values()}),
+        func.ltrim(GaNote.content).ilike("em %"),
+    ))).all())
     return {
-        "note_attachments": await note_attachments_by_row(db, note_ids),
-        "note_emails": await mail_previews_by_row(db, note_ids),
+        number: heading for number, note_id in note_ids.items()
+        if (heading := manual_email_heading(notes.get(UUID(note_id), "")))
     }
 
 
@@ -131,15 +155,7 @@ async def section_note_controls(
         if row[0] in note_ids and row[0] not in controls["note_emails"] and email_title_from_content(row[2])
     }
     if manual_ids:
-        notes = dict((await db.execute(select(GaNote.id, GaNote.content).where(
-            GaNote.id.in_({UUID(note_id) for note_id in manual_ids.values()}),
-        ))).all())
-        controls["note_email_headings"] = {}
-        for number, note_id in manual_ids.items():
-            content = (notes.get(UUID(note_id)) or "").strip()
-            heading = " ".join(content.partition("\n")[0].split())
-            if formatted := email_title_from_content(heading):
-                controls["note_email_headings"][number] = {"original": heading, "title": formatted}
+        controls["note_email_headings"] = await manual_email_headings(db, manual_ids)
     return controls
 
 

@@ -132,8 +132,10 @@ export function ReportMailbox({ reportDate, source }: { reportDate: string; sour
                     </tr>
                     {expanded && (
                       <tr className="border-t bg-slate-50">
-                        <td colSpan={4} className="whitespace-pre-wrap p-3 [overflow-wrap:anywhere]">
-                          {mail.body || "Ky email nuk ka tekst."}
+                        <td colSpan={4} className="p-2">
+                          <div className="max-h-[min(45vh,24rem)] overflow-y-auto overscroll-contain rounded border bg-background p-3 whitespace-pre-wrap [overflow-wrap:anywhere]" tabIndex={0} aria-label="Emaili i plotë">
+                            {mail.body || "Ky email nuk ka tekst."}
+                          </div>
                         </td>
                       </tr>
                     )}

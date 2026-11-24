@@ -4,8 +4,8 @@ import * as React from "react"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
 import { ReportMailbox } from "@/components/report-mailbox"
 import { installReportNoteControls, ReportNoteAttachmentDialog, ReportNoteCell, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
-import { NoteEmailPreview, useNoteEmailLoader } from "@/components/note-email-preview"
-import type { NoteEmailPreviews } from "@/lib/types"
+import { NoteEmailPreview, reportEmailNoteDetails, useNoteEmailLoader } from "@/components/note-email-preview"
+import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
@@ -55,7 +55,7 @@ type Draft = {
   sections: Section[]
   note_attachments?: ReportNoteAttachments
   note_emails?: NoteEmailPreviews
-  note_email_headings?: Record<string, { title: string; original: string }>
+  note_email_headings?: NoteEmailHeadings
   task_feedback_rows?: Record<string, TaskFeedbackRow[]>
   status: string
   sent_at?: string | null
@@ -214,7 +214,7 @@ export default function MorningReportPage() {
   const feedbackQueue = React.useRef(Promise.resolve())
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
-  const [preview, setPreview] = React.useState<{ html: string; plain_text: string; note_attachments?: ReportNoteAttachments; note_emails?: NoteEmailPreviews } | null>(null)
+  const [preview, setPreview] = React.useState<{ html: string; plain_text: string; note_attachments?: ReportNoteAttachments; note_emails?: NoteEmailPreviews; note_email_headings?: NoteEmailHeadings } | null>(null)
   const [noteFiles, setNoteFiles] = React.useState<ReportNoteAttachment[] | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState<RecipientInputs>({ to: "", cc: "", bcc: "" })
   const [settings, setSettings] = React.useState<ReportSettings | null>(null)
@@ -833,10 +833,7 @@ export default function MorningReportPage() {
                             const preview = <NoteEmailPreview key={email.id} email={email} />
                             return files?.length ? <ReportNoteCell text={preview} files={files} onOpen={setNoteFiles} /> : preview
                           }
-                          const heading = draft.note_email_headings?.[number]
-                          const noteText = text.trim().replace(/\s+/g, " ")
-                          const formatted = heading && (noteText === heading.original || noteText.startsWith(`${heading.original} `))
-                            ? <><strong>{heading.title}</strong>{noteText.slice(heading.original.length)}</> : null
+                          const formatted = reportEmailNoteDetails(text, draft.note_email_headings?.[number])
                           return files?.length ? <ReportNoteCell text={formatted ?? text} files={files} onOpen={setNoteFiles} /> : formatted
                         } : isTaskFeedbackSection && canEdit ? (label, number, header) => {
                           if (!/^[1-9]\d*$/.test(number)) return null
@@ -936,7 +933,7 @@ export default function MorningReportPage() {
             title={`${REPORT_LABEL} preview`}
             srcDoc={preview.html}
             className="h-[650px] w-full rounded border bg-white"
-            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles, preview.note_emails, loadNoteEmail)}
+            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles, preview.note_emails, loadNoteEmail, preview.note_email_headings)}
           /> : null}
         </DialogContent>
       </Dialog>

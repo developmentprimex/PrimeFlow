@@ -120,8 +120,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow. Importet ekzistuese ruhen
   me ID-në e tyre; vetëm përmbledhjet që dështojnë riprovohen me Rifresko.
   Listat e PX Notes, M1/M2, M1 PIKAT dhe preview-të e 1H Reports e SHTYPI
-  Tomorrow shfaqin vetëm titullin, subjektin dhe dërguesin për shënimet nga
-  email-et. Butoni `+` lexon emailin përmes API-së së autentikuar. Për
+  Tomorrow shfaqin vetëm titullin për shënimet nga email-et. Butoni `+`
+  hap subjektin, dërguesin dhe emailin origjinal përmes API-së së autentikuar,
+  ose detajet e shënimit kur është shkruar manualisht. Hapja e tekstit te
+  kutitë e M1 dhe te shënimet përdor scroll brenda një kutie me lartësi të
+  kufizuar. Për
   titullin përdoret formati `EM INFO PX: 08:00 PURIS – HOME24`. Kur një
   shënim i tillë kthehet në detyrë, `08:00` është shenja e prioritetit dhe
   sloti i detyrës 1H është `10:00`. Ora e pranimit ruhet te koha e importit.

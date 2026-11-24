@@ -139,7 +139,7 @@ async def _with_note_attachments(db: AsyncSession, report: dict) -> dict:
         references = await match_note_rows(
             db, [row for row in rows if len(row) == len(columns)], None, generated_at=report.get("generated_at"),
         )
-    controls = await note_controls_by_row(db, references)
+    controls = await note_controls_by_row(db, references, include_manual_emails=True)
     return {**report, "html": compact_report_note_html(report.get("html", ""), controls["note_emails"]), **controls}
 
 

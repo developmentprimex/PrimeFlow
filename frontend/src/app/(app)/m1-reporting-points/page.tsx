@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import { useNoteEmailLoader } from "@/components/note-email-preview"
 import { installReportNoteControls } from "@/components/report-note-attachments"
-import type { NoteEmailPreviews } from "@/lib/types"
+import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -43,6 +43,7 @@ export default function M1ReportingPointsPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [previewHtml, setPreviewHtml] = React.useState<string | null>(null)
   const [previewEmails, setPreviewEmails] = React.useState<NoteEmailPreviews>()
+  const [previewEmailHeadings, setPreviewEmailHeadings] = React.useState<NoteEmailHeadings>()
   const [history, setHistory] = React.useState<HistoryRow[] | null>(null)
   const [sendOpen, setSendOpen] = React.useState(false)
   const [tab, setTab] = React.useState("report")
@@ -192,8 +193,9 @@ export default function M1ReportingPointsPage() {
 
   const preview = () => action("preview", async () => {
     if (!report) return
-    const value = await responseJson<{ html: string; note_emails?: NoteEmailPreviews }>(await apiFetch(`${API}/${report.id}/preview`))
+    const value = await responseJson<{ html: string; note_emails?: NoteEmailPreviews; note_email_headings?: NoteEmailHeadings }>(await apiFetch(`${API}/${report.id}/preview`))
     setPreviewEmails(value.note_emails)
+    setPreviewEmailHeadings(value.note_email_headings)
     setPreviewHtml(value.html)
   })
 
@@ -290,7 +292,7 @@ export default function M1ReportingPointsPage() {
     </Tabs>
 
     <Dialog open={previewHtml !== null} onOpenChange={(open) => { if (!open) setPreviewHtml(null) }}><DialogContent className="max-w-[95vw] sm:max-w-[95vw]"><DialogHeader><DialogTitle>Pamja e raportit në email</DialogTitle></DialogHeader><iframe title="Pikat për raportim M1" sandbox="allow-same-origin" srcDoc={previewHtml || ""} className="h-[75vh] w-full rounded border bg-white"
-      onLoad={event => installReportNoteControls(event.currentTarget.contentDocument, undefined, () => {}, previewEmails, loadNoteEmail)}
+      onLoad={event => installReportNoteControls(event.currentTarget.contentDocument, undefined, () => {}, previewEmails, loadNoteEmail, previewEmailHeadings)}
     /></DialogContent></Dialog>
     <Dialog open={sendOpen} onOpenChange={(open) => { if (!busy) setSendOpen(open) }}><DialogContent><DialogHeader><DialogTitle>Dërgo raportin M1</DialogTitle></DialogHeader><p className="text-sm">Raporti i datës {reportDate(day)} dërgohet te marrësit aktualë të M1. Pikat automatike të raportit të sotëm përditësohen në momentin e dërgimit; përgjigjet ruhen. Çdo dërgim krijon një email të ri.</p><div className="space-y-2 rounded-lg bg-muted p-3 text-sm">{recipients ? (Object.entries(recipients) as [string, string[]][]).filter(([, values]) => values.length).map(([key, values]) => <p key={key}><strong>{key.toUpperCase()}:</strong> {values.join(", ")}</p>) : null}</div><Button onClick={send} disabled={!!busy}><Send className="mr-2 h-4 w-4" />{busy === "send" ? "Duke dërguar…" : "Dërgo raportin"}</Button></DialogContent></Dialog>
   </div>

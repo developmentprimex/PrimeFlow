@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth"
 import { useMarkerComments } from "@/components/marker-comments-context"
 import { installReportNoteControls, ReportNoteAttachmentDialog, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
 import { useNoteEmailLoader } from "@/components/note-email-preview"
-import type { NoteEmailPreviews } from "@/lib/types"
+import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 import { isReportTaskDone, reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
 import { applyTaskStrikeBadges, taskHasStrikes, reportStrikeTotal, type OneHStrikeSummary } from "@/lib/one-h-strikes"
 
@@ -44,6 +44,7 @@ type Preview = {
   html: string
   note_attachments?: ReportNoteAttachments
   note_emails?: NoteEmailPreviews
+  note_email_headings?: NoteEmailHeadings
   snapshot_id: string
   report_date: string
   generated_at: string | null
@@ -248,8 +249,8 @@ export function PrintReportPage({
   const [noteFiles, setNoteFiles] = React.useState<ReportNoteAttachment[] | null>(null)
   const noteAttachments = preview?.note_attachments
   React.useEffect(() => {
-    if (!today) installReportNoteControls(previewFrameRef.current?.contentDocument, noteAttachments, setNoteFiles, preview?.note_emails, loadNoteEmail)
-  }, [loadNoteEmail, preview?.note_emails, noteAttachments, today])
+    if (!today) installReportNoteControls(previewFrameRef.current?.contentDocument, noteAttachments, setNoteFiles, preview?.note_emails, loadNoteEmail, preview?.note_email_headings)
+  }, [loadNoteEmail, preview?.note_email_headings, preview?.note_emails, noteAttachments, today])
   const syncPreviewCommentAttention = React.useCallback(() => {
     const frameDocument = previewFrameRef.current?.contentDocument
     if (!frameDocument) return
@@ -1096,7 +1097,7 @@ export function PrintReportPage({
           setupPreviewFilters()
           const document = previewFrameRef.current?.contentDocument
           if (today && document) applyTaskStrikeBadges(document, preview.one_h_strikes)
-          if (!today) installReportNoteControls(document, preview.note_attachments, setNoteFiles, preview.note_emails, loadNoteEmail)
+          if (!today) installReportNoteControls(document, preview.note_attachments, setNoteFiles, preview.note_emails, loadNoteEmail, preview.note_email_headings)
         }}
         title={`${reportName} generated email`}
         srcDoc={preview.html.replace('<div data-report-intro="true">', '<div data-report-intro="true" hidden>')}
