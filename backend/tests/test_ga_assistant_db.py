@@ -133,6 +133,105 @@ class GaAssistantDbTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.status_code, expect, res.text)
         return res.json()
 
+    async def test_discord_artifact_feed_filters_the_channel_and_shows_reaction_changes(self) -> None:
+        from app.models.ga_discord_mention import GaDiscordMention
+        from app.services.ga_discord_mentions import bridge_secret
+
+        path = "/discord/mentions/feed"
+        created_at = self.at(self.today)
+
+        def message(id, *, channel="20", guild="10", reasons=("mention",)):
+            return {
+                "id": id, "guild_id": guild, "channel_id": channel, "channel_name": "det-nga-stafi-per-ga",
+                "author_discord_id": "77", "author_name": "Dërguesi", "created_at": created_at.isoformat(),
+                "content": "<@42> Kontrolloje detyrën", "jump_url": f"https://discord.com/channels/{guild}/{channel}/{id}",
+                "attachments": [{"name": "plan.pdf", "url": "https://cdn.discordapp.com/attachments/20/300/plan.pdf?ex=old"}]
+                if id == "1002" else [],
+                "reasons": list(reasons),
+            }
+
+        with patch.multiple(settings, DISCORD_GUILD_ID="10", DISCORD_GA_REPLIES_CHANNEL_ID="20",
+                            GA_DISCORD_USER_ID="42", GA_DISCORD_MENTIONS_BOT_TOKEN="test-token"):
+            bot_headers = {"X-GA-Mentions-Secret": bridge_secret()}
+            bridge = "/api/ga-discord-bot"
+            response = await self.client.post(f"{bridge}/mentions", headers=bot_headers, json={"messages": [
+                message("1001"), message("1002", reasons=("mention", "reply")), message("1003", channel="21"),
+                message("1004", reasons=("role",)), message("1005", reasons=("reply",)),
+            ]})
+            self.assertEqual(response.json(), {"stored": 5, "skipped": 0})
+            async with self.SessionLocal() as db:
+                db.add(GaDiscordMention(**{**message("1006", guild="11"), "created_at": created_at}))
+                await db.commit()
+
+            api_path = f"/api/ga-assistant{path}"
+            self.assertIn((await self.client.get(api_path)).status_code, {401, 403})
+            self.assertEqual((await self.client.get(api_path, headers=self.h(self.staff_token))).status_code, 403)
+            for params in ({"before": "1003"}, {"before": "1004"}, {"before": "1006"}, {"limit": "51"}):
+                self.assertEqual((await self.client.get(api_path, headers=self.h(), params=params)).status_code, 422)
+
+            page = await self.get(path, limit=1)
+            self.assertEqual((page["channel_id"], page["next_before"]), ("20", "1002"))
+            self.assertEqual([item["id"] for item in page["items"]], ["dc:1002"])
+            self.assertIsNone(page["items"][0]["reactions_synced_at"])
+            self.assertEqual(page["items"][0]["attachments"], [{"name": "plan.pdf"}])
+            older = await self.get(path, limit=1, before=page["next_before"])
+            self.assertEqual([item["id"] for item in older["items"]], ["dc:1001"])
+            self.assertEqual(older["items"][0]["attachments"], [])
+            self.assertIsNone(older["next_before"])
+
+            import httpx
+
+            attachment_path = "/discord/mentions/feed/1002/attachments"
+            source_url = "https://discord.com/api/v10/channels/20/messages/1002"
+            fresh_url = "https://cdn.discordapp.com/attachments/20/300/plan.pdf?ex=fresh"
+            discord_source = {
+                "id": "1002", "channel_id": "20", "author": {"id": "77"}, "mentions": [{"id": "42"}],
+                "attachments": [
+                    {"id": "300", "filename": "plan.pdf", "content_type": "application/pdf", "url": fresh_url},
+                    {"id": "301", "filename": "outside.png", "url": "https://cdn.discordapp.com/attachments/21/301/outside.png"},
+                    {"id": "302", "filename": "unsafe.png", "url": "https://invalid.example/attachments/20/302/unsafe.png"},
+                ],
+            }
+            request = httpx.Request("GET", source_url)
+            discord_get = AsyncMock(return_value=httpx.Response(200, request=request, json=discord_source))
+            async def fake_discord_get(_client, url, **kwargs):
+                if url == source_url:
+                    return await discord_get(url, **kwargs)
+                return await original_get(_client, url, **kwargs)
+
+            original_get = httpx.AsyncClient.get
+            with patch.object(httpx.AsyncClient, "get", fake_discord_get):
+                actual = await self.get(attachment_path)
+                self.assertEqual(actual, {"id": "dc:1002", "attachments": [
+                    {"name": "plan.pdf", "url": fresh_url, "content_type": "application/pdf"},
+                ]})
+                discord_get.assert_awaited_once_with(source_url, headers={"Authorization": "Bot test-token"})
+                for id in ("1003", "1004", "1005", "1006"):
+                    response = await self.client.get(f"{api_path}/{id}/attachments", headers=self.h())
+                    self.assertEqual(response.status_code, 404)
+                response = await self.client.get(f"/api/ga-assistant{attachment_path}", headers=self.h(self.staff_token))
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(discord_get.await_count, 1)
+                discord_source["mentions"] = []
+                discord_get.return_value = httpx.Response(200, request=request, json=discord_source)
+                response = await self.client.get(f"/api/ga-assistant{attachment_path}", headers=self.h())
+                self.assertEqual(response.status_code, 404)
+
+            reaction = {"emoji": "👍", "count": 1, "users": [{"discord_id": "66", "name": "Arta Berisha"}]}
+            for reactions in ([reaction], []):
+                response = await self.client.post(f"{bridge}/reactions", headers=bot_headers, json={
+                    "message_id": "1002", "reactions": reactions,
+                })
+                self.assertEqual(response.json(), {"updated": True})
+                item = (await self.get(path))["items"][0]
+                expected = [{"emoji": "👍", "count": 1, "users": [{"name": "Arta Berisha", "initials": "AB"}]}] if reactions else []
+                self.assertEqual(item["reactions"], expected)
+                self.assertIsNotNone(item["reactions_synced_at"])
+                self.assertEqual(item["url"], "https://discord.com/channels/10/20/1002")
+
+            await self.post("/discord/mentions/dc:1002/status", {"status": "done"})
+            self.assertEqual((await self.get(path))["items"][0]["status"], "done")
+
     async def test_agenda_classifies_like_admin_tasks_and_respects_window(self) -> None:
         start, end = self.at(self.today, 8), self.at(self.today, 12)
         data = await self.get("/agenda", start=start.isoformat(), end=end.isoformat())

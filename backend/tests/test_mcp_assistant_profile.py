@@ -162,6 +162,36 @@ class AssistantProfileTests(unittest.IsolatedAsyncioTestCase):
         with patch("httpx.AsyncClient.post", AsyncMock(return_value=Response())):
             self.assertIsNone(await verifier.verify_token("pfm_at_inactive"))
 
+    async def test_discord_artifact_feed_returns_structured_read_only_data(self) -> None:
+        tool_name = "ga_discord_mentions_feed"
+        tools = {tool.name: tool for tool in await self.server.mcp.list_tools()}
+        tool = tools[tool_name]
+        self.assertTrue(tool.annotations.readOnlyHint)
+        self.assertEqual(set(tool.inputSchema["properties"]), {"before", "limit"})
+        self.assertIn("items", tool.outputSchema["properties"])
+        data = {"channel_id": "20", "timezone": "Europe/Belgrade", "bot_configured": True,
+                "items": [], "next_before": None}
+        with patch.object(self.server, "_request", AsyncMock(return_value=data)) as request:
+            _, structured = await self.server.mcp.call_tool(tool_name, {"before": "1002", "limit": 10})
+            request.assert_awaited_once_with(
+                "GET", "/api/ga-assistant/discord/mentions/feed", params={"before": "1002", "limit": 10},
+            )
+        self.assertEqual(structured, data)
+
+    async def test_discord_attachment_links_are_structured_and_read_only(self) -> None:
+        tool_name = "ga_discord_mention_attachments"
+        tools = {tool.name: tool for tool in await self.server.mcp.list_tools()}
+        self.assertTrue(tools[tool_name].annotations.readOnlyHint)
+        self.assertIn("attachments", tools[tool_name].outputSchema["properties"])
+        data = {"id": "dc:1002", "attachments": [{
+            "name": "plan.pdf", "url": "https://cdn.discordapp.com/attachments/20/300/plan.pdf?ex=fresh",
+            "content_type": "application/pdf",
+        }]}
+        with patch.object(self.server, "_request", AsyncMock(return_value=data)) as request:
+            _, structured = await self.server.mcp.call_tool(tool_name, {"id": "dc:1002"})
+            request.assert_awaited_once_with("GET", "/api/ga-assistant/discord/mentions/feed/1002/attachments")
+        self.assertEqual(structured, data)
+
 
 if __name__ == "__main__":
     unittest.main()

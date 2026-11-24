@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,13 @@ from app.models.task import Task
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
+from app.schemas.ga_discord_mentions import (
+    DISCORD_FEED_DEFAULT_LIMIT,
+    DISCORD_FEED_MAX_LIMIT,
+    DISCORD_MESSAGE_ID_PATTERN,
+    DiscordMentionAttachments,
+    DiscordMentionsFeed,
+)
 from app.services import ga_assistant as svc
 from app.services.audit import add_audit_log
 from app.services.ga_identity import is_ga_user
@@ -747,3 +754,47 @@ async def discord_mark(item_id: str, payload: DiscordMarkIn, db: AsyncSession = 
         raise HTTPException(status_code=422, detail="Discord mention ids look like dc:<message id>")
     row = await _set_discord_status(db, user, raw, payload.status)
     return (await mentions.render(db, [row], svc.ga_tz()))[0]
+
+
+@router.get("/discord/mentions/feed", response_model=DiscordMentionsFeed)
+async def discord_mentions_feed(
+    before: str | None = Query(default=None, pattern=DISCORD_MESSAGE_ID_PATTERN),
+    limit: int = Query(default=DISCORD_FEED_DEFAULT_LIMIT, ge=1, le=DISCORD_FEED_MAX_LIMIT),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Direct GA mentions in the configured staff channel with their current reactions."""
+    from app.services import ga_discord_mentions as mentions
+
+    ensure_assistant_user(user)
+    try:
+        rows = await mentions.list_staff_channel_mentions(db, before=before, limit=limit + 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    page = rows[:limit]
+    tz = svc.ga_tz()
+    items = await mentions.render(db, page, tz) if page else []
+    for item, row in zip(items, page):
+        item["reactions_synced_at"] = row.reactions_synced_at
+    return {
+        "channel_id": settings.DISCORD_GA_REPLIES_CHANNEL_ID,
+        "timezone": settings.GA_TIMEZONE,
+        "bot_configured": bool(settings.DISCORD_GUILD_ID and settings.DISCORD_GA_REPLIES_CHANNEL_ID
+                               and settings.GA_DISCORD_MENTIONS_BOT_TOKEN),
+        "items": items,
+        "next_before": page[-1].id if len(rows) > limit else None,
+    }
+
+
+@router.get("/discord/mentions/feed/{message_id}/attachments")
+async def discord_mention_attachments(
+    message_id: str = Path(pattern=DISCORD_MESSAGE_ID_PATTERN),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DiscordMentionAttachments:
+    from app.services import ga_discord_mentions as mentions
+
+    ensure_assistant_user(user)
+    links = await mentions.staff_mention_attachment_links(db, message_id)
+    return DiscordMentionAttachments(id=f"dc:{message_id}", attachments=links)

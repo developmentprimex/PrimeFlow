@@ -21,7 +21,7 @@ claude.ai ──HTTPS──> api-flow.primexeu.com  /.well-known/oauth-authoriza
   Tani lidhet vetëm në `127.0.0.1`, dhe `DELETE` te `primeflow_api_request` është i bllokuar
   (`PRIMEFLOW_MCP_ALLOW_DELETE=false`).
 - `primeflow-mcp-assistant` është i njëjti `mcp_server.py` me `PRIMEFLOW_MCP_PROFILE=assistant`.
-  Ekspozon vetëm allowlist-ën (43 tools) dhe s'e përdor kurrë llogarinë e shërbimit.
+  Ekspozon vetëm mjetet në `ASSISTANT_TOOLS`. Thirrjet përdorin identitetin OAuth të përdoruesit.
   Ekzekutohet nga `backend\.venv-mcp-assistant`, sepse kërkon `mcp==1.28.1`
   (`requirements-mcp-assistant.txt`), ndërsa 8010 mbetet me `mcp==1.10.1`.
 - Çdo shkrim ekzekutohet me JWT-në e GA-së. Prandaj `created_by`, `audit_logs.actor_user_id`
@@ -73,6 +73,8 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 | `todo_list / todo_create / todo_update / todo_complete / todo_set_steps` | Microsoft To Do i `info@` |
 | `ga_time_table(week_start?)` | GA Time Table e javës (H–P), si te faqja: rreshtat e orëve me shënimet, hyrjet e template-it dhe rreshtat e iPhone Sync (“R: …”, “CALENDAR …”). Takimet/detyrat janë te `ga_agenda` |
 | `ga_discord_mentions(since?, until?, only_open=true)` | Mesazhet në kanalet e serverit që e përmendin GA-në, një rol të saj, ose i përgjigjen asaj: kush (emri + inicialet), kanali, koha, teksti, linku, bashkëngjitjet, statusi |
+| `ga_discord_mentions_feed(before?, limit=25)` | Lista vetëm për lexim për Claude Artifact, me përmendjet direkte të GA-së nga `#det-nga-stafi-per-ga` dhe reagimet e tyre aktuale |
+| `ga_discord_mention_attachments(id)` | Linket e freskëta të bashkëngjitjeve nga një mesazh i listës, me emër dhe lloj skedari |
 | `ga_discord_mark(id, status)` | `seen` / `done` (ose `new`); në Discord s'ndryshon asgjë |
 
 ## Reminders “R:” të iPhone-it (GA Time Table)
@@ -119,6 +121,15 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
   pas nisjes. Emoji aprovimi: `GA_DISCORD_APPROVAL_EMOJIS` (default `✅,👍,✔️,☑️`; ngjyra e lëkurës s'ka
   rëndësi); emoji të tjera shfaqen, por s'e bëjnë mesazhin gati. Te agjenda, një mesazh gati ka markerin
   `✅ LH`.
+
+### Lista e Discord-it për Claude Artifact
+
+- Lidhe connector-in ekzistues `https://mcp-flow.primexeu.com/mcp` me OAuth si GA. Në lejet e Artifact-it për këtë kanal zgjidh `ga_discord_mentions_feed` dhe `ga_discord_mention_attachments`. Të dyja mjetet janë vetëm për lexim.
+- Thirr `ga_discord_mentions_feed({})` kur hapet ose rifreskohet lista. Përmendjet direkte nga `#det-nga-stafi-per-ga` vijnë nga më e reja te më e vjetra, përfshirë statusin `done`. API-ja përdor `DISCORD_GA_REPLIES_CHANNEL_ID` për të zbatuar filtrin e kanalit. Përmendjet e roleve dhe përgjigjet hyjnë në listë vetëm kur i njëjti mesazh përmban edhe përmendje direkte.
+- Rezultati i strukturuar MCP përmban `channel_id`, `timezone`, `bot_configured`, `items` dhe `next_before`. Çdo rresht përmban ID-në `dc:…`, dërguesin, kanalin, kohën, tekstin, linkun origjinal dhe reagimet me emoji, numër dhe emra. `reactions_synced_at: null` tregon që leximi i reagimeve është ende në pritje. `bot_configured` tregon praninë e konfigurimit të botit.
+- Shfaq `items[].attachments[].name` te mesazhi. Kur përdoruesi hap skedarët, thirr `ga_discord_mention_attachments` me ID-në `dc:…` të atij rreshti. Mjeti kontrollon mesazhin aktual në Discord dhe kthen `attachments: [{name, url, content_type}]`. Kërko link të ri nëse bie afati i tij. Linku `items[].url` hap mesazhin origjinal në Discord.
+- Për faqen pasuese, ktheje `next_before` si `before` dhe përdor të njëjtin `limit` (1–50). `next_before: null` shënon fundin. Për të marrë ndryshime të reja, rifresko faqen e parë pa `before`; përditëso rreshtat ekzistues sipas `id` që shtimi ose heqja e reagimeve të shfaqet te i njëjti mesazh.
+- Pas deployment-it, provoje me një përmendje direkte dhe një skedar në kanal, shto një reaction dhe hiqe. Verifiko që skedari hapet me linkun e kërkuar nga mjeti dhe që `reactions` ndryshon duke ruajtur të njëjtin `id`.
 
 ### Si klasifikohen elementet
 
