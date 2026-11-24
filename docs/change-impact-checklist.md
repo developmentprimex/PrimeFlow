@@ -267,6 +267,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   për datën e raportit. Kontrollo titujt me tekst para dhe pas fjalës.
   Kontrollo faqen, pamjen paraprake, emailin dhe bashkëngjitjet HTML, Word dhe PNG.
 
+- M3: **DET DONE TE HV** përdor kalimin në DONE të regjistruar nga Haxhere
+  Spahiu gjatë datës së raportit. Përfshin detyrat sistemore dhe të zakonshme.
+  Kontrollo gjenerimin e M3, pamjen paraprake, email-in dhe eksportet Word/PNG.
+
 - M3: **A JEMI BRENDA MESATARES ME PROJEKTE?** dhe **PIKAT E DITES** përjashtohen nga draftet e
   ruajtura, rigjenerimi dhe importi i pyetjeve manuale. Kontrollo gjithashtu
   faqen M3, preview, emailin dhe bashkëngjitjet.

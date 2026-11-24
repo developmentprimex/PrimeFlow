@@ -28,6 +28,7 @@ type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 const TOMORROW_SYMBOLS_TITLE = "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER"
+const HV_DONE_TITLE = "DET DONE TE HV"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -128,6 +129,7 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "DET TE SHTYERA",
     "DET E KRYERA SOT (AM/PM)",
+    HV_DONE_TITLE,
     "PRODUKTE +/- SOT (PCM)",
     "TAK STATUSI?",
     "N- (GA) PV/FESTE?",
@@ -195,6 +197,7 @@ function sectionGroupLabel(section: Section) {
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "DET TE SHTYERA",
     "DET E KRYERA SOT (AM/PM)",
+    HV_DONE_TITLE,
     "PRODUKTE +/- SOT (PCM)",
     "N- (GA) PV/FESTE?",
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",

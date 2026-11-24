@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from app.api.deps import require_admin
 from app.api.routers import meetings_report as meetings_api
@@ -26,8 +27,10 @@ from app.services.meeting_point_manual_sync import (
 )
 from app.services.meetings_report import (
     DISPLAY_SECTION_TITLES,
+    HV_DONE_TITLE,
     SECTION_TITLES,
     _completed_tasks_for_report_day,
+    _hv_done_section,
     _common_meeting_lines,
     _common_task_metadata_by_title,
     _is_new_task_for_m3_day,
@@ -56,6 +59,7 @@ from app.services.meetings_report import (
     _tomorrow_task_table,
     normalize_meetings_report_sections,
     render_html,
+    render_plain_text,
     render_section_report_docx,
     render_section_report_png,
     section_report_attachments,
@@ -208,6 +212,42 @@ def make_draft() -> MeetingsReportDraft:
 
 
 class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_hv_done_section_uses_completion_actor_and_includes_system_tasks(self) -> None:
+        tz = ZoneInfo("Europe/Tirane")
+        day = date(2026, 11, 24)
+        tomorrow = date(2026, 11, 25)
+        db = AsyncMock()
+        db.execute.return_value = SimpleNamespace(all=lambda: [
+            (SimpleNamespace(title="Review invoices"), datetime(2026, 11, 24, 9, 15, tzinfo=tz)),
+            (
+                SimpleNamespace(title="Check daily payments", system_template_origin_id=uuid.uuid4()),
+                datetime(2026, 11, 24, 14, 30, tzinfo=tz),
+            ),
+        ])
+
+        body, count = await _hv_done_section(db, day)
+        query = db.execute.await_args.args[0].compile(dialect=postgresql.dialect())
+        self.assertIn("DISTINCT ON (audit_logs.entity_id)", str(query))
+        self.assertIn("users.id = task_completions.actor_user_id", str(query))
+        self.assertIn("haxhere spahiu", query.params.values())
+        self.assertIn(datetime.combine(day, time.min, tzinfo=tz), query.params.values())
+        self.assertIn(datetime.combine(tomorrow, time.min, tzinfo=tz), query.params.values())
+        self.assertEqual(count, 2)
+
+        sections = normalize_meetings_report_sections([{"title": HV_DONE_TITLE, "body": body}])
+        self.assertEqual(section_group_label("meetings", HV_DONE_TITLE), "AUTO-FILLED FROM PRIMEFLOW")
+        outputs = [
+            render_plain_text("M3", day, tomorrow, sections),
+            render_html("M3", day, tomorrow, sections),
+        ]
+        from docx import Document
+
+        outputs.append(Document(BytesIO(render_section_report_docx("M3", "M3", day, sections))).element.body.xml)
+        self.assertTrue(render_section_report_png("M3", "M3", day, sections).startswith(b"\x89PNG\r\n\x1a\n"))
+        for output in outputs:
+            for label in (HV_DONE_TITLE, "Review invoices", "Check daily payments", "SYS", "14:30"):
+                self.assertIn(label, output)
+
     async def test_opening_today_twice_refreshes_only_symbol_table(self) -> None:
         draft = make_draft()
         draft.sections = [{"title": SECTION_TITLES[15], "body": "Previous symbol table"},
