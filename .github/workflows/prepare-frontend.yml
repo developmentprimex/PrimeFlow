@@ -1,12 +1,5 @@
 name: Prepare PrimeFlow frontend
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'frontend/**'
-      - 'deploy/**'
-      - '.github/workflows/deploy.yml'
-      - '.github/workflows/prepare-frontend.yml'
   workflow_call:
     inputs:
       publish_artifact:
