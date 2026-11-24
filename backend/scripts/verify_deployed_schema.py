@@ -8,6 +8,7 @@ from app.db import engine
 
 
 EXPECTED_COLUMNS = {
+    ("discord_ga_reactions", "attachment_count"),
     ("discord_reminders", "one_h_report"),
     ("projects", "is_active"),
     ("system_task_templates", "is_repetitive"),
