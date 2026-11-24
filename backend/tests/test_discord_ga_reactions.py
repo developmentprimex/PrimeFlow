@@ -126,6 +126,22 @@ class DiscordGaReactionsTests(unittest.TestCase):
             with self.subTest(report=report):
                 self.assert_report_table(report, module, expected_start)
 
+    def test_drafts_recover_late_reaction_records_at_the_original_generation_cutoff(self):
+        cutoff = datetime(2026, 11, 23, 11, 30, tzinfo=report_timezone())
+        sections = [{"section_key": service.GA_REACTIONS_SECTION_KEY, "body": service.NO_REACTIONS_RECORDED}]
+        snapshot = {"ga_replies_generated_at": cutoff.isoformat()}
+        for report in ("M1", "M2"):
+            with self.subTest(report=report), patch.object(service, "reaction_summary_for_day", AsyncMock(return_value="Recovered")) as summary:
+                refreshed = asyncio.run(service.refresh_ga_reaction_section(
+                    None, sections, cutoff.date(), report=report, generated_snapshot=snapshot, sent=False,
+                ))
+                assert refreshed[0]["body"] == "Recovered"
+                frozen = asyncio.run(service.refresh_ga_reaction_section(
+                    None, sections, cutoff.date(), report=report, generated_snapshot=snapshot, sent=True,
+                ))
+                assert frozen == sections
+                summary.assert_awaited_once_with(None, cutoff.date(), report=report, generated_at=cutoff)
+
     def assert_report_table(self, report, module, expected_start):
         tz = report_timezone()
         cutoff = datetime(2026, 11, 23, 11, 30, tzinfo=tz)

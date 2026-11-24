@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from app.services.report_attendance import filter_task_context, filter_report_sections
-from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE, UNAVAILABLE, summary_for_day
+from app.services.discord_ga_replies import (
+    GA_REPLIES_CAPTURE_VERSION,
+    GA_REPLIES_CAPTURE_VERSION_KEY,
+    GA_REPLIES_SECTION_TITLE,
+    UNAVAILABLE,
+    summary_for_day,
+)
 from app.services.discord_ga_reactions import (
     GA_REACTIONS_SECTION_KEY,
     GA_REACTIONS_SECTION_TITLE,
@@ -1167,6 +1173,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         "report_day": report_day.isoformat(),
         NOTE_REFERENCES: blue_notes,
         "ga_replies_generated_at": generated_at.isoformat(),
+        GA_REPLIES_CAPTURE_VERSION_KEY: GA_REPLIES_CAPTURE_VERSION,
         "counts": {
             SECTION_TITLES[0]: 0,
             SECTION_TITLES[4]: len(unfinished_priority_rows),

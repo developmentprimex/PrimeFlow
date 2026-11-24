@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from docx import Document
 
-from app.api.deps import require_admin
+from app.api.deps import require_manager_or_admin
 from app.api.routers import morning_report as morning_api
 from app.api.routers.morning_report import DraftUpdate, SectionPayload, router, update_draft
 from app.models.common_entry import CommonEntry
@@ -438,6 +438,9 @@ class FakeDraftDb:
 
     async def get(self, _model, _draft_id):
         return self.draft
+
+    async def execute(self, _query):
+        return Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[]))))
 
     async def commit(self) -> None:
         return None
@@ -1032,10 +1035,11 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             [
                 {"title": SECTION_TITLES[0], "body": "EMAIL INFO PX (KO SPAM): ok"},
                 {"title": SECTION_TITLES[2], "body": "VONESA: 0"},
+                {"title": "PYETJE SHTESË", "section_key": "manual:pyetjeshtese", "body": "Përgjigje"},
             ],
         )
 
-        self.assertIn("Hapja e dites M1", html)
+        self.assertIn("M1 - PrimeFlow Hapja e dites - 05.08.2026", html)
         self.assertIn("MANUAL QUESTIONS", html)
         self.assertIn("AUTO-FILLED FROM PRIMEFLOW", html)
         self.assertIn("max-width:600px", html)
@@ -1065,12 +1069,12 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("EM: INFO PX: DET TEST", html)
         self.assertNotIn("<pre", html)
 
-    def test_settings_routes_require_admin(self) -> None:
+    def test_settings_routes_require_manager_or_admin(self) -> None:
         settings_routes = [route for route in router.routes if route.path == "/settings"]
         self.assertEqual(len(settings_routes), 2)
         for route in settings_routes:
             dependencies = [dependency.call for dependency in route.dependant.dependencies]
-            self.assertIn(require_admin, dependencies)
+            self.assertIn(require_manager_or_admin, dependencies)
 
     async def test_saved_m1_content_can_be_edited(self) -> None:
         draft = make_draft()
@@ -1085,7 +1089,8 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             staff,
         )
 
-        self.assertIn("NDRYSHON PLANI: Changes after 10:00", result["sections"][0]["body"])
+        attendance = next(section for section in result["sections"] if section["section_key"] == SECTION_TITLES[2])
+        self.assertIn("NDRYSHON PLANI: Changes after 10:00", attendance["body"])
 
     async def test_existing_m1_personal_section_remains_ga_only(self) -> None:
         assignee_id = uuid.uuid4()

@@ -36,6 +36,7 @@ from app.services.after_break_report import (
     subject_for,
 )
 from app.services.discord_ga_replies import refresh_ga_reply_section
+from app.services.discord_ga_reactions import refresh_ga_reaction_section
 from app.services.meeting_point_manual_sync import (
     custom_manual_questions,
     merge_common_view_manual_sections,
@@ -171,6 +172,8 @@ async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) ->
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
     sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", refresh_current=row.status != "SENT",
                                              sent_at=row.sent_at, populate_missing=True, generated_snapshot=row.generated_snapshot)
+    sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M2",
+                                                 generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
     sections = await apply_1h_confirmation_questions(db, sections)
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
@@ -385,6 +388,8 @@ async def preview_draft(
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
     sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", refresh_current=row.status != "SENT",
                                              sent_at=row.sent_at, populate_missing=True, generated_snapshot=row.generated_snapshot)
+    sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M2",
+                                                 generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
@@ -411,8 +416,10 @@ async def send_draft(
         db, normalize_after_break_report_sections(row.sections)
     )
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
-    sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", populate_missing=True,
-                                             generated_snapshot=row.generated_snapshot)
+    sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", refresh_current=row.status != "SENT",
+                                             sent_at=row.sent_at, populate_missing=True, generated_snapshot=row.generated_snapshot)
+    sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M2",
+                                                 generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)

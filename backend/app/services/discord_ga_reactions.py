@@ -99,3 +99,15 @@ async def reaction_summary_for_day(db, day, *, report, generated_at):
         DiscordGaReaction.observed_at >= start, DiscordGaReaction.observed_at <= end,
     ).order_by(DiscordGaReaction.observed_at, DiscordGaReaction.event_id))
     return render_reactions(result.all())
+
+
+async def refresh_ga_reaction_section(db, sections, day, *, report, generated_snapshot, sent):
+    generated_at = (generated_snapshot or {}).get("ga_replies_generated_at")
+    if sent or not generated_at:
+        return sections
+    return [
+        {**section, "body": await reaction_summary_for_day(
+            db, day, report=report, generated_at=datetime.fromisoformat(generated_at),
+        )} if (section.get("section_key") or section.get("title")) == GA_REACTIONS_SECTION_KEY else section
+        for section in sections
+    ]
