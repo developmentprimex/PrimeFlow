@@ -34,7 +34,7 @@ class DiscordMentionAttachments(BaseModel):
     attachments: list[DiscordAttachmentLink]
 
 
-class DiscordFeedMention(BaseModel):
+class DiscordContextMessage(BaseModel):
     id: str
     author: str
     author_initials: str
@@ -44,9 +44,20 @@ class DiscordFeedMention(BaseModel):
     text: str
     url: str
     attachments: list[DiscordAttachmentName]
-    status: Literal["new", "seen", "done"]
     reactions: list[DiscordFeedReaction]
     reactions_synced_at: datetime | None
+
+
+class DiscordMentionContext(BaseModel):
+    para: list[DiscordContextMessage]
+    pas: list[DiscordContextMessage]
+    reply: DiscordContextMessage | None
+    përgjigjet: list[DiscordContextMessage]
+
+
+class DiscordFeedMention(DiscordContextMessage):
+    context: DiscordMentionContext
+    status: Literal["new", "seen", "done"]
     reviewed_by: list[str]
     ready_for_ga: bool
 

@@ -271,6 +271,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Artifact-i përdor `ga_discord_mention_attachments` dhe botin e përmendjeve
   për të kërkuar linket e përkohshme nga Discord. Kontrollo hapjen nga një
   përmendje direkte dhe refuzimin për burimet jashtë listës së kanalit.
+  Arkivi `ga_discord_channel_messages` furnizon `context` në të dy mjetet e
+  përmendjeve. Kontrollo kanalin dhe thread-et publike, dritaren dyminutëshe
+  për autorin, reply-n origjinal, reagimet dhe skedarët për çdo ID të lidhur.
+  Agjenda e GA-së vazhdon të lexojë tabelën e përmendjeve dhe M1/M2 përdorin
+  evidencën e tyre për përgjigjet dhe reagimet.
 
 - M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
   importi nga Common View të mos krijojnë kopje në grupin manual të M2.

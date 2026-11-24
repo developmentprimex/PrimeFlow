@@ -726,7 +726,7 @@ async def discord_mentions(
     if end <= start:
         raise HTTPException(status_code=422, detail="until must be after since")
     rows = await mentions.list_mentions(db, since=start, until=end, statuses=mentions.OPEN_STATUSES if only_open else None)
-    items = await mentions.render(db, rows, svc.ga_tz())
+    items = await mentions.render_with_context(db, rows, svc.ga_tz())
     if only_ready:
         items = [item for item in items if item["ready_for_ga"]]
     last = await mentions.last_message_at(db)
@@ -774,9 +774,7 @@ async def discord_mentions_feed(
 
     page = rows[:limit]
     tz = svc.ga_tz()
-    items = await mentions.render(db, page, tz) if page else []
-    for item, row in zip(items, page):
-        item["reactions_synced_at"] = row.reactions_synced_at
+    items = await mentions.render_with_context(db, page, tz)
     return {
         "channel_id": settings.DISCORD_GA_REPLIES_CHANNEL_ID,
         "timezone": settings.GA_TIMEZONE,

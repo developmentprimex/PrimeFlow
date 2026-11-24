@@ -108,6 +108,10 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
   rol që ka), ose që i përgjigjet një mesazhi të saj. GA-ja njihet nga lidhja e saj Discord
   në PrimeFlow (`discord_links`) ose nga `GA_DISCORD_USER_ID`.
 - Pas çdo rilidhjeje lexon edhe mesazhet e humbura (deri në `GA_DISCORD_MENTIONS_BACKFILL_HOURS`).
+- Arkivi i stafit (migrimi 0207) ruan mesazhet e `#det-nga-stafi-per-ga` dhe të thread-eve publike
+  ku boti ka qasje. Importi fillestar lexon historikun e disponueshëm. Pas rilidhjes, çdo
+  kanal ose thread vazhdon nga grupi i fundit i ruajtur. Mesazhet e reja dhe reagimet
+  regjistrohen gjatë punës normale të botit.
 - Boti flet me API-në te `/api/ga-discord-bot/*` me sekret që nxirret nga `JWT_SECRET`
   (s'ka sekret të ri për t'u vendosur).
 - Te `ga_agenda` (me `include_untimed`) dhe `ga_untimed_today`: `kind: DISCORD`, pa orë, në ditën
@@ -128,6 +132,12 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 - Thirr `ga_discord_mentions_feed({})` kur hapet ose rifreskohet lista. Përmendjet direkte nga `#det-nga-stafi-per-ga` vijnë nga më e reja te më e vjetra, përfshirë statusin `done`. API-ja përdor `DISCORD_GA_REPLIES_CHANNEL_ID` për të zbatuar filtrin e kanalit. Përmendjet e roleve dhe përgjigjet hyjnë në listë vetëm kur i njëjti mesazh përmban edhe përmendje direkte.
 - Rezultati i strukturuar MCP përmban `channel_id`, `timezone`, `bot_configured`, `items` dhe `next_before`. Çdo rresht përmban ID-në `dc:…`, dërguesin, kanalin, kohën, tekstin, linkun origjinal dhe reagimet me emoji, numër dhe emra. `reactions_synced_at: null` tregon që leximi i reagimeve është ende në pritje. `bot_configured` tregon praninë e konfigurimit të botit.
 - Shfaq `items[].attachments[].name` te mesazhi. Kur përdoruesi hap skedarët, thirr `ga_discord_mention_attachments` me ID-në `dc:…` të atij rreshti. Mjeti kontrollon mesazhin aktual në Discord dhe kthen `attachments: [{name, url, content_type}]`. Kërko link të ri nëse bie afati i tij. Linku `items[].url` hap mesazhin origjinal në Discord.
+- Të dy mjetet e përmendjeve kthejnë `context` për çdo rresht. Për një përmendje direkte në këtë kanal:
+  - `para` dhe `pas` përmbajnë mesazhet e të njëjtit autor në të njëjtin kanal, deri në dy minuta nga përmendja.
+  - `reply` përmban mesazhin origjinal të cilit i përgjigjet përmendja, pa kufi kohe, ose `null`.
+  - `përgjigjet` përmban reply-t direkte ndaj përmendjes dhe mesazhet nga thread-i publik që nis te përmendja.
+  - Çdo mesazh i kontekstit ka ID `dc:…`, autor, kohë, tekst, emra skedarësh, reagime dhe linkun te Discord.
+    Përdor të njëjtin `ga_discord_mention_attachments` me ID-në e mesazhit të kontekstit.
 - Për faqen pasuese, ktheje `next_before` si `before` dhe përdor të njëjtin `limit` (1–50). `next_before: null` shënon fundin. Për të marrë ndryshime të reja, rifresko faqen e parë pa `before`; përditëso rreshtat ekzistues sipas `id` që shtimi ose heqja e reagimeve të shfaqet te i njëjti mesazh.
 - Pas deployment-it, provoje me një përmendje direkte dhe një skedar në kanal, shto një reaction dhe hiqe. Verifiko që skedari hapet me linkun e kërkuar nga mjeti dhe që `reactions` ndryshon duke ruajtur të njëjtin `id`.
 

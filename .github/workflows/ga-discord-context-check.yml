@@ -1,0 +1,26 @@
+name: GA Discord Context Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: primeflow-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: self-hosted
+    timeout-minutes: 7
+    steps:
+      - name: Verify deployed staff-channel context against Discord
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $deployed = (Get-Content -LiteralPath 'C:\pm2-system\primeflow-deploy\backend.sha' -Raw).Trim()
+          if ($deployed -ne $env:GITHUB_SHA) { throw 'This check requires the selected commit to be deployed.' }
+          Set-Location -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'backend')
+          & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -m scripts.check_ga_discord_context
+          if ($LASTEXITCODE -ne 0) { throw 'The Discord context check could not be completed.' }

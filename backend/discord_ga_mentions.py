@@ -1,9 +1,10 @@
-"""Read-only Discord bot: stores server messages that mention the GA, for the GA assistant.
+"""Read-only Discord bot for GA mentions and the staff channel archive.
 
 What it stores (PrimEx server channels and public threads only, never DMs):
 * messages that @mention the GA,
 * messages that @mention a role the GA has,
 * replies to one of the GA's messages.
+* every message in the configured staff channel and its public threads.
 
 It also follows the reactions on stored mentions (who already reviewed a message):
 live through reaction add/remove events, and once over REST for older mentions.
@@ -78,8 +79,17 @@ def message_payload(message, reasons: list[str]) -> dict:
         "jump_url": message.jump_url,
         "attachments": [{"name": a.filename[:300], "url": a.url[:1000]} for a in message.attachments[:20]],
         "reasons": reasons,
-        "reply_to_message_id": str(reference.message_id) if reference and reference.message_id else None,
+        "reply_to_message_id": str(reference.message_id)
+        if message.type == discord.MessageType.reply and reference and reference.message_id else None,
     }
+
+
+def archive_payload(message) -> dict:
+    payload = message_payload(message, [])
+    del payload["reasons"]
+    thread = message.channel if isinstance(message.channel, discord.Thread) else None
+    payload["parent_channel_id"] = str(thread.parent_id) if thread else None
+    return payload
 
 
 def emoji_label(emoji) -> str:
@@ -106,6 +116,14 @@ async def read_reactions(message) -> list[dict]:
     return out[:50]
 
 
+async def archive_snapshot(message) -> dict:
+    return {
+        **archive_payload(message),
+        "reactions_synced_at": datetime.now(timezone.utc).isoformat(),
+        "reactions": await read_reactions(message),
+    }
+
+
 class GaMentionsBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.none()
@@ -123,6 +141,8 @@ class GaMentionsBot(discord.Client):
         self.context_at = 0.0
         self.context: dict = {}
         self.backfill_lock = asyncio.Lock()
+        self.archive_lock = asyncio.Lock()
+        self.archive_channels: set[int] = set()
         self.tracked: set[int] = set()
         self.pending_reactions: dict[int, asyncio.Task] = {}
 
@@ -131,7 +151,7 @@ class GaMentionsBot(discord.Client):
         await super().close()
 
     async def refresh_context(self, *, force: bool = False) -> bool:
-        if not force and time.monotonic() - self.context_at < CONTEXT_TTL_SECONDS and self.ga_id:
+        if not force and self.context.get("guild_id") and time.monotonic() - self.context_at < CONTEXT_TTL_SECONDS:
             return True
         try:
             response = await self.api.get("/context")
@@ -140,20 +160,27 @@ class GaMentionsBot(discord.Client):
             self.tracked.update(int(item) for item in self.context.get("tracked_message_ids") or [])
         except (httpx.HTTPError, ValueError) as exc:
             log.warning("PrimeFlow context unavailable: %s", type(exc).__name__)
-            return bool(self.ga_id)
+            return bool(self.context.get("guild_id"))
         ga_raw = self.context.get("ga_discord_id")
         guild = self.get_guild(int(self.context.get("guild_id") or 0))
-        if not ga_raw or guild is None:
-            log.error("GA Discord id or PrimEx server unavailable (is the bot invited, is GA's Discord linked?)")
+        if guild is None:
+            log.error("PrimEx server unavailable (is the bot invited?)")
             self.ga_id = None
             return False
+        self.context_at = time.monotonic()
+        if not ga_raw:
+            log.warning("GA Discord id unavailable; the staff channel archive can still run")
+            self.ga_id = None
+            self.ga_roles = set()
+            return True
+        if self.ga_id != int(ga_raw):
+            self.ga_roles = set()
         self.ga_id = int(ga_raw)
         try:
             member = await guild.fetch_member(self.ga_id)  # REST call; needs no privileged intent
             self.ga_roles = {role.id for role in member.roles if not role.is_default()}
         except discord.DiscordException as exc:
             log.warning("GA roles unavailable: %s", type(exc).__name__)
-        self.context_at = time.monotonic()
         return True
 
     def concerns_ga(self, message) -> list[str]:
@@ -168,19 +195,35 @@ class GaMentionsBot(discord.Client):
     async def send(self, payloads: list[dict]) -> None:
         self.tracked.update(int(payload["id"]) for payload in payloads)
         for start in range(0, len(payloads), POST_BATCH):
-            batch = payloads[start:start + POST_BATCH]
-            for attempt in range(3):
-                try:
-                    response = await self.api.post("/mentions", json={"messages": batch})
-                    response.raise_for_status()
-                    break
-                except httpx.HTTPError as exc:
-                    log.warning("Storing %s mention(s) failed (%s), attempt %s", len(batch), type(exc).__name__, attempt + 1)
+            await self.post_batch("/mentions", {"messages": payloads[start:start + POST_BATCH]})
+
+    async def post_batch(self, endpoint: str, data: dict) -> bool:
+        for attempt in range(3):
+            try:
+                response = await self.api.post(endpoint, json=data)
+                response.raise_for_status()
+                return True
+            except httpx.HTTPError as exc:
+                log.warning("Storing Discord batch at %s failed (%s), attempt %s", endpoint, type(exc).__name__, attempt + 1)
+                if attempt < 2:
                     await asyncio.sleep(2 * (attempt + 1))
+        return False
+
+    def is_staff_channel(self, channel) -> bool:
+        staff_channel = self.context.get("staff_channel_id")
+        if channel is None or not staff_channel:
+            return False
+        if isinstance(channel, discord.Thread):
+            return not channel.is_private() and str(channel.parent_id) == staff_channel
+        return str(channel.id) == staff_channel
 
     async def handle(self, message) -> None:
         if not await self.refresh_context():
             return
+        if (message.guild and str(message.guild.id) == self.context.get("guild_id")
+                and self.is_staff_channel(message.channel) and message.type != discord.MessageType.thread_starter_message):
+            self.archive_channels.add(message.channel.id)
+            await self.post_batch("/channel-messages", {"messages": [archive_payload(message)]})
         reasons = self.concerns_ga(message)
         if reasons:
             await self.send([message_payload(message, reasons)])
@@ -189,6 +232,11 @@ class GaMentionsBot(discord.Client):
         log.info("GA mentions bot connected as %s", self.user)
         if await self.refresh_context(force=True):
             asyncio.create_task(self.backfill())
+            asyncio.create_task(self.backfill_archive())
+
+    async def on_resumed(self) -> None:
+        if await self.refresh_context(force=True):
+            asyncio.create_task(self.backfill_archive())
 
     async def on_raw_reaction_add(self, payload) -> None:
         self.reaction_changed(payload)
@@ -207,7 +255,9 @@ class GaMentionsBot(discord.Client):
         guild_id = getattr(payload, "guild_id", None)
         if guild_id is None or str(guild_id) != str(self.context.get("guild_id")):
             return  # DMs and other servers are never read
-        if payload.message_id not in self.tracked:
+        if (payload.message_id not in self.tracked and payload.channel_id not in self.archive_channels
+                and str(payload.channel_id) != self.context.get("staff_channel_id")
+                and not self.is_staff_channel(self.get_channel(payload.channel_id))):
             return
         pending = self.pending_reactions.pop(payload.message_id, None)
         if pending is not None:
@@ -224,9 +274,19 @@ class GaMentionsBot(discord.Client):
             if getattr(channel, "guild", None) is None:
                 return
             message = await channel.fetch_message(message_id)  # GET /channels/{id}/messages/{id}
-            reactions = await read_reactions(message)
-            response = await self.api.post("/reactions", json={"message_id": str(message_id), "reactions": reactions})
-            response.raise_for_status()
+            if self.is_staff_channel(channel) and message.type != discord.MessageType.thread_starter_message:
+                snapshot = await archive_snapshot(message)
+                await self.post_batch("/channel-messages", {"messages": [snapshot]})
+                reactions = snapshot["reactions"]
+                observed_at = snapshot["reactions_synced_at"]
+            else:
+                observed_at = datetime.now(timezone.utc).isoformat()
+                reactions = await read_reactions(message)
+            if message_id in self.tracked:
+                response = await self.api.post("/reactions", json={
+                    "message_id": str(message_id), "reactions": reactions, "observed_at": observed_at,
+                })
+                response.raise_for_status()
         except asyncio.CancelledError:
             raise
         except discord.NotFound:
@@ -251,6 +311,66 @@ class GaMentionsBot(discord.Client):
 
     async def on_message_edit(self, _before, after) -> None:
         await self.handle(after)
+
+    async def on_raw_message_edit(self, payload) -> None:
+        if payload.cached_message is not None or str(payload.guild_id) != self.context.get("guild_id"):
+            return
+        channel = self.get_channel(payload.channel_id)
+        if (not self.is_staff_channel(channel) and payload.channel_id not in self.archive_channels
+                and str(payload.channel_id) != self.context.get("staff_channel_id")):
+            return
+        try:
+            channel = channel or await self.fetch_channel(payload.channel_id)
+            await self.handle(await channel.fetch_message(payload.message_id))
+        except discord.DiscordException as exc:
+            log.info("Discord edit unavailable in the staff channel: %s", type(exc).__name__)
+
+    async def backfill_archive(self) -> None:
+        async with self.archive_lock:
+            guild = self.get_guild(int(self.context.get("guild_id") or 0))
+            if guild is None:
+                return
+            staff = guild.get_channel(int(self.context.get("staff_channel_id") or 0))
+            if not isinstance(staff, discord.TextChannel) or not readable(staff, guild.me):
+                return
+
+            checkpoints = self.context.setdefault("archive_checkpoints", {})
+            await self.archive_history(staff, checkpoints)
+            scanned = set()
+            try:
+                for thread in await guild.active_threads():
+                    if self.is_staff_channel(thread) and readable(thread, guild.me):
+                        await self.archive_history(thread, checkpoints)
+                        scanned.add(thread.id)
+            except discord.DiscordException as exc:
+                log.warning("Active staff threads unavailable: %s", type(exc).__name__)
+            try:
+                async for thread in staff.archived_threads(limit=None):
+                    if thread.id not in scanned and readable(thread, guild.me):
+                        await self.archive_history(thread, checkpoints)
+            except discord.DiscordException as exc:
+                log.warning("Archived staff threads unavailable: %s", type(exc).__name__)
+
+    async def archive_history(self, channel, checkpoints: dict[str, str]) -> None:
+        self.archive_channels.add(channel.id)
+        channel_id = str(channel.id)
+        cursor = checkpoints.get(channel_id)
+        after = discord.Object(id=int(cursor)) if cursor else None
+        batch = []
+        try:
+            async for message in channel.history(limit=None, after=after, oldest_first=True):
+                if message.type == discord.MessageType.thread_starter_message:
+                    continue
+                batch.append(await archive_snapshot(message))
+                if len(batch) == POST_BATCH:
+                    if not await self.post_batch("/channel-messages", {"messages": batch, "checkpoint_channel_id": channel_id}):
+                        return
+                    checkpoints[channel_id] = batch[-1]["id"]
+                    batch = []
+        except discord.DiscordException as exc:
+            log.warning("Staff archive history interrupted in channel %s: %s", channel_id, type(exc).__name__)
+        if batch and await self.post_batch("/channel-messages", {"messages": batch, "checkpoint_channel_id": channel_id}):
+            checkpoints[channel_id] = batch[-1]["id"]
 
     async def backfill(self) -> None:
         """After a (re)connect, read what was written while the bot was offline."""

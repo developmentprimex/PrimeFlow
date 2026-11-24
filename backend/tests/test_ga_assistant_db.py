@@ -232,6 +232,96 @@ class GaAssistantDbTests(unittest.IsolatedAsyncioTestCase):
             await self.post("/discord/mentions/dc:1002/status", {"status": "done"})
             self.assertEqual((await self.get(path))["items"][0]["status"], "done")
 
+    async def test_staff_discord_archive_joins_context_and_limits_attachment_access(self) -> None:
+        import httpx
+
+        from app.services.ga_discord_mentions import bridge_secret
+
+        at = self.at(self.today) - timedelta(minutes=10)
+        bridge = "/api/ga-discord-bot"
+
+        def message(mid, seconds, *, author="77", channel="20", parent=None, reply=None):
+            return {
+                "id": mid, "guild_id": "10", "channel_id": channel, "channel_name": "staff",
+                "parent_channel_id": parent, "author_discord_id": author, "author_name": "Stafi",
+                "created_at": (at + timedelta(seconds=seconds)).isoformat(), "content": f"Mesazhi {mid}",
+                "reply_to_message_id": reply, "jump_url": f"https://discord.com/channels/10/{channel}/{mid}",
+                "attachments": [{"name": "plan.pdf", "url": "https://cdn.discordapp.com/attachments/20/30/plan.pdf"}],
+            }
+
+        with patch.multiple(settings, DISCORD_GUILD_ID="10", DISCORD_GA_REPLIES_CHANNEL_ID="20",
+                            GA_DISCORD_USER_ID="42", GA_DISCORD_MENTIONS_BOT_TOKEN="test-token"):
+            headers = {"X-GA-Mentions-Secret": bridge_secret()}
+            mention = message("200", 0, reply="100")
+            records = [
+                message("100", -480, author="80"),
+                message("190", -121), message("191", -120), message("192", -30, author="80"),
+                mention, message("201", 120), message("202", 121),
+                message("203", 180, author="42", reply="200"),
+                message("204", 181, author="80", channel="200", parent="20"),
+                message("205", 182, author="80", channel="999", parent="20"),
+                message("206", 10, channel="21"),
+            ]
+            posted = await self.client.post(f"{bridge}/channel-messages", headers=headers, json={"messages": records})
+            self.assertEqual(posted.json(), {"stored": 10, "skipped": 1})
+            edited = {**records[2], "content": "Mesazhi 191", "edited_at": (at + timedelta(seconds=5)).isoformat()}
+            stale = {**records[2], "content": "Kopja e vjetër"}
+            for batch in ([edited, records[5]], [stale]):
+                posted = await self.client.post(f"{bridge}/channel-messages", headers=headers, json={
+                    "messages": batch, "checkpoint_channel_id": "20",
+                })
+                self.assertEqual(posted.status_code, 200, posted.text)
+            bot_context = await self.client.get(f"{bridge}/context", headers=headers)
+            self.assertEqual(bot_context.json()["archive_checkpoints"], {"20": "201"})
+            posted = await self.client.post(f"{bridge}/mentions", headers=headers, json={
+                "messages": [{**mention, "reasons": ["mention"]}],
+            })
+            self.assertEqual(posted.json()["stored"], 1)
+
+            paths = ("/discord/mentions/feed", "/discord/mentions")
+            for path in paths:
+                result = await self.get(path, **({"since": (at - timedelta(minutes=1)).isoformat()} if path == paths[1] else {}))
+                self.assertEqual([item["id"] for item in result["items"]], ["dc:200"])
+                context = result["items"][0]["context"]
+                self.assertEqual([item["id"] for item in context["para"]], ["dc:191"])
+                self.assertEqual([item["id"] for item in context["pas"]], ["dc:201"])
+                self.assertEqual(context["reply"]["id"], "dc:100")
+                self.assertEqual([item["id"] for item in context["përgjigjet"]], ["dc:203", "dc:204"])
+                previous = context["para"][0]
+                self.assertEqual(previous["attachments"], [{"name": "plan.pdf"}])
+                self.assertEqual(previous["text"], "Mesazhi 191")
+
+            reaction = {"emoji": "✅", "count": 1, "users": [{"discord_id": "66", "name": "Arta Berisha"}]}
+            response = await self.client.post(f"{bridge}/reactions", headers=headers, json={
+                "message_id": "191", "reactions": [reaction],
+            })
+            self.assertEqual(response.json(), {"updated": True})
+            await self.client.post(f"{bridge}/channel-messages", headers=headers, json={"messages": [
+                {**stale, "reactions": [], "reactions_synced_at": at.isoformat()},
+            ]})
+            item = (await self.get(paths[0]))["items"][0]["context"]["para"][0]
+            self.assertEqual(item["reactions"][0]["users"][0]["name"], "Arta Berisha")
+
+            url = "https://discord.com/api/v10/channels/20/messages/191"
+            fresh = "https://cdn.discordapp.com/attachments/20/30/plan.pdf?ex=fresh"
+            original_get = httpx.AsyncClient.get
+            discord_get = AsyncMock(return_value=httpx.Response(200, request=httpx.Request("GET", url), json={
+                "id": "191", "channel_id": "20", "author": {"id": "77"}, "mentions": [],
+                "attachments": [{"id": "30", "filename": "plan.pdf", "url": fresh}],
+            }))
+
+            async def fake_discord_get(client, address, **kwargs):
+                if address == url:
+                    return await discord_get(address, **kwargs)
+                return await original_get(client, address, **kwargs)
+
+            with patch.object(httpx.AsyncClient, "get", fake_discord_get):
+                self.assertEqual((await self.get(f"{paths[0]}/191/attachments"))["attachments"][0]["url"], fresh)
+                for mid in ("190", "192", "205", "206"):
+                    response = await self.client.get(f"/api/ga-assistant{paths[0]}/{mid}/attachments", headers=self.h())
+                    self.assertEqual(response.status_code, 404)
+                self.assertEqual(discord_get.await_count, 1)
+
     async def test_agenda_classifies_like_admin_tasks_and_respects_window(self) -> None:
         start, end = self.at(self.today, 8), self.at(self.today, 12)
         data = await self.get("/agenda", start=start.isoformat(), end=end.isoformat())
