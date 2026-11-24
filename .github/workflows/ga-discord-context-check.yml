@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: primeflow-production-deploy
+  group: primeflow-ga-discord-context-check
   cancel-in-progress: false
 
 jobs:
@@ -20,7 +20,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $deployed = (Get-Content -LiteralPath 'C:\pm2-system\primeflow-deploy\backend.sha' -Raw).Trim()
-          if ($deployed -ne $env:GITHUB_SHA) { throw 'This check requires the selected commit to be deployed.' }
+          if ($deployed -notmatch '^[0-9a-f]{40}$') { throw 'The deployed backend commit is unavailable.' }
+          Set-Location -LiteralPath $env:GITHUB_WORKSPACE
+          git -c "safe.directory=$env:GITHUB_WORKSPACE" diff --quiet $deployed HEAD -- backend/scripts/check_ga_discord_context.py backend/app/services/ga_discord_channel_archive.py backend/app/services/ga_discord_mentions.py backend/app/schemas/ga_discord_mentions.py backend/discord_ga_mentions.py
+          if ($LASTEXITCODE -ne 0) { throw 'The staff context code in this checkout differs from the deployed backend.' }
+          Write-Host "Checking deployed backend $deployed"
           Set-Location -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'backend')
           & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -m scripts.check_ga_discord_context
           if ($LASTEXITCODE -ne 0) { throw 'The Discord context check could not be completed.' }
