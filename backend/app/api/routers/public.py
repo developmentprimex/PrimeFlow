@@ -10,6 +10,7 @@ from app.models.enums import GaNoteStatus
 from app.schemas.ga_note import GaNotePublicOut
 from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN
 from app.integrations.gmail_mail import PX_EU_NOTE_ORIGIN
+from app.integrations.homeface_mail import NOTE_ORIGIN as HF_NOTE_ORIGIN
 from app.integrations.microsoft_mail import INFO_PX_NOTE_ORIGIN, IT_NOTE_ORIGIN
 
 
@@ -39,6 +40,7 @@ async def list_public_ga_notes(
         .where(GaNote.knowledge_type.is_distinct_from(INFO_PX_NOTE_ORIGIN))
         .where(GaNote.knowledge_type.is_distinct_from(IT_NOTE_ORIGIN))
         .where(GaNote.knowledge_type.is_distinct_from(PX_EU_NOTE_ORIGIN))
+        .where(GaNote.knowledge_type.is_distinct_from(HF_NOTE_ORIGIN))
         .order_by(GaNote.created_at.desc())
         .limit(PUBLIC_NOTES_LIMIT)
     )

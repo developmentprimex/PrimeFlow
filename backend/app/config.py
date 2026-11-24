@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Literal
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -152,6 +152,7 @@ class Settings(BaseSettings):
     GMAIL_PX_EU_CLIENT_ID: str | None = None
     GMAIL_PX_EU_CLIENT_SECRET: str | None = None
     GMAIL_PX_EU_REDIRECT_URI: str | None = None
+    HOMEFACE_MAIL_APP_PASSWORD: SecretStr | None = None
     # Microsoft To Do for the GA assistant; off = Microsoft connect asks for the same permissions as before.
     MS_TODO_ENABLED: bool = False
     # Optional: To Do list (id, or a unique name) for reminders created by the GA assistant.
