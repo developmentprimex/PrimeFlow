@@ -259,6 +259,19 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
   kufirit të gjenerimit. Kontrollo faqet, preview dhe emailin për të dy raportet.
 
+- Claude Artifact lexon përmendjet direkte të GA-së përmes `ga_discord_mentions_feed`
+  dhe `/api/ga-assistant/discord/mentions/feed`. Burimi është `ga_discord_mentions`,
+  të cilin e lexojnë edhe agjenda e GA-së dhe mjeti ekzistues `ga_discord_mentions`.
+  Filtri i listës së Artifact-it përdor `DISCORD_GA_REPLIES_CHANNEL_ID`, të njëjtin
+  konfigurim kanali që përdorin rrjedhat e përgjigjeve dhe reagimeve të GA në M1/M2.
+  Kur ndryshon ID-ja e kanalit, kontrollo burimin në të tria paraqitjet. Për listën
+  e Artifact-it kontrollo mention-et direkte, përjashtimin e kanaleve të tjera,
+  faqëzimin dhe rifreskimin pas shtimit ose heqjes së një reagimi.
+  Lista shfaq emrat e bashkëngjitjeve nga `ga_discord_mentions`. Hapja nga
+  Artifact-i përdor `ga_discord_mention_attachments` dhe botin e përmendjeve
+  për të kërkuar linket e përkohshme nga Discord. Kontrollo hapjen nga një
+  përmendje direkte dhe refuzimin për burimet jashtë listës së kanalit.
+
 - M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
   importi nga Common View të mos krijojnë kopje në grupin manual të M2.
 

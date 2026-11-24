@@ -12,9 +12,12 @@ import hmac
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+import httpx
+from fastapi import HTTPException
+from sqlalchemy import Select, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +25,7 @@ from app.config import settings
 from app.models.discord_assistant import DiscordLink
 from app.models.ga_discord_mention import GaDiscordMention
 from app.models.user import User
+from app.schemas.ga_discord_mentions import DiscordAttachmentLink
 
 STATUSES = ("new", "seen", "done")
 TRACKED_DAYS = 30  # reactions are followed on mentions of the last 30 days
@@ -235,3 +239,69 @@ async def list_mentions(
     if statuses:
         statement = statement.where(GaDiscordMention.status.in_(statuses))
     return list((await db.execute(statement.limit(1000))).scalars().all())
+
+
+def _staff_channel_mentions() -> Select[tuple[GaDiscordMention]]:
+    mention = GaDiscordMention
+    return select(mention).where(
+        mention.guild_id == settings.DISCORD_GUILD_ID,
+        mention.channel_id == settings.DISCORD_GA_REPLIES_CHANNEL_ID,
+        mention.reasons.contains(["mention"]),
+    )
+
+
+async def list_staff_channel_mentions(
+    db: AsyncSession, *, before: str | None, limit: int
+) -> list[GaDiscordMention]:
+    if not settings.DISCORD_GUILD_ID or not settings.DISCORD_GA_REPLIES_CHANNEL_ID:
+        return []
+
+    mention = GaDiscordMention
+    statement = _staff_channel_mentions()
+    if before is not None:
+        cursor_time = await db.scalar(statement.with_only_columns(mention.created_at).where(mention.id == before))
+        if cursor_time is None:
+            raise ValueError("before must be a message ID from the GA staff channel feed")
+        statement = statement.where(tuple_(mention.created_at, mention.id) < tuple_(cursor_time, before))
+
+    statement = statement.order_by(mention.created_at.desc(), mention.id.desc()).limit(limit)
+    return list((await db.scalars(statement)).all())
+
+
+async def staff_mention_attachment_links(db: AsyncSession, message_id: str) -> list[DiscordAttachmentLink]:
+    """Fetch fresh signed URLs for a direct mention in the staff channel."""
+    row = await db.scalar(_staff_channel_mentions().where(GaDiscordMention.id == message_id))
+    ga_id = await ga_discord_id(db) if row else None
+    if row is None or not ga_id:
+        raise HTTPException(404, "Përmendja nuk gjendet në listën e GA-së.")
+    if not settings.GA_DISCORD_MENTIONS_BOT_TOKEN:
+        raise HTTPException(424, "Boti i përmendjeve nuk është i konfiguruar. Hape mesazhin në Discord.")
+
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
+            response = await client.get(
+                f"https://discord.com/api/v10/channels/{row.channel_id}/messages/{row.id}",
+                headers={"Authorization": f"Bot {settings.GA_DISCORD_MENTIONS_BOT_TOKEN}"},
+            )
+            if response.status_code in {403, 404}:
+                raise HTTPException(404, "Mesazhi nuk është më i disponueshëm në Discord.")
+            response.raise_for_status()
+            message = response.json()
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(502, "Skedarët nuk u lexuan nga Discord. Hape mesazhin në Discord.") from None
+
+    if (message.get("id") != row.id or message.get("channel_id") != row.channel_id
+            or message.get("author", {}).get("id") != row.author_discord_id
+            or not any(user.get("id") == ga_id for user in message.get("mentions", []))):
+        raise HTTPException(404, "Mesazhi nuk përputhet më me përmendjen e GA-së.")
+
+    links = []
+    for attachment in message.get("attachments", []):
+        url = attachment.get("url", "")
+        asset = urlsplit(url)
+        if (asset.scheme == "https" and asset.netloc in {"cdn.discordapp.com", "media.discordapp.net"}
+                and asset.path.startswith(f"/attachments/{row.channel_id}/{attachment['id']}/")):
+            links.append(DiscordAttachmentLink(
+                name=attachment["filename"], url=url, content_type=attachment.get("content_type"),
+            ))
+    return links
