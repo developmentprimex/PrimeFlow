@@ -1,0 +1,26 @@
+name: Check Alembic migrations
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  migration-graph:
+    name: Alembic migration graph
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install migration test dependencies
+        run: awk -F '==' '$1 == "SQLAlchemy[asyncio]" || $1 == "alembic" || $1 == "python-dotenv" {print}' requirements.txt | xargs python -m pip install
+      - name: Validate migration graph
+        run: python -m unittest tests.test_migration_graph
