@@ -18,6 +18,18 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_deployed_pause_and_symbol_comment_merge_is_recognized(self) -> None:
+        scripts = migration_scripts()
+        deployed = "0204_merge_pause_symbol_heads"
+        pause = "0203_allow_paused_note_tasks"
+        comments = "0203_task_symbol_comment_events"
+        self.assertEqual(set(scripts.get_revision(deployed).down_revision), {pause, comments})
+        self.assertEqual(scripts._upgrade_revs(deployed, deployed), [])
+        for current, expected in ((pause, [comments, deployed]), (comments, [pause, deployed])):
+            with self.subTest(current=current):
+                steps = scripts._upgrade_revs(deployed, current)
+                self.assertEqual([step.revision.revision for step in steps], expected)
+
     def test_paused_note_tasks_migration_handles_both_existing_constraint_names(self) -> None:
         scripts = migration_scripts()
         migration = scripts.get_revision("0203_allow_paused_note_tasks").module
