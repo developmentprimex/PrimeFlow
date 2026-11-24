@@ -18,6 +18,7 @@ _MAIL_WEB_HOSTS = {
 }
 _MANUAL_EMAIL_LINK = re.compile(r"^Email origjinal:\s*(\S+)\s*$", re.IGNORECASE)
 _EMAIL_TITLE = re.compile(r"^(EM (?:INFO PX|IT|HF|PX EU|GA|GMAIL)):\s*\d{1,2}:\d{2}(?:[ \t]+(.+))?$", re.IGNORECASE)
+_EMAIL_NOTE_PREFIX = re.compile(r"^EM(?:\s*:\s*|\s+)(?:INFO\s+PX|IT|HF|PX\s+EU|GA|GMAIL)\s*[:-]", re.I)
 _LEGACY_HEADER = re.compile(
     r"^(EM INFO PX|EM IT|EM HF|EM PX EU) - (?P<subject>[^\r\n]*)\r?\nDërguesi: (?P<sender>[^\r\n]*)"
     r"|^EM: GMAIL: (?P<gmail_subject>[^\r\n]*)\r?\nDërguesi: (?P<gmail_sender>[^\r\n]*)"
@@ -42,6 +43,10 @@ def email_title_from_content(content: str) -> str | None:
     first_line = content.lstrip().split("\n", 1)[0].strip()
     match = _EMAIL_TITLE.fullmatch(first_line)
     return format_email_title(match[1], match[2] or "") if match else None
+
+
+def is_email_note_content(content: str | None) -> bool:
+    return bool(_EMAIL_NOTE_PREFIX.match((content or "").lstrip()))
 
 
 def original_email_url(value: str | None) -> str | None:

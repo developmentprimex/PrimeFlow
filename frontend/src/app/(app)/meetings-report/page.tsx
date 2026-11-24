@@ -61,9 +61,6 @@ function canonicalMeetingsSectionTitle(title: string) {
   if (key.replace(/^(?:MANUAL)?\d*/, "") === compactSectionTitle(TOMORROW_SYMBOLS_TITLE)) {
     return TOMORROW_SYMBOLS_TITLE
   }
-  if (key.includes("TIKETATESTD")) {
-    return "(GA) ZHV: TIKETAT E STD?"
-  }
   if (key === compactSectionTitle("DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?")) {
     return "SYSTEM TASK LATE"
   }
@@ -124,7 +121,6 @@ function canonicalMeetingsSectionTitle(title: string) {
 function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
     TOMORROW_SYMBOLS_TITLE,
-    "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "DET TE SHTYERA",
@@ -154,9 +150,12 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
   }
 
   for (const section of sections) {
-    if ([section.title, section.section_key || ""].some((value) =>
-      compactSectionTitle(value).replace(/^(?:MANUAL)?\d*/, "") === "AJEMIBRENDAMESATARESMEPROJEKTE"
-    )) continue
+    if ([section.title, section.section_key || ""].some((value) => {
+      const key = compactSectionTitle(value).replace(/^(?:MANUAL)?\d*/, "")
+      return key === "AJEMIBRENDAMESATARESMEPROJEKTE" ||
+        key === "GAZHVTIKETATESTD" ||
+        (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3"))
+    })) continue
     const title = canonicalMeetingsSectionTitle((section.section_key || section.title).trim())
     if (!title) continue
     if (displayOrder.includes(title)) {
@@ -187,12 +186,8 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
 
 function sectionGroupLabel(section: Section) {
   const key = compactSectionTitle(section.section_key || section.title)
-  if (key.includes("TIKETATESTD")) {
-    return "Auto-filled from PrimeFlow"
-  }
   const knownAuto = [
     TOMORROW_SYMBOLS_TITLE,
-    "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "DET TE SHTYERA",

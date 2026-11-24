@@ -759,7 +759,7 @@ export default function AfterBreakReportPage() {
                       />
                     ) : (
                       <ReportSectionPreview
-                        bzColumnWidth={(section.section_key || section.title) === "GA MBYLLJA E DET" ? "96px" : undefined}
+                        compactBzColumn={(section.section_key || section.title) === "GA MBYLLJA E DET"}
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         discordReplyReport={(section.section_key || section.title) === GA_REPLIES_SECTION
                           ? { report: "M2", date: draft.report_date }

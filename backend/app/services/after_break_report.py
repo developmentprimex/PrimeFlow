@@ -49,6 +49,7 @@ from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
     _all_participant_user_ids,
+    _ascii_table_block,
     _assignee_names,
     apply_weekly_planner_task_order,
     _clean_task_title as _display_title,
@@ -70,6 +71,7 @@ from app.services.meetings_report import (
     _normalize_report_status,
     _render_group_label_html,
     _render_section_block_html,
+    _section_report_table_rows,
     _task_owners,
     _wrap_fixed_width,
     _wrap_report_email_html,
@@ -78,6 +80,7 @@ from app.services.meetings_report import (
 )
 from app.services.task_title_rules import title_has_eight_am_indicator
 from app.services.primeflow_report import report_timezone
+from app.services.px_note_email import EMAIL_NOTE_ORIGINS, email_preview, email_preview_text, is_email_note_content
 from app.services.report_inboxes import MailSource, REPORT_INBOX_SOURCES, read_report_inbox, report_mailbox
 
 REPORT_TYPE = "after_break_report"
@@ -902,6 +905,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             if title in by_title:
                 continue
         body = str(section.get("body") or "")
+        if title == SECTION_TITLES[9]:
+            body = order_blue_notes_table(body)
         if title == PCM_PROJECTS_TITLE and not PCM_PROJECT_SUMMARY_PATTERN.fullmatch(body):
             body = ""
         if title in SECTION_TITLES and title not in by_title:
@@ -1074,6 +1079,33 @@ BLUE_NOTE_COLUMNS = [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME",
 NOTE_REFERENCES = "px_note_references"
 
 
+def order_blue_note_references(references: list[tuple[str, list[str]]]) -> list[tuple[str, list[str]]]:
+    ordered = sorted(references, key=lambda entry: is_email_note_content(entry[1][2]))
+    if ordered == references:
+        return references
+    return [(note_id, [str(index), *values[1:]]) for index, (note_id, values) in enumerate(ordered, 1)]
+
+
+def order_blue_notes_table(body: str) -> str:
+    lines = body.splitlines()
+    caption_index = next((index for index, line in enumerate(lines) if line.strip() == "NOTES:"), None)
+    if caption_index is None:
+        return body
+    start = next((index for index in range(caption_index + 1, len(lines)) if lines[index].strip()), len(lines))
+    block = _ascii_table_block(lines, start)
+    if block is None:
+        return body
+    table, end = block
+    header, rows = _section_report_table_rows(table)
+    if header != [column for column, _ in BLUE_NOTE_COLUMNS] or not all(row[0].isdecimal() for row in rows):
+        return body
+    ordered = sorted(rows, key=lambda row: is_email_note_content(row[2]))
+    if ordered == rows:
+        return body
+    numbered = [[str(index), *row[1:]] for index, row in enumerate(ordered, 1)]
+    return "\n".join([*lines[:caption_index], *_ascii_table("NOTES", BLUE_NOTE_COLUMNS, numbered), *lines[end:]])
+
+
 async def load_blue_notes(
     db: AsyncSession, *, created_before: datetime | None = None, compact_email: bool = True,
 ) -> list[tuple[str, list[str]]]:
@@ -1118,9 +1150,10 @@ async def load_blue_notes(
         users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(author_ids)))).scalars().all()
         names = {user.id: user.full_name or user.username or user.email for user in users}
 
-    from app.services.px_note_email import email_preview, email_preview_text
-
-    ordered = sorted(open_notes, key=lambda note: note.created_at or note.updated_at)
+    ordered = sorted(open_notes, key=lambda note: (
+        getattr(note, "knowledge_type", None) in EMAIL_NOTE_ORIGINS or is_email_note_content(note.content),
+        note.created_at or note.updated_at,
+    ))
     return [
         (str(note.id), [
             str(index),

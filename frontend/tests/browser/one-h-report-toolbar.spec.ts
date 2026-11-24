@@ -144,7 +144,7 @@ test("M1 inbox shows the subject and expands only the selected email", async ({ 
     } })
     if (url.pathname.endsWith("/morning-report")) return route.fulfill({ json: {
       id: "mail-draft", status: "DRAFT", report_date: "2026-11-24", subject: "Morning report", recipients,
-      sections: [{ section_key: emailSection, title: emailSection, body: "" }],
+      sections: [{ section_key: emailSection, title: "EMAILS TE REJA?", body: "" }],
     } })
     if (url.pathname.endsWith("/microsoft-mail/sync")) {
       const source = url.searchParams.get("source")
@@ -162,6 +162,7 @@ test("M1 inbox shows the subject and expands only the selected email", async ({ 
   })
 
   await page.goto("/morning-report")
+  await expect(page.getByText("1. EMAILS TE REJA?", { exact: true })).toBeVisible()
   for (const { source, title } of sources) {
     const row = page.getByRole("row").filter({ hasText: `Subject ${source}` })
     await expect(row.getByText(`${title}: 09:08`, { exact: true })).toBeVisible()
@@ -181,7 +182,7 @@ test("M1 inbox shows the subject and expands only the selected email", async ({ 
   }
 })
 
-test("M2 aligns BZ ME and saves task explanations by task ID", async ({ page }) => {
+test("M2 places compact BZ ME after LLOJI and saves task explanations by task ID", async ({ page }) => {
   const user = { id: "m2-editor", full_name: "Report editor", email: "editor@example.test", role: "STAFF", is_active: true }
   const table = (caption: string, columns: string[], values: string[]) =>
     `${caption}:\n+---+\n| ${columns.join(" | ")} |\n+---+\n| ${values.join(" | ")} |\n+---+`
@@ -195,9 +196,10 @@ test("M2 aligns BZ ME and saves task explanations by task ID", async ({ page }) 
     sections: [
       { section_key: key, title: key, body: table(key, ["NR", "KUSH", "TITULLI", "ARSYEJA", "KOMENT"], ["1", "EF", "Test task", task.reason, task.comment]) },
       { section_key: ga, title: ga, body: [
-        table("TODO", ["NR", "KUSH", "TITULLI", "BZ ME"], ["1", "GA", "Long task title", "OH"]),
-        table("DONE", ["NR", "KUSH", "TITULLI", "BZ ME"], ["1", "GA", "Short", "HS"]),
-        table("LATE", ["NR", "KUSH", "T/Y/O", "TITULLI", "BZ ME"], ["1", "-", "-", "(Asnje detyre)", "-"]),
+        table("TODO", ["NR", "KUSH", "LLOJI", "TITULLI", "BZ ME"], ["1", "GA", "SYS", "Long task title", "OH"]),
+        table("IN PROGRESS", ["NR", "KUSH", "LLOJI", "TITULLI", "BZ ME"], ["1", "GA", "PRJK", "Another task", "DV / LV / EP"]),
+        table("DONE", ["NR", "KUSH", "LLOJI", "TITULLI", "BZ ME"], ["1", "GA", "SYS", "Short", "HS"]),
+        table("LATE", ["NR", "KUSH", "LLOJI", "T/Y/O", "TITULLI", "BZ ME"], ["1", "-", "-", "-", "(Asnje detyre)", "-"]),
       ].join("\n\n") },
     ],
   })
@@ -219,9 +221,15 @@ test("M2 aligns BZ ME and saves task explanations by task ID", async ({ page }) 
   })
   await page.goto("/after-break-report")
   const headers = page.getByRole("columnheader", { name: "BZ ME", exact: true })
-  await expect(headers).toHaveCount(3)
-  const lefts = await headers.evaluateAll(cells => cells.map(cell => cell.getBoundingClientRect().left))
-  expect(Math.max(...lefts) - Math.min(...lefts)).toBeLessThanOrEqual(1)
+  await expect(headers).toHaveCount(4)
+  const columns = await headers.evaluateAll(cells => cells.map(cell => ({
+    previous: cell.previousElementSibling?.textContent?.trim(),
+    width: cell.getBoundingClientRect().width,
+  })))
+  expect(columns.map(column => column.previous)).toEqual(["LLOJI", "LLOJI", "LLOJI", "LLOJI"])
+  expect(Math.max(...columns.map(column => column.width))).toBeLessThan(80)
+  await expect(page.getByRole("row").filter({ hasText: "Long task title" }).getByRole("cell")).toHaveText(["1", "GA", "SYS", "OH", "Long task title"])
+  await expect(page.getByRole("row").filter({ hasText: "Another task" }).getByRole("cell")).toHaveText(["1", "GA", "PRJK", "DV / LV / EP", "Another task"])
   const reason = page.getByRole("combobox", { name: "Arsyeja për Test task (EF)" })
   const comment = page.getByRole("textbox", { name: "Komenti për Test task (EF)" })
   await expect(comment).toHaveValue("Discord note")
@@ -242,9 +250,17 @@ test("M1 preserves edits and refreshed symbol tables when saving report details"
   const user = { id: "m1-test-admin", full_name: "Report admin", email: "admin@example.test", role: "ADMIN", is_active: true }
   const recipients = { to: ["admin@example.test"], cc: [], bcc: [] }
   const physicalSection = { section_key: "FIZIKISHT ME GA?", title: "FIZIKISHT ME GA?", body: "FG:GA DEVICES" }
+  const gaSection = {
+    section_key: "GA/HV/DV TASKS",
+    title: "GA/HV/DV TASKS",
+    body: [
+      "GA TASKS:", "+---+", "| NR | KUSH | LLOJI | STATUS | T/Y/O | TITULLI | BZ ME |", "+---+",
+      "| 1 | GA | SYS | TODO | - | Invoice payment | OH |", "+---+",
+    ].join("\n"),
+  }
   const draft = {
     id: "draft", status: "SENT", report_date: "2026-11-23", subject: "Morning report", recipients,
-    sections: [{ title: "First report point", body: "Report content" }, physicalSection],
+    sections: [{ title: "First report point", body: "Report content" }, physicalSection, gaSection],
   }
   await page.addInitScript((account) => {
     localStorage.setItem("primex_access_token", "test-only-browser-token")
@@ -270,6 +286,12 @@ test("M1 preserves edits and refreshed symbol tables when saving report details"
   const symbols = page.getByRole("button", { name: "Simbolet e detyrave" })
   const status = page.getByText("Sent to", { exact: true })
   await expect(point).toBeVisible()
+  const bzHeader = page.getByRole("columnheader", { name: "BZ ME", exact: true })
+  await expect(bzHeader).toBeVisible()
+  expect(await bzHeader.evaluate(cell => cell.previousElementSibling?.textContent?.trim())).toBe("LLOJI")
+  expect(await bzHeader.evaluate(cell => cell.getBoundingClientRect().width)).toBeLessThan(80)
+  await expect(page.getByRole("row").filter({ hasText: "Invoice payment" }).getByRole("cell"))
+    .toHaveText(["1", "GA", "SYS", "OH", "-", "Invoice payment"])
   await expect(symbols).toBeHidden()
   await expect(status).toBeHidden()
   await expect(toggle.getByText("+", { exact: true })).toBeVisible()

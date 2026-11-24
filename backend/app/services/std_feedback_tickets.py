@@ -3,16 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.std_feedback_ticket import StdFeedbackSyncState, StdFeedbackTicket
-from app.services.primeflow_report import report_timezone
 
 
 logger = logging.getLogger(__name__)
@@ -458,73 +457,6 @@ def ticket_files(ticket: StdFeedbackTicket) -> list[dict[str, Any]]:
     raw = ticket.raw or {}
     value = raw.get("files") if isinstance(raw.get("files"), list) else raw.get("attachments")
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
-
-
-def _status_is(*values: str):
-    return func.lower(StdFeedbackTicket.status).in_([value.casefold() for value in values])
-
-
-async def std_tickets_report_section(db: AsyncSession, report_day: date) -> str:
-    start = datetime.combine(report_day, datetime.min.time()).replace(tzinfo=report_timezone())
-    end = datetime.combine(report_day, datetime.max.time()).replace(tzinfo=report_timezone())
-    closed_on_day = or_(
-        StdFeedbackTicket.closed_at.between(start, end),
-        StdFeedbackTicket.closed_at.is_(None) & StdFeedbackTicket.source_updated_at.between(start, end),
-    )
-
-    total_opened = (
-        await db.execute(
-            select(func.count(StdFeedbackTicket.id)).where(
-                StdFeedbackTicket.is_external.is_(True),
-                _status_is("open"),
-            )
-        )
-    ).scalar_one()
-    opened_today = (
-        await db.execute(
-            select(func.count(StdFeedbackTicket.id)).where(
-                StdFeedbackTicket.is_external.is_(True),
-                StdFeedbackTicket.reported_at.between(start, end),
-            )
-        )
-    ).scalar_one()
-    closed_today = (
-        await db.execute(
-            select(func.count(StdFeedbackTicket.id)).where(
-                StdFeedbackTicket.is_external.is_(True),
-                _status_is("closed"),
-                closed_on_day,
-            )
-        )
-    ).scalar_one()
-    done_today = (
-        await db.execute(
-            select(func.count(StdFeedbackTicket.id)).where(
-                StdFeedbackTicket.is_external.is_(True),
-                _status_is("done"),
-                closed_on_day,
-            )
-        )
-    ).scalar_one()
-
-    rows = [
-        ("Total tiketa te hapura", int(total_opened or 0)),
-        ("Tiketa sot", int(opened_today or 0)),
-        ("Rregulluar sot", int(done_today or 0)),
-        ("Mbyllura sot", int(closed_today or 0)),
-    ]
-    type_width = max(len("LLOJI"), max(len(label) for label, _ in rows))
-    count_width = max(len("TOTALI"), max(len(str(count)) for _, count in rows))
-    border = f"+----+{'-' * (type_width + 2)}+{'-' * (count_width + 2)}+"
-    lines = [
-        border,
-        f"| {'NR':<2} | {'LLOJI':<{type_width}} | {'TOTALI':<{count_width}} |",
-        border,
-    ]
-    for index, (label, count) in enumerate(rows, start=1):
-        lines.append(f"| {index:<2} | {label:<{type_width}} | {str(count):<{count_width}} |")
-        lines.append(border)
-    return "\n".join(lines)
 
 
 async def run_std_feedback_ticket_sync_forever() -> None:

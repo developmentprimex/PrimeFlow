@@ -30,6 +30,7 @@ from app.services.after_break_report import (
     _personal_section,
     _task_covers_day,
     load_blue_notes,
+    order_blue_notes_table,
 )
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
@@ -97,6 +98,7 @@ GA_HV_DV_TASKS_TITLE = "GA/HV/DV TASKS"
 PHYSICAL_GA_TITLE = "FIZIKISHT ME GA?"
 KA_GENT_QUESTIONS_TITLE = "A KA PYTJE/SQARIME ME KA/GENTIN"
 GA_PF_COMMENTS_TITLE = "(GA) A KA KOMENTE NE PF?"
+NEW_EMAILS_SECTION_TITLE = "EMAILS TE REJA?"
 MARKER_TASK_SECTIONS = {
     PHYSICAL_GA_TITLE: ({"F"}, "DETYRAT ME F"),
     KA_GENT_QUESTIONS_TITLE: ({"KA", "GENT"}, "DETYRAT ME KA OSE GENT"),
@@ -130,6 +132,7 @@ DISPLAY_SECTION_TITLES = [
 ]
 SECTION_DISPLAY_TITLES = {
     GA_REACTIONS_SECTION_KEY: GA_REACTIONS_SECTION_TITLE,
+    SECTION_TITLES[1]: NEW_EMAILS_SECTION_TITLE,
     SECTION_TITLES[2]: "(GA) VONESA/MUNGESA/PV. A NDRYSHON PLANI PER SOT?",
     SECTION_TITLES[4]: "FESTA EXT/TAK EXT/TAK INT/BZ ME GA/BLLOK:",
 }
@@ -155,6 +158,7 @@ LEGACY_NOTES_TITLE = (
 )
 SECTION_TITLE_ALIASES = {
     GA_REACTIONS_SECTION_TITLE: GA_REACTIONS_SECTION_KEY,
+    NEW_EMAILS_SECTION_TITLE: SECTION_TITLES[1],
     "(GA/KA/GENTI) KUSH KA DET PERSONALISHT?": SECTION_TITLES[7],
     "TASKS PERSONALISHT ME KA/GENTIN?": SECTION_TITLES[7],
     "WFC TASKS (KA/GENTI)": SECTION_TITLES[8],
@@ -342,11 +346,11 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
             notes_body, emails_body = _split_notes_and_emails(body)
             if SECTION_TITLES[3] not in by_title:
                 by_title[SECTION_TITLES[3]] = {
-                    "section_key": SECTION_TITLES[3], "title": SECTION_TITLES[3], "body": notes_body,
+                    "section_key": SECTION_TITLES[3], "title": SECTION_TITLES[3], "body": order_blue_notes_table(notes_body),
                 }
             if SECTION_TITLES[1] not in by_title:
                 by_title[SECTION_TITLES[1]] = {
-                    "section_key": SECTION_TITLES[1], "title": SECTION_TITLES[1], "body": emails_body,
+                    "section_key": SECTION_TITLES[1], "title": NEW_EMAILS_SECTION_TITLE, "body": emails_body,
                 }
             continue
         if title is None:
@@ -359,6 +363,8 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
             continue
         if title == SECTION_TITLES[1]:
             body = _separate_keyed_prompt_lines(_without_retired_email_task_tables(body))
+        if title == SECTION_TITLES[3]:
+            body = order_blue_notes_table(body)
         if title == GA_PF_COMMENTS_TITLE and body.strip() in {"", "(Ploteso manualisht)"}:
             body = _default_body(title)
         if title not in by_title:

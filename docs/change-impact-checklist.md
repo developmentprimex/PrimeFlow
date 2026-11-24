@@ -134,6 +134,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   shënim i tillë kthehet në detyrë, `08:00` është shenja e prioritetit dhe
   sloti i detyrës 1H është `10:00`. Ora e pranimit ruhet te koha e importit.
   Pika 9 e M1 thekson edhe kryerreshtin e shënimeve me titull EM të shkruar manualisht.
+  M1, M2, M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow rendisin shënimet
+  e email-eve pas shënimeve të tjera, me të njëjtin rend brenda secilit grup.
+  Kontrollo numrat e rreshtave dhe lidhjet e email-it e të bashkëngjitjeve kur
+  hapen draftet e ruajtura me renditjen e vjetër.
   Kur një import i vjetër do të shfaqte vetëm prefiksin dhe orën, titulli merr edhe
   subjektin me shkronja të mëdha. Ruhet veçmas subjekti origjinal.
   Për importet e vjetra, API-ja lexon kopjen burimore nga shënimi ose nga
@@ -169,7 +173,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Kontrollo kufijtë e orarit dhe që pyetja e vjetër manuale të mos
   rikthehet përmes drafteve të ruajtura ose sinkronizimit me Common View.
 
-- Pika «DET NGA EMAILS TE REJA» në M1 Start of Day ka edhe një pilot lokal për leximin e subjektit,
+- Pika «EMAILS TE REJA?» në M1 Start of Day ka edhe një pilot lokal për leximin e subjektit,
   dërguesit, orës dhe përmbajtjes
   nga etiketa `PrimeFlow-M1-Test` në Gmail. Tabela e pilotit hyn në ekranin
   M1, preview, dërgimin manual dhe automatik, tekstin dhe bashkëngjitjet e M1.
@@ -284,7 +288,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Spahiu gjatë datës së raportit. Përfshin detyrat sistemore dhe të zakonshme.
   Kontrollo gjenerimin e M3, pamjen paraprake, email-in dhe eksportet Word/PNG.
 
-- M3: **A JEMI BRENDA MESATARES ME PROJEKTE?** dhe **PIKAT E DITES** përjashtohen nga draftet e
+- M3: Tabela **DET 08:00** te pika e detyrave të nesërme ngjyros rreshtat
+  sipas statusit në ekran, preview, email dhe bashkëngjitjet Word/PNG.
+
+- M3: **A JEMI BRENDA MESATARES ME PROJEKTE?**, **PIKAT E DITES** dhe
+  **(GA) ZHV: TIKETAT E STD?** përjashtohen nga draftet e
   ruajtura, rigjenerimi dhe importi i pyetjeve manuale. Kontrollo gjithashtu
   faqen M3, preview, emailin dhe bashkëngjitjet.
 
@@ -462,6 +470,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   tërësisht nga printimi javor, edhe nga printimi i shfletuesit. Gjendja ndahet
   mes dy javëve gjatë qëndrimit në faqe. Eksporti Excel dhe raportet e veçanta
   1H SHTYPI Today/Tomorrow nuk përdorin këtë gjendje minimizimi.
+
+- Common View Short filtron detyrat e tabelës javore për This Week dhe Next
+  Week para grupimit të kartave. Kontrollo kolonat e hënë–e premte, përfshirjen
+  sipas secilit kriter dhe printimin e së njëjtës tabelë. API-ja Common View,
+  eksporti Excel dhe raportet e veçanta SHTYPI nuk përdorin filtrin Short.
 
 - Eksporti `/exports/checklists.xlsx` përdoret nga checklistat e Product Content
   dhe kontrollon edhe shabllonet globale sipas `group_key`: MST, TT dhe

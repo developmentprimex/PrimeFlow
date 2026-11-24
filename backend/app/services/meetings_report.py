@@ -39,7 +39,6 @@ from app.services.meeting_palette import MEETING_TONE_COLORS, meeting_report_ton
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.personal_task_owner import personal_task_owner
 from app.services.primeflow_report import GmailService, one_h_marker_symbol, report_timezone
-from app.services.std_feedback_tickets import std_tickets_report_section
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.task_marker import active_one_h_marker
@@ -49,7 +48,7 @@ REPORT_TYPE = "meetings_report"
 HV_DONE_TITLE = "DET DONE TE HV"
 SECTION_TITLES = [
     "A JEMI BRENDA MESATARES ME PROJEKTE?",  # Retired, kept as a legacy key.
-    "(GA) ZHV: TIKETAT E STD?",
+    "(GA) ZHV: TIKETAT E STD?",  # Retired, kept as a legacy key.
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "N- (GA) PV/FESTE?",
@@ -68,7 +67,6 @@ SECTION_TITLES = [
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[15],  # Tomorrow's marked tasks first among auto-filled sections
-    SECTION_TITLES[1],  # STD tickets first among auto-filled
     SECTION_TITLES[2],
     SECTION_TITLES[3],
     SECTION_TITLES[11],
@@ -110,6 +108,8 @@ SECTION_TITLE_ALIASES = {
 }
 RETIRED_CLOSING_SECTION_TITLES = {
     SECTION_TITLES[0],
+    SECTION_TITLES[1],
+    *(alias for alias, canonical in SECTION_TITLE_ALIASES.items() if canonical == SECTION_TITLES[1]),
     "PIKAT E DITES",
     "PIKAT E DITËS",
     "GA MBYLLJA E DET",
@@ -123,8 +123,8 @@ RETIRED_CLOSING_SECTION_KEYS = {
 
 
 def is_retired_meetings_section_title(title: str | None, section_key: str | None = None) -> bool:
-    return any(re.sub(r"^(?:MANUAL)?\d*", "", _compact_section_title(value)) in RETIRED_CLOSING_SECTION_KEYS
-               for value in (title, section_key))
+    keys = (re.sub(r"^(?:MANUAL)?\d*", "", _compact_section_title(value)) for value in (title, section_key))
+    return any(key in RETIRED_CLOSING_SECTION_KEYS or ("TIKETATESTD" in key and "RAPORTOHENNEM3" in key) for key in keys)
 
 
 def without_retired_meetings_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -1395,7 +1395,6 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     names = await _assignee_names(db, report_tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, report_tasks)
     all_participant_ids = await _all_participant_user_ids(db)
-    std_tickets_section = await std_tickets_report_section(db, report_day)
 
     system_tasks = [task for task in tasks if task.system_template_origin_id and _is_open(task)]
     system_late = _dedupe_system_task_rows([task for task in system_tasks if _late_days(task) > 0])
@@ -1572,6 +1571,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             "DET 08:00",
             at_0800,
             names,
+            with_status=True,
             include_department=True,
             include_am_pm=True,
             department_codes=department_codes,
@@ -1592,7 +1592,6 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
 
     by_title = {
         TOMORROW_SYMBOLS_TITLE: symbols_body,
-        SECTION_TITLES[1]: std_tickets_section,
         SECTION_TITLES[2]: _normalize_section(section_1),
         SECTION_TITLES[3]: _normalize_section(
             _m3_status_table(

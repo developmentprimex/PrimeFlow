@@ -19,11 +19,12 @@ from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.services.compact_report_questions import question_parts, questions_html, layout_question_parts
 from app.config import settings
 from app.services.one_h_ga_summary import GaTaskCounts, build_ga_summary, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
+from app.services.px_note_email import is_email_note_content
 
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
@@ -271,6 +272,11 @@ class ReportDocument(BaseModel):
     truncated: bool = False
     strike_interval: str | None = None
     notes_only: bool = False
+
+    @field_validator("undiscussed_notes")
+    @classmethod
+    def _email_notes_last(cls, notes: list[ReportUndiscussedNote]) -> list[ReportUndiscussedNote]:
+        return sorted(notes, key=lambda note: is_email_note_content(note.content))
 
     @property
     def content_count_label(self) -> str:

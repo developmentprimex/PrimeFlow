@@ -786,6 +786,7 @@ export default function MorningReportPage() {
                     ) : showSectionBody ? (
                       <ReportSectionPreview
                         body={reportSectionPreviewText(section.body)}
+                        compactBzColumn={isTaskFeedbackSection || sectionKey === "GA TASKS"}
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         discordReplyReport={sectionKey === GA_REPLIES_SECTION
                           ? { report: "M1", date: draft.report_date }

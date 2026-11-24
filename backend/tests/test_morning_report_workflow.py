@@ -1094,7 +1094,9 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         ])
         sections = normalize_morning_report_sections([{"title": SECTION_TITLES[1], "body": body}])
         email_section = next(section for section in sections if section["section_key"] == SECTION_TITLES[1])
+        self.assertEqual(email_section["title"], "EMAILS TE REJA?")
         self.assertEqual(email_section["body"], mailbox)
+        self.assertEqual(normalize_morning_report_sections(sections), sections)
         report_day = date(2026, 8, 5)
         html = render_html("M1", report_day, [email_section])
         self.assertIn('class="report-table"', html)
@@ -1105,7 +1107,9 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             Document(BytesIO(render_section_report_docx("M1", "M1", report_day, sections))).element.body.xml,
         ]
         for output in outputs:
+            self.assertIn("EMAILS TE REJA?", output)
             self.assertIn("Customer message", output)
+            self.assertNotIn("DET NGA EMAILS TE REJA", output)
             self.assertNotIn("EM: INFO PX:", output)
 
     def test_settings_routes_require_manager_or_admin(self) -> None:

@@ -1447,6 +1447,16 @@ const getFastTaskDisplayNumber = (
 
 const hasEightAmIndicator = (title?: string | null, isSystemTask = false) =>
   /\b0?8:00\b/.test(title || "") || (!isSystemTask && /\bEM\b/i.test(title || ""))
+
+type WeekTaskSource = "blocked" | "oneH" | "personal" | "r1"
+
+const matchesShortWeekTask = (entry: FastTaskEntry, source: WeekTaskSource) =>
+  source === "blocked" ||
+  (source === "personal" && entry.isPersonalTask !== false && getPersonalTaskGroup(entry) === "GA") ||
+  Boolean(entry.isDeadlineImportant) ||
+  hasEightAmIndicator(entry.title, entry.isSystemTask) ||
+  splitTaskMarkers(entry.oneHMarker).includes("CLIENT_URGENT")
+
 const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
   const normalized = (finishPeriod || "").trim().toUpperCase()
   return normalized === "AM" || normalized === "PM" ? normalized : ""
@@ -1847,6 +1857,7 @@ export default function CommonViewPage() {
   } | null>(null)
 
   const [weekStart, setWeekStart] = React.useState<Date>(() => getMonday(new Date()))
+  const [shortWeek, setShortWeek] = React.useState(false)
   const [selectedDates, setSelectedDates] = React.useState<Set<string>>(() => new Set([toISODate(new Date())]))
   const [multiMode, setMultiMode] = React.useState(false)
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
@@ -5195,6 +5206,7 @@ export default function CommonViewPage() {
 
   // Handlers
   const toggleDay = (iso: string) => {
+    setShortWeek(false)
     setSelectedDates((prev) => {
       const s = new Set(prev)
       if (!multiMode) {
@@ -5256,18 +5268,20 @@ export default function CommonViewPage() {
     setSelectedDates(new Set(weekISOs))
   }
 
-  const selectWeek = (weekStartDate: Date) => {
+  const selectWeek = (weekStartDate: Date, short = false) => {
     const targetWeekIso = toISODate(weekStartDate)
     if (toISODate(weekStart) !== targetWeekIso) {
       setDataLoaded(false)
       setWeekStart(weekStartDate)
     }
     setSelectedDates(new Set(getWeekdays(weekStartDate).map(toISODate)))
+    setShortWeek(short)
     setMultiMode(true)
     resetSwimlaneTitleRowsOpen()
   }
 
   const selectToday = () => {
+    setShortWeek(false)
     const today = new Date()
     const todayMonday = getMonday(today)
     if (toISODate(weekStart) !== toISODate(todayMonday)) {
@@ -5839,6 +5853,9 @@ export default function CommonViewPage() {
   const todayIso = toISODate(today)
   const thisWeekMonday = getMonday(today)
   const thisWeekMondayIso = toISODate(thisWeekMonday)
+  const nextWeekMonday = addDays(thisWeekMonday, 7)
+  const thisWeekSelected = allDaysSelected && toISODate(weekStart) === thisWeekMondayIso
+  const nextWeekSelected = allDaysSelected && toISODate(weekStart) === toISODate(nextWeekMonday)
   const isOpenTaskStartingToday = (isDone?: boolean, startDate?: string | null) => {
     if (isDone || !startDate) return false
     const start = parseDateOnly(startDate)
@@ -6204,6 +6221,7 @@ export default function CommonViewPage() {
   }
 
   const setWeek = (dateStr: string) => {
+    setShortWeek(false)
     const base = dateStr ? fromISODate(dateStr) : new Date()
     const monday = getMonday(base)
     if (toISODate(weekStart) !== toISODate(monday)) {
@@ -8928,6 +8946,20 @@ export default function CommonViewPage() {
     }> = {}
     const dailyFeedback = filtered.feedback.filter((x) => x.everyday)
     const dailyProblems = filtered.problems.filter((x) => x.everyday)
+    const tasksForWeekTable = <T extends FastTaskEntry>(entries: T[], source: WeekTaskSource) =>
+      shortWeek ? entries.filter((entry) => matchesShortWeekTask(entry, source)) : entries
+    const blocked = tasksForWeekTable(filtered.blocked, "blocked")
+    const oneH = tasksForWeekTable(filtered.oneH, "oneH")
+    const personal = tasksForWeekTable(filtered.personal, "personal")
+    const r1 = tasksForWeekTable(filtered.r1, "r1")
+    const includeWaitingClientSource = (source: WeekTaskSource) =>
+      !shortWeek || typeFilters.size === 0 || typeFilters.has(source)
+    const waitingClient = [
+      ...(includeWaitingClientSource("blocked") ? blocked : []),
+      ...(includeWaitingClientSource("oneH") ? oneH : []),
+      ...(includeWaitingClientSource("personal") ? personal : []),
+      ...(includeWaitingClientSource("r1") ? r1 : []),
+    ].filter(isWaitingClientTask)
     
     weekISOs.forEach((iso) => {
       if (filtered.fullyCoveredDates.has(iso)) {
@@ -8965,19 +8997,14 @@ export default function CommonViewPage() {
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
         externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
-        waitingClient: sortTasksByOrder(
-          [...filtered.blocked, ...filtered.oneH, ...filtered.personal, ...filtered.r1].filter(
-            (x) => x.date === iso && isWaitingClientTask(x)
-          ),
-          false
-        ),
-        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso && !isWaitingClientTask(x)), false, true),
-        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
-        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
+        waitingClient: sortTasksByOrder(waitingClient.filter((x) => x.date === iso), false),
+        blocked: sortTasksByOrder(blocked.filter((x) => x.date === iso && !isWaitingClientTask(x)), false, true),
+        oneH: sortTasksByOrder(oneH.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
+        personal: sortTasksByOrder(personal.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
-        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
+        r1: sortTasksByOrder(r1.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         problems: [
           ...filtered.problems.filter((x) => !x.everyday && x.date === iso),
           ...dailyProblems,
@@ -8992,7 +9019,7 @@ export default function CommonViewPage() {
     })
     
     return dataByDay
-  }, [allDaysSelected, weekISOs, filtered, filteredDiamondItems, sortByTime, sortTasksByOrder])
+  }, [allDaysSelected, allUsersLeaveByDate, weekISOs, filtered, filteredDiamondItems, shortWeek, sortByTime, sortTasksByOrder, typeFilters])
 
   const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
   const scrollSwimlaneRow = React.useCallback((rowId: CommonType, direction: "left" | "right") => {
@@ -9315,6 +9342,54 @@ export default function CommonViewPage() {
           )
         })
       })
+
+  const weekTableRows = tableDataByDay
+    ? orderCommonRowsForPrint(swimlaneRows).flatMap<{ row: SwimlaneRow; dayEntries: Record<string, CommonWeekTableEntry[]> }>((row) => {
+      if (shortWeek && !isFastTaskRowId(row.id)) return []
+      if (!showCard(row.id, row.items.length)) return []
+      if (!shortWeek && collapsedWeekRows.has(row.id)) return [{ row, dayEntries: {} }]
+      const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
+      const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
+      const dayEntries: Record<string, CommonWeekTableEntry[]> = {}
+      weekISOs.forEach((iso) => {
+        const dayData = tableDataByDay?.[iso]
+        if (row.id === "late") dayEntries[iso] = dayData?.late || []
+        else if (row.id === "absent") dayEntries[iso] = dayData?.absent || []
+        else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
+        else if (row.id === "externalHoliday") dayEntries[iso] = dayData?.externalHoliday || []
+        else if (row.id === "waitingClient") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.waitingClient || [], true)
+        else if (row.id === "blocked") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.blocked || [], true)
+        else if (isOneHSlotRowId(row.id)) {
+          const oneHEntries = includeOneH ? dayData?.oneH || [] : []
+          const slot = getOneHSlotRowSlot(row.id)
+          const slotEntries = slot === undefined
+            ? oneHEntries
+            : oneHEntries.filter((entry) =>
+                slot === null
+                  ? !normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot)
+                  : normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot) === slot
+              )
+          dayEntries[iso] = mergePrintTaskEntries(row.id, slotEntries, true)
+        }
+        else if (row.id === "r1") dayEntries[iso] = includeR1 ? mergePrintTaskEntries(row.id, dayData?.r1 || [], true) : []
+        else if (isPersonalRowId(row.id)) {
+          dayEntries[iso] = mergePrintTaskEntries(
+            row.id,
+            personalTasksForRow(dayData?.personal || [], row.id), true
+          )
+        }
+        else if (row.id === "external") dayEntries[iso] = dayData?.external || []
+        else if (row.id === "internal") dayEntries[iso] = dayData?.internal || []
+        else if (row.id === "bz") dayEntries[iso] = dayData?.bz || []
+        else if (row.id === "problem") dayEntries[iso] = dayData?.problems || []
+        else if (row.id === "feedback") dayEntries[iso] = dayData?.feedback || []
+        else if (row.id === "priority") dayEntries[iso] = dayData?.priority || []
+        else if (row.id === "diamond") dayEntries[iso] = dayData?.diamond || []
+      })
+      if (shortWeek && !Object.values(dayEntries).some((entries) => entries.length > 0)) return []
+      return [{ row, dayEntries }]
+    })
+    : []
 
   return (
     <div
@@ -12705,6 +12780,10 @@ export default function CommonViewPage() {
           align-items: center;
           gap: 8px;
         }
+        .date-controls {
+          flex-wrap: wrap;
+          min-width: 0;
+        }
         .task-focus-filter-group {
           align-items: flex-start;
         }
@@ -12915,9 +12994,15 @@ export default function CommonViewPage() {
         
         /* Week Navigation Buttons - Different style from day chips */
         .week-nav-buttons {
-          display: inline-flex;
+          display: grid;
+          flex: 0 0 auto;
           gap: 6px;
-          margin-right: 12px;
+          max-width: 100%;
+        }
+        .week-nav-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
           align-items: center;
         }
         .week-nav-btn {
@@ -12943,6 +13028,26 @@ export default function CommonViewPage() {
           border-color: #3b82f6;
           color: white;
           box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+        }
+        .week-nav-btn-short {
+          background: #f0fdfa;
+          border-color: #5eead4;
+          color: #115e59;
+        }
+        .week-nav-btn-short:hover {
+          background: #ccfbf1;
+          border-color: #0f766e;
+          color: #134e4a;
+        }
+        .week-nav-btn-short.active {
+          background: #0f766e;
+          border-color: #0f766e;
+          color: white;
+          box-shadow: 0 2px 6px rgba(15, 118, 110, 0.35);
+        }
+        .week-nav-btn-short:focus-visible {
+          outline: 2px solid #0f766e;
+          outline-offset: 2px;
         }
         
         /* Input & Switch */
@@ -13430,7 +13535,7 @@ export default function CommonViewPage() {
         </header>
 
         <div className="common-toolbar no-print">
-          <div className="toolbar-group">
+          <div className="toolbar-group date-controls">
             <div className="chip-row">
             {weekISOs.map((iso) => {
               const d = fromISODate(iso)
@@ -13449,32 +13554,49 @@ export default function CommonViewPage() {
             })}
             </div>
             <div className="week-nav-buttons">
-              <button
-                className={`week-nav-btn ${selectedDates.size === 1 && selectedDates.has(todayIso) && toISODate(weekStart) === thisWeekMondayIso ? "active" : ""}`}
-                type="button"
-                onClick={selectToday}
-              >
-                Today
-              </button>
-              <button
-                className={`week-nav-btn ${toISODate(weekStart) === thisWeekMondayIso && allDaysSelected ? "active" : ""}`}
-                type="button"
-                onClick={() => {
-                  selectWeek(thisWeekMonday)
-                }}
-              >
-                This Week
-              </button>
-              <button
-                className={`week-nav-btn ${toISODate(weekStart) === toISODate(addDays(thisWeekMonday, 7)) && allDaysSelected ? "active" : ""}`}
-                type="button"
-                onClick={() => {
-                  const nextWeekMonday = addDays(thisWeekMonday, 7)
-                  selectWeek(nextWeekMonday)
-                }}
-              >
-                Next Week
-              </button>
+              <div className="week-nav-row">
+                <button
+                  className={`week-nav-btn ${selectedDates.size === 1 && selectedDates.has(todayIso) && toISODate(weekStart) === thisWeekMondayIso ? "active" : ""}`}
+                  type="button"
+                  onClick={selectToday}
+                >
+                  Today
+                </button>
+                <button
+                  className={`week-nav-btn ${thisWeekSelected && !shortWeek ? "active" : ""}`}
+                  type="button"
+                  aria-pressed={thisWeekSelected && !shortWeek}
+                  onClick={() => selectWeek(thisWeekMonday)}
+                >
+                  This Week
+                </button>
+                <button
+                  className={`week-nav-btn ${nextWeekSelected && !shortWeek ? "active" : ""}`}
+                  type="button"
+                  aria-pressed={nextWeekSelected && !shortWeek}
+                  onClick={() => selectWeek(nextWeekMonday)}
+                >
+                  Next Week
+                </button>
+              </div>
+              <div className="week-nav-row">
+                <button
+                  className={`week-nav-btn week-nav-btn-short ${thisWeekSelected && shortWeek ? "active" : ""}`}
+                  type="button"
+                  aria-pressed={thisWeekSelected && shortWeek}
+                  onClick={() => selectWeek(thisWeekMonday, true)}
+                >
+                  This Week Short
+                </button>
+                <button
+                  className={`week-nav-btn week-nav-btn-short ${nextWeekSelected && shortWeek ? "active" : ""}`}
+                  type="button"
+                  aria-pressed={nextWeekSelected && shortWeek}
+                  onClick={() => selectWeek(nextWeekMonday, true)}
+                >
+                  Next Week Short
+                </button>
+              </div>
             </div>
             <label className="switch" title="When OFF: select only one. When ON: select multiple.">
               <input type="checkbox" checked={multiMode} onChange={(e) => setMultiMode(e.target.checked)} />
@@ -16386,7 +16508,7 @@ export default function CommonViewPage() {
       ) : null}
 
       <div className="view-container" aria-busy={!dataLoaded}>
-        <div className="common-view-title">PERMBLEDHJA - COMMON VIEW</div>
+        <div className="common-view-title">PERMBLEDHJA - COMMON VIEW{shortWeek ? " SHORT" : ""}</div>
         {!dataLoaded ? (
           <div className="common-view-loading no-print" role="status" aria-live="polite">
             <span className="common-view-loading-spinner" aria-hidden="true" />
@@ -16398,7 +16520,7 @@ export default function CommonViewPage() {
             <div className="week-table-onepage-content" ref={weekTablePrintContentRef}>
             <div className="print-header">
               <div />
-              <div className="print-title">COMMON VIEW - WEEK PLAN</div>
+              <div className="print-title">COMMON VIEW - WEEK PLAN{shortWeek ? " SHORT" : ""}</div>
               <div className="print-datetime">
                 {formatDateTimeDMY(printedAt)}
               </div>
@@ -16427,8 +16549,14 @@ export default function CommonViewPage() {
                 </tr>
               </thead>
               <tbody>
-                {orderCommonRowsForPrint(swimlaneRows.filter((row) => showCard(row.id, row.items.length)))
-                  .map((row, rowIndex) => {
+                {shortWeek && dataLoaded && weekTableRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={weekISOs.length + 2} className="week-table-cell">
+                      <span className="week-table-empty">No matching tasks this week.</span>
+                    </td>
+                  </tr>
+                ) : null}
+                {weekTableRows.map(({ row, dayEntries }, rowIndex) => {
                     if (collapsedWeekRows.has(row.id)) {
                       return (
                         <tr key={row.id} className="week-table-row week-table-row-collapsed">
@@ -16441,44 +16569,6 @@ export default function CommonViewPage() {
                         </tr>
                       )
                     }
-                    const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
-                    const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
-                    const dayEntries: Record<string, CommonWeekTableEntry[]> = {}
-                    weekISOs.forEach((iso) => {
-                      const dayData = tableDataByDay?.[iso]
-                      if (row.id === "late") dayEntries[iso] = dayData?.late || []
-                      else if (row.id === "absent") dayEntries[iso] = dayData?.absent || []
-                      else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
-                      else if (row.id === "externalHoliday") dayEntries[iso] = dayData?.externalHoliday || []
-                      else if (row.id === "waitingClient") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.waitingClient || [], true)
-                      else if (row.id === "blocked") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.blocked || [], true)
-                      else if (isOneHSlotRowId(row.id)) {
-                        const oneHEntries = includeOneH ? dayData?.oneH || [] : []
-                        const slot = getOneHSlotRowSlot(row.id)
-                        const slotEntries = slot === undefined
-                          ? oneHEntries
-                          : oneHEntries.filter((entry) =>
-                              slot === null
-                                ? !normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot)
-                                : normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot) === slot
-                            )
-                        dayEntries[iso] = mergePrintTaskEntries(row.id, slotEntries, true)
-                      }
-                      else if (row.id === "r1") dayEntries[iso] = includeR1 ? mergePrintTaskEntries(row.id, dayData?.r1 || [], true) : []
-                      else if (isPersonalRowId(row.id)) {
-                        dayEntries[iso] = mergePrintTaskEntries(
-                          row.id,
-                          personalTasksForRow(dayData?.personal || [], row.id), true
-                        )
-                      }
-                      else if (row.id === "external") dayEntries[iso] = dayData?.external || []
-                      else if (row.id === "internal") dayEntries[iso] = dayData?.internal || []
-                      else if (row.id === "bz") dayEntries[iso] = dayData?.bz || []
-                      else if (row.id === "problem") dayEntries[iso] = dayData?.problems || []
-                      else if (row.id === "feedback") dayEntries[iso] = dayData?.feedback || []
-                      else if (row.id === "priority") dayEntries[iso] = dayData?.priority || []
-                      else if (row.id === "diamond") dayEntries[iso] = dayData?.diamond || []
-                    })
                     const repeatedTaskFirstDateById = buildRepeatedTaskFirstDateMap(
                       weekISOs,
                       (dateIso) =>

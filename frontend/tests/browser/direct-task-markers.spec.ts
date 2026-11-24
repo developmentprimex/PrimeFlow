@@ -100,7 +100,18 @@ test("M3 opens the Tomorrow table by default and filters task cards by multiple 
   await page.route(/\/api\/meetings-report\?report_date=/, (route) => route.fulfill({ json: {
     id: "m3-test", report_date: "2026-11-19", tomorrow_date: "2026-11-20", subject: "M3", status: "DRAFT",
     recipients: { to: [], cc: [], bcc: [] },
-    sections: [{ title: "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER", body: "" }],
+    sections: [
+      { title: "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER", body: "" },
+      { title: "(GA) ZHV: TIKETAT E STD?", body: "Old ticket totals" },
+      {
+        title: "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?",
+        body: [
+          "DET 08:00:", "+---+", "| NR | KUSH | TITULLI |", "+---+",
+          "| 1 | GA | Pending morning task [[st:TODO]] |", "+---+",
+          "| 2 | GA | Active morning task [[st:IN_PROGRESS]] |", "+---+",
+        ].join("\n"),
+      },
+    ],
     generated_snapshot: { tomorrow_symbols_html: `
       <table><tbody>
         <tr data-task-card-row="content"><th rowspan="2">1H 10:00</th>
@@ -117,6 +128,10 @@ test("M3 opens the Tomorrow table by default and filters task cards by multiple 
 
   await page.goto("/meetings-report")
   await expect(page.getByText("Physical task", { exact: true })).toBeVisible()
+  await expect(page.getByText("TIKETAT E STD?", { exact: false })).toHaveCount(0)
+  await expect(page.getByText("Old ticket totals", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("row").filter({ hasText: "Pending morning task" })).toHaveClass(/\bbg-pink-200\b/)
+  await expect(page.getByRole("row").filter({ hasText: "Active morning task" })).toHaveClass(/\bbg-yellow-100\b/)
   const management = page.locator("summary").filter({ hasText: "Menaxhimi i raportit dhe email-it" })
   const preview = page.getByRole("button", { name: "Email preview", exact: true })
   await expect(management.getByText("+", { exact: true })).toBeVisible()
@@ -174,6 +189,69 @@ async function openGroup(page: Page) {
   await weekly.getByRole('button', { name: 'Simbolet e grupit', exact: true }).click()
   return page.getByRole('dialog', { name: 'Simbolet e grupit', exact: true })
 }
+
+test("Common View Short filters both workweeks and the weekly print", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await fixture(page)
+  await page.route(/\/api\/common-view\?/, (route) => {
+    const url = new URL(route.request().url())
+    const week = url.searchParams.get("week_start")!
+    const included = url.searchParams.get("include")!.split(",")
+    const task = (offset: number, title: string, fields = {}) => {
+      const date = new Date(`${week}T12:00:00Z`)
+      date.setUTCDate(date.getUTCDate() + offset)
+      return { date: date.toISOString().slice(0, 10), title, status: "TODO", ...fields }
+    }
+    return route.fulfill({ json: {
+      week_start: week, included, requested: included, missing: [], users: owners,
+      items: {
+        late: [], absent: [], leave: [], externalHoliday: [], problems: [], feedback: [],
+        priority: [], bz: [], internal: [],
+        external: [task(0, "External meeting", { time: "10:00" })],
+        oneH: [
+          task(0, "Urgent review", { oneHMarker: "M3,CLIENT_URGENT" }),
+          task(2, "08:00 inventory"),
+          task(0, "Ordinary review", { oneHMarker: "DOUBLE_EXCLAM" }),
+        ],
+        r1: [task(1, "Deadline review", { is_deadline_important: true })],
+        blocked: [task(3, "Blocked review")],
+        personal: [task(4, "GA: Personal review"), task(4, "KA: Other review")],
+      },
+    } })
+  })
+
+  await page.goto("/common")
+  const fullWeek = page.getByRole("button", { name: "Next Week", exact: true })
+  const thisWeekShort = page.getByRole("button", { name: "This Week Short", exact: true })
+  const nextWeekShort = page.getByRole("button", { name: "Next Week Short", exact: true })
+  await expect(nextWeekShort).toBeVisible()
+  expect((await thisWeekShort.boundingBox())!.y).toBeGreaterThan((await fullWeek.boundingBox())!.y)
+  expect((await nextWeekShort.boundingBox())!.y).toBe((await thisWeekShort.boundingBox())!.y)
+  await expect(thisWeekShort).toHaveCSS("background-color", "rgb(240, 253, 250)")
+  const table = page.locator(".week-table-view")
+  const matching = ["Urgent review", "Deadline review", "08:00 inventory", "Blocked review", "Personal review"]
+  const excluded = ["Ordinary review", "Other review", "External meeting"]
+  for (const week of ["This Week", "Next Week"]) {
+    const short = page.getByRole("button", { name: `${week} Short`, exact: true })
+    await short.click()
+    await expect(short).toHaveAttribute("aria-pressed", "true")
+    await expect(table.locator(".week-table-date-header")).toHaveCount(5)
+    for (const [day, title] of matching.entries()) {
+      await expect(table.locator(`tbody tr td:nth-child(${day + 3})`).getByText(title)).toBeVisible()
+    }
+    for (const title of excluded) await expect(table.getByText(title)).toHaveCount(0)
+    await expect(table.locator("tbody tr")).toHaveCount(4)
+  }
+
+  await page.emulateMedia({ media: "print" })
+  await expect(table.getByText("COMMON VIEW - WEEK PLAN SHORT")).toBeVisible()
+  await expect(table.getByText("Urgent review")).toBeVisible()
+  await expect(table.getByText("Ordinary review")).toHaveCount(0)
+  await page.emulateMedia({ media: "screen" })
+
+  await page.getByRole("button", { name: "Next Week", exact: true }).click()
+  for (const title of excluded) await expect(table.getByText(title)).toBeVisible()
+})
 
 async function chooseGroupSymbols(page: Page) {
   await page.getByRole('button', { name: 'Simbolet për të gjithë', exact: true }).click()

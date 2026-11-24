@@ -57,6 +57,7 @@ from app.services.meetings_report import (
     _tomorrow_common_section,
     _tomorrow_meeting_table,
     _tomorrow_task_table,
+    meetings_sections_for_snapshot,
     normalize_meetings_report_sections,
     render_html,
     render_plain_text,
@@ -292,14 +293,14 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         sections = normalize_meetings_report_sections(
             with_section_keys("meetings", [{"title": title, "body": str(i)} for i, title in enumerate(SECTION_TITLES)])
         )
-        target_index = next(i for i, section in enumerate(sections) if section["section_key"] == SECTION_TITLES[1])
-        sections[target_index]["title"] = "CUSTOM STD TITLE"
+        target_index = next(i for i, section in enumerate(sections) if section["section_key"] == SECTION_TITLES[2])
+        sections[target_index]["title"] = "CUSTOM SYSTEM TASK TITLE"
 
         normalized = normalize_meetings_report_sections(sections)
         affected = normalized[target_index]
 
-        self.assertEqual(affected["title"], "CUSTOM STD TITLE")
-        self.assertEqual(affected["section_key"], SECTION_TITLES[1])
+        self.assertEqual(affected["title"], "CUSTOM SYSTEM TASK TITLE")
+        self.assertEqual(affected["section_key"], SECTION_TITLES[2])
         self.assertEqual(
             section_group_label("meetings", affected["title"], affected["section_key"]),
             "AUTO-FILLED FROM PRIMEFLOW",
@@ -582,41 +583,43 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         self.assertTrue(attachments[0][1].startswith(b"PK"))
         self.assertTrue(attachments[1][1].startswith(b"\x89PNG"))
 
-    def test_normalize_collapses_common_view_aliases_into_auto_sections(self) -> None:
-        auto_tickets = "STD TICKETS: 2"
+    def test_normalize_removes_retired_common_view_aliases(self) -> None:
         normalized = normalize_meetings_report_sections(
             [
                 {"title": "A JEMI BRENDA MESATARES ME PROJEKTE/", "body": "(Ploteso manualisht)"},
                 {"title": "(GA) M3 DET GA MBYLLJA ME HV/OH?", "body": "(Ploteso manualisht)"},
                 {"title": "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", "body": "(Ploteso manualisht)"},
-                {"title": SECTION_TITLES[1], "body": auto_tickets},
+                {"title": SECTION_TITLES[1], "body": "STD TICKETS: 2"},
                 {"title": "Brand new Common View pike", "body": "(Ploteso manualisht)"},
             ]
         )
         titles = [section["title"] for section in normalized]
         self.assertEqual(titles[1], SECTION_TITLES[15])  # first automatic section follows manual extras
         self.assertNotIn(SECTION_TITLES[0], titles)
-        auto_titles = [title for title in titles if title == SECTION_TITLES[1]]
-        self.assertEqual(auto_titles[0], SECTION_TITLES[1])  # tickets first among auto-filled
-        self.assertEqual(titles.count(SECTION_TITLES[1]), 1)
+        self.assertNotIn(SECTION_TITLES[1], titles)
         self.assertNotIn("GA MBYLLJA E DET", titles)
         self.assertNotIn("HV MBYLLJA E DET", titles)
         self.assertNotIn("(GA) M3 DET GA MBYLLJA ME HV/OH?", titles)
         self.assertNotIn("(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", titles)
         self.assertIn("Brand new Common View pike", titles)
-        by_title = {section["title"]: section["body"] for section in normalized}
-        self.assertEqual(by_title[SECTION_TITLES[1]], auto_tickets)
 
-    def test_ticket_wording_variant_alone_maps_to_auto_title(self) -> None:
-        normalized = normalize_meetings_report_sections(
-            [
-                {"title": "A JEMI BRENDA MESATARES ME PROJEKTE/", "body": "(Ploteso manualisht)"},
-                {"title": "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", "body": "(Ploteso manualisht)"},
-            ]
-        )
-        titles = [section["title"] for section in normalized]
-        self.assertNotIn("(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", titles)
-        self.assertIn(SECTION_TITLES[1], titles)
+    def test_saved_m3_omits_std_tickets_from_preview_and_attachments(self) -> None:
+        ticket_body = "STD TICKETS: 2"
+        sections = meetings_sections_for_snapshot([
+            {"title": "(GA) TIKETAT E STD VETEM? RAPORTOHEN NE M3", "body": ticket_body},
+            {"title": "Edited ticket section", "section_key": SECTION_TITLES[1], "body": ticket_body},
+            {"title": SECTION_TITLES[2], "body": "Keep late tasks"},
+        ], {})
+        self.assertEqual([section["title"] for section in sections], [SECTION_TITLES[2]])
+
+        day, tomorrow = date(2026, 11, 24), date(2026, 11, 25)
+        attachments = section_report_attachments("M3", "M3", day, sections, tomorrow=tomorrow)
+        with ZipFile(BytesIO(attachments[0][1])) as archive:
+            word = archive.read("word/document.xml").decode()
+        self.assertTrue(attachments[1][1].startswith(b"\x89PNG"))
+        for output in (render_html("M3", day, tomorrow, sections), render_plain_text("M3", day, tomorrow, sections), word):
+            self.assertIn("Keep late tasks", output)
+            self.assertNotIn(ticket_body, output)
 
     def test_ga_and_hv_closing_sections_are_removed_from_m3(self) -> None:
         normalized = normalize_meetings_report_sections(
@@ -636,12 +639,13 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         title = SECTION_TITLES[0]
         legacy = {"title": f"1. {title}", "section_key": "manual:custom:1:projects", "body": "Old answer"}
         daily = {"title": "2. PIKAT E DITËS", "section_key": "manual:custom:2:daily", "body": "Old daily points"}
+        std = {"title": "3. (GA) ZHV: TIKETAT E STD?", "section_key": "manual:custom:3:std", "body": "Old tickets"}
         original = [{"title": "Edited title", "section_key": title, "body": "Old answer"}, legacy,
                     {"title": "Edited daily points", "section_key": "manual:PIKATEDITES", "body": "Old answer"}, daily]
         sections = normalize_meetings_report_sections(original)
         with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles",
-                   AsyncMock(return_value=[title, "PIKAT E DITES", SECTION_TITLES[15], "Another point"])):
-            merged = asyncio.run(merge_common_view_manual_sections(None, sections, "meetings", original, [legacy, daily]))
+                   AsyncMock(return_value=[title, "PIKAT E DITES", SECTION_TITLES[1], SECTION_TITLES[15], "Another point"])):
+            merged = asyncio.run(merge_common_view_manual_sections(None, sections, "meetings", original, [legacy, daily, std]))
         self.assertEqual([section["title"] for section in merged], ["Another point", SECTION_TITLES[15]])
 
     def test_common_view_aliases_are_known_auto_not_manual(self) -> None:
@@ -1107,7 +1111,7 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertIn("BZ ME", empty[2])
         self.assertEqual(empty[4].split("|")[-2].strip(), "-")
 
-    def test_new_task_table_keeps_each_task_status_for_row_coloring(self) -> None:
+    def test_new_and_eight_am_task_tables_keep_status_colors(self) -> None:
         task_template = {
             "id": uuid.uuid4(),
             "system_template_origin_id": None,
@@ -1127,13 +1131,16 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             SimpleNamespace(**{**task_template, "id": uuid.uuid4()}, title="Done task", status="DONE"),
         ]
 
-        rows = _m3_status_table("DETYRAT E REJA", tasks, {}, with_status=True)
-        html = _render_ascii_table_html(rows)
-
-        self.assertIn('class="todo"', html)
-        self.assertIn('class="in-progress"', html)
-        self.assertIn('class="waiting"', html)
-        self.assertIn('class="done"', html)
+        for caption in ("DETYRAT E REJA", "DET 08:00"):
+            with self.subTest(caption=caption):
+                rows = _m3_status_table(caption, tasks, {}, with_status=True)
+                body = "\n".join(rows)
+                sections = [{"title": SECTION_TITLES[6], "body": body}]
+                report_day = date(2026, 11, 24)
+                html = render_html("M3", report_day, date(2026, 11, 25), sections)
+                for tone in ("todo", "in-progress", "waiting", "done"):
+                    self.assertIn(f'class="{tone}"', html)
+                self.assertNotIn("[[st:", html)
 
     def test_status_table_orders_system_tasks_before_fast_tasks(self) -> None:
         system_task = SimpleNamespace(

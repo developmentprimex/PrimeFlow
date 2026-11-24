@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ga_note_attachment import GaNoteAttachment
 from app.models.ga_note import GaNote
-from app.services.after_break_report import BLUE_NOTE_COLUMNS, NOTE_REFERENCES, load_blue_notes
+from app.services.after_break_report import BLUE_NOTE_COLUMNS, NOTE_REFERENCES, load_blue_notes, order_blue_note_references
 from app.services.meetings_report import _section_report_table_rows
 from app.services.px_note_email import (
     EMAIL_NOTE_ORIGINS, email_preview, email_preview_text, email_title_from_content, manual_original_email_url,
@@ -56,6 +56,8 @@ async def match_note_rows(
         references = await load_blue_notes(
             db, created_before=datetime.fromisoformat(generated_at) if generated_at else None, compact_email=False,
         )
+    else:
+        references = order_blue_note_references(references)
     candidates: dict[tuple[str, ...], set[str]] = defaultdict(set)
     for note_id, values in references:
         candidates[_row_key(values[1:] if legacy else values)].add(note_id)
