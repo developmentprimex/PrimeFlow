@@ -26,8 +26,11 @@ test("Mira groups Discord answers and task outcomes without requiring a voice-ho
     const path = new URL(route.request().url()).pathname
     if (path === "/api/auth/me") return route.fulfill({ json: user })
     if (path === "/api/mira/status") return route.fulfill({ json: { enabled: false, live: null } })
-    if (path === "/api/mira/meetings") return route.fulfill({ json: { total: 1, items: [row] } })
-    if (path === `/api/mira/meetings/${row.id}`) return route.fulfill({ json: {
+    if (path === "/api/mira/meeting-catalog") return route.fulfill({ json: { total: 1, follow_up: [], items: [
+      { ...row, title: "1H 14:20 · Raportimet e stafit", source: "host", group: "1H", started_at: "2026-10-27T14:20:00+01:00" },
+    ] } })
+    if (path === `/api/mira/meeting-catalog/host/${row.id}`) return route.fulfill({ json: {
+      id: row.id, title: "1H 14:20", source: "host", notes: [], host_ids: [], host: {
       ...row, turns: [], summary: null, transcript: [], events: [], mentions: [], recorder: null,
       discord_reports: [
         { id: "report", user_id: user.id, name: user.full_name, state: "PARTIAL", created_at: "2026-10-27T14:20:00+01:00", sent_at: "2026-10-27T14:20:01+01:00", tasks,
@@ -38,11 +41,11 @@ test("Mira groups Discord answers and task outcomes without requiring a voice-ho
           tasks: [{ ...tasks[0], id: "55555555-5555-4555-8555-555555555555", title: "OH: OFERTA", status: "DONE", planned_status: "DONE", answer: null, expected_at: null, history: [], postponements: [] }],
           next: { answer: "Vazhdoj me përgatitjen e ofertës tjetër.", history: [] } },
       ],
-    } })
+    } } })
     return route.fulfill({ json: path.includes("count") ? { count: 0 } : [] })
   })
   await page.goto("/mira")
-  await page.getByRole("button", { name: /14:20 Raportimet e stafit/ }).click()
+  await page.getByRole("link", { name: /14:20 · Raportimet e stafit/ }).click()
   await expect(page.getByRole("heading", { name: "Raportimet nga Discord" })).toBeVisible()
   await expect(page.getByText("Po vazhdoj me konfigurimin.", { exact: true }).first()).toBeVisible()
   await expect(page.getByText("Pjesërisht i raportuar", { exact: true })).toBeVisible()
@@ -61,6 +64,6 @@ test("Mira groups Discord answers and task outcomes without requiring a voice-ho
   await page.screenshot({ path: "test-results/mira-discord-reports-desktop.png", fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByRole("heading", { name: "Raportimet nga Discord" })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await expect.poll(() => page.locator("main").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await page.screenshot({ path: "test-results/mira-discord-reports-mobile.png", fullPage: true })
 })

@@ -19,6 +19,7 @@ from app.models.discord_assistant import DiscordLink
 from app.models.user import User
 from app.schemas.ga_note import GaNoteCreate
 from app.services import mira_memory
+from app.services.discord_voice_note_format import meeting_url
 from app.services.ga_note_creation import build_ga_note
 
 log = logging.getLogger(__name__)
@@ -43,9 +44,7 @@ def view(row):
         quick_summary=getattr(row, 'quick_summary', None),
         started_at=(getattr(row, 'started_at', None) or row.created_at).isoformat() if row.created_at else None,
         saved_note_id=str(row.saved_note_id) if row.saved_note_id else None,
-        note_url=settings.FRONTEND_URL.rstrip('/') + ('/mira?tab=shenimet'
-            if settings.DISCORD_MEETING_CONTROL_CHANNEL_ID and row.private_channel_id == settings.DISCORD_MEETING_CONTROL_CHANNEL_ID
-            else '/ga-ka-notes') if row.saved_note_id else None)
+        note_url=meeting_url(row.id, 'full') if row.saved_note_id else None)
 
 
 async def locked(db, session_id):
@@ -351,9 +350,11 @@ async def meeting_record(db, session_id):
         raise HTTPException(404, 'Takimi nuk u gjet.')
     segments = (await db.scalars(select(Segment).where(Segment.session_id == row.id, Segment.status == 'DONE',
         Segment.transcript.is_not(None)).order_by(Segment.start_ms, Segment.sequence))).all()
+    speakers = {speaker_id: index for index, speaker_id in enumerate(dict.fromkeys(s.speaker_id for s in segments))}
     return {'id': str(row.id), 'title': row.title, 'started_at': (row.started_at or row.created_at).isoformat(),
         'partial': row.partial, 'quick_summary': row.quick_summary, 'full_notes': row.draft_text, 'error': row.error,
         'quick_summary_pending': bool(row.quick_summary is None and row.lease_until and row.lease_until > now()),
         'memory': await mira_memory.meeting_points(db, row, segments),
-        'transcript': [{'id': str(segment.id), 'speaker': segment.speaker_name, 'start_ms': segment.start_ms,
+        'transcript': [{'id': str(segment.id), 'speaker': segment.speaker_name,
+            'speaker_key': speakers[segment.speaker_id], 'start_ms': segment.start_ms,
             'end_ms': segment.end_ms, 'text': segment.transcript} for segment in segments]}

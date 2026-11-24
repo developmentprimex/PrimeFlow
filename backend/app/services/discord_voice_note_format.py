@@ -23,3 +23,9 @@ def albanian_date(moment: datetime) -> str:
     local = moment.astimezone(ZoneInfo(settings.APP_TIMEZONE))
     text = f'{DAYS[local.weekday()]}, {local.day} {MONTHS[local.month - 1]} {local.year}'
     return text[0].upper() + text[1:]
+
+
+def meeting_url(meeting_id, view, anchor=None):
+    root = settings.FRONTEND_URL.rstrip('/')
+    url = f'{root}/mira?tab=takimet&meeting={meeting_id}&source=discord&view={view}'
+    return f'{url}#{anchor}' if anchor else url

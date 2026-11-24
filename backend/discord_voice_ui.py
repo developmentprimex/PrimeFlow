@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import discord
 from discord.http import handle_message_parameters
 from app.config import settings
-from app.services.discord_voice_note_format import QUICK_SECTIONS, albanian_date
+from app.services.discord_voice_note_format import QUICK_SECTIONS, albanian_date, meeting_url
 
 
 def meeting_view(row):
@@ -17,14 +17,13 @@ def meeting_view(row):
         view.add_item(discord.ui.Button(label='Shiko shënimet',custom_id=f'pf:vm:view:{sid}'))
         view.add_item(discord.ui.Button(label='Ruaj në PX Notes',style=discord.ButtonStyle.success,custom_id=f'pf:vm:save:{sid}'))
     elif state=='SAVED' and row.get('note_url'):
-        view.add_item(discord.ui.Button(label='Hap PX Notes',url=row['note_url']))
+        view.add_item(discord.ui.Button(label='Hap takimin',url=row['note_url']))
     return view
 
 
 def result_message(row):
     quick = row.get('quick_summary')
     if quick:
-        root = settings.FRONTEND_URL.rstrip('/') + '/mira?tab=notetaker&meeting=' + row['id']
         date = albanian_date(datetime.fromisoformat(row['started_at'])) if row.get('started_at') else ''
         lines = [' | '.join(filter(None, (date, discord.utils.escape_markdown(row['title']))))]
         if row.get('partial'):
@@ -33,7 +32,8 @@ def result_message(row):
         for key, label in QUICK_SECTIONS.items():
             items = ['• ' + discord.utils.escape_markdown(item, ignore_links=False) for item in quick[key]]
             lines.append('\n'.join([f'**{label}**', *(items or ['—'])]))
-        links = f'[Shënimet e plota]({root}&view=full) | [Transkripti]({root}&view=transcript)'
+        links = (f"[Shënimet e plota]({meeting_url(row['id'], 'full')}) | "
+                 f"[Transkripti]({meeting_url(row['id'], 'transcript')})")
         description = '\n\n'.join([*lines, links])
         if len(description.encode('utf-16-le')) // 2 <= 4096:
             return {'embed': discord.Embed(title='MIRA | Meeting Notes', description=description), 'view': meeting_view(row)}
@@ -50,11 +50,12 @@ def result_message(row):
 
 async def send_durable(bot, channel, row):
     marker=f"Mira takim · {row['id']}"
-    tab = 'notetaker' if row.get('quick_summary') else 'shenimet'
-    marker_url = settings.FRONTEND_URL.rstrip('/') + f'/mira?tab={tab}&meeting=' + row['id']
+    marker_url = meeting_url(row['id'], 'quick' if row.get('quick_summary') else 'full')
+    legacy_urls = {f"{settings.FRONTEND_URL.rstrip('/')}/mira?tab={tab}&meeting={row['id']}"
+                   for tab in ('notetaker', 'shenimet')}
     created=datetime.fromisoformat(row['created_at']) if row.get('created_at') else None
     async for previous in channel.history(limit=None,after=created-timedelta(seconds=5) if created else None):
-        if previous.author.id==bot.user.id and any(e.footer.text==marker or e.url==marker_url for e in previous.embeds):return [str(previous.id)]
+        if previous.author.id==bot.user.id and any(e.footer.text==marker or e.url==marker_url or e.url in legacy_urls for e in previous.embeds):return [str(previous.id)]
     parts=result_message(row);parts['embed'].url=marker_url
     nonce=hashlib.sha256(marker.encode()).hexdigest()[:24]
     try:

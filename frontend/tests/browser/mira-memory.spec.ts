@@ -100,10 +100,22 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
   const { id, title, kind, status } = list.items[0]
   const writes: unknown[] = []
   await shell(page)
-  await page.route(`**/api/mira/notetaker/meetings/${meeting}`, route => route.fulfill({ json: {
+  await page.route(`**/api/mira/meeting-catalog/discord/${meeting}`, route => route.fulfill({ json: {
+    source: "discord", host_ids: [],
+    notes: [{ id: "created-note", note_id: "created-note", kind: "PX_NOTE", title: "Shënim i diktuar",
+      content: "Kontrolli i dokumenteve", status: "OPEN", created_at: null, shared_to_px: false,
+      shareable: false, created_during_meeting: true }],
+    created_tasks: [{ id: "created-task", title: "Dërgo ofertën", assignees: ["Arta Aliu", "Ana Krasniqi"], assignee_initials: ["AA", "AK"],
+      start_date: "2026-11-19", due_date: null }],
     id: meeting, title: "Takimi Modeco", started_at: "2026-11-19T09:00:00+01:00",
-    partial: true, quick_summary: null, full_notes: "Shënime", error: null,
-    transcript: [{ ...source, text: "Kontrollojeni ofertën deri nesër." }],
+    partial: true, quick_summary: null, error: null,
+    full_notes: "Shënime\n\n**Transkripti fjalë për fjalë**\n\nGA: Teksti i ruajtur.\n\n**Përmbledhje e shkurtër**\n\nU diskutua oferta.",
+    transcript: [
+      { ...source, speaker_key: 0, text: "Kontrollojeni ofertën deri nesër." },
+      { id: "continuation", speaker: "GA", speaker_key: 0, start_ms: 330000, end_ms: 334000, text: "Pastaj na njoftoni." },
+      { id: "answer", speaker: "Ana", speaker_key: 1, start_ms: 334000, end_ms: 336000, text: "Në rregull." },
+      { id: "return", speaker: "GA", speaker_key: 0, start_ms: 337000, end_ms: 339000, text: "Faleminderit." },
+    ],
     memory: { points: [{ id, title, kind, status, needs_follow_up: true, text: "Kontrolli i ofertës u kërkua nga GA.",
       correction: null, project: "Modeco", requested_by: "GA", assignee: null, deadline_text: "nesër",
       deadline_date: "2026-11-20", questions: [question], answers: {}, sources: [source], discussion_state: "REPEATED" },
@@ -112,7 +124,8 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
     previous: [{ id, title, text: "U diskutua oferta.", meeting_id: priorMeeting, meeting_title: "Takimi paraprak Modeco",
       date: "2026-11-18T09:00:00+01:00" }] },
   } }))
-  await page.route(`**/api/mira/notetaker/meetings/${priorMeeting}`, route => route.fulfill({ json: {
+  await page.route(`**/api/mira/meeting-catalog/discord/${priorMeeting}`, route => route.fulfill({ json: {
+    source: "discord", host_ids: [], notes: [],
     id: priorMeeting, title: "Takimi paraprak Modeco", started_at: "2026-11-18T09:00:00+01:00",
     partial: false, quick_summary: null, full_notes: "Shënimet e mëparshme", error: null, transcript: [],
   } }))
@@ -122,6 +135,21 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
     await route.fulfill({ json: { question, answer: body.answer } })
   })
   await page.goto(`/mira?tab=notetaker&meeting=${meeting}&view=quick`)
+  await expect(page.getByRole("link", { name: "Dërgo ofertën" })).toHaveAttribute("href", "/tasks/created-task")
+  const tasks = page.getByRole("table", { name: "Detyrat e krijuara nga takimi" })
+  await expect(tasks.getByRole("columnheader")).toHaveText(["Detyra", "Përgjegjësi", "Data e fillimit", "Afati"])
+  await expect(tasks.getByRole("cell")).toHaveText(["Dërgo ofertën", "AA, AK", "19/11/2026", "—"])
+  await expect(tasks.getByRole("cell", { name: "AA, AK" })).toHaveAttribute("title", "Arta Aliu, Ana Krasniqi")
+  await page.getByRole("link", { name: "Kontrolli i dokumenteve" }).click()
+  await expect(page.locator("#note-created-note")).toContainText("Kontrolli i dokumenteve")
+  const transcript = page.locator("#transkripti")
+  await expect(transcript.getByRole("listitem")).toHaveCount(3)
+  await expect(transcript.getByRole("listitem").first()).toContainText("05:16–05:34")
+  await expect(transcript.getByRole("listitem").first()).toContainText("Kontrollojeni ofertën deri nesër. Pastaj na njoftoni.")
+  await expect(page.getByText("Teksti i ruajtur.", { exact: false })).toBeHidden()
+  await page.getByText("Teksti origjinal i transkriptit në shënim").click()
+  await expect(page.getByText("GA: Teksti i ruajtur.", { exact: true })).toBeVisible()
+  await page.getByRole("link", { name: "Përmbledhja", exact: true }).click()
   await expect(page.getByText("Regjistrimi ose transkripti është i pjesshëm.")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Kërkohet sqarim" })).toBeVisible()
   await page.getByRole("button", { name: "Përgjigju" }).click()
@@ -129,7 +157,7 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
   await page.getByRole("button", { name: "Ruaj sqarimin" }).click()
   await expect(page.getByRole("heading", { name: "Kërkohet sqarim" })).toHaveCount(0)
   expect(writes).toEqual([{ meeting_id: meeting, question, answer: "Arta." }])
-  await page.getByRole("link", { name: "Kujtesa e takimit" }).click()
+  await page.getByRole("link", { name: "Pikat e takimit" }).click()
   await expect(page.getByText(/Diskutuar më parë/)).toBeVisible()
   await expect(page.getByText("Arta.", { exact: true })).toBeVisible()
   await expect(page.getByText("Vendimi për ofertën")).toBeVisible()
@@ -139,6 +167,7 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
   await page.getByRole("link", { name: "GA · 05:16–05:30" }).click()
   await expect(page).toHaveURL(/view=transcript#segment-source/)
   await expect(page.locator('#segment-source[data-source="true"]')).toContainText("Kontrollojeni ofertën deri nesër.")
+  await page.getByRole("link", { name: "Pikat e takimit" }).click()
   await page.getByRole("link", { name: "Historiku i takimeve" }).click()
   await page.getByRole("link", { name: /Takimi paraprak Modeco/ }).click()
   await expect(page.getByRole("heading", { name: "Takimi paraprak Modeco" })).toBeVisible()
@@ -148,15 +177,16 @@ test("Notetaker can filter open points before the next meeting", async ({ page }
   await shell(page)
   const point = { id: offer, title: "Oferta Modeco", text: "Pritet përgjigjja.", meeting_id: offer,
     meeting_title: "Takimi Modeco", date: "2026-11-19T09:00:00+01:00" }
-  await page.route(/\/api\/mira\/notetaker\/meetings\?/, route => {
+  await page.route(/\/api\/mira\/meeting-catalog\?/, route => {
     const query = new URL(route.request().url()).searchParams.get("follow_up_query")
-    return route.fulfill({ json: { items: [], follow_up: query === "Dantese" ? [] : [point] } })
+    return route.fulfill({ json: { items: [], total: 0, follow_up: query === "Dantese" ? [] : [point] } })
   })
   await page.goto("/mira?tab=notetaker")
+  await page.getByRole("button", { name: "Për t’u ndjekur" }).click()
   await expect(page.getByText("Oferta Modeco")).toBeVisible()
   await page.getByLabel("Kërko pika të hapura sipas projektit ose temës").fill("Dantese")
-  await page.getByRole("button", { name: "Kërko", exact: true }).click()
-  await expect(page.getByText("Nuk u gjetën pika të hapura për këtë kërkim.")).toBeVisible()
+  await page.getByLabel("Kërko pika të hapura sipas projektit ose temës").press("Enter")
+  await expect(page.getByText("Nuk u gjetën pika të hapura.")).toBeVisible()
   await expect(page.getByText("Oferta Modeco")).toHaveCount(0)
 })
 
@@ -165,12 +195,15 @@ test("an admin can generate a missing 1H summary from its saved transcript", asy
   const meeting = "44444444-4444-4444-8444-444444444444"
   const endpoint = `**/api/mira/notetaker/meetings/${meeting}`
   let queued = false
-  await page.route(endpoint, route => route.fulfill({ json: {
+  const record = () => ({
+    source: "discord", host_ids: [], notes: [],
     id: meeting, title: "Takimi 1H", started_at: "2026-11-20T11:51:00+01:00",
     partial: true, full_notes: "Shënimet e ruajtura.", error: null,
     transcript: [{ id: "source", speaker: "Ana", start_ms: 0, end_ms: 1000, text: "Dërgohet raporti." }],
     quick_summary: queued ? { discussion: ["U diskutua raporti."], decisions: [], actions: [], open_points: [], follow_up: [] } : null,
-  } }))
+  })
+  await page.route(endpoint, route => route.fulfill({ json: record() }))
+  await page.route(`**/api/mira/meeting-catalog/discord/${meeting}`, route => route.fulfill({ json: record() }))
   await page.route(`${endpoint}/summarize`, route => {
     expect(route.request().method()).toBe("POST")
     queued = true

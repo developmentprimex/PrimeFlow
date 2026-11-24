@@ -216,7 +216,7 @@ export function MiraMemoryPage({ itemId = null }: { itemId?: string | null }) {
                         style={{ background: event.user_name ? "var(--muted-foreground)" : ACCENT }} />
                       <p className="text-xs font-medium">{eventLabel(event)}{event.partial && <span className="font-normal text-muted-foreground"> (takim i pjesshëm)</span>}</p>
                       {event.text && <p className="mt-1 max-w-[62ch] text-sm leading-relaxed text-muted-foreground">{event.text}</p>}
-                      {event.meeting_id && <Link href={`/mira?tab=notetaker&meeting=${event.meeting_id}&view=memory`} className="mt-1 inline-block text-xs underline">Hap takimin</Link>}
+                      {event.meeting_id && <Link href={`/mira?tab=takimet&meeting=${event.meeting_id}&source=discord&view=memory#point-${detail.id}`} className="mt-1 inline-block text-xs underline">Hap takimin</Link>}
                     </li>
                   ))}
                 </ol>

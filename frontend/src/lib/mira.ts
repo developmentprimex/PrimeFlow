@@ -1,4 +1,4 @@
-export type MiraTab = "takimet" | "notetaker" | "shenimet" | "knowledge" | "kujtesa" | "cilesimet"
+export type MiraTab = "takimet" | "knowledge" | "kujtesa" | "cilesimet"
 
 export function miraDictationLabel(source?: string | null): string | null {
   if (source === "1h") return "Nga Mira 1H"
@@ -173,6 +173,22 @@ export async function json<T>(response: Response): Promise<T> {
     throw new Error(typeof body?.detail === "string" ? body.detail : "Kërkesa dështoi. Provo përsëri.")
   }
   return body as T
+}
+
+export function transcriptTime(ms: number) {
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.floor(ms / 1_000) % 60
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+}
+
+export function groupTranscriptBySpeaker<T>(segments: readonly T[], speaker: (segment: T) => string | number): T[][] {
+  const turns: T[][] = []
+  for (const segment of segments) {
+    const last = turns.at(-1)
+    if (last && speaker(last[0]) === speaker(segment)) last.push(segment)
+    else turns.push([segment])
+  }
+  return turns
 }
 
 export function clock(value: string | null | undefined): string {

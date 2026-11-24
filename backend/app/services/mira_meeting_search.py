@@ -17,6 +17,7 @@ from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting, Dis
 from app.models.mira_memory import MiraMemoryEvent as Event, MiraMemoryItem as Item
 from app.models.user import User
 from app.services import discord_voice_meetings, discord_voice_openai as provider, mira_memory
+from app.services.discord_voice_note_format import meeting_url
 
 NO_EVIDENCE = 'Nuk gjeta informacion të konfirmuar për këtë çështje në takimet ku ke qasje.'
 STOP_WORDS = set("""
@@ -193,12 +194,11 @@ async def ask_meetings(db, request):
     if len(current) != len(ids):
         return {'answer': NO_EVIDENCE, 'sources': []}
     by_id = {segment.id: (segment, meeting) for segment, meeting in current}
-    root = settings.FRONTEND_URL.rstrip('/')
     citations = []
     for segment_id in ids:
         segment, meeting = by_id[segment_id]
         citations.append({'speaker': segment.speaker_name,
             'date': (meeting.started_at or meeting.created_at).astimezone(tz).strftime('%d.%m.%Y'),
             'time': f'{provider.clock(segment.start_ms)}–{provider.clock(segment.end_ms)}',
-            'url': f'{root}/mira?tab=notetaker&meeting={meeting.id}&view=transcript#segment-{segment.id}'})
+            'url': meeting_url(meeting.id, 'transcript', f'segment-{segment.id}')})
     return {'answer': answer.strip(), 'sources': citations}

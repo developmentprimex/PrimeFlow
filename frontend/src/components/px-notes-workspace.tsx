@@ -4850,6 +4850,11 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                 )}
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
+                                {(note.from_mira || note.mira_shared_to_px) && (
+                                  <Button asChild variant="outline" size="sm" className="h-7 shrink-0 text-xs">
+                                    <Link href={`/mira?tab=takimet&note=${note.id}`}>Hap takimin burim</Link>
+                                  </Button>
+                                )}
                                 {note.from_mira ? (
                                   <Button
                                     asChild

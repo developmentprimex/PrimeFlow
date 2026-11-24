@@ -11,6 +11,7 @@ from app.db import get_db
 from app.models.mira_host import MiraKnowledgeItem
 from app.services import mira_host as host
 from app.services import discord_voice_meetings as notetaker
+from app.services import mira_meeting_catalog as catalog
 from app.services.mira_note_groups import grouped_notes
 
 router = APIRouter()
@@ -60,6 +61,21 @@ def knowledge_row(row: MiraKnowledgeItem) -> dict:
 @router.get('/meetings')
 async def meetings(limit: int = 50, offset: int = 0, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     return await host.list_meetings(db, min(max(limit, 1), 200), max(offset, 0))
+
+
+@router.get('/meeting-catalog')
+async def meeting_catalog(limit: int = Query(default=30, ge=1, le=100), offset: int = Query(default=0, ge=0),
+        group: Literal["1H", "AI_AGENT", "OTHER"] | None = None,
+        query: str = Query(default="", max_length=200), follow_up_query: str = Query(default="", max_length=100),
+        db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return await catalog.list_meetings(db, user, limit=limit, offset=offset, group=group,
+        query=query.strip(), follow_up_query=follow_up_query.strip())
+
+
+@router.get('/meeting-catalog/{source}/{meeting_id}')
+async def catalog_meeting(source: Literal["discord", "host", "desktop"], meeting_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return await catalog.meeting_detail(db, user, source, meeting_id)
 
 
 @router.get('/notetaker/meetings')
@@ -119,6 +135,18 @@ async def note_transcript(note_id: uuid.UUID, db: AsyncSession = Depends(get_db)
     if desktop is not None:return desktop
     # Existing Discord transcript visibility stays unchanged.
     return await host.note_transcript(db, note_id)
+
+
+@router.get('/notes/{note_id}/meeting')
+async def note_meeting(note_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return await catalog.meeting_for_note(db, note_id)
+
+
+@router.get('/unlinked-notes')
+async def unlinked_notes(limit: int = Query(default=30, ge=1, le=100), offset: int = Query(default=0, ge=0),
+        query: str = Query(default="", max_length=200), db: AsyncSession = Depends(get_db),
+        user=Depends(get_current_user)):
+    return await catalog.list_unlinked_notes(db, limit, offset, query.strip())
 
 
 @router.get('/status')
