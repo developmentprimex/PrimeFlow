@@ -87,8 +87,8 @@ class VoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         for label in provider.QUICK_SECTIONS.values():
             self.assertIn(label, embed.description)
         self.assertIn('Regjistrimi ose transkripti është i pjesshëm.', embed.description)
-        self.assertIn('meeting=test-id&view=full', embed.description)
-        self.assertIn('meeting=test-id&view=transcript', embed.description)
+        self.assertIn('/mira?tab=takimet&meeting=test-id&source=discord&view=full', embed.description)
+        self.assertIn('/mira?tab=takimet&meeting=test-id&source=discord&view=transcript', embed.description)
         self.assertNotIn('Ky është transkripti i plotë', embed.description)
 
     async def test_short_speech_tail_is_padded_to_provider_minimum_without_changing_samples(self):
