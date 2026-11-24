@@ -1,0 +1,38 @@
+from datetime import datetime
+
+from sqlalchemy import DateTime, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+
+class GaDiscordChannelMessage(Base):
+    __tablename__ = "ga_discord_channel_messages"
+    __table_args__ = (
+        Index("ix_ga_discord_channel_author_time", "channel_id", "author_discord_id", "created_at"),
+        Index("ix_ga_discord_channel_reply", "reply_to_message_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    guild_id: Mapped[str] = mapped_column(String(32))
+    channel_id: Mapped[str] = mapped_column(String(32))
+    parent_channel_id: Mapped[str | None] = mapped_column(String(32))
+    channel_name: Mapped[str] = mapped_column(String(200))
+    author_discord_id: Mapped[str] = mapped_column(String(32))
+    author_name: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    content: Mapped[str] = mapped_column(Text)
+    jump_url: Mapped[str] = mapped_column(String(300))
+    attachments: Mapped[list] = mapped_column(JSONB, server_default="[]")
+    reply_to_message_id: Mapped[str | None] = mapped_column(String(32))
+    reactions: Mapped[list] = mapped_column(JSONB, server_default="[]")
+    reactions_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GaDiscordArchiveCheckpoint(Base):
+    __tablename__ = "ga_discord_archive_checkpoints"
+
+    channel_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    last_message_id: Mapped[str] = mapped_column(String(32))

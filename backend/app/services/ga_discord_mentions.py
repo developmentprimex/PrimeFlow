@@ -17,15 +17,17 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import HTTPException
-from sqlalchemy import Select, select, tuple_
+from sqlalchemy import Select, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.discord_assistant import DiscordLink
+from app.models.ga_discord_channel_message import GaDiscordChannelMessage
 from app.models.ga_discord_mention import GaDiscordMention
 from app.models.user import User
 from app.schemas.ga_discord_mentions import DiscordAttachmentLink
+from app.services import ga_discord_channel_archive as archive
 
 STATUSES = ("new", "seen", "done")
 TRACKED_DAYS = 30  # reactions are followed on mentions of the last 30 days
@@ -112,15 +114,22 @@ async def store(db: AsyncSession, messages: list[dict[str, Any]]) -> int:
     return len(messages)
 
 
-async def set_reactions(db: AsyncSession, message_id: str, reactions: list[dict[str, Any]]) -> bool:
-    """Replace the reactions of a stored mention (False when the message is not a stored mention)."""
-    row = await db.get(GaDiscordMention, message_id)
-    if row is None:
-        return False
-    row.reactions = reactions
-    row.reactions_synced_at = datetime.now(timezone.utc)
+async def set_reactions(
+    db: AsyncSession, message_id: str, reactions: list[dict[str, Any]], *, observed_at: datetime | None = None,
+) -> bool:
+    """Update the reactions wherever this Discord message was captured."""
+    observed_at = observed_at or datetime.now(timezone.utc)
+    updated = False
+    for model in (GaDiscordMention, GaDiscordChannelMessage):
+        row_id = await db.scalar(
+            update(model).where(
+                model.id == message_id,
+                or_(model.reactions_synced_at.is_(None), model.reactions_synced_at <= observed_at),
+            ).values(reactions=reactions, reactions_synced_at=observed_at).returning(model.id)
+        )
+        updated |= row_id is not None
     await db.commit()
-    return True
+    return updated
 
 
 async def tracked(db: AsyncSession) -> tuple[list[str], list[dict[str, str]]]:
@@ -148,21 +157,28 @@ def normalize_emoji(value: str) -> str:
     return "".join(ch for ch in value.strip() if ch != "\ufe0f" and not 0x1F3FB <= ord(ch) <= 0x1F3FF)
 
 
-async def reactor_names(db: AsyncSession, rows: list[GaDiscordMention]) -> dict[str, str]:
+async def reactor_names(db: AsyncSession, rows: list[GaDiscordMention | GaDiscordChannelMessage]) -> dict[str, str]:
     """Discord user id -> PrimeFlow name for everyone who reacted (linked users only)."""
     ids = {str(user.get("discord_id")) for row in rows for reaction in (row.reactions or []) for user in reaction.get("users") or []}
-    if not ids:
+    return await _discord_display_names(db, ids)
+
+
+async def _discord_display_names(db: AsyncSession, discord_ids: set[str], *, guild_id: str | None = None) -> dict[str, str]:
+    if not discord_ids:
         return {}
-    result = await db.execute(
+    statement = (
         select(DiscordLink.discord_user_id, User.full_name, User.username)
         .join(User, User.id == DiscordLink.user_id)
-        .where(DiscordLink.discord_user_id.in_(ids))
+        .where(DiscordLink.discord_user_id.in_(discord_ids))
     )
+    if guild_id:
+        statement = statement.where(DiscordLink.guild_id == guild_id)
+    result = await db.execute(statement)
     return {discord_id: (full_name or username or "") for discord_id, full_name, username in result.all()}
 
 
 def reactions_out(
-    row: GaDiscordMention, people: dict[str, str], ga_id: str | None, approvals: set[str]
+    row: GaDiscordMention | GaDiscordChannelMessage, people: dict[str, str], ga_id: str | None, approvals: set[str]
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Reactions with names/initials, and initials of the reviewers (approval emoji, not author, not GA)."""
     out: list[dict[str, Any]] = []
@@ -190,6 +206,49 @@ async def render(db: AsyncSession, rows: list[GaDiscordMention], tz: ZoneInfo) -
     return [mention_out(row, names, tz, people=people, ga_id=ga_id, approvals=approvals) for row in rows]
 
 
+async def render_with_context(db: AsyncSession, rows: list[GaDiscordMention], tz: ZoneInfo) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    items = await render(db, rows, tz)
+    contexts = {
+        row.id: {"para": [], "pas": [], "reply": None, "përgjigjet": []}
+        for row in rows
+    }
+    for row, item in zip(rows, items, strict=True):
+        item["context"] = contexts[row.id]
+    candidate_ids = [row.id for row in rows if archive.archive_scope(row.guild_id, row.channel_id, None)
+                     and "mention" in row.reasons]
+    if not candidate_ids:
+        return items
+
+    matches = await archive.context_rows(db, candidate_ids)
+    if not matches:
+        return items
+    messages = {row.id: row for _, row, *_ in matches}
+    people = await reactor_names(db, list(messages.values()))
+    authors = await _discord_display_names(db, {row.author_discord_id for row in messages.values()},
+                                          guild_id=settings.DISCORD_GUILD_ID)
+    rendered = {}
+    for row in messages.values():
+        name = authors.get(row.author_discord_id) or row.author_name
+        value = message_out(row, name, tz)
+        value["attachments"] = [{"name": file["name"]} for file in row.attachments or []]
+        value["reactions"] = reactions_out(row, people, None, set())[0]
+        rendered[row.id] = value
+    for anchor_id, row, before, after, original, response in matches:
+        value = rendered[row.id]
+        context = contexts[anchor_id]
+        if before:
+            context["para"].append(value)
+        if after:
+            context["pas"].append(value)
+        if original:
+            context["reply"] = value
+        if response:
+            context["përgjigjet"].append(value)
+    return items
+
+
 async def author_names(db: AsyncSession, rows: list[GaDiscordMention]) -> dict[uuid.UUID, str]:
     ids = {row.author_user_id for row in rows if row.author_user_id}
     if not ids:
@@ -210,21 +269,29 @@ def mention_out(
     name = names.get(row.author_user_id) if row.author_user_id else None
     reactions, reviewed_by = reactions_out(row, people or {}, ga_id, approval_emojis() if approvals is None else approvals)
     return {
-        "id": f"dc:{row.id}",
-        "author": name or row.author_name,
-        "author_initials": initials(name or row.author_name),
+        **message_out(row, name or row.author_name, tz),
         "author_in_primeflow": bool(name),
+        "reasons": row.reasons or [],
+        "status": row.status,
+        "reactions": reactions,
+        "reviewed_by": reviewed_by,
+        "ready_for_ga": bool(reviewed_by),
+    }
+
+
+def message_out(row: GaDiscordMention | GaDiscordChannelMessage, name: str, tz: ZoneInfo) -> dict[str, Any]:
+    synced_at = getattr(row, "reactions_synced_at", None)
+    return {
+        "id": f"dc:{row.id}",
+        "author": name,
+        "author_initials": initials(name),
         "channel": f"#{row.channel_name}" if row.channel_name else row.channel_id,
         "time": row.created_at.astimezone(tz).isoformat(),
         "edited_at": row.edited_at.astimezone(tz).isoformat() if row.edited_at else None,
         "text": row.content,
         "url": row.jump_url,
         "attachments": row.attachments or [],
-        "reasons": row.reasons or [],
-        "status": row.status,
-        "reactions": reactions,
-        "reviewed_by": reviewed_by,
-        "ready_for_ga": bool(reviewed_by),
+        "reactions_synced_at": synced_at.isoformat() if synced_at else None,
     }
 
 
@@ -242,12 +309,7 @@ async def list_mentions(
 
 
 def _staff_channel_mentions() -> Select[tuple[GaDiscordMention]]:
-    mention = GaDiscordMention
-    return select(mention).where(
-        mention.guild_id == settings.DISCORD_GUILD_ID,
-        mention.channel_id == settings.DISCORD_GA_REPLIES_CHANNEL_ID,
-        mention.reasons.contains(["mention"]),
-    )
+    return select(GaDiscordMention).where(archive.staff_mention_scope())
 
 
 async def list_staff_channel_mentions(
@@ -269,8 +331,9 @@ async def list_staff_channel_mentions(
 
 
 async def staff_mention_attachment_links(db: AsyncSession, message_id: str) -> list[DiscordAttachmentLink]:
-    """Fetch fresh signed URLs for a direct mention in the staff channel."""
-    row = await db.scalar(_staff_channel_mentions().where(GaDiscordMention.id == message_id))
+    """Fetch signed URLs for an eligible mention or one of its context messages."""
+    mention = await db.scalar(_staff_channel_mentions().where(GaDiscordMention.id == message_id))
+    row = mention if mention is not None else await archive.get_context_message(db, message_id)
     ga_id = await ga_discord_id(db) if row else None
     if row is None or not ga_id:
         raise HTTPException(404, "Përmendja nuk gjendet në listën e GA-së.")
@@ -292,7 +355,7 @@ async def staff_mention_attachment_links(db: AsyncSession, message_id: str) -> l
 
     if (message.get("id") != row.id or message.get("channel_id") != row.channel_id
             or message.get("author", {}).get("id") != row.author_discord_id
-            or not any(user.get("id") == ga_id for user in message.get("mentions", []))):
+            or (mention is not None and not any(user.get("id") == ga_id for user in message.get("mentions", [])))):
         raise HTTPException(404, "Mesazhi nuk përputhet më me përmendjen e GA-së.")
 
     links = []
