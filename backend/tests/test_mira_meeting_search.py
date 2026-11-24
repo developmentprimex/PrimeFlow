@@ -52,7 +52,7 @@ class MeetingSearchTests(MemoryTests):
             self.assertEqual(len(sources), 2)
             citation = result['sources'][0]
             self.assertEqual((citation['speaker'], citation['date'], citation['time']), ('GA', '19.11.2026', '05:16–05:30'))
-            self.assertTrue(citation['url'].endswith(f'meeting={sid}&view=transcript#segment-{segment_id}'))
+            self.assertTrue(citation['url'].endswith(f'meeting={sid}&source=discord&view=transcript#segment-{segment_id}'))
             model.return_value = {'answer': 'Burim i gabuar.', 'refs': [99]}
             async with self.sessions() as db:
                 self.assertEqual((await search.ask_meetings(db, request))['answer'], search.NO_EVIDENCE)

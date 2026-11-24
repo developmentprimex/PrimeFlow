@@ -14,6 +14,67 @@ from app.services import discord_voice_meetings as service
 from app.jobs import discord_voice_meetings as jobs
 
 class VoiceJobTests(PostgresMeetingTests):
+    async def test_catalog_keeps_meeting_sources_and_unlinked_notes_reachable(self):
+        from datetime import date
+        from types import SimpleNamespace
+        from app.db import Base
+        from app.models.discord_assistant import DiscordReminder
+        from app.models.ga_note import GaNote
+        from app.models.mira_desktop import MiraDesktopSession
+        from app.models.mira_host import Mira1HEvent, Mira1HMeeting, Mira1HTurn
+        from app.services import mira_meeting_catalog as catalog
+
+        async with self.engine.begin() as conn:
+            await conn.run_sync(lambda connection: Base.metadata.create_all(
+                connection, tables=[DiscordReminder.__table__, Mira1HTurn.__table__]))
+        day, slot = date(2026, 10, 20), "10:00"
+        async with self.sessions() as db:
+            user = SimpleNamespace(id=self.uid)
+            other_user = SimpleNamespace(id=uuid.uuid4())
+            saved, host_note, desktop_note, unlinked = [
+                GaNote(created_by=self.uid, content=content)
+                for content in ("Discord saved note", "Host saved note", "Desktop saved note", "Historical note")
+            ]
+            db.add_all([saved, host_note, desktop_note, unlinked])
+            await db.flush()
+            voice = Meeting(id=uuid.uuid4(), user_id=self.uid, link_id=self.lid, guild_id="123",
+                voice_channel_id="55", private_channel_id="44", request_id="auto1h-202610200958",
+                instance_id=uuid.uuid4(), capture_token_hash="test", title="1H Discord",
+                status="SAVED", saved_note_id=saved.id)
+            host = Mira1HMeeting(id=uuid.uuid4(), meeting_date=day, slot=slot, status="DONE")
+            desktop = MiraDesktopSession(id=uuid.uuid4(), user_id=self.uid, title="Desktop session",
+                status="SAVED", note_id=desktop_note.id, notes="Owner-only draft")
+            db.add_all([voice, host, desktop])
+            await db.flush()
+            db.add_all([
+                Mira1HEvent(meeting_date=day, slot=slot, kind="PX_NOTE", meeting_id=host.id, note_id=host_note.id),
+                Mira1HEvent(meeting_date=day, slot=slot, kind="PX_NOTE", note_id=unlinked.id),
+            ])
+            await db.commit()
+
+            result = await catalog.list_meetings(db, user, limit=30, offset=0, group=None, query="", follow_up_query="")
+            self.assertEqual({(row["source"], row["id"]) for row in result["items"]},
+                             {("discord", str(voice.id)), ("desktop", str(desktop.id))})
+            self.assertTrue(result["has_unlinked_notes"])
+            voice_row = next(row for row in result["items"] if row["id"] == str(voice.id))
+            self.assertEqual(voice_row["recorder"], "primary")
+            self.assertEqual(voice_row["created_note_count"], 1)
+            self.assertEqual(voice_row["created_task_count"], 0)
+            result = await catalog.list_meetings(db, user, limit=30, offset=0, group="1H",
+                query="Host saved note", follow_up_query="")
+            self.assertEqual([row["id"] for row in result["items"]], [str(voice.id)])
+            self.assertEqual(await catalog.meeting_for_note(db, host_note.id), {"source": "discord", "id": str(voice.id)})
+            detail = await catalog.meeting_detail(db, user, "host", host.id)
+            self.assertEqual(detail["host_ids"], [str(host.id)])
+            self.assertEqual({note["id"] for note in detail["notes"]}, {str(saved.id), str(host_note.id)})
+            detail = await catalog.meeting_detail(db, other_user, "desktop", desktop.id)
+            self.assertEqual([note["id"] for note in detail["notes"]], [str(desktop_note.id)])
+            self.assertIsNone(detail["full_notes"])
+            self.assertFalse(detail["transcript_allowed"])
+            result = await catalog.list_unlinked_notes(db, 1, 0, "Historical")
+            self.assertEqual([note["id"] for note in result["notes"]], [str(unlinked.id)])
+            self.assertEqual((await catalog.meeting_for_note(db, unlinked.id))["archived_note"]["id"], str(unlinked.id))
+
     async def test_task_dictation_assigns_by_initials_once_on_both_recorders(self):
         from io import BytesIO
 
@@ -28,6 +89,7 @@ class VoiceJobTests(PostgresMeetingTests):
         from app.models.task import Task
         from app.models.task_assignee import TaskAssignee
         from app.models.user import User
+        from app.services import mira_meeting_catalog
 
         tables = {Task.__table__, TaskAssignee.__table__, Notification.__table__}
         while (expanded := tables | {fk.column.table for table in tables for fk in table.foreign_keys}) != tables:
@@ -93,6 +155,15 @@ class VoiceJobTests(PostgresMeetingTests):
                 meeting = await db.get(Meeting, session_id)
                 self.assertNotIn("tasks", meeting.dictation_progress)
                 self.assertEqual(meeting.status, "LISTENING")
+                meeting.status = "READY"
+                await db.commit()
+                detail = await mira_meeting_catalog.discord_detail(db, session_id)
+                self.assertEqual([task["title"] for task in detail["created_tasks"]], [f"Kontrollo ofertën {recorder}"])
+                self.assertEqual(detail["created_tasks"][0]["assignees"], ["Elsa Ferati"])
+                self.assertIsNotNone(detail["created_tasks"][0]["start_date"])
+                self.assertIsNone(detail["created_tasks"][0]["due_date"])
+                artifacts = await mira_meeting_catalog.page_artifacts(db, [session_id], {})
+                self.assertEqual(artifacts[session_id], {"created_task_count": 1, "created_note_count": 0})
 
         async with self.sessions() as db:
             records = (await db.scalars(select(Task).order_by(Task.title))).all()
@@ -127,6 +198,7 @@ class VoiceJobTests(PostgresMeetingTests):
         from sqlalchemy import select
         from app.api.routers.ga_notes import _note_out
         from app.models.ga_note import GaNote
+        from app.services import mira_meeting_catalog
         from app.services.report_note_visibility import is_mira_note
 
         for recorder, channel_setting, source in (
@@ -168,6 +240,13 @@ class VoiceJobTests(PostgresMeetingTests):
                 self.assertEqual(view.mira_dictation_source, source)
                 self.assertFalse(view.from_mira)
                 self.assertTrue(is_mira_note(saved))
+                row.status = "READY"
+                await db.commit()
+                detail = await mira_meeting_catalog.discord_detail(db, sid)
+                self.assertEqual([(note["id"], note["created_during_meeting"]) for note in detail["notes"]],
+                                 [(str(saved.id), True)])
+                artifacts = await mira_meeting_catalog.page_artifacts(db, [sid], {})
+                self.assertEqual(artifacts[sid], {"created_task_count": 0, "created_note_count": 1})
 
     async def test_chunks_are_deduplicated_ordered_and_finalized_without_tools(self):
         sid,instance=uuid.uuid4(),uuid.uuid4();token='x'*40
@@ -342,7 +421,8 @@ class VoiceJobTests(PostgresMeetingTests):
                 self.assertEqual(note.created_by, self.uid)
                 panel = await panel_state(db, ControlScope(guild_id='123', channel_id='44'), 'ai_agent')
                 self.assertEqual(panel['meeting']['status'], 'SAVED')
-                self.assertTrue(panel['meeting']['note_url'].endswith('/mira?tab=shenimet'))
+                self.assertTrue(panel['meeting']['note_url'].endswith(
+                    f'/mira?tab=takimet&meeting={sid}&source=discord&view=full'))
                 transcript = await mira_host.note_transcript(db, note.id)
                 self.assertEqual(transcript['passages'][0]['speaker'], 'Ana')
                 claimed = (await service.claim_deliveries(db, recorder='ai_agent'))['jobs']

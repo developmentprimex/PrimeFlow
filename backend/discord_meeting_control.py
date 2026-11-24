@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 import discord
 from app.config import settings
+from app.services.discord_voice_note_format import meeting_url
 
 log = logging.getLogger('primeflow.discord.control')
 PREFIX = '/bot/voice-meetings'
@@ -84,7 +85,7 @@ def panel_content(recorder, data):
             custom_id=f'pf:mc:{recorder}:{action}:{"-" if action in ("start","refresh") else sid}'))
     if status == 'SAVED':
         view.add_item(discord.ui.Button(label='Hap shënimet në PrimeFlow',
-            url=settings.FRONTEND_URL.rstrip('/')+'/mira?tab=shenimet',row=1))
+            url=meeting_url(sid, 'full'),row=1))
     return embed, view
 
 

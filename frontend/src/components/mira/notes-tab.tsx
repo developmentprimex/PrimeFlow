@@ -1,161 +1,148 @@
-"use client"
+﻿"use client"
 
-import * as React from "react"
-import Image from "next/image"
+import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Check, ChevronDown, RefreshCw, Search } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
-import { clock, json, type MiraNote } from "@/lib/mira"
-import { MIRA_NOTE_GROUPS, miraNoteGroup, type MiraNoteGroup } from "@/lib/mira-note-groups"
-import { cn } from "@/lib/utils"
+import { clock, json } from "@/lib/mira"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Summary } from "@/components/mira/meetings-tab"
 
-const PAGE_SIZE = 100
-const SOURCE_LABELS = { "1H": "Takimi 1H", DISCORD: "Discord", DESKTOP: "Mira Desktop" }
-const STATUS_LABELS: Record<string, string> = { OPEN: "E hapur", CLOSED: "E mbyllur", DONE: "Përfundoi", ABORTED: "U ndërpre" }
-const noteKey = (note: MiraNote) => `${note.kind}:${note.id}`
-
-function dateLabel(value: string | null) {
-  if (!value) return "–"
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? "–" : `${String(date.getDate()).padStart(2, "0")}.${String(date.getMonth() + 1).padStart(2, "0")}.${date.getFullYear()}`
+export type MeetingNote = {
+  id: string
+  kind: "1H" | "PX_NOTE"
+  title: string
+  content: string
+  status: string
+  created_at: string | null
+  note_id: string | null
+  shared_to_px: boolean
+  shareable?: boolean
+  created_during_meeting?: boolean
 }
 
-export function NotesTab() {
+const statusLabels: Record<string, string> = {
+  OPEN: "E hapur", CLOSED: "E mbyllur", DONE: "Përfundoi", ABORTED: "U ndërpre",
+}
+
+const transcriptHeading = /^\*\*Transkripti fjalë për fjalë\*\*\s*$/im
+const summaryHeading = /^\*\*Përmbledhje e shkurtër\*\*\s*$/im
+
+function NoteContent({ text, transcript }: { text: string; transcript?: ReactNode }) {
+  const marker = transcript && transcriptHeading.exec(text)
+  if (!marker) return <Summary text={text} />
+  const afterHeading = text.slice(marker.index + marker[0].length)
+  const summary = summaryHeading.exec(afterHeading)
+  const original = afterHeading.slice(0, summary?.index).trim()
+  return <>
+    {marker.index > 0 && <Summary text={text.slice(0, marker.index).trim()} />}
+    {transcript}
+    {original && <details className="text-sm">
+      <summary className="cursor-pointer font-medium text-violet-800 dark:text-violet-200">Teksti origjinal i transkriptit në shënim</summary>
+      <div className="mt-2"><Summary text={original} /></div>
+    </details>}
+    {summary && <Summary text={afterHeading.slice(summary.index)} />}
+  </>
+}
+
+function Note({ note, transcript }: { note: MeetingNote; transcript?: ReactNode }) {
   const { apiFetch } = useAuth()
-  const [notes, setNotes] = React.useState<MiraNote[]>([])
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<string | null>(null)
-  const [reload, setReload] = React.useState(0)
-  const [query, setQuery] = React.useState("")
-  const [group, setGroup] = React.useState<MiraNoteGroup>("1H")
-  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set())
-  const [sharing, setSharing] = React.useState<Set<string>>(() => new Set())
+  const [shared, setShared] = useState(note.shared_to_px)
+  const [busy, setBusy] = useState(false)
 
-  React.useEffect(() => {
-    let active = true
-    void (async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        // Show each page immediately while continuing to fetch the full history.
-        const all: MiraNote[] = []
-        for (let offset = 0; active; offset += PAGE_SIZE) {
-          const page = await json<MiraNote[]>(await apiFetch(`/mira/notes?limit=${PAGE_SIZE}&offset=${offset}`))
-          all.push(...page)
-          if (active) setNotes([...all])
-          if (page.length < PAGE_SIZE) break
-        }
-        if (active) setNotes(all)
-      } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : String(e))
-      } finally {
-        if (active) setLoading(false)
-      }
-    })()
-    return () => { active = false }
-  }, [apiFetch, reload])
-
-  const groupCounts = notes.reduce<Record<MiraNoteGroup, number>>((counts, note) => {
-    counts[miraNoteGroup(note)] += 1
-    return counts
-  }, { "1H": 0, AI_AGENT: 0, OTHER: 0 })
-  const groupLabel = MIRA_NOTE_GROUPS.find(item => item.value === group)!.label
-  const visibleNotes = notes.filter(note => miraNoteGroup(note) === group).filter(note =>
-    `${note.title} ${note.content} ${SOURCE_LABELS[note.source]} ${STATUS_LABELS[note.status] ?? note.status}`
-      .toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-
-  const toggle = (key: string) => setExpanded(current => {
-    const next = new Set(current)
-    if (!next.delete(key)) next.add(key)
-    return next
-  })
-
-  const share = async (note: MiraNote) => {
-    const key = noteKey(note)
-    setSharing(current => new Set(current).add(key))
+  async function share() {
+    setBusy(true)
     try {
-      const result = await json<{ note_id: string; shared_to_px: boolean }>(await apiFetch(
+      const result = await json<{ shared_to_px: boolean }>(await apiFetch(
         `/mira/notes/${note.kind}/${note.id}/show-in-px-notes`, { method: "POST" }))
-      setNotes(current => current.map(item => noteKey(item) === key
-        ? { ...item, note_id: result.note_id, shared_to_px: result.shared_to_px } : item))
-      toast.success("Shënimi tani shfaqet te All Tasks/Notes në PX Notes.")
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      setShared(result.shared_to_px)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Shënimi nuk u shfaq në PX Notes.")
     } finally {
-      setSharing(current => { const next = new Set(current); next.delete(key); return next })
+      setBusy(false)
     }
   }
 
-  return (
-    <section className="mt-6 rounded-xl border bg-background p-4 shadow-sm md:p-6" aria-label="Shënimet e Mira-s">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div role="group" aria-label="Lloji i takimit" className="flex flex-wrap gap-2">
-        {MIRA_NOTE_GROUPS.map(item => <Button key={item.value} type="button" size="sm"
-          variant={group === item.value ? "default" : "outline"} aria-pressed={group === item.value}
-          onClick={() => { setGroup(item.value); setExpanded(new Set()) }}>
-          {item.label}<span className="ml-1 tabular-nums">({groupCounts[item.value]})</span>
-        </Button>)}
+  return <article id={`note-${note.note_id ?? note.id}`} className="scroll-mt-24 space-y-3 rounded-lg border border-violet-200 bg-violet-50/60 p-4 target:ring-2 target:ring-violet-500 dark:border-violet-900 dark:bg-violet-950/30">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h3 className="text-sm font-semibold">{note.title}</h3>
+        <p className="text-xs text-muted-foreground">
+          {statusLabels[note.status] ?? note.status}
+          {note.created_at && ` · ${new Date(note.created_at).toLocaleDateString("sq-AL")} · ${clock(note.created_at)}`}
+        </p>
       </div>
-        <Button type="button" variant="outline" size="sm" disabled={loading || sharing.size > 0} onClick={() => setReload(value => value + 1)}>
-          <RefreshCw className={cn("size-4", loading && "animate-spin")} /> Rifresko
-        </Button>
-      </div>
-      <div className="relative mb-3 max-w-sm">
-        <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
-        <Input className="pl-9" aria-label="Kërko shënime" placeholder="Kërko shënime..." value={query} onChange={event => setQuery(event.target.value)} />
-      </div>
-      {error && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-        {error}<Button type="button" variant="outline" size="sm" onClick={() => setReload(value => value + 1)}>Provo përsëri</Button>
-      </div>}
-      <div className="overflow-hidden rounded-md border-2 border-slate-600">
-        <Table className="min-w-[850px] [&_th]:border-r [&_th]:border-slate-600 [&_th]:last:border-r-0 [&_td]:border-r [&_td]:border-slate-600 [&_td]:last:border-r-0 [&_tr]:border-slate-600">
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-12">NR</TableHead>
-              <TableHead>SHËNIMI</TableHead>
-              <TableHead className="w-32">BURIMI</TableHead>
-              <TableHead className="w-32">DATA, ORA</TableHead>
-              <TableHead className="w-28">STATUSI</TableHead>
-              <TableHead className="w-48">PX NOTES</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading && notes.length === 0 ? <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">Duke ngarkuar shënimet...</TableCell></TableRow>
-              : visibleNotes.length === 0 ? <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
-                {error ? "Shënimet nuk u ngarkuan." : query ? "Nuk u gjet asnjë shënim." : `Nuk ka ende shënime në grupin ${groupLabel}.`}
-              </TableCell></TableRow> : visibleNotes.map((note, index) => {
-                const key = noteKey(note), open = expanded.has(key), busy = sharing.has(key)
-                return <TableRow key={key} className="hover:bg-transparent">
-                  <TableCell className="align-top text-muted-foreground">{index + 1}</TableCell>
-                  <TableCell className="max-w-[750px] bg-violet-100/80 align-top whitespace-normal">
-                    <button type="button" aria-expanded={open} onClick={() => toggle(key)} className="flex w-full items-start gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      <Image src="/mira-avatar.png" alt="" width={34} height={34} className="shrink-0 rounded-full border border-violet-300" />
-                      <span className="min-w-0 flex-1 break-words pt-1 font-medium">{note.title}</span>
-                      <ChevronDown className={cn("mt-2 size-4 shrink-0 text-violet-700 transition-transform", open && "rotate-180")} />
-                    </button>
-                    {open && <div className="mt-3 max-h-[520px] overflow-y-auto break-words border-t border-violet-200 pt-3"><Summary text={note.content} /></div>}
-                  </TableCell>
-                  <TableCell className="align-top whitespace-normal text-xs">{SOURCE_LABELS[note.source]}</TableCell>
-                  <TableCell className="align-top text-xs tabular-nums"><div>{dateLabel(note.created_at)}</div><div className="mt-1">{clock(note.created_at)}</div></TableCell>
-                  <TableCell className="align-top"><span className={cn("inline-flex rounded-full border px-2 py-1 text-xs", note.status === "CLOSED" ? "border-slate-200 bg-slate-100 text-slate-600" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>{STATUS_LABELS[note.status] ?? note.status}</span></TableCell>
-                  <TableCell className="align-top">
-                    {note.shared_to_px ? <div className="space-y-2">
-                      <span className="flex items-center gap-1 text-xs text-emerald-700"><Check className="size-4" />Shfaqet në PX Notes</span>
-                      <Link href="/ga-ka-notes" className="text-xs text-blue-700 underline underline-offset-4">Hap PX Notes</Link>
-                    </div> : <Button type="button" variant="outline" size="sm" disabled={busy || loading} className="border-blue-200 text-xs text-blue-700" onClick={() => void share(note)}>
-                      {busy ? "Duke shfaqur..." : "Shfaq në PX Notes"}
-                    </Button>}
-                  </TableCell>
-                </TableRow>
-              })}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
-  )
+      {shared
+        ? <Link href="/ga-ka-notes" className="text-sm underline">Shfaqet në PX Notes</Link>
+        : note.shareable !== false && <Button size="sm" variant="outline" disabled={busy} onClick={() => void share()}>
+          {busy ? "Duke shfaqur…" : "Shfaq në PX Notes"}
+        </Button>}
+    </div>
+    <NoteContent text={note.content} transcript={transcript} />
+  </article>
+}
+
+export function MeetingNotes({ notes, draft, transcript, inlineTranscript }: {
+  notes: MeetingNote[]; draft?: string | null; transcript?: ReactNode; inlineTranscript?: boolean
+}) {
+  const showDraft = draft && !notes.some((note) => note.content === draft)
+  const inlineNote = inlineTranscript ? notes.find((note) => transcriptHeading.test(note.content)) : undefined
+  const inlineDraft = inlineTranscript && !inlineNote && showDraft && transcriptHeading.test(draft)
+  return <div className="space-y-3">
+    {notes.map((note) => <Note key={`${note.kind}:${note.id}`} note={note} transcript={note === inlineNote ? transcript : undefined} />)}
+    {showDraft && <article className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/60 p-4 dark:border-violet-900 dark:bg-violet-950/30">
+      <h3 className="text-sm font-semibold">Shënimet e plota</h3>
+      <NoteContent text={draft} transcript={inlineDraft ? transcript : undefined} />
+    </article>}
+    {!notes.length && !showDraft && <p className="text-sm text-muted-foreground">Nuk ka shënime për këtë takim.</p>}
+    {!inlineNote && !inlineDraft && transcript}
+  </div>
+}
+
+export function UnlinkedNotes() {
+  const { apiFetch } = useAuth()
+  const [search, setSearch] = useState("")
+  const [query, setQuery] = useState("")
+  const [offset, setOffset] = useState(0)
+  const [page, setPage] = useState<{ notes: MeetingNote[]; has_more: boolean } | null>(null)
+  const [error, setError] = useState("")
+  const [retry, setRetry] = useState(0)
+  const limit = 30
+
+  useEffect(() => {
+    let active = true
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset), query })
+    async function load() {
+      try {
+        const result = await json<NonNullable<typeof page>>(await apiFetch(`/mira/unlinked-notes?${params}`))
+        if (active) { setPage(result); setError("") }
+      } catch (error) {
+        if (active) setError(error instanceof Error ? error.message : "Shënimet nuk u ngarkuan.")
+      }
+    }
+    void load()
+    return () => { active = false }
+  }, [apiFetch, offset, query, retry])
+
+  return <section className="mt-5 space-y-4">
+    <Link href="/mira?tab=takimet" className="text-sm underline">Kthehu te takimet</Link>
+    <h2 className="text-lg font-semibold">Shënime pa takim të lidhur</h2>
+    <form className="flex max-w-md gap-2" onSubmit={(event) => {
+      event.preventDefault()
+      setOffset(0)
+      setQuery(search.trim())
+    }}>
+      <Input aria-label="Kërko shënime" value={search} maxLength={200} onChange={event => setSearch(event.target.value)} />
+      <Button type="submit" variant="outline">Kërko</Button>
+    </form>
+    {error ? <p role="alert">{error}{" "}
+      <button type="button" className="underline" onClick={() => { setError(""); setRetry(value => value + 1) }}>Provo përsëri</button>
+    </p> : page ? (page.notes.length ? <MeetingNotes notes={page.notes} /> :
+      <p className="text-sm text-muted-foreground">Nuk u gjetën shënime.</p>) : <p role="status">Po ngarkohen shënimet…</p>}
+    {!error && (offset > 0 || page?.has_more) && <div className="flex gap-2">
+      <Button variant="outline" disabled={offset === 0} onClick={() => { setPage(null); setOffset(offset - limit) }}>Para</Button>
+      <Button variant="outline" disabled={!page?.has_more} onClick={() => { setPage(null); setOffset(offset + limit) }}>Tjetër</Button>
+    </div>}
+  </section>
 }

@@ -1,14 +1,20 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Image from "next/image"
 import Link from "next/link"
+import { ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
-import { Summary } from "@/components/mira/meetings-tab"
+import { HostMeetingPanel, Summary } from "@/components/mira/meetings-tab"
+import { MeetingNotes, type MeetingNote } from "@/components/mira/notes-tab"
 import { useAuth } from "@/lib/auth"
-import { json } from "@/lib/mira"
+import { formatDateDMY } from "@/lib/dates"
+import { dayLabel, groupTranscriptBySpeaker, json, STATUS_LABELS, transcriptTime as timestamp, type MeetingDetail as HostDetail } from "@/lib/mira"
 import { memoryKindLabels, type MemoryListItem } from "@/lib/mira-memory"
+import { cn } from "@/lib/utils"
 
 const sections = {
   discussion: "U diskutua",
@@ -18,8 +24,17 @@ const sections = {
   follow_up: "Për takimin tjetër",
 } as const
 
-type Meeting = { id: string; title: string; started_at: string; partial: boolean }
+export type MeetingSource = "discord" | "host" | "desktop"
+type MeetingGroup = "1H" | "AI_AGENT" | "OTHER"
+type Meeting = {
+  id: string; source: MeetingSource; title: string; started_at: string; partial: boolean;
+  group: MeetingGroup; status: string; open_count: number
+  recorder?: string | null
+  created_task_count?: number
+  created_note_count?: number
+}
 type Source = { id: string; speaker: string; start_ms: number; end_ms: number }
+type TranscriptSegment = Source & { text: string; speaker_key?: number }
 type MemoryPoint = Pick<MemoryListItem, "id" | "title" | "kind" | "status"> & {
   text: string
   correction: string | null
@@ -36,36 +51,100 @@ type MemoryPoint = Pick<MemoryListItem, "id" | "title" | "kind" | "status"> & {
   discussion_state?: "NEW" | "REPEATED" | "RESOLVED"
 }
 type PreviousPoint = { id: string; title: string; text: string; meeting_id: string; meeting_title: string; date: string; status?: MemoryListItem["status"] }
-type MeetingDetail = Meeting & {
+type MeetingDetail = Pick<Meeting, "id" | "source" | "title"> & {
+  started_at?: string
+  status?: string
+  partial?: boolean
   quick_summary: Record<keyof typeof sections, string[]> | null
   quick_summary_pending?: boolean
   full_notes: string | null
   error: string | null
-  transcript: (Source & { text: string })[]
+  transcript: TranscriptSegment[]
   memory?: { points: MemoryPoint[]; previous: PreviousPoint[]; status?: string | null }
+  host?: HostDetail
+  host_ids: string[]
+  notes: MeetingNote[]
+  created_tasks?: {
+    id: string; title: string; assignees: string[]; assignee_initials: string[];
+    start_date: string | null; due_date: string | null
+  }[]
+  desktop_transcript?: string | null
+  transcript_allowed?: boolean
 }
 
-const base = "/mira?tab=notetaker"
+const base = "/mira?tab=takimet"
 const endpoint = "/mira/notetaker/meetings"
+const catalog = "/mira/meeting-catalog"
 const pageSize = 30
+const groups = { "1H": "1H", AI_AGENT: "AI Agent", OTHER: "Të tjera" } as const
+const groupColors = {
+  "1H": "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200",
+  AI_AGENT: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
+  OTHER: "bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200",
+}
+const sources = { discord: "Discord", host: "1H", desktop: "Mira Desktop" }
+const recordingStatuses: Record<string, string> = {
+  ...STATUS_LABELS, READY: "Gati", SAVED: "Ruajtur", FAILED: "Përpunimi dështoi",
+  CAPTURING: "Po regjistrohet", LISTENING: "Po regjistrohet", PROCESSING: "Po përpunohet",
+}
 const views = {
-  quick: "Përmbledhja e shpejtë",
-  full: "Shënimet e plota",
-  transcript: "Transkripti",
-  open: "Pikat e hapura",
-  history: "Historiku i takimeve",
-  memory: "Kujtesa e takimit",
+  quick: "Përmbledhja",
+  full: "Shënimet dhe transkripti",
+  memory: "Pikat e takimit",
+  report: "Raportimi 1H",
 } as const
 
+export function miraMeetingUrl(id: string, source: MeetingSource = "discord", view?: string, anchor?: string) {
+  return `${base}&meeting=${encodeURIComponent(id)}&source=${source}${view ? `&view=${view}` : ""}${anchor ? `#${encodeURIComponent(anchor)}` : ""}`
+}
+
 function meetingView(value: string | null): keyof typeof views {
+  if (value === "transcript") return "full"
+  if (value === "open" || value === "history") return "memory"
   return value && Object.hasOwn(views, value) ? value as keyof typeof views : "quick"
 }
-const dateTime = new Intl.DateTimeFormat("sq-AL", { dateStyle: "medium", timeStyle: "short" })
 
-function timestamp(ms: number) {
-  const minutes = Math.floor(ms / 60_000)
-  const seconds = Math.floor(ms / 1_000) % 60
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+const dateTime = new Intl.DateTimeFormat("sq-AL", { dateStyle: "medium", timeStyle: "short" })
+const listDateTime = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Budapest", day: "2-digit", month: "2-digit", year: "numeric",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+})
+
+function meetingListTitle(meeting: Meeting) {
+  // Discord's automatic titles include the recording time after the middle dot.
+  if (meeting.source !== "discord") return meeting.title
+  return meeting.title.replace(/\s+·\s+\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}$/, "") || meeting.title
+}
+
+function meetingListDate(value: string) {
+  const parts = Object.fromEntries(listDateTime.formatToParts(new Date(value)).map(part => [part.type, part.value]))
+  return `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}`
+}
+
+function DiscordTranscript({ segments, anchor }: { segments: TranscriptSegment[]; anchor: string }) {
+  if (!segments.length) return <p className="text-sm">Nuk ka segmente të transkriptuara.</p>
+  const turns = groupTranscriptBySpeaker(segments, segment => segment.speaker_key ?? segment.speaker)
+  return <ul className="divide-y text-sm">
+    {turns.map(turn => {
+      const first = turn[0]
+      const end = turn.reduce((latest, segment) => Math.max(latest, segment.end_ms), first.end_ms)
+      return <li key={first.id} className="grid gap-x-3 px-2 py-2 [overflow-wrap:anywhere] sm:grid-cols-[7rem_minmax(0,1fr)]">
+        <span className="text-xs font-medium tabular-nums text-violet-800 dark:text-violet-200">{timestamp(first.start_ms)}–{timestamp(end)}</span>
+        <div>
+          <p className="font-medium">{first.speaker}</p>
+          <p className="whitespace-pre-wrap">
+            {turn.map((segment, index) => <span key={segment.id}>
+              {index > 0 && " "}
+              <span id={`segment-${segment.id}`} data-source={anchor === `segment-${segment.id}` ? "true" : undefined}
+                className="scroll-mt-20 rounded-sm target:bg-violet-100 data-[source=true]:bg-violet-100 dark:target:bg-violet-950 dark:data-[source=true]:bg-violet-950">
+                {segment.text}
+              </span>
+            </span>)}
+          </p>
+        </div>
+      </li>
+    })}
+  </ul>
 }
 
 function PreviousPoints({ points, title }: { points: PreviousPoint[]; title: string }) {
@@ -76,7 +155,7 @@ function PreviousPoints({ points, title }: { points: PreviousPoint[]; title: str
       {points.map((point) => <li key={point.id} className="space-y-1 px-3 py-2">
         <p className="font-medium">{point.title}{point.status === "CLOSED" && <span className="ml-2 text-xs text-muted-foreground">Mbyllur</span>}</p>
         <p>{point.text}</p>
-        <Link className="text-xs underline" href={`${base}&meeting=${point.meeting_id}&view=memory`}>{point.meeting_title} · {dateTime.format(new Date(point.date))}</Link>
+        <Link className="text-xs underline" href={miraMeetingUrl(point.meeting_id, "discord", "memory", `point-${point.id}`)}>{point.meeting_title} · {dateTime.format(new Date(point.date))}</Link>
       </li>)}
     </ul>
   </section>
@@ -135,19 +214,18 @@ function Clarifications({ detail, onAnswer }: {
     </section>
 }
 
-function MeetingMemory({ detail, openOnly = false }: { detail: MeetingDetail; openOnly?: boolean }) {
-  const points = (detail.memory?.points ?? []).filter((point) => !openOnly || point.needs_follow_up)
+function MeetingMemory({ detail, filter }: { detail: MeetingDetail; filter: string }) {
+  const points = (detail.memory?.points ?? []).filter((point) => filter !== "open" || point.needs_follow_up)
   if (!points.length) {
     const status = detail.memory?.status
     const message = status === "PENDING" || status === "RUNNING" ? "MIRA po përpunon pikat e takimit."
       : status === "FAILED" ? "Përpunimi i kujtesës dështoi."
-        : openOnly ? "Nuk ka pika të hapura të ruajtura për këtë takim." : "Kujtesa e këtij takimi nuk ka pika për të shfaqur."
+        : filter === "open" ? "Nuk ka pika të hapura të ruajtura për këtë takim." : "Kujtesa e këtij takimi nuk ka pika për të shfaqur."
     return <p className="text-sm">{message}</p>
   }
   return <section className="space-y-2 text-sm">
-      <h3 className="font-semibold">{openOnly ? "Çështjet që mbeten për t’u ndjekur" : "Pikat e takimit"}</h3>
       <ul className="divide-y rounded-md border">
-        {points.map((point) => <li key={point.id} className="space-y-1 px-3 py-2">
+        {points.map((point) => <li key={point.id} id={`point-${point.id}`} className="scroll-mt-24 space-y-1 px-3 py-2 target:bg-muted">
           <Link className="font-medium underline" href={`/mira?tab=kujtesa&item=${point.id}`}>{point.title}</Link>
           <p className="text-xs text-muted-foreground">
             {memoryKindLabels[point.kind]} · {point.status === "OPEN" ? "Hapur" : "Mbyllur"}
@@ -170,7 +248,7 @@ function MeetingMemory({ detail, openOnly = false }: { detail: MeetingDetail; op
           </dl>}
           {point.sources.length > 0 && <ul className="flex flex-wrap gap-x-3 text-xs">
             {point.sources.map((source) => <li key={source.id}>
-              <Link className="underline" href={`${base}&meeting=${detail.id}&view=transcript#segment-${source.id}`}>
+              <Link className="underline" href={miraMeetingUrl(detail.id, "discord", "transcript", `segment-${source.id}`)}>
                 {source.speaker} · {timestamp(source.start_ms)}–{timestamp(source.end_ms)}
               </Link>
             </li>)}
@@ -180,37 +258,49 @@ function MeetingMemory({ detail, openOnly = false }: { detail: MeetingDetail; op
     </section>
 }
 
-export function NotetakerTab({ meetingId, view }: { meetingId: string | null; view: string | null }) {
+export function NotetakerTab({ meetingId, source, view, filter }: {
+  meetingId: string | null; source: MeetingSource; view: string | null; filter: string | null
+}) {
   const { apiFetch, user } = useAuth()
   const [offset, setOffset] = useState(0)
-  const [items, setItems] = useState<Meeting[] | null>(null)
+  const [list, setList] = useState<{ items: Meeting[]; total: number; follow_up: PreviousPoint[]; has_unlinked_notes: boolean } | null>(null)
   const [detail, setDetail] = useState<MeetingDetail | null>(null)
-  const [followUp, setFollowUp] = useState<{ query: string; points: PreviousPoint[] } | null>(null)
+  const [loadedKey, setLoadedKey] = useState("")
+  const [group, setGroup] = useState<MeetingGroup | "">("")
+  const [search, setSearch] = useState("")
+  const [query, setQuery] = useState("")
+  const [showFollowUp, setShowFollowUp] = useState(false)
   const [queryDraft, setQueryDraft] = useState("")
   const [followUpQuery, setFollowUpQuery] = useState("")
   const [error, setError] = useState<{ key: string; message: string } | null>(null)
+  const [reload, setReload] = useState(0)
   const [summaryRequest, setSummaryRequest] = useState<{ id: string; error?: string } | null>(null)
   const [transcriptAnchor, setTranscriptAnchor] = useState("")
-  const selected = meetingView(view)
-  const requestKey = meetingId ?? `page-${offset}`
+  const selected = view === null && (detail?.source === "host" || detail?.source === "desktop")
+    ? detail.source === "host" ? "report" : "full"
+    : meetingView(view)
+  const pointFilter = filter ?? (view === "open" || view === "history" ? view : "")
+  const requestKey = meetingId ? `${source}:${meetingId}` : `page-${offset}`
+  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   useEffect(() => {
     let ignore = false
     async function load() {
       try {
         if (meetingId) {
-          const record = await json<MeetingDetail>(await apiFetch(`${endpoint}/${encodeURIComponent(meetingId)}`))
+          const record = await json<MeetingDetail>(await apiFetch(`${catalog}/${source}/${encodeURIComponent(meetingId)}`))
           if (!ignore) {
             setDetail(record)
+            setLoadedKey(requestKey)
             setError(null)
           }
         } else {
-          const params = new URLSearchParams({ limit: String(pageSize + 1), offset: String(offset) })
+          const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset), query })
+          if (group) params.set("group", group)
           if (followUpQuery) params.set("follow_up_query", followUpQuery)
-          const result = await json<{ items: Meeting[]; follow_up?: PreviousPoint[] }>(await apiFetch(`${endpoint}?${params}`))
+          const result = await json<NonNullable<typeof list>>(await apiFetch(`${catalog}?${params}`))
           if (!ignore) {
-            setItems(result.items)
-            setFollowUp({ query: followUpQuery, points: result.follow_up ?? [] })
+            setList(result)
             setError(null)
           }
         }
@@ -219,22 +309,23 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
       }
     }
     void load()
-    return () => { ignore = true }
-  }, [apiFetch, meetingId, offset, requestKey, followUpQuery])
+    const timer = !meetingId && offset === 0 ? window.setInterval(() => void load(), 30_000) : undefined
+    return () => { ignore = true; window.clearInterval(timer) }
+  }, [apiFetch, meetingId, source, offset, requestKey, followUpQuery, group, query, reload])
 
   useEffect(() => {
-    if (selected !== "transcript" || detail?.id !== meetingId) return
+    if (!detail || !meetingId || loadedKey !== requestKey) return
     function showSource() {
-      const anchor = window.location.hash.slice(1)
+      const anchor = window.location.hash.slice(1) || (view === "transcript" ? "transkripti" : "")
       setTranscriptAnchor(anchor)
-      if (anchor.startsWith("segment-")) document.getElementById(anchor)?.scrollIntoView({ block: "start" })
+      document.getElementById(anchor)?.scrollIntoView({ block: "start" })
     }
     showSource()
     window.addEventListener("hashchange", showSource)
     return () => window.removeEventListener("hashchange", showSource)
-  }, [detail, meetingId, selected])
+  }, [detail, meetingId, selected, view, pointFilter, loadedKey, requestKey])
 
-  const pendingMeetingId = detail?.id === meetingId && detail.quick_summary_pending ? detail.id : null
+  const pendingMeetingId = meetingId && loadedKey === requestKey && detail?.quick_summary_pending ? detail.id : null
   useEffect(() => {
     if (!pendingMeetingId) return
     let ignore = false
@@ -271,55 +362,158 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
     }
   }
 
-  if (error?.key === requestKey) return <p role="alert" className="mt-4 text-sm">{error.message} {meetingId && <Link className="underline" href={base}>Kthehu te takimet</Link>}</p>
+  if (error?.key === requestKey) return <p role="alert" className="mt-4 text-sm">{error.message}{" "}
+    <button type="button" className="underline" onClick={() => { setError(null); setReload(value => value + 1) }}>Provo përsëri</button>
+    {meetingId && <> · <Link className="underline" href={base}>Kthehu te takimet</Link></>}
+  </p>
 
   if (!meetingId) return (
     <section className="mt-5 space-y-3">
-      {offset === 0 && (Boolean(followUp?.points.length) || followUpQuery) && <div className="space-y-3">
-        <form className="flex max-w-md gap-2" onSubmit={(event) => { event.preventDefault(); setFollowUpQuery(queryDraft.trim()) }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <form className="flex max-w-md flex-1 gap-2" onSubmit={(event) => {
+          event.preventDefault(); setOffset(0); setQuery(search.trim())
+        }}>
+          <Input value={search} maxLength={200} onChange={(event) => setSearch(event.target.value)}
+            aria-label="Kërko takime" placeholder="Kërko takime ose shënime" />
+          <Button type="submit" variant="outline">Kërko</Button>
+        </form>
+        <Button type="button" variant={showFollowUp ? "default" : "outline"} aria-expanded={showFollowUp}
+          onClick={() => { setOffset(0); setShowFollowUp(value => !value) }}>Për t’u ndjekur</Button>
+        {list?.has_unlinked_notes && <Link className="text-sm underline" href={`${base}&archive=1`}>Shënime pa takim të lidhur</Link>}
+      </div>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Lloji i takimit">
+        {(["", "1H", "AI_AGENT", "OTHER"] as const).map(value =>
+          <Button key={value} type="button" size="sm" variant={group === value ? "default" : "outline"}
+            className={value && group !== value ? groupColors[value] : undefined}
+            aria-pressed={group === value} onClick={() => { setOffset(0); setGroup(value) }}>
+            {value ? groups[value] : "Të gjitha"}
+          </Button>)}
+      </div>
+      {showFollowUp && <div className="space-y-3 rounded-md border p-3">
+        <form className="flex max-w-md gap-2" onSubmit={(event) => { event.preventDefault(); setOffset(0); setFollowUpQuery(queryDraft.trim()) }}>
           <Input value={queryDraft} maxLength={100} onChange={(event) => setQueryDraft(event.target.value)}
             aria-label="Kërko pika të hapura sipas projektit ose temës" placeholder="Projekti ose tema" />
           <Button type="submit" variant="outline">Kërko</Button>
         </form>
-        {followUp?.query === followUpQuery && (followUp.points.length
-          ? <PreviousPoints points={followUp.points} title="Pika të hapura për takimet e radhës" />
-          : <p className="text-sm">Nuk u gjetën pika të hapura për këtë kërkim.</p>)}
+        {list && (list.follow_up.length
+          ? <PreviousPoints points={list.follow_up} title="Pika të hapura për takimet e radhës" />
+          : <p className="text-sm">Nuk u gjetën pika të hapura.</p>)}
       </div>}
-      {items === null ? <p role="status">Po ngarkohen takimet…</p> : items.length === 0 ? <p>Nuk ka takime për të shfaqur.</p> : (
-        <ul className="divide-y rounded-md border text-sm">
-          {items.slice(0, pageSize).map((item) => (
-            <li key={item.id}>
-              <Link href={`${base}&meeting=${item.id}`} className="flex flex-wrap justify-between gap-2 px-4 py-3 hover:bg-muted/40">
-                <span className="font-medium">{item.title}</span>
-                <span className="text-muted-foreground">{dateTime.format(new Date(item.started_at))}{item.partial ? " · Regjistrim i pjesshëm" : ""}</span>
+      {list === null ? <p role="status">Po ngarkohen takimet…</p> : list.items.length === 0 ? <p>Nuk ka takime për të shfaqur.</p> : (
+        <ul className="divide-y overflow-hidden rounded-lg border text-sm">
+          {list.items.map((item) => {
+            const aiAgent = item.recorder === "ai_agent" || item.group === "AI_AGENT"
+            const tasks = item.created_task_count ?? 0
+            const notes = item.created_note_count ?? 0
+            return (
+            <li key={`${item.source}:${item.id}`}>
+              <Link href={miraMeetingUrl(item.id, item.source)} className={cn(
+                "group grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring lg:grid-cols-[minmax(0,22rem)_8.5rem_minmax(0,1fr)_auto]",
+                aiAgent ? "bg-emerald-50/70 hover:bg-emerald-100/70 dark:bg-emerald-950/25 dark:hover:bg-emerald-900/40"
+                  : "bg-blue-50/70 hover:bg-blue-100/70 dark:bg-blue-950/25 dark:hover:bg-blue-900/40"
+              )}>
+                <span className="flex min-w-0 items-center gap-3 font-medium">
+                  <Image src={aiAgent ? "/mira-ai-agent-avatar.png" : "/mira-avatar.png"} alt="" width={34} height={34}
+                    className={cn("shrink-0 rounded-full border", aiAgent ? "border-emerald-400" : "border-blue-400")} />
+                  <span className="min-w-0">
+                    <span className="block break-words">{meetingListTitle(item)}</span>
+                    {(tasks > 0 || notes > 0) && <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
+                      {tasks > 0 && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-900 dark:bg-blue-950 dark:text-blue-200">
+                        {tasks} {tasks === 1 ? "detyrë e krijuar" : "detyra të krijuara"}
+                      </span>}
+                      {notes > 0 && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-violet-900 dark:bg-violet-950 dark:text-violet-200">
+                        {notes} {notes === 1 ? "shënim i krijuar" : "shënime të krijuara"}
+                      </span>}
+                    </span>}
+                  </span>
+                </span>
+                <time dateTime={item.started_at} className="col-start-1 row-start-2 whitespace-nowrap pl-11 text-xs font-medium tabular-nums text-foreground lg:col-start-2 lg:row-start-1 lg:pl-0">
+                  {meetingListDate(item.started_at)}
+                </time>
+                <span className="col-start-1 row-start-3 flex flex-wrap items-center gap-x-2 gap-y-1 pl-11 text-xs text-muted-foreground lg:col-start-3 lg:row-start-1 lg:justify-end lg:pl-0">
+                  {item.source === "desktop" && <span>{sources.desktop}</span>}
+                  {recordingStatuses[item.status] && <span>{recordingStatuses[item.status]}</span>}
+                  {item.partial && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-900 dark:bg-amber-950 dark:text-amber-200">Regjistrim i pjesshëm</span>}
+                  {item.open_count > 0 && <span className="rounded-full bg-orange-100 px-2 py-0.5 text-orange-900 dark:bg-orange-950 dark:text-orange-200">{item.open_count} {item.open_count === 1 ? "pikë e hapur" : "pika të hapura"}</span>}
+                </span>
+                <ChevronRight aria-hidden className="col-start-2 row-start-1 size-4 text-muted-foreground group-hover:translate-x-0.5 lg:col-start-4" />
               </Link>
             </li>
-          ))}
+          )})}
         </ul>
       )}
-      {(offset > 0 || (items?.length ?? 0) > pageSize) && <div className="flex gap-2">
-        <Button variant="outline" disabled={offset === 0} onClick={() => { setItems(null); setOffset(offset - pageSize) }}>Para</Button>
-        <Button variant="outline" disabled={(items?.length ?? 0) <= pageSize} onClick={() => { setItems(null); setOffset(offset + pageSize) }}>Tjetër</Button>
+      {!showFollowUp && (offset > 0 || (list?.total ?? 0) > pageSize) && <div className="flex gap-2">
+        <Button variant="outline" disabled={offset === 0} onClick={() => { setList(null); setOffset(offset - pageSize) }}>Para</Button>
+        <Button variant="outline" disabled={offset + pageSize >= (list?.total ?? 0)} onClick={() => { setList(null); setOffset(offset + pageSize) }}>Tjetër</Button>
       </div>}
     </section>
   )
 
-  if (!detail || detail.id !== meetingId) return <p className="mt-4 text-sm" role="status">Po ngarkohet takimi…</p>
+  if (!detail || loadedKey !== requestKey) return <p className="mt-4 text-sm" role="status">Po ngarkohet takimi…</p>
   const quick = detail.quick_summary
+  const hostIds = detail.host ? [detail.host.id] : detail.host_ids
+  const available = (Object.keys(views) as (keyof typeof views)[]).filter((key) =>
+    key === "report" ? hostIds.length > 0 :
+    key === "quick" || key === "memory" ? detail.source === "discord" :
+    detail.host?.status !== "DISCORD_REPORT")
+  const active = available.includes(selected) ? selected : available[0]
+  const url = (key: string) => miraMeetingUrl(detail.id, detail.source, key)
+  const createdNotes = detail.notes.filter(note => note.created_during_meeting)
+  const createdTasks = detail.created_tasks ?? []
   return (
     <section className="mt-5 space-y-4">
       <Link href={base} className="text-sm underline">Kthehu te takimet</Link>
       <header>
         <h2 className="text-lg font-semibold">{detail.title}</h2>
-        <p className="text-sm text-muted-foreground">{dateTime.format(new Date(detail.started_at))}</p>
+        <p className="text-sm text-muted-foreground">
+          {detail.started_at ? dateTime.format(new Date(detail.started_at)) : detail.host && dayLabel(detail.host.date)}
+          {" · "}{sources[detail.source]}
+          {detail.status && recordingStatuses[detail.status] && ` · ${recordingStatuses[detail.status]}`}
+        </p>
       </header>
       {detail.partial && <p className="rounded-md border border-amber-500/50 px-3 py-2 text-sm">Regjistrimi ose transkripti është i pjesshëm.</p>}
+      {(createdTasks.length > 0 || createdNotes.length > 0) && <section className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-900 dark:bg-violet-950/30">
+        <h3 className="text-sm font-semibold">Detyra dhe shënime nga takimi</h3>
+        {createdTasks.length > 0 && <Table aria-label="Detyrat e krijuara nga takimi"
+          containerClassName="rounded-md border border-violet-200 dark:border-violet-900"
+          className="min-w-[28rem] table-fixed bg-background">
+          <TableHeader className="bg-violet-100/60 dark:bg-violet-950/60">
+            <TableRow>
+              <TableHead scope="col">Detyra</TableHead>
+              <TableHead scope="col" className="w-1/4">Përgjegjësi</TableHead>
+              <TableHead scope="col" className="w-32">Data e fillimit</TableHead>
+              <TableHead scope="col" className="w-28">Afati</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {createdTasks.map(task => <TableRow key={task.id}>
+              <TableCell className="whitespace-normal [overflow-wrap:anywhere]">
+                <Link href={`/tasks/${task.id}`} className="underline underline-offset-2">{task.title}</Link>
+              </TableCell>
+              <TableCell className="whitespace-normal [overflow-wrap:anywhere]" title={task.assignees?.join(", ")}>
+                {task.assignee_initials?.filter(Boolean).join(", ") || "—"}
+              </TableCell>
+              <TableCell className="tabular-nums">{formatDateDMY(task.start_date, "—")}</TableCell>
+              <TableCell className="tabular-nums">{formatDateDMY(task.due_date, "—")}</TableCell>
+            </TableRow>)}
+          </TableBody>
+        </Table>}
+        {createdNotes.length > 0 && <ul className="space-y-1.5 text-sm">
+          {createdNotes.map(note => <li key={note.id} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-xs font-medium text-violet-800 dark:text-violet-200">Shënim</span>
+            <Link href={miraMeetingUrl(detail.id, detail.source, "full", `note-${note.note_id ?? note.id}`)}
+              className="min-w-0 break-words underline underline-offset-2">{note.content.trim().split("\n")[0]?.slice(0, 140) || note.title}</Link>
+          </li>)}
+        </ul>}
+      </section>}
       <nav aria-label="Pamjet e takimit" className="flex flex-wrap gap-4 border-b pb-2 text-sm">
-        {Object.entries(views).map(([key, label]) => (
-          <Link key={key} href={`${base}&meeting=${detail.id}&view=${key}`} aria-current={selected === key ? "page" : undefined} className={selected === key ? "font-semibold underline" : "text-muted-foreground"}>{label}</Link>
+        {available.map(key => (
+          <Link key={key} href={url(key)} aria-current={active === key ? "page" : undefined} className={cn("rounded-md px-3 py-1.5", active === key
+            ? "bg-violet-100 font-semibold text-violet-900 dark:bg-violet-950 dark:text-violet-200"
+            : "text-muted-foreground hover:bg-violet-50 dark:hover:bg-violet-950/40")}>{views[key]}</Link>
         ))}
       </nav>
-      {selected === "quick" && (quick ? Object.entries(sections).map(([key, label]) => {
+      {active === "quick" && (quick ? Object.entries(sections).map(([key, label]) => {
         const points = quick[key as keyof typeof sections]
         return <div key={key} className="text-sm"><h3 className="font-semibold">{label}</h3>{points.length ? (
           <ul className="ml-5 mt-1 list-disc space-y-1">{points.map((point, index) => <li key={index}>{point}</li>)}</ul>
@@ -330,38 +524,50 @@ export function NotetakerTab({ meetingId, view }: { meetingId: string | null; vi
             ? "Ky takim ka transkript të ruajtur. Përmbledhja e shpejtë ende mungon."
             : "Nuk ka të folur të transkriptuar nga i cili të krijohet përmbledhja."}</p>}
         {detail.transcript.length > 0 && <div className="flex flex-wrap items-center gap-3">
-          {(user?.role === "ADMIN" || user?.role === "MANAGER") && !detail.quick_summary_pending &&
+          {canManage && !detail.quick_summary_pending &&
             <Button size="sm" variant="outline" disabled={summaryRequest?.id === detail.id && !summaryRequest.error}
               onClick={() => void requestSummary(detail.id)}>Gjenero përmbledhjen</Button>}
-          {detail.full_notes && <Link className="underline" href={`${base}&meeting=${detail.id}&view=full`}>Hap shënimet e plota</Link>}
-          <Link className="underline" href={`${base}&meeting=${detail.id}&view=transcript`}>Hap transkriptin</Link>
+          {detail.full_notes && <Link className="underline" href={url("full")}>Hap shënimet e plota</Link>}
+          <Link className="underline" href={url("transcript")}>Hap transkriptin</Link>
         </div>}
         {summaryRequest?.id === detail.id && summaryRequest.error && <p role="alert">{summaryRequest.error}</p>}
       </div>)}
-      {selected === "full" && (detail.full_notes ? <Summary text={detail.full_notes} /> : <p className="text-sm">{detail.error || "Shënimet nuk janë të disponueshme."}</p>)}
-      {(selected === "quick" || selected === "open" || selected === "memory") && <Clarifications key={detail.id} detail={detail}
+      {active === "report" && hostIds.map(id => <HostMeetingPanel key={id} id={id} initial={detail.host} canManage={canManage} />)}
+      {active === "full" && <>
+        {detail.error && <p className="text-sm">{detail.error}</p>}
+        <MeetingNotes key={detail.id} notes={detail.notes} draft={detail.full_notes ?? detail.host?.recorder?.notes}
+          inlineTranscript={detail.source === "discord" && detail.transcript.length > 0}
+          transcript={<section id="transkripti" className="scroll-mt-20 space-y-2 rounded-lg border border-violet-200 bg-background p-3 dark:border-violet-900">
+            <h3 className="text-sm font-semibold">Transkripti me kohë</h3>
+            {detail.source === "discord" && <DiscordTranscript segments={detail.transcript} anchor={transcriptAnchor} />}
+            {hostIds.map(id => <HostMeetingPanel key={id} id={id} initial={detail.host}
+              canManage={canManage} transcript includeRecorder={detail.source === "host"} />)}
+            {detail.source === "desktop" && <p className="whitespace-pre-wrap break-words text-sm">
+              {detail.transcript_allowed === false ? "Pronari i regjistrimit mund të hapë transkriptin e Mira Desktop."
+                : detail.desktop_transcript || "Nuk ka segmente të transkriptuara."}
+            </p>}
+          </section>} />
+      </>}
+      {active === "memory" && <nav aria-label="Filtri i pikave" className="flex flex-wrap gap-4 text-sm">
+        {[["", "Të gjitha"], ["open", "Pikat e hapura"], ["history", "Historiku i takimeve"]].map(([value, label]) =>
+          <Link key={label} href={url("memory") + (value ? `&filter=${value}` : "")}
+            aria-current={pointFilter === value ? "page" : undefined}
+            className={pointFilter === value ? "font-semibold underline" : "text-muted-foreground"}>{label}</Link>)}
+      </nav>}
+      {(active === "quick" || (active === "memory" && pointFilter !== "history")) && <Clarifications key={detail.id} detail={detail}
         onAnswer={(itemId, question, answer) => setDetail((current) => {
           if (!current?.memory || current.id !== detail.id) return current
           return { ...current, memory: { ...current.memory, points: current.memory.points.map((point) => point.id === itemId
             ? { ...point, questions: point.questions.filter((value) => value !== question), answers: { ...point.answers, [question]: answer } }
             : point) } }
         })} />}
-      {selected === "memory" && <MeetingMemory detail={detail} />}
-      {selected === "open" && <MeetingMemory detail={detail} openOnly />}
-      {selected === "history" && (detail.memory?.previous.length
+      {active === "memory" && pointFilter !== "history" && <MeetingMemory detail={detail} filter={pointFilter} />}
+      {active === "memory" && pointFilter === "history" && (detail.memory?.previous.length
         ? <PreviousPoints points={detail.memory.previous} title="Diskutimet e mëparshme" />
         : <p className="text-sm">{detail.memory?.status === "PENDING" || detail.memory?.status === "RUNNING"
           ? "MIRA po kontrollon lidhjet me takimet e mëparshme."
           : detail.memory?.status === "FAILED" ? "Përpunimi i historikut dështoi."
             : "Nuk ka diskutime të mëparshme të lidhura me këtë takim."}</p>)}
-      {selected === "transcript" && (detail.transcript.length ? <ul className="divide-y rounded-md border text-sm">
-        {detail.transcript.map((segment) => <li id={`segment-${segment.id}`} key={segment.id}
-          data-source={transcriptAnchor === `segment-${segment.id}` ? "true" : undefined}
-          className="scroll-mt-20 break-words px-4 py-2 data-[source=true]:bg-muted">
-          <p className="font-medium">{segment.speaker} <span className="font-normal text-muted-foreground">{timestamp(segment.start_ms)}–{timestamp(segment.end_ms)}</span></p>
-          <p className="whitespace-pre-wrap">{segment.text}</p>
-        </li>)}
-      </ul> : <p className="text-sm">Nuk ka segmente të transkriptuara.</p>)}
     </section>
   )
 }

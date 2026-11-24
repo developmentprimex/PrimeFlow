@@ -98,6 +98,7 @@ async def _save_note(db, user, source, content):
         return
     note = await build_ga_note(db, user, GaNoteCreate(content=content, department_id=user.department_id))
     note.mira_dictation_source = source
+    return note
 
 
 async def process(db, meeting, *, finished_segments=None):
@@ -113,6 +114,7 @@ async def process(db, meeting, *, finished_segments=None):
     cursor = progress.get("cursor", 0)
     pending = dict(progress.get("pending", {}))
     tasks = list(progress.get("tasks", []))
+    created = list(progress.get("created", []))
     if finished_segments is None:
         segments = (await db.execute(select(DiscordVoiceSegment).where(
             DiscordVoiceSegment.session_id == meeting.id, DiscordVoiceSegment.sequence >= cursor,
@@ -142,22 +144,30 @@ async def process(db, meeting, *, finished_segments=None):
                 continue
             for index, (kind, body) in enumerate(commands):
                 if kind == "note":
-                    await _save_note(db, user, source, body)
+                    note = await _save_note(db, user, source, body)
+                    if note is not None:
+                        await db.flush()
+                        created.append({"kind": "note", "id": str(note.id)})
                 elif fields := task_fields(body):
                     code, title = fields
                     tasks.append({"command": f"{segment.sequence}:{index}", "speaker_id": segment.speaker_id,
                                   "creator_id": str(user.id), "initials": code, "title": title})
 
-    meeting.dictation_progress = {"cursor": cursor, "pending": pending if finished_segments is None else {}}
+    progress = {"cursor": cursor, "pending": pending if finished_segments is None else {}}
     if tasks:
-        meeting.dictation_progress = {**meeting.dictation_progress, "tasks": tasks}
+        progress["tasks"] = tasks
+    if created:
+        progress["created"] = created
+    meeting.dictation_progress = progress
 
 
-def _consume_task(meeting):
+def _consume_task(meeting, task=None):
     progress = dict(meeting.dictation_progress)
     remaining = progress.pop("tasks")[1:]
     if remaining:
         progress["tasks"] = remaining
+    if task is not None:
+        progress["created"] = [*progress.get("created", []), {"kind": "task", "id": str(task.id)}]
     meeting.dictation_progress = progress
 
 
@@ -196,7 +206,7 @@ async def _create_task(db, meeting):
         is_1h_report=True, ga_note_origin_id=note.id,
     )
     # Save the note, task and queue progress in the same transaction.
-    await create_task_in_session(payload, db, creator, before_commit=lambda _: _consume_task(meeting))
+    await create_task_in_session(payload, db, creator, before_commit=lambda task: _consume_task(meeting, task))
 
 
 async def process_queued_tasks(sessions):
