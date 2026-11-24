@@ -116,12 +116,13 @@ class ReportNoteAttachmentsTests(IsolatedAsyncioTestCase):
         note = SimpleNamespace(
             id=uuid4(), knowledge_type="INFO_PX_MAIL",
             created_at=datetime(2026, 11, 24, 7, tzinfo=timezone.utc),
-            content="EM INFO PX: 09:50 Puris – Home24\nKlienti kërkon automatizim.",
+            content="EM INFO PX: 09:50 Puris – Home24\nKlienti kërkon automatizim.\n1) Kontrollo katalogun.",
             email_metadata={"subject": "Re: Kërkesë", "sender": "Drita"},
         )
         preview = email_preview(note)
         assert preview["title"] == "EM INFO PX: 08:00 PURIS – HOME24"
         assert preview["subject"] == "Re: Kërkesë"
+        assert preview["summary"] == "Klienti kërkon automatizim.\n1) Kontrollo katalogun."
 
     async def test_report_matches_a_manual_email_heading_without_changing_its_body(self):
         note_id = uuid4()

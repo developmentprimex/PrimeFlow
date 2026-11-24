@@ -86,15 +86,21 @@ async def _current_payload(db: AsyncSession, row: M1ReportingPointsReport) -> di
 
     report = await filter_points_payload(db, report_payload(row, excluded_note_ids=await excluded_note_ids(db, row)))
     notes = report["data"].get("notes", [])
-    legacy_ids = {
+    missing_details = {
         note["id"]: note["id"] for note in notes
-        if not note.get("email_preview") and legacy_email(note.get("content") or "")
+        if (not email.get("summary") if (email := note.get("email_preview")) else legacy_email(note.get("content") or ""))
     }
-    previews = await mail_previews_by_row(db, legacy_ids)
-    report["data"]["notes"] = [
-        {**note, "email_preview": email, "content": email_preview_text(email)}
-        if (email := previews.get(note["id"])) else note for note in notes
-    ]
+    previews = await mail_previews_by_row(db, missing_details)
+    visible_notes = []
+    for note in notes:
+        current = previews.get(note["id"])
+        saved = note.get("email_preview")
+        if current and saved:
+            note = {**note, "email_preview": {**current, **saved}}
+        elif current:
+            note = {**note, "email_preview": current, "content": email_preview_text(current)}
+        visible_notes.append(note)
+    report["data"]["notes"] = visible_notes
     return report
 
 

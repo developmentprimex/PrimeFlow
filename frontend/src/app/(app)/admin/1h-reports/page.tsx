@@ -15,7 +15,6 @@ import { useAuth } from "@/lib/auth"
 import { applyOneHReportFilter } from "@/lib/one-h-report-filter"
 import { ReportTaskMarkerControls } from "@/components/report-task-marker-controls"
 import { installReportNoteControls, ReportNoteAttachmentDialog, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
-import { useNoteEmailLoader } from "@/components/note-email-preview"
 import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 
 type Recipient = { id:string; email:string; recipient_type:"TO"|"CC"|"BCC"; is_active:boolean; is_default:boolean; sort_order:number; created_at:string; updated_at:string; updated_by?:string|null }
@@ -29,7 +28,6 @@ const slots = ["10:00","11:00","11:50","14:10","14:20","16:00"]
 
 export default function ReportManagementPage() {
   const { apiFetch, user } = useAuth()
-  const loadNoteEmail = useNoteEmailLoader()
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const [recipients,setRecipients] = React.useState<Recipient[]>([])
   const [schedules,setSchedules] = React.useState<Schedule[]>([])
@@ -49,8 +47,8 @@ export default function ReportManagementPage() {
   const previewFrame = React.useRef<HTMLIFrameElement>(null)
   const noteAttachments = preview?.note_attachments
   React.useEffect(() => {
-    installReportNoteControls(previewFrame.current?.contentDocument, noteAttachments, setNoteFiles, preview?.note_emails, loadNoteEmail, preview?.note_email_headings)
-  }, [loadNoteEmail, preview?.note_email_headings, preview?.note_emails, noteAttachments])
+    installReportNoteControls(previewFrame.current?.contentDocument, noteAttachments, setNoteFiles, preview?.note_emails, preview?.note_email_headings)
+  }, [preview?.note_email_headings, preview?.note_emails, noteAttachments])
   const [previewing,setPreviewing] = React.useState(false)
   const [sendOpen,setSendOpen] = React.useState(false)
   const [sending,setSending] = React.useState(false)
@@ -151,7 +149,7 @@ export default function ReportManagementPage() {
     ? <p className="rounded-md border bg-muted/30 p-3 text-sm">{doneOnly ? "Nuk ka detyra Done në këtë raport." : "Nuk ka detyra me strikes > 0 në këtë interval."}</p> : null
   const onPreviewLoad = () => {
     applyPreviewFilter()
-    installReportNoteControls(previewFrame.current?.contentDocument, preview?.note_attachments, setNoteFiles, preview?.note_emails, loadNoteEmail, preview?.note_email_headings)
+    installReportNoteControls(previewFrame.current?.contentDocument, preview?.note_attachments, setNoteFiles, preview?.note_emails, preview?.note_email_headings)
   }
   const noteAttachmentDialog = <ReportNoteAttachmentDialog files={noteFiles} onClose={() => setNoteFiles(null)} />
   if(!user) return <div className="rounded-lg border p-8">Sign in to access 1H reports.</div>

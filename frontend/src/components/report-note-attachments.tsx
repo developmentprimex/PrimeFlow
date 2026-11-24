@@ -4,7 +4,7 @@ import * as React from "react"
 import { Paperclip } from "lucide-react"
 import { toast } from "sonner"
 
-import { emailNoteTextWithoutLink, originalEmailUrl, ORIGINAL_EMAIL_LABEL } from "@/components/note-email-preview"
+import { emailNoteTextWithoutLink, NO_EMAIL_SUMMARY, originalEmailUrl, ORIGINAL_EMAIL_LABEL } from "@/components/note-email-preview"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useAuth } from "@/lib/auth"
@@ -42,7 +42,6 @@ export function installReportNoteControls(
   attachments: ReportNoteAttachments | undefined,
   onOpen: (files: ReportNoteAttachment[]) => void,
   emails?: NoteEmailPreviews,
-  loadEmail?: (id: string) => Promise<string>,
   headings?: NoteEmailHeadings,
 ) {
   if (!document) return
@@ -88,7 +87,7 @@ export function installReportNoteControls(
     const heading = headings?.[number]
     const existingText = cell.innerText.trim().replace(/\s+/g, " ")
     const manual = heading && (existingText === heading.original || existingText.startsWith(`${heading.original} `)) ? heading : undefined
-    if ((email && loadEmail || manual) && !cell.querySelector(".px-note-email")) {
+    if ((email || manual) && !cell.querySelector(".px-note-email")) {
       const details = document.createElement("details")
       details.className = "px-note-email"
       const summary = document.createElement("summary")
@@ -96,36 +95,20 @@ export function installReportNoteControls(
       title.textContent = email?.title ?? manual?.title ?? ""
       const symbol = document.createElement("span")
       symbol.className = "px-note-email-symbol"
-      symbol.setAttribute("aria-label", "Hap emailin")
+      symbol.setAttribute("aria-label", "Hap detajet e shënimit")
       summary.append(title, symbol)
       const body = document.createElement("div")
       body.className = "px-note-email-body"
       body.tabIndex = 0
-      body.setAttribute("aria-label", "Detajet e emailit")
-      const message = document.createElement("div")
+      body.setAttribute("aria-label", "Detajet e shënimit")
       if (email) {
-        for (const [label, value] of [["Subjekti", email.subject], ["Dërguesi", email.sender]]) {
-          if (!value) continue
-          const line = document.createElement("div")
-          line.textContent = `${label} · ${value}`
-          body.append(line)
-        }
+        body.textContent = email.summary || NO_EMAIL_SUMMARY
       } else if (manual) {
         const text = existingText.slice(manual.original.length).trim()
-        message.textContent = emailNoteTextWithoutLink(text, manual.original_email_url) || "Ky shënim nuk ka detaje."
+        body.textContent = emailNoteTextWithoutLink(text, manual.original_email_url) || "Ky shënim nuk ka detaje."
       }
-      body.append(message)
-      let loaded = false
-      let loading = false
       details.addEventListener("toggle", () => {
-        symbol.setAttribute("aria-label", details.open ? "Mbyll emailin" : "Hap emailin")
-        if (!details.open || loaded || loading || !email || !loadEmail) return
-        loading = true
-        message.textContent = "Duke hapur emailin…"
-        void loadEmail(email.id).then(value => {
-          loaded = true
-          message.textContent = value || "Ky email nuk ka tekst."
-        }, () => { message.textContent = "Emaili origjinal nuk është i disponueshëm." }).finally(() => { loading = false })
+        symbol.setAttribute("aria-label", details.open ? "Mbyll detajet e shënimit" : "Hap detajet e shënimit")
       })
       details.append(summary)
       const href = originalEmailUrl(email?.original_email_url ?? manual?.original_email_url)

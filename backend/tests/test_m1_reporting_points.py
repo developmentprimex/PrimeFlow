@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +13,30 @@ from app.api.routers.m1_reporting_points import ManualAnswersPayload
 
 
 DAY = date(2026, 10, 13)
+
+
+def test_saved_email_preview_loads_the_missing_summary(monkeypatch):
+    from app.api.routers import m1_reporting_points as router
+    from app.services import report_attendance, report_note_attachments
+
+    note_id = str(uuid.uuid4())
+    saved_email = {"title": "EM IT: 08:00 POROSIA"}
+    saved_note = {"id": note_id, "source": "PX Notes", "content": "Titulli i ruajtur", "email_preview": saved_email}
+    row = SimpleNamespace(id=uuid.uuid4(), report_date=DAY, data={"notes": [saved_note]}, manual_answers={},
+                          status="SENT", generated_at=None, sent_at=None, last_error=None)
+    current_email = {"title": "EM IT: 08:00 POROSIA E REDAKTUAR", "summary": "1) Verifiko porosinë."}
+    monkeypatch.setattr(router, "excluded_note_ids", AsyncMock(return_value=set()))
+    monkeypatch.setattr(report_attendance, "filter_points_payload", AsyncMock(side_effect=lambda _db, payload: payload))
+    load_previews = AsyncMock(return_value={note_id: current_email})
+    monkeypatch.setattr(report_note_attachments, "mail_previews_by_row", load_previews)
+
+    db = object()
+    payload = asyncio.run(router._current_payload(db, row))
+
+    load_previews.assert_awaited_once_with(db, {note_id: note_id})
+    assert payload["data"]["notes"][0]["email_preview"] == {**current_email, **saved_email}
+    assert payload["data"]["notes"][0]["content"] == saved_note["content"]
+    assert "summary" not in saved_email
 
 
 def ga_task(**changes):

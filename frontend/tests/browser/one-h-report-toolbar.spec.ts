@@ -4,11 +4,11 @@ import path from "node:path"
 
 const backend = path.resolve(__dirname, "../../../backend")
 
-test("PX Notes Emails opens the original email with the disclosure button", async ({ page }) => {
+test("PX Notes expands the saved summary and opens the original email separately", async ({ page }) => {
   const user = { id: "note-test-admin", full_name: "Notes admin", email: "admin@example.test", role: "ADMIN", is_active: true }
   const originalEmailUrl = "https://outlook.office.com/mail/deeplink/read/test"
   const manualEmailUrl = "https://mail.yandex.com/#message/123"
-  const email = { id: "px-mail", title: "EM IT: 10:00", subject: "Porosia", sender: "Drita <drita@example.test>", original_email_url: originalEmailUrl }
+  const email = { id: "px-mail", title: "EM IT: 10:00", subject: "Porosia", sender: "Drita <drita@example.test>", summary: "Klienti kërkon konfirmim.\n1) Verifiko porosinë.", original_email_url: originalEmailUrl }
   const timestamp = new Date().toISOString()
   const note = { status: "OPEN", note_type: "GA", created_at: timestamp, start_date: timestamp, updated_at: timestamp, attachments: [] }
   let requests = 0
@@ -43,10 +43,9 @@ test("PX Notes Emails opens the original email with the disclosure button", asyn
   await expect(content.getByText(email.sender, { exact: false })).toBeHidden()
   await expect(page.getByText("Saved original email", { exact: true })).toBeHidden()
   expect(requests).toBe(0)
-  await content.getByLabel("Hap emailin").click()
-  await expect(content.getByText(email.subject, { exact: false })).toBeVisible()
-  await expect(content.getByText(email.sender, { exact: false })).toBeVisible()
-  await expect(content.getByText("Complete source email")).toBeVisible()
+  await content.getByLabel("Hap detajet e shënimit").click()
+  await expect(content.getByLabel("Detajet e shënimit", { exact: true })).toHaveText(email.summary)
+  await expect(content.getByText("Complete source email")).toBeHidden()
   const originalLink = content.getByRole("link", { name: "Hap emailin origjinal" })
   await expect(originalLink).toHaveAttribute("href", originalEmailUrl)
   await expect(originalLink).toHaveAttribute("target", "_blank")
@@ -56,23 +55,23 @@ test("PX Notes Emails opens the original email with the disclosure button", asyn
   const mailbox = await opened
   await expect(mailbox).toHaveURL(originalEmailUrl)
   await mailbox.close()
-  expect(requests).toBe(1)
-  await content.getByLabel("Mbyll emailin").click()
-  await expect(content.getByText("Complete source email")).toBeHidden()
+  expect(requests).toBe(0)
+  await content.getByLabel("Mbyll detajet e shënimit").click()
+  await expect(content.getByText("Klienti kërkon konfirmim.", { exact: false })).toBeHidden()
   const manual = page.locator("#ga-note-content-manual-mail")
   await expect(manual.getByText("EM GA: 08:00 STD-STAUD")).toBeVisible()
   await expect(manual.getByText("Kontrollo dokumentet.")).toBeHidden()
-  await manual.getByLabel("Hap emailin").click()
+  await manual.getByLabel("Hap detajet e shënimit").click()
   await expect(manual.getByText("Kontrollo dokumentet.")).toBeVisible()
   await expect(manual.getByRole("link", { name: "Hap emailin origjinal" })).toHaveAttribute("href", manualEmailUrl)
   await expect(manual).not.toContainText(manualEmailUrl)
 })
 
-test("M1 opens a previously imported email only on demand", async ({ page }) => {
+test("M1 keeps a legacy email linked when no summary was saved", async ({ page }) => {
   const user = { id: "note-test-admin", full_name: "Report admin", email: "admin@example.test", role: "ADMIN", is_active: true }
   const point = "(GA) NOTES TE REJA ( NOT DISSCUSED)?"
   const recipients = { to: [], cc: [], bcc: [] }
-  const email = { id: "old-import", title: "EM IT: 10:00", subject: "Porosia", sender: "Drita <drita@example.test>" }
+  const email = { id: "old-import", title: "EM IT: 10:00", subject: "Porosia", sender: "Drita <drita@example.test>", original_email_url: "https://outlook.office.com/mail/deeplink/read/old" }
   let emailRequests = 0
   await page.addInitScript(account => {
     localStorage.setItem("primex_access_token", "test-only-browser-token")
@@ -112,13 +111,15 @@ test("M1 opens a previously imported email only on demand", async ({ page }) => 
   await expect(page.getByText("Saved original email text")).toBeHidden()
   expect(emailRequests).toBe(0)
   await row.locator("summary").click()
-  await expect(row.getByText("Full original email text")).toBeVisible()
-  expect(emailRequests).toBe(1)
-  await row.locator("summary").press("Enter")
+  await expect(row.getByText("Ky shënim nuk ka përmbledhje të ruajtur.")).toBeVisible()
+  await expect(row.getByRole("link", { name: "Hap emailin origjinal" })).toHaveAttribute("href", email.original_email_url)
   await expect(row.getByText("Full original email text")).toBeHidden()
+  expect(emailRequests).toBe(0)
+  await row.locator("summary").press("Enter")
+  await expect(row.getByText("Ky shënim nuk ka përmbledhje të ruajtur.")).toBeHidden()
   const manual = page.getByRole("row").filter({ hasText: "EM GA: 08:00 STD-STAUD" })
   await expect(manual.getByText("Kontrollo dokumentet.")).toBeHidden()
-  await manual.getByLabel("Hap emailin").click()
+  await manual.getByLabel("Hap detajet e shënimit").click()
   await expect(manual.getByText("Kontrollo dokumentet.")).toBeVisible()
 })
 
@@ -413,7 +414,8 @@ from app.services.tomorrow_print_report import _closing_sections_html
 from tests.test_one_h_report_strike_counts import fresh_document
 day = date(2026, 11, 23)
 values = [["1", "NO", "Note with files", "GA", "09:15"], ["2", "NO", "Note without files", "GA", "09:16"],
-          ["3", "NO", "EM GA: 09:50 STD-STAUD Kontrollo dokumentet.", "GA", "09:50"]]
+          ["3", "NO", "EM GA: 09:50 STD-STAUD Kontrollo dokumentet.", "GA", "09:50"],
+          ["4", "NO", "EM IT: 08:00 POROSIA", "-", "10:00"]]
 body = m1._notes_section(values)
 sections = {"morning-report": [{"title": m1.SECTION_TITLES[3], "body": body}],
             "after-break-report": [{"title": m2.SECTION_TITLES[9], "body": body}]}
@@ -434,6 +436,8 @@ for (const reportName of ["morning-report", "after-break-report", "tomorrow-prin
     const fixture = pxNoteReportFixtures()
     const reportDay = "2026-11-23"
     const originalUrl = "https://outlook.office.com/mail/deeplink/read/test"
+    const importedEmail = { id: "imported-note", title: "EM IT: 08:00 POROSIA", subject: "Porosia", sender: "Klienti",
+      summary: "Klienti kërkon konfirmim.\n1) Verifiko porosinë.", original_email_url: originalUrl }
     const user = { id: "22222222-2222-4222-8222-222222222222", full_name: "Test owner", email: "owner@example.com", role: reportName === "morning-report" ? "ADMIN" : "STAFF", is_active: true }
     const noteAttachments = {
       "1": [{ id: "file-one", original_filename: "First.docx" }, { id: "file-two", original_filename: "Second.xlsx" }],
@@ -458,6 +462,7 @@ for (const reportName of ["morning-report", "after-break-report", "tomorrow-prin
       } })
       const html = fixture[reportName]
       const payload = { html, plain_text: "", note_attachments: noteAttachments,
+        note_emails: { "4": importedEmail },
         note_email_headings: { "3": { original: "EM GA: 09:50 STD-STAUD", title: "EM GA: 08:00 STD-STAUD", original_email_url: originalUrl } },
       }
       if ((pathname.endsWith(`/${reportName}`) || pathname.endsWith(`/${reportName}/draft`)) && fixture.sections[reportName]) {
@@ -495,6 +500,13 @@ for (const reportName of ["morning-report", "after-break-report", "tomorrow-prin
     await emailNote.locator("summary").click()
     await expect(emailNote.getByText("Kontrollo dokumentet.")).toBeVisible()
     await expect(emailNote.getByRole("link", { name: "Hap emailin origjinal" })).toHaveAttribute("href", originalUrl)
+    const importedNote = notes.locator("tr").filter({ hasText: importedEmail.title }).last()
+    const importedDetails = importedNote.getByLabel("Detajet e shënimit", { exact: true })
+    await expect(importedDetails).toBeHidden()
+    await importedNote.locator("summary").click()
+    await expect(importedDetails).toBeVisible()
+    await expect(importedDetails).toHaveText(importedEmail.summary)
+    await expect(importedNote.getByRole("link", { name: "Hap emailin origjinal" })).toHaveAttribute("href", originalUrl)
     const fileRow = notes.locator("tr").filter({ hasText: "Note with files" }).last()
     const emptyRow = notes.locator("tr").filter({ hasText: "Note without files" }).last()
     await expect(fileRow.getByRole("button", { name: "View (2)" })).toBeVisible()
@@ -518,6 +530,9 @@ for (const reportName of ["morning-report", "after-break-report", "tomorrow-prin
       await previewNote.locator("summary").click()
       await expect(previewNote.getByText("Kontrollo dokumentet.")).toBeVisible()
       await expect(previewNote.getByRole("link", { name: "Hap emailin origjinal" })).toHaveAttribute("href", originalUrl)
+      const importedPreviewNote = previewFrame.locator("tr").filter({ hasText: importedEmail.title }).last()
+      await importedPreviewNote.locator("summary").click()
+      await expect(importedPreviewNote.getByLabel("Detajet e shënimit", { exact: true })).toHaveText(importedEmail.summary)
       const previewButton = previewFrame.getByRole("button", { name: "View (2)", exact: true })
       await expect(previewButton).toBeVisible()
       await previewButton.click()

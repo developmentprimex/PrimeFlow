@@ -4,7 +4,7 @@ import * as React from "react"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
 import { ReportMailbox } from "@/components/report-mailbox"
 import { installReportNoteControls, ReportNoteAttachmentDialog, ReportNoteCell, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
-import { NoteEmailPreview, reportEmailNoteDetails, useNoteEmailLoader } from "@/components/note-email-preview"
+import { NoteEmailPreview, reportEmailNoteDetails } from "@/components/note-email-preview"
 import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
@@ -204,7 +204,6 @@ async function responseError(res: Response) {
 
 export default function MorningReportPage() {
   const { apiFetch, loading: authLoading, user } = useAuth()
-  const loadNoteEmail = useNoteEmailLoader()
   const canAccess = !authLoading && Boolean(user)
   const isManagerOrAdmin = ["ADMIN", "MANAGER"].includes(String(user?.role || "").toUpperCase())
   const canEdit = Boolean(user)
@@ -939,7 +938,7 @@ export default function MorningReportPage() {
             title={`${REPORT_LABEL} preview`}
             srcDoc={preview.html}
             className="h-[650px] w-full rounded border bg-white"
-            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles, preview.note_emails, loadNoteEmail, preview.note_email_headings)}
+            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles, preview.note_emails, preview.note_email_headings)}
           /> : null}
         </DialogContent>
       </Dialog>

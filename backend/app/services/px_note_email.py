@@ -70,18 +70,26 @@ def email_preview(note) -> dict[str, str] | None:
     prefix = _PREFIXES.get(getattr(note, "knowledge_type", None))
     if not prefix:
         return None
-    content = note.content or ""
+    content = (note.content or "").lstrip()
     metadata = getattr(note, "email_metadata", None) or {}
     original = legacy_email(content)
     subject = metadata.get("subject") or (original[0] if original else "")
-    saved_title = metadata.get("title") or content.split("\n", 1)[0].strip()
+    heading, _, details = content.partition("\n")
+    saved_title = metadata.get("title") or heading.strip()
     formatted = _EMAIL_TITLE.fullmatch(saved_title)
-    source_url = original_email_url(metadata.get("original_email_url"))
+    # Structured notes store the summary and numbered steps under the title.
+    # Legacy imports store the original message in that position instead.
+    summary = details.strip() if not original and email_title_from_content(heading) else ""
+    note_url = manual_original_email_url(summary)
+    if note_url:
+        summary = summary.rpartition("\n")[0].strip()
+    source_url = original_email_url(metadata.get("original_email_url")) or note_url
     return {
         "id": str(note.id),
         "title": format_email_title(prefix, (formatted[2] if formatted else None) or subject),
         "subject": subject,
         "sender": metadata.get("sender") or (original[1] if original else ""),
+        **({"summary": summary} if summary else {}),
         **({"original_email_url": source_url} if source_url else {}),
     }
 

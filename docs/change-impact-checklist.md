@@ -125,9 +125,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow. Importet ekzistuese ruhen
   me ID-në e tyre; vetëm përmbledhjet që dështojnë riprovohen me Rifresko.
   Listat e PX Notes, M1/M2, M1 PIKAT dhe preview-të e 1H Reports e SHTYPI
-  Tomorrow shfaqin vetëm titullin për shënimet nga email-et. Butoni `+`
-  hap subjektin, dërguesin dhe emailin origjinal përmes API-së së autentikuar,
-  ose detajet e shënimit kur është shkruar manualisht. Hapja e tekstit te
+  Tomorrow shfaqin titullin për shënimet nga email-et. Butoni `+` hap
+  përmbledhjen dhe hapat e ruajtur, ose detajet e shënimit manual. Lidhja
+  «Hap emailin origjinal» hap email-in te ofruesi kur URL-ja është ruajtur.
+  Importet e vjetra që kanë vetëm kopje të email-it shfaqin statusin se
+  përmbledhja nuk është ruajtur. Hapja e tekstit te
   kutitë e M1 dhe te shënimet përdor scroll brenda një kutie me lartësi të
   kufizuar. Për
   titullin përdoret formati `EM INFO PX: 08:00 PURIS – HOME24`. Kur një

@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useAuth } from "@/lib/auth"
 import type { NoteEmailHeading, NoteEmailPreview } from "@/lib/types"
 
 const MAIL_WEB_HOSTS = new Set([
@@ -10,6 +9,7 @@ const MAIL_WEB_HOSTS = new Set([
 ])
 const MANUAL_EMAIL_LINK = /(?:^|\s)Email origjinal:\s*(\S+)\s*$/i
 export const ORIGINAL_EMAIL_LABEL = "Hap emailin origjinal"
+export const NO_EMAIL_SUMMARY = "Ky shënim nuk ka përmbledhje të ruajtur."
 
 export function originalEmailUrl(value?: string) {
   if (!value || /[\s\\]/.test(value)) return undefined
@@ -36,55 +36,29 @@ export function OriginalEmailLink({ sourceUrl }: { sourceUrl?: string }) {
   )
 }
 
-export function useNoteEmailLoader() {
-  const { apiFetch } = useAuth()
-  return React.useCallback(async (id: string) => {
-    const response = await apiFetch(`/ga-notes/${encodeURIComponent(id)}/email`, { cache: "no-store" })
-    if (!response.ok) throw new Error("Emaili origjinal nuk është i disponueshëm.")
-    const email: { body: string } = await response.json()
-    return email.body
-  }, [apiFetch])
-}
-
-export function EmailNoteDisclosure({ title, children, onOpen, sourceUrl }: {
-  title: string; children: React.ReactNode; onOpen?: () => void; sourceUrl?: string
+export function EmailNoteDisclosure({ title, children, sourceUrl }: {
+  title: string; children: React.ReactNode; sourceUrl?: string
 }) {
   const [expanded, setExpanded] = React.useState(false)
   return (
-    <details className="min-w-0 whitespace-normal" onToggle={event => {
-      const open = event.currentTarget.open
-      setExpanded(open)
-      if (open) onOpen?.()
-    }}>
+    <details className="min-w-0 whitespace-normal" onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary className="group flex cursor-pointer list-none items-start justify-between gap-2 rounded [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 [&::-webkit-details-marker]:hidden">
         <strong>{title}</strong>
         <span
           className="inline-flex size-6 shrink-0 items-center justify-center rounded border border-blue-900 bg-blue-800 text-base font-bold leading-none text-white group-hover:bg-blue-950 print:hidden"
-          aria-label={expanded ? "Mbyll emailin" : "Hap emailin"}
+          aria-label={expanded ? "Mbyll detajet e shënimit" : "Hap detajet e shënimit"}
         >{expanded ? "−" : "+"}</span>
       </summary>
       <OriginalEmailLink sourceUrl={sourceUrl} />
-      <div className="mt-2 max-h-72 overflow-y-auto overscroll-contain rounded border bg-background p-2 whitespace-pre-wrap [overflow-wrap:anywhere] print:hidden" tabIndex={0} aria-label="Detajet e emailit">{children}</div>
+      <div className="mt-2 max-h-72 overflow-y-auto overscroll-contain rounded border bg-background p-2 whitespace-pre-wrap [overflow-wrap:anywhere] print:hidden" tabIndex={0} aria-label="Detajet e shënimit">{children}</div>
     </details>
   )
 }
 
 export function NoteEmailPreview({ email }: { email: NoteEmailPreview }) {
-  const loadEmail = useNoteEmailLoader()
-  const [body, setBody] = React.useState<string | null>(null)
-  const [failed, setFailed] = React.useState(false)
-  const [loading, setLoading] = React.useState(false)
-
   return (
-    <EmailNoteDisclosure title={email.title} sourceUrl={email.original_email_url} onOpen={() => {
-      if (body !== null || loading) return
-      setFailed(false)
-      setLoading(true)
-      void loadEmail(email.id).then(setBody, () => setFailed(true)).finally(() => setLoading(false))
-    }}>
-      {email.subject && <div><strong>Subjekti</strong> · {email.subject}</div>}
-      {email.sender && <div><strong>Dërguesi</strong> · {email.sender}</div>}
-      <div className="mt-2">{failed ? "Emaili origjinal nuk është i disponueshëm." : body === null ? "Duke hapur emailin…" : body || "Ky email nuk ka tekst."}</div>
+    <EmailNoteDisclosure title={email.title} sourceUrl={email.original_email_url}>
+      {email.summary || NO_EMAIL_SUMMARY}
     </EmailNoteDisclosure>
   )
 }
