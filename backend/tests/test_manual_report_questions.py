@@ -106,8 +106,10 @@ def test_numbered_manual_question_keeps_requested_position(kind):
         "body": "(Ploteso manualisht)",
     }
     sections = normalize([numbered])
-    assert sections[1] == numbered
-    assert normalize(sections)[1] == numbered
+    # M2 has no built-in manual questions after the email point became automatic.
+    expected_position = 0 if kind == "after_break" else 1
+    assert sections[expected_position] == numbered
+    assert normalize(sections)[expected_position] == numbered
 
     with patch(
         "app.services.meeting_point_manual_sync.load_common_view_extra_titles",
@@ -115,4 +117,4 @@ def test_numbered_manual_question_keeps_requested_position(kind):
         return_value=[],
     ):
         regenerated = asyncio.run(merge_common_view_manual_sections(None, normalize([]), kind, [numbered]))
-    assert regenerated[1] == numbered
+    assert regenerated[expected_position] == numbered

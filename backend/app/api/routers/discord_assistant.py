@@ -29,7 +29,7 @@ from app.models.user import User
 from app.services import discord_meetings
 from app.services import discord_one_h as one_h
 from app.services import discord_ga_replies as ga_replies
-from app.services.discord_ga_reactions import ReactionEvidence, record_reaction
+from app.services.discord_ga_reactions import ReactionEvidence, reaction_attachment_links, record_reaction
 from app.services import discord_task_tools as tools
 from app.services.primeflow_report import report_timezone
 
@@ -87,6 +87,7 @@ async def ga_reply_attachments(
     response: Response,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
+    source: Literal["reply", "reaction"] = "reply",
 ):
     from app.models.after_break_report_draft import AfterBreakReportDraft
     from app.models.morning_report_draft import MorningReportDraft
@@ -97,7 +98,8 @@ async def ga_reply_attachments(
         raise HTTPException(404, "Raporti nuk u gjet.")
     generated_at = (draft.generated_snapshot or {}).get("ga_replies_generated_at")
     cutoff = datetime.fromisoformat(generated_at) if generated_at else draft.sent_at or datetime.now(timezone.utc)
-    files = await ga_replies.attachment_links_for_report(db, report_date, report, cutoff, message_id)
+    load_files = reaction_attachment_links if source == "reaction" else ga_replies.attachment_links_for_report
+    files = await load_files(db, report_date, report, cutoff, message_id)
     response.headers["Cache-Control"] = "private, no-store"
     return files
 

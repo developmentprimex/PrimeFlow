@@ -23,6 +23,7 @@ from app.models.meeting import Meeting
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.project import Project
 from app.models.system_task_template import SystemTaskTemplate
+from app.services.report_ga_task_bz import ga_task_bz_labels
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
@@ -1012,6 +1013,7 @@ def _m3_status_table(
     project_titles_by_id: dict[Any, str] | None = None,
     include_priority_tone: bool = False,
     show_all_assignees: bool = False,
+    bz_labels_by_task: dict[Any, str] | None = None,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -1031,6 +1033,8 @@ def _m3_status_table(
     if include_late_days:
         columns.append(("T/Y/O", 5))
     columns.append(("TITULLI", 64))
+    if bz_labels_by_task is not None:
+        columns.append(("BZ ME", 14))
     if daily_rlz_by_task is not None:
         columns.extend((("ARSYEJA", 24), ("KOMENT", 36)))
 
@@ -1067,6 +1071,8 @@ def _m3_status_table(
         if include_late_days:
             values.append("-")
         values.append(empty_title)
+        if bz_labels_by_task is not None:
+            values.append("-")
         if daily_rlz_by_task is not None:
             values.extend(("-", "-"))
         rows.append(table_row(values))
@@ -1150,6 +1156,8 @@ def _m3_status_table(
         if include_late_days:
             values.append(_late_days_tyo_label(_late_days(task)))
         values.append(padded_titles[0])
+        if bz_labels_by_task is not None:
+            values.append(bz_labels_by_task.get(task.id, "-"))
         if daily_rlz_by_task is not None:
             values.extend((reason_lines[0], comment_lines[0]))
         rows.append(table_row(values))
@@ -1177,6 +1185,8 @@ def _m3_status_table(
             if include_late_days:
                 continuation.append("")
             continuation.append(padded_titles[line_index] if line_index < len(padded_titles) else "")
+            if bz_labels_by_task is not None:
+                continuation.append("")
             if daily_rlz_by_task is not None:
                 continuation.extend((
                     reason_lines[line_index] if line_index < len(reason_lines) else "",
@@ -1825,6 +1835,7 @@ def _status_group_section(
     *,
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     all_participant_ids: set[Any] | None = None,
+    bz_labels_by_task: dict[Any, str] | None = None,
 ) -> list[str]:
     today_tasks = [task for task in tasks if _task_day(task) == report_day]
     todo = [task for task in today_tasks if str(task.status or "").upper() == "TODO" and _is_open(task)]
@@ -1840,6 +1851,7 @@ def _status_group_section(
         "assignee_ids_by_task": assignee_ids_by_task,
         "all_participant_ids": all_participant_ids,
         "include_type": True,
+        "bz_labels_by_task": bz_labels_by_task,
     }
     return [
         *([f"{title}:"] if title else []),
@@ -1855,7 +1867,8 @@ def _status_group_section(
 
 
 async def _m3_finance_ga_sections(
-    db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date
+    db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date, *,
+    include_ga_bz: bool = False,
 ) -> tuple[str, str]:
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     tasks, names, assignee_ids_by_task = await filter_task_context(db, report_day, tasks, names, assignee_ids_by_task)
@@ -1894,6 +1907,7 @@ async def _m3_finance_ga_sections(
             report_day,
             assignee_ids_by_task=assignee_ids_by_task,
             all_participant_ids=all_participant_ids,
+            bz_labels_by_task=await ga_task_bz_labels(db, ga_tasks, assignee_ids_by_task) if include_ga_bz else None,
         )),
         _normalize_section(_status_group_section(
             None,

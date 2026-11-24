@@ -2,7 +2,7 @@
 
 import base64
 import hashlib
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timezone
 from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
@@ -73,13 +73,17 @@ async def validate_mailbox(client: httpx.AsyncClient, token: str, mailbox: Mailb
         raise ValueError("The signed-in Google account does not match EM PX EU.")
 
 
-async def read_inbox(client: httpx.AsyncClient, token: str, report_day: date, tz: ZoneInfo) -> list[dict]:
-    start = datetime.combine(report_day, time.min, tz)
-    end = datetime.combine(report_day + timedelta(days=1), time.min, tz)
-    # Include the boundary second in Gmail search and enforce the exact day below.
+async def read_inbox(
+    client: httpx.AsyncClient, token: str, report_day: date, tz: ZoneInfo, *,
+    window: tuple[datetime, datetime] | None = None,
+) -> list[dict]:
+    start, end = window or (datetime.combine(report_day, time.min, tz), datetime.combine(report_day, time.max, tz))
+    if end < start:
+        return []
+    # Gmail searches by whole seconds. Filter exact timestamps before reading bodies.
     params = {
         "labelIds": "INBOX",
-        "q": f"after:{int(start.timestamp()) - 1} before:{int(end.timestamp())}",
+        "q": f"after:{int(start.timestamp()) - 1} before:{int(end.timestamp()) + 1}",
         "maxResults": 50,
         "fields": "messages(id),nextPageToken",
     }
@@ -97,14 +101,20 @@ async def read_inbox(client: httpx.AsyncClient, token: str, report_day: date, tz
                 continue
             seen.add(message_id)
             message = await get(
-                f"messages/{quote(message_id, safe='')}", format="full", fields="internalDate,labelIds,payload",
+                f"messages/{quote(message_id, safe='')}", format="full", fields="internalDate,labelIds,payload,threadId",
             )
             received_at = datetime.fromtimestamp(int(message["internalDate"]) / 1000, timezone.utc).astimezone(tz)
-            if received_at.date() != report_day or "INBOX" not in message.get("labelIds", []):
+            if not start <= received_at <= end or "INBOX" not in message.get("labelIds", []):
                 continue
             payload = message.get("payload") or {}
             headers = {header["name"].casefold(): header["value"] for header in payload.get("headers", [])}
             await fetch_gmail_body_parts(get, message_id, payload)
+            thread_id = message.get("threadId")
+            original_url = (
+                f"https://mail.google.com/mail/?{urlencode({'authuser': mailbox_for_px_eu().email})}"
+                f"#all/{quote(thread_id, safe='')}"
+                if thread_id else None
+            )
             rows.append({
                 "id": message_id,
                 "subject": headers.get("subject") or "(Pa subjekt)",
@@ -112,6 +122,7 @@ async def read_inbox(client: httpx.AsyncClient, token: str, report_day: date, tz
                 "received_at": received_at.strftime("%H:%M"),
                 "received_datetime": received_at.isoformat(),
                 "body": extract_gmail_text(payload),
+                **({"original_email_url": original_url} if original_url else {}),
             })
         next_page = page.get("nextPageToken")
         if not next_page:

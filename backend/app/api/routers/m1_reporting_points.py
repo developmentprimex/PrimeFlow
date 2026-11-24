@@ -156,12 +156,19 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
 @router.get("/{report_id}/preview")
 async def preview(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                   _: User = Depends(get_current_user)) -> dict:
+    from app.services.report_note_attachments import manual_email_heading
+
     report = await _current_payload(db, await _by_id(db, report_id))
+    notes = report["data"].get("notes", [])
     return {
         "html": render_html(report), "plain_text": render_plain_text(report),
         "note_emails": {
             str(index): note["email_preview"]
-            for index, note in enumerate(report["data"].get("notes", []), 1) if note.get("email_preview")
+            for index, note in enumerate(notes, 1) if note.get("email_preview")
+        },
+        "note_email_headings": {
+            str(index): heading for index, note in enumerate(notes, 1)
+            if not note.get("email_preview") and (heading := manual_email_heading(note.get("content") or ""))
         },
     }
 

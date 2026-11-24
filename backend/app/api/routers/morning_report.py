@@ -384,7 +384,10 @@ async def get_draft(
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M1",
                                                  generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
-    sections = await refresh_m1_gmail_section(sections, row.report_date, sent=row.status == "SENT")
+    sections = await refresh_m1_gmail_section(
+        sections, row.report_date, sent=row.status == "SENT",
+        generated_snapshot=row.generated_snapshot, sent_at=row.sent_at,
+    )
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
         db, sections, "morning", row.sections, settings.manual_questions
@@ -533,7 +536,10 @@ async def preview_draft(
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M1",
                                                  generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
-    sections = await refresh_m1_gmail_section(sections, row.report_date, sent=row.status == "SENT")
+    sections = await refresh_m1_gmail_section(
+        sections, row.report_date, sent=row.status == "SENT",
+        generated_snapshot=row.generated_snapshot, sent_at=row.sent_at,
+    )
     sections = await refresh_morning_leave_table(db, sections, row.report_date, row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
     note_controls = await section_note_controls(db, sections, SECTION_TITLES[3], row.generated_snapshot)
@@ -565,7 +571,10 @@ async def send_draft(
                                         sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
     sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M1",
                                                  generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
-    sections = await refresh_m1_gmail_section(sections, row.report_date, sent=row.status == "SENT")
+    sections = await refresh_m1_gmail_section(
+        sections, row.report_date, sent=row.status == "SENT",
+        generated_snapshot=row.generated_snapshot, sent_at=row.sent_at,
+    )
     sections = await refresh_morning_leave_table(db, sections, row.report_date, row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
     row.sections = sections

@@ -4,11 +4,20 @@ import * as React from "react"
 import { Minus, Plus, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
+import { OriginalEmailLink } from "@/components/note-email-preview"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
 
-type MailMessage = { id: string; subject: string; sender: string; received_at: string; body: string }
-type MailResult = { configured: boolean; connected: boolean; messages: MailMessage[]; error?: string; notes_error?: string }
+type MailMessage = {
+  id: string
+  subject: string
+  sender: string
+  received_at: string
+  received_datetime?: string
+  body: string
+  original_email_url?: string
+}
+export type MailResult = { configured: boolean; connected: boolean; messages: MailMessage[]; error?: string; notes_error?: string }
 
 const mailboxes = {
   "info-px": { label: "INFO PX", provider: "Outlook" },
@@ -17,12 +26,60 @@ const mailboxes = {
   hf: { label: "EM HF", provider: "Yandex" },
 }
 
-export function ReportMailbox({ reportDate, source }: { reportDate: string; source: keyof typeof mailboxes }) {
+export type ReportMailboxSource = keyof typeof mailboxes
+type MailboxStatuses = Record<ReportMailboxSource, { configured: boolean; connected: boolean | null }>
+const reportMailboxSources: ReportMailboxSource[] = ["info-px", "it", "hf", "px-eu"]
+
+export function AfterBreakReportMailboxes({ summary, snapshot }: {
+  summary: string
+  snapshot?: Partial<Record<ReportMailboxSource, MailResult>>
+}) {
+  const { apiFetch } = useAuth()
+  const [statuses, setStatuses] = React.useState<MailboxStatuses | null>(null)
+  const [statusFailed, setStatusFailed] = React.useState(false)
+
+  React.useEffect(() => {
+    const abort = new AbortController()
+    void apiFetch("/microsoft-mail/status", { signal: abort.signal, cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error()
+        const value: MailboxStatuses = await response.json()
+        if (!abort.signal.aborted) setStatuses(value)
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) setStatusFailed(true)
+      })
+    return () => abort.abort()
+  }, [apiFetch])
+
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">{summary}</p>
+      {reportMailboxSources.map((source) => {
+        const status = statuses?.[source]
+        const result = snapshot?.[source]
+        let label = statusFailed ? "Statusi nuk u lexua" : "Duke kontrolluar lidhjen…"
+        if (status) {
+          if (!status.configured) label = "E pakonfiguruar"
+          else if (status.connected === false) label = "E palidhur"
+          else if (result?.error) label = "Gabim gjatë leximit"
+          else if (status.connected || result?.connected) label = "E lidhur"
+          else label = "E konfiguruar · ende e paverifikuar"
+        }
+        return <ReportMailboxTable key={source} source={source} result={result} connectionStatus={label} emptyMessage="Asnjë email në këtë interval." />
+      })}
+    </>
+  )
+}
+
+export function ReportMailbox({ reportDate, source, draftId }: {
+  reportDate: string
+  source: ReportMailboxSource
+  draftId: string
+}) {
   const { label, provider } = mailboxes[source]
-  const titlePrefix = source === "info-px" ? "EM INFO PX" : label
   const { apiFetch, user } = useAuth()
   const [result, setResult] = React.useState<MailResult | null>(null)
-  const [expandedMessageId, setExpandedMessageId] = React.useState<string | null>(null)
   const [reload, setReload] = React.useState(0)
   const [loading, setLoading] = React.useState(false)
   const [connecting, setConnecting] = React.useState(false)
@@ -30,7 +87,8 @@ export function ReportMailbox({ reportDate, source }: { reportDate: string; sour
   React.useEffect(() => {
     const abort = new AbortController()
     setLoading(true)
-    void apiFetch(`/microsoft-mail/sync?source=${source}&report_date=${encodeURIComponent(reportDate)}`, {
+    const query = new URLSearchParams({ source, report_date: reportDate, m1_draft_id: draftId })
+    void apiFetch(`/microsoft-mail/sync?${query}`, {
       method: "POST",
       signal: abort.signal,
       cache: "no-store",
@@ -44,7 +102,7 @@ export function ReportMailbox({ reportDate, source }: { reportDate: string; sour
       if (!abort.signal.aborted) setLoading(false)
     })
     return () => abort.abort()
-  }, [apiFetch, label, reload, reportDate, source])
+  }, [apiFetch, draftId, label, reload, reportDate, source])
 
   React.useEffect(() => {
     const url = new URL(window.location.href)
@@ -73,9 +131,7 @@ export function ReportMailbox({ reportDate, source }: { reportDate: string; sour
   if (!result?.configured) return null
 
   return (
-    <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
-      <div className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2">
-        <h3 className="text-sm font-semibold">{label} · {provider}</h3>
+    <ReportMailboxTable source={source} result={result} reportDate={reportDate} actions={
         <div className="flex gap-2">
           {(result.connected || source === "hf") && (
             <Button variant="outline" size="sm" disabled={loading} onClick={() => setReload(value => value + 1)}>
@@ -88,14 +144,40 @@ export function ReportMailbox({ reportDate, source }: { reportDate: string; sour
             </Button>
           )}
         </div>
+    } />
+  )
+}
+
+function ReportMailboxTable({ source, result, actions, connectionStatus, reportDate, emptyMessage = "Asnjë email në këtë interval." }: {
+  source: ReportMailboxSource
+  result?: MailResult
+  actions?: React.ReactNode
+  connectionStatus?: string
+  reportDate?: string
+  emptyMessage?: string
+}) {
+  const { label, provider } = mailboxes[source]
+  const titlePrefix = source === "info-px" ? "EM INFO PX" : label
+  const [expandedMessageId, setExpandedMessageId] = React.useState<string | null>(null)
+
+  if (!connectionStatus && !result?.configured) return null
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
+      <div className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2">
+        <h3 className="text-sm font-semibold">{label} · {provider}</h3>
+        {connectionStatus && <span className="text-sm text-muted-foreground">{connectionStatus}</span>}
+        {actions}
       </div>
-      {result.notes_error && <p className="px-3 py-2 text-sm text-red-700" role="status">{result.notes_error}</p>}
-      {result.error ? (
+      {result?.notes_error && <p className="px-3 py-2 text-sm text-red-700" role="status">{result.notes_error}</p>}
+      {!result?.configured ? null : result.error ? (
         <p className="px-3 py-2 text-sm text-red-700" role="status">{result.error}</p>
       ) : !result.connected || !result.messages.length ? (
-        <p className="px-3 py-2 text-sm text-muted-foreground">
-          {result.connected ? "Asnjë email për këtë datë." : `${label} ende nuk është lidhur me ${provider}.`}
-        </p>
+        result.connected || !connectionStatus ? (
+          <p className="px-3 py-2 text-sm text-muted-foreground">
+            {result.connected ? emptyMessage : `${label} ende nuk është lidhur me ${provider}.`}
+          </p>
+        ) : null
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full table-fixed text-left text-xs">
@@ -110,10 +192,16 @@ export function ReportMailbox({ reportDate, source }: { reportDate: string; sour
             <tbody>
               {result.messages.map(mail => {
                 const expanded = expandedMessageId === mail.id
+                const receivedDate = mail.received_datetime?.slice(0, 10)
                 return (
                   <React.Fragment key={mail.id}>
                     <tr className="border-t">
-                      <td className="p-2 font-medium [overflow-wrap:anywhere]">{titlePrefix}: {mail.received_at}</td>
+                      <td className="p-2 font-medium [overflow-wrap:anywhere]">
+                        {titlePrefix}: {mail.received_at}
+                        {reportDate && receivedDate && receivedDate !== reportDate && (
+                          <div className="text-muted-foreground">{receivedDate.split("-").reverse().join(".")}</div>
+                        )}
+                      </td>
                       <td className="p-2 [overflow-wrap:anywhere]">{mail.sender}</td>
                       <td className="p-2 [overflow-wrap:anywhere]">{mail.subject}</td>
                       <td className="p-1">
@@ -132,8 +220,11 @@ export function ReportMailbox({ reportDate, source }: { reportDate: string; sour
                     </tr>
                     {expanded && (
                       <tr className="border-t bg-slate-50">
-                        <td colSpan={4} className="whitespace-pre-wrap p-3 [overflow-wrap:anywhere]">
-                          {mail.body || "Ky email nuk ka tekst."}
+                        <td colSpan={4} className="p-2">
+                          <OriginalEmailLink sourceUrl={mail.original_email_url} />
+                          <div className="max-h-[min(45vh,24rem)] overflow-y-auto overscroll-contain rounded border bg-background p-3 whitespace-pre-wrap [overflow-wrap:anywhere]" tabIndex={0} aria-label="Emaili i plotë">
+                            {mail.body || "Ky email nuk ka tekst."}
+                          </div>
                         </td>
                       </tr>
                     )}

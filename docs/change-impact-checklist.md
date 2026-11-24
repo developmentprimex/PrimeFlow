@@ -102,12 +102,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   si edhe përjashtimin nga API-ja publike. Tabela e Outlook-ut në pikën 5
   lexohet veç përmbajtjes së draftit.
 
-- EM PX EU lexon Inbox-in e Gmail për datën e M1 me `gmail.readonly`. Një
+- EM PX EU lexon Inbox-in e Gmail për intervalin e M1 me `gmail.readonly`. Një
   administrator autorizon llogarinë `primex.eu@gmail.com`. Hapja ose rifreskimi
   i tabelës në pikën 5 ruan një PX Note për çdo mesazh me prefiksin `EM PX EU:`.
   Verifiko filtrin Email në PX Notes, shënimet
   në M1, M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow, Excel të PX Notes
   dhe përjashtimin nga API-ja publike. Tabela burimore shfaqet në ekranin e M1.
+
+- Pika 5 e M1 shfaq tabelat e kutive postare. Normalizimi heq tabelat e
+  vjetra të detyrave EM nga draftet e ruajtura, pamja paraprake dhe
+  përmbajtja e email-it dhe e eksporteve të M1. Kontrollo që tabela e
+  mesazheve Gmail të mbetet e dukshme kur është e disponueshme.
 
 - Tabelat e inbox-it INFO PX, IT, HF dhe PX EU në pikën 5 të M1 përdorin
   të njëjtin komponent. Rreshti shfaq prefiksin me orën, dërguesin dhe
@@ -120,9 +125,18 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow. Importet ekzistuese ruhen
   me ID-në e tyre; vetëm përmbledhjet që dështojnë riprovohen me Rifresko.
   Listat e PX Notes, M1/M2, M1 PIKAT dhe preview-të e 1H Reports e SHTYPI
-  Tomorrow shfaqin vetëm titullin, subjektin dhe dërguesin për shënimet nga
-  email-et. Butoni `+` lexon emailin përmes API-së së autentikuar. Për
-  importet e vjetra, API-ja lexon kopjen burimore nga shënimi ose nga
+  Tomorrow shfaqin vetëm titullin për shënimet nga email-et. Butoni `+`
+  hap subjektin, dërguesin dhe emailin origjinal përmes API-së së autentikuar,
+  ose detajet e shënimit kur është shkruar manualisht. Hapja e tekstit te
+  kutitë e M1 dhe te shënimet përdor scroll brenda një kutie me lartësi të
+  kufizuar. Për
+  titullin përdoret formati `EM INFO PX: 08:00 PURIS – HOME24`. Kur një
+  shënim i tillë kthehet në detyrë, `08:00` është shenja e prioritetit dhe
+  sloti i detyrës 1H është `10:00`. Ora e pranimit ruhet te koha e importit.
+  Pika 9 e M1 thekson edhe kryerreshtin e shënimeve me titull EM të shkruar manualisht.
+  Kur një import i vjetër do të shfaqte vetëm prefiksin dhe orën, titulli merr edhe
+  subjektin me shkronja të mëdha. Ruhet veçmas subjekti origjinal.
+  Për importet e vjetra, API-ja lexon kopjen burimore nga shënimi ose nga
   metadata e plotësuar në sinkronizimin pasues. Daljet statike të gjeneruara
   nga shënimet përdorin rreshtin e shkurtuar.
 
@@ -134,6 +148,26 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   vetëm i simbolit dhe komenti pa simbol nuk krijojnë rresht. Kontrollo që
   daljet e M1 përdorin tabelën e ruajtur, si edhe renditjen e pyetjeve të
   shtuara nga M1 ose Common View.
+
+- Leximi i kutive postare të M1 dhe M2 ndan intervalin me përgjigjet e GA.
+  M1 nis në 16:30 të ditës paraardhëse, ose të ditës së fundit të punës
+  kur raporti është i së hënës. M2 nis në 08:00 të datës së raportit.
+  Përdor orën e gjenerimit të ruajtur me përgjigjet e GA. Verifiko
+  rifreskimin e M1 dhe pilotin Gmail, gjenerimin e M2, preview, email-in
+  dhe eksportet kur përmbajnë tabela email-esh. Tabelat e inbox-it në M1
+  dhe M2 hapin edhe lidhjen origjinale kur ajo vjen nga ofruesi.
+
+- Pika «(GA) EMAILS TE REJA?» në M2 Post-Break përdor të njëjtat katër
+  inbox-e si M1. Gjenerimi ruan email-et e mbërritura në datën e raportit
+  nga 08:00 deri në çastin e gjenerimit, në zonën kohore të raporteve.
+  Ekrani i M2 lejon hapjen e tekstit të plotë. Preview-ja, teksti dhe
+  dërgimi manual/automatik me bashkëngjitje marrin dërguesin, subjektin
+  dhe orën nga po ai gjenerim. Leximi i M2 nuk krijon PX Notes.
+  Ekrani shfaq statusin e të katër kutive edhe para gjenerimit, përmes
+  `/microsoft-mail/status`. Statusi lexon konfigurimin dhe autorizimet
+  e ruajtura, ndërsa HOMEFACE verifikohet kur lexohet inbox-i.
+  Kontrollo kufijtë e orarit dhe që pyetja e vjetër manuale të mos
+  rikthehet përmes drafteve të ruajtura ose sinkronizimit me Common View.
 
 - Pika «DET NGA EMAILS TE REJA» në M1 Start of Day ka edhe një pilot lokal për leximin e subjektit,
   dërguesit, orës dhe përmbajtjes
@@ -148,7 +182,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 - Pika 5 e M1 Start of Day lexon inbox-in HOMEFACE (`info@homeface.de`)
   nga Yandex me IMAP në modalitet leximi. Vendos fjalëkalimin e aplikacionit
-  te sekreti i deploy-it `HOMEFACE_MAIL_APP_PASSWORD`. Mesazhet e datës së
+  te sekreti i deploy-it `HOMEFACE_MAIL_APP_PASSWORD`. Mesazhet e intervalit të
   raportit importohen në PX Notes si `HF_MAIL`, me ID të qëndrueshme nga
   UIDVALIDITY dhe UID. Kontrollo filtrin Email, PX Notes Excel, pikën 9 të
   M1, M2 Post-Break, M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow. API-ja
@@ -277,10 +311,19 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   përdor të njëjtin kanal Discord, të njëjtin interval dhe të njëjtën kohë
   gjenerimi si komentet e raportit përkatës. Boti ruan kohën kur merr
   reagimin e GA ndaj një mesazhi nga stafi me lidhje aktive Discord.
+  AUTORI shfaq inicialet. Kolona SKEDARËT hap miniaturat dhe pamjen e plotë
+  në M1/M2 përmes mesazhit të reaguar, edhe në thread publik. Preview dhe
+  emaili HTML lidhin mesazhin në Discord, ndërsa Word/PNG tregojnë numrin.
+  Reagimet e vjetra marrin lidhjen kur snapshot-i i Discord-it ruan mesazhin
+  dhe të dhënat e bashkëngjitjeve. API-ja pranon vetëm mesazhe me reagim
+  brenda intervalit të atij raporti.
   Kontrollo reagimet ndaj mesazheve ekzistuese, kufirin e së premtes për M1
   të së hënës, kufirin 08:00 për M2, preview, emailin dhe Word/PNG.
   Hapja e draftit, preview dhe dërgimi manual rilexojnë reagimet e draftit
   deri në orën fillestare të gjenerimit, edhe kur boti i ka ruajtur me vonesë.
+  Për draftet e vjetra të M2 pa orë gjenerimi, përgjigjet dhe reagimet
+  rilexohen me të njëjtën orë kontrolli. Raportet e dërguara pa orë
+  gjenerimi përdorin orën e dërgimit kur rikuperojnë reagimet.
   Një server raportimi pa ID të serverit Discord lexon evidencën e ruajtur
   nga kanali i konfiguruar. Raportet e dërguara me evidencë të padisponueshme
   mund ta shfaqin tabelën e rikuperuar me kufirin e gjenerimit të ruajtur.
@@ -307,6 +350,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   dhe të shabllonit sistemor, duke përjashtuar personat e caktuar për koordinim.
   Kontrollo që inicialet të përdoren edhe në preview, email, tekst dhe Word/PNG.
   Tabela **BZ ME GA** te pika e takimeve përdor rrjedhën e saj.
+  Në M2, **GA MBYLLJA E DET** përdor të njëjtin burim për kolonën **BZ ME**
+  në çdo tabelë statusi. Kontrollo gjenerimin, preview, emailin dhe Word/PNG.
+  Tabela HV dhe bashkëngjitja e 1H Reports përdorin paraqitjen e tyre.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
 
@@ -611,6 +657,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 - Taskat përdoren edhe nga M1/M2/M3 dhe PIKAT PËR RAP. Mos i përjashto këto
   vetëm sepse ndryshimi fillon në My View ose Common View. Përfshirja e taskut
   varet nga kategoria, data, personi dhe filtrat e raportit.
+- M2 Post-Break shfaq **ARSYEJA** dhe **KOMENT** te **DET TE PAKRYERA,
+  08:00/DEADLINE** nga Daily Report i My View për datën e raportit. Vlerat
+  lidhen sipas ID-së së detyrës. Gjenerimi, preview-ja dhe daljet e dërgimit
+  përdorin të njëjtën tabelë. M2 PIKAT ndan përzgjedhjen e detyrave dhe ka
+  rrjedhën e vet për shpjegimet dhe komentet manuale.
+  M2 Post-Break përfshin edhe shënimet e veçanta nga Discord dhe komentet e
+  vazhdimit AM → PM. Ndryshimet manuale ruhen për secilën fushë në draftin
+  e M2 Post-Break dhe kanë përparësi gjatë rifreskimit dhe rigjenerimit.
+  Në ekran, Arsyeja ruhet nga lista brenda qelizës dhe Komenti kur fusha
+  humb fokusin. Numri i rreshtit lidhet me ID-në e detyrës pas filtrit të
+  mungesave. Preview-ja dhe dërgimi përdorin tekstin e ruajtur.
 - M2 në Discord lidh kartën AM të pambyllur me përgjigjen PM për të njëjtën
   detyrë/person/ditë. Vazhdimi AM→PM nuk ndryshon periudhën apo datat e taskut;
   ruhet në pyetjen PM dhe shfaqet edhe në M2 PIKAT/email/eksport. Mbyllja kalon

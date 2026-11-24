@@ -67,6 +67,7 @@ def test_gmail_validates_address_and_reads_only_the_report_days_inbox():
             return httpx.Response(200, json={"data": "TWVzc2FnZSBib2R5"})
         return httpx.Response(200, json={
             "internalDate": str(midnight * 1000 - int(path.endswith("/old"))),
+            "threadId": "thread-1",
             "labelIds": [] if path.endswith("/archived") else ["INBOX"],
             "payload": {
                 "mimeType": "text/plain", "body": {"attachmentId": "text-part"},
@@ -84,4 +85,5 @@ def test_gmail_validates_address_and_reads_only_the_report_days_inbox():
     assert asyncio.run(read()) == [{
         "id": "one", "subject": "Hello", "sender": "sender@example.test", "received_at": "00:00",
         "received_datetime": "2026-11-23T00:00:00+01:00", "body": "Message body",
+        "original_email_url": "https://mail.google.com/mail/?authuser=primex.eu%40gmail.com#all/thread-1",
     }]

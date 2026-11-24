@@ -596,8 +596,10 @@ export interface ProjectPhaseChecklistItem {
   updated_at: string
 }
 
-export type NoteEmailPreview = { id: string; title: string; subject: string; sender: string }
+export type NoteEmailPreview = { id: string; title: string; subject: string; sender: string; original_email_url?: string }
 export type NoteEmailPreviews = Record<string, NoteEmailPreview>
+export type NoteEmailHeading = { title: string; original: string; original_email_url?: string }
+export type NoteEmailHeadings = Record<string, NoteEmailHeading>
 
 export interface GaNote {
   email_preview?: NoteEmailPreview | null

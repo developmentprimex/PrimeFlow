@@ -39,7 +39,7 @@ from app.schemas.ga_note import (
 )
 from app.services.ga_note_creation import build_ga_note
 from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN, sync_gmail_px_notes
-from app.services.px_note_email import email_preview, legacy_email
+from app.services.px_note_email import email_preview, email_title_from_content, legacy_email
 from app.services.audit import add_audit_log
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
@@ -85,14 +85,18 @@ _ga_note_default_task_description = ga_note_default_task_description
 
 
 def _title_for_note_task(note: GaNote, content: str) -> str:
-    if note.knowledge_type == GMAIL_NOTE_ORIGIN:
-        content = content.partition("\n")[0]
-    return _ga_note_task_title(content)
+    title = email_title_from_content(content)
+    if title:
+        return title
+    preview = email_preview(note)
+    return preview["title"] if preview else _ga_note_task_title(content)
 
 
 def _description_for_note_task(note: GaNote, content: str) -> str | None:
     if note.knowledge_type == GMAIL_NOTE_ORIGIN:
         return "\n".join(content.splitlines()[2:]).strip() or None
+    if email_title_from_content(content):
+        return content.strip().partition("\n")[2].strip() or None
     return _ga_note_default_task_description(content)
 
 

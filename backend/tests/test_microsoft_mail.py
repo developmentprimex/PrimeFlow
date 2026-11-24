@@ -40,9 +40,11 @@ def test_graph_reads_inbox_directly_in_report_timezone():
         assert request.url.path.endswith("/mailFolders/inbox/messages")
         assert request.headers["Prefer"] == 'outlook.body-content-type="text", IdType="ImmutableId"'
         assert "2026-11-22T23:00:00Z" in request.url.params["$filter"]
+        assert "webLink" in request.url.params["$select"].split(",")
         assert "2026-11-23T23:00:00Z" in request.url.params["$filter"]
         return httpx.Response(200, json={"value": [{
             "id": "mail-1", "subject": "A test", "receivedDateTime": "2026-11-23T09:50:00Z",
+            "webLink": "https://outlook.office.com/mail/deeplink/read/mail-1",
             "from": {"emailAddress": {"name": "Sender", "address": "sender@example.test"}},
             "body": {"contentType": "text", "content": "The email body"},
         }]})
@@ -54,14 +56,17 @@ def test_graph_reads_inbox_directly_in_report_timezone():
     assert asyncio.run(read()) == [{
         "id": "mail-1", "subject": "A test", "sender": "Sender <sender@example.test>",
         "received_at": "10:50", "received_datetime": "2026-11-23T10:50:00+01:00", "body": "The email body",
+        "original_email_url": "https://outlook.office.com/mail/deeplink/read/mail-1",
     }]
 
 
 def test_signed_in_staff_can_read_but_only_admin_can_authorize(monkeypatch):
+    from app.services import report_inboxes
+
     app = FastAPI()
     app.include_router(api.router, prefix="/api/microsoft-mail")
     app.dependency_overrides[api.get_db] = lambda: None
-    monkeypatch.setattr(api, "_configured", lambda mailbox: False)
+    monkeypatch.setattr(report_inboxes, "_configured", lambda mailbox: False)
     endpoint = "/api/microsoft-mail/sync?report_date=2026-11-23"
     client = TestClient(app)
     assert client.post(endpoint).status_code == 401
@@ -72,6 +77,63 @@ def test_signed_in_staff_can_read_but_only_admin_can_authorize(monkeypatch):
     assert response.json() == {"configured": False, "connected": False, "messages": []}
     assert response.headers["cache-control"] == "no-store"
     assert client.post("/api/microsoft-mail/authorize-url").status_code == 403
+
+
+def test_mailbox_status_lists_all_sources_without_reading_inboxes(monkeypatch):
+    from app.services import report_inboxes
+
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api/microsoft-mail")
+    db = AsyncMock()
+    db.get.side_effect = lambda model, token_id: object() if token_id == 1 else None
+    app.dependency_overrides[api.get_db] = lambda: db
+    monkeypatch.setattr(report_inboxes, "_configured", lambda mailbox: mailbox.token_id in {1, 2})
+    monkeypatch.setattr(report_inboxes.settings, "HOMEFACE_MAIL_APP_PASSWORD", "test-only")
+    read = AsyncMock()
+    monkeypatch.setattr(api, "read_report_inbox", read)
+    client = TestClient(app)
+    assert client.get("/api/microsoft-mail/status").status_code == 401
+
+    app.dependency_overrides[api.get_current_user] = lambda: SimpleNamespace(role=UserRole.STAFF)
+    response = client.get("/api/microsoft-mail/status")
+    assert response.json() == {
+        "info-px": {"configured": True, "connected": True},
+        "it": {"configured": True, "connected": False},
+        "hf": {"configured": True, "connected": None},
+        "px-eu": {"configured": False, "connected": False},
+    }
+    assert response.headers["cache-control"] == "no-store"
+    read.assert_not_awaited()
+
+
+def test_m1_mailbox_uses_the_saved_ga_window_and_imports_its_messages(monkeypatch):
+    draft_id = uuid.uuid4()
+    report_day = date(2026, 11, 23)
+    db = AsyncMock()
+    db.get.return_value = SimpleNamespace(
+        report_date=report_day,
+        status="DRAFT",
+        generated_snapshot={"ga_replies_generated_at": "2026-11-23T08:15:30+01:00"},
+        sent_at=None,
+    )
+    rows = [{"id": "previous-friday-message"}]
+    read = AsyncMock(return_value={"configured": True, "connected": True, "messages": rows})
+    save = AsyncMock(return_value=True)
+    monkeypatch.setattr(api, "read_report_inbox", read)
+    monkeypatch.setattr(api, "save_mailbox_notes", save)
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[api.get_db] = lambda: db
+    app.dependency_overrides[api.get_current_user] = lambda: SimpleNamespace(role=UserRole.STAFF)
+    response = TestClient(app).post(f"/sync?source=it&report_date={report_day}&m1_draft_id={draft_id}")
+    assert response.status_code == 200
+    assert response.json()["messages"] == rows
+    read.assert_awaited_once()
+    start, end = read.await_args.kwargs["window"]
+    assert start.isoformat() == "2026-11-20T16:30:00+01:00"
+    assert end.isoformat() == "2026-11-23T08:15:30+01:00"
+    save.assert_awaited_once_with(db, rows, mail.mailbox_for("it"))
 
 
 def test_px_note_formats_each_mailbox_and_skips_already_imported_messages(monkeypatch):
@@ -97,7 +159,7 @@ def test_px_note_formats_each_mailbox_and_skips_already_imported_messages(monkey
     assert len({statement.params["id_m0"] for statement in inserted}) == 4
     for mailbox, statement in zip(mailboxes, inserted):
         assert statement.params["content_m0"] == (
-            f"{mailbox.label}: 10:50 PURIS – HOME24\n"
+            f"{mailbox.label}: 08:00 PURIS – HOME24\n"
             "Klienti kërkon automatizim.\n1) Analizo dokumentet.\n2) Përgatit mapping."
         )
         assert statement.params["knowledge_type_m0"] == mailbox.note_origin
@@ -127,7 +189,7 @@ def test_failed_mail_summary_stays_available_for_retry(monkeypatch):
     monkeypatch.setattr(info_px_notes, "_draft_note", draft)
     assert not asyncio.run(info_px_notes.save_mailbox_notes(db, inbox, mail.mailbox_for("info-px")))
     statement = db.execute.await_args.args[0].compile(dialect=dialect())
-    assert statement.params["content_m0"] == "EM INFO PX: 10:51 INFORMATIVE\nInformative"
+    assert statement.params["content_m0"] == "EM INFO PX: 08:00 INFORMATIVE\nInformative"
     assert "content_m1" not in statement.params
 
 

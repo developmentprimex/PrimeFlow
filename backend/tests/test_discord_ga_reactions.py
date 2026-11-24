@@ -49,7 +49,7 @@ class DiscordGaReactionsTests(unittest.TestCase):
         message = SimpleNamespace(
             id=40, author=SimpleNamespace(id=50, bot=False, display_name="Stafi"),
             type=discord.MessageType.default, reference=None, content="Mesazh i vjetër",
-            created_at=now - timedelta(days=90), mentions=[], attachments=[],
+            created_at=now - timedelta(days=90), mentions=[], attachments=[object()],
         )
         thread = Mock(spec=discord.Thread, parent_id=20, fetch_message=AsyncMock(return_value=message))
         thread.is_private.return_value = False
@@ -68,6 +68,8 @@ class DiscordGaReactionsTests(unittest.TestCase):
         assert route == "/bot/ga-reactions"
         assert payload["observed_at"] == now.isoformat()
         assert payload["message_author_id"] == "50"
+        assert payload["message_channel_id"] == "21"
+        assert payload["attachment_count"] == 1
         assert payload["emoji"] == "👍"
         thread.fetch_message.assert_awaited_once_with(40)
 
@@ -96,7 +98,7 @@ class DiscordGaReactionsTests(unittest.TestCase):
         event = service.ReactionEvidence(
             event_id=uuid4(), guild_id="10", channel_id="20", ga_user_id="30", message_id="40",
             message_author_id="50", message_content="Mesazh i stafit https://example.test/internal",
-            has_attachments=False, emoji="👍", observed_at=datetime.now(timezone.utc),
+            message_channel_id="21", has_attachments=True, attachment_count=1, emoji="👍", observed_at=datetime.now(timezone.utc),
         )
         staff_lookup = Mock()
         db = SimpleNamespace(execute=AsyncMock(return_value=staff_lookup), commit=AsyncMock())
@@ -116,6 +118,9 @@ class DiscordGaReactionsTests(unittest.TestCase):
         assert "ON CONFLICT (event_id) DO NOTHING" in str(statement)
         assert statement.params["event_id"] == event.event_id
         assert statement.params["message_excerpt"] == "Mesazh i stafit"
+        assert statement.params["message_author_id"] == "50"
+        assert statement.params["message_channel_id"] == "21"
+        assert statement.params["attachment_count"] == 1
         db.commit.assert_awaited_once()
 
     def test_report_uses_observed_time_window_and_renders_table(self):
@@ -142,12 +147,27 @@ class DiscordGaReactionsTests(unittest.TestCase):
                 assert frozen == sections
                 summary.assert_awaited_once_with(None, cutoff.date(), report=report, generated_at=cutoff)
 
+    def test_legacy_m2_draft_uses_the_same_cutoff_for_replies_and_reactions(self):
+        sections = [
+            {"section_key": after_break_report.GA_REPLIES_SECTION_TITLE, "body": "Old replies"},
+            {"section_key": service.GA_REACTIONS_SECTION_KEY, "body": "Old reactions"},
+        ]
+        day = datetime.now(report_timezone()).date()
+        with patch.object(after_break_report, "summary_for_day", AsyncMock(return_value="New replies")) as replies:
+            with patch.object(service, "reaction_summary_for_day", AsyncMock(return_value="New reactions")) as reactions:
+                refreshed = asyncio.run(after_break_report.refresh_after_break_discord_sections(
+                    None, sections, day, generated_snapshot=None, sent=False, sent_at=None,
+                ))
+        assert [section["body"] for section in refreshed] == ["New replies", "New reactions"]
+        assert replies.await_args == reactions.await_args
+        assert replies.await_args.kwargs["report"] == "M2"
+
     def test_report_only_instance_reads_the_channel_and_recovers_a_sent_unavailable_section(self):
         cutoff = datetime(2026, 11, 24, 9, 3, tzinfo=report_timezone())
         snapshot = {"ga_replies_generated_at": cutoff.isoformat()}
         sections = [{"section_key": service.GA_REACTIONS_SECTION_KEY, "body": service.REACTIONS_UNAVAILABLE}]
         row = SimpleNamespace(staff_name="Laurent", message_excerpt="Po mendon Puris apo?", emoji="👍",
-                              observed_at=cutoff - timedelta(minutes=10))
+                              observed_at=cutoff - timedelta(minutes=10), attachment_count=0)
         with patch.object(settings, "DISCORD_GUILD_ID", None):
             for report, expected_start in (("M1", (23, 16, 30)), ("M2", (24, 8, 0))):
                 with self.subTest(report=report):
@@ -159,25 +179,71 @@ class DiscordGaReactionsTests(unittest.TestCase):
                     start = datetime(2026, 11, *expected_start, tzinfo=cutoff.tzinfo)
                     assert {"20", start, cutoff} <= set(query.params.values())
                     assert "discord_ga_reactions.guild_id =" not in str(query)
-                    assert "Laurent" in refreshed[0]["body"] and "👍" in refreshed[0]["body"]
+                    assert "Laurent" not in refreshed[0]["body"] and "👍" in refreshed[0]["body"]
+                    assert _section_report_blocks(refreshed[0]["body"])[0]["rows"][0][1] == "L"
+
+    def test_attachment_lookup_requires_reaction_evidence_and_reads_the_message_thread(self):
+        cutoff = datetime(2026, 11, 23, 11, 30, tzinfo=report_timezone())
+        row = SimpleNamespace(message_id="40", message_author_id="50", message_channel_id="21", attachment_count=1)
+        scalar = Mock(all=Mock(return_value=[row]))
+        db = SimpleNamespace(scalars=AsyncMock(return_value=scalar))
+        fetch = self.enterContext(patch.object(service, "fetch_discord_message_attachments", AsyncMock(return_value=[{"image": True}])))
+        files = asyncio.run(service.reaction_attachment_links(db, cutoff.date(), "M2", cutoff, "40"))
+        assert files == [{"image": True}]
+        assert {"40", "20", "10", cutoff} <= set(db.scalars.await_args.args[0].compile().params.values())
+        fetch.assert_awaited_once_with("21", "40", "50")
+
+        scalar.all.return_value = []
+        with self.assertRaises(HTTPException) as error:
+            asyncio.run(service.reaction_attachment_links(db, cutoff.date(), "M2", cutoff, "41"))
+        assert error.exception.status_code == 404
+        fetch.assert_awaited_once()
+
+    def test_old_sent_table_recovers_a_photo_from_matching_discord_evidence(self):
+        cutoff = datetime(2026, 11, 23, 11, 30, tzinfo=report_timezone())
+        reaction = SimpleNamespace(
+            guild_id="10", channel_id="20", message_id="40", attachment_count=None,
+            staff_name="Laurent Hoxha", message_excerpt="Foto e projektit", emoji="👍",
+            observed_at=cutoff - timedelta(minutes=10),
+        )
+        evidence = {"guild_id": "10", "channel_id": "20", "messages": [
+            {"id": "40", "thread_root_id": "21", "author_id": "50", "attachments": 1},
+        ]}
+        self.enterContext(patch.object(service, "_snapshot_for_day", AsyncMock(return_value=SimpleNamespace(evidence=evidence))))
+        db = SimpleNamespace(scalars=AsyncMock(return_value=Mock(all=Mock(return_value=[reaction]))))
+        columns = [column for column in service._COLUMNS if column[0] != "SKEDARËT"]
+        body = "\n".join(after_break_report._ascii_table(service._CAPTION, columns, [
+            ["1", "Laurent Hoxha", "Foto e projektit", "👍", "23.11.2026", "11:20"],
+        ]))
+        sections = [{"section_key": service.GA_REACTIONS_SECTION_KEY, "body": body}]
+        refreshed = asyncio.run(service.refresh_ga_reaction_section(
+            db, sections, cutoff.date(), report="M2", sent=True,
+            generated_snapshot={"ga_replies_generated_at": cutoff.isoformat()},
+        ))
+        assert _section_report_blocks(refreshed[0]["body"])[0]["rows"][0] == [
+            "1", "LH", "Foto e projektit", "👍", "1 https://discord.com/channels/10/21/40", "23.11.2026", "11:20",
+        ]
+        assert sections[0]["body"] == body
 
     def assert_report_table(self, report, module, expected_start):
         tz = report_timezone()
         cutoff = datetime(2026, 11, 23, 11, 30, tzinfo=tz)
         expected = datetime(2026, 11, *expected_start, tzinfo=tz)
         row = SimpleNamespace(staff_name="Emër Stafi", message_excerpt="Projekt | <detyrë>", emoji="👍",
-                              observed_at=cutoff - timedelta(minutes=10))
+                              observed_at=cutoff - timedelta(minutes=10), guild_id="10", channel_id="20",
+                              message_id="40", message_channel_id="21", message_author_id="50", attachment_count=1)
         db = SimpleNamespace(scalars=AsyncMock(return_value=Mock(all=Mock(return_value=[row]))))
         body = asyncio.run(service.reaction_summary_for_day(db, cutoff.date(), report=report, generated_at=cutoff))
         query = db.scalars.await_args.args[0].compile()
         assert str(query).count("discord_ga_reactions.observed_at") >= 3
         assert {"10", "20", expected, cutoff} <= set(query.params.values())
         block, = _section_report_blocks(body)
-        assert block["rows"] == [["1", "Emër Stafi", "Projekt ¦ <detyrë>", "👍", "23.11.2026", "11:20"]]
+        assert block["rows"] == [["1", "ES", "Projekt ¦ <detyrë>", "👍", "1 https://discord.com/channels/10/21/40", "23.11.2026", "11:20"]]
 
         sections = [{"title": service.GA_REACTIONS_SECTION_TITLE, "body": body}]
         html = module.render_html("Raporti", cutoff.date(), sections)
         assert "Projekt ¦ &lt;detyrë&gt;" in html and "👍" in html
+        assert 'href="https://discord.com/channels/10/21/40"' in html
         assert "11:20" in module.render_plain_text("Raporti", cutoff.date(), sections)
         docx = render_section_report_docx("Raporti", report, cutoff.date(), sections)
         with ZipFile(BytesIO(docx)) as document:

@@ -95,12 +95,17 @@ async def fetch_gmail_body_parts(get: Callable[..., Awaitable[dict]], message_id
 async def read_m1_gmail_messages(
     report_day: date,
     report_tz: ZoneInfo,
+    *,
+    window: tuple[datetime, datetime] | None = None,
 ) -> list[GmailMessage] | None:
     messages = await read_labeled_gmail_messages(include_body=True)
     if messages is None:
         messages = await read_labeled_gmail_messages()
     if messages is None:
         return None
+    if window is not None:
+        start, end = window
+        return [message for message in messages if start <= message.received_at <= end]
     return [
         message
         for message in messages

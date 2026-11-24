@@ -1057,6 +1057,15 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         header = next(row for row in rows if "LLOJI" in row and "TITULLI" in row)
         self.assertIn("LLOJI", header)
         self.assertTrue(any("BLL" in row and "MODECO" in row for row in rows))
+        self.assertNotIn("BZ ME", header)
+
+        with_bz = _m3_status_table("TODO", [task], {}, include_type=True, bz_labels_by_task={task.id: "OH / DV"})
+        self.assertIn("BZ ME", with_bz[2])
+        self.assertTrue(any("MODECO" in row and "OH / DV" in row for row in with_bz))
+
+        empty = _m3_status_table("LATE", [], {}, include_late_days=True, bz_labels_by_task={})
+        self.assertIn("BZ ME", empty[2])
+        self.assertEqual(empty[4].split("|")[-2].strip(), "-")
 
     def test_new_task_table_keeps_each_task_status_for_row_coloring(self) -> None:
         task_template = {

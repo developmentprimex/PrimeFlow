@@ -1,6 +1,6 @@
 "use client"
 
-import { NoteEmailPreview } from "@/components/note-email-preview"
+import { EmailNoteDisclosure, NoteEmailPreview, splitManualEmailNote } from "@/components/note-email-preview"
 
 import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
 
@@ -2679,16 +2679,20 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       return
     }
     const fromGmail = note.knowledge_type === "GMAIL"
-    const noteTitle = noteToTaskTitle(note.content || "", fromGmail)
+    const [firstLine, ...noteLines] = parseMarkedNoteContent(note.content).text.trim().split(/\r?\n/)
+    const emailHeading = /^(EM (?:INFO PX|IT|HF|PX EU|GA|GMAIL)):\s*\d{1,2}:\d{2}\s+(.+)$/i.exec(firstLine)
+    const emailTitle = note.email_preview?.title
+      || (emailHeading ? `${emailHeading[1].toUpperCase()}: 08:00 ${emailHeading[2].toUpperCase()}` : "")
+    const noteTitle = emailTitle || noteToTaskTitle(note.content || "", fromGmail)
     const taskContext = fromGmail ? noteTitle : note.content || ""
     // Knowledge PX: the prompt creator's task is "PROMPT: …" (renamed to the prompt title once it is saved).
     const defaultTitle = isKnowledgeNote(note) ? `${KNOWLEDGE_CONFIG[note.knowledge_type || "PROMPT"].prefix}: ${noteTitle}` : noteTitle
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
-    setTaskDescription(fromGmail ? (note.content || "").split(/\r?\n/).slice(2).join("\n").trim() : "")
-    setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+    setTaskDescription(fromGmail ? noteLines.slice(1).join("\n").trim() : emailHeading ? noteLines.join("\n").trim() : "")
+    setTaskPriority(emailTitle ? "1H" : note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
-    setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
+    setTaskOneHReportSlot(emailTitle ? "10:00" : ONE_H_REPORT_SLOT_NONE_VALUE)
     setTaskDueDate("")
     setTaskStartDate("")
     setTaskIsRepetitive(false)
@@ -3242,6 +3246,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     const matchesContentFilter = (note: GaNote) => {
       if (contentFilter === "all") return true
       return Boolean(note.email_preview)
+        || Boolean(splitManualEmailNote(note.content || ""))
         || ["GMAIL", "INFO_PX_MAIL", "IT_MAIL", "HF_MAIL", "PX_EU_MAIL"].includes(note.knowledge_type ?? "")
         || EMAIL_MARKER_RE.test(note.content || "")
     }
@@ -4762,6 +4767,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     // 2. We're currently filtering by department/project (on a specific page)
                     // 3. Note's department_id is different from user's department (explicitly set, not auto-assigned)
                     const miraCollapsed = Boolean(note.from_mira) && !expandedMiraNoteIds.has(note.id)
+                    const manualEmail = note.email_preview ? null : splitManualEmailNote(note.content || "")
                     const isFilteredView = departmentId !== "ALL" || projectId !== "NONE"
                     const isExplicitDepartment = note.department_id && note.department_id !== user?.department_id
                     const shouldShowDepartment = displayDepartment && (displayProject || isFilteredView || isExplicitDepartment)
@@ -4848,7 +4854,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                         <TaskMarkerComment comment={symbol.comment} />
                                       </span>
                                     ) : null)}
-                                    {note.email_preview ? <NoteEmailPreview email={note.email_preview} /> : renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
+                                    {note.email_preview ? <NoteEmailPreview email={note.email_preview} /> : manualEmail
+                                      ? <EmailNoteDisclosure title={manualEmail.title} sourceUrl={manualEmail.sourceUrl}>{renderMarkedNoteContent(manualEmail.body, canViewStrikeTimestamps)}</EmailNoteDisclosure>
+                                      : renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                     {dictationSource && <span className="mt-1 block text-xs text-muted-foreground">{dictationSource}</span>}
                                   </div>
                                 )}

@@ -208,6 +208,11 @@ def _report_window(day, report, cutoff):
     return start, min(cutoff, end_of_day)
 
 
+def m1_report_cutoff(generated_snapshot: dict | None, sent_at: datetime | None = None) -> datetime:
+    generated_at = (generated_snapshot or {}).get("ga_replies_generated_at")
+    return datetime.fromisoformat(generated_at) if generated_at else sent_at or datetime.now(timezone.utc)
+
+
 def render_summary(evidence, captured_at, now, *, day=None, reply_ids=None, initials_by_user=None, window=None,
                    allow_verified_stale=False, include_details=False):
     if not evidence or evidence.get("status") == "UNAVAILABLE":
@@ -319,12 +324,16 @@ async def attachment_links_for_report(db, day, report, cutoff, message_id):
     if (day == datetime.now(report_timezone()).date()
             and evidence["ga_user_id"] != await ga_identity(db, guild_id=evidence["guild_id"])):
         raise HTTPException(404, "Mesazhi nuk përputhet me burimin e raportit.")
+    channel_id = message.get("thread_root_id") or evidence["channel_id"]
+    return await fetch_discord_message_attachments(channel_id, message_id, message["author_id"])
+
+
+async def fetch_discord_message_attachments(channel_id: str, message_id: str, author_id: str) -> list[dict]:
     if not settings.DISCORD_BOT_TOKEN:
         raise HTTPException(424, {
             "code": "discord_preview_not_configured",
             "message": "Ky server nuk ka të konfiguruar botin e Discord për pamjen paraprake.",
         })
-    channel_id = message.get("thread_root_id") or evidence["channel_id"]
     try:
         async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
             response = await client.get(
@@ -336,7 +345,7 @@ async def attachment_links_for_report(db, day, report, cutoff, message_id):
     except (httpx.HTTPError, ValueError):
         raise HTTPException(502, "Bashkëngjitjet nuk mund të lexohen nga Discord.") from None
     if (source.get("id") != message_id or source.get("channel_id") != channel_id
-            or source.get("author", {}).get("id") != message["author_id"]):
+            or source.get("author", {}).get("id") != author_id):
         raise HTTPException(404, "Mesazhi nuk përputhet me burimin e raportit.")
     files = []
     for attachment in source.get("attachments", []):

@@ -2,7 +2,7 @@
 
 import re
 import ssl
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -41,7 +41,13 @@ def _message_body(message: EmailMessage) -> str:
     return content.strip()
 
 
-def read_inbox(password: str, report_day: date, tz: ZoneInfo) -> list[dict]:
+def read_inbox(
+    password: str, report_day: date, tz: ZoneInfo, *,
+    window: tuple[datetime, datetime] | None = None,
+) -> list[dict]:
+    start, end = window or (datetime.combine(report_day, time.min, tz), datetime.combine(report_day, time.max, tz))
+    if end < start:
+        return []
     rows = []
     with IMAP4_SSL(_HOST, 993, ssl_context=ssl.create_default_context(), timeout=12) as inbox:
         inbox.login(MAILBOX.email, password)
@@ -51,11 +57,10 @@ def read_inbox(password: str, report_day: date, tz: ZoneInfo) -> list[dict]:
         _, validity = inbox.response("UIDVALIDITY")
         if not validity or not validity[-1] or not validity[-1].isdigit():
             raise ValueError("The HOMEFACE inbox did not supply UIDVALIDITY.")
-        # IMAP searches by the server's message date. Confirm the exact report
-        # date after applying the received timestamp's timezone offset.
+        # IMAP searches by the server's date. Confirm the exact timestamps after fetching.
         status, candidates = inbox.uid(
-            "SEARCH", None, "SINCE", _imap_date(report_day - timedelta(days=2)),
-            "BEFORE", _imap_date(report_day + timedelta(days=3)),
+            "SEARCH", None, "SINCE", _imap_date(start.astimezone(tz).date() - timedelta(days=2)),
+            "BEFORE", _imap_date(end.astimezone(tz).date() + timedelta(days=3)),
         )
         if status != "OK":
             raise ValueError("The HOMEFACE inbox could not be searched.")
@@ -70,7 +75,7 @@ def read_inbox(password: str, report_day: date, tz: ZoneInfo) -> list[dict]:
             if raw_date is None:
                 continue
             received = datetime.strptime(raw_date.decode("ascii").strip(), "%d-%b-%Y %H:%M:%S %z").astimezone(tz)
-            if received.date() != report_day:
+            if not start <= received <= end:
                 continue
             status, data = inbox.uid("FETCH", uid, "(BODY.PEEK[])")
             if status != "OK":

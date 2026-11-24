@@ -10,15 +10,17 @@ from sqlalchemy import select
 from app.db import SessionLocal
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.services.after_break_report import (
+    UNFINISHED_EXPLANATION_OVERRIDES,
+    apply_unfinished_priority_task_table,
     build_after_break_report_sections,
     normalize_after_break_report_sections,
     populate_pcm_projects_section,
+    refresh_after_break_discord_sections,
     render_html,
     render_plain_text,
     send_after_break_report,
     subject_for,
 )
-from app.services.discord_ga_replies import refresh_ga_reply_section
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_delivery import configured_recipients, validate_report_config
 
@@ -46,11 +48,14 @@ async def main() -> None:
             await db.commit()
             await db.refresh(row)
 
-        sections = await refresh_ga_reply_section(db, normalize_after_break_report_sections(row.sections),
-                                                 row.report_date, report="M2", refresh_current=args.send or row.status != "SENT",
-                                                 sent_at=None if args.send else row.sent_at, populate_missing=True,
-                                                 generated_snapshot=row.generated_snapshot)
+        sections = await refresh_after_break_discord_sections(
+            db, normalize_after_break_report_sections(row.sections), row.report_date,
+            generated_snapshot=row.generated_snapshot, sent=row.status == "SENT", sent_at=row.sent_at,
+        )
         sections = await populate_pcm_projects_section(db, sections, row.report_date)
+        sections = await apply_unfinished_priority_task_table(
+            db, sections, row.report_date, explanation_overrides=(row.generated_snapshot or {}).get(UNFINISHED_EXPLANATION_OVERRIDES),
+        )
         plain_text = render_plain_text(row.subject, row.report_date, sections)
         if args.send:
             message = await send_after_break_report(

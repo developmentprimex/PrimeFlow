@@ -580,6 +580,7 @@ export function ReportSectionPreview({
   filterCreatedWeek = false,
   filterWfeAge = false,
   projectColumnWidth,
+  bzColumnWidth,
   largerTableText = false,
   emphasizeOwnerSeparator = false,
   discordReplyReport,
@@ -590,6 +591,7 @@ export function ReportSectionPreview({
   filterCreatedWeek?: boolean
   filterWfeAge?: boolean
   projectColumnWidth?: string
+  bzColumnWidth?: string
   largerTableText?: boolean
   emphasizeOwnerSeparator?: boolean
   discordReplyReport?: DiscordReplyReport
@@ -815,7 +817,9 @@ export function ReportSectionPreview({
                             overflowWrap: "break-word" as const,
                             wordBreak: "normal" as const,
                           }
-                        : undefined
+                        : header === "BZ ME" && bzColumnWidth
+                          ? { width: bzColumnWidth, minWidth: bzColumnWidth, maxWidth: bzColumnWidth }
+                          : undefined
                       return (
                         <th
                           key={cellIndex}

@@ -115,9 +115,11 @@ async def capture_reaction(bot, event, observed_at):
         "channel_id": channel_id,
         "ga_user_id": context["ga_user_id"],
         "message_id": evidence["id"],
+        "message_channel_id": str(event.channel_id),
         "message_author_id": evidence["author_id"],
         "message_content": evidence["content"],
         "has_attachments": bool(evidence["attachments"]),
+        "attachment_count": evidence["attachments"],
         "emoji": event.emoji.name if event.emoji.id is None else f":{event.emoji.name}:",
         "observed_at": observed_at.isoformat(),
     }

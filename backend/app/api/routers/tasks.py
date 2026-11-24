@@ -80,6 +80,7 @@ from app.services.task_title_rules import (
     normalize_email_task_title as _normalize_email_task_title,
     title_has_eight_am_indicator,
 )
+from app.services.px_note_email import email_preview, email_title_from_content
 
 
 router = APIRouter()
@@ -1978,6 +1979,12 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
         ).scalar_one_or_none()
         if ga_note is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note not found")
+        email = email_preview(ga_note)
+        email_title = email_title_from_content(ga_note.content or "") or (email["title"] if email else None)
+        if email_title:
+            payload.title = email_title_from_content(payload.title) or email_title
+            payload.is_1h_report = True
+            payload.one_h_report_slot = "10:00"
         ga_note_department = None
         if ga_note.department_id is not None:
             ga_note_department = (
