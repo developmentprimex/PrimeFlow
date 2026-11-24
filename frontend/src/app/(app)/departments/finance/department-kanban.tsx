@@ -877,31 +877,46 @@ export default function DepartmentKanban() {
               {error}
             </div>
           ) : (
-            <div className="space-y-4">
-              <Table className="min-w-[2100px] table-fixed" containerClassName="rounded-lg border border-slate-200 bg-white">
+            <div className="@container space-y-4">
+              <Table
+                className="min-w-[1340px] table-fixed"
+                containerClassName="max-h-[75dvh] overflow-auto rounded-lg border border-slate-200 bg-white @[1342px]:max-h-none @[1342px]:overflow-visible print:max-h-none print:overflow-visible"
+              >
                 <colgroup>
-                  {[44, 480, 64, 90, 112, 48, 105, 105, 105, 65, 100, 120, 170, 190, 90].map((width, index) => (
-                    <col key={index} style={{ width }} />
-                  ))}
+                  <col className="w-[36px]" />{/* NR */}
+                  <col />{/* Title fills the remaining space */}
+                  <col className="w-16" />{/* Freq. */}
+                  <col className="w-[54px]" />{/* Type */}
+                  <col className="w-20" />{/* Slot */}
+                  <col className="w-10" />{/* Asg */}
+                  <col className="w-[82px]" />{/* Created */}
+                  <col className="w-[88px]" />{/* Start Date */}
+                  <col className="w-[88px]" />{/* Due Date */}
+                  <col className="w-[46px]" />{/* Late */}
+                  <col className="w-[100px]" />{/* Symbol */}
+                  <col className="w-[108px]" />{/* Status */}
+                  <col className="w-[170px]" />{/* Arsyeja */}
+                  <col className="w-[150px]" />{/* Koment */}
+                  <col className="w-28" />{/* Actions */}
                 </colgroup>
-                <TableHeader className="bg-slate-50">
+                <TableHeader className="sticky top-0 z-20 bg-slate-50 print:static">
                   <TableRow className="bg-slate-50">
                     <TableHead>NR</TableHead>
-                    <TableHead className="w-[480px] min-w-[480px]">Title</TableHead>
-                    <TableHead className="w-16 min-w-16 max-w-16 px-0 text-center" title="Frequency">Freq.</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead className="px-0 text-center" title="Frequency">Freq.</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead className="w-28 min-w-28 px-1 text-center" title="1H report time">
+                    <TableHead className="px-1 text-center" title="1H report time">
                       Slot
                     </TableHead>
-                    <TableHead className="w-12 min-w-12 px-1 text-center" title="Assignee">Asg</TableHead>
+                    <TableHead className="px-1 text-center" title="Assignee">Asg</TableHead>
                     <TableHead className="text-xs font-normal text-slate-400">Created</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead>Late</TableHead>
                     <TableHead>Symbol</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="min-w-[170px]">Arsyeja</TableHead>
-                    <TableHead className="min-w-[190px]">Koment</TableHead>
+                    <TableHead>Arsyeja</TableHead>
+                    <TableHead>Koment</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -910,7 +925,7 @@ export default function DepartmentKanban() {
                     filteredRows.map((row, index) => (
                       <TableRow key={row.id}>
                         <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                        <TableCell className="w-[480px] min-w-[480px] whitespace-normal font-medium text-slate-800">
+                        <TableCell className="whitespace-normal font-medium text-slate-800">
                           <div className="relative flex w-full items-start gap-2 pr-8">
                             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
                               <TaskMarkerComment comment={row.task.one_h_marker_comment} taskId={row.task.id} />
@@ -923,7 +938,7 @@ export default function DepartmentKanban() {
                             </span>
                           </div>
                         </TableCell>
-                        <TableCell className="w-16 min-w-16 max-w-16 px-0 text-center">
+                        <TableCell className="px-0 text-center">
                           {row.systemFrequencyDisplayLabel ? (
                             <span
                               className="inline-flex h-5 items-center justify-center rounded-full border border-slate-200 px-2 text-[10px] font-semibold text-slate-600"
@@ -936,7 +951,7 @@ export default function DepartmentKanban() {
                         <TableCell>
                           <Badge variant="outline">{row.typeLabel}</Badge>
                         </TableCell>
-                        <TableCell className="w-28 min-w-28 px-1 text-center">
+                        <TableCell className="px-1 text-center">
                           {row.task.is_1h_report || row.task.is_r1 || row.oneHReportSlot ? (
                             row.canEdit ? (
                               <select
@@ -975,7 +990,7 @@ export default function DepartmentKanban() {
                             getFinanceSlotDisplay(row.task)
                           )}
                         </TableCell>
-                        <TableCell className="w-12 min-w-12 px-1 text-center" title={row.assigneeLabel}>
+                        <TableCell className="px-1 text-center whitespace-normal" title={row.assigneeLabel}>
                           <span className="text-xs font-semibold text-slate-700">{row.assigneeInitials}</span>
                         </TableCell>
                         <TableCell className="text-xs font-normal text-slate-400">
@@ -990,7 +1005,7 @@ export default function DepartmentKanban() {
                             "-"
                           )}
                         </TableCell>
-                        <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                        <TableCell className="px-1 text-center">
                           {row.typeLabel === "SYS" ? (
                             <span className="text-xs font-semibold text-slate-600">SYS</span>
                           ) : (
@@ -998,11 +1013,11 @@ export default function DepartmentKanban() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${row.statusClassName}`}>
+                          <span className={`inline-block max-w-full rounded px-2 py-1 text-xs font-medium uppercase whitespace-normal [overflow-wrap:anywhere] ${row.statusClassName}`}>
                             {row.status === "PAUSED" ? "Stopped" : row.status}
                           </span>
                         </TableCell>
-                        <TableCell className="min-w-[170px]">
+                        <TableCell className="whitespace-normal [overflow-wrap:anywhere] [&_[data-slot=select-trigger]]:w-full [&_[data-slot=select-trigger]]:px-2">
                           <DailyRlzReasonCell
                             taskId={row.id}
                             day={todayIso}
@@ -1011,7 +1026,7 @@ export default function DepartmentKanban() {
                             onSaved={refreshDailyReport}
                           />
                         </TableCell>
-                        <TableCell className="min-w-[190px]">
+                        <TableCell className="whitespace-normal [overflow-wrap:anywhere] [&_input]:min-w-0">
                           <DailyRlzCommentField
                             taskId={row.id}
                             day={todayIso}
@@ -1021,16 +1036,17 @@ export default function DepartmentKanban() {
                           />
                         </TableCell>
                         <TableCell>
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap items-center gap-1">
                             <Button
                               size="sm"
                               variant="ghost"
+                              className="h-7 px-2"
                               onClick={() => setViewingDescriptionTask(row.task)}
                             >
                               Description
                             </Button>
                             {row.canEdit ? (
-                              <Button size="sm" variant="outline" onClick={() => setEditingTask(row.task)}>
+                              <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setEditingTask(row.task)}>
                                 Edit
                               </Button>
                             ) : (
@@ -1039,7 +1055,7 @@ export default function DepartmentKanban() {
                             {row.canMarkDone ? (
                               <Button
                                 size="sm"
-                                className="bg-emerald-500 text-white hover:bg-emerald-600"
+                                className="h-7 bg-emerald-500 px-2 text-white hover:bg-emerald-600"
                                 onClick={() => void handleMarkDone(row.id)}
                                 disabled={Boolean(updatingTaskIds[row.id])}
                               >

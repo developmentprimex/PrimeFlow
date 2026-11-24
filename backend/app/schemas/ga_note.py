@@ -24,6 +24,7 @@ from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, TaskFinis
 class GaNoteOut(BaseModel):
     id: uuid.UUID
     content: str
+    email_preview: dict[str, str] | None = None
     created_by: uuid.UUID | None = None
     note_type: GaNoteType
     status: GaNoteStatus

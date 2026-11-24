@@ -1,5 +1,7 @@
 "use client"
 
+import { NoteEmailPreview } from "@/components/note-email-preview"
+
 import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
@@ -3239,7 +3241,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     }
     const matchesContentFilter = (note: GaNote) => {
       if (contentFilter === "all") return true
-      return ["INFO_PX_MAIL", "IT_MAIL", "HF_MAIL", "PX_EU_MAIL"].includes(note.knowledge_type ?? "") || EMAIL_MARKER_RE.test(note.content || "")
+      return Boolean(note.email_preview)
+        || ["GMAIL", "INFO_PX_MAIL", "IT_MAIL", "HF_MAIL", "PX_EU_MAIL"].includes(note.knowledge_type ?? "")
+        || EMAIL_MARKER_RE.test(note.content || "")
     }
     const matchesOneHMarkerFilter = (note: GaNote) => {
       const markers = noteDisplayMarkers(note, noteTaskInfo.get(note.id))
@@ -4333,7 +4337,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 value={contentFilter}
                 onValueChange={(v) => setContentFilter(v as ContentFilter)}
               >
-                <SelectTrigger className="h-9 w-full min-w-0 gap-1 px-2 text-xs sm:w-[140px] sm:gap-2 sm:px-3 sm:text-sm [&_[data-slot=select-value]]:min-w-0">
+                <SelectTrigger aria-label="Content" className="h-9 w-full min-w-0 gap-1 px-2 text-xs sm:w-[140px] sm:gap-2 sm:px-3 sm:text-sm [&_[data-slot=select-value]]:min-w-0">
                   <SelectValue placeholder="Content" />
                 </SelectTrigger>
                 <SelectContent>
@@ -4837,16 +4841,16 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                   </Link>
                                 ) : null}
                                 {miraCollapsed ? null : (
-                                  <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
+                                  <div id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
                                     {displayMarkers.map((symbol) => symbol.comment ? (
                                       <span key={symbol.key}>
                                         {displayMarkers.length > 1 && symbol.person ? <span className="font-semibold">{symbol.person}: </span> : null}
                                         <TaskMarkerComment comment={symbol.comment} />
                                       </span>
                                     ) : null)}
-                                    {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
+                                    {note.email_preview ? <NoteEmailPreview email={note.email_preview} /> : renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                     {dictationSource && <span className="mt-1 block text-xs text-muted-foreground">{dictationSource}</span>}
-                                  </span>
+                                  </div>
                                 )}
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
@@ -5285,7 +5289,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Note</div>
                 <div className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">
-                  {renderMarkedNoteContent(attachmentsDialogNote.content, canViewStrikeTimestamps)}
+                  {attachmentsDialogNote.email_preview
+                    ? <NoteEmailPreview email={attachmentsDialogNote.email_preview} />
+                    : renderMarkedNoteContent(attachmentsDialogNote.content, canViewStrikeTimestamps)}
                 </div>
               </div>
               {attachmentsDialogCanAddFiles ? (

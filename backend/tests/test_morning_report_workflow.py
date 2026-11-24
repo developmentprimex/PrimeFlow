@@ -318,6 +318,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertIn("T/Y/O", body)
         self.assertIn("VAZHDON?", body)
         self.assertIn("KOMENT", body)
+        self.assertEqual(body.count("BZ ME"), 1)
         report_html = render_html(
             subject_for(date(2026, 9, 1)),
             date(2026, 9, 1),
@@ -351,7 +352,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
             [{"title": GA_HV_DV_TASKS_TITLE, "body": body}],
         )
 
-        self.assertEqual(report_html.count("am-pm-divider"), 9)
+        self.assertEqual(report_html.count("am-pm-divider"), 10)
         self.assertIn("border-top:3px solid #334155!important", report_html)
 
         unrelated_body = _ga_hv_dv_tables_body({
@@ -594,7 +595,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_task_feedback_uses_owner_and_task_id_and_keeps_manual_fields(self) -> None:
         report_day = date(2026, 9, 1)
-        ga = GaHvDvTodayTaskRowsTests._task("Same title", id=uuid.uuid4())
+        ga = GaHvDvTodayTaskRowsTests._task("Same title", id=uuid.uuid4(), system_template_origin_id=uuid.uuid4())
         dv = GaHvDvTodayTaskRowsTests._task(
             "Same title", id=uuid.uuid4(), assigned_to="dv-user",
             start_date=datetime(2026, 9, 2, 8, 0), due_date=datetime(2026, 9, 2, 16, 0),
@@ -614,11 +615,16 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(task_id=finance.id, user_id="hs-user", continuation=None,
                                 comment="Finance comment from PrimeFlow", updated_at=datetime.now(timezone.utc)),
             ])))),
+            Mock(all=Mock(return_value=[(ga.id, "other-user")])),
+            Mock(all=Mock(return_value=[
+                (ga.system_template_origin_id, "oh-user", ["ga-user", "oh-user"], "ga-user"),
+            ])),
+            Mock(all=Mock(return_value=[("oh-user", "Owner Hoxha", "owner.hoxha")])),
         ]
         body, feedback = await _ga_hv_dv_task_section(
             db, [ga, dv, finance],
             {"ga-user": "Gane Arifaj", "dv-user": "Diellza Veliu", "hs-user": "Haxhere Spahiu"},
-            {}, report_day, {"finance": "FIN"},
+            {ga.id: {"ga-user", "other-user"}}, report_day, {"finance": "FIN"},
             {
                 f"GA TASKS:{ga.id}": {"comment": "Manual GA"},
                 "plan:HV": {"continuation": "PO", "comment": "Ndryshim në Finance"},
@@ -638,10 +644,12 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("A prishet plani për sot? (GA): –", body)
         self.assertNotIn("Older finance comment", body)
         self.assertNotIn("Wrong owner", body)
+        self.assertRegex(body, r"\| Same title\s+\| OH\s+\| ✓\s+\| Manual GA")
         sections = [{"title": GA_HV_DV_TASKS_TITLE, "body": body}]
         subject = subject_for(report_day)
         html = render_html(subject, report_day, sections)
         self.assertIn("Ndryshim në Finance", html)
+        self.assertRegex(html, r"<td[^>]*>OH</td>")
         self.assertRegex(html, r'<td[^>]*bgcolor="#DCFCE7"[^>]*>✓</td>')
         self.assertRegex(html, r'<td[^>]*bgcolor="#FEE2E2"[^>]*>X</td>')
         from docx import Document
@@ -650,6 +658,8 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("✓", cells)
         self.assertIn("X", cells)
         self.assertIn("Discord DV", cells)
+        self.assertIn("BZ ME", cells)
+        self.assertIn("OH", cells)
         self.assertTrue(render_section_report_png(subject, "M1", report_day, sections).startswith(b"\x89PNG"))
 
     async def test_task_feedback_patch_keeps_other_fields_and_saves_an_explicit_blank(self) -> None:
@@ -694,6 +704,31 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["sections"][0]["body"], "Updated F table")
         self.assertEqual(row.sections, old)
         db.commit.assert_not_awaited()
+
+    async def test_generating_existing_m1_keeps_both_automatic_symbol_tables(self) -> None:
+        row = make_draft()
+        marker_sections = [
+            {"section_key": title, "title": title, "body": f"Updated {caption}"}
+            for title, (_, caption) in MARKER_TASK_SECTIONS.items()
+        ]
+        manual = {"section_key": "manual:custom:1:retained", "title": "Another question", "body": "Keep this answer"}
+        row.sections = [*normalize_morning_report_sections([]), manual]
+        db = AsyncMock()
+        db.execute.return_value = Mock(scalar_one_or_none=Mock(return_value=row),
+                                       scalars=Mock(return_value=Mock(all=Mock(return_value=[]))))
+        user = SimpleNamespace(id=uuid.uuid4())
+        with (
+            patch.object(morning_api, "_default_draft_recipients", AsyncMock(return_value=row.recipients)),
+            patch.object(morning_api, "_get_or_create_settings", AsyncMock(return_value=SimpleNamespace(manual_questions=[]))),
+            patch.object(morning_api, "build_morning_report_sections", AsyncMock(return_value=(marker_sections, {}))),
+            patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles", AsyncMock(return_value=[])),
+        ):
+            payload = await morning_api.generate_draft(row.report_date, db, user)
+
+        for sections in (row.sections, payload["sections"]):
+            by_key = {section["section_key"]: section for section in sections}
+            for section in [*marker_sections, manual]:
+                self.assertEqual(by_key[section["section_key"]]["body"], section["body"])
 
     async def test_retired_questions_are_removed_from_saved_and_regenerated_m1(self) -> None:
         retired = [
@@ -1158,7 +1193,10 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             last_run_date=None,
         )
         db = SchedulerDb(settings, draft)
-        regenerated = [{"title": SECTION_TITLES[2], "body": "Fresh VONESA: 0"}]
+        regenerated = [
+            {"title": SECTION_TITLES[2], "body": "Fresh VONESA: 0"},
+            {"section_key": PHYSICAL_GA_TITLE, "title": PHYSICAL_GA_TITLE, "body": "FG:GA DEVICES"},
+        ]
         build = AsyncMock(return_value=(regenerated, {"counts": {}, TASK_FEEDBACK_OVERRIDES: overrides}))
         send = AsyncMock(return_value={"id": "gmail-id", "threadId": "thread-id"})
         render_plain = Mock(return_value="plain")

@@ -16,6 +16,7 @@ from app.models.department import Department
 from app.models.enums import CommonCategory, GaNoteStatus
 from app.models.ga_note import GaNote
 from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN, sync_gmail_px_notes
+from app.services.px_note_email import email_preview, email_preview_text
 from app.models.plan_note import PlanNote
 from app.models.m1_reporting_points import M1ReportingPointsReport
 from app.models.task import Task
@@ -136,7 +137,10 @@ def select_sections(entries, ga_notes, _plan_notes, tasks, day: date, *, now: da
                 and not is_mira_note(note)
                 and getattr(note, "status", GaNoteStatus.OPEN) != GaNoteStatus.CLOSED):
             author = users.get(getattr(note, "created_by", None))
-            data["notes"].append({"id": str(note.id), "source": "PX Notes", "content": note.content,
+            email = email_preview(note)
+            data["notes"].append({"id": str(note.id), "source": "PX Notes",
+                                  "content": email_preview_text(email) if email else note.content,
+                                  **({"email_preview": email} if email else {}),
                                   "author": (getattr(author, "full_name", None) or getattr(author, "username", None)
                                              or getattr(author, "email", None) or "-"),
                                   "created_at": _local(note.created_at).isoformat()})
@@ -425,7 +429,7 @@ def _table_rows(report: dict, key: str) -> list[list[dict]]:
         rendered.append([{"text": str(value), "fill": fill, "color": "#000000",
                           "bold": column == (1 if key in {"absences", "delays", "notes"} else 5 if key == "tasks" else -1), "divider": False}
                          for column, value in enumerate(values)])
-        if key == "notes":
+        if key == "notes" and not row.get("email_preview"):
             runs = marked_note_runs(row.get("content"))
             rendered[-1][2]["text"] = "".join(run["text"] for run in runs) or "-"
             rendered[-1][2]["runs"] = runs
@@ -501,7 +505,8 @@ def render_html(report: dict) -> str:
                 f"<td style='background:{cell['fill']};color:{cell['color']};border:1px solid #000;padding:7px;vertical-align:{'bottom' if index < 2 else 'top'};text-align:left;direction:ltr;white-space:pre-wrap;overflow-wrap:anywhere{';font-weight:bold' if cell['bold'] else ''}'>{runs_html(cell['runs']) if cell.get('runs') else html.escape(cell['text']).replace(chr(10), '<br>')}</td>"
                 for index, cell in enumerate(row)) + "</tr>" for row in block["rows"])
             table_width = f"{total_width}px" if len(block["columns"]) == 3 else "100%"
-            parts.append(f"<table style='border-collapse:collapse;width:{table_width};max-width:100%;table-layout:fixed;font-size:12px'><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>")
+            notes_table = " data-undiscussed-notes-table='true'" if any(key == "content" for key, _, _ in block["columns"]) else ""
+            parts.append(f"<table{notes_table} style='border-collapse:collapse;width:{table_width};max-width:100%;table-layout:fixed;font-size:12px'><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>")
     return "".join(parts) + "</body></html>"
 
 

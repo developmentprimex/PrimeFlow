@@ -21,7 +21,8 @@ def test_gmail_note_uses_the_message_id_and_preserves_review_state_on_retry():
     assert values["created_at_m0"] == timestamp
     assert "Test email" in values["content_m0"]
     assert "sender@example.com" in values["content_m0"]
-    assert "ON CONFLICT (id) DO NOTHING" in str(compiled)
+    assert "DO UPDATE SET email_metadata = excluded.email_metadata, email_body = excluded.email_body" in str(compiled)
+    assert "WHERE ga_notes.email_metadata IS NULL" in str(compiled)
 
 
 def test_gmail_note_contains_full_plain_text():

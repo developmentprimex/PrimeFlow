@@ -17,7 +17,10 @@ from app.models.department import Department
 from app.services.task_plan_feedback import load_task_plan_feedback
 from app.models.enums import CommonCategory
 from app.models.meeting import Meeting
+from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
+from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_symbol_comment_event import TaskSymbolCommentEvent
 from app.models.user import User
 from app.services.after_break_report import (
@@ -140,6 +143,7 @@ GA_HV_DV_TASK_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7),
     ("STATUS", 18), ("T/Y/O", 5), ("TITULLI", 52), ("VAZHDON?", 8), ("KOMENT", 45),
 ]
+GA_TASK_COLUMNS = [*GA_HV_DV_TASK_COLUMNS[:8], ("BZ ME", 14), *GA_HV_DV_TASK_COLUMNS[8:]]
 TASK_FEEDBACK_OVERRIDES = "task_feedback_overrides"
 TASK_FEEDBACK_ROWS = "task_feedback_rows"
 CONTINUATION_ICONS = {"PO": "✓", "JO": "X"}
@@ -697,12 +701,67 @@ def _ga_hv_dv_tables_body(
             answer = {"PO": "Po", "JO": "Jo"}.get(plan["continuation"], "–")
             comment = " ".join(plan["comment"].split())
             lines.append(f'{plan["title"]} ({plan["owners"]}): {answer}' + (f" · {comment}" if comment else ""))
+        columns = GA_TASK_COLUMNS if title == GA_TASKS_TITLE else GA_HV_DV_TASK_COLUMNS
         rows = rows_by_title.get(title, [])
         if not rows:
             rows = [["-", "-", "-", "-", "-", "-", "-", "(Asnje detyre)"]]
-        values = [row + [""] * (len(GA_HV_DV_TASK_COLUMNS) - len(row)) for row in rows]
-        lines.extend(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, values))
+        values = [row + [""] * (len(columns) - len(row)) for row in rows]
+        lines.extend(_ascii_table(title, columns, values))
     return _normalize_section(lines)
+
+
+async def _ga_task_bz_labels(
+    db: AsyncSession, tasks: list[Task], assignee_ids_by_task: dict[Any, set[Any]],
+) -> dict[Any, str]:
+    """Mirror the Admin Tasks BZ ME column for the tasks already selected for M1."""
+    if not tasks:
+        return {}
+
+    task_ids = [task.id for task in tasks]
+    task_alignment: dict[Any, set[Any]] = {}
+    for task_id, user_id in (await db.execute(
+        select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
+        .where(TaskAlignmentUser.task_id.in_(task_ids))
+    )).all():
+        task_alignment.setdefault(task_id, set()).add(user_id)
+
+    template_ids = {task.system_template_origin_id for task in tasks if task.system_template_origin_id}
+    template_assignees: dict[Any, list[Any]] = {}
+    template_alignment: dict[Any, set[Any]] = {}
+    if template_ids:
+        for template_id, default_id, assignee_ids, alignment_id in (await db.execute(
+            select(SystemTaskTemplate.id, SystemTaskTemplate.default_assignee_id,
+                   SystemTaskTemplate.assignee_ids, SystemTaskTemplateAlignmentUser.user_id)
+            .outerjoin(SystemTaskTemplateAlignmentUser,
+                       SystemTaskTemplateAlignmentUser.template_id == SystemTaskTemplate.id)
+            .where(SystemTaskTemplate.id.in_(template_ids))
+        )).all():
+            template_assignees[template_id] = [default_id, *(assignee_ids or [])]
+            if alignment_id:
+                template_alignment.setdefault(template_id, set()).add(alignment_id)
+
+    executors_by_task = {}
+    for task in tasks:
+        template_id = task.system_template_origin_id
+        coordinators = task_alignment.get(task.id, set()) | template_alignment.get(template_id, set())
+        assigned = [task.assigned_to, *sorted(assignee_ids_by_task.get(task.id, ()), key=str),
+                    *template_assignees.get(template_id, [])]
+        executors_by_task[task.id] = [user_id for user_id in dict.fromkeys(assigned)
+                                      if user_id and user_id not in coordinators]
+
+    user_ids = {user_id for executors in executors_by_task.values() for user_id in executors}
+    if not user_ids:
+        return {}
+    initials = {
+        user_id: "".join(part[0].upper() for part in (full_name or username or "").split()[:2])
+        for user_id, full_name, username in (await db.execute(
+            select(User.id, User.full_name, User.username).where(User.id.in_(user_ids), User.work_staff_filter())
+        )).all()
+    }
+    return {
+        task_id: " / ".join(initials[user_id] for user_id in executors if initials.get(user_id)) or "-"
+        for task_id, executors in executors_by_task.items()
+    }
 
 
 async def _ga_hv_dv_task_section(
@@ -746,6 +805,7 @@ async def _ga_hv_dv_task_section(
         )
         rows_by_title[title] = rows
         feedback_rows[title] = []
+        bz_labels = await _ga_task_bz_labels(db, selected, assignee_ids_by_task) if title == GA_TASKS_TITLE else {}
         for row, task in zip(rows, selected):
             responses = responses_by_task.get(task.id, [])
             actions = {action for _, action, _ in responses}
@@ -759,6 +819,8 @@ async def _ga_hv_dv_task_section(
             manual = overrides.get(key, {})
             continuation = manual.get("continuation", continuation)
             comment = manual.get("comment", comment)
+            if title == GA_TASKS_TITLE:
+                row.append(bz_labels.get(task.id, "-"))
             row.extend((CONTINUATION_ICONS.get(continuation, ""), comment.replace("|", "│")))
             feedback_rows[title].append({
                 "key": key, "title": row[7], "owners": row[1],

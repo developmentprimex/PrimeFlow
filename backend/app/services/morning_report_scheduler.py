@@ -11,7 +11,6 @@ from app.db import SessionLocal
 from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.services.morning_report import (
-    MANUAL_SECTION_TITLES,
     TASK_FEEDBACK_OVERRIDES,
     build_morning_report_sections,
     is_generated_subject,
@@ -21,7 +20,6 @@ from app.services.morning_report import (
     send_morning_report,
     subject_for,
 )
-from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 
 logger = logging.getLogger(__name__)
@@ -86,7 +84,6 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
         )
         existing_sections = row.sections if row is not None else None
         if row is not None:
-            sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
             sections = preserve_morning_plan_note(sections, row.sections)
         from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
 

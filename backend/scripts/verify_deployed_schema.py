@@ -32,6 +32,8 @@ EXPECTED_COLUMNS = {
     )),
     ("m2_reporting_points_reports", "auto_sent_at"),
     ("ga_notes", "knowledge_tester_id"),
+    ("ga_notes", "email_metadata"),
+    ("ga_notes", "email_body"),
     ("knowledge_prompts", "tester_id"),
     ("knowledge_prompts", "test_task_id"),
     ("realization_daily_close_events", "daily_comment"),

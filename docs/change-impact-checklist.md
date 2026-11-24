@@ -90,22 +90,38 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
-- INFO PX dhe EM IT në pikën 8 të M1 lexojnë tekstin nga Inbox-et e Outlook-ut
+- INFO PX dhe EM IT në pikën 5 të M1 lexojnë tekstin nga Inbox-et e Outlook-ut
   me Microsoft Graph `Mail.Read`. Çdo përdorues i kyçur që hap M1 mund ta
   shohë tabelën dhe vetëm administratori autorizon mailbox-in. Rifreskimi
   ruan nga një PX Note për çdo ID mesazhi dhe mailbox, me prefiksin
-  `EM INFO PX -` ose `EM IT -`,
-  subjektin, dërguesin dhe tekstin. Kontrollo pikën e shënimeve në M1,
+  `EM INFO PX:` ose `EM IT:`. Kontrollo pikën e shënimeve në M1,
   M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow dhe Excel të PX Notes,
-  si edhe përjashtimin nga API-ja publike. Tabela e Outlook-ut në pikën 8
+  si edhe përjashtimin nga API-ja publike. Tabela e Outlook-ut në pikën 5
   lexohet veç përmbajtjes së draftit.
 
 - EM PX EU lexon Inbox-in e Gmail për datën e M1 me `gmail.readonly`. Një
   administrator autorizon llogarinë `primex.eu@gmail.com`. Hapja ose rifreskimi
-  i tabelës në pikën 8 ruan një PX Note për çdo mesazh me prefiksin `EM PX EU -`,
-  subjektin, dërguesin dhe tekstin. Verifiko filtrin Email në PX Notes, shënimet
+  i tabelës në pikën 5 ruan një PX Note për çdo mesazh me prefiksin `EM PX EU:`.
+  Verifiko filtrin Email në PX Notes, shënimet
   në M1, M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow, Excel të PX Notes
   dhe përjashtimin nga API-ja publike. Tabela burimore shfaqet në ekranin e M1.
+
+- Tabelat e inbox-it INFO PX, IT, HF dhe PX EU në pikën 5 të M1 përdorin
+  të njëjtin komponent. Rreshti shfaq prefiksin me orën, dërguesin dhe
+  subjektin. Butoni `+` hap tekstin e plotë dhe `−` e mbyll. Kontrollo
+  të katër kutitë, përfshirë email-et me tekst të gjatë. Importi i ri përdor
+  konfigurimin OpenAI të PrimeFlow për të përmbledhur subjektin dhe tekstin e
+  email-it. Shënimi ruhet me prefiksin, orën, klientin ose projektin (ose
+  subjektin kur nuk identifikohet një emër), një përmbledhje dhe hapat e
+  numëruar. Kontrollo filtrin Email, eksportin Excel, M1, M2 Post-Break,
+  M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow. Importet ekzistuese ruhen
+  me ID-në e tyre; vetëm përmbledhjet që dështojnë riprovohen me Rifresko.
+  Listat e PX Notes, M1/M2, M1 PIKAT dhe preview-të e 1H Reports e SHTYPI
+  Tomorrow shfaqin vetëm titullin, subjektin dhe dërguesin për shënimet nga
+  email-et. Butoni `+` lexon emailin përmes API-së së autentikuar. Për
+  importet e vjetra, API-ja lexon kopjen burimore nga shënimi ose nga
+  metadata e plotësuar në sinkronizimin pasues. Daljet statike të gjeneruara
+  nga shënimet përdorin rreshtin e shkurtuar.
 
 - Renditja e pikave në M1 Start of Day përdoret edhe nga preview-ja, teksti
   dhe emaili me bashkëngjitjet Word/PNG, në dërgimin manual dhe automatik.
@@ -244,6 +260,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   simbolesh shfaqen në një rresht me përgjegjësit përkatës pas filtrit të
   mungesave. Kur janë disa përgjegjës, kolona KUSH i ndan me `/` dhe faqja M1
   e thekson vijën ndarëse. Kontrollo numrin e rreshtave dhe kolonën KUSH.
+  Ruajtja e titullit, marrësve ose pyetjeve të tjera mban tabelat e simboleve
+  që faqja ka rifreskuar, edhe nëse përgjigjja e ruajtjes kthen kopjen e vjetër.
+  Generate dhe dërgimi automatik i M1 ruajnë identifikuesit e tabelave të
+  gjeneruara dhe bashkojnë përgjigjet manuale nga drafti ekzistues.
   Të dyja pikat renditen pas përgjigjeve dhe reagimeve të GA nga Discord.
   Kontrollo gjenerimin, rifreskimin e draftit, preview, emailin manual dhe
   automatik dhe bashkëngjitjet Word/PNG. Titulli nga TAK BORD/GA ose nga një
@@ -258,6 +278,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   të së hënës, kufirin 08:00 për M2, preview, emailin dhe Word/PNG.
   Hapja e draftit, preview dhe dërgimi manual rilexojnë reagimet e draftit
   deri në orën fillestare të gjenerimit, edhe kur boti i ka ruajtur me vonesë.
+  Një server raportimi pa ID të serverit Discord lexon evidencën e ruajtur
+  nga kanali i konfiguruar. Raportet e dërguara me evidencë të padisponueshme
+  mund ta shfaqin tabelën e rikuperuar me kufirin e gjenerimit të ruajtur.
   Reagimet historike pa orë të regjistruar nuk mund të futen në interval.
   M3 dhe sinkronizimi i reagimeve për përmendjet e GA kanë rrjedha të veçanta.
 
@@ -276,6 +299,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   edhe kur filtri i mungesave heq rreshta nga tabela.
   Kontrollo rifreskimin, rigjenerimin, preview, emailin manual dhe automatik,
   Word/PNG dhe tekstin. M2, M3, Common View dhe 1H përdorin tabela të veçanta.
+  Vetëm nën-tabela **GA TASKS** shton kolonën **BZ ME**, duke ndjekur rregullin
+  e Admin Tasks për inicialet e ekzekutuesve. Përfshihen caktimet e detyrës
+  dhe të shabllonit sistemor, duke përjashtuar personat e caktuar për koordinim.
+  Kontrollo që inicialet të përdoren edhe në preview, email, tekst dhe Word/PNG.
+  Tabela **BZ ME GA** te pika e takimeve përdor rrjedhën e saj.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
 

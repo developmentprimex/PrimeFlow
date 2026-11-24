@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -16,6 +16,8 @@ class GaNote(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     content: Mapped[str] = mapped_column(String, nullable=False)
+    email_metadata: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)
+    email_body: Mapped[str | None] = mapped_column(Text, nullable=True, deferred=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     note_type: Mapped[GaNoteType] = mapped_column(
         Enum(GaNoteType, name="ga_note_type"), nullable=False, server_default="GA"

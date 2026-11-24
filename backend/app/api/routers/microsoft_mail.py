@@ -217,7 +217,8 @@ async def messages(
                     client, access_token, report_date, report_timezone(),
                 )
         payload["messages"] = inbox_messages
-        await save_mailbox_notes(db, inbox_messages, mailbox)
+        if not await save_mailbox_notes(db, inbox_messages, mailbox):
+            payload["notes_error"] = "Email-et u lexuan, por disa përmbledhje për PX Notes nuk u krijuan. Provo përsëri me Rifresko."
     except SQLAlchemyError:
         await db.rollback()
         payload["notes_error"] = "Email-et u lexuan, por shënimet nuk u ruajtën në PX Notes."

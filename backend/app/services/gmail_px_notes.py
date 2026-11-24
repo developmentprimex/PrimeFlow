@@ -29,11 +29,18 @@ def gmail_note_insert(messages: list[GmailMessage]):
         values.append({
             "id": uuid.uuid5(_NOTE_NAMESPACE, message.id),
             "content": content,
+            "email_metadata": {"subject": subject, "sender": sender},
+            "email_body": message.body.replace("\x00", ""),
             "knowledge_type": GMAIL_NOTE_ORIGIN,
             "created_at": message.received_at,
             "start_date": message.received_at,
         })
-    return insert(GaNote.__table__).values(values).on_conflict_do_nothing(index_elements=["id"])
+    statement = insert(GaNote.__table__).values(values)
+    return statement.on_conflict_do_update(
+        index_elements=["id"],
+        set_={"email_metadata": statement.excluded.email_metadata, "email_body": statement.excluded.email_body},
+        where=GaNote.email_metadata.is_(None),
+    )
 
 
 async def sync_gmail_px_notes() -> None:

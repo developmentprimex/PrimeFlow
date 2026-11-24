@@ -39,7 +39,6 @@ from app.services.meeting_point_manual_sync import (
 from app.services.morning_report import (
     GA_HV_DV_TASKS_TITLE,
     GA_PF_COMMENTS_TITLE,
-    MANUAL_SECTION_TITLES,
     MARKER_TASK_SECTIONS,
     SECTION_TITLES,
     TASK_FEEDBACK_OVERRIDES,
@@ -56,8 +55,7 @@ from app.services.morning_report import (
     send_morning_report,
     subject_for,
 )
-from app.services.report_section_merge import preserve_manual_sections
-from app.services.report_note_attachments import section_note_attachments
+from app.services.report_note_attachments import compact_report_note_html, section_note_controls
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -288,7 +286,7 @@ async def _draft(db: AsyncSession, row: MorningReportDraft, sections: list[dict[
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
         "sections": visible_sections,
-        "note_attachments": await section_note_attachments(db, visible_sections, SECTION_TITLES[3], snapshot),
+        **(await section_note_controls(db, visible_sections, SECTION_TITLES[3], snapshot)),
         TASK_FEEDBACK_ROWS: feedback_rows,
         "generated_snapshot": row.generated_snapshot,
         "auto_sent_slots": list(row.auto_sent_slots or []),
@@ -414,7 +412,6 @@ async def generate_draft(
         raise HTTPException(status_code=500, detail=f"Generate failed: {exc}") from exc
     existing_sections = row.sections if row is not None else None
     if row is not None:
-        sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
         sections = preserve_morning_plan_note(sections, row.sections)
     sections = await merge_common_view_manual_sections(
         db, sections, "morning", existing_sections, settings.manual_questions
@@ -539,10 +536,11 @@ async def preview_draft(
     sections = await refresh_m1_gmail_section(sections, row.report_date, sent=row.status == "SENT")
     sections = await refresh_morning_leave_table(db, sections, row.report_date, row.generated_snapshot)
     sections = await filter_report_sections(db, sections, row.report_date)
+    note_controls = await section_note_controls(db, sections, SECTION_TITLES[3], row.generated_snapshot)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
-        "html": render_html(row.subject, row.report_date, sections),
-        "note_attachments": await section_note_attachments(db, sections, SECTION_TITLES[3], row.generated_snapshot),
+        "html": compact_report_note_html(render_html(row.subject, row.report_date, sections), note_controls["note_emails"]),
+        **note_controls,
     }
 
 

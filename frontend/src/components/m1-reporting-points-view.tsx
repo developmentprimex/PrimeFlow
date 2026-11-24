@@ -1,6 +1,8 @@
 "use client"
 
 import type { ReactNode } from "react"
+import { NoteEmailPreview } from "@/components/note-email-preview"
+import type { NoteEmailPreview as EmailPreview } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -14,7 +16,7 @@ export type ManualKey = "plan_changes" | "reorganization"
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 
 type AttendanceRow = { id: string; person: string; note?: string | null; from?: string; to?: string; start?: string; until?: string }
-type NoteRow = { id: string; author?: string; content: string; created_at: string }
+type NoteRow = { id: string; author?: string; content: string; created_at: string; email_preview?: EmailPreview }
 type TaskRow = { id: string; title: string; status: string; created_at: string; start_date?: string | null; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
@@ -76,7 +78,8 @@ function Created({ rows, kind }: { rows: NoteRow[] | TaskRow[]; kind: "note" | "
     empty={kind === "note" ? "Asnjë note e re në këtë interval." : "Asnjë detyrë e krijuar në këtë interval."}
     rows={rows.map((row, index) => ({ id: row.id, fill: kind === "note" ? "#dbeafe" : STATUS_COLORS[(row as TaskRow).status] || "#ffffff", cells: kind === "note" ? [
       index + 1, <strong key="author">{noteAuthorInitials((row as NoteRow).author)}</strong>,
-      <div key="note" className="whitespace-pre-wrap">{renderMarkedNoteContent((row as NoteRow).content)}</div>,
+      <div key="note" className="whitespace-pre-wrap">{(row as NoteRow).email_preview
+        ? <NoteEmailPreview email={(row as NoteRow).email_preview!} /> : renderMarkedNoteContent((row as NoteRow).content)}</div>,
       `${reportDate(row.created_at)} ${reportTime(row.created_at)}`,
     ] : [
       index + 1, (row as TaskRow).assignees || "—", (row as TaskRow).department || "—",

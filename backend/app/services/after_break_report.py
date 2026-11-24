@@ -988,7 +988,7 @@ NOTE_REFERENCES = "px_note_references"
 
 
 async def load_blue_notes(
-    db: AsyncSession, *, created_before: datetime | None = None,
+    db: AsyncSession, *, created_before: datetime | None = None, compact_email: bool = True,
 ) -> list[tuple[str, list[str]]]:
     """All eligible PX Notes that have not yet been discussed."""
     statement = (
@@ -1031,12 +1031,14 @@ async def load_blue_notes(
         users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(author_ids)))).scalars().all()
         names = {user.id: user.full_name or user.username or user.email for user in users}
 
+    from app.services.px_note_email import email_preview, email_preview_text
+
     ordered = sorted(open_notes, key=lambda note: note.created_at or note.updated_at)
     return [
         (str(note.id), [
             str(index),
             "YES" if note.is_discussed else "NO",
-            _note_text(note.content),
+            email_preview_text(preview) if compact_email and (preview := email_preview(note)) else _note_text(note.content),
             _initials(names.get(note.created_by)),
             _local_time(note.created_at),
         ])

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,7 @@ from app.schemas.ga_note import (
 )
 from app.services.ga_note_creation import build_ga_note
 from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN, sync_gmail_px_notes
+from app.services.px_note_email import email_preview, legacy_email
 from app.services.audit import add_audit_log
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
@@ -112,6 +113,7 @@ def _note_out(note: GaNote) -> GaNoteOut:
     return GaNoteOut(
         id=note.id,
         content=note.content,
+        email_preview=email_preview(note),
         created_by=note.created_by,
         note_type=note.note_type,
         status=note.status,
@@ -1036,6 +1038,30 @@ async def get_ga_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA note not found")
     await _ensure_note_access(note, user, db)
     return _note_out(note)
+
+
+@router.get("/{note_id}/email")
+async def get_ga_note_email(
+    note_id: uuid.UUID,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> dict[str, str]:
+    found = (await db.execute(select(GaNote, GaNote.email_body).where(GaNote.id == note_id))).one_or_none()
+    if found is None:
+        raise HTTPException(status_code=404, detail="Email not found")
+    note, body = found
+    await _ensure_note_access(note, user, db)
+    preview = email_preview(note)
+    if not preview:
+        raise HTTPException(status_code=404, detail="Email not found")
+    if body is None:
+        original = legacy_email(note.content)
+        if original is None:
+            raise HTTPException(status_code=404, detail="Email source not stored")
+        body = original[2]
+    response.headers["Cache-Control"] = "no-store"
+    return {**preview, "body": body}
 
 
 @router.post("/{note_id}/attachments", response_model=list[GaNoteAttachmentOut], status_code=status.HTTP_201_CREATED)

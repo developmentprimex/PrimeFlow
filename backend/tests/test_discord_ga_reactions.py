@@ -142,6 +142,25 @@ class DiscordGaReactionsTests(unittest.TestCase):
                 assert frozen == sections
                 summary.assert_awaited_once_with(None, cutoff.date(), report=report, generated_at=cutoff)
 
+    def test_report_only_instance_reads_the_channel_and_recovers_a_sent_unavailable_section(self):
+        cutoff = datetime(2026, 11, 24, 9, 3, tzinfo=report_timezone())
+        snapshot = {"ga_replies_generated_at": cutoff.isoformat()}
+        sections = [{"section_key": service.GA_REACTIONS_SECTION_KEY, "body": service.REACTIONS_UNAVAILABLE}]
+        row = SimpleNamespace(staff_name="Laurent", message_excerpt="Po mendon Puris apo?", emoji="👍",
+                              observed_at=cutoff - timedelta(minutes=10))
+        with patch.object(settings, "DISCORD_GUILD_ID", None):
+            for report, expected_start in (("M1", (23, 16, 30)), ("M2", (24, 8, 0))):
+                with self.subTest(report=report):
+                    db = SimpleNamespace(scalars=AsyncMock(return_value=Mock(all=Mock(return_value=[row]))))
+                    refreshed = asyncio.run(service.refresh_ga_reaction_section(
+                        db, sections, cutoff.date(), report=report, generated_snapshot=snapshot, sent=True,
+                    ))
+                    query = db.scalars.await_args.args[0].compile()
+                    start = datetime(2026, 11, *expected_start, tzinfo=cutoff.tzinfo)
+                    assert {"20", start, cutoff} <= set(query.params.values())
+                    assert "discord_ga_reactions.guild_id =" not in str(query)
+                    assert "Laurent" in refreshed[0]["body"] and "👍" in refreshed[0]["body"]
+
     def assert_report_table(self, report, module, expected_start):
         tz = report_timezone()
         cutoff = datetime(2026, 11, 23, 11, 30, tzinfo=tz)

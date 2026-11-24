@@ -16,7 +16,7 @@ from app.models.user import User
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.after_break_report import BLUE_NOTE_COLUMNS, NOTE_REFERENCES
-from app.services.report_note_attachments import match_note_attachments, note_attachments_by_row
+from app.services.report_note_attachments import compact_report_note_html, match_note_rows, note_controls_by_row
 from app.services.one_h_print_report_snapshot import (
     get_one_h_print_snapshot,
     save_one_h_print_snapshot,
@@ -123,9 +123,7 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
 
 async def _with_note_attachments(db: AsyncSession, report: dict) -> dict:
     references = report.pop(NOTE_REFERENCES, None)
-    if references is not None:
-        attachments = await note_attachments_by_row(db, references)
-    else:
+    if references is None:
         # Older snapshots only store HTML. Read the saved rows without
         # regenerating or replacing the rest of the report.
         document = BeautifulSoup(report.get("html", ""), "html.parser")
@@ -138,10 +136,11 @@ async def _with_note_attachments(db: AsyncSession, report: dict) -> dict:
                     [cell.get_text(" ", strip=True) for cell in row.select("td")]
                     for row in table.select("tbody tr")
                 ])
-        attachments = await match_note_attachments(
+        references = await match_note_rows(
             db, [row for row in rows if len(row) == len(columns)], None, generated_at=report.get("generated_at"),
         )
-    return {**report, "note_attachments": attachments}
+    controls = await note_controls_by_row(db, references)
+    return {**report, "html": compact_report_note_html(report.get("html", ""), controls["note_emails"]), **controls}
 
 
 @router.get("/preview")

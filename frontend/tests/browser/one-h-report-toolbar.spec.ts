@@ -4,9 +4,156 @@ import path from "node:path"
 
 const backend = path.resolve(__dirname, "../../../backend")
 
-test("M1 hides report controls initially and preserves edits when collapsed", async ({ page }) => {
+test("PX Notes Emails opens the original email with the disclosure button", async ({ page }) => {
+  const user = { id: "note-test-admin", full_name: "Notes admin", email: "admin@example.test", role: "ADMIN", is_active: true }
+  const email = { id: "px-mail", title: "EM IT: 10:00", subject: "Porosia", sender: "Drita <drita@example.test>" }
+  const timestamp = new Date().toISOString()
+  const note = { status: "OPEN", note_type: "GA", created_at: timestamp, start_date: timestamp, updated_at: timestamp, attachments: [] }
+  let requests = 0
+  await page.addInitScript(account => {
+    localStorage.setItem("primex_access_token", "test-only-browser-token")
+    localStorage.setItem("primex_user", JSON.stringify(account))
+  }, user)
+  await page.route("**/api/**", route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname === "/api/auth/me") return route.fulfill({ json: user })
+    if (pathname === "/api/marker-comments") return route.fulfill({ json: { items: [] } })
+    if (pathname === "/api/ga-notes") return route.fulfill({ json: [
+      { ...note, id: email.id, content: "Saved original email", knowledge_type: "IT_MAIL", email_preview: email },
+      { ...note, id: "ordinary", content: "Ordinary PX note" },
+    ] })
+    if (pathname === "/api/ga-notes/px-mail/email") {
+      requests++
+      return route.fulfill({ json: { ...email, body: "Complete source email" } })
+    }
+    return route.fulfill({ json: [] })
+  })
+
+  await page.goto("/ga-ka-notes")
+  await expect(page.getByText("Ordinary PX note", { exact: true })).toBeVisible()
+  await page.getByRole("combobox", { name: "Content" }).click()
+  await page.getByRole("option", { name: "Emails", exact: true }).click()
+  await expect(page.getByText("Ordinary PX note", { exact: true })).toBeHidden()
+  const content = page.locator("#ga-note-content-px-mail")
+  await expect(content).toContainText(email.title)
+  await expect(content).toContainText(email.subject)
+  await expect(content).toContainText(email.sender)
+  await expect(page.getByText("Saved original email", { exact: true })).toBeHidden()
+  expect(requests).toBe(0)
+  await content.getByLabel("Hap emailin").click()
+  await expect(content.getByText("Complete source email")).toBeVisible()
+  expect(requests).toBe(1)
+  await content.getByLabel("Mbyll emailin").click()
+  await expect(content.getByText("Complete source email")).toBeHidden()
+})
+
+test("M1 opens a previously imported email only on demand", async ({ page }) => {
+  const user = { id: "note-test-admin", full_name: "Report admin", email: "admin@example.test", role: "ADMIN", is_active: true }
+  const point = "(GA) NOTES TE REJA ( NOT DISSCUSED)?"
+  const recipients = { to: [], cc: [], bcc: [] }
+  const email = { id: "old-import", title: "EM IT: 10:00", subject: "Porosia", sender: "Drita <drita@example.test>" }
+  let emailRequests = 0
+  await page.addInitScript(account => {
+    localStorage.setItem("primex_access_token", "test-only-browser-token")
+    localStorage.setItem("primex_user", JSON.stringify(account))
+  }, user)
+  await page.route("**/api/**", route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === "/api/auth/me") return route.fulfill({ json: user })
+    if (path.endsWith("/morning-report/settings")) return route.fulfill({ json: {
+      is_active: true, timezone: "Europe/Tirane", weekdays: [1, 2, 3, 4, 5], recipients,
+    } })
+    if (path.endsWith("/morning-report")) return route.fulfill({ json: {
+      id: "old-report", status: "DRAFT", report_date: "2026-11-24", subject: "Morning report", recipients,
+      sections: [{ section_key: point, title: point, body: [
+        "NOTES:", "+----+------+----------------------------+------+-------+",
+        "| NR | DISK | NOTE                       | FROM | TIME  |",
+        "+----+------+----------------------------+------+-------+",
+        "| 1  | NO   | Saved original email text  | -    | 10:00 |",
+        "+----+------+----------------------------+------+-------+",
+      ].join("\n") }],
+      note_emails: { "1": email },
+    } })
+    if (path.endsWith("/ga-notes/old-import/email")) {
+      emailRequests++
+      return route.fulfill({ json: { ...email, body: "Full original email text" } })
+    }
+    return route.fulfill({ json: [] })
+  })
+
+  await page.goto("/morning-report")
+  const row = page.getByRole("row").filter({ hasText: email.title })
+  await expect(row.getByText(email.subject, { exact: false })).toBeVisible()
+  await expect(row.getByText(email.sender, { exact: false })).toBeVisible()
+  await expect(page.getByText("Saved original email text")).toBeHidden()
+  expect(emailRequests).toBe(0)
+  await row.locator("summary").click()
+  await expect(row.getByText("Full original email text")).toBeVisible()
+  expect(emailRequests).toBe(1)
+  await row.locator("summary").press("Enter")
+  await expect(row.getByText("Full original email text")).toBeHidden()
+})
+
+test("M1 inbox shows the subject and expands only the selected email", async ({ page }) => {
+  const user = { id: "mail-test-admin", full_name: "Report admin", email: "admin@example.test", role: "ADMIN", is_active: true }
+  const recipients = { to: [], cc: [], bcc: [] }
+  const emailSection = "(GA) DET NGA EMAILS TE REJA"
+  const sources = [
+    { source: "info-px", title: "EM INFO PX" },
+    { source: "it", title: "EM IT" },
+    { source: "hf", title: "EM HF" },
+    { source: "px-eu", title: "EM PX EU" },
+  ]
+  await page.addInitScript(account => {
+    localStorage.setItem("primex_access_token", "test-only-browser-token")
+    localStorage.setItem("primex_user", JSON.stringify(account))
+  }, user)
+  await page.route("**/api/**", route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === "/api/auth/me") return route.fulfill({ json: user })
+    if (url.pathname.endsWith("/morning-report/settings")) return route.fulfill({ json: {
+      is_active: true, timezone: "Europe/Tirane", weekdays: [1, 2, 3, 4, 5], recipients,
+    } })
+    if (url.pathname.endsWith("/morning-report")) return route.fulfill({ json: {
+      id: "mail-draft", status: "DRAFT", report_date: "2026-11-24", subject: "Morning report", recipients,
+      sections: [{ section_key: emailSection, title: emailSection, body: "" }],
+    } })
+    if (url.pathname.endsWith("/microsoft-mail/sync")) {
+      const source = url.searchParams.get("source")
+      return route.fulfill({ json: {
+        configured: true, connected: true, messages: [{
+          id: "message", subject: `Subject ${source}`, sender: "Sender <sender@example.test>",
+          received_at: "09:08", body: `Full email ${source}\nSecond line`,
+        }],
+      } })
+    }
+    return route.fulfill({ json: [] })
+  })
+
+  await page.goto("/morning-report")
+  for (const { source, title } of sources) {
+    const row = page.getByRole("row").filter({ hasText: `Subject ${source}` })
+    await expect(row.getByText(`${title}: 09:08`, { exact: true })).toBeVisible()
+    await expect(row.getByText("Sender <sender@example.test>", { exact: true })).toBeVisible()
+    const fullEmail = page.getByText(`Full email ${source}`)
+    await expect(fullEmail).toBeHidden()
+    await row.getByRole("button", { name: `Hap emailin: Subject ${source}` }).press("Enter")
+    await expect(fullEmail).toBeVisible()
+    const collapse = row.getByRole("button", { name: `Mbyll emailin: Subject ${source}` })
+    await expect(collapse).toHaveAttribute("aria-expanded", "true")
+    await collapse.click()
+    await expect(fullEmail).toBeHidden()
+  }
+})
+
+test("M1 preserves edits and refreshed symbol tables when saving report details", async ({ page }) => {
   const user = { id: "m1-test-admin", full_name: "Report admin", email: "admin@example.test", role: "ADMIN", is_active: true }
   const recipients = { to: ["admin@example.test"], cc: [], bcc: [] }
+  const physicalSection = { section_key: "FIZIKISHT ME GA?", title: "FIZIKISHT ME GA?", body: "FG:GA DEVICES" }
+  const draft = {
+    id: "draft", status: "SENT", report_date: "2026-11-23", subject: "Morning report", recipients,
+    sections: [{ title: "First report point", body: "Report content" }, physicalSection],
+  }
   await page.addInitScript((account) => {
     localStorage.setItem("primex_access_token", "test-only-browser-token")
     localStorage.setItem("primex_user", JSON.stringify(account))
@@ -17,9 +164,10 @@ test("M1 hides report controls initially and preserves edits when collapsed", as
     if (pathname.endsWith("/morning-report/settings")) return route.fulfill({ json: {
       is_active: true, timezone: "Europe/Tirane", weekdays: [1, 2, 3, 4, 5], recipients,
     } })
-    if (pathname.endsWith("/morning-report")) return route.fulfill({ json: {
-      id: "draft", status: "SENT", report_date: "2026-11-23", subject: "Morning report", recipients,
-      sections: [{ title: "First report point", body: "Report content" }],
+    if (pathname.endsWith("/morning-report")) return route.fulfill({ json: draft })
+    if (pathname.endsWith("/morning-report/draft") && route.request().method() === "PATCH") return route.fulfill({ json: {
+      ...draft, subject: "Edited subject",
+      sections: [draft.sections[0], { ...physicalSection, body: "(Asnje detyre)" }],
     } })
     return route.fulfill({ json: [] })
   })
@@ -47,6 +195,14 @@ test("M1 hides report controls initially and preserves edits when collapsed", as
   await expect(status).toBeHidden()
   await toggle.click()
   await expect(subject).toHaveValue("Edited subject")
+
+  const physicalTask = page.getByText("FG: GA DEVICES", { exact: true })
+  await expect(physicalTask).toBeVisible()
+  const saved = page.waitForResponse(response => response.url().endsWith("/morning-report/draft") && response.request().method() === "PATCH")
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  expect((await saved).ok()).toBe(true)
+  await expect(page.getByText("Draft saved", { exact: true })).toBeVisible()
+  await expect(physicalTask).toBeVisible()
 })
 
 for (const [pagePath, report] of [["morning-report", "M1"], ["after-break-report", "M2"]] as const) {

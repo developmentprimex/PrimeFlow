@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useAuth } from "@/lib/auth"
+import type { NoteEmailPreviews } from "@/lib/types"
 
 export type ReportNoteAttachment = { id: string; original_filename: string }
 export type ReportNoteAttachments = Record<string, ReportNoteAttachment[]>
@@ -16,13 +17,13 @@ function viewLabel(files: ReportNoteAttachment[]) {
 }
 
 export function ReportNoteCell({ text, files, onOpen }: {
-  text: string
+  text: React.ReactNode
   files: ReportNoteAttachment[]
   onOpen: (files: ReportNoteAttachment[]) => void
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-      <span className="min-w-0 flex-1 break-words">{text || "-"}</span>
+      <div className="min-w-0 flex-1 break-words">{text || "-"}</div>
       <button
         type="button"
         className="inline-flex shrink-0 items-center gap-1 rounded border border-blue-300 bg-white px-2 py-0.5 font-medium text-blue-800 hover:bg-blue-50 print:hidden"
@@ -39,11 +40,13 @@ export function installReportNoteControls(
   document: Document | null | undefined,
   attachments: ReportNoteAttachments | undefined,
   onOpen: (files: ReportNoteAttachment[]) => void,
+  emails?: NoteEmailPreviews,
+  loadEmail?: (id: string) => Promise<string>,
 ) {
   if (!document) return
   const className = "px-note-attachment-view"
   document.querySelectorAll(`.${className}`).forEach((button) => button.remove())
-  if (!attachments || !Object.keys(attachments).length) return
+  if (!Object.keys(attachments ?? {}).length && !Object.keys(emails ?? {}).length) return
   if (!document.getElementById("px-note-attachment-styles")) {
     const style = document.createElement("style")
     style.id = "px-note-attachment-styles"
@@ -51,7 +54,13 @@ export function installReportNoteControls(
       .${className} { float:right; margin:0 0 2px 8px; padding:2px 7px; cursor:pointer;
         border:1px solid #93c5fd; border-radius:4px; color:#1e40af; background:#fff; font:600 11px Arial; }
       .${className}:hover { background:#eff6ff; }
-      @media print { .${className} { display:none; } }
+      .px-note-email summary { display:flex; justify-content:space-between; gap:8px; cursor:pointer; overflow-wrap:anywhere; text-align:left; }
+      .px-note-email summary::-webkit-details-marker { display:none; }
+      .px-note-email-symbol { font-weight:bold; min-width:1em; }
+      .px-note-email-symbol::before { content:"+"; }
+      .px-note-email[open] .px-note-email-symbol::before { content:"−"; }
+      .px-note-email-body { margin-top:6px; padding:6px; border:1px solid #cbd5e1; max-height:18em; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; text-align:left; }
+      @media print { .${className}, .px-note-email-symbol, .px-note-email-body { display:none; } }
     `
     document.head.append(style)
   }
@@ -67,9 +76,40 @@ export function installReportNoteControls(
   for (const row of Array.from(table.rows).slice(1)) {
     const number = row.cells[0]?.textContent?.trim() ?? ""
     if (!/^\d+$/.test(number)) continue
-    const files = attachments[number]
+    const files = attachments?.[number]
     const cell = row.cells[noteColumn]
-    if (!files?.length || !cell) continue
+    if (!cell) continue
+    const email = emails?.[number]
+    if (email && loadEmail && !cell.querySelector(".px-note-email")) {
+      const details = document.createElement("details")
+      details.className = "px-note-email"
+      const summary = document.createElement("summary")
+      const text = document.createElement("span")
+      const title = document.createElement("strong")
+      title.textContent = email.title
+      text.append(title, [email.subject, email.sender].filter(Boolean).map(value => ` · ${value}`).join(""))
+      const symbol = document.createElement("span")
+      symbol.className = "px-note-email-symbol"
+      symbol.setAttribute("aria-label", "Hap emailin")
+      summary.append(text, symbol)
+      const body = document.createElement("div")
+      body.className = "px-note-email-body"
+      let loaded = false
+      let loading = false
+      details.addEventListener("toggle", () => {
+        symbol.setAttribute("aria-label", details.open ? "Mbyll emailin" : "Hap emailin")
+        if (!details.open || loaded || loading) return
+        loading = true
+        body.textContent = "Duke hapur emailin…"
+        void loadEmail(email.id).then(value => {
+          loaded = true
+          body.textContent = value || "Ky email nuk ka tekst."
+        }, () => { body.textContent = "Emaili origjinal nuk është i disponueshëm." }).finally(() => { loading = false })
+      })
+      details.append(summary, body)
+      cell.replaceChildren(details)
+    }
+    if (!files?.length) continue
     const button = document.createElement("button")
     button.type = "button"
     button.className = className

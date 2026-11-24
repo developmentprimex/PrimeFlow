@@ -73,6 +73,7 @@ from app.services.task_marker import one_h_marker_label
 from app.services.note_markup import parse_marked_note_content
 from app.services.ga_identity import resolve_ga_user
 from app.services.report_note_visibility import append_mira_dictation_label
+from app.services.px_note_email import email_preview, email_preview_text
 
 
 router = APIRouter()
@@ -7432,7 +7433,8 @@ async def export_ga_notes_xlsx(
             per_value = ", ".join(assignee_initials)
         
         # Clean content (remove HTML if any)
-        content = _strip_html(note.content) if note.content else ""
+        email = email_preview(note)
+        content = email_preview_text(email) if email else (_strip_html(note.content) if note.content else "")
         content = append_mira_dictation_label(content, getattr(note, "mira_dictation_source", None))
 
         if note.status == GaNoteStatus.CLOSED:

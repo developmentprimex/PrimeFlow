@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.services.report_attendance import filter_report_sections
-from app.services.report_note_attachments import section_note_attachments
+from app.services.report_note_attachments import compact_report_note_html, section_note_controls
 
 import uuid
 from datetime import date, datetime
@@ -183,9 +183,9 @@ async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) ->
         db, sections, "after_break", row.sections, settings.manual_questions
     )
     draft = _draft(row, await filter_report_sections(db, sections, row.report_date))
-    draft["note_attachments"] = await section_note_attachments(
+    draft.update(await section_note_controls(
         db, draft["sections"], SECTION_TITLES[9], row.generated_snapshot,
-    )
+    ))
     return draft
 
 
@@ -393,10 +393,11 @@ async def preview_draft(
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
+    note_controls = await section_note_controls(db, sections, SECTION_TITLES[9], row.generated_snapshot)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
-        "html": render_html(row.subject, row.report_date, sections),
-        "note_attachments": await section_note_attachments(db, sections, SECTION_TITLES[9], row.generated_snapshot),
+        "html": compact_report_note_html(render_html(row.subject, row.report_date, sections), note_controls["note_emails"]),
+        **note_controls,
     }
 
 

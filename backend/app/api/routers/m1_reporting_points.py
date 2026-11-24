@@ -81,7 +81,21 @@ async def _refresh_saved_metadata(db: AsyncSession, row: M1ReportingPointsReport
 
 async def _current_payload(db: AsyncSession, row: M1ReportingPointsReport) -> dict:
     from app.services.report_attendance import filter_points_payload
-    return await filter_points_payload(db, report_payload(row, excluded_note_ids=await excluded_note_ids(db, row)))
+    from app.services.px_note_email import email_preview_text, legacy_email
+    from app.services.report_note_attachments import mail_previews_by_row
+
+    report = await filter_points_payload(db, report_payload(row, excluded_note_ids=await excluded_note_ids(db, row)))
+    notes = report["data"].get("notes", [])
+    legacy_ids = {
+        note["id"]: note["id"] for note in notes
+        if not note.get("email_preview") and legacy_email(note.get("content") or "")
+    }
+    previews = await mail_previews_by_row(db, legacy_ids)
+    report["data"]["notes"] = [
+        {**note, "email_preview": email, "content": email_preview_text(email)}
+        if (email := previews.get(note["id"])) else note for note in notes
+    ]
+    return report
 
 
 @router.get("/recipients")
@@ -143,7 +157,13 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
 async def preview(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                   _: User = Depends(get_current_user)) -> dict:
     report = await _current_payload(db, await _by_id(db, report_id))
-    return {"html": render_html(report), "plain_text": render_plain_text(report)}
+    return {
+        "html": render_html(report), "plain_text": render_plain_text(report),
+        "note_emails": {
+            str(index): note["email_preview"]
+            for index, note in enumerate(report["data"].get("notes", []), 1) if note.get("email_preview")
+        },
+    }
 
 
 @router.post("/{report_id}/send")

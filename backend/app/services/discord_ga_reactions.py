@@ -88,26 +88,31 @@ def render_reactions(reactions) -> str:
 
 
 async def reaction_summary_for_day(db, day, *, report, generated_at):
-    if not settings.DISCORD_GUILD_ID or not settings.DISCORD_GA_REPLIES_CHANNEL_ID:
+    channel_id = settings.DISCORD_GA_REPLIES_CHANNEL_ID
+    if not channel_id:
         return REACTIONS_UNAVAILABLE
     start, end = _report_window(day, report, generated_at)
     if end < start:
         return REACTIONS_UNAVAILABLE
-    result = await db.scalars(select(DiscordGaReaction).where(
-        DiscordGaReaction.guild_id == settings.DISCORD_GUILD_ID,
-        DiscordGaReaction.channel_id == settings.DISCORD_GA_REPLIES_CHANNEL_ID,
+    statement = select(DiscordGaReaction).where(
+        DiscordGaReaction.channel_id == channel_id,
         DiscordGaReaction.observed_at >= start, DiscordGaReaction.observed_at <= end,
-    ).order_by(DiscordGaReaction.observed_at, DiscordGaReaction.event_id))
+    )
+    # Discord channel IDs are globally unique; report-only instances may lack bot settings.
+    if settings.DISCORD_GUILD_ID:
+        statement = statement.where(DiscordGaReaction.guild_id == settings.DISCORD_GUILD_ID)
+    result = await db.scalars(statement.order_by(DiscordGaReaction.observed_at, DiscordGaReaction.event_id))
     return render_reactions(result.all())
 
 
 async def refresh_ga_reaction_section(db, sections, day, *, report, generated_snapshot, sent):
     generated_at = (generated_snapshot or {}).get("ga_replies_generated_at")
-    if sent or not generated_at:
+    if not generated_at:
         return sections
     return [
         {**section, "body": await reaction_summary_for_day(
             db, day, report=report, generated_at=datetime.fromisoformat(generated_at),
-        )} if (section.get("section_key") or section.get("title")) == GA_REACTIONS_SECTION_KEY else section
+        )} if (section.get("section_key") or section.get("title")) == GA_REACTIONS_SECTION_KEY
+        and (not sent or section.get("body") == REACTIONS_UNAVAILABLE) else section
         for section in sections
     ]

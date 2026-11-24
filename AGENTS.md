@@ -40,3 +40,21 @@ Për ndryshime funksionale ose vizuale në aplikacion, lexo pjesën përkatëse 
 
 Këto udhëzime ruajnë marrëveshjen me përdoruesin për kontrollin e ndryshimeve
 ndërmjet faqeve. Kërkesa konkrete e përdoruesit përcakton shtrirjen e punës.
+
+## PX Notes nga email-et
+
+Kur përdoruesi kërkon të krijosh një PX Note nga një email, zgjidh prefiksin
+sipas kutisë ku është pranuar emaili:
+
+| Kutia | Prefiksi |
+| --- | --- |
+| `info@primexeu.com` | EM INFO PX |
+| `it@forestdream.de` | EM IT |
+| `info@homeface.de` | EM HF |
+| `primex.eu@gmail.com` | EM PX EU |
+
+Përdor titullin `PREFIKSI: HH:MM KLIENTI OSE PROJEKTI`, me orën e pranimit
+dhe emrin e klientit ose projektit me shkronja të mëdha, p.sh.
+`EM INFO PX: 08:00 PURIS – HOME24`. Në kryerresht përmblidh shkurt kërkesën
+e klientit. Rendit hapat konkretë me `1)`, `2)`, `3)` sipas radhës së
+realizimit. Përfshi vetëm veprime që mbështeten nga kërkesa e emailit.

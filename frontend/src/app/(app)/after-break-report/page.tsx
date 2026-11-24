@@ -3,6 +3,8 @@
 import * as React from "react"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
 import { installReportNoteControls, ReportNoteAttachmentDialog, ReportNoteCell, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
+import { NoteEmailPreview, useNoteEmailLoader } from "@/components/note-email-preview"
+import type { NoteEmailPreviews } from "@/lib/types"
 import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
@@ -42,6 +44,7 @@ type Draft = {
   recipients: Recipients
   sections: Section[]
   note_attachments?: ReportNoteAttachments
+  note_emails?: NoteEmailPreviews
   status: string
   sent_at?: string | null
   gmail_message_id?: string | null
@@ -166,6 +169,7 @@ async function responseError(res: Response) {
 
 export default function AfterBreakReportPage() {
   const { apiFetch, loading: authLoading, user } = useAuth()
+  const loadNoteEmail = useNoteEmailLoader()
   const canAccess = !authLoading && Boolean(user)
   const isManagerOrAdmin = ["ADMIN", "MANAGER"].includes(String(user?.role || "").toUpperCase())
   const canEdit = Boolean(user)
@@ -175,7 +179,7 @@ export default function AfterBreakReportPage() {
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
-  const [preview, setPreview] = React.useState<{ html: string; plain_text: string; note_attachments?: ReportNoteAttachments } | null>(null)
+  const [preview, setPreview] = React.useState<{ html: string; plain_text: string; note_attachments?: ReportNoteAttachments; note_emails?: NoteEmailPreviews } | null>(null)
   const [noteFiles, setNoteFiles] = React.useState<ReportNoteAttachment[] | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState<RecipientInputs>({ to: "", cc: "", bcc: "" })
   const [settings, setSettings] = React.useState<ReportSettings | null>(null)
@@ -363,9 +367,12 @@ export default function AfterBreakReportPage() {
         : section
     )
     const editedSection = draft.sections[editingSection.index]
-    const noteAttachments = (editedSection.section_key || editedSection.title) === NOTES_SECTION
-      ? undefined : draft.note_attachments
-    const nextDraft = { ...draft, sections, note_attachments: noteAttachments }
+    const notesEdited = (editedSection.section_key || editedSection.title) === NOTES_SECTION
+    const nextDraft = {
+      ...draft, sections,
+      note_attachments: notesEdited ? undefined : draft.note_attachments,
+      note_emails: notesEdited ? undefined : draft.note_emails,
+    }
     setDraft(nextDraft)
     setEditingSection(null)
     void save(nextDraft)
@@ -686,6 +693,11 @@ export default function AfterBreakReportPage() {
                         filterWfeAge={isWaitingClientSection(section)}
                         renderCell={(section.section_key || section.title) === NOTES_SECTION ? (label, number, header, text) => {
                           const files = draft.note_attachments?.[number]
+                          const email = draft.note_emails?.[number]
+                          if (label === "NOTES:" && header === "NOTE" && email) {
+                            const preview = <NoteEmailPreview key={email.id} email={email} />
+                            return files?.length ? <ReportNoteCell text={preview} files={files} onOpen={setNoteFiles} /> : preview
+                          }
                           return label === "NOTES:" && header === "NOTE" && files?.length
                             ? <ReportNoteCell text={text} files={files} onOpen={setNoteFiles} />
                             : null
@@ -759,7 +771,7 @@ export default function AfterBreakReportPage() {
             title={`${REPORT_LABEL} preview`}
             srcDoc={preview.html}
             className="h-[650px] w-full rounded border bg-white"
-            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles)}
+            onLoad={(event) => installReportNoteControls(event.currentTarget.contentDocument, preview.note_attachments, setNoteFiles, preview.note_emails, loadNoteEmail)}
           /> : null}
         </DialogContent>
       </Dialog>

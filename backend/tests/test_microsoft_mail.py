@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 from datetime import date
 from types import SimpleNamespace
@@ -14,10 +15,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.dialects.postgresql import dialect
 
 from app.api.routers import microsoft_mail as api
-from app.integrations import gmail_mail
+from app.integrations import gmail_mail, homeface_mail
 from app.integrations import microsoft_mail as mail
 from app.models.enums import UserRole
-from app.services.info_px_notes import save_mailbox_notes
+from app.services import info_px_notes
 
 
 def test_authorize_requests_read_only_permissions(monkeypatch):
@@ -73,30 +74,83 @@ def test_signed_in_staff_can_read_but_only_admin_can_authorize(monkeypatch):
     assert client.post("/api/microsoft-mail/authorize-url").status_code == 403
 
 
-def test_px_note_preserves_sender_and_reuses_the_same_id():
+def test_px_note_formats_each_mailbox_and_skips_already_imported_messages(monkeypatch):
     db = AsyncMock()
     message = {
         "id": "immutable-id", "subject": "Kërkesë", "sender": "Drita <drita@example.test>",
         "received_datetime": "2026-11-23T10:50:00+01:00", "body": "Rreshti 1\nRreshti 2",
     }
-    asyncio.run(save_mailbox_notes(db, [message, message], mail.mailbox_for("info-px")))
-    asyncio.run(save_mailbox_notes(db, [message], mail.mailbox_for("info-px")))
-    asyncio.run(save_mailbox_notes(db, [message], mail.mailbox_for("it")))
-    asyncio.run(save_mailbox_notes(db, [message], gmail_mail.mailbox_for_px_eu()))
-    first, second, it, px_eu = (
-        call.args[0].compile(dialect=dialect()) for call in db.execute.await_args_list
-    )
-    assert first.params == second.params
-    assert first.params["content_m0"] == "EM INFO PX - Kërkesë\nDërguesi: Drita <drita@example.test>\n\nRreshti 1\nRreshti 2"
-    assert first.params["knowledge_type_m0"] == "INFO_PX_MAIL"
-    assert it.params["id_m0"] != first.params["id_m0"]
-    assert it.params["content_m0"].startswith("EM IT - Kërkesë\nDërguesi:")
-    assert it.params["knowledge_type_m0"] == "IT_MAIL"
-    assert px_eu.params["id_m0"] not in (first.params["id_m0"], it.params["id_m0"])
-    assert px_eu.params["content_m0"].startswith("EM PX EU - ")
-    assert px_eu.params["knowledge_type_m0"] == "PX_EU_MAIL"
-    assert "ON CONFLICT (id) DO NOTHING" in str(first)
-    assert db.commit.await_count == 4
+    draft = AsyncMock(return_value=info_px_notes.MailboxNoteDraft(
+        client_or_project="Puris – Home24",
+        summary="Klienti kërkon automatizim.",
+        steps=["Analizo dokumentet.", "Përgatit mapping."],
+    ))
+    monkeypatch.setattr(info_px_notes, "_draft_note", draft)
+    db.execute.return_value = SimpleNamespace(all=lambda: [])
+    mailboxes = [mail.mailbox_for("info-px"), mail.mailbox_for("it"), homeface_mail.MAILBOX, gmail_mail.mailbox_for_px_eu()]
+    for mailbox in mailboxes:
+        assert asyncio.run(info_px_notes.save_mailbox_notes(db, [message, message], mailbox))
+
+    inserted = [
+        call.args[0].compile(dialect=dialect()) for call in db.execute.await_args_list if call.args[0].is_insert
+    ]
+    assert len({statement.params["id_m0"] for statement in inserted}) == 4
+    for mailbox, statement in zip(mailboxes, inserted):
+        assert statement.params["content_m0"] == (
+            f"{mailbox.label}: 10:50 PURIS – HOME24\n"
+            "Klienti kërkon automatizim.\n1) Analizo dokumentet.\n2) Përgatit mapping."
+        )
+        assert statement.params["knowledge_type_m0"] == mailbox.note_origin
+        assert statement.params["email_metadata_m0"] == {"subject": "Kërkesë", "sender": message["sender"]}
+        assert statement.params["email_body_m0"] == message["body"]
+        assert "ON CONFLICT (id) DO NOTHING" in str(statement)
+
+    db.execute.return_value = SimpleNamespace(all=lambda: [(inserted[0].params["id_m0"], {"subject": "Kërkesë"})])
+    assert asyncio.run(info_px_notes.save_mailbox_notes(db, [message], mailboxes[0]))
+    assert db.execute.await_count == 9
+    assert draft.await_count == 4
+
+
+def test_failed_mail_summary_stays_available_for_retry(monkeypatch):
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(all=lambda: [])
+    inbox = [
+        {"id": "bad", "subject": "Unprocessed", "received_datetime": "2026-11-23T10:50:00+01:00", "body": "Text"},
+        {"id": "ok", "subject": "Informative", "sender": "sender@example.test", "received_datetime": "2026-11-23T10:51:00+01:00", "body": "Text"},
+    ]
+
+    async def draft(_, subject, __):
+        if subject == "Unprocessed":
+            raise ValueError("formatting failed")
+        return info_px_notes.MailboxNoteDraft(client_or_project=None, summary=subject, steps=[])
+
+    monkeypatch.setattr(info_px_notes, "_draft_note", draft)
+    assert not asyncio.run(info_px_notes.save_mailbox_notes(db, inbox, mail.mailbox_for("info-px")))
+    statement = db.execute.await_args.args[0].compile(dialect=dialect())
+    assert statement.params["content_m0"] == "EM INFO PX: 10:51 INFORMATIVE\nInformative"
+    assert "content_m1" not in statement.params
+
+
+def test_mail_summary_requests_structured_output_without_storing_the_response(monkeypatch):
+    monkeypatch.setattr(info_px_notes.settings, "OPENAI_API_KEY", "test-key")
+
+    def respond(request):
+        payload = json.loads(request.content)
+        assert payload["store"] is False
+        assert json.loads(payload["input"]) == {"subject": "Kërkesë", "body": "Përgatit një template."}
+        assert payload["text"]["format"]["strict"] is True
+        return httpx.Response(200, json={
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({
+                "client_or_project": None, "summary": "Kërkohet një template.", "steps": ["Përgatit template-in."],
+            })}]}],
+        })
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            return await info_px_notes._draft_note(client, "Kërkesë", "Përgatit një template.")
+
+    assert asyncio.run(run()).steps == ["Përgatit template-in."]
 
 
 def test_authorization_state_is_browser_bound_and_tokens_are_encrypted(monkeypatch):
