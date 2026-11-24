@@ -26,6 +26,8 @@ LEGACY_REPLY_LINK = re.compile(r"^Përgjigjja GA: https://discord\.com/channels/
 GA_MESSAGES_CAPTION = "Përgjigjet dhe komentet e GA"
 GA_REPLIES_SECTION_TITLE = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
 GA_REPLIES_WINDOW_VERSION = 2
+GA_REPLIES_CAPTURE_VERSION = 1
+GA_REPLIES_CAPTURE_VERSION_KEY = "ga_replies_capture_version"
 GA_FILES_HEADER = "SKEDARËT"
 _REPLY_COLUMNS = [("NR", 2), ("PËR KË", 7), ("MESAZHI ORIGJINAL", 40), ("PËRGJIGJJA E GA", 52)]
 
@@ -211,6 +213,7 @@ def render_summary(evidence, captured_at, now, *, day=None, reply_ids=None, init
     if not evidence or evidence.get("status") == "UNAVAILABLE":
         return UNAVAILABLE
     stale = now - captured_at > timedelta(minutes=5)
+    incomplete_window = bool(window and captured_at < window[1] and allow_verified_stale)
     if stale and not allow_verified_stale:
         return UNAVAILABLE
     if window:
@@ -223,12 +226,12 @@ def render_summary(evidence, captured_at, now, *, day=None, reply_ids=None, init
         message_ids, linked_ids = _included_message_ids(evidence, day or captured_at.astimezone(report_timezone()).date(), reply_ids)
     rows = _ga_message_rows(evidence, message_ids, initials_by_user=initials_by_user or {}, include_details=include_details)
     if not rows:
-        if stale or linked_ids or _has_reply(evidence, message_ids) or evidence["status"] == "PARTIAL":
+        if stale or incomplete_window or linked_ids or _has_reply(evidence, message_ids) or evidence["status"] == "PARTIAL":
             return UNAVAILABLE
         return _empty_reply_table(include_details=include_details)
     values = [[str(index), *(value.replace("|", "¦") for value in row)] for index, row in enumerate(rows, 1)]
     table = _render_reply_table(values, include_details=include_details)
-    if stale:
+    if stale or incomplete_window:
         local_capture = captured_at.astimezone(report_timezone())
         return f"{STALE_REPLY_NOTE} {local_capture:%d.%m.%Y %H:%M}.\n\n{table}"
     return table
@@ -421,9 +424,14 @@ async def refresh_ga_reply_section(db, sections, day, *, report=None, refresh_cu
                 retry = body == UNAVAILABLE or body.startswith(STALE_REPLY_NOTE)
                 # The old Sunday cutoff could produce a confirmed empty table on Monday.
                 outdated_empty = legacy_monday and body == _empty_reply_table()
+                # Older reports could declare an empty window before the bot finished reading it.
+                unverified_empty = (
+                    refresh_current and not generated_snapshot.get(GA_REPLIES_CAPTURE_VERSION_KEY)
+                    and body == _empty_reply_table(include_details=True)
+                )
                 table = _saved_reply_table(body)
                 old_columns = table and table["header"] == [name for name, _ in _REPLY_COLUMNS]
-                if retry or outdated_empty or old_columns:
+                if retry or outdated_empty or unverified_empty or old_columns:
                     refreshed = await summary_for_day(db, day, report=report, generated_at=datetime.fromisoformat(generated_at))
                     if old_columns and not (outdated_empty or retry):
                         if refreshed != UNAVAILABLE:

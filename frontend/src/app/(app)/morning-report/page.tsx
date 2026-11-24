@@ -846,6 +846,7 @@ export default function MorningReportPage() {
                       <React.Fragment key={draft.report_date}>
                         <ReportMailbox source="info-px" reportDate={draft.report_date} />
                         <ReportMailbox source="it" reportDate={draft.report_date} />
+                        <ReportMailbox source="hf" reportDate={draft.report_date} />
                         <ReportMailbox source="px-eu" reportDate={draft.report_date} />
                       </React.Fragment>
                     )}

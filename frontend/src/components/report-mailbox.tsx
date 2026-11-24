@@ -14,6 +14,7 @@ const mailboxes = {
   "info-px": { label: "INFO PX", provider: "Outlook" },
   it: { label: "EM IT", provider: "Outlook" },
   "px-eu": { label: "EM PX EU", provider: "Gmail" },
+  hf: { label: "EM HF", provider: "Yandex" },
 }
 
 export function ReportMailbox({ reportDate, source }: { reportDate: string; source: keyof typeof mailboxes }) {
@@ -74,12 +75,12 @@ export function ReportMailbox({ reportDate, source }: { reportDate: string; sour
       <div className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2">
         <h3 className="text-sm font-semibold">{label} · {provider}</h3>
         <div className="flex gap-2">
-          {result.connected && (
+          {(result.connected || source === "hf") && (
             <Button variant="outline" size="sm" disabled={loading} onClick={() => setReload(value => value + 1)}>
               <RefreshCw className={loading ? "animate-spin" : ""} /> Rifresko
             </Button>
           )}
-          {user?.role === "ADMIN" && (!result.connected || result.error) && (
+          {source !== "hf" && user?.role === "ADMIN" && (!result.connected || result.error) && (
             <Button variant="outline" size="sm" disabled={connecting} onClick={() => void connect()}>
               {result.connected ? "Lidhe përsëri" : `Lidh ${provider}`}
             </Button>

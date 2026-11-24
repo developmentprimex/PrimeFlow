@@ -34,6 +34,7 @@ from app.services.common_leave import parse_common_view_annual_leave
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
 from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE, GA_REPLIES_WINDOW_VERSION
+from app.services.discord_ga_replies import GA_REPLIES_CAPTURE_VERSION, GA_REPLIES_CAPTURE_VERSION_KEY
 from app.services.discord_ga_reactions import (
     GA_REACTIONS_SECTION_KEY,
     GA_REACTIONS_SECTION_TITLE,
@@ -344,6 +345,8 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
             continue
         if title == SECTION_TITLES[1]:
             body = _separate_keyed_prompt_lines(_without_retired_task_status_prompt(body)) or _emails_default_body()
+        if title == GA_PF_COMMENTS_TITLE and body.strip() in {"", "(Ploteso manualisht)"}:
+            body = _default_body(title)
         if title not in by_title:
             visible_title = SECTION_DISPLAY_TITLES.get(title, title)
             if (section_key and raw_title != title
@@ -1233,6 +1236,7 @@ async def build_morning_report_sections(
         NOTE_REFERENCES: blue_notes,
         "ga_replies_generated_at": generated_at.isoformat(),
         "ga_replies_window_version": GA_REPLIES_WINDOW_VERSION,
+        GA_REPLIES_CAPTURE_VERSION_KEY: GA_REPLIES_CAPTURE_VERSION,
         "leave_table_preserved": True,
         TASK_FEEDBACK_ROWS: feedback_rows,
         TASK_FEEDBACK_OVERRIDES: task_feedback_overrides or {},

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from imaplib import IMAP4
 from typing import Literal
 
 import httpx
@@ -23,7 +25,7 @@ from app.api.deps import get_current_user, require_admin
 from app.auth.security import ALGORITHM
 from app.config import settings
 from app.db import get_db
-from app.integrations import gmail_mail, microsoft_mail as graph
+from app.integrations import gmail_mail, homeface_mail, microsoft_mail as graph
 from app.models.enums import UserRole
 from app.models.microsoft_mail_token import MicrosoftMailToken
 from app.models.user import User
@@ -35,14 +37,15 @@ router = APIRouter()
 gmail_router = APIRouter()
 _CALLBACK_PATH = "/api/microsoft-mail/callback"
 _GMAIL_CALLBACK_PATH = "/api/gmail-mail/callback"
-MailSource = Literal["info-px", "it", "px-eu"]
+OAuthMailSource = Literal["info-px", "it", "px-eu"]
+MailSource = Literal["info-px", "it", "px-eu", "hf"]
 
 
-def _cookie_name(source: MailSource) -> str:
+def _cookie_name(source: OAuthMailSource) -> str:
     return f"primeflow_{source.replace('-', '_')}_oauth"
 
 
-def _mailbox(source: MailSource) -> graph.Mailbox:
+def _mailbox(source: OAuthMailSource) -> graph.Mailbox:
     return gmail_mail.mailbox_for_px_eu() if source == "px-eu" else graph.mailbox_for(source)
 
 
@@ -79,7 +82,7 @@ def _token_fields(token: dict, mailbox: graph.Mailbox) -> dict:
 
 
 @router.post("/authorize-url")
-async def authorize(response: Response, source: MailSource = "info-px", user: User = Depends(require_admin)) -> dict:
+async def authorize(response: Response, source: OAuthMailSource = "info-px", user: User = Depends(require_admin)) -> dict:
     mailbox = _mailbox(source)
     is_gmail = source == "px-eu"
     provider = gmail_mail if is_gmail else graph
@@ -189,27 +192,36 @@ async def messages(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     response.headers["Cache-Control"] = "no-store"
-    mailbox = _mailbox(source)
+    app_password = settings.HOMEFACE_MAIL_APP_PASSWORD
+    mailbox = homeface_mail.MAILBOX if source == "hf" else _mailbox(source)
     provider = gmail_mail if source == "px-eu" else graph
-    payload = {"configured": _configured(mailbox), "connected": False, "messages": []}
+    configured = bool(app_password) if source == "hf" else _configured(mailbox)
+    payload = {"configured": configured, "connected": False, "messages": []}
     if not payload["configured"]:
         return payload
-    row = await db.get(MicrosoftMailToken, mailbox.token_id)
-    if row is None:
-        return payload
-    payload["connected"] = True
     try:
-        async with httpx.AsyncClient(timeout=12) as client:
-            access_token = await _access_token(db, client, row, mailbox)
-            inbox_messages = await provider.read_inbox(
-                client, access_token, report_date, report_timezone(),
+        if source == "hf":
+            assert app_password is not None
+            inbox_messages = await asyncio.to_thread(
+                homeface_mail.read_inbox, app_password.get_secret_value(), report_date, report_timezone(),
             )
+            payload["connected"] = True
+        else:
+            row = await db.get(MicrosoftMailToken, mailbox.token_id)
+            if row is None:
+                return payload
+            payload["connected"] = True
+            async with httpx.AsyncClient(timeout=12) as client:
+                access_token = await _access_token(db, client, row, mailbox)
+                inbox_messages = await provider.read_inbox(
+                    client, access_token, report_date, report_timezone(),
+                )
         payload["messages"] = inbox_messages
         await save_mailbox_notes(db, inbox_messages, mailbox)
     except SQLAlchemyError:
         await db.rollback()
         payload["notes_error"] = "Email-et u lexuan, por shënimet nuk u ruajtën në PX Notes."
-    except (httpx.HTTPError, InvalidToken, KeyError, ValueError):
+    except (httpx.HTTPError, IMAP4.error, InvalidToken, KeyError, OSError, ValueError):
         await db.rollback()
         payload["error"] = f"Email-et e {mailbox.label} nuk mund të lexohen."
     return payload

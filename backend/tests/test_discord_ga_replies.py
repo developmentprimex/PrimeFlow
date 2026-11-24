@@ -141,6 +141,26 @@ class DiscordGaRepliesTests(unittest.TestCase):
             ))
         assert missing[0]["body"] == service.UNAVAILABLE
 
+    def test_m1_and_m2_recover_messages_missed_between_last_poll_and_generation(self):
+        captured = NOW - timedelta(minutes=1)
+        window = (captured - timedelta(hours=1), NOW)
+        assert service.render_summary(evidence(), captured, NOW, window=window,
+                                      allow_verified_stale=True) == service.UNAVAILABLE
+        partial = service.render_summary(
+            evidence([message(1, GA, "Already read", created_at=captured.isoformat())]),
+            captured, NOW, window=window, allow_verified_stale=True,
+        )
+        assert partial.startswith(service.STALE_REPLY_NOTE)
+
+        saved = [{"title": service.GA_REPLIES_SECTION_TITLE, "body": service._empty_reply_table(include_details=True)}]
+        for report in ("M1", "M2"):
+            with self.subTest(report=report), patch.object(service, "summary_for_day", AsyncMock(return_value="Recovered")) as summary:
+                refreshed = asyncio.run(service.refresh_ga_reply_section(
+                    None, saved, NOW.date(), report=report, generated_snapshot={"ga_replies_generated_at": NOW.isoformat()},
+                ))
+                assert refreshed[0]["body"] == "Recovered"
+                summary.assert_awaited_once_with(None, NOW.date(), report=report, generated_at=NOW)
+
     def test_m1_keeps_verified_rows_from_a_stale_capture(self):
         captured = NOW - timedelta(minutes=12)
         source = evidence([message(1, GA, "Koment i verifikuar", created_at=captured.isoformat())])

@@ -130,6 +130,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   edhe pas dërgimit, pa shkruar mbi raportin e ruajtur. Tabela e Gmail nuk
   krijon detyra të PrimeFlow.
 
+- Pika 5 e M1 Start of Day lexon inbox-in HOMEFACE (`info@homeface.de`)
+  nga Yandex me IMAP në modalitet leximi. Vendos fjalëkalimin e aplikacionit
+  te sekreti i deploy-it `HOMEFACE_MAIL_APP_PASSWORD`. Mesazhet e datës së
+  raportit importohen në PX Notes si `HF_MAIL`, me ID të qëndrueshme nga
+  UIDVALIDITY dhe UID. Kontrollo filtrin Email, PX Notes Excel, pikën 9 të
+  M1, M2 Post-Break, M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow. API-ja
+  publike i përjashton shënimet HOMEFACE. Tabela e inbox-it është në
+  ekranin e M1; pamjet e raporteve që lexojnë PX Notes marrin shënimet.
+
 - Importi lokal Gmail në PX Notes përdor etiketën `PrimeFlow-M1-Test` dhe
   një ID të qëndrueshme për çdo mesazh. Shënimet në pritje shfaqen te pika 9
   e M1, M2 Post-Break, M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow me
@@ -250,6 +259,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   reagimin e GA ndaj një mesazhi nga stafi me lidhje aktive Discord.
   Kontrollo reagimet ndaj mesazheve ekzistuese, kufirin e së premtes për M1
   të së hënës, kufirin 08:00 për M2, preview, emailin dhe Word/PNG.
+  Hapja e draftit, preview dhe dërgimi manual rilexojnë reagimet e draftit
+  deri në orën fillestare të gjenerimit, edhe kur boti i ka ruajtur me vonesë.
   Reagimet historike pa orë të regjistruar nuk mund të futen në interval.
   M3 dhe sinkronizimi i reagimeve për përmendjet e GA kanë rrjedha të veçanta.
 
@@ -299,7 +310,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   përkatës të API-së. M1 nis nga 16:30 e ditës së kaluar. Të hënën nis nga
   e premtja në 16:30 dhe përfshin fundjavën. M2 nis nga 08:00 e datës së
   raportit. Kufiri i fundit është momenti i gjenerimit,
-  sipas orës së raportit. Preview dhe dërgimi manual përdorin tabelën e ruajtur.
+  sipas orës së raportit. Kur leximi i Discord-it ende nuk mbulon atë orë,
+  hapja e draftit, preview dhe dërgimi manual e provojnë sërish me të njëjtin
+  kufi. Tabelat e vjetra bosh të drafteve rikontrollohen po njësoj.
   Një tabelë e ruajtur bosh të hënën me rregullin e vjetër rilexohet me orën e
   gjenerimit fillestar, edhe kur raporti është dërguar.
   Evidenca prej 30 ditësh jep edhe kontekstin e mesazhit origjinal. Çdo rresht

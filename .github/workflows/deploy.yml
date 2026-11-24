@@ -270,6 +270,7 @@ jobs:
           MS_MAIL_IT_CLIENT_SECRET: ${{ secrets.MS_MAIL_IT_CLIENT_SECRET }}
           GMAIL_PX_EU_CLIENT_ID: ${{ vars.GMAIL_PX_EU_CLIENT_ID }}
           GMAIL_PX_EU_CLIENT_SECRET: ${{ secrets.GMAIL_PX_EU_CLIENT_SECRET }}
+          HOMEFACE_MAIL_APP_PASSWORD: ${{ secrets.HOMEFACE_MAIL_APP_PASSWORD }}
           GA_PERSONAL_DISCORD_BRIDGE_SECRET: ${{ secrets.GA_PERSONAL_DISCORD_BRIDGE_SECRET }}
           MCP_ASSISTANT_ENABLED: ${{ vars.MCP_ASSISTANT_ENABLED || 'false' }}
           MCP_ASSISTANT_ALLOWED_EMAILS: ${{ vars.MCP_ASSISTANT_ALLOWED_EMAILS }}
@@ -310,7 +311,7 @@ jobs:
           echo MS_REDIRECT_URI=https://api-flow.primexeu.com/api/microsoft/callback >> backend\.env
           echo MS_ORGANIZER_EMAIL=info@primexeu.com >> backend\.env
           REM Pass optional mail settings by environment so secrets are not interpolated into cmd.
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "import json,os; from pathlib import Path; names=('MS_MAIL_CLIENT_ID','MS_MAIL_TENANT_ID','MS_MAIL_CLIENT_SECRET','MS_MAIL_SIGNING_KEY','MS_MAIL_IT_CLIENT_ID','MS_MAIL_IT_TENANT_ID','MS_MAIL_IT_CLIENT_SECRET','GMAIL_PX_EU_CLIENT_ID','GMAIL_PX_EU_CLIENT_SECRET'); settings={name:os.environ.get(name,'') for name in names}; settings['MS_MAIL_REDIRECT_URI']='https://api-flow.primexeu.com/api/microsoft-mail/callback'; settings['GMAIL_PX_EU_REDIRECT_URI']='https://api-flow.primexeu.com/api/gmail-mail/callback'; Path('backend/.env').open('a',encoding='utf-8').writelines(f'{name}={json.dumps(value)}\n' for name,value in settings.items() if value)"
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "import json,os; from pathlib import Path; names=('MS_MAIL_CLIENT_ID','MS_MAIL_TENANT_ID','MS_MAIL_CLIENT_SECRET','MS_MAIL_SIGNING_KEY','MS_MAIL_IT_CLIENT_ID','MS_MAIL_IT_TENANT_ID','MS_MAIL_IT_CLIENT_SECRET','GMAIL_PX_EU_CLIENT_ID','GMAIL_PX_EU_CLIENT_SECRET','HOMEFACE_MAIL_APP_PASSWORD'); settings={name:os.environ.get(name,'') for name in names}; settings['MS_MAIL_REDIRECT_URI']='https://api-flow.primexeu.com/api/microsoft-mail/callback'; settings['GMAIL_PX_EU_REDIRECT_URI']='https://api-flow.primexeu.com/api/gmail-mail/callback'; Path('backend/.env').open('a',encoding='utf-8').writelines(f'{name}={json.dumps(value)}\n' for name,value in settings.items() if value)"
           if errorlevel 1 exit /b 1
           echo MS_CALENDAR_SYNC_PAST_DAYS=0 >> backend\.env
           echo MS_CALENDAR_SYNC_FUTURE_DAYS=14 >> backend\.env

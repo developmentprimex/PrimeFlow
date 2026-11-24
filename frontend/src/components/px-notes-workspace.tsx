@@ -3239,7 +3239,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     }
     const matchesContentFilter = (note: GaNote) => {
       if (contentFilter === "all") return true
-      return ["INFO_PX_MAIL", "IT_MAIL", "PX_EU_MAIL"].includes(note.knowledge_type ?? "") || EMAIL_MARKER_RE.test(note.content || "")
+      return ["INFO_PX_MAIL", "IT_MAIL", "HF_MAIL", "PX_EU_MAIL"].includes(note.knowledge_type ?? "") || EMAIL_MARKER_RE.test(note.content || "")
     }
     const matchesOneHMarkerFilter = (note: GaNote) => {
       const markers = noteDisplayMarkers(note, noteTaskInfo.get(note.id))
