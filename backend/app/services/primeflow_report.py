@@ -554,6 +554,7 @@ def _document_section(
     title_overrides: dict[str, tuple[str, str]] | None = None,
     description_overrides: dict[str, tuple[str, str]] | None = None,
     department_codes: dict[str, str] | None = None,
+    strike_counts: dict[str, int] | None = None,
 ) -> ReportSection:
     employees = []
     for employee, employee_tasks in _group_tasks_by_employee(tasks):
@@ -573,9 +574,10 @@ def _document_section(
             description_override = (description_overrides or {}).get(task_id)
             marked_title = title_override[1] if title_override else preserve_done_marks(raw_title)
             marked_description = description_override[1] if description_override else preserve_done_marks(raw_description)
-            # Same blue point markers counted by count_struck_points_for_interval.
             # Count both source fields, even when duplicate display text is hidden.
-            strike_count = _count_blue_strikes(marked_title, marked_description)
+            strike_count = (strike_counts or {}).get(task_id)
+            if strike_count is None:
+                strike_count = _count_blue_strikes(marked_title, marked_description)
             description_duplicates_title = bool(raw_description) and (
                 clean_description(raw_description) == clean_title(raw_title)
             )
@@ -631,6 +633,7 @@ def build_report_document(
     completion_window_start: datetime | None = None,
     completion_window_end: datetime | None = None,
     strike_window_start: datetime | None = None,
+    daily_strike_overrides: tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]] | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
@@ -729,16 +732,18 @@ def build_report_document(
                 f"{BLOCKED_SECTION_TITLE_PREFIX} {report_day:%d.%m.%Y}",
                 filter_tasks(items.get("blocked") or [], report_day),
             ))
+    strike_counts: dict[str, int] = {}
     if strike_window_start is not None:
+        # Count from the daily window while the displayed marks follow the slot.
+        for overrides in daily_strike_overrides or (title_overrides, description_overrides):
+            for task_id, (_, marked) in (overrides or {}).items():
+                strike_counts[task_id] = strike_counts.get(task_id, 0) + _count_blue_strikes(marked)
         displayed_ids = {
             str(task.get("task_id") or task.get("id") or "")
             for _, tasks in definitions for task in tasks
         }
         strike_task_ids = {
-            task_id
-            for overrides in (title_overrides, description_overrides)
-            for task_id, (_, marked) in (overrides or {}).items()
-            if _count_blue_strikes(marked)
+            task_id for task_id, count in strike_counts.items() if count
         } - displayed_ids
         if strike_task_ids:
             candidates = [
@@ -772,6 +777,7 @@ def build_report_document(
                 title_overrides,
                 description_overrides,
                 department_codes,
+                strike_counts,
             )
             for title, tasks in definitions
         ],

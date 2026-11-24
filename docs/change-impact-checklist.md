@@ -507,8 +507,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   SHTYPI Tomorrow nuk ka këta filtra. Filtrat veprojnë në preview; shkarkimet
   dhe email-et e gjeneruara në server ndjekin raportin e plotë, si për Strikes.
 
-- Strikes te 1H Reports llogariten nga 08:00 deri në fund të slotit të
-  zgjedhur, edhe në SHTYPI të integruar në raportin e GA. Pikat e ditës nga
+- Totali dhe filtri i strikes te 1H Reports llogariten nga 08:00 deri në fund të
+  slotit të zgjedhur, edhe në SHTYPI të integruar në raportin e GA. Ngjyra e
+  pikave në 1H Reports (përfshirë BLL) ndjek intervalin e slotit: kaltër për
+  pikën e kryer në interval, gjelbër për pikën e kryer më herët po atë ditë,
+  gri për ditët e mëparshme ose pa datë. Pikat e ditës nga
   detyrat që mungojnë në seksionet e slotit shfaqen te “STRIKES TË DITËS”.
   Kontrollo preview, filtrin Strikes, email, Word/PNG/Text dhe raportet
   historike. SHTYPI Today më vete dhe Mira Host përdorin dritaret e slotit.

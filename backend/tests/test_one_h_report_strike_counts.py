@@ -2,6 +2,7 @@ import asyncio
 import io
 import uuid
 import zipfile
+from xml.etree import ElementTree
 from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -89,6 +90,9 @@ def test_every_report_counts_from_morning_and_deduplicates_shared_tasks(slot):
     assert document.strike_total == expected
     assert document.strike_interval == f"08:00–{strike_interval_end(DAY, slot):%H:%M}"
     assert ReportDocument.model_validate(document.model_dump(mode="json")).strike_total == expected
+    shared_card = next(task for task in cards if task.task_id == str(shared_id))
+    assert "[[done:green]]1. Earlier title[[/done]]" in shared_card.marked_title
+    assert "[[done:blue]]2. Current title[[/done]]" in shared_card.marked_title
 
 
 def test_counts_are_visible_in_preview_email_text_word_and_png():
@@ -99,7 +103,14 @@ def test_counts_are_visible_in_preview_email_text_word_and_png():
     assert output.count('data-task-strike-count="true"') == 2
     assert output.count("Strikes: 3 · 08:00–11:00") == 1
     assert "Strikes: 0 · 08:00–11:00" in output
-    for rendered in (render_plain_text(document), zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode()):
+    word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode()
+    assert 'color:#16a34a;text-decoration:line-through;text-decoration-thickness:2px;">1. Earlier title</span>' in output
+    word_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    ns = {"w": word_ns}
+    runs = ElementTree.fromstring(word_xml).findall(".//w:r", ns)
+    earlier_run = next(run for run in runs if run.findtext("w:t", namespaces=ns) == "1. Earlier title")
+    assert earlier_run.find("w:rPr/w:color", ns).get(f"{{{word_ns}}}val") == "16A34A"
+    for rendered in (render_plain_text(document), word_xml):
         assert "Total strikes: 3 · 08:00–11:00" in rendered
         assert "Strikes: 3 · 08:00–11:00" in rendered
         assert "Strikes: 0 · 08:00–11:00" in rendered
@@ -117,6 +128,7 @@ def test_counts_are_visible_in_preview_email_text_word_and_png():
         assert render_png(document).startswith(b"\x89PNG")
     assert "Total strikes: 3 · 08:00–11:00" in labels
     assert labels.count("Strikes: 3 · 08:00–11:00") == 1
+    assert colours["1. Earlier title"] == "#16a34a"
     assert colours["1. At end"] == "#2563eb"
     assert colours["2. Reopened"] == "#64748b"
 
@@ -128,6 +140,7 @@ def test_bll_table_also_displays_its_strike_count():
     output = render_html(document).split('data-bll-task-table="true"', 1)[1]
     assert 'data-task-strike-count="true"' in output
     assert "Strikes: 3 · 08:00–14:20" in output
+    assert 'color:#16a34a;text-decoration:line-through;text-decoration-thickness:2px;">1. Earlier title</span>' in output
 
 
 @pytest.mark.parametrize("slot", ("11:00", "16:00"))
@@ -140,6 +153,7 @@ def test_earlier_strike_survives_the_done_window_and_slot_selection(slot):
     assert document.strike_total == expected + 1
     tasks = [task for employee in section.employees for task in employee.tasks]
     assert [(task.title, task.strike_count) for task in tasks] == [("Morning task", 1)]
+    assert "[[done:green]]1. Morning point[[/done]]" in tasks[0].marked_description
 
 
 def test_old_saved_reports_keep_unknown_counts_hidden():
