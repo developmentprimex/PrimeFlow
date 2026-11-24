@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.integrations.microsoft_mail import Mailbox
 from app.models.ga_note import GaNote
+from app.services.px_note_email import format_email_title
 
 
 class MailboxNoteDraft(BaseModel):
@@ -112,10 +113,10 @@ async def save_mailbox_notes(db: AsyncSession, messages: list[dict], mailbox: Ma
                     draft = await _draft_note(client, subject, body)
                 except (httpx.HTTPError, KeyError, ValueError):
                     return None
-            title = (_line(draft.client_or_project or "") or subject).upper()
+            title = format_email_title(mailbox.label, _line(draft.client_or_project or "") or subject)
             steps = [line for step in draft.steps if (line := _line(step))]
             content = [
-                f"{mailbox.label}: {received_at:%H:%M} {title}",
+                title,
                 _line(draft.summary) or subject,
                 *(f"{index}) {step}" for index, step in enumerate(steps, 1)),
             ]

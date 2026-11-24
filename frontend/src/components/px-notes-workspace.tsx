@@ -2679,16 +2679,20 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       return
     }
     const fromGmail = note.knowledge_type === "GMAIL"
-    const noteTitle = noteToTaskTitle(note.content || "", fromGmail)
+    const [firstLine, ...noteLines] = parseMarkedNoteContent(note.content).text.trim().split(/\r?\n/)
+    const emailHeading = /^(EM (?:INFO PX|IT|HF|PX EU|GA|GMAIL)):\s*\d{1,2}:\d{2}\s+(.+)$/i.exec(firstLine)
+    const emailTitle = note.email_preview?.title
+      || (emailHeading ? `${emailHeading[1].toUpperCase()}: 08:00 ${emailHeading[2].toUpperCase()}` : "")
+    const noteTitle = emailTitle || noteToTaskTitle(note.content || "", fromGmail)
     const taskContext = fromGmail ? noteTitle : note.content || ""
     // Knowledge PX: the prompt creator's task is "PROMPT: …" (renamed to the prompt title once it is saved).
     const defaultTitle = isKnowledgeNote(note) ? `${KNOWLEDGE_CONFIG[note.knowledge_type || "PROMPT"].prefix}: ${noteTitle}` : noteTitle
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
-    setTaskDescription(fromGmail ? (note.content || "").split(/\r?\n/).slice(2).join("\n").trim() : "")
-    setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+    setTaskDescription(fromGmail ? noteLines.slice(1).join("\n").trim() : emailHeading ? noteLines.join("\n").trim() : "")
+    setTaskPriority(emailTitle ? "1H" : note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
-    setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
+    setTaskOneHReportSlot(emailTitle ? "10:00" : ONE_H_REPORT_SLOT_NONE_VALUE)
     setTaskDueDate("")
     setTaskStartDate("")
     setTaskIsRepetitive(false)

@@ -122,7 +122,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Listat e PX Notes, M1/M2, M1 PIKAT dhe preview-të e 1H Reports e SHTYPI
   Tomorrow shfaqin vetëm titullin, subjektin dhe dërguesin për shënimet nga
   email-et. Butoni `+` lexon emailin përmes API-së së autentikuar. Për
-  importet e vjetra, API-ja lexon kopjen burimore nga shënimi ose nga
+  titullin përdoret formati `EM INFO PX: 08:00 PURIS – HOME24`. Kur një
+  shënim i tillë kthehet në detyrë, `08:00` është shenja e prioritetit dhe
+  sloti i detyrës 1H është `10:00`. Ora e pranimit ruhet te koha e importit.
+  Pika 9 e M1 thekson edhe kryerreshtin e shënimeve me titull EM të shkruar manualisht.
+  Kur një import i vjetër do të shfaqte vetëm prefiksin dhe orën, titulli merr edhe
+  subjektin me shkronja të mëdha. Ruhet veçmas subjekti origjinal.
+  Për importet e vjetra, API-ja lexon kopjen burimore nga shënimi ose nga
   metadata e plotësuar në sinkronizimin pasues. Daljet statike të gjeneruara
   nga shënimet përdorin rreshtin e shkurtuar.
 

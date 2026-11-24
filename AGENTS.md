@@ -53,8 +53,8 @@ sipas kutisë ku është pranuar emaili:
 | `info@homeface.de` | EM HF |
 | `primex.eu@gmail.com` | EM PX EU |
 
-Përdor titullin `PREFIKSI: HH:MM KLIENTI OSE PROJEKTI`, me orën e pranimit
-dhe emrin e klientit ose projektit me shkronja të mëdha, p.sh.
+Përdor titullin `PREFIKSI: 08:00 KLIENTI OSE PROJEKTI`, me orën standarde
+`08:00` dhe emrin e klientit ose projektit me shkronja të mëdha, p.sh.
 `EM INFO PX: 08:00 PURIS – HOME24`. Në kryerresht përmblidh shkurt kërkesën
 e klientit. Rendit hapat konkretë me `1)`, `2)`, `3)` sipas radhës së
 realizimit. Përfshi vetëm veprime që mbështeten nga kërkesa e emailit.

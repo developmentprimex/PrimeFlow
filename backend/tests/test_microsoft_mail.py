@@ -97,7 +97,7 @@ def test_px_note_formats_each_mailbox_and_skips_already_imported_messages(monkey
     assert len({statement.params["id_m0"] for statement in inserted}) == 4
     for mailbox, statement in zip(mailboxes, inserted):
         assert statement.params["content_m0"] == (
-            f"{mailbox.label}: 10:50 PURIS – HOME24\n"
+            f"{mailbox.label}: 08:00 PURIS – HOME24\n"
             "Klienti kërkon automatizim.\n1) Analizo dokumentet.\n2) Përgatit mapping."
         )
         assert statement.params["knowledge_type_m0"] == mailbox.note_origin
@@ -127,7 +127,7 @@ def test_failed_mail_summary_stays_available_for_retry(monkeypatch):
     monkeypatch.setattr(info_px_notes, "_draft_note", draft)
     assert not asyncio.run(info_px_notes.save_mailbox_notes(db, inbox, mail.mailbox_for("info-px")))
     statement = db.execute.await_args.args[0].compile(dialect=dialect())
-    assert statement.params["content_m0"] == "EM INFO PX: 10:51 INFORMATIVE\nInformative"
+    assert statement.params["content_m0"] == "EM INFO PX: 08:00 INFORMATIVE\nInformative"
     assert "content_m1" not in statement.params
 
 

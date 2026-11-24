@@ -11,7 +11,7 @@ from app.models.ga_note_attachment import GaNoteAttachment
 from app.models.ga_note import GaNote
 from app.services.after_break_report import BLUE_NOTE_COLUMNS, NOTE_REFERENCES, load_blue_notes
 from app.services.meetings_report import _section_report_table_rows
-from app.services.px_note_email import EMAIL_NOTE_ORIGINS, email_preview, email_preview_text
+from app.services.px_note_email import EMAIL_NOTE_ORIGINS, email_preview, email_preview_text, email_title_from_content
 
 
 def _row_key(values: list[str]) -> tuple[str, ...]:
@@ -123,7 +123,24 @@ def _section_note_rows(sections: list[dict], title: str) -> list[list[str]]:
 async def section_note_controls(
     db: AsyncSession, sections: list[dict], title: str, snapshot: dict | None,
 ) -> dict:
-    return await note_controls_by_row(db, await match_note_rows(db, _section_note_rows(sections, title), snapshot))
+    rows = _section_note_rows(sections, title)
+    note_ids = await match_note_rows(db, rows, snapshot)
+    controls = await note_controls_by_row(db, note_ids)
+    manual_ids = {
+        row[0]: note_ids[row[0]] for row in rows
+        if row[0] in note_ids and row[0] not in controls["note_emails"] and email_title_from_content(row[2])
+    }
+    if manual_ids:
+        notes = dict((await db.execute(select(GaNote.id, GaNote.content).where(
+            GaNote.id.in_({UUID(note_id) for note_id in manual_ids.values()}),
+        ))).all())
+        controls["note_email_headings"] = {}
+        for number, note_id in manual_ids.items():
+            content = (notes.get(UUID(note_id)) or "").strip()
+            heading = " ".join(content.partition("\n")[0].split())
+            if formatted := email_title_from_content(heading):
+                controls["note_email_headings"][number] = {"original": heading, "title": formatted}
+    return controls
 
 
 async def section_note_attachments(

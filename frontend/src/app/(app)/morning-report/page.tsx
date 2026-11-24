@@ -55,6 +55,7 @@ type Draft = {
   sections: Section[]
   note_attachments?: ReportNoteAttachments
   note_emails?: NoteEmailPreviews
+  note_email_headings?: Record<string, { title: string; original: string }>
   task_feedback_rows?: Record<string, TaskFeedbackRow[]>
   status: string
   sent_at?: string | null
@@ -441,6 +442,7 @@ export default function MorningReportPage() {
       ...draft, sections,
       note_attachments: notesEdited ? undefined : draft.note_attachments,
       note_emails: notesEdited ? undefined : draft.note_emails,
+      note_email_headings: notesEdited ? undefined : draft.note_email_headings,
     }
     setDraft(nextDraft)
     setEditingSection(null)
@@ -824,15 +826,18 @@ export default function MorningReportPage() {
                           )
                         } : undefined}
                         renderCell={sectionKey === NOTES_SECTION ? (label, number, header, text) => {
+                          if (label !== "NOTES:" || header !== "NOTE") return null
                           const files = draft.note_attachments?.[number]
                           const email = draft.note_emails?.[number]
-                          if (label === "NOTES:" && header === "NOTE" && email) {
+                          if (email) {
                             const preview = <NoteEmailPreview key={email.id} email={email} />
                             return files?.length ? <ReportNoteCell text={preview} files={files} onOpen={setNoteFiles} /> : preview
                           }
-                          return label === "NOTES:" && header === "NOTE" && files?.length
-                            ? <ReportNoteCell text={text} files={files} onOpen={setNoteFiles} />
-                            : null
+                          const heading = draft.note_email_headings?.[number]
+                          const noteText = text.trim().replace(/\s+/g, " ")
+                          const formatted = heading && (noteText === heading.original || noteText.startsWith(`${heading.original} `))
+                            ? <><strong>{heading.title}</strong>{noteText.slice(heading.original.length)}</> : null
+                          return files?.length ? <ReportNoteCell text={formatted ?? text} files={files} onOpen={setNoteFiles} /> : formatted
                         } : isTaskFeedbackSection && canEdit ? (label, number, header) => {
                           if (!/^[1-9]\d*$/.test(number)) return null
                           const row = draft.task_feedback_rows?.[label.trim().replace(/:$/, "").toUpperCase()]?.[Number(number) - 1]

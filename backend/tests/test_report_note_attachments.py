@@ -8,6 +8,7 @@ from fastapi import Response
 
 from app.api.routers.ga_notes import get_ga_note_email
 from app.services.morning_report import SECTION_TITLES, _notes_section
+from app.services.px_note_email import email_preview
 from app.services.report_note_attachments import NOTE_REFERENCES, section_note_attachments, section_note_controls
 
 
@@ -30,7 +31,7 @@ class ReportNoteAttachmentsTests(IsolatedAsyncioTestCase):
         })
 
         assert controls["note_emails"]["1"] == {
-            "id": str(note_id), "title": "EM IT: 10:00", "subject": "Porosia", "sender": "Drita <drita@example.test>",
+            "id": str(note_id), "title": "EM IT: 08:00 POROSIA", "subject": "Porosia", "sender": "Drita <drita@example.test>",
         }
         assert not controls["note_attachments"]
 
@@ -43,6 +44,35 @@ class ReportNoteAttachmentsTests(IsolatedAsyncioTestCase):
         db.execute.return_value = SimpleNamespace(one_or_none=lambda: (note, "Complete source"))
         requested = await get_ga_note_email(note_id, response, db, SimpleNamespace())
         assert requested["body"] == "Complete source"
+
+    def test_email_title_keeps_the_received_time_and_named_project(self):
+        note = SimpleNamespace(
+            id=uuid4(), knowledge_type="INFO_PX_MAIL",
+            created_at=datetime(2026, 11, 24, 7, tzinfo=timezone.utc),
+            content="EM INFO PX: 09:50 Puris – Home24\nKlienti kërkon automatizim.",
+            email_metadata={"subject": "Re: Kërkesë", "sender": "Drita"},
+        )
+        preview = email_preview(note)
+        assert preview["title"] == "EM INFO PX: 08:00 PURIS – HOME24"
+        assert preview["subject"] == "Re: Kërkesë"
+
+    async def test_report_matches_a_manual_email_heading_without_changing_its_body(self):
+        note_id = uuid4()
+        title = "EM GA: 09:50 STD-STAUD"
+        content = f"{title}\nKontrollo dokumentet."
+        values = ["1", "NO", f"{title} Kontrollo dokumentet.", "GA", "10:04"]
+        sections = [{"title": SECTION_TITLES[3], "body": _notes_section([values])}]
+        db = AsyncMock()
+        db.execute.side_effect = [
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])),
+            SimpleNamespace(all=lambda: [(note_id, content)]),
+        ]
+        db.scalars.return_value = SimpleNamespace(all=lambda: [])
+        controls = await section_note_controls(db, sections, SECTION_TITLES[3], {
+            NOTE_REFERENCES: [[str(note_id), values]],
+        })
+        assert controls["note_email_headings"]["1"] == {"original": title, "title": "EM GA: 08:00 STD-STAUD"}
+        assert controls["note_emails"] == {}
 
     async def test_snapshot_uses_ids_and_hides_files_for_an_edited_row(self):
         note_ids = [uuid4(), uuid4()]
