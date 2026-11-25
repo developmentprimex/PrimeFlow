@@ -8,10 +8,15 @@ export const DAILY_RLZ_REASONS = [
   ["REQUEST_CHANGE", "Ndryshim kërkese"],
   ["NEW_REQUESTS", "Kërkesa të reja"],
   ["ABSENCE", "Mungesë"],
+  ["PV", "PV"],
   ["OTHER", "Tjetër"],
 ] as const
 
 const DAILY_RLZ_REASON_LABELS = Object.fromEntries(DAILY_RLZ_REASONS)
+
+export function dailyRlzReasonRequiresComment(code?: string | null) {
+  return code !== "PV"
+}
 
 export function dailyRlzReasonLabel(code?: string | null) {
   if (!code) return null

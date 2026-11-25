@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hmac
+import logging
 from datetime import date, datetime, timedelta, timezone
 from imaplib import IMAP4
 from typing import Literal
@@ -22,6 +23,7 @@ from app.services.primeflow_report import report_timezone
 OAuthMailSource = Literal["info-px", "it", "px-eu"]
 MailSource = Literal["info-px", "it", "px-eu", "hf"]
 REPORT_INBOX_SOURCES: tuple[MailSource, ...] = ("info-px", "it", "hf", "px-eu")
+logger = logging.getLogger(__name__)
 
 
 def _mailbox(source: OAuthMailSource) -> graph.Mailbox:
@@ -113,9 +115,12 @@ async def read_report_inbox(
     try:
         if source == "hf":
             assert app_password is not None
-            payload["messages"] = await asyncio.to_thread(
-                homeface_mail.read_inbox, app_password.get_secret_value(), report_day, report_timezone(), **read_options,
-            )
+            args = (app_password.get_secret_value(), report_day, report_timezone())
+            try:
+                payload["messages"] = await asyncio.to_thread(homeface_mail.read_inbox, *args, **read_options)
+            except (IMAP4.abort, ConnectionError, TimeoutError):
+                await asyncio.sleep(0.25)
+                payload["messages"] = await asyncio.to_thread(homeface_mail.read_inbox, *args, **read_options)
             payload["connected"] = True
         else:
             row = await db.get(MicrosoftMailToken, mailbox.token_id)
@@ -127,7 +132,9 @@ async def read_report_inbox(
                 payload["messages"] = await provider.read_inbox(
                     client, access_token, report_day, report_timezone(), **read_options,
                 )
-    except (SQLAlchemyError, httpx.HTTPError, IMAP4.error, InvalidToken, KeyError, OSError, ValueError):
+    except (SQLAlchemyError, httpx.HTTPError, IMAP4.error, InvalidToken, KeyError, OSError, ValueError) as exc:
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        logger.warning("Report inbox read failed: source=%s error=%s http_status=%s", source, type(exc).__name__, status)
         await db.rollback()
         payload["error"] = f"Email-et e {mailbox.label} nuk mund të lexohen."
     return payload

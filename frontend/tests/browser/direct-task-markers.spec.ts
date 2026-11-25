@@ -26,6 +26,15 @@ async function fixture(page: Page, group: "oneH" | "personal" | "blocked" = "one
   }, user)
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url()), path = url.pathname
+    if (path === "/api/tasks/group/one-h-markers") {
+      const { task_ids, one_h_marker } = route.request().postDataJSON()
+      const updated = tasks.filter(task => task_ids.includes(task.id))
+      for (const task of updated) {
+        task.one_h_marker = one_h_marker
+        writes.push({ id: task.id, body: { one_h_marker, one_h_marker_comment: task.one_h_marker_comment } })
+      }
+      return route.fulfill({ json: updated })
+    }
     const task = tasks.find(task => path === `/api/tasks/${task.id}` || path === `/api/tasks/${task.id}/one-h-marker`)
     if (task) {
       if (route.request().method() === "PATCH") {
@@ -83,7 +92,7 @@ async function fixture(page: Page, group: "oneH" | "personal" | "blocked" = "one
   return { tasks, writes }
 }
 
-async function chooseSymbols(page: Page, id: string) {
+async function chooseSymbols(page: Page, id: string, waitForSave = true) {
   const editor = page.locator(`[data-task-marker-id="${id}"]:visible`).first()
   await editor.getByRole("button", { name: "Task symbols (maximum 2)", exact: true }).click()
   const picker = page.getByRole("dialog", { name: "Simbolet", exact: true })
@@ -92,7 +101,7 @@ async function chooseSymbols(page: Page, id: string) {
   await picker.getByRole("button", { name: "Ruaj", exact: true }).click()
   const comment = page.getByRole("dialog", { name: "Task comment", exact: true })
   await comment.getByRole("button", { name: "Save", exact: true }).click()
-  await expect(editor.locator('[data-task-marker-symbol]')).toHaveText(['!!!', 'M3'])
+  if (waitForSave) await expect(editor.locator('[data-task-marker-symbol]')).toHaveText(['!!!', 'M3'])
 }
 
 test("M3 opens the Tomorrow table by default and filters task cards by multiple symbols", async ({ page }) => {
@@ -299,18 +308,49 @@ test('Common View canceling the shared symbol draft writes nothing', async ({ pa
   expect(writes).toHaveLength(0)
 })
 
-test('Common View reports partial saves and retries without erasing owner comments', async ({ page }) => {
+test("An individual symbol difference shows the colleague's value and requires an explanation", async ({ page }) => {
+  const { tasks, writes } = await fixture(page)
+  tasks[0].one_h_marker = "M2"
+  await page.route(`**/api/tasks/${taskIds[1]}/one-h-marker`, async route => {
+    if (route.request().method() !== "PATCH" || route.request().postDataJSON().reporting_choice_confirmations) {
+      return route.fallback()
+    }
+    return route.fulfill({ status: 409, json: { detail: {
+      code: "TASK_REPORTING_CHOICE_REASON_REQUIRED", key: "test-conflict", field: "marker", label: "!!! + M3",
+      task_title: tasks[1].title, person: owners[1].full_name, date: "2026-11-25",
+      peers: [{ owner_id: owners[0].id, person: owners[0].full_name, label: "M2" }],
+    } } })
+  })
+  const group = await openGroup(page)
+  await group.getByRole("button", { name: "Sipas personit", exact: true }).click()
+  await chooseSymbols(page, taskIds[1], false)
+  const warning = page.getByRole("dialog", { name: "Simbol tjetër për të njëjtën detyrë" })
+  await expect(warning.getByText("First Owner", { exact: true })).toBeVisible()
+  await expect(warning.getByText("M2", { exact: true })).toBeVisible()
+  await expect(warning.getByRole("button", { name: "Vazhdo dhe ruaj" })).toBeDisabled()
+  expect(writes).toHaveLength(0)
+  await warning.getByRole("textbox", { name: "Komenti i detyrueshëm" }).fill("Dorëzimi im është në fund të ditës.")
+  await warning.getByRole("button", { name: "Vazhdo dhe ruaj" }).click()
+  await expect(warning).toHaveCount(0)
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0].body.reporting_choice_confirmations).toEqual({
+    marker: { key: "test-conflict", reason: "Dorëzimi im është në fund të ditës." },
+  })
+  expect(tasks[0].one_h_marker).toBe("M2")
+})
+
+test('Common View retries a rejected group change without erasing owner comments', async ({ page }) => {
   const { tasks, writes } = await fixture(page)
   let fail = true
-  await page.route(`**/api/tasks/${taskIds[1]}/one-h-marker`, async route => {
+  await page.route('**/api/tasks/group/one-h-markers', async route => {
     if (fail) return route.fulfill({ status: 503, json: { detail: 'Unavailable' } })
     return route.fallback()
   })
   const dialog = await openGroup(page)
   await chooseGroupSymbols(page)
   await dialog.getByRole('button', { name: 'Ruaj për të gjithë', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('Second Owner')
-  expect(tasks[0].one_h_marker).toBe('CLIENT_URGENT,M3')
+  await expect(dialog.getByRole('alert')).toContainText('Simbolet nuk u ruajtën')
+  expect(tasks[0].one_h_marker).toBeNull()
   expect(tasks[1].one_h_marker).toBeNull()
   fail = false
   await dialog.getByRole('button', { name: 'Ruaj për të gjithë', exact: true }).click()

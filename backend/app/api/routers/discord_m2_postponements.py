@@ -67,7 +67,7 @@ class Proposal(Actor):
     start_date: datetime | None = None
     due_date: datetime | None = None
     reason_code: str = Field(max_length=40)
-    comment: str = Field(min_length=1, max_length=4000)
+    comment: str = Field(default="", max_length=4000)
 
 
 @router.post('/questions/{question_id}')

@@ -704,10 +704,13 @@ def _daily_rlz_state_out(
     *, system_task: Task | None = None, task: Task | None = None,
 ) -> DailyRlzTaskStateOut:
     task = task if task is not None else system_task
-    explanation_required = bool(task is not None and requires_daily_explanation(
+    requirement = requires_daily_explanation(
         status="DONE" if task.completed_at else str(getattr(task.status, "value", task.status)),
         selected_day=day, deadline=semantic_local_day(task.due_date),
-    ).requires_explanation)
+        reason_code=row.reason_code if row else None,
+    ) if task is not None else None
+    reason_required = bool(requirement and requirement.reason_required)
+    comment_required = bool(requirement and requirement.comment_required)
     return DailyRlzTaskStateOut(
         reason_code=row.reason_code if row else None,
         reason_label=REASON_LABELS.get(row.reason_code) if row else None,
@@ -715,11 +718,11 @@ def _daily_rlz_state_out(
         updated_at=row.updated_at if row else None,
         is_editable=is_explanation_editable_day(day),
         editable_until=None,
-        requires_explanation=explanation_required,
-        reason_required=explanation_required,
-        comment_required=explanation_required,
-        reason_missing=explanation_required and not (row and row.reason_code),
-        comment_missing=explanation_required and not (row and (row.comment or "").strip()),
+        requires_explanation=reason_required or comment_required,
+        reason_required=reason_required,
+        comment_required=comment_required,
+        reason_missing=reason_required and not (row and row.reason_code),
+        comment_missing=comment_required and not (row and (row.comment or "").strip()),
     )
 
 

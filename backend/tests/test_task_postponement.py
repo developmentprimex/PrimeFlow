@@ -110,6 +110,22 @@ def test_valid_explanation_is_trimmed_and_daily_state_upsert_targets_each_assign
     assert "ON CONFLICT ON CONSTRAINT uq_task_daily_rlz_state_task_user_day DO UPDATE" in str(statement)
 
 
+def test_pv_accepts_a_postponement_without_a_comment():
+    item = SimpleNamespace(id=uuid.uuid4(), title="Task", start_date=None, due_date=date(2026, 10, 20))
+    explanation = require_postponement_explanation(
+        task=item, updates={"due_date": "2026-10-21"}, reason_code="PV", comment=None,
+    )
+    assert explanation == {"reason_code": "PV", "reason": "PV", "comment": ""}
+    from app.services.daily_realization_events import postponement_explanation_from_events
+
+    event = SimpleNamespace(id=uuid.uuid4(), created_at=datetime(2026, 10, 20, tzinfo=timezone.utc),
+                            action="task.due_date_changed", before={"value": "2026-10-20"},
+                            after={"value": "2026-10-21", **explanation})
+    assert postponement_explanation_from_events([event]) == {
+        "reason": "PV", "comment": "-", "postponement_explanation": True,
+    }
+
+
 def test_system_occurrence_postponement_requires_explanation_before_baseline_or_mutation():
     user_id = uuid.uuid4()
     template = SimpleNamespace(id=uuid.uuid4(), assignee_ids=[user_id], timezone="Europe/Tirane")

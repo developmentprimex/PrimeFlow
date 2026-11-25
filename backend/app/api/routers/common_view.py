@@ -46,6 +46,7 @@ from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga
+from app.services.task_reporting_choices import personal_choices, shared_assignees
 from app.services.task_date_window import common_view_task_date_window_filter
 
 
@@ -75,7 +76,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "23"
+COMMON_VIEW_CACHE_VERSION = "24"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -353,6 +354,7 @@ async def _compute_etag(
         str(department_id) if department_id else "",
         "1" if include_all_departments else "0",
         str(user.role) if user is not None else "internal-report",
+        str(user.id) if user is not None and "tasks" in requested else "",
         "1" if freeze_one_h_slots else "0",
         ",".join(day.isoformat() for day in one_h_slot_report_dates),
         one_h_slot_report_start.isoformat(),
@@ -544,6 +546,7 @@ async def _build_common_view(
     cache_key = (
         f"{COMMON_VIEW_CACHE_VERSION}|{week_start_date}|{week_end}|{','.join(sorted(requested))}|"
         f"{department_id}|{include_all_departments}|{user.role if user is not None else 'internal-report'}|{freeze_one_h_slots}|"
+        f"{user.id if user is not None and 'tasks' in requested else ''}|"
         f"{','.join(day.isoformat() for day in one_h_slot_report_dates)}|"
         f"{one_h_slot_report_start}|{one_h_slot_report_end}"
     )
@@ -820,6 +823,12 @@ async def _build_common_view(
         assignees_by_task: dict[uuid.UUID, list[User]] = {}
         for task_id, user_row in assignee_rows:
             assignees_by_task.setdefault(task_id, []).append(user_row)
+        viewer_choices = await personal_choices(
+            db, [task.id for task in tasks if shared_assignees(task, assignees_by_task.get(task.id, []))],
+            week_start_date, user_id=user.id, marker_day=slot_effective_now.date(),
+            slot_days=one_h_slot_report_dates,
+        ) if user is not None else {}
+        viewer_id = str(user.id) if user is not None else ""
 
         project_ids = list({t.project_id for t in tasks if t.project_id})
         projects: dict[uuid.UUID, Project] = {}
@@ -916,6 +925,12 @@ async def _build_common_view(
                 one_h_slot_date = (
                     task_date if freeze_one_h_slots else effective_slot_date(task_date, slot_effective_now)
                 )
+                own_marker = viewer_choices.get((t.id, viewer_id, "marker"))
+                own_slot = viewer_choices.get((t.id, viewer_id, "slot", one_h_slot_date.isoformat()))
+                marker = own_marker["value"] if own_marker is not None else active_one_h_marker(t, task_date, slot_effective_now)
+                marker_by_ga = own_marker.get("marker_by_ga", False) if own_marker is not None else active_one_h_marker_by_ga(t, task_date, slot_effective_now)
+                marker_comment = own_marker.get("marker_comment") if own_marker is not None else t.one_h_marker_comment
+                slot = own_slot["value"] if own_slot is not None else one_h_slots_by_task_date.get((t.id, one_h_slot_date), t.one_h_report_slot)
                 if t.is_bllok:
                     items["blocked"].append(
                         {
@@ -934,9 +949,9 @@ async def _build_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_marker": active_one_h_marker(t, task_date, slot_effective_now),
-                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, task_date, slot_effective_now),
-                            "one_h_marker_comment": t.one_h_marker_comment,
+                            "one_h_marker": marker,
+                            "one_h_marker_by_ga": marker_by_ga,
+                            "one_h_marker_comment": marker_comment,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -963,11 +978,10 @@ async def _build_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, one_h_slot_date))
-                            or t.one_h_report_slot,
-                            "one_h_marker": active_one_h_marker(t, task_date, slot_effective_now),
-                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, task_date, slot_effective_now),
-                            "one_h_marker_comment": t.one_h_marker_comment,
+                            "one_h_report_slot": slot,
+                            "one_h_marker": marker,
+                            "one_h_marker_by_ga": marker_by_ga,
+                            "one_h_marker_comment": marker_comment,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -994,9 +1008,9 @@ async def _build_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_marker": active_one_h_marker(t, task_date, slot_effective_now),
-                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, task_date, slot_effective_now),
-                            "one_h_marker_comment": t.one_h_marker_comment,
+                            "one_h_marker": marker,
+                            "one_h_marker_by_ga": marker_by_ga,
+                            "one_h_marker_comment": marker_comment,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -1024,11 +1038,10 @@ async def _build_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, one_h_slot_date))
-                            or t.one_h_report_slot,
-                            "one_h_marker": active_one_h_marker(t, task_date, slot_effective_now),
-                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, task_date, slot_effective_now),
-                            "one_h_marker_comment": t.one_h_marker_comment,
+                            "one_h_report_slot": slot,
+                            "one_h_marker": marker,
+                            "one_h_marker_by_ga": marker_by_ga,
+                            "one_h_marker_comment": marker_comment,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -1061,9 +1074,9 @@ async def _build_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_marker": active_one_h_marker(t, task_date, slot_effective_now),
-                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, task_date, slot_effective_now),
-                            "one_h_marker_comment": t.one_h_marker_comment,
+                            "one_h_marker": marker,
+                            "one_h_marker_by_ga": marker_by_ga,
+                            "one_h_marker_comment": marker_comment,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -1096,9 +1109,8 @@ async def _build_common_view(
                             "isDone": False,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, one_h_slot_date))
-                            or t.one_h_report_slot,
-                            "one_h_marker": active_one_h_marker(t, task_date, slot_effective_now),
+                            "one_h_report_slot": slot,
+                            "one_h_marker": marker,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,

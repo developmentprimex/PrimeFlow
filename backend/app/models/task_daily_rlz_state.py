@@ -19,7 +19,7 @@ class TaskDailyRlzState(Base):
         CheckConstraint(
             "reason_code IS NULL OR reason_code IN ('TOOK_LONGER','OTHER_URGENCY','WAITING_CLIENT',"
             "'PRIORITY_CHANGE','TECHNICAL_PROBLEM','MISSING_INFORMATION','REQUEST_CHANGE',"
-            "'NEW_REQUESTS','ABSENCE','OTHER')",
+            "'NEW_REQUESTS','ABSENCE','OTHER','PV')",
             name="ck_task_daily_rlz_state_reason_code",
         ),
         Index("ix_task_daily_rlz_state_user_day", "user_id", "day_date"),

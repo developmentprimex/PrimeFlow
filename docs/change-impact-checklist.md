@@ -93,6 +93,52 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- Arsyeja `PV` pranohet pa koment në raportin ditor RLZ, te shtyrjet e
+  detyrave dhe në përgjigjet M2 që përdorin listën e arsyeve. Kontrollo
+  Development, Graphic Design, Product Content (edhe My View), Finance,
+  Task Details, Weekly Planner, PX Notes/PX JAV, Realization, Kontrollin
+  ditor RLZ, M2 Post-Break, M2/M3 PIKAT, eksportet dhe Discord M2. Arsyeja
+  ruhet në `task_daily_rlz_states` pas migrimit 0210. Mbyllja si DONE e detyrave
+  që kërkojnë koment për rezultatin përdor një rregull më vete.
+
+- Dorëzimet në Discord te Reports & Control lexon simbolet M2, M3 dhe M2/3
+  të detyrave të planifikuara për datën e raportit dhe lidhjet aktive
+  PrimeFlow–Discord të punonjësve. Përdor historikun e simboleve për datat
+  e kaluara kur është i disponueshëm. Lexon vetëm kanalin
+  `#det-nga-stafi-per-ga` me botin e përmendjeve dhe kontrollon titullin
+  dhe autorin deri në 12:15 për M2 dhe deri në 16:30 për M3. M2/3 kërkon dy
+  postime, me ndarje në 12:15. Kontrollo mesazhet e vonuara, identitetet e
+  palidhura, titujt e dyfishtë dhe mungesën e qasjes në historikun e kanalit.
+  Common View dhe tabelat manuale të dorëzimeve në M1, M2 dhe M3 PIKAT
+  përdorin të njëjtat të dhëna burimore të detyrave. Raporti shfaq inicialet
+  dhe departamentin e secilit përgjegjës, përdor renditjen e Weekly Planner
+  dhe Common View, si dhe ngjyrat e tabelave M3 për statusin, deadline dhe
+  theksimin e detyrave 08:00 (përfshirë EM të detyrave josistemore).
+  Paraqet veçmas grupet M2, M2/3 dhe M3 në këtë rend. Çdo rresht hyn në një
+  grup sipas afateve që kontrollohen dhe grupi M2/3 i shfaq të dyja kolonat.
+  Kolonat automatike Po/Jo nxjerrin Jo pas afatit kur historiku është lexuar
+  drejtpërdrejt. Kur leximi direkt mungon, arkivi ekzistues i kanalit mund
+  të konfirmojë një postim të gjetur. Komentet ruhen sipas datës, detyrës
+  dhe përgjegjësit në `discord_task_delivery_comments` (migrimi 0209).
+  Pika 2 i shfaq dallimet mes përgjegjësve në dy tabela, me titullin në rreshtin e parë
+  dhe pjesën e mbetur të detyrës pas kontrollit +/−. Tabelat ndjekin ngjyrat
+  e statusit dhe renditjen e punonjësve nga Weekly Planner. Editorët
+  e detyrave kërkojnë koment kur zgjedhja individuale ndryshon nga zgjedhjet
+  e kolegëve. Ruhet vlera e mëparshme, zgjedhja, homologët dhe arsyeja në
+  historikun e ndryshimeve. Për rreshtat e përbashkët zgjedhja individuale
+  lexohet në My View, Common View, Task Details dhe te dorëzimet për M2/M3.
+  Kontrollo edhe Development, Graphic Design, Product Content dhe Finance,
+  "Për të gjithë" në Common View, 1H SHTYPI, 1H Reports, M1/M2/M3 PIKAT,
+  PX Notes/PX JAV dhe Discord që përdorin burimet e tyre të raportimit.
+  Pika 3 liston detyrat aktive 1H pa slot sipas datës dhe përgjegjësit.
+  Kontrollon zgjedhjen individuale, slotin e ruajtur për datën dhe slotin
+  bazë në këtë radhë. Data e slotit ndjek kalimin e Common View pas 16:00.
+  Common View, 1H Reports dhe M3 End of Day kanë paraqitjet e tyre për 1H pa slot.
+  Pika 4 liston punonjësit pa 1H në 10:00, pa detyrë personale me një person
+  tjetër në AM dhe pa simbol F në AM, vetëm kur mungojnë të tria. Përdor
+  datën e raportit për përzgjedhjet individuale, mungesat tërëditore dhe
+  renditjen e Weekly Planner. Common View llogarit mbulimin e vet për 10:00.
+
 - INFO PX dhe EM IT në pikën 5 të M1 lexojnë tekstin nga Inbox-et e Outlook-ut
   me Microsoft Graph `Mail.Read`. Çdo përdorues i kyçur që hap M1 mund ta
   shohë tabelën dhe vetëm administratori autorizon mailbox-in. Rifreskimi
@@ -108,6 +154,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Verifiko filtrin Email në PX Notes, shënimet
   në M1, M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow, Excel të PX Notes
   dhe përjashtimin nga API-ja publike. Tabela burimore shfaqet në ekranin e M1.
+
+- M1 dhe M2 Post-Break përdorin të njëjtin lexim të Inbox-it për Gmail dhe
+  Yandex. Për Gmail, kontrollo që rezultati bosh të vijë si JSON dhe të
+  shfaqet si interval pa email. Për të dy ofruesit, kontrollo riprovën pas
+  ndërprerjes dhe që një gabim i vazhdueshëm të mbetet i dukshëm.
 
 - Pika 5 e M1 shfaq tabelat e kutive postare. Normalizimi heq tabelat e
   vjetra të detyrave EM nga draftet e ruajtura, pamja paraprake dhe
@@ -391,6 +442,24 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tabela HV dhe bashkëngjitja e 1H Reports përdorin paraqitjen e tyre.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
+
+- Në tabelën **Finance Tasks**, filtri i datave përfshin çdo detyrë që
+  mbivendoset me intervalin e zgjedhur, përfshirë kufijtë. Një datë e vetme
+  kontrollon atë ditë. Filtri **People** përfshin përgjegjësit dhe personat
+  e BZ. Për detyrat sistemore, personat dhe ora e BZ lexohen edhe nga
+  shablloni. Kontrollo detyrat e një departamenti tjetër ku një punonjës
+  Finance merr pjesë vetëm në BZ. Excel përdor rreshtat e filtruar dhe
+  kolonat BZ ME, KOHA BZ dhe përgjegjësit, me rregullin e pranisë së eksportit.
+  Kolona BZ ME paraqet inicialet në Finance dhe Excel.
+  Kolona Asg dhe Excel përfshijnë përgjegjësit e kopjeve aktive të lidhura
+  në `/tasks?include_shared_assignees=true`. Filtrat dhe redaktimi përdorin
+  caktimet e rreshtit përkatës, ndërsa BZ ME përdor pjesëmarrësit e BZ.
+
+- Excel i **Open Tasks** shfaq **ASSIGNEES TË TJERË** menjëherë pas **BZ ME**,
+  nga caktimet e rreshtit dhe kopjeve aktive të lidhura, duke përjashtuar
+  personin e filtruar ose përgjegjësin kryesor. **BZ ME** bashkon inicialet
+  nga detyra dhe shablloni sistemor. Kontrollo shkarkimin nga Open Tasks dhe
+  MCP, si dhe importin e planifikimit me kolonat ekzistuese dhe TASK ID.
 
 - Pamja **Nesër** te **Finance** për HV dhe **Admin Tasks** për GA përdor
   një buton të veçantë. Admin mund të redaktojë planin e HV kur zgjedh

@@ -38,33 +38,20 @@ export function TaskGroupMarkerEditor({ targets }: { targets: Target[] }) {
     setSaving(true)
     setError("")
     try {
-      // Load every record first: missing data must never erase a saved comment.
-      const current = await Promise.all(unique.map(async target => {
-        const response = await apiFetch(`/tasks/${target.taskId}`)
-        if (!response.ok) throw new Error(`Nuk u ngarkua detyra për ${target.person}.`)
-        return { target, task: await response.json() as Task }
-      }))
-      const failed: string[] = []
-      for (const { target, task } of current) {
-        try {
-          const response = await apiFetch(`/tasks/${target.taskId}/one-h-marker`, {
-            method: "PATCH", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ one_h_marker: draft || null, one_h_marker_comment: task.one_h_marker_comment || null }),
-          })
-          if (!response.ok) throw new Error("Save failed")
-          const saved = await response.json() as Task
-          window.dispatchEvent(new CustomEvent(TASK_MARKER_UPDATED_EVENT, { detail: {
-            taskId: target.taskId, marker: saved.one_h_marker ?? null,
-            markerByGa: Boolean(saved.one_h_marker_by_ga), markerComment: saved.one_h_marker_comment ?? null,
-          } }))
-        } catch { failed.push(target.person) }
+      const response = await apiFetch("/tasks/group/one-h-markers", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_ids: unique.map(target => target.taskId), one_h_marker: draft || null }),
+      })
+      if (!response.ok) throw new Error("Simbolet nuk u ruajtën. Provo përsëri.")
+      const saved = await response.json() as Task[]
+      for (const task of saved) {
+        window.dispatchEvent(new CustomEvent(TASK_MARKER_UPDATED_EVENT, { detail: {
+          taskId: task.id, marker: task.one_h_marker ?? null,
+          markerByGa: Boolean(task.one_h_marker_by_ga), markerComment: task.one_h_marker_comment ?? null,
+        } }))
       }
-      if (failed.length) {
-        setError(`Nuk u ruajt për: ${failed.join(", ")}. ${failed.length < current.length ? "Ndryshimet e tjera u ruajtën. " : ""}Provo përsëri.`)
-      } else {
-        toast.success("Simbolet u ruajtën për të gjithë")
-        setOpen(false)
-      }
+      toast.success("Simbolet u ruajtën për të gjithë")
+      setOpen(false)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Detyrat nuk u ngarkuan. Provo përsëri.")
     } finally { setSaving(false) }

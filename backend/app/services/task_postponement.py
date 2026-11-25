@@ -16,6 +16,7 @@ from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.user import User
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.daily_realization_explanation import reason_requires_comment
 from app.services.ga_identity import ga_email, ga_username
 
 
@@ -64,7 +65,7 @@ def require_postponement_explanation(*, task, updates: dict, reason_code: str | 
     if not changes:
         return {}
     reason_code, comment = (reason_code or "").strip(), (comment or "").strip()
-    if reason_code not in REASON_LABELS or not comment:
+    if reason_code not in REASON_LABELS or (reason_requires_comment(reason_code) and not comment):
         if getattr(task, "project_id", None) in (exempt_project_ids or set()):
             return {}
         if getattr(task, "assigned_to", None) in (exempt_assignee_ids or set()):
@@ -135,6 +136,7 @@ async def save_postponement_daily_explanation(db, *, task_id, user_ids, explanat
     ])
     await db.execute(statement.on_conflict_do_update(
         constraint="uq_task_daily_rlz_state_task_user_day",
-        set_={"reason_code": statement.excluded.reason_code, "comment": statement.excluded.comment,
+        set_={"reason_code": statement.excluded.reason_code,
+              "comment": func.coalesce(func.nullif(statement.excluded.comment, ""), TaskDailyRlzState.comment),
               "updated_at": func.now()},
     ))

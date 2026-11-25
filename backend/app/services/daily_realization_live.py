@@ -557,10 +557,11 @@ async def build_live_daily_realization(
             daily_share, multi_day_before_deadline = multi_day_share(
                 local_day(task.start_date) if task else None, original_due or current_due, day,
             )
+            state = states.get((person_id, task_id))
             requirement = requires_daily_explanation(
                 status=status_on_day, selected_day=day,
                 deadline=current_due, deadline_was_today=deadline_was_today,
-                postponed_today=postponed_today,
+                postponed_today=postponed_today, reason_code=state.reason_code if state else None,
             )
             classification = classify_daily_task(DailyClassificationInput(
                 day=day, in_baseline=bool(original), original_due_date=original_due or current_due,
@@ -571,7 +572,6 @@ async def build_live_daily_realization(
                 postponement_approved=approved, reopened=reopened,
                 reassigned_out=was_assigned_out, reassigned_in=was_assigned_in,
             ))
-            state = states.get((person_id, task_id))
             if not original and task and task.system_template_origin_id in hidden_system_template_ids:
                 continue
             if not original and not additional_task_has_day_evidence(

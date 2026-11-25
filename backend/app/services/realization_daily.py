@@ -663,6 +663,7 @@ async def calculate_daily_period(
         else []
     )
     comments = _effective_task_comment_map(comment_rows, daily_comment_rows)
+    pv_reasons = {(row.task_id, row.user_id) for row in daily_comment_rows if row.reason_code == "PV"}
 
     observation_rows = (
         await db.execute(
@@ -782,8 +783,11 @@ async def calculate_daily_period(
             task_id_raw = task_fact.get("task_id")
             task_uuid = uuid.UUID(str(task_id_raw)) if task_id_raw else None
             comment = comments.get((task_uuid, user_id), "") if task_uuid else ""
+            pv_reason = (task_uuid, user_id) in pv_reasons
             task_fact["user_comment"] = comment or None
-            task_fact["comment_required_before_close"] = task_fact.get("source_type") != "system"
+            task_fact["comment_required_before_close"] = task_fact.get("source_type") != "system" and (
+                not pv_reason or task_fact.get("classification") == "completed"
+            )
             task_fact["rlz_impact"] = (
                 "PINK_ACTION_REQUIRED"
                 if task_fact.get("attribution") in {"planned_today", "system_schedule"}
@@ -793,7 +797,7 @@ async def calculate_daily_period(
                 else "ADDITIONAL_EVIDENCE"
             )
             task_fact["explanation_missing"] = bool(
-                task_fact["rlz_impact"] == "PINK_ACTION_REQUIRED" and not comment
+                task_fact["rlz_impact"] == "PINK_ACTION_REQUIRED" and not comment and not pv_reason
             )
             if task_fact["explanation_missing"]:
                 missing_pink_explanations += 1

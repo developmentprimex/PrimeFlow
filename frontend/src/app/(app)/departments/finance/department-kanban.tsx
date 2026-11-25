@@ -26,7 +26,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, toDateInputValue } from "@/lib/dates"
 import { renderMarkedNoteContent } from "@/lib/note-markup"
-import type { DailyReportResponse, Department, SystemTaskOut, Task, User } from "@/lib/types"
+import { financeTaskAlignment, financeTaskMatchesDates, financeTaskMatchesPerson, financeUserInitials as initials } from "@/lib/finance-task-rows"
+import type { DailyReportResponse, Department, SystemTaskOut, SystemTaskTemplate, Task, User } from "@/lib/types"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 
 const ALL_USERS_VALUE = "__all__"
@@ -49,6 +50,7 @@ type RowView = {
   assigneeIds: string[]
   assigneeLabel: string
   assigneeInitials: string
+  alignment: ReturnType<typeof financeTaskAlignment>
   systemFrequency: string
   systemFrequencyLabel: string
   systemFrequencyDisplayLabel: string
@@ -83,15 +85,6 @@ type FinanceExportRow = {
 function userLabel(user?: User | null) {
   if (!user) return ""
   return user.full_name || user.username || user.email || ""
-}
-
-function initials(src: string) {
-  return src
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("")
 }
 
 function parseFilenameFromDisposition(headerValue: string | null) {
@@ -219,14 +212,14 @@ function endOfCurrentWeekIso(referenceDate: Date) {
 function taskAssigneeInfo(task: Task, usersById: Map<string, User>) {
   const seen = new Set<string>()
   const ids: string[] = []
-  const labels: string[] = []
+  const labels = new Map<string, string>()
 
   const pushUser = (id?: string | null, fallbackLabel?: string | null) => {
     if (!id || seen.has(id)) return
     seen.add(id)
     ids.push(id)
     const label = userLabel(usersById.get(id)) || fallbackLabel || id
-    labels.push(label)
+    labels.set(id, label)
   }
 
   if (task.assignees?.length) {
@@ -237,42 +230,21 @@ function taskAssigneeInfo(task: Task, usersById: Map<string, User>) {
 
   pushUser(task.assigned_to)
 
+  const displayIds = [...new Set([task.assigned_to, ...ids, ...(task.shared_assignee_ids ?? [])])]
+  const displayLabels = displayIds.flatMap((id) => {
+    if (!id) return []
+    const label = labels.get(id) || userLabel(usersById.get(id))
+    return label ? [label] : []
+  })
   return {
     ids,
-    label: labels.length ? labels.join(", ") : "Unassigned",
-    initials: labels.length ? labels.map(initials).filter(Boolean).join(", ") : "-",
+    label: displayLabels.join(", ") || "Unassigned",
+    initials: displayLabels.map(initials).filter(Boolean).join(", ") || "-",
   }
 }
 
 function isOpenStatus(status: string) {
   return status === "TODO" || status === "IN_PROGRESS" || status === "PAUSED" || status === "WAITING_CONFIRMATION"
-}
-
-function rowMatchesToday(row: RowView, todayIso: string) {
-  if (row.startDateIso && row.dueDateIso) {
-    const start = row.startDateIso <= row.dueDateIso ? row.startDateIso : row.dueDateIso
-    const end = row.startDateIso <= row.dueDateIso ? row.dueDateIso : row.startDateIso
-    return start <= todayIso && todayIso <= end
-  }
-  return [row.startDateIso, row.dueDateIso].filter(Boolean).includes(todayIso)
-}
-
-function isIsoWithinInclusiveRange(value: string, from: string, to: string) {
-  if (!value) return false
-  if (from && value < from) return false
-  if (to && value > to) return false
-  return true
-}
-
-function rowMatchesDateFilter(row: RowView, dateFrom: string, dateTo: string) {
-  const candidateDates = [row.startDateIso, row.dueDateIso].filter(Boolean)
-  if (!candidateDates.length) return false
-  if (!dateFrom && !dateTo) return true
-  if (dateFrom && !dateTo) return candidateDates.includes(dateFrom)
-  if (!dateFrom && dateTo) return candidateDates.includes(dateTo)
-  const start = dateFrom <= dateTo ? dateFrom : dateTo
-  const end = dateFrom <= dateTo ? dateTo : dateFrom
-  return candidateDates.some((value) => isIsoWithinInclusiveRange(value, start, end))
 }
 
 function rowSortDate(row: RowView) {
@@ -315,7 +287,7 @@ export default function DepartmentKanban() {
   const [editingTask, setEditingTask] = React.useState<Task | null>(null)
   const [viewingDescriptionTask, setViewingDescriptionTask] = React.useState<Task | null>(null)
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
-  const [systemTaskFrequencyByTemplateId, setSystemTaskFrequencyByTemplateId] = React.useState<Record<string, string>>({})
+  const [systemTasksByTemplateId, setSystemTasksByTemplateId] = React.useState<Map<string, SystemTaskOut | SystemTaskTemplate>>(new Map())
   const todayIso = React.useMemo(() => toDateInputValue(new Date()), [])
   const currentWeekEndIso = React.useMemo(() => endOfCurrentWeekIso(new Date()), [])
 
@@ -339,29 +311,41 @@ export default function DepartmentKanban() {
         throw new Error("Finance department was not found.")
       }
 
-      const [tasksRes, systemTasksRes] = await Promise.all([
-        apiFetch(`/tasks?department_id=${encodeURIComponent(financeDepartment.id)}&include_done=true&include_all_done=true`),
+      const financeUsers = nextUsers.filter((entry) => entry.is_active && entry.department_id === financeDepartment.id)
+      const [tasksRes, systemTasksRes, templatesRes, ...relatedResponses] = await Promise.all([
+        apiFetch(`/tasks?department_id=${encodeURIComponent(financeDepartment.id)}&include_done=true&include_all_done=true&include_shared_assignees=true`),
         apiFetch(`/system-tasks?department_id=${encodeURIComponent(financeDepartment.id)}`),
+        apiFetch("/system-tasks/templates"),
+        ...financeUsers.map(({ id }) => apiFetch(`/tasks?related_user_id=${encodeURIComponent(id)}&include_done=true&include_all_done=true&include_shared_assignees=true`)),
       ])
 
-      if (!tasksRes.ok) {
+      if (!tasksRes.ok || !templatesRes.ok || relatedResponses.some((response) => !response.ok)) {
         throw new Error("Unable to load Finance tasks.")
       }
 
       const nextTasks = (await tasksRes.json()) as Task[]
       const systemTasks = systemTasksRes.ok ? ((await systemTasksRes.json()) as SystemTaskOut[]) : []
-      const nextSystemTaskFrequencyByTemplateId = systemTasks.reduce<Record<string, string>>((acc, item) => {
-        if (item.template_id && item.frequency) acc[item.template_id] = item.frequency
-        return acc
-      }, {})
-      const financeUsers = nextUsers.filter(
-        (entry) => entry.is_active && entry.department_id === financeDepartment.id
-      )
+      const templates = (await templatesRes.json()) as SystemTaskTemplate[]
+      const relatedTasks = await Promise.all(relatedResponses.map(async (response) => (await response.json()) as Task[]))
+      const nextSystemTasks = new Map<string, SystemTaskOut | SystemTaskTemplate>(templates.map((item) => [item.id, item]))
+      for (const item of systemTasks) nextSystemTasks.set(item.template_id, item)
+
+      const nextTasksById = new Map(nextTasks.map((task) => [task.id, task]))
+      relatedTasks.forEach((matches, index) => {
+        const personId = financeUsers[index].id
+        for (const task of matches) {
+          const template = nextSystemTasks.get(task.system_template_origin_id ?? "")
+          if (task.assigned_to === personId || task.assignees?.some((assignee) => assignee.id === personId)
+            || task.alignment_user_ids?.includes(personId) || template?.alignment_user_ids?.includes(personId)) {
+            nextTasksById.set(task.id, task)
+          }
+        }
+      })
 
       setDepartment(financeDepartment)
       setUsers(nextUsers)
-      setTasks(nextTasks)
-      setSystemTaskFrequencyByTemplateId(nextSystemTaskFrequencyByTemplateId)
+      setTasks([...nextTasksById.values()])
+      setSystemTasksByTemplateId(nextSystemTasks)
       setSelectedUserId((prev) => {
         if (prev !== ALL_USERS_VALUE && nextUsers.some((entry) => entry.id === prev)) return prev
         if (financeUsers.length === 1) return financeUsers[0]!.id
@@ -453,6 +437,7 @@ export default function DepartmentKanban() {
   }, [users])
 
   const rows = React.useMemo<RowView[]>(() => {
+    const userLabels = new Map(users.map((entry) => [entry.id, userLabel(entry)]))
     return [...tasks]
       .map((task) => {
         const assigneeInfo = taskAssigneeInfo(task, usersById)
@@ -460,9 +445,8 @@ export default function DepartmentKanban() {
         const isManagerView = user?.role === "ADMIN" || user?.role === "MANAGER"
         const isAssignedToCurrentUser = Boolean(user?.id && assigneeInfo.ids.includes(user.id))
         const canEdit = Boolean((isManagerView || isAssignedToCurrentUser) && statusValue !== "DONE")
-        const systemFrequency = task.system_template_origin_id
-          ? systemTaskFrequencyByTemplateId[task.system_template_origin_id] || ""
-          : ""
+        const systemTask = systemTasksByTemplateId.get(task.system_template_origin_id ?? "")
+        const systemFrequency = systemTask?.frequency || ""
 
         return {
           task,
@@ -474,6 +458,7 @@ export default function DepartmentKanban() {
           assigneeIds: assigneeInfo.ids,
           assigneeLabel: assigneeInfo.label,
           assigneeInitials: assigneeInfo.initials,
+          alignment: financeTaskAlignment(task.alignment_user_ids, systemTask, userLabels),
           systemFrequency,
           systemFrequencyLabel: systemFrequencyShortLabel(systemFrequency),
           systemFrequencyDisplayLabel: systemFrequencyDisplayLabel(systemFrequency),
@@ -503,12 +488,13 @@ export default function DepartmentKanban() {
 
         return a.title.localeCompare(b.title)
       })
-  }, [systemTaskFrequencyByTemplateId, tasks, user?.id, user?.role, usersById])
+  }, [systemTasksByTemplateId, tasks, user?.id, user?.role, users, usersById])
 
   const selectableUsers = React.useMemo(() => {
     const ids = new Set<string>()
     for (const row of rows) {
       for (const id of row.assigneeIds) ids.add(id)
+      for (const id of row.alignment.userIds) ids.add(id)
     }
 
     return users
@@ -525,22 +511,22 @@ export default function DepartmentKanban() {
   const filteredRows = React.useMemo(() => {
     const visibleRows = rows.filter((row) => {
       if (
-        row.task.system_template_origin_id &&
+        !dateFrom && !dateTo && row.task.system_template_origin_id &&
         row.occurrenceDateIso &&
         row.occurrenceDateIso > currentWeekEndIso
       ) {
         return false
       }
 
-      if (selectedUserId !== ALL_USERS_VALUE && !row.assigneeIds.includes(selectedUserId)) {
+      if (selectedUserId !== ALL_USERS_VALUE && !financeTaskMatchesPerson(row, selectedUserId)) {
         return false
       }
 
-      return rowMatchesDateFilter(row, dateFrom, dateTo)
+      return financeTaskMatchesDates(row, dateFrom, dateTo)
     })
 
     if (viewFilter === VIEW_TODAY) {
-      return visibleRows.filter((row) => row.status !== "DONE" && rowMatchesToday(row, todayIso))
+      return visibleRows.filter((row) => row.status !== "DONE" && financeTaskMatchesDates(row, todayIso, todayIso))
     }
     if (viewFilter === VIEW_OVERDUE) {
       return visibleRows.filter((row) => row.status !== "DONE" && (row.lateDays ?? 0) > 0)
@@ -548,7 +534,7 @@ export default function DepartmentKanban() {
     if (viewFilter === VIEW_TODAY_OVERDUE) {
       return visibleRows.filter(
         (row) =>
-          row.status !== "DONE" && (rowMatchesToday(row, todayIso) || (row.lateDays ?? 0) > 0)
+          row.status !== "DONE" && (financeTaskMatchesDates(row, todayIso, todayIso) || (row.lateDays ?? 0) > 0)
       )
     }
 
@@ -568,44 +554,28 @@ export default function DepartmentKanban() {
     const departmentLabel = department?.code || department?.name || "FIN"
     return filteredRows.map((row) => {
       const task = row.task
-      const alignmentInitials = (task.alignment_user_ids || [])
-        .map((id) => {
-          const entry = usersById.get(id)
-          return entry ? initials(userLabel(entry)) : ""
-        })
-        .filter(Boolean)
-        .join(", ")
-
-      const assigneeInitials = Array.from(new Set(row.assigneeIds))
-        .map((id) => {
-          const entry = usersById.get(id)
-          if (entry) return initials(userLabel(entry))
-          const fallback = task.assignees?.find((assignee) => assignee.id === id)
-          return fallback ? initials(fallback.full_name || fallback.username || fallback.email || "") : ""
-        })
-        .filter(Boolean)
-        .join(", ")
-
       return {
         typeLabel: task.system_template_origin_id ? "SYS" : task.project_id ? "PRJK" : "FT",
         subtype: task.system_template_origin_id ? "SYS" : task.project_id ? "-" : fastReportSubtypeShort(task),
         frequency: row.systemFrequencyLabel,
         dateLabel: row.dueDateIso ? formatDateDMY(row.dueDateIso) : row.startDateIso ? formatDateDMY(row.startDateIso) : "-",
-        bzMe: alignmentInitials,
-        kohaBz: "-",
+        bzMe: row.alignment.withLabel,
+        kohaBz: row.alignment.time || "-",
         department: departmentLabel,
         period: resolvePeriod(task.finish_period),
         title: [task.title || "-", miraDictationLabel(task.mira_dictation_source)].filter(Boolean).join("\n"),
         description: task.description || "",
         details: formatInternalDetails(task.internal_notes),
         status: row.status,
-        userInitials: assigneeInitials,
+        userInitials: row.assigneeInitials === "-" ? "" : row.assigneeInitials,
       }
     })
-  }, [department?.code, department?.name, filteredRows, usersById])
+  }, [department?.code, department?.name, filteredRows])
 
   const handleTaskUpdated = React.useCallback((updatedTask: Task) => {
-    setTasks((prev) => prev.map((task) => (task.id === updatedTask.id ? updatedTask : task)))
+    setTasks((prev) => prev.map((task) => task.id === updatedTask.id
+      ? { ...updatedTask, shared_assignee_ids: updatedTask.shared_assignee_ids ?? task.shared_assignee_ids }
+      : task))
   }, [])
 
   const saveOneHReportSlot = React.useCallback(
@@ -691,7 +661,7 @@ export default function DepartmentKanban() {
         }
 
         const updatedTask = (await res.json()) as Task
-        setTasks((prev) => prev.map((task) => (task.id === taskId ? updatedTask : task)))
+        handleTaskUpdated(updatedTask)
         toast.success("Task marked as done")
       } catch (markError) {
         const message = markError instanceof Error ? markError.message : "Failed to mark task as done."
@@ -704,7 +674,7 @@ export default function DepartmentKanban() {
         })
       }
     },
-    [apiFetch, tasks]
+    [apiFetch, handleTaskUpdated, tasks]
   )
 
   const handleExportExcel = React.useCallback(async () => {
@@ -809,12 +779,12 @@ export default function DepartmentKanban() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Date from</Label>
-              <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+              <Label htmlFor="finance-date-from">Date from</Label>
+              <Input id="finance-date-from" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Date to</Label>
-              <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+              <Label htmlFor="finance-date-to">Date to</Label>
+              <Input id="finance-date-to" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
             </div>
           </div>
         </CardContent>}
@@ -879,36 +849,40 @@ export default function DepartmentKanban() {
           ) : (
             <div className="@container space-y-4">
               <Table
-                className="min-w-[1340px] table-fixed"
-                containerClassName="max-h-[75dvh] overflow-auto rounded-lg border border-slate-200 bg-white @[1342px]:max-h-none @[1342px]:overflow-visible print:max-h-none print:overflow-visible"
+                className="min-w-[1544px] table-fixed [--finance-row-number-width:36px]"
+                containerClassName="max-h-[75dvh] overflow-auto rounded-lg border border-slate-200 bg-white @[1546px]:max-h-none @[1546px]:overflow-visible print:max-h-none print:overflow-visible"
               >
                 <colgroup>
-                  <col className="w-[36px]" />{/* NR */}
+                  <col className="w-[var(--finance-row-number-width)]" />{/* NR */}
                   <col />{/* Title fills the remaining space */}
                   <col className="w-16" />{/* Freq. */}
                   <col className="w-[54px]" />{/* Type */}
                   <col className="w-20" />{/* Slot */}
-                  <col className="w-10" />{/* Asg */}
-                  <col className="w-[82px]" />{/* Created */}
+                  <col className="w-14" />{/* Asg */}
+                  <col className="w-[72px]" />{/* BZ ME */}
+                  <col className="w-[76px]" />{/* KOHA BZ */}
+                  <col className="w-[76px]" />{/* Created */}
                   <col className="w-[88px]" />{/* Start Date */}
                   <col className="w-[88px]" />{/* Due Date */}
                   <col className="w-[46px]" />{/* Late */}
-                  <col className="w-[100px]" />{/* Symbol */}
-                  <col className="w-[108px]" />{/* Status */}
+                  <col className="w-[88px]" />{/* Symbol */}
+                  <col className="w-[88px]" />{/* Status */}
                   <col className="w-[170px]" />{/* Arsyeja */}
                   <col className="w-[150px]" />{/* Koment */}
                   <col className="w-28" />{/* Actions */}
                 </colgroup>
                 <TableHeader className="sticky top-0 z-20 bg-slate-50 print:static">
                   <TableRow className="bg-slate-50">
-                    <TableHead>NR</TableHead>
-                    <TableHead>Title</TableHead>
+                    <TableHead className="sticky left-0 z-10 bg-slate-50 print:static">NR</TableHead>
+                    <TableHead className="sticky left-[var(--finance-row-number-width)] z-10 border-r border-slate-200 bg-slate-50 print:static">Title</TableHead>
                     <TableHead className="px-0 text-center" title="Frequency">Freq.</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead className="px-1 text-center" title="1H report time">
                       Slot
                     </TableHead>
                     <TableHead className="px-1 text-center" title="Assignee">Asg</TableHead>
+                    <TableHead>BZ ME</TableHead>
+                    <TableHead>KOHA BZ</TableHead>
                     <TableHead className="text-xs font-normal text-slate-400">Created</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
@@ -917,15 +891,15 @@ export default function DepartmentKanban() {
                     <TableHead>Status</TableHead>
                     <TableHead>Arsyeja</TableHead>
                     <TableHead>Koment</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead className="sticky right-0 z-10 border-l border-slate-200 bg-slate-50 print:static">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredRows.length ? (
                     filteredRows.map((row, index) => (
-                      <TableRow key={row.id}>
-                        <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                        <TableCell className="whitespace-normal font-medium text-slate-800">
+                      <TableRow key={row.id} className="group/finance-row">
+                        <TableCell className="sticky left-0 z-10 bg-background font-semibold text-slate-700 group-hover/finance-row:bg-muted print:static">{index + 1}</TableCell>
+                        <TableCell className="sticky left-[var(--finance-row-number-width)] z-10 whitespace-normal border-r border-slate-200 bg-background font-medium text-slate-800 group-hover/finance-row:bg-muted print:static">
                           <div className="relative flex w-full items-start gap-2 pr-8">
                             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
                               <TaskMarkerComment comment={row.task.one_h_marker_comment} taskId={row.task.id} />
@@ -993,6 +967,8 @@ export default function DepartmentKanban() {
                         <TableCell className="px-1 text-center whitespace-normal" title={row.assigneeLabel}>
                           <span className="text-xs font-semibold text-slate-700">{row.assigneeInitials}</span>
                         </TableCell>
+                        <TableCell className="whitespace-normal break-words">{row.alignment.withLabel || "—"}</TableCell>
+                        <TableCell>{row.alignment.time || "—"}</TableCell>
                         <TableCell className="text-xs font-normal text-slate-400">
                           {formatDateDMY(row.createdDateIso)}
                         </TableCell>
@@ -1035,7 +1011,7 @@ export default function DepartmentKanban() {
                             onSaved={refreshDailyReport}
                           />
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="sticky right-0 z-10 border-l border-slate-200 bg-background group-hover/finance-row:bg-muted print:static">
                           <div className="flex flex-wrap items-center gap-1">
                             <Button
                               size="sm"
@@ -1068,7 +1044,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={15} className="py-8 text-center text-sm text-slate-500">
+                      <TableCell colSpan={17} className="py-8 text-center text-sm text-slate-500">
                         No Finance tasks match the selected filters.
                       </TableCell>
                     </TableRow>
@@ -1094,7 +1070,10 @@ export default function DepartmentKanban() {
         onOpenChange={(open) => {
           if (!open) setEditingTask(null)
         }}
-        onUpdated={handleTaskUpdated}
+        onUpdated={(updatedTask) => {
+          handleTaskUpdated(updatedTask)
+          void loadData()
+        }}
         showDescriptionField
       />
 

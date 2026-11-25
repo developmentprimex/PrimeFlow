@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 import discord
 from app.config import settings
+from app.services.daily_realization_explanation import reason_requires_comment
 from app.services.primeflow_report import report_timezone
 from app.services.discord_m2_postponements import FIELDS, STATUS_LABELS, iso
 import discord_m2_client as questions
@@ -106,9 +107,10 @@ class ProposalModal(discord.ui.Modal):
                 placeholder='Ndrysho datën nëse dëshiron · DD.MM.YYYY', required=True, max_length=32)
             self.dates[field] = item
             self.add_item(item)
-        self.comment = discord.ui.TextInput(label='Pse të duhet shtyrja?',
+        comment_required = reason_requires_comment(reason)
+        self.comment = discord.ui.TextInput(label='Pse të duhet shtyrja?' if comment_required else 'Komenti (opsional)',
             placeholder='P.sh. Pres të dhënat nga klienti. Më duhet edhe një ditë.',
-            required=True, max_length=4000, style=discord.TextStyle.paragraph)
+            required=comment_required, max_length=4000, style=discord.TextStyle.paragraph)
         self.add_item(self.comment)
 
     async def on_submit(self, interaction):

@@ -87,3 +87,27 @@ def test_gmail_validates_address_and_reads_only_the_report_days_inbox():
         "received_datetime": "2026-11-23T00:00:00+01:00", "body": "Message body",
         "original_email_url": "https://mail.google.com/mail/?authuser=primex.eu%40gmail.com#all/thread-1",
     }]
+
+
+def test_gmail_retries_a_temporary_failure_then_returns_an_empty_inbox(monkeypatch):
+    pause = []
+
+    async def sleep(delay):
+        pause.append(delay)
+
+    monkeypatch.setattr(gmail_mail.asyncio, "sleep", sleep)
+
+    def respond(request):
+        assert request.url.path.endswith("/messages")
+        if not pause:
+            return httpx.Response(503)
+        if "resultSizeEstimate" not in request.url.params["fields"].split(","):
+            return httpx.Response(204)
+        return httpx.Response(200, json={"resultSizeEstimate": 0})
+
+    async def read():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            return await gmail_mail.read_inbox(client, "sample", date(2026, 11, 25), ZoneInfo("Europe/Tirane"))
+
+    assert asyncio.run(read()) == []
+    assert len(pause) == 1

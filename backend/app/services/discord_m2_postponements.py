@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.daily_realization_explanation import reason_requires_comment
 from app.services.primeflow_report import report_timezone
 from app.services.discord_task_status import settled_for_questions
 
@@ -20,7 +21,7 @@ def iso(value):
 
 
 def proposed_dates(task, change_kind, values, reason_code, comment):
-    if reason_code not in REASON_LABELS or not comment.strip():
+    if reason_code not in REASON_LABELS or (reason_requires_comment(reason_code) and not comment.strip()):
         raise HTTPException(422, 'Zgjidh arsyen dhe plotëso komentin.')
     if change_kind not in FIELDS or set(values) != set(FIELDS[change_kind]):
         raise HTTPException(422, 'Zgjidh vetëm Start, vetëm Due, ose Start dhe Due.')

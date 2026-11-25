@@ -74,6 +74,7 @@ class M2RulesTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 service.validate_answer(kind, 'OTHER', '', None)
             self.assertEqual(service.validate_answer(kind, 'OTHER', 'Text', None), ('OTHER', 'Text', None))
+            self.assertEqual(service.validate_answer(kind, 'PV', '', None), ('PV', '', None))
 
     def test_duplicate_submission_does_not_append_comment_again(self):
         question = SimpleNamespace(answered_at=datetime.now(), task_id=uuid.uuid4(), kind='delivery',

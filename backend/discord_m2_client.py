@@ -7,6 +7,7 @@ import discord
 import discord_ui as task_ui
 from discord_interactions import prepare_modal, open_modal
 from app.services.discord_m2 import KINDS, MOVEMENTS
+from app.services.daily_realization_explanation import reason_requires_comment
 
 
 def actor(interaction):
@@ -161,8 +162,9 @@ class ReplyModal(discord.ui.Modal):
         super().__init__(title='Komenti për PM' if job['kind'] == 'continuation' else 'Komenti për dorëzimin' if choice == 'PO' else 'PËRGJIGJA për M2', timeout=900)
         self.bot, self.job, self.reason, self.choice = bot, job, reason, choice
         self.source_message = source_message
-        self.comment = discord.ui.TextInput(label=('Pse nuk vazhdon në PM?' if job['kind'] == 'continuation' else 'Pse nuk u dorëzua?') if choice == 'JO' else 'Komenti (opsional)' if choice == 'PO' else 'Komenti / progresi',
-            style=discord.TextStyle.paragraph, required=choice != 'PO', max_length=4000,
+        comment_required = choice != 'PO' and reason_requires_comment(reason)
+        self.comment = discord.ui.TextInput(label=('Pse nuk vazhdon në PM?' if job['kind'] == 'continuation' else 'Pse nuk u dorëzua?') if choice == 'JO' else 'Komenti / progresi' if comment_required else 'Komenti (opsional)',
+            style=discord.TextStyle.paragraph, required=comment_required, max_length=4000,
             default=(job.get('comment') or None) if choice == job.get('choice') else None)
         self.add_item(self.comment)
 

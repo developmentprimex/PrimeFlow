@@ -30,6 +30,7 @@ class TaskOut(BaseModel):
     assigned_to: uuid.UUID | None = None
     confirmation_assignee_id: uuid.UUID | None = None
     assignees: list[TaskAssigneeOut] = Field(default_factory=list)
+    shared_assignee_ids: list[uuid.UUID] | None = None
     created_by: uuid.UUID | None = None
     ga_note_origin_id: uuid.UUID | None = None
     mira_dictation_source: str | None = None
@@ -148,6 +149,7 @@ class TaskRemoveFromDayRequest(BaseModel):
 
 
 class TaskUpdate(BaseModel):
+    reporting_choice_confirmations: dict[str, dict[str, str]] = Field(default_factory=dict, exclude=True)
     postponement_reason_code: str | None = Field(default=None, max_length=40, exclude=True)
     postponement_comment: str | None = Field(default=None, max_length=10000, exclude=True)
     title: str | None = Field(default=None, min_length=2)

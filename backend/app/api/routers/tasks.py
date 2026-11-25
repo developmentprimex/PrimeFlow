@@ -37,7 +37,8 @@ from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
-from app.services.one_h_slots import effective_slot_date
+from app.services.one_h_slots import current_effective_slot_date, effective_slot_date
+from app.services import task_reporting_choices as reporting_choices
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
@@ -1481,6 +1482,7 @@ async def list_tasks(
     include_all_departments: bool = False,
     related_user_id: uuid.UUID | None = None,
     related_department_id: uuid.UUID | None = None,
+    include_shared_assignees: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[TaskOut]:
@@ -1604,7 +1606,12 @@ async def list_tasks(
     tasks = (await db.execute(stmt)).scalars().all()
     task_ids = [t.id for t in tasks]
     assignee_map, comment_map, alignment_map = await _task_list_metadata(db, task_ids, user.id)
+    shared_assignee_ids = await reporting_choices.shared_task_assignee_ids(db, tasks) if include_shared_assignees else {}
     question_status_overrides = await _question_task_status_overrides(db, tasks, user.id)
+    choices = await reporting_choices.personal_choices(
+        db, [task.id for task in tasks if reporting_choices.shared_assignees(task, assignee_map.get(task.id, []))],
+        current_effective_slot_date(), user_id=user.id, marker_day=current_effective_marker_date(),
+    )
 
     out = []
     today = _as_local_date(datetime.now(timezone.utc)) or datetime.now(timezone.utc).date()
@@ -1633,7 +1640,8 @@ async def list_tasks(
             moved_days=_task_moved_days(t),
         )
         dto.alignment_user_ids = alignment_map.get(t.id)
-        out.append(dto)
+        dto.shared_assignee_ids = shared_assignee_ids.get(t.id)
+        out.append(reporting_choices.apply_personal_choices(dto, choices, user.id))
     return out
 
 
@@ -1881,6 +1889,11 @@ async def get_task(
         status_override = question_status_overrides[task.id]
 
     dto = _task_to_out(task, dto_assignees or [], status_override=status_override)
+    if reporting_choices.shared_assignees(task, assignee_map.get(task.id, [])):
+        choices = await reporting_choices.personal_choices(
+            db, [task.id], current_effective_slot_date(), user_id=user.id, marker_day=current_effective_marker_date(),
+        )
+        reporting_choices.apply_personal_choices(dto, choices, user.id)
     if task.plan_note_origin_id is not None:
         planning_brief_payload = (
             await db.execute(
@@ -2920,11 +2933,12 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
-    return await update_task_in_session(task_id, payload, db, user)
+    return await update_task_in_session(task_id, payload, db, user, coordinate_reporting=True)
 
 
 async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: AsyncSession, user,
-                                 *, before_update=None, before_commit=None, return_dto=True) -> TaskOut | Task:
+                                 *, before_update=None, before_commit=None, return_dto=True,
+                                 coordinate_reporting=False) -> TaskOut | Task:
     """Internal hooks allow a reviewed proposal and the normal task edit to commit together."""
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
@@ -2944,6 +2958,9 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         updates={field: getattr(payload, field) for field in ("start_date", "due_date") if _payload_has_field(payload, field)},
         reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
     )
+    slot_set = _payload_has_field(payload, "one_h_report_slot")
+    marker_set = _payload_has_field(payload, "one_h_marker")
+    coordinate = coordinate_reporting and (slot_set or marker_set)
 
     prepared_date_departments = None
     product_phases = {ProjectPhaseStatus.PRODUCT, ProjectPhaseStatus.CONTROL}
@@ -2965,10 +2982,13 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             db=db, department_ids=department_ids, day=_realization_today(), actor=user,
         )
         prepared_date_departments = department_ids
-        group_id = select(Task.fast_task_group_id).where(Task.id == task_id).correlate(None).scalar_subquery()
-        locked = (await db.execute(select(Task).where(or_(Task.id == task_id, Task.fast_task_group_id == group_id))
-            .order_by(Task.id).with_for_update().execution_options(populate_existing=True))).scalars().all()
-        task = next((item for item in locked if item.id == task_id), None)
+        if coordinate:
+            task, reporting_group = await reporting_choices.lock_task_group(db, task_id)
+        else:
+            group_id = select(Task.fast_task_group_id).where(Task.id == task_id).correlate(None).scalar_subquery()
+            locked = (await db.execute(select(Task).where(or_(Task.id == task_id, Task.fast_task_group_id == group_id))
+                .order_by(Task.id).with_for_update().execution_options(populate_existing=True))).scalars().all()
+            task = next((item for item in locked if item.id == task_id), None)
         if task is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
         ensure_task_editor(user, task)
@@ -2979,6 +2999,29 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             updates={field: getattr(payload, field) for field in ("start_date", "due_date") if _payload_has_field(payload, field)},
             reason_code=payload.postponement_reason_code, comment=payload.postponement_comment,
         )
+
+    personal_slot = personal_marker = False
+    slot_day = current_effective_slot_date() if coordinate else None
+    if coordinate:
+        if prepared_date_departments is None:
+            task, reporting_group = await reporting_choices.lock_task_group(db, task_id)
+            ensure_task_editor(user, task)
+        if slot_set:
+            _validate_eight_am_one_h_slot(
+                payload.title or task.title, payload.one_h_report_slot,
+                is_system_task=bool(task.system_template_origin_id or task.system_task_slot_id),
+            )
+            personal_slot = await reporting_choices.record_choice(
+                db, task, reporting_group, user, field="slot", value=payload.one_h_report_slot, day=slot_day,
+                confirmation=payload.reporting_choice_confirmations.get("slot"),
+            )
+        if marker_set:
+            personal_marker = await reporting_choices.record_choice(
+                db, task, reporting_group, user, field="marker", value=payload.one_h_marker, day=current_effective_marker_date(),
+                confirmation=payload.reporting_choice_confirmations.get("marker"),
+                marker_comment=normalize_marker_comment(payload.one_h_marker, payload.one_h_marker_comment),
+                marker_by_ga=bool(payload.one_h_marker and marker_is_by_ga(user.email)),
+            )
 
     if before_update is not None:
         await before_update(task)
@@ -3533,10 +3576,11 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             # R1 uses the same report slots without changing the task type to 1H.
             if not task.is_r1 and payload.is_r1 is not True:
                 task.is_1h_report = True
+        if not personal_slot:
             task.one_h_report_slot = payload.one_h_report_slot
-        else:
-            task.one_h_report_slot = None
-    if one_h_marker_set:
+            if coordinate:
+                await _store_task_slot(db, task.id, slot_day, payload.one_h_report_slot)
+    if one_h_marker_set and not personal_marker:
         await sync_task_marker(
             db, task, payload.one_h_marker, actor_email=user.email,
             marker_comment=payload.one_h_marker_comment,
@@ -3739,7 +3783,9 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             shared_values["is_r1"] = task.is_r1
         if payload.is_1h_report is not None:
             shared_values["is_1h_report"] = task.is_1h_report
-        if _payload_has_field(payload, "one_h_report_slot") or payload.is_1h_report is not None:
+        if (not coordinate_reporting and _payload_has_field(payload, "one_h_report_slot")) or (
+            payload.is_1h_report is not None and not slot_set
+        ):
             shared_values["one_h_report_slot"] = task.one_h_report_slot
         if payload.is_personal is not None:
             shared_values["is_personal"] = task.is_personal
@@ -3991,6 +4037,11 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
         dto_assignees = group_map.get(task.fast_task_group_id, dto_assignees)
     dto = _task_to_out(task, dto_assignees or [], status_override=question_status_override)
+    if reporting_choices.shared_assignees(task, assignee_map.get(task.id, [])):
+        choices = await reporting_choices.personal_choices(
+            db, [task.id], current_effective_slot_date(), user_id=user.id, marker_day=current_effective_marker_date(),
+        )
+        reporting_choices.apply_personal_choices(dto, choices, user.id)
     if alignment_set:
         dto.alignment_user_ids = payload.alignment_user_ids
     else:
@@ -4035,11 +4086,13 @@ class TaskCommentUpdate(BaseModel):
 class TaskOneHReportSlotUpdate(BaseModel):
     report_date: date
     one_h_report_slot: str | None = None
+    reporting_choice_confirmations: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class TaskOneHMarkerUpdate(BaseModel):
     one_h_marker: TaskMarkerValue | None = None
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
+    reporting_choice_confirmations: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 def _normalize_one_h_report_slot(value: str | None) -> str | None:
@@ -4054,12 +4107,16 @@ async def update_task_one_h_report_slot(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
-    return await update_task_one_h_report_slot_in_session(task_id, payload, db, user)
+    return await update_task_one_h_report_slot_in_session(task_id, payload, db, user, coordinate_reporting=True)
 
 
-async def update_task_one_h_report_slot_in_session(task_id, payload, db, user, *, before_commit=None, before_update=None, return_dto=True):
-    task = (await db.execute(select(Task).where(Task.id == task_id).with_for_update()
-        .execution_options(populate_existing=True))).scalar_one_or_none()
+async def update_task_one_h_report_slot_in_session(task_id, payload, db, user, *, before_commit=None, before_update=None,
+                                                  return_dto=True, coordinate_reporting=False):
+    if coordinate_reporting:
+        task, group = await reporting_choices.lock_task_group(db, task_id)
+    else:
+        task = (await db.execute(select(Task).where(Task.id == task_id).with_for_update()
+            .execution_options(populate_existing=True))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     is_assigned = (
@@ -4088,11 +4145,33 @@ async def update_task_one_h_report_slot_in_session(task_id, payload, db, user, *
 
     # Current-day slots roll over to the next working day at 16:00.
     slot_date = effective_slot_date(payload.report_date)
+    personal = coordinate_reporting and await reporting_choices.record_choice(
+        db, task, group, user, field="slot", value=next_slot, day=slot_date,
+        confirmation=payload.reporting_choice_confirmations.get("slot"),
+    )
 
-    task.one_h_report_slot = next_slot
+    if not personal:
+        task.one_h_report_slot = next_slot
     if next_slot is not None and not task.is_r1:
         task.is_1h_report = True
 
+    if not personal:
+        await _store_task_slot(db, task_id, slot_date, next_slot)
+
+    if before_commit is not None:
+        await before_commit(task)
+    await db.commit()
+    if not return_dto:
+        return task
+    await db.refresh(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
+    task_out = _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
+    task_out.one_h_report_slot = next_slot
+    return task_out
+
+
+async def _store_task_slot(db, task_id, slot_date, next_slot):
     existing = (
         await db.execute(
             select(TaskOneHReportSlot).where(
@@ -4116,19 +4195,6 @@ async def update_task_one_h_report_slot_in_session(task_id, payload, db, user, *
     else:
         existing.one_h_report_slot = next_slot
 
-    if before_commit is not None:
-        await before_commit(task)
-    await db.commit()
-    if not return_dto:
-        return task
-    await db.refresh(task)
-    assignee_map = await _assignees_for_tasks(db, [task.id])
-    comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
-    task_out = _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
-    task_out.one_h_report_slot = next_slot
-    return task_out
-
-
 @router.patch("/{task_id}/one-h-marker", response_model=TaskOut)
 async def update_task_one_h_marker(
     task_id: uuid.UUID,
@@ -4137,18 +4203,56 @@ async def update_task_one_h_marker(
     user=Depends(get_current_user),
 ) -> TaskOut:
     """Allow any authenticated user to classify a task shown in 1H SHTYPI."""
-    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
-    if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    await sync_task_marker(
-        db, task, payload.one_h_marker, actor_email=getattr(user, "email", None),
-        marker_comment=payload.one_h_marker_comment,
+    task, group = await reporting_choices.lock_task_group(db, task_id)
+    marker_comment = normalize_marker_comment(payload.one_h_marker, payload.one_h_marker_comment)
+    marker_by_ga = bool(payload.one_h_marker and marker_is_by_ga(getattr(user, "email", None)))
+    personal = await reporting_choices.record_choice(
+        db, task, group, user, field="marker", value=payload.one_h_marker, day=current_effective_marker_date(),
+        confirmation=payload.reporting_choice_confirmations.get("marker"),
+        marker_comment=marker_comment, marker_by_ga=marker_by_ga,
     )
+    if not personal:
+        await sync_task_marker(db, task, payload.one_h_marker, actor_email=getattr(user, "email", None),
+                               marker_comment=payload.one_h_marker_comment)
 
     await db.commit()
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
-    return _task_to_out(task, assignee_map.get(task.id, []))
+    dto = _task_to_out(task, assignee_map.get(task.id, []))
+    if personal:
+        dto.one_h_marker, dto.one_h_marker_by_ga, dto.one_h_marker_comment = payload.one_h_marker, marker_by_ga, marker_comment
+    return dto
+
+
+class TaskGroupMarkerUpdate(BaseModel):
+    task_ids: list[uuid.UUID] = Field(min_length=2, max_length=250)
+    one_h_marker: TaskMarkerValue | None = None
+
+
+@router.patch("/group/one-h-markers", response_model=list[TaskOut])
+async def update_task_group_markers(
+    payload: TaskGroupMarkerUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[TaskOut]:
+    task_ids = set(payload.task_ids)
+    tasks = (await db.scalars(select(Task).where(
+        Task.id.in_(task_ids), Task.is_active.is_(True),
+    ).order_by(Task.id).with_for_update())).all()
+    if len(tasks) != len(task_ids) or len(tasks) < 2:
+        raise HTTPException(404, "Disa detyra të grupit nuk u gjetën.")
+    if len({reporting_choices.group_key(task) for task in tasks}) != 1:
+        raise HTTPException(422, "Detyrat nuk i përkasin të njëjtit grup.")
+    await reporting_choices.replace_group_marker_overrides(
+        db, tasks, user, payload.one_h_marker, current_effective_marker_date(),
+        marker_by_ga=bool(payload.one_h_marker and marker_is_by_ga(user.email)),
+    )
+    for task in tasks:
+        await sync_task_marker(db, task, payload.one_h_marker, actor_email=user.email,
+                               marker_comment=task.one_h_marker_comment)
+    await db.commit()
+    assignees = await _assignees_for_tasks(db, [task.id for task in tasks])
+    return [_task_to_out(task, assignees.get(task.id, [])) for task in tasks]
 
 
 @router.patch("/{task_id}/comment", response_model=TaskOut)

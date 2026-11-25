@@ -5,6 +5,7 @@ import hashlib
 import json
 from datetime import datetime, time
 from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.daily_realization_explanation import reason_requires_comment
 from app.services.primeflow_report import report_timezone
 from app.services.discord_task_status import is_wfe
 
@@ -38,7 +39,8 @@ def question_rows(data: dict) -> list[tuple[str, dict]]:
                 continue
             # An explanation already recorded on the actual date-change event
             # needs no second request, irrespective of who made that change.
-            if kind == "postponed" and row.get("postponement_explanation") and row.get("comment") not in {None, "", "-", "—"}:
+            if (kind == "postponed" and row.get("postponement_explanation")
+                    and (not reason_requires_comment(row.get("reason")) or row.get("comment") not in {None, "", "-", "—"})):
                 continue
             seen.add(key)
             result.append((kind, row))
@@ -52,6 +54,6 @@ def validate_answer(kind: str, reason: str | None, comment: str | None, choice: 
             raise ValueError("Zgjidh PO ose JO.")
         if choice == "JO" and not comment:
             raise ValueError("Shëno pse nuk vazhdon në PM." if kind == 'continuation' else "Shëno pse nuk është dorëzuar detyra.")
-    elif reason not in REASON_LABELS or not comment:
+    elif reason not in REASON_LABELS or (reason_requires_comment(reason) and not comment):
         raise ValueError("Zgjidh arsyen nga lista dhe plotëso komentin.")
     return (None if kind in {'delivery', 'continuation'} else reason or None), comment, choice if kind in {"delivery", "continuation"} else None

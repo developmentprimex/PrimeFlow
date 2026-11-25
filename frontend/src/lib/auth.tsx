@@ -4,6 +4,8 @@ import * as React from "react"
 import { toast } from "sonner"
 import { useTaskPostponement } from "@/components/task-postponement-dialog"
 import { withPostponementExplanation } from "@/lib/task-postponement"
+import { useTaskReportingChoice } from "@/components/task-reporting-choice-dialog"
+import { withTaskReportingChoice } from "@/lib/task-reporting-choice"
 
 import { API_HTTP_URL, API_HTTP_FALLBACK_URL, API_WS_URL } from "@/lib/config"
 import { clearDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
@@ -254,6 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const userId = user?.id ?? null
   const { requestExplanation, postponementDialog } = useTaskPostponement(userId)
+  const { requestChoiceExplanation, reportingChoiceDialog } = useTaskReportingChoice(userId)
 
   React.useEffect(() => {
     tokenRef.current = token
@@ -669,7 +672,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearSessionCaches()
       }
       const canShareRequest = method === "GET" && init.body == null && init.signal == null
-      if (!canShareRequest) return withPostponementExplanation(path, init, executeRequest, requestExplanation)
+      if (!canShareRequest) return withPostponementExplanation(
+        path, init, (request) => withTaskReportingChoice(path, request, executeRequest, requestChoiceExplanation), requestExplanation,
+      )
 
       const requestKey = createRequestKey(url, headers, init)
       const prefetched = prefetchedResponseCache.get(requestKey)
@@ -705,7 +710,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [requestExplanation]
+    [requestExplanation, requestChoiceExplanation]
   )
 
   const prefetchApiFetch = React.useCallback(
@@ -768,6 +773,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={value}>
       {children}
       {postponementDialog}
+      {reportingChoiceDialog}
       {activeMeetingAlarm ? (
         <div
           role="alert"
