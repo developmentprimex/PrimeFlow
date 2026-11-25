@@ -383,7 +383,7 @@ TABLE_COLUMNS = {
               ("planned_for", "PËR KUR", 100), ("created", "KRIJUAR", 135)],
 }
 TASK_FILLS = {"TODO": "#ffc4ed", "IN_PROGRESS": "#ffff00", "PAUSED": "#cbd5e1", "DONE": "#c4fdc4",
-              "WAITING_CLIENT": "#e2c15b", "WAITING_CONFIRMATION": "#ffedd5"}
+              "WAITING_CLIENT": "#e2c15b", "WAITING_CONFIRMATION": "#ccfbf1"}
 
 
 def _created_label(value: str | None) -> str:
@@ -473,11 +473,15 @@ def export_blocks(report: dict) -> list[dict]:
                 blocks.append({"kind": "table", "columns": TABLE_COLUMNS["tasks"], "rows": rows} if rows else
                               {"kind": "text", "text": "Asnjë detyrë.", "level": 0})
         elif key in {"ga_progress", "delivery"}:
-            columns = m2.table_columns("ga_progress")
+            linked_delivery = key == "delivery" and report.get("discord_delivery_slot")
+            columns = (m3.report_table_columns("delivery", discord_delivery=True)
+                       if linked_delivery else m2.table_columns("ga_progress"))
+            if linked_delivery:
+                blocks.append({"kind": "text", "text": m3.delivery_summary(report), "level": 3})
             rows = []
             for index, row in enumerate(report.get("data", {}).get(key) or [], 1):
                 fill, color, _ = m3.task_row_appearance(row)
-                rows.append([{"text": str(m2.table_value(report, row, column, index, "")),
+                rows.append([{"text": str(m2.table_value(report, row, column, index, "", "delivery" if linked_delivery else "")),
                               "fill": fill, "color": color, "bold": column in {"title", "marker"},
                               "divider": False} for column, _, _ in columns])
             blocks.append({"kind": "table", "columns": columns, "rows": rows} if rows else
@@ -529,10 +533,13 @@ def report_attachments(report: dict):
 
 
 async def send_report(db, row, recipients, *, automatic: bool = False):
+    from app.services.discord_task_deliveries import with_discord_delivery
+
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To ne konfigurimin e M1.")
     report = await filter_points_payload(db, report_payload(row, excluded_note_ids=await excluded_note_ids(db, row)))
+    report = await with_discord_delivery(db, report, "M2")
     try:
         gmail = GmailService()
         html_body = render_html(report)

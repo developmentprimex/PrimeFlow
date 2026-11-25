@@ -93,6 +93,7 @@ function sectionGroupLabel(section: Section) {
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     "DET PERSONALISHT ME KA/GENTIN?",
     "TASKS PERSONALISHT ME KA/GENTIN?",
+    "WFC INT ME KA/GENTIN?",
     "WFC ME KA/GENTIN?",
     ...MARKER_TASK_SECTIONS,
   ]

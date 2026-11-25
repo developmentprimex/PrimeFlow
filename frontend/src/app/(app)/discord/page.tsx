@@ -93,7 +93,7 @@ const STATUS_LEGEND = [
   { label: "To Do", color: "#FFC4ED" },
   { label: "Në progres", color: "#FFFF00" },
   { label: "WFE", color: "#E2C15B" },
-  { label: "Në konfirmim", color: "#FFEDD5" },
+  { label: "WFC INT", color: "#CCFBF1" },
   { label: "E kryer", color: "#C4FDC4" },
 ]
 

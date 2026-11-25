@@ -15,6 +15,7 @@ from app.models.m3_reporting_points import M3ReportingPointsReport
 from app.services import m2_reporting_points as m2, m3_reporting_points as m3
 from app.services import reporting_points_auto_scheduler as scheduler
 from app.services.reporting_points_settings import default_settings
+from tests.report_attendance_fixtures import present_report_population
 from tests.test_migration_graph import migration_scripts
 
 DAY = date(2026, 10, 5)

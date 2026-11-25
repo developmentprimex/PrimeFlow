@@ -212,7 +212,7 @@ function taskPalette(task: RealizationTaskFact) {
     task.classification === "pending_confirmation"
     || task.status?.toUpperCase() === "WAITING_CONFIRMATION"
   ) {
-    return "border-l-4 border-l-orange-600 border-y border-r border-orange-300 bg-orange-100 text-orange-950"
+    return "border-l-4 border-l-teal-700 border-y border-r border-teal-300 bg-teal-100 text-teal-950"
   }
   if (isAdditional) return "border-l-4 border-l-blue-600 border-y border-r border-blue-300 bg-blue-100 text-blue-950"
   return "border-l-4 border-l-rose-600 border-y border-r border-rose-300 bg-rose-100 text-rose-950"
@@ -1585,7 +1585,7 @@ function WeeklyRealizationView() {
                   </div>
                 </details>
 
-                <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><summary className="cursor-pointer list-none bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">Evidenca teknike e detyrave ({selected.facts_json.tasks?.length || 0})</summary><div className="max-h-72 overflow-y-auto border-t border-slate-200"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-3 py-2 font-medium text-slate-700">Detyra</th><th className="px-3 py-2 font-medium text-slate-700">Burimi</th><th className="px-3 py-2 font-medium text-slate-700">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t border-slate-200"><td className="px-3 py-2"><p className="font-medium text-slate-900">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-slate-500">{task.task_id || task.match_key}</p></td><td className="px-3 py-2 text-slate-700">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></details>
+                <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><summary className="cursor-pointer list-none bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">Evidenca teknike e detyrave ({selected.facts_json.tasks?.length || 0})</summary><div className="max-h-72 overflow-y-auto border-t border-slate-200"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-3 py-2 font-medium text-slate-700">Detyra</th><th className="px-3 py-2 font-medium text-slate-700">Burimi</th><th className="px-3 py-2 font-medium text-slate-700">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t border-slate-200"><td className="px-3 py-2"><p className="font-medium text-slate-900">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-slate-500">{task.task_id || task.match_key}</p></td><td className="px-3 py-2 text-slate-700">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{task.status === "WAITING_CONFIRMATION" ? "WFC INT" : TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></details>
 
                 {data ? <RealizationManagerReview key={`${selected.id}:${reviewVersion}`} periodId={data.period.id} userId={selected.user_id} onSaved={() => void loadReport()} /> : null}
 
@@ -1652,7 +1652,7 @@ function WeeklyRealizationView() {
                 {(todayTimeline?.close_event?.facts_json?.daily_report_state?.tasks || []).map((task) => (
                   <div key={task.task_id} className="rounded-lg border p-3 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <strong>{cleanTaskTitle(task.title)}</strong><Badge variant="outline">{task.status}</Badge>
+                      <strong>{cleanTaskTitle(task.title)}</strong><Badge variant="outline">{task.status === "WAITING_CONFIRMATION" ? "WFC INT" : task.status}</Badge>
                     </div>
                     <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
                       <span>Afati: {task.planned_due_date || "—"} → {task.due_date || "—"}</span>

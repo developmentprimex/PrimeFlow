@@ -232,7 +232,7 @@ class TomorrowClosingFormatParityTests(unittest.TestCase):
         for value in expected:
             self.assertIn(value, docx_text)
         document_xml = document._element.xml
-        for color in ("FFC4ED", "FFFF00", "FFEDD5", "DBEAFE", "FEE2E2"):
+        for color in ("FFC4ED", "FFFF00", "CCFBF1", "DBEAFE", "FEE2E2"):
             self.assertIn(color, document_xml)
         self.assertIn('w:color="334155"', document_xml)
         self.assertIn('w:sz="12"', document_xml)

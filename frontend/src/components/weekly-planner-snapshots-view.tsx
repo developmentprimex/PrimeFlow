@@ -214,7 +214,7 @@ const getStatusCardClasses = (status?: string | null) => {
     return "border-[#000000] bg-[#FFFF00] text-[#000000]"
   }
   if (normalized === "WAITING_CONFIRMATION") {
-    return "border-[#C2410C] bg-[#FFEDD5] text-[#9A3412]"
+    return "border-[#0F766E] bg-[#CCFBF1] text-[#134E4A]"
   }
   if (normalized === "WAITING_CLIENT") {
     return "border-[#B8860B] bg-[#E2C15B] text-[#4F3A00]"
@@ -1782,7 +1782,7 @@ export function WeeklyPlannerSnapshotsView({
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
             .task-status-paused { background-color: #CBD5E1; }
-            .task-status-waiting { background-color: #FFEDD5; border-color: #C2410C; color: #9A3412; }
+            .task-status-waiting { background-color: #CCFBF1; border-color: #0F766E; color: #134E4A; }
             .task-status-waiting-client { background-color: #E2C15B; border-color: #B8860B; color: #4F3A00; }
             .task-status-done { background-color: #C4FDC4; }
             .task-status-new-open { background-color: #dbeafe; border-color: #1d4ed8; }

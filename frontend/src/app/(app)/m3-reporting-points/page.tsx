@@ -156,6 +156,15 @@ export default function M3ReportingPointsPage() {
     toast.success(canManage ? "Përgjigjet u ruajtën." : "Komentet u ruajtën.")
   })
 
+  const saveRealizationComment = (key: string, value: string) => action("realization-comment", async () => {
+    if (!report) return
+    const updated = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${report.id}/answers`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: { [key]: value } }),
+    }))
+    setReport((previous) => previous?.id === updated.id ? updated : previous)
+    toast.success("Komenti i realizimit u ruajt.")
+  })
+
   const preview = () => action("preview", async () => {
     if (!report) return
     const value = await responseJson<{ html: string }>(await apiFetch(`${API}/${report.id}/preview`))
@@ -233,7 +242,9 @@ export default function M3ReportingPointsPage() {
           {saveError ? `Ruajtja automatike dështoi: ${saveError} Provo ${canManage ? "Ruaj përgjigjet" : "Ruaj komentet"}.` : savingAnswers || dirty ? "Duke ruajtur përgjigjet…" : "Përgjigjet ruhen automatikisht për datën e këtij raporti."}
         </p> : null}
     {loading ? <p className="py-10 text-center text-muted-foreground">Duke ngarkuar raportin…</p> : report ? <>
-      <M3ReportingPointsView report={report} answers={answers} disabled={!canManage || !!busy} meetingCommentsDisabled={!canAccess} onAnswerChange={changeAnswer} />
+      <M3ReportingPointsView report={report} answers={answers} disabled={!canManage || !!busy} meetingCommentsDisabled={!canAccess}
+        onAnswerChange={changeAnswer} realizationCommentsDisabled={!!busy || savingAnswers}
+        onSaveRealizationComment={saveRealizationComment} />
       {!report.realization_captured_at ? <p className="text-sm text-muted-foreground">Dërgimi aktivizohet pasi të ruhet realizimi i orës 16:15. Pas 16:15, &quot;Gjenero raportin&quot; merr realizimin e fundit.</p> : null}
     </> : <div className="rounded-xl border border-dashed p-12 text-center"><h2 className="font-semibold">Nuk ka raport të ruajtur për {reportDate(day)}.</h2><p className="mt-2 text-sm text-muted-foreground">{day === today() ? "Gjenero raportin për të plotësuar përgjigjet dhe për të parë pikat automatike." : "Zgjidh një datë nga historiku për të parë të dhënat e ruajtura."}</p></div>}
       </TabsContent>

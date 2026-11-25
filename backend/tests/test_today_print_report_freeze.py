@@ -37,6 +37,20 @@ def row():
 
 
 class FreezeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_one_h_report_monday_loads_previous_friday_from_same_database(self):
+        from app.services.primeflow_report_delivery import load_common_view
+
+        db = AsyncMock()
+        monday, friday = date(2026, 11, 30), date(2026, 11, 27)
+        monday_data = {"items": {"oneH": [{"date": monday.isoformat()}]}, "generated_at": "2026-11-30T09:00:00"}
+        friday_data = {"items": {"oneH": [{"date": friday.isoformat()}]}, "generated_at": "2026-11-30T09:00:01"}
+        with patch("app.api.routers.common_view.load_report_common_view", new=AsyncMock(
+            side_effect=[monday_data, friday_data],
+        )) as source:
+            result = await load_common_view(monday, db=db)
+        self.assertEqual([call.args for call in source.await_args_list], [(db, monday), (db, friday)])
+        self.assertEqual([item["date"] for item in result["items"]["oneH"]], [monday.isoformat(), friday.isoformat()])
+
     def test_cutoff_timezone_and_next_day_are_date_scoped(self):
         self.assertFalse(freeze.is_closed(DAY, clock(15, 59, 59)))
         self.assertTrue(freeze.is_closed(DAY, clock()))
@@ -63,11 +77,12 @@ class FreezeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_before_cutoff_uses_latest_data_and_next_day_is_live(self):
         for day, now in [(DAY, clock(15, 59)), (date(2026, 10, 3), clock(8, day=3))]:
+            db = AsyncMock()
             with patch.object(freeze, "local_now", return_value=now), \
                  patch.object(freeze, "build_today_print_report", AsyncMock(return_value=report())) as live, \
                  patch.object(freeze, "get_one_h_print_snapshot", AsyncMock()) as snapshot:
-                result = await freeze.today_report(AsyncMock(), day)
-            live.assert_awaited_once_with(day, include_attachment=False)
+                result = await freeze.today_report(db, day)
+            live.assert_awaited_once_with(day, include_attachment=False, db=db)
             snapshot.assert_not_awaited()
             self.assertFalse(result["is_frozen"])
 

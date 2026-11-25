@@ -4,7 +4,7 @@ import * as React from "react"
 import { Minus, Plus, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
-import { OriginalEmailLink } from "@/components/note-email-preview"
+import { EmailKindBadge, OriginalEmailLink, emailSubjectKind } from "@/components/note-email-preview"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
 
@@ -203,7 +203,7 @@ function ReportMailboxTable({ source, result, actions, connectionStatus, reportD
                         )}
                       </td>
                       <td className="p-2 [overflow-wrap:anywhere]">{mail.sender}</td>
-                      <td className="p-2 [overflow-wrap:anywhere]">{mail.subject}</td>
+                      <td className="p-2 [overflow-wrap:anywhere]"><EmailKindBadge kind={emailSubjectKind(mail.subject)} />{mail.subject}</td>
                       <td className="p-1">
                         <Button
                           type="button"

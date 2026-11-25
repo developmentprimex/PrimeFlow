@@ -57,7 +57,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 | Ndryshime në… | Ku duhet të kontrollohen |
 |---|---|
-| Taska - ndryshime të përgjithshme | My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, PX Notes, PX JAV, Weekly Planner, Monthly Planner, Open Tasks, Admin Tasks, Projects, Task Details, Realization, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Meeting Scheduler, WFC, Comments, Reviews, Kontrolli ditor RLZ, Weekly Planning Check |
+| Taska - ndryshime të përgjithshme | My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, PX Notes, PX JAV, Weekly Planner, Monthly Planner, Open Tasks, Admin Tasks, Projects, Task Details, Realization, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Meeting Scheduler, WFC INT, Comments, Reviews, Kontrolli ditor RLZ, Weekly Planning Check |
 | Taska - personale / R1 / BLL | My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, PX Notes, PX JAV, Weekly Planner, Monthly Planner, Open Tasks, Admin Tasks, Projects, Task Details, Realization, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Taska - sistemore / përsëritje | System Tasks, System Tasks Report, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, Realization, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Task Details |
 | Taska - nga PX Notes | PX Notes, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Projects, Weekly Planner, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, Task Details |
@@ -71,7 +71,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | PX Notes | PX Notes, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Projects, Weekly Planner, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | PX JAV | PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, Weekly Planner, Projects, PX JAV Kontrolli, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Mungesa dhe pushime | Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow (edhe tabelat hyrëse), 1H Reports, Weekly Planner, PX JAV / PX JAV Kontrolli, Realization / Kontrolli ditor RLZ, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, End Week BZ, Reports / Daily Report, eksportet e detyrave, raportimi personal Discord 1H/M2/M3 |
-| WFC / Waiting Client | WFC, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, PX Notes, PX JAV, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
+| WFC INT / Waiting Client | WFC INT, My View, Department Views, Finance View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, PX Notes, PX JAV, Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Planifikim | Weekly Planner, Monthly Planner, PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, Realization, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Realization dhe Reviews | My View, Department Views, Finance View, Realization, Reviews, Common View, Weekly Planner, Kontrolli ditor RLZ, M3 PIKAT |
 | Regjistrime dhe Mira | Regjistrimet, Mira, Meetings, PX Notes, Task Details |
@@ -94,6 +94,20 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- 1H SHTYPI Today/Tomorrow dhe 1H Reports lexojnë Common View nga databaza
+  brenda procesit të autorizuar. Kontrollo preview, printimin nga Common
+  View, gjenerimin e raporteve, javët e njëpasnjëshme dhe arkivin e Today
+  në 16:00. Kur arkivi mungon, printimi shfaq gabimin e API-së.
+
+- Common View dhe 1H SHTYPI Today/Tomorrow përdorin `waitingConfirmation`
+  për rreshtin WFC INT në ekran, printim dhe eksport. WFC INT ka ngjyrë
+  mente, WFE të artë dhe detyrat personale vjollcë. Kontrollo legjendat, badge-in CON:,
+  pamjet e departamenteve, PX Notes/PX JAV, planifikimin dhe M1/M2/M3. Kontrollo
+  inicialet nga Confirm by, detyrat pa konfirmues, filtrin për person dhe
+  javën e plotë. Në Common View rreshti mbetet i dukshëm me filtrin All ose
+  WFC INT kur rezultati është bosh. Waiting Client dhe rreshtat e personalëve për KA/GENT
+  vazhdojnë të përdorin klasifikimet e tyre.
+
 - Arsyeja `PV` pranohet pa koment në raportin ditor RLZ, te shtyrjet e
   detyrave dhe në përgjigjet M2 që përdorin listën e arsyeve. Kontrollo
   Development, Graphic Design, Product Content (edhe My View), Finance,
@@ -102,7 +116,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ruhet në `task_daily_rlz_states` pas migrimit 0210. Mbyllja si DONE e detyrave
   që kërkojnë koment për rezultatin përdor një rregull më vete.
 
-- Dorëzimet në Discord te Reports & Control lexon simbolet M2, M3 dhe M2/3
+- **BZ M3** te **Reports & Control → Meetings** lexon simbolet M2, M3 dhe M2/3
   të detyrave të planifikuara për datën e raportit dhe lidhjet aktive
   PrimeFlow–Discord të punonjësve. Përdor historikun e simboleve për datat
   e kaluara kur është i disponueshëm. Lexon vetëm kanalin
@@ -110,16 +124,21 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   dhe autorin deri në 12:15 për M2 dhe deri në 16:30 për M3. M2/3 kërkon dy
   postime, me ndarje në 12:15. Kontrollo mesazhet e vonuara, identitetet e
   palidhura, titujt e dyfishtë dhe mungesën e qasjes në historikun e kanalit.
-  Common View dhe tabelat manuale të dorëzimeve në M1, M2 dhe M3 PIKAT
-  përdorin të njëjtat të dhëna burimore të detyrave. Raporti shfaq inicialet
+  Tabelat e dorëzimeve në M1, M2 dhe M3 PIKAT përdorin të njëjtin kontroll
+  të Discord për çdo përgjegjës. M1 dhe M2 përdorin M2 në 12:15, M3 përdor
+  M3 në 16:30. Kontrollo faqet, pamjet paraprake, emailin dhe eksportet
+  Word, PNG dhe Excel. Common View mbetet burimi i simboleve të detyrave.
+  Raporti shfaq inicialet
   dhe departamentin e secilit përgjegjës, përdor renditjen e Weekly Planner
   dhe Common View, si dhe ngjyrat e tabelave M3 për statusin, deadline dhe
   theksimin e detyrave 08:00 (përfshirë EM të detyrave josistemore).
   Paraqet veçmas grupet M2, M2/3 dhe M3 në këtë rend. Çdo rresht hyn në një
   grup sipas afateve që kontrollohen dhe grupi M2/3 i shfaq të dyja kolonat.
   Kolonat automatike Po/Jo nxjerrin Jo pas afatit kur historiku është lexuar
-  drejtpërdrejt. Kur leximi direkt mungon, arkivi ekzistues i kanalit mund
-  të konfirmojë një postim të gjetur. Komentet ruhen sipas datës, detyrës
+  drejtpërdrejt. Në BZ M3, e gjithë qeliza është e gjelbër për Po dhe e kuqe
+  për Jo. Dorëzimi i vonuar shënohet te teksti i qelizës. Kur leximi direkt
+  mungon, arkivi ekzistues i kanalit mund të konfirmojë një postim të gjetur.
+  Komentet ruhen sipas datës, detyrës
   dhe përgjegjësit në `discord_task_delivery_comments` (migrimi 0209).
   Pika 2 i shfaq dallimet mes përgjegjësve në dy tabela, me titullin në rreshtin e parë
   dhe pjesën e mbetur të detyrës pas kontrollit +/−. Tabelat ndjekin ngjyrat
@@ -180,6 +199,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tomorrow shfaqin titullin për shënimet nga email-et. Butoni `+` hap
   përmbledhjen dhe hapat e ruajtur, ose detajet e shënimit manual. Lidhja
   «Hap emailin origjinal» hap email-in te ofruesi kur URL-ja është ruajtur.
+  PX Notes, M1 Start of Day, M2 Post-Break dhe M1 PIKAT shfaqin etiketën
+  Forward ose Reply nga prefiksi i subjektit origjinal. Për shënimet EM
+  manuale përdoret prefiksi pas orës në kryerresht. Te prefikset e njëpasnjëshme
+  etiketa ndjek prefiksin e parë.
   Importet e vjetra që kanë vetëm kopje të email-it shfaqin statusin se
   përmbledhja nuk është ruajtur. Hapja e tekstit te
   kutitë e M1 dhe te shënimet përdor scroll brenda një kutie me lartësi të
@@ -467,6 +490,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Finance merr pjesë vetëm në BZ. Excel përdor rreshtat e filtruar dhe
   kolonat BZ ME, KOHA BZ dhe përgjegjësit, me rregullin e pranisë së eksportit.
   Kolona BZ ME paraqet inicialet në Finance dhe Excel.
+  Eksporti Excel i Finance vendos **USER** menjëherë pas **BZ ME**. **Admin Tasks**
+  përdor të njëjtën API për Excel dhe e ka kolonën **USER** në fund.
   Kolona Asg dhe Excel përfshijnë përgjegjësit e kopjeve aktive të lidhura
   në `/tasks?include_shared_assignees=true`. Filtrat dhe redaktimi përdorin
   caktimet e rreshtit përkatës, ndërsa BZ ME përdor pjesëmarrësit e BZ.
@@ -581,7 +606,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 - Butoni i zgjerimit të titullit (`CollapsibleTaskTitle`) rreshtohet në skajin
   e kolonës për My View te Development, Graphic Design dhe Product Content
-  (Waiting Confirmation, Project Tasks, Fast Tasks, System Tasks), si dhe te
+  (WFC INT, Project Tasks, Fast Tasks, System Tasks), si dhe te
   tabela Finance. `alignToggle` kërkon mbështjellës `relative` me hapësirë `pr-8`;
   në pamjen Department të tri departamenteve rreshtimi i zakonshëm ruhet.
   Ky komponent nuk përdoret nga raportet ose eksportet.
@@ -681,7 +706,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ka përparësi kur ekziston; etiketat nuk ndryshojnë të dhënat e ruajtura.
 
 - Development, Graphic Design dhe Product Content përdorin
-  `CollapsibleTaskTitle` për titujt në listat All (Waiting Confirmation,
+  `CollapsibleTaskTitle` për titujt në listat All (WFC INT,
   Project Tasks, Fast Tasks dhe System Tasks), me rreshtin e parë dhe `+`/`-`
   vetëm në My View. Department View ruan tekstin e plotë. Finance përdor të
   njëjtin komponent në tabelën e vet. Daily Report, printimet e departamenteve
@@ -783,6 +808,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ndryshimi i evidencës kërkon konfirmim të ri. Kontrollo edhe përqindjet ditore
   dhe javore, Kontrollin ditor RLZ, gjendjen pas mbylljes dhe Excel-in (fleta
   `Konfirmimet RLZ`). Aprovimi ekzistues i shtyrjes gjithashtu heq penalizimin.
+- Te **M3 PIKAT**, për realizim nën 50% te DEV, GD dhe PCM, çdo përdorues
+  me qasje në raport mund të shkruajë komentin. Fusha ruhet kur humb fokusin.
+  API-ja verifikon përqindjen dhe ruan komentin sipas datës dhe departamentit.
+  Nga 16:15, pyetjet e Discord shkojnë te Laurent Hoxha për DEV dhe Diellza
+  Veliu për GD e PCM, në kanalet e tyre private të lidhura. Secili departament
+  nën 50% me koment ende bosh ka pyetjen e vet. Përgjigjja në Discord plotëson
+  të njëjtën fushë. Komenti i ruajtur mbetet i dukshëm edhe pas përditësimit
+  të përqindjes. Kontrollo Discord M3, tabelën, pamjen e email-it dhe
+  bashkëngjitjet HTML, Word, PNG dhe Excel.
 - Taskat përdoren edhe nga M1/M2/M3 dhe PIKAT PËR RAP. Mos i përjashto këto
   vetëm sepse ndryshimi fillon në My View ose Common View. Përfshirja e taskut
   varet nga kategoria, data, personi dhe filtrat e raportit.
@@ -1169,7 +1203,7 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 - Vendosja direkte e simboleve: Weekly Planner (kartat e projekteve, sistemore,
   të shpejta dhe kutia e planifikimit), Common View javore, Monthly Planner,
-  Open Tasks, Admin Tasks, WFC, Projects, Task Details, PX JAV dhe preview i 1H Reports përdorin
+  Open Tasks, Admin Tasks, WFC INT, Projects, Task Details, PX JAV dhe preview i 1H Reports përdorin
   redaktuesin e përbashkët. Common View javore paraqet një kontroll për kartën
   me disa persona. Dialogu nis me “Për të gjithë” dhe ruan të njëjtat simbole
   në taskat e kartës, duke ruajtur komentet individuale. “Sipas personit” hap

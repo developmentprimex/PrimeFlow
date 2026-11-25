@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { TaskOneHMarkerFromLabel } from "@/components/task-one-h-marker"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
-import { reportDate, reportTime, ReportingTaskTable } from "@/components/m3-reporting-points-view"
-import type { TaskRow as GaTaskRow } from "@/components/m3-reporting-points-view"
+import { DiscordDeliveryTable, reportDate, reportTime, ReportingTaskTable } from "@/components/m3-reporting-points-view"
+import type { DeliverySlot, TaskRow as GaTaskRow } from "@/components/m3-reporting-points-view"
 
 export { reportDate, reportTime }
 export type ManualKey = "plan_changes" | "reorganization"
@@ -20,20 +20,21 @@ type NoteRow = { id: string; author?: string; content: string; created_at: strin
 function PointNote({ note }: { note: NoteRow }) {
   if (note.email_preview) return <NoteEmailPreview email={note.email_preview} />
   const email = splitManualEmailNote(note.content)
-  return email ? <EmailNoteDisclosure title={email.title} sourceUrl={email.sourceUrl}>{renderMarkedNoteContent(email.body)}</EmailNoteDisclosure>
+  return email ? <EmailNoteDisclosure title={email.title} sourceUrl={email.sourceUrl} kind={email.kind}>{renderMarkedNoteContent(email.body)}</EmailNoteDisclosure>
     : renderMarkedNoteContent(note.content)
 }
 type TaskRow = { id: string; title: string; status: string; created_at: string; start_date?: string | null; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
+  discord_delivery_slot?: DeliverySlot
   data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[]; postponed?: GaTaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
 const STATUS_COLORS: Record<string, string> = {
   TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", PAUSED: "#CBD5E1", DONE: "#C4FDC4",
-  WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#FFEDD5",
+  WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#CCFBF1",
 }
 const cellClass = "border border-black px-2 py-2 whitespace-pre-wrap break-words"
 const taskTitle = (value: string) => getPlainMarkedText(value).split(/\r?\n/).find((line) => line.trim())?.trim() || "—"
@@ -128,7 +129,9 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
       </div>)}
     </Point>
     {manual("reorganization", "6. A DUHET RIORGANIZIM?")}
-    {(["ga_progress", "delivery"] as const).map((key) => <Point key={key} id={`m1-${key}`}
+    {(["ga_progress", "delivery"] as const).map((key) => key === "delivery" && report.discord_delivery_slot ? <Point key={key} id="m1-delivery" title="8. SA PER DOREZIM M2?">
+      <DiscordDeliveryTable rows={report.data.delivery || []} slot={report.discord_delivery_slot} />
+    </Point> : <Point key={key} id={`m1-${key}`}
       title={key === "ga_progress" ? "7. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA" : "8. SA PER DOREZIM M2?"}
       count={(report.data[key] || []).length}
       description={key === "ga_progress" ? "Detyrat AM dhe AM/PM personale me GA ose me simbolet F/GA, brenda intervalit start–due." : "Detyrat me simbolet M2 dhe M2/3, AM dhe PM, brenda intervalit start–due, si te M2."}>

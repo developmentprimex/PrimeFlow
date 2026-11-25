@@ -185,8 +185,8 @@ const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }
     className: "border-[#B8860B] bg-[#E2C15B] text-[#4F3A00]",
   },
   WAITING_CONFIRMATION: {
-    label: "Waiting Confirmation",
-    className: "border-blue-200 bg-blue-50 text-blue-700",
+    label: "WFC INT",
+    className: "border-teal-300 bg-teal-100 text-teal-900",
   },
   DONE: {
     label: "Done",

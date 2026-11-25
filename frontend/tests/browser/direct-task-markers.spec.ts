@@ -199,6 +199,42 @@ async function openGroup(page: Page) {
   return page.getByRole('dialog', { name: 'Simbolet e grupit', exact: true })
 }
 
+test("Common View distinguishes WFC INT from WFE and shows the selected confirmer", async ({ page }) => {
+  await fixture(page)
+  await page.route(/\/api\/common-view\?/, (route) => {
+    const params = new URL(route.request().url()).searchParams
+    const week = params.get("week_start")!
+    const included = params.get("include")!.split(",")
+    return route.fulfill({ json: {
+      week_start: week, included, requested: included, missing: [], users: owners, departments: [department],
+      items: {
+        feedback: [], blocked: [], oneH: [], r1: [], problems: [],
+        personal: [{ title: "GA: Personal work", status: "TODO", date: week }],
+        external: [], internal: [], bz: [], late: [], absent: [], leave: [], externalHoliday: [], priority: [], diamond: [],
+        waitingConfirmation: [{
+          title: "Internal approval", status: "WAITING_CONFIRMATION", date: week,
+          taskId: taskIds[0], userId: owners[0].id, assignees: [owners[0].full_name],
+          confirmation_assignee_initials: "HS",
+        }],
+        waitingClient: [{
+          title: "Client reply", status: "WAITING_CLIENT", date: week,
+          taskId: taskIds[1], userId: owners[1].id, assignees: [owners[1].full_name],
+        }],
+      },
+    } })
+  })
+
+  await page.goto("/common")
+  await page.getByRole("button", { name: "This Week", exact: true }).click()
+  const confirmation = page.locator(".week-table-row.waiting-confirmation")
+  const client = page.locator(".week-table-row.waiting-client")
+  await expect(confirmation.locator(".week-table-label")).toHaveCSS("background-color", "rgb(153, 246, 228)")
+  await expect(client.locator(".week-table-label")).toHaveCSS("background-color", "rgb(226, 193, 91)")
+  await expect(page.locator(".week-table-row.personal .week-table-label").first()).toHaveCSS("background-color", "rgb(243, 232, 255)")
+  await expect(confirmation.getByText("CON: HS", { exact: true })).toBeVisible()
+  await expect(client.getByText("CON: HS", { exact: true })).toHaveCount(0)
+})
+
 test("Common View Short filters both workweeks and the weekly print", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await fixture(page)
@@ -408,10 +444,11 @@ test("Task Details preserves unsaved title edits while saving symbols", async ({
   expect(writes[0].body).not.toHaveProperty('title')
 })
 
-test("WFC saves symbols without changing the confirmation status", async ({ page }) => {
+test("WFC INT saves symbols without changing the confirmation status", async ({ page }) => {
   const { tasks, writes } = await fixture(page)
   Object.assign(tasks[0], { status: 'WAITING_CONFIRMATION', confirmation_assignee_id: owners[0].id })
   await page.goto('/waiting-confirmation-ga')
+  await expect(page.getByRole('heading', { name: 'WFC INT', exact: true })).toBeVisible()
   await chooseSymbols(page, taskIds[0])
   expect(writes[0].id).toBe(taskIds[0])
   expect(tasks[0].status).toBe('WAITING_CONFIRMATION')

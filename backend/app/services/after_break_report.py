@@ -163,7 +163,7 @@ PERSONAL_GROUPS = [
     ("IN PROGRESS", "IN_PROGRESS"),
     ("STOPPED", "PAUSED"),
     ("WFE", "WAITING_CLIENT"),
-    ("WAITING CONFIRMATION", "WAITING_CONFIRMATION"),
+    ("WFC INT", "WAITING_CONFIRMATION"),
     ("DONE", "DONE"),
 ]
 def subject_for(day: date) -> str:
@@ -905,6 +905,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             if title in by_title:
                 continue
         body = str(section.get("body") or "")
+        if title == SECTION_TITLES[8]:
+            body = re.sub(r"(?m)^WAITING CONFIRMATION(?=:)", "WFC INT", body)
         if title == SECTION_TITLES[9]:
             body = order_blue_notes_table(body)
         if title == PCM_PROJECTS_TITLE and not PCM_PROJECT_SUMMARY_PATTERN.fullmatch(body):
@@ -972,7 +974,7 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         elif title == SECTION_TITLES[7]:
             body = "\n".join(["NEW SYSTEM TASKS: 0", "", "PYETJE PER KONFIRMIM: 0"])
         elif title == SECTION_TITLES[8]:
-            body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WFE: 0", "", "WAITING CONFIRMATION: 0", "", "DONE: 0"])
+            body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WFE: 0", "", "WFC INT: 0", "", "DONE: 0"])
         elif title in {SECTION_TITLES[10], SECTION_TITLES[11]}:
             body = "TODO: 0\n\nIN PROGRESS: 0\n\nDONE: 0\n\nLATE: 0"
         else:

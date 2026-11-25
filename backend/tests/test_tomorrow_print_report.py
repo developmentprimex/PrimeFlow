@@ -64,6 +64,48 @@ def test_m3_symbol_table_reuses_tomorrow_cards_for_marked_tasks_only() -> None:
 
 
 @pytest.mark.parametrize("tomorrow", [False, True])
+def test_waiting_confirmation_row_and_confirmer_in_print_and_excel(tomorrow) -> None:
+    payload = {"items": {
+        "waitingConfirmation": [
+            {"title": "Approve the task", "date": "2026-09-08", "status": "WAITING_CONFIRMATION",
+             "confirmation_assignee_initials": "HS", "assignees": ["Era Fana"], "task_id": "waiting"},
+        ],
+        "waitingClient": [
+            {"title": "Client response", "date": "2026-09-08", "status": "WAITING_CLIENT"},
+        ],
+    }, "users": []}
+    build = build_tomorrow_print_report if tomorrow else build_today_print_report
+    report = asyncio.run(build(date(2026, 9, 7) if tomorrow else date(2026, 9, 8),
+                               payload=payload, include_attachment=True))
+    assert "WFC INT" in report["html"]
+    assert "CON: HS" in report["html"]
+    assert "background-color:#99F6E4;color:#134E4A" in report["html"]
+    assert "background-color:#E2C15B;color:#4F3A00" in report["html"]
+    workbook = load_workbook(BytesIO(report["attachments"][0][1]))
+    exported = "\n".join(str(cell.value or "") for row in workbook.active for cell in row)
+    assert "WFC INT" in exported and "CON: HS" in exported
+    row_colors = {cell.value: cell.fill.fgColor.rgb for cell in workbook.active["B"] if cell.value in {"WFC INT", "WFE"}}
+    assert row_colors == {"WFC INT": "0099F6E4", "WFE": "00E2C15B"}
+
+
+def test_tomorrow_with_database_loads_both_weeks_without_service_login():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    db = SimpleNamespace()
+    friday = date(2026, 11, 27)
+    monday = date(2026, 11, 30)
+    with patch("app.api.routers.common_view.load_report_common_view", new=AsyncMock(side_effect=[
+        {"week_end": "2026-11-29", "items": {}}, {"week_end": "2026-12-06", "items": {}},
+    ])) as source, patch("app.services.tomorrow_print_report.PrimeFlowClient") as client, \
+         patch("app.services.tomorrow_print_report.build_tomorrow_closing_sections", new=AsyncMock(return_value=[])):
+        report = asyncio.run(build_tomorrow_print_report(date(2026, 11, 26), db=db))
+    assert report["target_date"] == friday.isoformat()
+    assert [call.args for call in source.await_args_list] == [(db, friday), (db, monday)]
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize("tomorrow", [False, True])
 @pytest.mark.parametrize("absence", [
     {"date": "2026-09-08", "from": "8:00", "to": "16:00"},
     {"date": "2026-09-08"},
@@ -858,7 +900,7 @@ def test_task_status_colours_apply_to_email_cells_but_ga_personal_stays_purple()
 
     assert 'bgcolor="#FFC4ED"' in report_html
     assert 'bgcolor="#FFFF00"' in report_html
-    assert 'bgcolor="#FFEDD5"' in report_html
+    assert 'bgcolor="#CCFBF1"' in report_html
     assert 'bgcolor="#C4FDC4"' in report_html
     assert 'bgcolor="#D8B4FE"' in report_html
 

@@ -63,7 +63,7 @@ export const STATUS_STYLE: Record<MeetingNoteTaskStatus, { label: string; cell: 
   TODO: { label: "TODO", cell: "bg-pink-200 text-slate-900" },
   IN_PROGRESS: { label: "IN PROGRESS", cell: "bg-yellow-200 text-slate-900" },
   WAITING_CLIENT: { label: "WFE", cell: "bg-[#E2C15B] text-[#4F3A00]" },
-  WAITING_CONFIRMATION: { label: "WFC", cell: "bg-amber-50 text-slate-900" },
+  WAITING_CONFIRMATION: { label: "WFC INT", cell: "bg-teal-100 text-teal-900" },
   DONE: { label: "DONE", cell: "bg-green-200 text-slate-900" },
 }
 

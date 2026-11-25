@@ -116,6 +116,40 @@ async def personal_report(actor: Actor, db: AsyncSession = Depends(get_db)):
     return await collect_questions(db, now=datetime.now(timezone.utc), phase='all', only_user_id=user.id, manual=True)
 
 
+async def realization_candidates(db, report, now, links):
+    if not links:
+        return []
+    usernames = {'laurent.hoxha': 'Laurent Hoxha', 'laurent': 'Laurent Hoxha', 'diellza.veliu': 'Diellza Veliu'}
+    users = dict((await db.execute(select(User.username, User.id).where(
+        User.id.in_([link.user_id for link in links]), User.username.in_(usernames)))).all())
+    recipients = {}
+    for username, manager in usernames.items():
+        if username in users:
+            recipients.setdefault(manager, users[username])
+    if not recipients:
+        return []
+    if report.realization_captured_at is None:
+        if report.generated_at is None:
+            await reports.refresh_report(db, report, now)
+        else:
+            reports.record_realization_capture(report, await reports.build_realization_capture(db, report.report_date), now)
+    capture = report.realization or {}
+    departments = reports.initial_realization_departments(capture)
+    if 'discord_departments' not in capture:
+        report.realization = {**capture, 'discord_departments': departments}
+    requests = reports.realization_comment_requests({'departments': departments})
+    answers = report.manual_answers or {}
+    candidates = []
+    for item in departments:
+        code = item['code'].strip().upper()
+        key = f'realization_comment:{code}'
+        uid = recipients.get(requests.get(key))
+        if uid and not (answers.get(key) or '').strip():
+            candidates.append((uid, 'realization', {'title': f'Realizimi · {code}', 'department': code,
+                                                  'percent': item['percent']}, report.report_date))
+    return candidates
+
+
 async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
     day = now.astimezone(report_timezone()).date()
     report = await reports.locked_report(db, day, wait=manual)
@@ -124,7 +158,8 @@ async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
     links = (await db.execute(select(DiscordLink).join(User, User.id == DiscordLink.user_id).where(
         DiscordLink.enabled.is_(True), DiscordLink.guild_id == settings.DISCORD_GUILD_ID,
         DiscordLink.channel_id.is_not(None), User.is_active.is_(True)))).scalars().all()
-    candidates = []
+    candidates = (await realization_candidates(db, report, now, links)
+                  if not manual and phase == 'tomorrow' and rules.realization_collection_due(now) else [])
     if phase in {'m3', 'all'}:
         data = await reports.build_task_data(db, day)
         report.data = {**(report.data or {}), **data}
@@ -157,9 +192,10 @@ async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
     asked = {(q.kind, str(q.task_id)) for q in existing.values()}
     by_user = {link.user_id: link for link in links}
     jobs = []
-    policies = {target: await load_report_attendance(db, target) for target in {item[3] for item in candidates}}
+    policies = {target: await load_report_attendance(db, target)
+                for target in {target for _, kind, _, target in candidates if kind != 'realization'}}
     for uid, kind, row, target in candidates:
-        if policies[target].excludes(uid):
+        if kind != 'realization' and policies[target].excludes(uid):
             continue
         if only_user_id is not None and uid != only_user_id:
             continue
@@ -177,7 +213,8 @@ async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
             if answers.get(answer_key):
                 continue
         q = existing.get((link.id, kind, key))
-        if not manual and q and not rules.delivery_is_pending(q, now, phase):
+        delivery_phase = 'realization' if kind == 'realization' else phase
+        if not manual and q and not rules.delivery_is_pending(q, now, delivery_phase):
             continue
         if q is None:
             q = Question(link_id=link.id, task_id=uuid.UUID(row['task_id']) if row.get('task_id') else None,
@@ -190,7 +227,7 @@ async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
             q.snapshot = {**q.snapshot, **row}
             jobs.append(question_payload(q, link))
         elif len(jobs) < 50:
-            if q.sent_at and not rules.sent_in_regular_window(q, phase):
+            if q.sent_at and not rules.sent_in_regular_window(q, delivery_phase):
                 q.snapshot = {**q.snapshot, '_previous_test_message_id': q.message_id,
                     '_test_sent_at': q.sent_at.isoformat()}
                 # The real attempt now has its own lease. Keep the earlier
@@ -208,7 +245,7 @@ async def collect_questions(db, *, now, phase, only_user_id=None, manual=False):
         included = {job['id'] for job in jobs}
         for q in existing.values():
             link = by_user.get(only_user_id)
-            if not link or q.link_id != link.id or q.kind not in {'untouched', 'delivery', 'meeting'} or str(q.id) in included:
+            if not link or q.link_id != link.id or q.kind not in {'untouched', 'delivery', 'meeting', 'realization'} or str(q.id) in included:
                 continue
             try:
                 await own_question(db, q.id, Actor(discord_user_id=link.discord_user_id,
@@ -352,7 +389,7 @@ class Answer(Actor):
 
 def validate_answer(q, value):
     allowed = {'untouched': {'comment', 'progress', 'done', 'postpone'}, 'delivery': {'PO', 'JO'},
-        'meeting': {'held', 'canceled'}, 'tomorrow': {'PO', 'JO'},
+        'meeting': {'held', 'canceled'}, 'realization': {'comment'}, 'tomorrow': {'PO', 'JO'},
         'tomorrow_task': {'PO', 'JO', 'comment', 'postpone'}, 'slot': {'slot'}}
     if value.action not in allowed[q.kind]:
         raise HTTPException(422, 'Ky veprim nuk lejohet për këtë pyetje.')
@@ -369,6 +406,11 @@ def validate_answer(q, value):
 
 
 async def update_report_answers(db, report, q):
+    if q.kind == 'realization':
+        key = f"realization_comment:{q.snapshot['department']}"
+        report.manual_answers = {**(report.manual_answers or {}), key: q.comment}
+        report.status, report.last_error = 'DRAFT', None
+        return
     if q.kind not in {'untouched', 'delivery'}:
         return
     pairs = (await db.execute(select(Question, User).join(DiscordLink, DiscordLink.id == Question.link_id)
@@ -443,6 +485,8 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
             after={'question_id': str(q.id), 'target_date': q.target_date.isoformat(), **recorded, 'comment': q.comment})
         await db.flush()
         await update_report_answers(db, report, q)
+        if q.kind == 'realization':
+            report.updated_by = user.id
         if q.kind == 'untouched' and value.action in {'done', 'progress', 'postpone'}:
             report.data = {**(report.data or {}), **await reports.build_task_data(db, q.day)}
             report.generated_at = q.answered_at
@@ -538,15 +582,22 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
 
 
 async def capture_report_changes(db, report, before, submitted):
-    """A manager's explicit platform answer supersedes outstanding Discord forms."""
+    """An explicit platform answer supersedes outstanding Discord forms."""
     changed = {key for key, value in submitted.items() if value != before.get(key, '')
-        and key.startswith(('untouched_comment:', 'delivery:', 'delivery_choice:'))}
+        and key.startswith(('untouched_comment:', 'delivery:', 'delivery_choice:', 'realization_comment:'))}
     if not changed:
         return
     questions = (await db.execute(select(Question).where(Question.day == report.report_date))).scalars().all()
     for q in questions:
-        keys = {f'delivery:{q.task_id}', f'delivery_choice:{q.task_id}'} if q.kind == 'delivery' else {f'untouched_comment:{q.task_id}'} if q.kind == 'untouched' else set()
+        if q.kind == 'realization':
+            key = f"realization_comment:{q.snapshot['department']}"
+            keys = {key}
+        elif q.kind in {'delivery', 'untouched'}:
+            key = f"{'delivery' if q.kind == 'delivery' else 'untouched_comment'}:{q.task_id}"
+            keys = {key, f'delivery_choice:{q.task_id}'} if q.kind == 'delivery' else {key}
+        else:
+            continue
         if changed.intersection(keys):
             q.answer = {'platform': True}
-            q.comment = (report.manual_answers or {}).get(f'delivery:{q.task_id}' if q.kind == 'delivery' else f'untouched_comment:{q.task_id}', '')
+            q.comment = (report.manual_answers or {}).get(key, '')
             q.answered_at = datetime.now(timezone.utc)

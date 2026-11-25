@@ -855,11 +855,16 @@ def build_realization_workbook(
         for person in department.get("people") or []:
             facts = person.get("facts_json") or {}
             for task in facts.get("tasks") or []:
+                classification = task.get("classification")
+                status_label = (
+                    "WFC INT" if task.get("status") == "WAITING_CONFIRMATION"
+                    else STATUS_LABELS.get(str(classification), classification)
+                )
                 values = [
                     department["name"], person["user_name"], "TASK",
                     task.get("task_id") or task.get("match_key"),
                     SOURCE_LABELS.get(str(task.get("source_type")), task.get("source_type")),
-                    STATUS_LABELS.get(str(task.get("classification")), task.get("classification")),
+                    status_label,
                     _clean_task_title(task.get("title")), "Po",
                 ]
                 for column, value in enumerate(values, 1):
@@ -1257,8 +1262,9 @@ def build_realization_workbook(
                         state, evidence = "Shtyrje e aprovuar · pa penalizim", adjustment
                     else:
                         continue
+                    status_label = "WFC INT" if task.get("status") == "WAITING_CONFIRMATION" else task.get("classification")
                     values = [department["name"], person["user_name"], day.get("date"), _clean_task_title(task.get("title")),
-                              task.get("classification"), state, evidence.get("decided_by_name") or "", evidence.get("decided_at") or ""]
+                              status_label, state, evidence.get("decided_by_name") or "", evidence.get("decided_at") or ""]
                     for column, value in enumerate(values, 1):
                         cell = confirmations_sheet.cell(confirmation_row, column, value)
                         cell.alignment = Alignment(vertical="top", wrap_text=True)

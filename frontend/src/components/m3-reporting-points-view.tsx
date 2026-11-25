@@ -13,7 +13,18 @@ export const MANUAL_POINTS = {
 
 export type ManualKey = keyof typeof MANUAL_POINTS | `meeting_plan:${string}` | `untouched_comment:${string}` | `delivery:${string}` | `delivery_choice:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
+export type DeliverySlot = "M2" | "M3"
+type DeliveryEvidence = {
+  status: "on_time" | "late" | "missing" | "pending" | "unlinked" | "ambiguous" | "unavailable"
+  verified_at?: string
+  url?: string
+}
+type RealizationDepartment = {
+  department_id: string; code: string; name: string; percent: number | null; employees: number; comment: string
+  comment_key?: string; manager_comment?: string
+}
 export type TaskRow = {
+  id?: string
   task_id: string
   title: string
   assignees: string
@@ -39,6 +50,8 @@ export type TaskRow = {
   risk?: "OK" | "RREZIK"
   category?: string
   completed_today?: number
+  discord_delivery?: DeliveryEvidence
+  delivery_note_editable?: boolean
   completed_value?: number | null
   total_value?: number | null
 }
@@ -57,6 +70,7 @@ export type ReportingPointsReport = {
   subject: string
   status: string
   manual_answers: ManualAnswers
+  discord_delivery_slot?: DeliverySlot
   data: Partial<Record<"postponed" | "postponed_today" | "untouched" | "same_day" | "ga_postponed" | "delivery", TaskRow[]>> & {
     unheld_meetings?: UnheldMeetingRow[]
     underload?: { user_id: string; person: string }[]
@@ -67,7 +81,7 @@ export type ReportingPointsReport = {
     comment: string
     baseline_available: boolean
     people: { user_id: string; name: string; percent: number | null }[]
-    departments?: { department_id: string; code: string; name: string; percent: number | null; employees: number; comment: string }[]
+    departments?: RealizationDepartment[]
   } | null
   realization_captured_at: string | null
   generated_at: string | null
@@ -88,7 +102,7 @@ export function reportTime(value?: string | null) {
 
 const STATUS_COLORS: Record<string, string> = {
   TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", PAUSED: "#CBD5E1", WAITING_CLIENT: "#E2C15B",
-  WAITING_CONFIRMATION: "#FFEDD5", DONE: "#C4FDC4",
+  WAITING_CONFIRMATION: "#CCFBF1", DONE: "#C4FDC4",
 }
 
 function taskTitle(value: string) {
@@ -155,7 +169,7 @@ function TaskGrid({ rows, kind, movement, manualComments }: { rows: TaskRow[]; k
     if (column.key === "title") return <div className="w-full whitespace-normal break-words font-medium">{row.marker ? <strong className={`mr-1 text-sm font-black ${row.deadline_important || row.category?.includes("Deadline Important") ? "text-white" : "text-red-600"}`} data-task-symbol="true">{row.marker}</strong> : null}{taskTitle(row.title)}</div>
     if (column.key === "from" || column.key === "to") return dateRange(row, column.key === "to", movement)
     if (column.key.endsWith("_date")) return reportDate(row[column.key as "created_date" | "start_date" | "due_date"])
-    return row[column.key] || "—"
+    return String(row[column.key] || "—")
   }
   return <div className="mx-3 my-3 overflow-x-auto sm:mx-5">
     <table className="w-full table-fixed border-collapse border border-black text-xs leading-5 text-slate-950" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 0) }} aria-label={kind === "untouched" ? "Detyrat TODO për datën e raportit" : kind === "same_day" ? "Detyrat sot për sot" : "Detyrat e shtyra"}>
@@ -239,7 +253,52 @@ function UnheldMeetings({ rows, reportDay, answers, disabled, onAnswerChange }: 
   </section>
 }
 
-function DeliveryPoint({ rows, answers, disabled, onAnswerChange }: TaskManualComments & { rows: TaskRow[] }) {
+const DELIVERY_STATUS = {
+  on_time: ["Po", "bg-emerald-100 text-emerald-900"], late: ["Po (me vonesë)", "bg-amber-100 text-amber-900"],
+  missing: ["Jo", "bg-red-100 text-red-900"], pending: ["Në pritje", "bg-slate-100 text-slate-700"],
+  unlinked: ["Pa lidhje Discord", "bg-slate-100 text-slate-700"], ambiguous: ["Titull i paqartë", "bg-slate-100 text-slate-700"],
+  unavailable: ["I paverifikuar", "bg-slate-100 text-slate-700"],
+}
+
+export function DiscordDeliveryTable({ rows, slot, notes, onNoteChange, disabled }: {
+  rows: TaskRow[]; slot: DeliverySlot; notes?: Partial<Record<`delivery:${string}`, string>>
+  onNoteChange?: (key: `delivery:${string}`, value: string) => void; disabled?: boolean
+}) {
+  const delivered = rows.filter((row) => row.discord_delivery?.status === "on_time" || row.discord_delivery?.status === "late").length
+  const fields = ["assignees", "department", "project", "am_pm", "task_type", "marker", "title"] as const
+  return <div className="space-y-3 p-3">
+    <p className="text-sm text-muted-foreground"><strong className="text-foreground">SA/TOTALI: {delivered}/{rows.length}</strong> · Verifikuar në Discord · {slot === "M2" ? "12:15" : "16:30"}</p>
+    {rows.length ? <div className="overflow-x-auto border"><table className="w-full min-w-[860px] border-collapse text-xs">
+      <thead className="bg-slate-100"><tr>{["NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "SIMBOLI", "TITULLI", "PO/JO · DISCORD", "KOMENTI"].map((label) => <th key={label} className="whitespace-nowrap border px-2 py-2 text-left">{label}</th>)}</tr></thead>
+      <tbody>{rows.map((row, index) => {
+        const delivery = row.discord_delivery
+        const [label, tone] = DELIVERY_STATUS[delivery?.status || "unavailable"]
+        const key = `delivery:${row.task_id}` as const
+        const style = { background: row.deadline_important ? "#dc2626" : STATUS_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }
+        return <tr key={row.id || row.task_id} className={row.eight_am ? "border-y-2 border-y-red-600" : undefined}>
+          <td style={style} className="border p-2 align-top">{index + 1}</td>
+          {fields.map((field) => <td key={field} style={style} className={`border p-2 align-top ${field === "title" ? "w-full min-w-[14rem]" : "whitespace-nowrap"} ${field === "marker" ? "font-bold" : ""}`}>{row[field] || "—"}</td>)}
+          <td className="whitespace-nowrap border p-2 align-top">
+            <span className={`rounded px-2 py-1 ${tone}`}>{label}</span>
+            {delivery?.url && delivery.verified_at ? <a className="mt-2 block underline" href={delivery.url} target="_blank" rel="noreferrer" aria-label={`Hap postimin në Discord për ${row.title}`}>{reportTime(delivery.verified_at)}</a> : null}
+          </td>
+          <td className="min-w-[14rem] space-y-1 border p-2 align-top">
+            {row.comment ? <p className="whitespace-pre-wrap">{row.comment}</p> : null}
+            {onNoteChange && row.delivery_note_editable ? <Textarea aria-label={`Shënimi i raportit për ${row.title}`} value={notes?.[key] || ""} disabled={disabled} maxLength={10000}
+              rows={1} autoResize placeholder="Shëno koment" onChange={(event) => onNoteChange(key, event.target.value)} />
+              : notes?.[key] ? <p className="whitespace-pre-wrap">{notes[key]}</p> : !row.comment ? "—" : null}
+          </td>
+        </tr>
+      })}</tbody>
+    </table></div> : <p className="text-sm text-muted-foreground">Asnjë detyrë.</p>}
+  </div>
+}
+
+function DeliveryPoint({ rows, answers, disabled, onAnswerChange, slot }: TaskManualComments & { rows: TaskRow[]; slot?: DeliverySlot }) {
+  if (slot) return <section className="rounded-xl border bg-card p-5" aria-labelledby="m3-delivery">
+    <h3 id="m3-delivery" className="font-semibold">5. SA PER DOREZIM M3?</h3>
+    <DiscordDeliveryTable rows={rows} slot={slot} notes={answers} onNoteChange={onAnswerChange} disabled={disabled} />
+  </section>
   const deliveredCount = rows.filter((row) => answers[`delivery_choice:${row.task_id}`] === "PO").length
   const columns: [keyof TaskRow, string][] = [["assignees", "KUSH"], ["department", "DEP"], ["project", "PRJK"], ["am_pm", "AM/PM"], ["task_type", "LLOJI"], ["marker", "SIMBOLI"]]
   return <section className="space-y-3 rounded-xl border bg-card p-5" aria-labelledby="m3-delivery">
@@ -269,16 +328,45 @@ function DeliveryPoint({ rows, answers, disabled, onAnswerChange }: TaskManualCo
   </section>
 }
 
-export function M3ReportingPointsView({ report, answers, onAnswerChange, disabled = false, meetingCommentsDisabled = disabled }: {
+function RealizationComment({ item, disabled, onSave }: {
+  item: RealizationDepartment
+  disabled: boolean
+  onSave?: (key: string, value: string) => Promise<void>
+}) {
+  const [draft, setDraft] = React.useState<string | null>(null)
+  const saved = item.manager_comment || ""
+  const key = item.comment_key
+  if (!key) return saved ? <p className="whitespace-pre-wrap break-words">{saved}</p> : <span aria-label="Nuk kërkohet koment">—</span>
+
+  return <div className="min-w-52">
+    {onSave ? <Textarea aria-label={`Komenti i realizimit për ${item.code}`} placeholder="Pse është realizimi nën 50%?"
+      value={draft ?? saved} onChange={(event) => setDraft(event.target.value)} disabled={disabled}
+      onBlur={(event) => {
+        const comment = event.currentTarget.value.trim()
+        if (!comment || comment === saved) {
+          setDraft(null)
+          return
+        }
+        if (!disabled) void onSave(key, comment)
+      }}
+      maxLength={10000} autoResize className="min-h-16" /> : <p className="whitespace-pre-wrap break-words">{saved}</p>}
+  </div>
+}
+
+export function M3ReportingPointsView({ report, answers, onAnswerChange, disabled = false, meetingCommentsDisabled = disabled,
+  realizationCommentsDisabled = false, onSaveRealizationComment }: {
   report: ReportingPointsReport
   answers: ManualAnswers
   onAnswerChange: (key: ManualKey, value: string) => void
   disabled?: boolean
   meetingCommentsDisabled?: boolean
+  realizationCommentsDisabled?: boolean
+  onSaveRealizationComment?: (key: string, value: string) => Promise<void>
 }) {
   const data = report.data
   const realization = report.realization
   const realizationDepartments = (realization?.departments || []).filter((item) => !["GA", "HR"].includes(item.code.trim().toUpperCase()))
+  const showComments = realizationDepartments.some((item) => item.comment_key || item.manager_comment)
   const manual = (key: Exclude<keyof typeof MANUAL_POINTS, "underload">) => <div key={key} className="space-y-2">
     <Label htmlFor={`point-${key}`} className="text-sm leading-6">{MANUAL_POINTS[key]}</Label>
     <Textarea id={`point-${key}`} value={answers[key] || ""} onChange={(event) => onAnswerChange(key, event.target.value)}
@@ -311,7 +399,7 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
       <Point title="2. PSE PA PREK TËRË DITËN?" note="Detyrat TODO ku data e raportit është brenda intervalit Start–Due, pavarësisht progresit të mëparshëm." rows={data.untouched || []} kind="untouched" manualComments={{ answers, disabled, onAnswerChange }} />
       <Point title="3. SOT PËR SOT/DEADLINE - PROGRESI?" note="Vetëm detyrat që nuk janë DONE dhe kanë Creation Date, Start Date dhe Due Date në datën e këtij raporti." rows={(data.same_day || []).filter((row) => row.status !== "DONE")} kind="same_day" />
       <UnheldMeetings rows={data.unheld_meetings || []} reportDay={report.report_date} answers={answers} disabled={meetingCommentsDisabled} onAnswerChange={onAnswerChange} />
-      <DeliveryPoint rows={data.delivery || []} answers={answers} disabled={disabled} onAnswerChange={onAnswerChange} />
+      <DeliveryPoint rows={data.delivery || []} answers={answers} disabled={disabled} onAnswerChange={onAnswerChange} slot={report.discord_delivery_slot} />
       <section className="rounded-xl border bg-card p-5" aria-labelledby="m3-realization-title">
         <h3 id="m3-realization-title" className="font-semibold">6. REALIZIMI — A MBËRRIHET?</h3>
         <p className="mt-1 text-xs text-muted-foreground">PLAN RLZ total dhe ndarja sipas departamenteve, si te Realization. Ruhet në 16:15 dhe sa herë gjenerohet raporti pas 16:15.</p>
@@ -323,11 +411,15 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
           <div><p className="font-medium">{realization.comment}</p><p className="mt-1 text-xs text-muted-foreground">{realization.employees} persona · {report.realization_captured_at ? `Marrë në ${reportTime(report.realization_captured_at)}` : <><span className="rounded bg-blue-100 px-1 py-0.5 font-semibold text-blue-800">LIVE</span> në {reportTime(report.generated_at)} · ende pa u ruajtur, ruhet pas 16:15</>}</p></div>
         </div> : <p className="mt-5 rounded-lg bg-muted px-4 py-3 text-sm">Nuk ka ende një vlerë të ruajtur për orën 16:15 të kësaj date.</p>}
         {realizationDepartments.length ? <div className="mt-5 overflow-x-auto"><table className="w-auto border-collapse text-sm">
-          <thead className="bg-slate-200"><tr>{["DEP", "REALIZIMI", "VLERËSIMI"].map((label) => <th key={label} className="whitespace-nowrap border border-black p-2 text-left">{label}</th>)}</tr></thead>
+          <thead className="bg-slate-200"><tr>{["DEP", "REALIZIMI", "VLERËSIMI", ...(showComments ? ["KOMENTI I REALIZIMIT"] : [])].map((label) => <th key={label} className="whitespace-nowrap border border-black p-2 text-left">{label}</th>)}</tr></thead>
           <tbody>{realizationDepartments.map((item) => <tr key={item.department_id}>
             <td className="whitespace-nowrap border border-black p-2 font-semibold">{item.code}</td>
             <td className={`whitespace-nowrap border border-black p-2 font-bold ${item.percent == null ? "bg-muted" : item.percent < 50 ? "bg-red-100 text-red-900" : "bg-green-100 text-green-900"}`}>{item.percent == null ? "Pa të dhëna" : `${item.percent}%`}</td>
             <td className="border border-black p-2">{item.percent == null ? item.comment : item.percent === 50 ? "Jemi në 50%" : `Jemi ${item.percent < 50 ? "nën" : "mbi"} 50%`}</td>
+            {showComments ? <td className="max-w-md border border-black p-2 align-top">
+              <RealizationComment key={`${report.id}:${item.comment_key}:${item.manager_comment || ""}`} item={item} disabled={realizationCommentsDisabled}
+                onSave={onSaveRealizationComment} />
+            </td> : null}
           </tr>)}</tbody>
         </table></div> : realization ? <p className="mt-4 text-sm text-muted-foreground">Nuk ka ndarje sipas departamentit të ruajtur për këtë datë.</p> : null}
       </section>

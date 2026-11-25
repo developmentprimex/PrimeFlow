@@ -566,6 +566,7 @@ function statusLabel(status?: string) {
   if (status === "PAUSED") return "Stopped"
   if (!status) return "-"
   if (status === "WAITING_CLIENT") return "WFE"
+  if (status === "WAITING_CONFIRMATION") return "WFC INT"
   return status
     .replace(/_/g, " ")
     .toLowerCase()
@@ -5068,7 +5069,7 @@ export default function PcmProjectPage() {
                                 className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${task.status === "DONE"
                                     ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                     : task.status === "WAITING_CONFIRMATION"
-                                      ? "bg-blue-50 text-blue-700 border-blue-200"
+                                      ? "bg-teal-100 text-teal-900 border-teal-300"
                                     : task.status === "IN_PROGRESS"
                                       ? "bg-amber-50 text-amber-700 border-amber-200"
                                       : "bg-slate-50 text-slate-700 border-slate-200"
@@ -8430,7 +8431,7 @@ export default function PcmProjectPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="text-sm text-muted-foreground">
-              Select manager/admin confirmer before setting task to Waiting Confirmation.
+              Select manager/admin confirmer before setting task to WFC INT.
             </div>
             <div className="space-y-2">
               <Label>Confirm by (Manager/Admin)</Label>

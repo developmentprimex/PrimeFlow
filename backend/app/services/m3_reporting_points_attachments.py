@@ -57,7 +57,8 @@ def _text(value: Any) -> str:
 def export_blocks(report: dict) -> list[dict]:
     from app.services.m3_reporting_points import (
         AUTO_TITLES, M3_TITLE, MANUAL_POINTS,
-        report_table_columns, report_table_value, task_table_groups, task_row_appearance, realization_department_rows,
+        report_table_columns, report_table_value, task_table_groups, task_row_appearance,
+        realization_department_rows, realization_comment_text,
         delivery_summary, reporting_point_answer,
     )
 
@@ -88,7 +89,7 @@ def export_blocks(report: dict) -> list[dict]:
             if not rows:
                 text("Asnje detyre.")
                 continue
-            columns = report_table_columns(key, movement)
+            columns = report_table_columns(key, movement, discord_delivery=bool(report.get("discord_delivery_slot")))
             rendered_rows = []
             for index, row in enumerate(rows, 1):
                 cells = []
@@ -136,16 +137,24 @@ def export_blocks(report: dict) -> list[dict]:
         text(f"Marrë në: {report.get('realization_captured_at') or '16:15'}")
         department_rows = realization_department_rows(realization)
         if department_rows:
+            columns = [("code", "DEP", 48), ("percent", "REALIZIMI", 88), ("comment", "VLERËSIMI", 136)]
+            show_comments = any(realization_comment_text(item) for item in department_rows)
+            if show_comments:
+                columns.append(("manager_comment", "KOMENTI I REALIZIMIT", 300))
             departments = []
             for item in department_rows:
                 value = item.get("percent")
                 fill = "#e2e8f0" if value is None else RED if value < 50 else GREEN
-                departments.append([
+                cells = [
                     {"text": _text(item["code"]), "fill": "#ffffff", "color": "#000000", "bold": True, "divider": False},
                     {"text": f"{value:g}%" if value is not None else "Pa të dhëna", "fill": fill, "color": "#000000", "bold": True, "divider": False},
                     {"text": _text(item["comment"]), "fill": "#ffffff", "color": "#000000", "bold": False, "divider": False},
-                ])
-            blocks.append({"kind": "table", "compact": True, "columns": [("code", "DEP", 48), ("percent", "REALIZIMI", 88), ("comment", "VLERËSIMI", 136)], "rows": departments})
+                ]
+                if show_comments:
+                    cells.append({"text": _text(realization_comment_text(item)), "fill": "#ffffff",
+                                  "color": "#000000", "bold": False, "divider": False})
+                departments.append(cells)
+            blocks.append({"kind": "table", "compact": True, "columns": columns, "rows": departments})
     else:
         text("Vlera e realizimit merret ne 16:15. Nuk ka vlere te ruajtur per kete date.")
     return blocks

@@ -74,7 +74,7 @@ def _task_title(title: str) -> str:
 CLASSIFICATION_LABELS = {
     "REALIZED_AS_PLANNED": "Kryer sipas planit", "IN_PROGRESS": "Në progres",
     "NO_PROGRESS": "Pa progres", "POSTPONED_APPROVED": "Shtyrë · aprovuar",
-    "POSTPONED_UNAPPROVED": "Shtyrë · pret aprovim", "WAITING_CONFIRMATION": "Në pritje konfirmimi",
+    "POSTPONED_UNAPPROVED": "Shtyrë · pret aprovim", "WAITING_CONFIRMATION": "WFC INT",
     "COMPLETED_LATE": "Kryer me vonesë", "COMPLETED_EARLY": "Kryer para kohe",
     "ADDITIONAL_COMPLETED": "Ekstra e kryer", "ADDED_DURING_DAY": "Shtuar gjatë ditës",
     "REOPENED": "Rihapur", "REASSIGNED_OUT": "Transferuar jashtë", "REASSIGNED_IN": "Transferuar brenda",
@@ -264,7 +264,7 @@ def _status_color(task: dict) -> str:
     if classification == "WAITING_CLIENT":
         return "#E2C15B"
     if classification == "WAITING_CONFIRMATION":
-        return "#FFEDD5"
+        return "#CCFBF1"
     if classification in {"POSTPONED_APPROVED", "POSTPONED_UNAPPROVED"}:
         return "#FED7AA"
     return "#FFC4ED"

@@ -11,6 +11,17 @@ const MANUAL_EMAIL_LINK = /(?:^|\s)Email origjinal:\s*(\S+)\s*$/i
 export const ORIGINAL_EMAIL_LABEL = "Hap emailin origjinal"
 export const NO_EMAIL_SUMMARY = "Ky shënim nuk ka përmbledhje të ruajtur."
 
+export function emailSubjectKind(subject: string): "Forward" | "Reply" | undefined {
+  const prefix = /^\s*(fwd?|wg|re|aw)\s*:/i.exec(subject)?.[1].toLowerCase()
+  if (!prefix) return
+  return prefix === "re" || prefix === "aw" ? "Reply" : "Forward"
+}
+
+export function EmailKindBadge({ kind }: { kind?: ReturnType<typeof emailSubjectKind> }) {
+  if (!kind) return null
+  return <span className="mr-1.5 inline-block rounded border border-blue-700/30 bg-blue-50 px-1.5 text-[11px] font-semibold leading-4 text-blue-950 dark:bg-blue-950 dark:text-blue-100">{kind}</span>
+}
+
 export function originalEmailUrl(value?: string) {
   if (!value || /[\s\\]/.test(value)) return undefined
   try {
@@ -36,14 +47,17 @@ export function OriginalEmailLink({ sourceUrl }: { sourceUrl?: string }) {
   )
 }
 
-export function EmailNoteDisclosure({ title, children, sourceUrl }: {
-  title: string; children: React.ReactNode; sourceUrl?: string
+export function EmailNoteDisclosure({ title, children, sourceUrl, kind }: {
+  title: string; children: React.ReactNode; sourceUrl?: string; kind?: ReturnType<typeof emailSubjectKind>
 }) {
   const [expanded, setExpanded] = React.useState(false)
   return (
     <details className="min-w-0 whitespace-normal" onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary className="group flex cursor-pointer list-none items-start justify-between gap-2 rounded [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 [&::-webkit-details-marker]:hidden">
-        <strong>{title}</strong>
+        <span className="min-w-0">
+          <EmailKindBadge kind={kind} />
+          <strong>{title}</strong>
+        </span>
         <span
           className="inline-flex size-6 shrink-0 items-center justify-center rounded border border-blue-900 bg-blue-800 text-base font-bold leading-none text-white group-hover:bg-blue-950 print:hidden"
           aria-label={expanded ? "Mbyll detajet e shënimit" : "Hap detajet e shënimit"}
@@ -57,7 +71,7 @@ export function EmailNoteDisclosure({ title, children, sourceUrl }: {
 
 export function NoteEmailPreview({ email }: { email: NoteEmailPreview }) {
   return (
-    <EmailNoteDisclosure title={email.title} sourceUrl={email.original_email_url}>
+    <EmailNoteDisclosure title={email.title} sourceUrl={email.original_email_url} kind={emailSubjectKind(email.subject)}>
       {email.summary || NO_EMAIL_SUMMARY}
     </EmailNoteDisclosure>
   )
@@ -74,6 +88,7 @@ export function splitManualEmailNote(content: string) {
     title: `${match[1].toUpperCase()}: 08:00 ${match[2].toUpperCase()}`,
     body: emailNoteTextWithoutLink(body, sourceUrl),
     sourceUrl,
+    kind: emailSubjectKind(match[2]),
   }
 }
 
@@ -81,5 +96,6 @@ export function reportEmailNoteDetails(text: string, heading: NoteEmailHeading |
   const note = text.trim().replace(/\s+/g, " ")
   if (!heading || (note !== heading.original && !note.startsWith(`${heading.original} `))) return null
   const body = emailNoteTextWithoutLink(note.slice(heading.original.length).trim(), heading.original_email_url)
-  return <EmailNoteDisclosure title={heading.title} sourceUrl={heading.original_email_url}>{body || "Ky shënim nuk ka detaje."}</EmailNoteDisclosure>
+  const kind = splitManualEmailNote(heading.original)?.kind ?? splitManualEmailNote(heading.title)?.kind
+  return <EmailNoteDisclosure title={heading.title} sourceUrl={heading.original_email_url} kind={kind}>{body || "Ky shënim nuk ka detaje."}</EmailNoteDisclosure>
 }

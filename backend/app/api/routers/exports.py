@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import Cell
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -1145,6 +1146,21 @@ async def _alignment_maps_for_templates(
     return roles_map, alignment_users_map
 
 
+def _color_waiting_status_cell(cell: Cell, status_label: str | None) -> None:
+    if status_label in {"WFC INT", "WAITING_CONFIRMATION"}:
+        background, foreground = "99F6E4", "134E4A"
+    elif status_label in {"WFE", "WAITING_CLIENT"}:
+        background, foreground = "E2C15B", "4F3A00"
+    else:
+        return
+    cell.fill = PatternFill("solid", fgColor=background)
+    cell.font = Font(bold=True, color=foreground)
+
+
+def _confirmation_status_label(status: str | None) -> str:
+    return "WFC INT" if status == "WAITING_CONFIRMATION" else status or ""
+
+
 def _format_task_status(status: str | None) -> str:
     if not status:
         return "-"
@@ -1155,7 +1171,7 @@ def _format_task_status(status: str | None) -> str:
     if status == "WAITING_CLIENT":
         return "WFE"
     if status == "WAITING_CONFIRMATION":
-        return "Waiting Confirmation"
+        return "WFC INT"
     if status == "TODO":
         return "To Do"
     if status == "DONE":
@@ -1431,7 +1447,7 @@ async def export_tasks_xlsx(
             row_values = [
                 idx,
                 getattr(t, "title", "") or "",
-                status_label,
+                _confirmation_status_label(status_label),
                 str(priority_value).upper() if priority_value else "",
                 due_value,
                 _initials_compact(assignee_name),
@@ -1987,7 +2003,7 @@ async def export_fast_tasks_xlsx(
             _initials_compact((assigned.full_name or assigned.username) if assigned else ""),
             _initials_compact((created.full_name or created.username) if created else ""),
             "Yes" if task.ga_note_origin_id else "No",
-            task.status or "",
+            _confirmation_status_label(task.status),
             (task.priority or "").upper(),
             _format_excel_datetime(task.start_date),
             _format_excel_datetime(task.due_date),
@@ -2196,7 +2212,7 @@ async def preview_fast_tasks(
             _normalize_preview_value(_initials_compact((assigned.full_name or assigned.username) if assigned else "")),
             _normalize_preview_value(_initials_compact((created.full_name or created.username) if created else "")),
             _normalize_preview_value("Yes" if task.ga_note_origin_id else "No"),
-            _normalize_preview_value(task.status or ""),
+            _normalize_preview_value(_confirmation_status_label(task.status)),
             _normalize_preview_value((task.priority or "").upper()),
             _normalize_preview_value(_format_excel_datetime(task.created_at)),
             _normalize_preview_value(_format_excel_datetime(task.start_date)),
@@ -2239,6 +2255,7 @@ async def export_all_tasks_report_xlsx(
                                            "bzMe": policy.owner_text(row.bzMe or "")}))
     payload = payload.model_copy(update={"rows": rows})
 
+    is_finance_report = payload.title == "ALL FINANCE TASK REPORT"
     show_frequency_column = any((r.frequency or "").strip() for r in (payload.rows or []))
     headers = [
         "NR",
@@ -2246,6 +2263,7 @@ async def export_all_tasks_report_xlsx(
         "NLL",
         "DITA",
         "BZ ME",
+        *(["USER"] if is_finance_report else []),
         "KOHA BZ",
         "DEP",
         "AM/PM",
@@ -2254,7 +2272,7 @@ async def export_all_tasks_report_xlsx(
         "PERSHKRIMI",
         "REGJ/PATH/CHECKLISTA/TRAINING/GROUP",
         "STATUS",
-        "USER",
+        *([] if is_finance_report else ["USER"]),
     ]
     title_text = _safe_filename(payload.title or "ALL TASKS REPORT")
 
@@ -2284,14 +2302,17 @@ async def export_all_tasks_report_xlsx(
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         cell.number_format = "@"
 
-    # Data rows (exactly matching Print All columns)
+    # Data rows follow the report's column order.
+    status_column = headers.index("STATUS") + 1
     for idx, r in enumerate(payload.rows or [], start=1):
+        user_initials = r.userInitials or "-"
         values = [
             idx,
             (r.typeLabel or "-"),
             (r.subtype or "-"),
             (r.dateLabel or "-"),
             (r.bzMe or ""),
+            *([user_initials] if is_finance_report else []),
             (r.kohaBz or "-"),
             (r.department or "-"),
             (r.period or "-"),
@@ -2299,14 +2320,16 @@ async def export_all_tasks_report_xlsx(
             *([(r.frequency or "-")] if show_frequency_column else []),
             _strip_html_keep_breaks(html.unescape(r.description or "")),
             _strip_html_keep_breaks(html.unescape(r.details or "")),
-            (r.status or "-"),
-            (r.userInitials or "-"),
+            (_confirmation_status_label(r.status) or "-"),
+            *([] if is_finance_report else [user_initials]),
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=data_row, column=col_idx, value=value)
             cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
             if col_idx == 1:
                 cell.font = Font(bold=True)
+            if col_idx == status_column:
+                _color_waiting_status_cell(cell, r.status)
         data_row += 1
 
     last_row = data_row - 1
@@ -2317,7 +2340,7 @@ async def export_all_tasks_report_xlsx(
         "LL": 6,
         "NLL": 7,
         "DITA": 12,
-        "BZ ME": 10 if payload.title == "ALL FINANCE TASK REPORT" else 14,
+        "BZ ME": 10 if is_finance_report else 14,
         "KOHA BZ": 12,
         "DEP": 8,
         "AM/PM": 7,
@@ -3044,7 +3067,7 @@ async def export_open_tasks_xlsx(
                 [
                     task.title or "",
                     task.description or "",
-                    task.status or "",
+                    _confirmation_status_label(task.status),
                     source,
                     "next week plan note" if task.plan_note_origin_id else "",
                     assignee_label(task),
@@ -3133,7 +3156,7 @@ async def export_open_tasks_xlsx(
             task.finish_period or "",
             _format_excel_datetime(task.start_date),
             _format_excel_datetime(task.due_date),
-            task.status or "",
+            _confirmation_status_label(task.status),
             (task.priority or "").upper(),
             _open_task_type_label(task),
             bz_me_label(task),
@@ -3151,6 +3174,8 @@ async def export_open_tasks_xlsx(
             cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True, readingOrder=1)
             if col_idx == 1:
                 cell.font = Font(bold=True)
+            if col_idx == column_numbers["STATUS"]:
+                _color_waiting_status_cell(cell, task.status)
         if baseline:
             if not _open_task_values_match(baseline.when_value, planned_when):
                 cell = ws.cell(row=data_row, column=column_numbers["WHEN PF"])
@@ -3318,6 +3343,8 @@ async def export_common_view_xlsx(
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         cell.number_format = "@"
 
+    type_column = next((index for index, name in enumerate(payload.columns, 1) if name == "LLOJI"), None)
+
     # Data rows
     for row in payload.rows:
         for col_idx, value in enumerate(row, start=1):
@@ -3325,6 +3352,8 @@ async def export_common_view_xlsx(
             cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
             if col_idx == 1:
                 cell.font = Font(bold=True)
+            if col_idx == type_column:
+                _color_waiting_status_cell(cell, value)
         data_row += 1
 
     last_row = data_row - 1

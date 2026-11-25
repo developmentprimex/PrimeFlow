@@ -105,7 +105,7 @@ function canonicalMeetingsSectionTitle(title: string) {
     return "N- DET PERSONALISHT ME KA/GENTIN?"
   }
   if (key === compactSectionTitle("WFC TASKS (KA/GENTI)")) {
-    return "N- WFC ME KA/GENTIN?"
+    return "N- WFC INT ME KA/GENTIN?"
   }
   if (key === compactSectionTitle("TASKS PERSONALISHT ME KA/GENTIN?")) {
     return "N- DET PERSONALISHT ME KA/GENTIN?"
@@ -113,8 +113,8 @@ function canonicalMeetingsSectionTitle(title: string) {
   if (key === compactSectionTitle("N- TASKS PERSONALISHT ME KA/GENTIN?")) {
     return "N- DET PERSONALISHT ME KA/GENTIN?"
   }
-  if (key === compactSectionTitle("WFC ME KA/GENTIN?")) {
-    return "N- WFC ME KA/GENTIN?"
+  if (["WFC ME KA/GENTIN?", "N- WFC ME KA/GENTIN?"].some((value) => key === compactSectionTitle(value))) {
+    return "N- WFC INT ME KA/GENTIN?"
   }
   return title
 }
@@ -135,7 +135,7 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
     "N- DET PERSONALISHT ME KA/GENTIN?",
-    "N- WFC ME KA/GENTIN?",
+    "N- WFC INT ME KA/GENTIN?",
   ]
   const placeholder = "(Ploteso manualisht)"
   const byTitle = new Map<string, Section>()
@@ -163,7 +163,9 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
       const existing = byTitle.get(title)
       byTitle.set(title, {
         section_key: title,
-        title: section.section_key ? section.title : title,
+        title: section.section_key && !(title === "N- WFC INT ME KA/GENTIN?" && canonicalMeetingsSectionTitle(section.title) === title)
+          ? section.title
+          : title,
         body: existing == null ? section.body : preferBody(existing.body, section.body),
       })
       continue
@@ -202,7 +204,7 @@ function sectionGroupLabel(section: Section) {
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
     "N- DET PERSONALISHT ME KA/GENTIN?",
-    "N- WFC ME KA/GENTIN?",
+    "N- WFC INT ME KA/GENTIN?",
   ]
   if (knownAuto.some((auto) => compactSectionTitle(auto) === key)) return "Auto-filled from PrimeFlow"
   return "Manual questions"

@@ -67,7 +67,7 @@ def test_ga_tasks_keep_personal_symbols_and_m2_delivery_in_separate_tables():
     assert len(tables) == 2
     table = tables[0]
     assert [column[0] for column in table["columns"]] == [
-        "nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title"]
+        "nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title", "reason", "comment"]
     assert len(table["rows"]) == 3
     assert len(tables[1]["rows"]) == 3
     assert "M2/3" in service.render_html(report)

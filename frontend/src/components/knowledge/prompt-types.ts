@@ -81,7 +81,7 @@ export const TASK_STATUS_META: Record<string, { label: string; className: string
   TODO: { label: "Për t'u bërë", className: "border-slate-200 bg-slate-50 text-slate-700" },
   IN_PROGRESS: { label: "Në proces", className: "border-sky-200 bg-sky-50 text-sky-800" },
   WAITING_CLIENT: { label: "Pret klientin", className: "border-orange-200 bg-orange-50 text-orange-800" },
-  WAITING_CONFIRMATION: { label: "Pret konfirmim", className: "border-violet-200 bg-violet-50 text-violet-800" },
+  WAITING_CONFIRMATION: { label: "WFC INT", className: "border-teal-300 bg-teal-100 text-teal-900" },
   DONE: { label: "Kryer", className: "border-emerald-200 bg-emerald-50 text-emerald-800" },
 }
 

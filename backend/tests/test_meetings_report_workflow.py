@@ -97,12 +97,19 @@ class M3TaskDateRangeTests(unittest.TestCase):
 class ReportOwnerAndWfcTests(unittest.TestCase):
     def test_personal_and_wfc_sections_are_known_auto_sections(self) -> None:
         self.assertEqual(SECTION_TITLES[13], "N- DET PERSONALISHT ME KA/GENTIN?")
-        self.assertEqual(SECTION_TITLES[14], "N- WFC ME KA/GENTIN?")
+        self.assertEqual(SECTION_TITLES[14], "N- WFC INT ME KA/GENTIN?")
         self.assertEqual(SECTION_TITLES[15], "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER")
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[15]))
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[13]))
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[14]))
         self.assertEqual(section_group_label("meetings", SECTION_TITLES[14]), "AUTO-FILLED FROM PRIMEFLOW")
+        legacy_title = "N- WFC ME KA/GENTIN?"
+        sections = normalize_meetings_report_sections(
+            [{"section_key": legacy_title, "title": legacy_title, "body": "WFC KA: 0\n\nWFC GENTI: 0"}]
+        )
+        confirmation = next(section for section in sections if section["section_key"] == SECTION_TITLES[14])
+        self.assertEqual(confirmation["title"], "N- WFC INT ME KA/GENTIN?")
+        self.assertEqual(confirmation["body"], "WFC INT KA: 0\n\nWFC INT GENTI: 0")
 
     def test_ka_and_genti_are_assigned_to_separate_owner_tables(self) -> None:
         self.assertEqual(_ka_genti_owner(SimpleNamespace(title="AT/KA: task")), "KA")

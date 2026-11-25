@@ -153,6 +153,8 @@ async def _task_rows(db: AsyncSession, day: date, today: date, guild_id: str | N
             department = _m3_department_code_label(user.department_id or task.department_id, department_codes) if user else "-"
             row = {
                 "id": f"{task.id}:{user_id}", "task_id": str(task.id),
+                "user_id": str(user_id) if user_id else None,
+                "status": status, "deadline_important": bool(task.is_deadline_important),
                 "person": person or "Pa përgjegjës", "initials": _initials(person),
                 "department": department, "project": project or "—",
                 "am_pm": _m3_am_pm_label(task), "task_type": _m3_task_type_label(task),
@@ -284,7 +286,7 @@ def _delivery_results(
     return result
 
 
-async def build_report(db: AsyncSession, day: date) -> dict:
+async def checked_deliveries(db: AsyncSession, day: date) -> tuple[datetime, str, bool, list[dict]]:
     now = datetime.now(report_timezone())
     guild_id = await _staff_guild(db)
     rows = await _task_rows(db, day, now.date(), guild_id)
@@ -307,6 +309,35 @@ async def build_report(db: AsyncSession, day: date) -> dict:
         comment_model.report_date == day,
     ))).tuples().all()) if rows and comments_available else {}
     checked = _delivery_results(rows, messages, day, now, guild_id=guild_id, complete=source == "live")
+    return now, source, comments_available, [{**row, "comment": comments.get(row["id"], "")} for row in checked]
+
+
+async def with_discord_delivery(db: AsyncSession, report: dict, slot: str) -> dict:
+    if "delivery" not in report["data"]:
+        return report
+    day = date.fromisoformat(report["report_date"])
+    _, _, _, rows = await checked_deliveries(db, day)
+    attendance = await load_report_attendance(db, day)
+    report_task_ids = {row["task_id"] for row in report["data"]["delivery"]}
+    deliveries = [
+        {**row, "assignees": row["initials"] or "—", "marker": row["symbol"], "discord_delivery": row["deliveries"][slot],
+         "delivery_note_editable": row["task_id"] in report_task_ids}
+        for row in rows if slot in row["deliveries"] and not attendance.excludes(row["user_id"], row["person"])
+    ]
+    return {**report, "discord_delivery_slot": slot, "data": {**report["data"], "delivery": deliveries}}
+
+
+def delivery_text(row: dict) -> str:
+    delivery = row["discord_delivery"]
+    label = {"on_time": "PO", "late": "PO (me vonesë)", "missing": "JO", "pending": "Në pritje",
+             "unlinked": "Pa lidhje Discord", "ambiguous": "Titull i paqartë", "unavailable": "I paverifikuar"}[delivery["status"]]
+    if delivery.get("verified_at"):
+        return f"{label} · {_local_time(datetime.fromisoformat(delivery['verified_at']))}"
+    return label
+
+
+async def build_report(db: AsyncSession, day: date) -> dict:
+    now, source, comments_available, checked = await checked_deliveries(db, day)
     slot_day = effective_slot_date(day)
     differences = await reporting_differences(db, day, now, marker_day=current_effective_marker_date(),
                                               slot_day=slot_day)
@@ -314,7 +345,7 @@ async def build_report(db: AsyncSession, day: date) -> dict:
         "report_date": day.isoformat(), "today": now.date().isoformat(),
         "checked_at": now.isoformat(), "timezone": str(now.tzinfo), "discord_source": source,
         "comments_available": comments_available, "deadlines": DEADLINES,
-        "rows": [{**row, "comment": comments.get(row["id"], "")} for row in checked],
+        "rows": checked,
         "reporting_differences": await _format_reporting_differences(db, differences),
         "missing_slot_date": slot_day.isoformat(),
         "missing_slots": await _missing_slot_tasks(db, day, slot_day),

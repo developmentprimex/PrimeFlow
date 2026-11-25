@@ -350,6 +350,42 @@ def realization_department_rows(realization: dict | None) -> list[dict]:
             if str(item.get("code") or "").strip().upper() not in {"GA", "HR"}]
 
 
+REALIZATION_COMMENT_MANAGERS = {
+    "realization_comment:DEV": "Laurent Hoxha",
+    "realization_comment:GD": "Diellza Veliu",
+    "realization_comment:PCM": "Diellza Veliu",
+}
+
+
+def realization_comment_requests(realization: dict | None) -> dict[str, str]:
+    requests = {}
+    for item in realization_department_rows(realization):
+        key = f"realization_comment:{item['code'].strip().upper()}"
+        percent = item.get("percent")
+        if key in REALIZATION_COMMENT_MANAGERS and percent is not None and percent < 50:
+            requests[key] = REALIZATION_COMMENT_MANAGERS[key]
+    return requests
+
+
+def initial_realization_departments(realization: dict) -> list[dict]:
+    return realization.get("discord_departments", [
+        {"code": item["code"], "percent": item.get("percent")}
+        for item in realization_department_rows(realization)
+    ])
+
+
+def record_realization_capture(row: M3ReportingPointsReport, realization: dict, now: datetime) -> None:
+    if "departments" in realization:
+        previous = row.realization if row.realization_captured_at is not None else None
+        realization = {**realization, "discord_departments": initial_realization_departments(previous or realization)}
+    row.realization = realization
+    row.realization_captured_at = now
+
+
+def realization_comment_text(item: dict) -> str:
+    return item.get("manager_comment") or ("Në pritje të komentit" if item.get("comment_key") else "")
+
+
 def realization_department_comment(percent: float | None) -> str:
     if percent is None:
         return realization_comment(percent)
@@ -401,18 +437,30 @@ async def refresh_report(db: AsyncSession, row: M3ReportingPointsReport, now: da
     data["underload"] = await build_underload_staff(db, row.report_date)
     data["unheld_meetings"] = await build_unheld_meetings(db, row.report_date)
     row.data = data
-    row.realization = await build_realization_capture(db, row.report_date)
+    realization = await build_realization_capture(db, row.report_date)
     if now.time().replace(tzinfo=None) >= REALIZATION_CAPTURE_TIME:
-        row.realization_captured_at = now
+        record_realization_capture(row, realization, now)
+    else:
+        row.realization = realization
     row.generated_at = now
 
 
 def report_payload(row: M3ReportingPointsReport) -> dict:
     realization = row.realization
+    answers = row.manual_answers or {}
     if realization and "departments" in realization:
-        realization = {**realization, "departments": realization_department_rows(realization)}
+        requests = realization_comment_requests(realization)
+        departments = realization_department_rows(realization)
+        for item in departments:
+            key = f"realization_comment:{item['code'].strip().upper()}"
+            if key in requests:
+                item.update(comment_key=key, comment_manager=requests[key], manager_comment=answers.get(key, ""))
+            elif key in REALIZATION_COMMENT_MANAGERS and answers.get(key):
+                item["manager_comment"] = answers[key]
+        realization = {key: value for key, value in realization.items() if key != "discord_departments"}
+        realization["departments"] = departments
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
-            "manual_answers": row.manual_answers or {},
+            "manual_answers": {key: value for key, value in answers.items() if key not in REALIZATION_COMMENT_MANAGERS},
             "data": {key: [item for item in rows if item.get("status") != "DONE"] if key == "same_day" else
                      [item for item in rows if planned_for_report_day(item, row.report_date)] if key == "postponed_today" else rows
                      for key, rows in (row.data or {}).items()}, "realization": realization,
@@ -458,12 +506,14 @@ async def with_current_task_explanations(db: AsyncSession, payload: dict, sectio
 
 
 async def current_report_payload(db: AsyncSession, row: M3ReportingPointsReport) -> dict:
+    from app.services.discord_task_deliveries import with_discord_delivery
+
     payload = report_payload(row)
     if row.report_date == datetime.now(report_timezone()).date() and "underload" not in payload["data"]:
         payload["data"]["underload"] = await build_underload_staff(db, row.report_date)
     payload = await with_current_task_explanations(db, payload, "untouched")
     payload["data"] = await add_saved_meeting_appearance(db, payload["data"])
-    return await filter_points_payload(db, payload)
+    return await with_discord_delivery(db, await filter_points_payload(db, payload), "M3")
 
 
 def _cell(value: Any) -> str:
@@ -509,12 +559,13 @@ def task_row_appearance(row: dict) -> tuple[str, str, bool]:
             "#ffffff" if deadline else "#000000", eight_am)
 
 
-def report_table_columns(key: str, movement: str = "") -> list[tuple[str, str, int]]:
+def report_table_columns(key: str, movement: str = "", *, discord_delivery: bool = False) -> list[tuple[str, str, int]]:
     if key == "delivery":
         return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
                 ("project", "PRJK", 96), ("am_pm", "AM/PM", 48), ("task_type", "LLOJI", 48),
                 ("marker", "SIMBOLI", 60), ("title", "TITULLI", 360),
-                ("choice", "PO/JO", 50), ("answer", "PERGJIGJJA MANUALE", 300)]
+                ("choice", "PO/JO · DISCORD" if discord_delivery else "PO/JO", 130 if discord_delivery else 50),
+                ("answer", "KOMENTI" if discord_delivery else "PERGJIGJJA MANUALE", 240 if discord_delivery else 300)]
     if key == "postponed_today":
         key = "postponed"
     columns = [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
@@ -539,6 +590,13 @@ def effective_task_comment(row: dict, report: dict, prefix: str) -> str:
 
 def report_table_value(row: dict, column: str, index: int, kind: str, report: dict | None = None, section: str = "") -> Any:
     if section == "delivery":
+        if row.get("discord_delivery"):
+            if column == "choice":
+                from app.services.discord_task_deliveries import delivery_text
+                return delivery_text(row)
+            if column == "answer":
+                note = (report or {}).get("manual_answers", {}).get(f"delivery:{row['task_id']}")
+                return "\n".join(filter(None, (row.get("comment"), note))) or "-"
         if column == "choice":
             return (report or {}).get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") or "-"
         if column == "answer":
@@ -568,7 +626,8 @@ def report_table_value(row: dict, column: str, index: int, kind: str, report: di
 
 def delivery_summary(report: dict) -> str:
     rows = report.get("data", {}).get("delivery", [])
-    delivered = sum(report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") == "PO" for row in rows)
+    delivered = sum(row["discord_delivery"]["status"] in {"on_time", "late"} if row.get("discord_delivery") else
+                    report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") == "PO" for row in rows)
     return f"SA/TOTALI: {delivered}/{len(rows)}"
 
 
@@ -594,7 +653,7 @@ def render_html(report: dict) -> str:
                 "<span style='background-color:#fee2e2;color:#7f1d1d;padding:2px 4px'>Për të premten ose javën tjetër: RREZIK.</span></p>"
             )
         for caption, kind, rows in task_table_groups(report["data"].get(key, []), key):
-            columns = report_table_columns(key, kind)
+            columns = report_table_columns(key, kind, discord_delivery=bool(report.get("discord_delivery_slot")))
             if caption:
                 parts.append(f"<h4>{caption}:</h4>")
             if not rows:
@@ -705,13 +764,20 @@ def render_html(report: dict) -> str:
         if department_rows:
             realization_html += "<table border='1' cellpadding='6' cellspacing='0' style='width:auto;border-collapse:collapse;border:1px solid #000'><tr>"
             compact_style = ";white-space:nowrap"
-            realization_html += "".join(f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0{compact_style}'>{label}</th>" for label in ("DEP", "REALIZIMI", "VLERËSIMI")) + "</tr>"
+            show_comments = any(realization_comment_text(item) for item in department_rows)
+            labels = ["DEP", "REALIZIMI", "VLERËSIMI"]
+            if show_comments:
+                labels.append("KOMENTI I REALIZIMIT")
+            realization_html += "".join(f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0{compact_style}'>{label}</th>" for label in labels) + "</tr>"
             for item in department_rows:
                 value = item.get("percent")
                 fill = "#e2e8f0" if value is None else "#fee2e2" if value < 50 else "#dcfce7"
                 realization_html += (f"<tr><td style='{cell_style}{compact_style}'>{_cell(item['code'])}</td>"
                                      f"<td bgcolor='{fill}' style='{cell_style}{compact_style};background-color:{fill};font-weight:700'>{f'{value:g}%' if value is not None else 'Pa të dhëna'}</td>"
-                                     f"<td style='{cell_style}'>{_cell(item['comment'])}</td></tr>")
+                                     f"<td style='{cell_style}'>{_cell(item['comment'])}</td>")
+                if show_comments:
+                    realization_html += f"<td style='{cell_style}'>{_cell(realization_comment_text(item))}</td>"
+                realization_html += "</tr>"
             realization_html += "</table>"
     else:
         realization_html = "<p>Vlera e realizimit merret ne 16:15. Nuk ka vlere te ruajtur per kete date.</p>"
@@ -750,12 +816,15 @@ def render_plain_text(report: dict) -> str:
             for item in realization_department_rows(realization):
                 value = item.get("percent")
                 lines.append(f"{item['code']}: " + (f"{value:g}%" if value is not None else "Pa të dhëna") + f" - {item['comment']}")
+                comment = realization_comment_text(item)
+                if comment:
+                    lines.append(comment)
             continue
         for caption, kind, rows in task_table_groups(report["data"].get(key, []), key):
             if caption:
                 lines.append(caption)
             lines.extend(" | ".join(f"{label}: {report_table_value(row, column, index, kind, report, key)}"
-                                    for column, label, _ in report_table_columns(key, kind))
+                                    for column, label, _ in report_table_columns(key, kind, discord_delivery=bool(report.get("discord_delivery_slot"))))
                          for index, row in enumerate(rows, 1))
             if not rows:
                 lines.append("Asnje detyre.")

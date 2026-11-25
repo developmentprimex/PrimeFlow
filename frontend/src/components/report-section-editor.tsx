@@ -345,7 +345,7 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   if (resolvedStatus === "WFE" || resolvedStatus.includes("WAITING CLIENT") || resolvedStatus.includes("WAITING FOR CLIENT")) {
     return "bg-[#E2C15B] text-[#4F3A00]"
   }
-  if (resolvedStatus.includes("WAITING")) return "bg-orange-100 text-orange-900"
+  if (resolvedStatus === "WFC INT" || resolvedStatus.includes("WAITING")) return "bg-teal-100 text-teal-900"
   if (resolvedStatus.includes("IN PROGRESS")) return "bg-yellow-100"
   if (resolvedStatus === "PAUSED" || resolvedStatus === "STOPPED") return "bg-slate-200"
   if (resolvedStatus === "TODO") return "bg-pink-200"
@@ -363,7 +363,7 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   ) {
     return "bg-[#E2C15B] text-[#4F3A00]"
   }
-  if (normalizedLabel.includes("WAITING")) return "bg-orange-100 text-orange-900"
+  if (normalizedLabel.startsWith("WFC INT") || normalizedLabel.includes("WAITING")) return "bg-teal-100 text-teal-900"
   if (normalizedLabel.includes("DONE") || normalizedLabel.includes("DET E KRYERA NE AM")) return "bg-green-100"
   // NOTES stay blue; DISK yes/no colors only the DISK cell (see diskCellTone).
   if (normalizedLabel.includes("NOTES") || headers.some((header) => normalizeHeader(header) === "NOTE")) {

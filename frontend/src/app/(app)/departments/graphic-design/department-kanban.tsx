@@ -826,7 +826,7 @@ function reportStatusLabel(status?: Task["status"] | null) {
   if (status === "IN_PROGRESS") return "In Progress"
   if (status === "PAUSED") return "Stopped"
   if (status === "WAITING_CLIENT") return "WFE"
-  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
+  if (status === "WAITING_CONFIRMATION") return "WFC INT"
   if (status === "TODO") return "TO DO"
   if (status === "DONE") return "Done"
   return status
@@ -853,7 +853,7 @@ function dailyReportStatusChipLabel(key: string) {
   if (key === "IN_PROGRESS") return "IN PROGRESS"
   if (key === "PAUSED") return "STOPPED"
   if (key === "WAITING_CLIENT") return "WFE"
-  if (key === "WAITING_CONFIRMATION") return "WAITING CONFIRMATION"
+  if (key === "WAITING_CONFIRMATION") return "WFC INT"
   if (key === "DONE") return "DONE"
   return key.replace(/_/g, " ")
 }
@@ -932,7 +932,7 @@ function controlKoUserId(task: Task): string | null {
 function statusBadgeClasses(status: Task["status"]) {
   if (status === "DONE") return "bg-green-100 text-green-700 border-green-200"
   if (status === "WAITING_CLIENT") return "bg-[#E2C15B] text-[#4F3A00] border-[#B8860B]"
-  if (status === "WAITING_CONFIRMATION") return "bg-blue-100 text-blue-700 border-blue-200"
+  if (status === "WAITING_CONFIRMATION") return "bg-teal-100 text-teal-900 border-teal-300"
   if (status === "IN_PROGRESS") return "bg-amber-100 text-amber-800 border-amber-200"
   if (status === "PAUSED") return "bg-slate-200 text-slate-800 border-slate-400"
   return "bg-slate-100 text-slate-700 border-slate-200"
@@ -944,7 +944,7 @@ function formatSystemOccurrenceStatus(status?: string | null) {
   if (status === "IN_PROGRESS") return "In Progress"
   if (status === "PAUSED") return "Stopped"
   if (status === "WAITING_CLIENT") return "WFE"
-  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
+  if (status === "WAITING_CONFIRMATION") return "WFC INT"
   if (status === "NOT_DONE") return "Not Done"
   if (status === "DONE") return "Done"
   if (status === "OPEN") return "TO DO"
@@ -1999,7 +1999,7 @@ export default function DepartmentKanban() {
       if (isTaskAssignedToUser(task, user?.id)) {
         return "Waiting for Confirm"
       }
-      return "Waiting Confirmation"
+      return "WFC INT"
     },
     [isTaskAssignedToUser, user?.id]
   )
@@ -6962,7 +6962,7 @@ export default function DepartmentKanban() {
                   <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl gap-2 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold text-slate-800">Waiting Confirmation</div>
+                        <div className="text-sm font-semibold text-teal-900">WFC INT</div>
                       </div>
                       <div className="text-xs font-semibold text-slate-600">{todayWaitingTasks.length}</div>
                     </div>
@@ -7086,7 +7086,7 @@ export default function DepartmentKanban() {
                         </TableBody>
                       </Table>
                     ) : (
-                      <div className="mt-1 text-sm text-slate-500">No waiting confirmation tasks.</div>
+                      <div className="mt-1 text-sm text-slate-500">No WFC INT tasks.</div>
                     )}
                   </Card>
 

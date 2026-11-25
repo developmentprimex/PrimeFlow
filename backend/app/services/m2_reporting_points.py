@@ -181,9 +181,11 @@ def report_payload(row: M2ReportingPointsReport) -> dict:
 
 
 async def current_report_payload(db: AsyncSession, row: M2ReportingPointsReport) -> dict:
+    from app.services.discord_task_deliveries import with_discord_delivery
+
     payload = await m3.with_current_task_explanations(db, report_payload(row), "unfinished_priority")
     payload = await m3.with_current_task_explanations(db, payload, "ga_progress")
-    return await filter_points_payload(db, payload)
+    return await with_discord_delivery(db, await filter_points_payload(db, payload), "M2")
 
 
 def table_groups(report, key):
@@ -214,6 +216,8 @@ def table_columns(key, movement=""):
 
 
 def table_value(report, row, column, index, movement, section=""):
+    if section == "delivery" and row.get("discord_delivery"):
+        return m3.report_table_value(row, column, index, movement, report, section)
     if column == "reason" and section in {"unfinished_priority", "postponed", "postponed_am"}:
         prefix = "unfinished_reason" if section == "unfinished_priority" else "postponed_reason"
         reason = report.get("manual_answers", {}).get(f"{prefix}:{row['task_id']}")
@@ -249,9 +253,7 @@ def export_blocks(report):
     for key, title in AUTO_TITLES.items():
         blocks.append({"kind": "text", "text": title, "level": 2})
         if key == "delivery":
-            rows = report.get("data", {}).get("delivery", [])
-            delivered = sum(report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") == "PO" for row in rows)
-            blocks.append({"kind": "text", "text": f"SA/TOTALI: {delivered}/{len(rows)}", "level": 3, "font_size": 14})
+            blocks.append({"kind": "text", "text": m3.delivery_summary(report), "level": 3, "font_size": 14})
         if key in {"postponed", "postponed_am"}:
             blocks.append({"kind": "legend", "runs": [
                 ("Shtyrjet e bëra gjatë ditës. ", None, "#000000"),
@@ -264,7 +266,8 @@ def export_blocks(report):
             if not rows:
                 blocks.append({"kind": "text", "text": "Asnje detyre.", "level": 0})
                 continue
-            columns = table_columns(key, movement)
+            columns = (m3.report_table_columns(key, movement, discord_delivery=True)
+                       if key == "delivery" and report.get("discord_delivery_slot") else table_columns(key, movement))
             rendered = []
             for index, row in enumerate(rows, 1):
                 fill, color, eight_am = m3.task_row_appearance(row)
@@ -342,10 +345,12 @@ def report_attachments(report):
 
 
 async def send_report(db, row, recipients, *, automatic: bool = False):
+    from app.services.discord_task_deliveries import with_discord_delivery
+
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To ne konfigurimin e M2.")
-    report = report_payload(row)
+    report = await with_discord_delivery(db, report_payload(row), "M2")
     try:
         gmail = GmailService()
         html_body = render_html(report)

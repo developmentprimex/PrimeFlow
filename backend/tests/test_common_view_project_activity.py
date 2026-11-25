@@ -23,6 +23,32 @@ def result(rows):
 
 
 class CommonViewProjectActivityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_waiting_confirmation_has_its_own_bucket_and_any_confirmer(self):
+        stamp = datetime(2026, 10, 26, tzinfo=timezone.utc)
+        owner = User(id=uuid.uuid4(), full_name='Test Owner', email='to@example.test', role=UserRole.ADMIN, is_active=True)
+        confirmer = User(id=uuid.uuid4(), full_name='Haxhere Spahiu', email='hs@example.test', role=UserRole.STAFF, is_active=True)
+        def task(status, confirmation_assignee_id=None):
+            return Task(id=uuid.uuid4(), title=status, assigned_to=owner.id, status=status, is_active=True,
+                        created_at=stamp, start_date=stamp, due_date=stamp, confirmation_assignee_id=confirmation_assignee_id)
+        waiting = task('WAITING_CONFIRMATION', confirmer.id)
+        unassigned = task('WAITING_CONFIRMATION')
+        done = task('DONE', confirmer.id)
+        client = task('WAITING_CLIENT', confirmer.id)
+        db = AsyncMock()
+        async def execute(statement):
+            entity = statement.column_descriptions[0].get('entity')
+            return result({User: [owner, confirmer], Task: [waiting, unassigned, done, client]}.get(entity, []))
+        db.execute.side_effect = execute
+        request = Request({'type': 'http', 'headers': [(b'cache-control', b'no-cache')]})
+        with patch.object(common_view, '_compute_etag', AsyncMock(return_value='wfc-test')), \
+             patch.object(common_view, 'SERVER_CACHE_TTL_SECONDS', 0):
+            output = await common_view.get_common_view(request, Response(), week_start=stamp.date(),
+                include='tasks', include_all_departments=True, db=db, user=owner)
+        rows = {row['task_id']: row for row in output.items.waitingConfirmation}
+        self.assertEqual(set(rows), {str(waiting.id), str(unassigned.id)})
+        self.assertEqual(rows[str(waiting.id)]['confirmation_assignee_initials'], 'HS')
+        self.assertIsNone(rows[str(unassigned.id)]['confirmation_assignee_initials'])
+
     async def test_inactive_projects_hide_only_prjk_and_preserve_done_1h_history(self):
         for active in (True, False):
             for status in ('TODO', 'DONE'):

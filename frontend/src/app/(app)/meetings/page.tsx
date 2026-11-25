@@ -132,7 +132,7 @@ export default function MeetingsPage() {
             <td className="border border-slate-600 p-2 align-bottom"><div className="flex gap-1">
               <span title="TODO"><CountChip value={row.counts.TODO} color="bg-pink-200" /></span>
               <span title="IN PROGRESS"><CountChip value={row.counts.IN_PROGRESS} color="bg-yellow-200" /></span>
-              <span title={row.kind === "EXTERNAL" ? "WAITING" : "WFE / WFC"}><CountChip value={row.counts.WAITING} color="bg-[#E2C15B] text-[#4F3A00]" /></span>
+              <span title={row.kind === "EXTERNAL" ? "WAITING" : "WFE / WFC INT"}><CountChip value={row.counts.WAITING} color="bg-[#E2C15B] text-[#4F3A00]" /></span>
               <span title="DONE"><CountChip value={row.counts.DONE} color="bg-green-200" alwaysColored /></span>
             </div></td>
           </tr>

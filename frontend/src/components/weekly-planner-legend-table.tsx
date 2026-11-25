@@ -41,9 +41,10 @@ export const LEGEND_COLORS: Record<string, string> = {
   PROCES: "#FFFF00", // Yellow (match IN_PROGRESS)
   PV: "#D3D3D3", // Light Grey
   "KOMPLET (100% PROJEKTE)": "#D3D3D3", // Light task)
-  "WAITING CONFIRMATION": "#FFEDD5", // Amber
-  WAITING_CONFIRMATION: "#FFEDD5", // Amber
-  "KONFIRMIM NE PRITJE": "#FFEDD5", // Amber
+  "WFC INT": "#CCFBF1", // Mint
+  "WAITING CONFIRMATION": "#CCFBF1", // Older legends
+  WAITING_CONFIRMATION: "#CCFBF1", // Mint
+  "KONFIRMIM NE PRITJE": "#CCFBF1", // Mint
   // Alternative/new labels (for backward compatibility)
   "NEW TASK / TO DO": "#FF0000", // Red
   DONE: "#C4FDC4", // Green
@@ -51,6 +52,9 @@ export const LEGEND_COLORS: Record<string, string> = {
 }
 
 const LEGEND_LABEL_DISPLAY: Record<string, string> = {
+  "WAITING CONFIRMATION": "WFC INT",
+  WAITING_CONFIRMATION: "WFC INT",
+  "KONFIRMIM NE PRITJE": "WFC INT",
   "NUK ESHTE PUNUAR": "DETYRE E RE",
   "MBINGARKESE?": "-",
   "KOMPLET (100% PROJEKTE)": "-",
@@ -59,7 +63,7 @@ export const getLegendLabelDisplay = (label: string) => LEGEND_LABEL_DISPLAY[lab
 
 export const LEGEND_EXTRA_SWATCHES: ReadonlyArray<{ label: string; color: string }> = [
   { label: "DETYRE E RE E KRIJUAR KETE JAVE", color: "#DBEAFE" },
-  { label: "KONFIRMIM NE PRITJE", color: "#FFEDD5" },
+  { label: "WFC INT", color: "#CCFBF1" },
   { label: "DETYRE E RE KRYER", color: "#02E6C7" },
 ]
 
@@ -72,15 +76,16 @@ export const buildLegendSwatches = (
   const hideUnknown = options?.hideUnknown ?? false
 
   const addSwatch = (label: string, fallbackColor?: string) => {
-    if (!label || seen.has(label)) return
+    const displayLabel = getLegendLabelDisplay(label)
+    if (!label || seen.has(displayLabel)) return
     const resolvedColor = LEGEND_COLORS[label] || fallbackColor
     if (hideUnknown && !resolvedColor) return
-    if (getLegendLabelDisplay(label) === "-") return
-    seen.add(label)
+    if (displayLabel === "-") return
+    seen.add(displayLabel)
     swatches.push({
       key: label,
       label,
-      displayLabel: getLegendLabelDisplay(label),
+      displayLabel,
       color: resolvedColor || "#E5E7EB",
     })
   }

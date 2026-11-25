@@ -80,7 +80,7 @@ function ActionReview({ action, number, recordingId, meetingId, people, departme
   const description = (savedTask ? savedTask.description || "" : action.description).split(/\n\s*Burimi: regjistrimi /)[0].replace(/<br\s*\/?\s*>/gi, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ")
   const taskContent = savedTask ? [savedTask.title, !savedTask.title.includes("\n") ? description : ""].filter(Boolean).join("\n") : [action.title.toLocaleUpperCase("sq-AL"), action.description].filter(Boolean).join("\n")
   const due = savedTask ? savedTask.due_date : action.suggested_due_date
-  const taskStatus = savedTask ? ({ TODO: "Për t’u bërë", IN_PROGRESS: "Në progres", WAITING_CLIENT: "WFE", WAITING_CONFIRMATION: "Në konfirmim", DONE: "E përfunduar" }[savedTask.status || "TODO"] || savedTask.status) : createdId ? "E krijuar" : action.confirmed_at ? "E fshirë" : noteId ? "Shënim te takimi" : dismissed ? "Injoruar" : "Propozim AI"
+  const taskStatus = savedTask ? ({ TODO: "Për t’u bërë", IN_PROGRESS: "Në progres", WAITING_CLIENT: "WFE", WAITING_CONFIRMATION: "WFC INT", DONE: "E përfunduar" }[savedTask.status || "TODO"] || savedTask.status) : createdId ? "E krijuar" : action.confirmed_at ? "E fshirë" : noteId ? "Shënim te takimi" : dismissed ? "Injoruar" : "Propozim AI"
   return <><TableRow className="align-top">
     <TableCell className="font-bold tabular-nums text-muted-foreground">{number}</TableCell>
     <TableCell className="whitespace-normal">
