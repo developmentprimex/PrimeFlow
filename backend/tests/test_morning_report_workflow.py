@@ -771,9 +771,16 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     def test_personal_and_wfc_sections_are_labeled_as_auto_filled(self) -> None:
         self.assertEqual(SECTION_TITLES[7], "DET PERSONALISHT ME KA/GENTIN?")
-        self.assertEqual(SECTION_TITLES[8], "WFC ME KA/GENTIN?")
+        self.assertEqual(SECTION_TITLES[8], "WFC INT ME KA/GENTIN?")
         self.assertEqual(section_group_label("morning", SECTION_TITLES[7]), "AUTO-FILLED FROM PRIMEFLOW")
         self.assertEqual(section_group_label("morning", SECTION_TITLES[8]), "AUTO-FILLED FROM PRIMEFLOW")
+        legacy_title = "WFC ME KA/GENTIN?"
+        sections = normalize_morning_report_sections(
+            [{"section_key": legacy_title, "title": legacy_title, "body": "WFC KA: 0\n\nWFC GENTI: 0"}]
+        )
+        confirmation = next(section for section in sections if section["section_key"] == SECTION_TITLES[8])
+        self.assertEqual(confirmation["title"], "WFC INT ME KA/GENTIN?")
+        self.assertEqual(confirmation["body"], "WFC INT KA: 0\n\nWFC INT GENTI: 0")
 
     def test_edited_auto_title_keeps_m1_identity_position_and_group(self) -> None:
         sections = normalize_morning_report_sections(

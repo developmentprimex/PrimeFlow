@@ -287,7 +287,7 @@ async def preview(
     recipients = await _recipient_map(payload)
     # Load Common View once; the GA email body below reuses it instead of
     # fetching the same data a second time.
-    source_data = await load_common_view(payload.report_date)
+    source_data = await load_common_view(payload.report_date, db=db)
     document = await generate_fresh(payload.report_date, payload.report_slot, recipients, data=source_data,
         show_full_mira_notes=payload.show_full_mira_notes)
     notes_document = notes_only_document(document)

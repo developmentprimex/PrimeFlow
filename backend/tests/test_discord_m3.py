@@ -24,6 +24,15 @@ def task(**fields):
 
 
 class M3RulesTests(unittest.TestCase):
+    def test_realization_questions_start_at_capture_and_have_department_identity(self):
+        before = datetime.fromisoformat('2026-10-27T16:14:59+01:00')
+        at = datetime.fromisoformat('2026-10-27T16:15:00+01:00')
+        self.assertFalse(rules.realization_collection_due(before))
+        self.assertTrue(rules.realization_collection_due(at))
+        self.assertNotEqual(rules.context_key('realization', {'department': 'GD'}),
+                            rules.context_key('realization', {'department': 'PCM'}))
+        self.assertEqual(rules.regular_delivery_at(at.date(), 'realization'), at)
+
     def test_early_test_does_not_consume_regular_delivery_or_its_future_lease(self):
         now = datetime.fromisoformat('2026-10-28T15:50:00+01:00')
         q = SimpleNamespace(day=now.date(), sent_at=now.replace(hour=11, minute=25),
@@ -102,6 +111,50 @@ class M3RulesTests(unittest.TestCase):
 
 
 class M3ControlsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_realization_routes_departments_to_linked_managers_and_skips_existing_comments(self):
+        from unittest.mock import MagicMock
+        now = datetime.fromisoformat('2026-10-27T16:15:00+01:00')
+        laurent, diellza = uuid.uuid4(), uuid.uuid4()
+        results = MagicMock()
+        results.all.return_value = [('laurent.hoxha', laurent), ('diellza.veliu', diellza)]
+        db = SimpleNamespace(execute=AsyncMock(return_value=results))
+        report = SimpleNamespace(report_date=now.date(), realization_captured_at=now,
+            manual_answers={'realization_comment:GD': 'Ruajtur në PrimeFlow'},
+            realization={'departments': [{'code': code, 'percent': percent} for code, percent in
+                [('DEV', 49.9), ('GD', 10), ('PCM', 0), ('FIN', 20), ('GAP', None)]]})
+        links = [SimpleNamespace(user_id=uid) for uid in (laurent, diellza)]
+        candidates = await api.realization_candidates(db, report, now, links)
+        self.assertEqual([(uid, row['department'], day) for uid, _, row, day in candidates],
+                         [(laurent, 'DEV', now.date()), (diellza, 'PCM', now.date())])
+        api.reports.record_realization_capture(report, {'departments': [
+            {'code': 'DEV', 'percent': 55}, {'code': 'PCM', 'percent': 32},
+        ]}, now + timedelta(minutes=5))
+        repeated = await api.realization_candidates(db, report, now + timedelta(minutes=5), links)
+        self.assertEqual(repeated, candidates)
+
+    async def test_realization_card_and_reply_update_the_m3_department_comment(self):
+        import discord_m3_client as client
+        qid, uid = uuid.uuid4(), uuid.uuid4()
+        today = datetime.fromisoformat('2026-10-27T16:15:00+01:00').date()
+        snapshot = {'title': 'Realizimi · GD', 'department': 'GD', 'percent': 32.9}
+        question = SimpleNamespace(id=qid, day=today, target_date=today, kind='realization', snapshot=snapshot,
+            task_id=None, meeting_id=None, answer=None, comment=None, answered_at=None, message_id=None)
+        link = SimpleNamespace(discord_user_id='11', guild_id='22', channel_id='33')
+        job = api.question_payload(question, link)
+        self.assertIn('**32.9%**', client.prompt(job))
+        self.assertIn('Pse ishte nën 50%?', client.prompt(job))
+        self.assertEqual(client.controls(job).children[0].custom_id, f'pf:m3:comment:{qid}')
+        report = SimpleNamespace(manual_answers={'realization_comment:PCM': 'Tjetër'}, status='SENT', last_error=None)
+        db = SimpleNamespace(flush=AsyncMock(), commit=AsyncMock(), add=Mock())
+        value = api.Answer(discord_user_id='11', guild_id='22', channel_id='33', action='comment', comment=' Pritje e materialeve ')
+        with patch.object(api, 'own_question', new=AsyncMock(return_value=(question, link, SimpleNamespace(id=uid), report))):
+            await api.answer(qid, value, db)
+        self.assertEqual(report.manual_answers, {'realization_comment:PCM': 'Tjetër',
+                                                  'realization_comment:GD': 'Pritje e materialeve'})
+        self.assertEqual(report.updated_by, uid)
+        self.assertEqual(question.comment, 'Pritje e materialeve')
+        db.commit.assert_awaited_once()
+
     async def test_pending_postponement_is_not_shown_as_already_postponed(self):
         import discord_m3_client as client
         for kind in ('tomorrow_task', 'untouched'):

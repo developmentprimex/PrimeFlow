@@ -7,11 +7,11 @@ from collections import defaultdict
 from datetime import date, datetime, time
 from app.services.one_h_slots import _next_working_day
 from app.services.primeflow_report import report_timezone
-from app.services.m3_reporting_points import semantic_local_day
+from app.services.m3_reporting_points import REALIZATION_CAPTURE_TIME, semantic_local_day
 
 SLOTS = ('10:00', '11:00', '11:50', '14:20', '16:00')
 KINDS = {'untouched': 'Pse nuk ka progres?', 'delivery': 'Dorëzimi M3',
-         'meeting': 'A u mbajt takimi?', 'tomorrow': 'Plani për nesër',
+         'meeting': 'A u mbajt takimi?', 'realization': 'Realizimi nën 50%', 'tomorrow': 'Plani për nesër',
          'tomorrow_task': 'A punohet nesër?', 'slot': 'Sloti 1H për nesër'}
 
 
@@ -27,8 +27,14 @@ def collection_phase(now: datetime) -> str | None:
     return None
 
 
+def realization_collection_due(now: datetime) -> bool:
+    local = now.astimezone(report_timezone())
+    return local.weekday() < 5 and REALIZATION_CAPTURE_TIME <= local.time().replace(tzinfo=None) < time(17)
+
+
 def regular_delivery_at(day, phase):
-    return datetime.combine(day, time(15, 50) if phase == 'm3' else time(16, 10), report_timezone())
+    start = {'m3': time(15, 50), 'tomorrow': time(16, 10), 'realization': REALIZATION_CAPTURE_TIME}[phase]
+    return datetime.combine(day, start, report_timezone())
 
 
 def sent_in_regular_window(question, phase):
@@ -49,6 +55,8 @@ def context_key(kind: str, row: dict) -> str:
     # A changed plan or slot conflict gets a fresh question; polling an unchanged
     # plan never repeats it. Individual task replies remain bound to that task.
     value = row if kind == 'slot' else {key: row.get(key) for key in ('task_id', 'meeting_id')}
+    if kind == 'realization':
+        value = row['department']
     if kind == 'tomorrow':
         # Work confirmation survives independent slot edits and list reordering.
         value = sorted([{key: task.get(key) for key in ('task_id', 'title', 'status', 'start_date', 'due_date', 'deadline_important')}

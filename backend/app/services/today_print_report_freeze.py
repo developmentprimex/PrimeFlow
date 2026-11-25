@@ -10,14 +10,10 @@ import asyncio
 import base64
 import logging
 from datetime import date, datetime, time, timedelta
-from types import SimpleNamespace
-
-from fastapi import Request, Response
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
-from app.models.enums import UserRole
 from app.models.one_h_print_report_snapshot import OneHPrintReportSnapshot
 from app.services.one_h_print_report_snapshot import get_one_h_print_snapshot, serialize_one_h_print_snapshot
 from app.services.primeflow_report import previous_working_day, report_timezone
@@ -92,7 +88,7 @@ async def today_report(db: AsyncSession, day: date, *, include_attachment: bool 
         return await frozen_report(db, day, include_attachment=include_attachment)
     if day != local_now().date():
         raise ValueError("1H SHTYPI Today mund të gjenerohet vetëm për datën e sotme.")
-    report = await build_today_print_report(day, include_attachment=include_attachment)
+    report = await build_today_print_report(day, include_attachment=include_attachment, db=db)
     report = await with_report_strikes(db, report, day)
     # An in-flight request must not leak fresh data once the cutoff has passed.
     if is_closed(day):
@@ -101,20 +97,9 @@ async def today_report(db: AsyncSession, day: date, *, include_attachment: bool 
 
 
 async def _source_payload(db: AsyncSession, day: date) -> dict:
-    # Use the same all-department Common View as the existing remote client,
-    # with caching disabled and no slot freezing. All queries share the same MVCC snapshot.
-    from app.api.routers.common_view import get_common_view
+    from app.api.routers.common_view import load_report_common_view
 
-    response = await get_common_view(
-        request=Request({"type": "http", "headers": [(b"cache-control", b"no-store")]}),
-        response=Response(), week_start=day, include=None, department_id=None,
-        include_all_departments=True, freeze_one_h_slots=False, max_items_per_bucket=5000,
-        debug=0, db=db, user=SimpleNamespace(role=UserRole.ADMIN),
-    )
-    payload = response.model_dump(mode="json")
-    if any((payload.get("guardrails", {}).get("truncated") or {}).values()):
-        raise ValueError("Common View contains truncated buckets")
-    return payload
+    return await load_report_common_view(db, day)
 
 
 async def _finish_frozen_report(db: AsyncSession, day: date) -> OneHPrintReportSnapshot:

@@ -72,7 +72,7 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
   PAUSED: { label: "Stopped", dot: "bg-slate-500", pill: "bg-slate-200 text-slate-800" },
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
   WAITING_CLIENT: { label: "WFE", dot: "bg-[#B8860B]", pill: "bg-[#E2C15B] text-[#4F3A00]" },
-  WAITING_CONFIRMATION: { label: "Waiting Confirmation", dot: "bg-blue-600", pill: "bg-blue-50 text-blue-700" },
+  WAITING_CONFIRMATION: { label: "WFC INT", dot: "bg-teal-700", pill: "bg-teal-100 text-teal-900" },
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
 }
 const MAX_ATTACHMENT_FILES = 20
@@ -788,7 +788,7 @@ function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   if (["in_progress", "in-progress", "in progress"].includes(normalized)) return "IN_PROGRESS"
   if (normalized === "paused") return "PAUSED"
   if (["waiting_client", "waiting-client", "waiting for client", "wfe"].includes(normalized)) return "WAITING_CLIENT"
-  if (["waiting_confirmation", "waiting-confirmation", "waiting confirmation"].includes(normalized)) return "WAITING_CONFIRMATION"
+  if (["waiting_confirmation", "waiting-confirmation", "waiting confirmation", "wfc int"].includes(normalized)) return "WAITING_CONFIRMATION"
   if (["done"].includes(normalized)) return "DONE"
   return "UNKNOWN"
 }
@@ -2971,7 +2971,7 @@ export default function NextWeekPlanPage() {
                       <TableCell className="p-1">
                         <div className="w-4 h-4 rounded-sm border border-slate-300 bg-amber-50" />
                       </TableCell>
-                      <TableCell className="text-sm font-semibold">Task: Waiting confirmation</TableCell>
+                      <TableCell className="text-sm font-semibold">Task: WFC INT</TableCell>
                       <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
                     </TableRow>
                     <TableRow className="h-8">
@@ -3089,7 +3089,7 @@ export default function NextWeekPlanPage() {
                     value="WAITING_CONFIRMATION"
                     className="bg-amber-50 text-blue-900 focus:bg-blue-200 focus:text-blue-900"
                   >
-                    Waiting Confirmation
+                    WFC INT
                   </SelectItem>
                   <SelectItem
                     value="DONE"

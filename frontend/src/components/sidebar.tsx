@@ -105,7 +105,7 @@ const primaryItems: NavItem[] = [
   },
   {
     href: "/waiting-confirmation-ga",
-    label: "WFC",
+    label: "WFC INT",
     icon: Clock3,
   },
 ]
@@ -228,7 +228,6 @@ const navGroups: NavGroup[] = [
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
       { href: "/reports/rlz-daily-control", label: "Kontrolli ditor RLZ", icon: Activity },
-      { href: "/reports/discord-task-deliveries", label: "Dorëzimet në Discord", icon: ClipboardCheck },
       {
         href: "/reports/weekly-planning-audit",
         label: "Weekly Planning Check",
@@ -257,6 +256,7 @@ const navGroups: NavGroup[] = [
           { href: "/m1-reporting-points", label: "M1 PIKAT PER RAP", icon: ClipboardCheck },
           { href: "/m2-reporting-points", label: "M2 PIKAT PER RAP", icon: ClipboardCheck },
           { href: "/m3-reporting-points", label: "M3 PIKAT PER RAP", icon: ClipboardCheck },
+          { href: "/reports/discord-task-deliveries", label: "BZ M3", icon: ClipboardCheck },
         ],
       },
     ],

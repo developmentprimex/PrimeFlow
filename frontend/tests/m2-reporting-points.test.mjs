@@ -86,7 +86,7 @@ test("M2 presents delivery and PM continuation as separate questions", () => {
   assert.match(deliveryTable, /<option value="PO" selected="">PO<\/option>/)
   assert.match(deliveryTable, /<option value="JO">JO<\/option>/)
   assert.match(html, /Detyra &lt;script&gt;/)
-  assert.match(html, /P.RGJIGJJA MANUALE<\/th><\/tr>/)
+  assert.match(html, /P.RGJIGJA MANUALE<\/th><\/tr>/)
 })
 
 test("M2 afternoon due section lists task details, due date, symbols and status colors", () => {
@@ -276,7 +276,12 @@ function mountPage(storage, apiFetch) {
   const pageModule = { exports: {} }
   vm.runInNewContext(compiled, {
     module: pageModule, exports: pageModule.exports,
-    require: (name) => name === "react" ? hooks : name === "@/lib/auth" ? { useAuth: () => ({ user: { id: "manager", role: "MANAGER" }, loading: false, apiFetch }) } : load(name),
+    require: (name) => {
+      if (name === "react") return hooks
+      if (name === "@/lib/auth") return { useAuth: () => ({ user: { id: "manager", role: "MANAGER" }, loading: false, apiFetch }) }
+      if (name === "@/lib/report-link-date") return { useReportDate: (initialDate) => hooks.useState(initialDate) }
+      return load(name)
+    },
     window: { localStorage: storage,
       setTimeout: (callback) => { const id = ++timerId; timers.set(id, callback); return id },
       clearTimeout: (id) => timers.delete(id), setInterval: () => -1, clearInterval: () => {},

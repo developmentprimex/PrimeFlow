@@ -98,7 +98,7 @@ function statusLabel(value?: string | null) {
   if (normalized === "IN_PROGRESS") return "In Progress"
   if (normalized === "PAUSED") return "Stopped"
   if (normalized === "WAITING_CLIENT") return "WFE"
-  if (normalized === "WAITING_CONFIRMATION") return "Waiting Confirmation"
+  if (normalized === "WAITING_CONFIRMATION") return "WFC INT"
   if (normalized === "DONE") return "Done"
   return "To Do"
 }
@@ -128,7 +128,7 @@ const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To Do" },
   { value: "IN_PROGRESS", label: "In Progress" },
   { value: "WAITING_CLIENT", label: "WFE" },
-  { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
+  { value: "WAITING_CONFIRMATION", label: "WFC INT" },
   { value: "DONE", label: "Done" },
 ] as const
 
@@ -607,7 +607,7 @@ export default function OpenTasksPage() {
       return
     }
     if (!isNoteOriginTask && taskStatus === "WAITING_CONFIRMATION" && !selectedTask.confirmation_assignee_id) {
-      toast.error("This task needs a confirmation assignee before it can use Waiting Confirmation.")
+      toast.error("This task needs a confirmation assignee before it can use WFC INT.")
       return
     }
     setSaving(true)

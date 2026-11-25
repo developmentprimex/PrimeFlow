@@ -63,7 +63,7 @@ SECTION_TITLES = [
     "DET TE SHTYERA",
     "PRODUKTE +/- SOT (PCM)",
     "N- DET PERSONALISHT ME KA/GENTIN?",
-    "N- WFC ME KA/GENTIN?",
+    "N- WFC INT ME KA/GENTIN?",
     "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
     HV_DONE_TITLE,
 ]
@@ -107,6 +107,7 @@ SECTION_TITLE_ALIASES = {
     "TASKS PERSONALISHT ME KA/GENTIN?": SECTION_TITLES[13],
     "N- TASKS PERSONALISHT ME KA/GENTIN?": SECTION_TITLES[13],
     "WFC ME KA/GENTIN?": SECTION_TITLES[14],
+    "N- WFC ME KA/GENTIN?": SECTION_TITLES[14],
 }
 RETIRED_CLOSING_SECTION_TITLES = {
     SECTION_TITLES[0],
@@ -251,11 +252,16 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
         if not title:
             continue
         body = str(section.get("body") or "")
+        visible_title = raw_title if section_key else title
+        if title == SECTION_TITLES[14]:
+            body = re.sub(r"(?m)^WFC (?=KA:|GENTI:)", "WFC INT ", body)
+            if canonical_meetings_section_title(raw_title) == title:
+                visible_title = title
         if title in DISPLAY_SECTION_TITLES:
             if title not in by_title:
                 by_title[title] = {
                     "section_key": title,
-                    "title": raw_title if section_key else title,
+                    "title": visible_title,
                     "body": body,
                 }
             else:
@@ -1728,7 +1734,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         SECTION_TITLES[14]: _normalize_section(
             [
                 *_m3_status_table(
-                    "WFC KA",
+                    "WFC INT KA",
                     [task for task in wfc_report_tasks if _ka_genti_confirmer(task, names) == "KA"],
                     names,
                     with_status=True,
@@ -1739,7 +1745,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 ),
                 "",
                 *_m3_status_table(
-                    "WFC GENTI",
+                    "WFC INT GENTI",
                     [task for task in wfc_report_tasks if _ka_genti_confirmer(task, names) == "GENTI"],
                     names,
                     with_status=True,
@@ -1773,7 +1779,7 @@ def _normalize_report_status(value: str | None) -> str:
         return "IN_PROGRESS"
     if status in {"WAITINGCLIENT", "WAITING_CLIENT", "WAITING_FOR_CLIENT", "WFE"}:
         return "WAITING_CLIENT"
-    if status in {"WAITING", "WAITING_CONFIRMATION", "PENDING_CONFIRMATION"}:
+    if status in {"WAITING", "WAITING_CONFIRMATION", "PENDING_CONFIRMATION", "WFC_INT"}:
         return "WAITING_CONFIRMATION"
     if status in {"TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"}:
         return status
@@ -2890,7 +2896,7 @@ h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700;border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table td{{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table .gmail-sender{{max-width:140px;overflow-wrap:anywhere;word-wrap:break-word}}
-.report-table .n{{white-space:nowrap}}.report-table .prjk{{max-width:110px;white-space:normal;overflow-wrap:break-word;word-break:normal}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.paused td{{background:#CBD5E1;color:#1E293B}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
+.report-table .n{{white-space:nowrap}}.report-table .prjk{{max-width:110px;white-space:normal;overflow-wrap:break-word;word-break:normal}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.paused td{{background:#CBD5E1;color:#1E293B}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ccfbf1;color:#134e4a}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
 @media only screen and (max-width:600px){{
 body{{padding:8px!important}}
 h1{{font-size:18px!important;line-height:1.2!important}}
@@ -3010,7 +3016,7 @@ def _table_tone_from_label(label: str) -> str:
         or "DT WFE" in normalized
     ):
         return "waiting-client"
-    if "WAITING" in normalized:
+    if normalized.startswith("WFC INT") or "WAITING" in normalized:
         return "waiting"
     if normalized == "DONE" or "DET E KRYERA" in normalized:
         return "done"
@@ -3076,7 +3082,7 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
     if tone == "in-progress":
         return "#fef3c7", "#111827"
     if tone == "waiting":
-        return "#ffedd5", "#9a3412"
+        return "#ccfbf1", "#134e4a"
     if tone == "waiting-client":
         return "#e2c15b", "#4f3a00"
     if tone == "done":

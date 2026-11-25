@@ -14,7 +14,7 @@ async def main() -> None:
     parser.add_argument("--slot", required=True, choices=["10:00", "11:00", "11:50", "14:10", "14:20", "16:00"])
     parser.add_argument("--send", action="store_true", help="Send and verify through Gmail; default is dry-run")
     args = parser.parse_args()
-    validate_report_config(require_gmail=args.send)
+    validate_report_config(require_gmail=args.send, require_api=False)
     run = await deliver_report(args.date, args.slot, send=args.send)
     print(json.dumps({"id": str(run.id), "status": run.status, "subject": run.subject}, ensure_ascii=False))
     if not args.send:

@@ -115,7 +115,7 @@ SECTION_TITLES = [
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     GA_HV_DV_TASKS_TITLE,
     "DET PERSONALISHT ME KA/GENTIN?",
-    "WFC ME KA/GENTIN?",
+    "WFC INT ME KA/GENTIN?",
     *MARKER_TASK_SECTIONS,
     GA_REACTIONS_SECTION_KEY,
     GA_PF_COMMENTS_TITLE,
@@ -164,6 +164,7 @@ SECTION_TITLE_ALIASES = {
     "(GA/KA/GENTI) KUSH KA DET PERSONALISHT?": SECTION_TITLES[7],
     "TASKS PERSONALISHT ME KA/GENTIN?": SECTION_TITLES[7],
     "WFC TASKS (KA/GENTI)": SECTION_TITLES[8],
+    "WFC ME KA/GENTIN?": SECTION_TITLES[8],
     "(GA) NOTES TE REJA?": SECTION_TITLES[3],
     "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET DETYRE?": SECTION_TITLES[3],
     LEGACY_NOTES_TITLE: SECTION_TITLES[3],
@@ -210,10 +211,10 @@ def _default_body(title: str) -> str:
     if title == SECTION_TITLES[7]:
         return "PERSONAL KA: 0\n\nPERSONAL GENTI: 0"
     if title == SECTION_TITLES[8]:
-        return "WFC KA: 0\n\nWFC GENTI: 0"
+        return "WFC INT KA: 0\n\nWFC INT GENTI: 0"
     if title in MARKER_TASK_SECTIONS:
         return _marker_task_table(MARKER_TASK_SECTIONS[title][1], [], {}, {}, {})
-    return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WFE: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
+    return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WFE: 0", "WFC INT: 0", "DONE: 0"])
 
 
 def _is_manual_email_line(line: str) -> bool:
@@ -363,6 +364,8 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
                     "body": body,
                 })
             continue
+        if title == SECTION_TITLES[8]:
+            body = re.sub(r"(?m)^WFC (?=KA:|GENTI:)", "WFC INT ", body)
         if title == SECTION_TITLES[1]:
             body = _separate_keyed_prompt_lines(_without_retired_email_task_tables(body))
         if title == SECTION_TITLES[3]:
@@ -373,6 +376,7 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
             visible_title = SECTION_DISPLAY_TITLES.get(title, title)
             if (section_key and raw_title != title
                     and title not in {GA_HV_DV_TASKS_TITLE, GA_REACTIONS_SECTION_KEY, GA_PF_COMMENTS_TITLE}
+                    and not (title == SECTION_TITLES[8] and _canonical_section_title(raw_title) == title)
                     and title not in MARKER_TASK_SECTIONS):
                 visible_title = raw_title
             by_title[title] = {
@@ -1158,7 +1162,7 @@ async def build_morning_report_sections(
     ]
     wfc = [
         *_m3_status_table(
-            "WFC KA",
+            "WFC INT KA",
             [task for task in wfc_report_tasks if _ka_genti_confirmer(task, names) == "KA"],
             names,
             with_status=True,
@@ -1170,7 +1174,7 @@ async def build_morning_report_sections(
         ),
         "",
         *_m3_status_table(
-            "WFC GENTI",
+            "WFC INT GENTI",
             [task for task in wfc_report_tasks if _ka_genti_confirmer(task, names) == "GENTI"],
             names,
             with_status=True,

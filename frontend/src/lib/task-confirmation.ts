@@ -24,7 +24,7 @@ export function validateWaitingConfirmation(
 ): string | null {
   if (!isWaitingConfirmation(status)) return null
   if ((confirmationAssigneeId || "").trim()) return null
-  return "Please select a manager, admin, or GA confirmer for Waiting for Confirmation."
+  return "Please select a manager, admin, or GA confirmer for WFC INT."
 }
 
 export function confirmerLabel(user?: { full_name?: string | null; username?: string | null } | null): string {

@@ -465,11 +465,16 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers=fixture["manual_answers"], data=fixture["data"], status="DRAFT")
         gmail = SimpleNamespace(find_exact=AsyncMock(return_value=None), send_verified=AsyncMock(return_value={"id": "mock-message"}))
         db = AsyncMock()
-        with patch.object(service, "GmailService", return_value=gmail):
+        checked = [{**task, "initials": task["assignees"], "user_id": None, "person": task["assignees"],
+                    "symbol": task["marker"], "deliveries": {"M2": {"status": status}}}
+                   for task, status in zip(fixture["data"]["delivery"], ("on_time", "missing", "late", "pending"))]
+        with (patch.object(service, "GmailService", return_value=gmail),
+              patch("app.services.discord_task_deliveries.checked_deliveries", new=AsyncMock(return_value=(None, "live", True, checked)))):
             await service.send_report(db, row, {"to": ["test@example.com"], "cc": [], "bcc": []})
         args = gmail.send_verified.call_args.args
         attachments = gmail.send_verified.call_args.kwargs["attachments"]
         assert "SA/TOTALI: 2/4" in args[2] and "SA/TOTALI: 2/4" in args[3]
+        assert "PO/JO · DISCORD" in args[3] and "PO (me vonesë)" in args[2]
         assert {name.rsplit(".", 1)[-1] for name, _, _ in attachments} == {"html", "docx", "png", "xlsx"}
         name, content, mime = next(item for item in attachments if item[0].endswith(".xlsx"))
         assert name == f"pikat_m2_{DAY.isoformat()}.xlsx" and mime == XLSX_MIME

@@ -616,7 +616,7 @@ function reportStatusLabel(status?: Task["status"] | null) {
   if (status === "IN_PROGRESS") return "In Progress"
   if (status === "PAUSED") return "Stopped"
   if (status === "WAITING_CLIENT") return "WFE"
-  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
+  if (status === "WAITING_CONFIRMATION") return "WFC INT"
   if (status === "TODO") return "To Do"
   if (status === "DONE") return "Done"
   return status
@@ -634,7 +634,7 @@ function formatSystemOccurrenceStatus(status?: string | null) {
   if (status === "IN_PROGRESS") return "In Progress"
   if (status === "PAUSED") return "Stopped"
   if (status === "WAITING_CLIENT") return "WFE"
-  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
+  if (status === "WAITING_CONFIRMATION") return "WFC INT"
   if (status === "NOT_DONE") return "Not Done"
   if (status === "DONE") return "Done"
   if (status === "OPEN") return "Open"
@@ -9178,7 +9178,7 @@ export default function AdminTasksPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="text-sm text-slate-600">
-              This task is moving to Waiting Confirmation. Select the manager/admin who will confirm it.
+              This task is moving to WFC INT. Select the manager/admin who will confirm it.
             </div>
             <div className="space-y-2">
               <Label>Confirm by (Manager/Admin)</Label>

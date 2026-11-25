@@ -48,7 +48,7 @@ REPORT_TYPE = "end_week_bz_report"
 REPORT_LABEL = "PIKAT E BZ FIN JAV"
 SECTION_TITLES = [
     "PERSONAL TASKS",
-    "WFC TASKS",
+    "WFC INT TASKS",
     "TASKS WITH DEADLINE",
     "R1 TASKS",
     "08:00 TASKS",
@@ -111,7 +111,7 @@ def _task_rows(
             "TITLE": _first_visible_line((display_titles or {}).get(task.id) or task.title) or "-",
             "DEADLINE": _due_text(task),
             "DUE DATE": _due_text(task),
-            "STATUS": _normalize_report_status(task.status),
+            "STATUS": "WFC INT" if task.status == "WAITING_CONFIRMATION" else _normalize_report_status(task.status),
         }
         rows.append([values[name] for name, _ in columns])
     return rows
@@ -147,6 +147,13 @@ def _meeting_rows(
 
 def normalize_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     by_key = {str(item.get("section_key") or item.get("title") or ""): item for item in sections or []}
+    confirmation_title = SECTION_TITLES[1]
+    confirmation_section = by_key.get(confirmation_title) or by_key.get("WFC TASKS")
+    if confirmation_section:
+        by_key[confirmation_title] = {
+            "title": confirmation_title,
+            "body": re.sub(r"(?m)^WAITING CONFIRMATION(?=:)", "WFC INT", str(confirmation_section.get("body") or "")),
+        }
     return [{
         "section_key": title,
         "title": str(by_key.get(title, {}).get("title") or title),
@@ -212,7 +219,7 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
         counts[f"P: {group}"] = len(grouped)
 
     wfc_lines: list[str] = []
-    for label, status in (("WFE", "WAITING_CLIENT"), ("WAITING CONFIRMATION", "WAITING_CONFIRMATION")):
+    for label, status in (("WFE", "WAITING_CLIENT"), ("WFC INT", "WAITING_CONFIRMATION")):
         grouped = [task for task in waiting if _normalize_report_status(task.status) == status]
         if wfc_lines:
             wfc_lines.append("")

@@ -49,6 +49,7 @@ TASK_ROWS = (
     ("oneH", "1H 11:50", "11:50"),
     ("oneH", "1H 14:20", "14:20"),
     ("waitingClient", "WFE", None),
+    ("waitingConfirmation", "WFC INT", None),
     ("blocked", "BLL\n14:30 - 16:00\nRAP 16:10", None),
     ("oneH", "1H 16:00", "16:00"),
     ("oneH", "1H NO SLOT", ""),
@@ -155,6 +156,10 @@ TASK_HEADER_FRAME_STYLE = "border-top:3px solid #111827;border-bottom:3px solid 
 MEETING_TABLE_FRAME_STYLE = "border:4px solid #111827"
 MEETING_HEADER_FRAME_STYLE = "border:3px solid #111827"
 SLOT_LABEL_STYLE = f"{CELL_STYLE};font-weight:700"
+WAITING_ROW_COLORS = {
+    "WFE": ("#E2C15B", "#4F3A00"),
+    "WFC INT": ("#99F6E4", "#134E4A"),
+}
 PERSONAL_GA_COLOR = "#D8B4FE"
 PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:{PERSONAL_GA_COLOR}"
 PERSONAL_ROW_LABEL_STYLE = (
@@ -170,13 +175,13 @@ NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
 CALENDAR_INTERNAL_TEXT_COLOR = "#64748B"
 PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{1,5}(?:\s*[:/]\s*[A-Z]{1,5})*(?=\s|:|/|$)", re.I)
 NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
-WFC_TOKEN_RE = re.compile(r"\bWFC\b", re.I)
+WFC_TOKEN_RE = re.compile(r"\bWFC(?: INT)?\b", re.I)
 STATUS_COLORS = {
     "TODO": "#FFC4ED",
     "IN_PROGRESS": "#FFFF00",
     "PAUSED": "#CBD5E1",
     "WAITING_CLIENT": "#E2C15B",
-    "WAITING_CONFIRMATION": "#FFEDD5",
+    "WAITING_CONFIRMATION": "#CCFBF1",
     "DONE": "#C4FDC4",
 }
 CLOSING_TONE_COLORS = {
@@ -260,7 +265,7 @@ def _task_status(item: dict[str, Any]) -> str:
         return "IN_PROGRESS"
     if normalized in {"WFE", "WAITINGCLIENT", "WAITING_FOR_CLIENT", "WAITING_CLIENT"}:
         return "WAITING_CLIENT"
-    if normalized in {"WAITING", "PENDING_CONFIRMATION", "WAITING_CONFIRMATION"}:
+    if normalized in {"WAITING", "PENDING_CONFIRMATION", "WAITING_CONFIRMATION", "WFC_INT"}:
         return "WAITING_CONFIRMATION"
     return normalized if normalized in STATUS_COLORS else "TODO"
 
@@ -655,7 +660,14 @@ def _is_system_task_item(item: dict[str, Any]) -> bool:
 
 def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = _report_text(_first_line(item.get("title")))
-    status_label = " [Pauzë]" if item.get("is_paused") else (" [STOPPED]" if _task_status(item) == "PAUSED" else "")
+    status_label = ""
+    if item.get("is_paused"):
+        status_label = " [Pauzë]"
+    elif _task_status(item) == "PAUSED":
+        status_label = " [STOPPED]"
+    if "confirmation_assignee_initials" in item:
+        initials = _report_text(item.get("confirmation_assignee_initials") or "")
+        status_label += f" [CON: {initials}]" if initials else " [Pa konfirmues]"
     if personal:
         return normalize_email_task_title(title, is_system_task=_is_system_task_item(item)) + status_label
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)
@@ -790,10 +802,10 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
     )
     if _task_status(item) == "WAITING_CONFIRMATION":
         wfc_style = (
-            f"{badge_base}background-color:#FFEDD5;border:1px solid #FB923C;color:#C2410C;"
+            f"{badge_base}background-color:#CCFBF1;border:1px solid #0F766E;color:#134E4A;"
         )
         top_badges.append(
-            f'<span data-task-badge="wfc" style="{wfc_style}">WFC</span>'
+            f'<span data-task-badge="wfc" style="{wfc_style}">WFC INT</span>'
         )
     marker = _task_marker_label(item)
     if marker:
@@ -952,6 +964,10 @@ def _task_rows(
                 for item in bucket_items
                 if _task_status(item) == "WAITING_CLIENT"
             ]
+        elif bucket == "waitingConfirmation":
+            values = [item for item in by_bucket.get(bucket, []) if _task_status(item) == "WAITING_CONFIRMATION"]
+            if not values:
+                continue
         else:
             values = [
                 item
@@ -992,7 +1008,8 @@ def _task_rows(
 
 
 def render_marked_tomorrow_tasks(payload: dict[str, Any], target_date: date) -> tuple[str, str]:
-    rows = _task_rows(payload.get("items") or {}, target_date, users=payload.get("users"))
+    items = {key: value for key, value in (payload.get("items") or {}).items() if key != "waitingConfirmation"}
+    rows = _task_rows(items, target_date, users=payload.get("users"))
     marked_rows = [
         (label, marked, personal)
         for label, items, personal in rows
@@ -1007,7 +1024,9 @@ def render_marked_tomorrow_tasks(payload: dict[str, Any], target_date: date) -> 
     for label, items, personal in marked_rows:
         for item in items:
             title = _task_title(item, personal=personal).replace("|", "¦")
-            lines.append(f"| {' '.join(label.splitlines())} | {_task_status(item)} | {_task_marker_text_token(item)} | {title} |")
+            status = _task_status(item)
+            status_label = "WFC INT" if status == "WAITING_CONFIRMATION" else status
+            lines.append(f"| {' '.join(label.splitlines())} | {status_label} | {_task_marker_text_token(item)} | {title} |")
     lines.append(border)
     return "\n".join(lines), _html_table(marked_rows, report_date=target_date)
 
@@ -1411,6 +1430,15 @@ def _task_marker_legend_html() -> str:
     )
 
 
+def _slot_label_style(label: str, personal: bool) -> str:
+    if personal:
+        return PERSONAL_ROW_LABEL_STYLE
+    if label in WAITING_ROW_COLORS:
+        background, foreground = WAITING_ROW_COLORS[label]
+        return f"{SLOT_LABEL_STYLE};background-color:{background};color:{foreground}"
+    return SLOT_LABEL_STYLE
+
+
 def _html_table(
     rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False,
     report_date: date | None = None, missing_one_h_by_slot: dict[str, list[str]] | None = None,
@@ -1567,7 +1595,7 @@ def _html_table(
                 label_divider_style = f"{SLOT_DIVIDER_STYLE};{SLOT_END_DIVIDER_STYLE}"
                 row_header = (
                     f'<th rowspan="{len(chunks) * 2}" style="{SLOT_LABEL_STYLE};{label_divider_style}">{number}</th>'
-                    f'<th rowspan="{len(chunks) * 2}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{label_divider_style}">{row_label_html(label, personal)}</th>'
+                    f'<th rowspan="{len(chunks) * 2}" style="{_slot_label_style(label, personal)};{label_divider_style}">{row_label_html(label, personal)}</th>'
                     if chunk_index == 0 else ""
                 )
                 body.append(f'<tr data-task-card-row="content">{row_header}{"".join(title_cells)}</tr>')
@@ -1612,7 +1640,7 @@ def _html_table(
             )
             row_header = (
                 f'<th rowspan="{len(chunks)}" style="{SLOT_LABEL_STYLE};{label_divider_style}">{number}</th>'
-                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{label_divider_style}">{row_label_html(label, personal)}</th>'
+                f'<th rowspan="{len(chunks)}" style="{_slot_label_style(label, personal)};{label_divider_style}">{row_label_html(label, personal)}</th>'
                 if chunk_index == 0 else ""
             )
             body.append(f"<tr>{row_header}{''.join(cells)}</tr>")
@@ -2226,6 +2254,10 @@ def _excel_table_attachment(
                                     label_value.extend(["\n", TextBlock(InlineFont(b=True, sz=10, color=color), " • ".join(group))])
                     label_cell = sheet.cell(row_number, 2, label_value)
                     label_cell.font = Font(bold=True, size=10)
+                    if label in WAITING_ROW_COLORS:
+                        background, foreground = WAITING_ROW_COLORS[label]
+                        label_cell.fill = PatternFill("solid", fgColor=background[1:])
+                        label_cell.font = Font(bold=True, size=10, color=foreground[1:])
                     if personal:
                         label_cell.alignment = Alignment(vertical="top", wrap_text=True)
                 for item_index, item in enumerate(chunk, 3):
@@ -2236,7 +2268,7 @@ def _excel_table_attachment(
                     if not meeting:
                         labels: list[str] = [f"[{_task_period_label(item)}]"]
                         if _task_status(item) == "WAITING_CONFIRMATION":
-                            labels.append("[WFC]")
+                            labels.append("[WFC INT]")
                         marker_label = _task_marker_label(item)
                         if marker_label:
                             labels.append(_task_marker_text_token(item))
@@ -2555,7 +2587,7 @@ def _docx_table_attachment(
         marker = _task_marker_label(item)
         parts = [
             (f"{number}. [{_task_period_label(item)}]", color),
-            (" [WFC]" if _task_status(item) == "WAITING_CONFIRMATION" else "", color),
+            (" [WFC INT]" if _task_status(item) == "WAITING_CONFIRMATION" else "", color),
             (f" {_task_marker_text_token(item)}" if marker else "", "DC2626"),
             (f" {_task_title(item, personal=personal)}", color),
         ]
@@ -2712,7 +2744,10 @@ def _docx_table_attachment(
         for chunk_index, chunk in enumerate(chunks):
             row = task_table.add_row()
             set_cell(row.cells[0], str(number) if chunk_index == 0 else "", center=True)
-            set_cell(row.cells[1], label if chunk_index == 0 else "", bold=True)
+            background, foreground = WAITING_ROW_COLORS.get(label, ("#FFFFFF", "#111827"))
+            if label in WAITING_ROW_COLORS:
+                shade(row.cells[1], background)
+            set_cell(row.cells[1], label if chunk_index == 0 else "", bold=True, color=foreground[1:])
             if chunk_index == 0:
                 slot = _one_h_slot_from_label(label) or ("BLL" if label.strip() == "BLL" else None)
                 missing = (missing_one_h_by_slot or {}).get(slot or "", [])
@@ -2993,7 +3028,8 @@ def _core_png_table_attachment(
         x = margin
         for column, value in ((0, str(number) if chunk_index == 0 else ""), (1, label if chunk_index == 0 else "")):
             right = x + column_widths[column]
-            draw.rectangle((x, y, right, y + row_height), fill="#FFFFFF", outline="#111827", width=2 if chunk_index == 0 else 1)
+            background, foreground = WAITING_ROW_COLORS.get(label, ("#FFFFFF", "#111827")) if column == 1 else ("#FFFFFF", "#111827")
+            draw.rectangle((x, y, right, y + row_height), fill=background, outline="#111827", width=2 if chunk_index == 0 else 1)
             if personal and column == 1 and value and "\n" in value:
                 personal_title, personal_time = value.split("\n", 1)
                 draw.text((x + 6, y + 6), personal_title, fill="#111827", font=bold)
@@ -3001,7 +3037,7 @@ def _core_png_table_attachment(
             else:
                 label_lines = wrap(value, bold, column_widths[column] - 12)
                 for line_index, line in enumerate(label_lines):
-                    draw.text((x + 6, y + 6 + line_index * 20), line, fill="#111827", font=bold)
+                    draw.text((x + 6, y + 6 + line_index * 20), line, fill=foreground, font=bold)
                 if column == 1 and chunk_index == 0:
                     slot = _one_h_slot_from_label(label) or ("BLL" if label.strip() == "BLL" else None)
                     missing = (missing_one_h_by_slot or {}).get(slot or "", [])
@@ -3075,16 +3111,16 @@ def _core_png_table_attachment(
                 draw.text((badge_left + 6, text_y + 3), period_label, fill="#0369A1", font=small_bold)
                 badge_right = badge_left - 5
                 if _task_status(item) == "WAITING_CONFIRMATION":
-                    badge_width = int(measure.textlength("WFC", font=small_bold)) + 12
+                    badge_width = int(measure.textlength("WFC INT", font=small_bold)) + 12
                     badge_left = badge_right - badge_width
                     draw.rounded_rectangle(
                         (badge_left, text_y, badge_right, text_y + 23),
                         radius=10,
-                        fill="#FFEDD5",
-                        outline="#FB923C",
+                        fill="#CCFBF1",
+                        outline="#0F766E",
                         width=1,
                     )
-                    draw.text((badge_left + 6, text_y + 3), "WFC", fill="#C2410C", font=small_bold)
+                    draw.text((badge_left + 6, text_y + 3), "WFC INT", fill="#134E4A", font=small_bold)
                     badge_right = badge_left - 5
                 marker_label = _task_marker_label(item)
                 if marker_label:
@@ -3462,6 +3498,10 @@ async def _build_print_report(
     next_day_payload: dict[str, Any] | None = None,
     include_completed_today: bool = False,
 ) -> dict[str, Any]:
+    if db is not None and payload is None:
+        from app.api.routers.common_view import load_report_common_view_with_previous_week
+
+        payload = await load_report_common_view_with_previous_week(db, target_date)
     if payload is None:
         base_url = settings.PRIMEFLOW_API_BASE_URL
         if not base_url:
@@ -3495,15 +3535,20 @@ async def _build_print_report(
         except ValueError:
             payload_week_end = meeting_dates[-1]
         if meeting_dates[-1] > payload_week_end and next_day_payload is None:
-            base_url = settings.PRIMEFLOW_API_BASE_URL
-            if not base_url:
-                raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to load next-day meetings")
-            next_meeting_payload = await PrimeFlowClient(
-                base_url.rstrip("/"),
-                settings.PRIMEFLOW_EMAIL or settings.ADMIN_EMAIL,
-                settings.PRIMEFLOW_PASSWORD or settings.ADMIN_PASSWORD,
-                settings.PRIMEFLOW_ACCESS_TOKEN,
-            ).common_view(meeting_dates[-1])
+            if db is not None:
+                from app.api.routers.common_view import load_report_common_view
+
+                next_meeting_payload = await load_report_common_view(db, meeting_dates[-1])
+            else:
+                base_url = settings.PRIMEFLOW_API_BASE_URL
+                if not base_url:
+                    raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to load next-day meetings")
+                next_meeting_payload = await PrimeFlowClient(
+                    base_url.rstrip("/"),
+                    settings.PRIMEFLOW_EMAIL or settings.ADMIN_EMAIL,
+                    settings.PRIMEFLOW_PASSWORD or settings.ADMIN_PASSWORD,
+                    settings.PRIMEFLOW_ACCESS_TOKEN,
+                ).common_view(meeting_dates[-1])
     meeting_sections = [
         (
             meeting_date,
@@ -3609,7 +3654,7 @@ async def _build_print_report(
             f"{label}{missing_label}: "
             + "; ".join(
                 f"[{_task_period_label(item)}]"
-                f"{' [WFC]' if _task_status(item) == 'WAITING_CONFIRMATION' else ''}"
+                f"{' [WFC INT]' if _task_status(item) == 'WAITING_CONFIRMATION' else ''}"
                 f"{f' {_task_marker_text_token(item)}' if _task_marker_label(item) else ''} "
                 f"{f'COM: {_task_marker_comment(item)} | ' if _task_marker_comment(item) else ''}"
                 f"{_task_title(item, personal=personal)}"
@@ -3717,12 +3762,14 @@ async def build_tomorrow_print_report(
 async def build_today_print_report(
     report_date: date, *, include_attachment: bool = False, payload: dict[str, Any] | None = None,
     next_day_payload: dict[str, Any] | None = None,
+    db: AsyncSession | None = None,
 ) -> dict[str, Any]:
     """Build today's task grid plus today/next-working-day meeting sections."""
     return await _build_print_report(
         report_date, include_attachment=include_attachment, include_meetings=True,
         include_png=True, first_meeting_day_label="SOT", report_day_label="SOT",
         checklist_date=report_date, payload=payload, next_day_payload=next_day_payload,
+        db=db,
         include_completed_today=True,
     )
 

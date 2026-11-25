@@ -74,30 +74,32 @@ const groups = [
   { id: "m2-m3", label: "M2/3", slots: ["M2", "M3"] },
   { id: "m3", label: "M3", slots: ["M3"] },
 ] as const
-const statuses: Record<Status, { label: string; className: string }> = {
-  on_time: { label: "Po", className: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200" },
-  late: { label: "Po · me vonesë", className: "bg-amber-100 text-amber-950 dark:bg-amber-950 dark:text-amber-200" },
-  missing: { label: "Jo", className: "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200" },
-  pending: { label: "Në pritje", className: "bg-muted text-muted-foreground" },
-  unlinked: { label: "Pa lidhje Discord", className: "bg-muted text-muted-foreground" },
-  unavailable: { label: "I paverifikuar", className: "bg-muted text-muted-foreground" },
-  ambiguous: { label: "Titull i paqartë", className: "bg-muted text-muted-foreground" },
+const statusLabels: Record<Status, string> = {
+  on_time: "Po",
+  late: "Po · me vonesë",
+  missing: "Jo",
+  pending: "Në pritje",
+  unlinked: "Pa lidhje Discord",
+  unavailable: "I paverifikuar",
+  ambiguous: "Titull i paqartë",
 }
 
-function DeliveryCell({ delivery, formatTime, label }: { delivery?: Delivery; formatTime: (value: string) => string; label: string }) {
-  if (!delivery) return <span className="text-muted-foreground">—</span>
-  const { label: status, className } = statuses[delivery.status]
+function DeliveryCell({ delivery, formatTime, label, className }: { delivery?: Delivery; formatTime: (value: string) => string; label: string; className: string }) {
+  const status = delivery?.status
+  const tone = status === "on_time" || status === "late" ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
+    : status === "missing" ? "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200"
+    : "bg-card text-muted-foreground"
   return (
-    <div className="space-y-1">
-      <span className={`inline-block whitespace-nowrap rounded px-2 py-1 text-xs font-semibold ${className}`}>{status}</span>
-      {delivery.url && delivery.verified_at && (
+    <td className={`${className} ${tone}`}>
+      <span className="whitespace-nowrap text-xs font-semibold">{status ? statusLabels[status] : "—"}</span>
+      {delivery?.url && delivery.verified_at && (
         <a href={delivery.url} target="_blank" rel="noreferrer"
           aria-label={`Hap mesazhin në Discord për ${label}`}
-          className="flex min-h-6 w-fit items-center gap-1 text-xs font-medium underline underline-offset-2">
+          className="mt-1 flex min-h-6 w-fit items-center gap-1 text-xs font-medium underline underline-offset-2">
           {formatTime(delivery.verified_at)} <ExternalLink className="size-3" aria-hidden="true" />
         </a>
       )}
-    </div>
+    </td>
   )
 }
 
@@ -187,9 +189,8 @@ function DeliveryTable({ group, rows, deadlines, formatTime, commentsAvailable, 
                       {row.eight_am && !/\b08:00\b/.test(title) && <strong className="mr-1.5">08:00</strong>}
                       {title}
                     </th>
-                    {group.slots.map((slot) => <td key={slot} className={`${cell} bg-card text-card-foreground`}>
-                      <DeliveryCell delivery={row.deliveries[slot]} formatTime={formatTime} label={`${slot} · ${row.title} · ${row.person}`} />
-                    </td>)}
+                    {group.slots.map((slot) => <DeliveryCell key={slot} className={cell} delivery={row.deliveries[slot]}
+                      formatTime={formatTime} label={`${slot} · ${row.title} · ${row.person}`} />)}
                     <td className={`${cell} min-w-52 bg-card text-card-foreground last:border-r-0`}>
                       <CommentCell row={row} available={commentsAvailable} save={saveComment} />
                     </td>
@@ -426,7 +427,7 @@ export default function DiscordTaskDeliveriesPage() {
     <main className="min-w-0 space-y-5 p-4 sm:p-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Dorëzimet në Discord</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">BZ M3</h1>
           <p className="text-sm text-muted-foreground">Kontrolli ditor i detyrave M2, M2/3 dhe M3 në #det-nga-stafi-per-ga.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">

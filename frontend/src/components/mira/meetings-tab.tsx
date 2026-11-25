@@ -62,7 +62,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 const REPORT_STATES = { WAITING: "Pa përgjigje", PARTIAL: "Pjesërisht i raportuar", DONE: "I raportuar" }
 const TASK_STATES: Record<string, string> = {
   TODO: "🩷 Pa progres", IN_PROGRESS: "🟡 Në proces", DONE: "✅ E kryer",
-  WAITING_CLIENT: "⏸ WFE", WAITING_CONFIRMATION: "Në pritje konfirmimi",
+  WAITING_CLIENT: "⏸ WFE", WAITING_CONFIRMATION: "WFC INT",
 }
 
 function ContinuationTasks({ tasks }: { tasks: DiscordContinuationTask[] }) {

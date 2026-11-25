@@ -81,6 +81,48 @@ test("M3 delivery shows symbols, PO/JO, manual answers and a live total before r
   assert.deepEqual(JSON.parse(JSON.stringify(readManualDraft(storage, "user", "2026-10-05"))), answers)
 })
 
+test("M1, M2 and M3 show Discord delivery per person instead of a shared manual choice", () => {
+  const { M1ReportingPointsView } = load("@/components/m1-reporting-points-view")
+  const { M2ReportingPointsView } = load("@/components/m2-reporting-points-view")
+  const url = "https://discord.com/channels/1/2/3"
+  const delivery = [
+    { ...row, id: "task:one", assignees: "EF", marker: "M2/3", discord_delivery: { status: "on_time", verified_at: "2026-10-05T10:00:00Z", url } },
+    { ...row, id: "task:two", assignees: "EH", marker: "M2/3", discord_delivery: { status: "missing" } },
+  ]
+  for (const [View, slot, deadline] of [[M1ReportingPointsView, "M2", "12:15"], [M2ReportingPointsView, "M2", "12:15"], [M3ReportingPointsView, "M3", "16:30"]]) {
+    const html = renderToStaticMarkup(React.createElement(View, {
+      report: { ...report, discord_delivery_slot: slot, data: { delivery } },
+      answers: { "delivery_choice:task": "PO" }, disabled: false, onAnswerChange: () => {},
+    }))
+    assert.match(html, /SA\/TOTALI: 1\/2/)
+    assert.ok(html.includes(`Verifikuar në Discord · ${deadline}`))
+    assert.ok(html.includes(`href="${url}"`))
+    assert.match(html, />EF<\/td>.*?>Po<\/span>.*?>EH<\/td>.*?>Jo<\/span>/)
+    assert.doesNotMatch(html, /aria-label="PO\/JO për Detyra"/)
+  }
+})
+
+test("M3 lets report viewers edit each realization comment below 50%", () => {
+  const departments = [
+    { department_id: "dev", code: "DEV", percent: 32, comment_key: "realization_comment:DEV", comment_manager: "Laurent Hoxha" },
+    { department_id: "gd", code: "GD", percent: 49.9, comment_key: "realization_comment:GD", comment_manager: "Diellza Veliu", manager_comment: "Pritje e materialeve" },
+    { department_id: "pcm", code: "PCM", percent: 50 },
+  ]
+  const html = renderToStaticMarkup(React.createElement(M3ReportingPointsView, {
+    report: { ...report, realization: { percent: 44, employees: 5, departments }, generated_at: "2026-10-05T09:00:00Z" },
+    answers: {}, disabled: true, onAnswerChange: () => {}, onSaveRealizationComment: async () => {},
+  }))
+  assert.match(html, /KOMENTI I REALIZIMIT/)
+  for (const code of ["DEV", "GD"]) {
+    const field = html.match(new RegExp(`<textarea[^>]*aria-label="Komenti i realizimit për ${code}"[^>]*>`))?.[0]
+    assert.ok(field)
+    assert.doesNotMatch(field, /\sdisabled=""/)
+  }
+  assert.doesNotMatch(html, /<textarea[^>]*aria-label="Komenti i realizimit për PCM"/)
+  assert.doesNotMatch(html, /Në pritje të komentit|Menaxheri i departamentit|Ruaj komentin/)
+  assert.match(html, /Pritje e materialeve/)
+})
+
 test("point two edits the existing My View comment column per task including SYS", () => {
   const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"]
   const answers = { [`untouched_comment:${ids[0]}`]: "Manual FT", [`untouched_comment:${ids[1]}`]: "Manual SYS" }
@@ -343,7 +385,12 @@ function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" })
   const pageModule = { exports: {} }
   vm.runInNewContext(compiled, {
     module: pageModule, exports: pageModule.exports,
-    require: (name) => name === "react" ? hooks : name === "@/lib/auth" ? { useAuth: () => ({ user, loading: false, apiFetch }) } : load(name),
+    require: (name) => {
+      if (name === "react") return hooks
+      if (name === "@/lib/auth") return { useAuth: () => ({ user, loading: false, apiFetch }) }
+      if (name === "@/lib/report-link-date") return { useReportDate: (initialDate) => hooks.useState(initialDate) }
+      return load(name)
+    },
     window: { localStorage: storage,
       setTimeout: (callback) => { const id = ++timerId; timers.set(id, callback); return id },
       clearTimeout: (id) => timers.delete(id), setInterval: () => -1, clearInterval: () => {},

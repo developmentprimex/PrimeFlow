@@ -30,7 +30,7 @@ const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
   { value: "WAITING_CLIENT", label: "WFE" },
-  { value: "WAITING_CONFIRMATION", label: "Waiting for Confirmation" },
+  { value: "WAITING_CONFIRMATION", label: "WFC INT" },
   { value: "DONE", label: "Done" },
 ] as const
 

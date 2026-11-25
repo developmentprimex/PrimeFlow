@@ -65,6 +65,7 @@ BUCKETS = [
     "blocked",
     "oneH",
     "personal",
+    "waitingConfirmation",
     "external",
     "internal",
     "r1",
@@ -77,7 +78,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "24"
+COMMON_VIEW_CACHE_VERSION = "25"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -95,6 +96,7 @@ class CommonViewCounts(BaseModel):
     blocked: int = 0
     oneH: int = 0
     personal: int = 0
+    waitingConfirmation: int = 0
     external: int = 0
     internal: int = 0
     r1: int = 0
@@ -113,6 +115,7 @@ class CommonViewItemPayload(BaseModel):
     blocked: list[dict[str, Any]] = Field(default_factory=list)
     oneH: list[dict[str, Any]] = Field(default_factory=list)
     personal: list[dict[str, Any]] = Field(default_factory=list)
+    waitingConfirmation: list[dict[str, Any]] = Field(default_factory=list)
     external: list[dict[str, Any]] = Field(default_factory=list)
     internal: list[dict[str, Any]] = Field(default_factory=list)
     r1: list[dict[str, Any]] = Field(default_factory=list)
@@ -362,7 +365,7 @@ async def _compute_etag(
         one_h_slot_report_end.isoformat(),
     ]
     fingerprint_fields: list[tuple[str, Any, bool]] = []
-    if "users" in requested:
+    if "users" in requested or "tasks" in requested:
         fingerprint_fields.append(("users_updated", _max_timestamp_scalar(User.updated_at), False))
     if "departments" in requested or "meetings" in requested or "tasks" in requested:
         fingerprint_fields.append(
@@ -488,6 +491,19 @@ async def load_report_common_view(db: AsyncSession, day: date) -> dict:
     if any(((report_data.get("guardrails") or {}).get("truncated") or {}).values()):
         raise ValueError("Common View contains truncated buckets")
     return report_data
+
+
+async def load_report_common_view_with_previous_week(db: AsyncSession, day: date) -> dict:
+    """Include Friday's data for reports built on Monday."""
+    current = await load_report_common_view(db, day)
+    if day.weekday() == 0:
+        from app.services.primeflow_report import previous_working_day
+
+        previous = await load_report_common_view(db, previous_working_day(day))
+        for bucket, values in (previous.get("items") or {}).items():
+            current.setdefault("items", {}).setdefault(bucket, []).extend(values)
+        current["generated_at"] = max(current["generated_at"], previous["generated_at"])
+    return current
 
 
 async def _build_common_view(
@@ -795,6 +811,11 @@ async def _build_common_view(
         stmt = stmt.where(common_view_task_date_window_filter(week_start_date, week_end))
         tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
         tasks = [t for t in tasks if _should_include_task(t)]
+        missing_confirmer_ids = {task.confirmation_assignee_id for task in tasks if task.confirmation_assignee_id} - users_map.keys()
+        inactive_confirmers = {}
+        if missing_confirmer_ids:
+            confirmers = (await db.execute(select(User).where(User.work_staff_filter(), User.id.in_(missing_confirmer_ids)))).scalars().all()
+            inactive_confirmers = {person.id: person for person in confirmers}
 
         task_ids = [t.id for t in tasks]
         one_h_slots_by_task_date: dict[tuple[uuid.UUID, date], str] = {}
@@ -900,9 +921,9 @@ async def _build_common_view(
             status_value = (t.status or "").lower()
             is_done = bool(t.completed_at) or status_value in {"done", "completed"}
             task_status = (t.status or ("DONE" if is_done else "TODO")).strip() or ("DONE" if is_done else "TODO")
-            confirmation_owner = _ka_genti_confirmation_owner(
-                users_map.get(t.confirmation_assignee_id) if t.confirmation_assignee_id else None
-            )
+            active_confirmer = users_map.get(t.confirmation_assignee_id)
+            confirmer = active_confirmer or inactive_confirmers.get(t.confirmation_assignee_id)
+            confirmation_owner = _ka_genti_confirmation_owner(active_confirmer)
             confirmation_fields = {
                 "mira_dictation_source": getattr(t, "mira_dictation_source", None),
                 "confirmation_assignee_id": str(t.confirmation_assignee_id) if t.confirmation_assignee_id else None,
@@ -1093,41 +1114,44 @@ async def _build_common_view(
                         }
                     )
 
-                if (
-                    not t.is_personal
-                    and not is_done
-                    and task_status.strip().upper() in {"WAITING", "PENDING_CONFIRMATION", "WAITING_CONFIRMATION"}
-                    and confirmation_owner in {"KA", "GENT"}
-                ):
-                    items["personal"].append(
-                        {
-                            "id": f"task:{t.id}:{task_date.isoformat()}:wfc",
-                            "task_id": str(t.id),
-                            "title": display_title,
-                            "task_title": t.title,
-                            "person": owner_label,
-                            "assignees": assignee_names or None,
-                            "user_id": str(assignee_id) if assignee_id else None,
-                            "date": task_date.isoformat(),
-                            "note": t.description or None,
-                            "description": t.description,
-                            "department_id": str(dept_id) if dept_id else None,
-                            "status": task_status,
-                            "is_paused": is_paused,
-                            "isDone": False,
-                            "fast_task_order": t.fast_task_order,
-                            "finish_period": t.finish_period,
-                            "one_h_report_slot": slot,
-                            "one_h_marker": marker,
-                            "is_deadline_important": bool(t.is_deadline_important),
-                            "due_date": t.due_date.isoformat() if t.due_date else None,
-                            "start_date": t.start_date.isoformat() if t.start_date else None,
-                            "created_at": t.created_at.isoformat() if t.created_at else None,
-                            "completed_at": None,
-                            "is_personal_task": False,
-                            **confirmation_fields,
-                        }
-                    )
+                if not is_done and task_status.upper() in {"WAITING", "PENDING_CONFIRMATION", "WAITING_CONFIRMATION"}:
+                    waiting_task = {
+                        "id": f"task:{t.id}:{task_date.isoformat()}:wfc",
+                        "task_id": str(t.id),
+                        "title": display_title,
+                        "task_title": t.title,
+                        "person": owner_label,
+                        "assignees": assignee_names or None,
+                        "user_id": str(assignee_id) if assignee_id else None,
+                        "date": task_date.isoformat(),
+                        "note": t.description or None,
+                        "description": t.description,
+                        "department_id": str(dept_id) if dept_id else None,
+                        "status": "WAITING_CONFIRMATION",
+                        "is_paused": is_paused,
+                        "isDone": False,
+                        "fast_task_order": t.fast_task_order,
+                        "finish_period": t.finish_period,
+                        "one_h_report_slot": slot,
+                        "one_h_marker": marker,
+                        "one_h_marker_by_ga": marker_by_ga,
+                        "one_h_marker_comment": marker_comment,
+                        "is_deadline_important": bool(t.is_deadline_important),
+                        "due_date": t.due_date.isoformat() if t.due_date else None,
+                        "start_date": t.start_date.isoformat() if t.start_date else None,
+                        "created_at": t.created_at.isoformat() if t.created_at else None,
+                        "completed_at": None,
+                        "is_personal_task": bool(t.is_personal),
+                        **confirmation_fields,
+                    }
+                    items["waitingConfirmation"].append({
+                        **waiting_task,
+                        "confirmation_assignee_initials": (
+                            (_initials(confirmer.full_name or confirmer.username or "") or None) if confirmer else None
+                        ),
+                    })
+                    if not t.is_personal and confirmation_owner in {"KA", "GENT"}:
+                        items["personal"].append({**waiting_task, "status": task_status})
 
             if t.project_id:
                 project = projects.get(t.project_id)

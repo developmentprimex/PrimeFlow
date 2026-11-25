@@ -192,6 +192,47 @@ class AssistantProfileTests(unittest.IsolatedAsyncioTestCase):
             request.assert_awaited_once_with("GET", "/api/ga-assistant/discord/mentions/feed/1002/attachments")
         self.assertEqual(structured, data)
 
+    async def test_discord_attachment_content_returns_native_mcp_image_for_context_id(self) -> None:
+        import base64
+        import io
+
+        from PIL import Image
+        from app.services import ga_discord_attachment_content as service
+
+        tool_name = "ga_discord_attachment_content"
+        tools = {tool.name: tool for tool in await self.server.mcp.list_tools()}
+        self.assertTrue(tools[tool_name].annotations.readOnlyHint)
+        self.assertEqual(set(tools[tool_name].inputSchema["required"]), {"id", "name"})
+        png = io.BytesIO()
+        Image.new("RGB", (3, 2)).save(png, "PNG")
+        data = {"id": "dc:777", "attachments": [{
+            "name": "foto.png", "url": "https://cdn.discordapp.com/attachments/20/300/foto.png?ex=fresh",
+            "content_type": "image/png",
+        }]}
+        with patch.object(self.server, "_request", AsyncMock(return_value=data)) as request, \
+             patch.object(service, "download_attachment", AsyncMock(return_value=png.getvalue())) as download:
+            result = await self.server.mcp.call_tool(tool_name, {"id": "dc:777", "name": "foto.png"})
+            request.assert_awaited_once_with("GET", "/api/ga-assistant/discord/mentions/feed/777/attachments")
+            self.assertEqual(download.await_count, 1)
+            self.assertFalse(result.isError)
+            self.assertEqual(result.structuredContent, {
+                "id": "dc:777", "name": "foto.png", "kind": "image", "mime_type": "image/png",
+            })
+            self.assertEqual(result.content[1].type, "image")
+            self.assertEqual(base64.b64decode(result.content[1].data), png.getvalue())
+
+    async def test_discord_attachment_content_requires_exact_filename(self) -> None:
+        from app.services import ga_discord_attachment_content as service
+
+        attachment = {"name": "B.txt", "url": "https://cdn.discordapp.com/attachments/20/300/B.txt",
+                      "content_type": "text/plain"}
+        for existing in ([attachment], [attachment, attachment]):
+            with patch.object(self.server, "_request", AsyncMock(return_value={"id": "dc:777", "attachments": existing})), \
+                 patch.object(service, "download_attachment", AsyncMock()) as download:
+                result = await self.server.mcp.call_tool("ga_discord_attachment_content", {"id": "dc:777", "name": "B.txt" if len(existing) == 2 else "b.txt"})
+            self.assertTrue(result.isError)
+            download.assert_not_awaited()
+
     async def test_discord_actions_register_as_writes_and_return_confirmed_results(self) -> None:
         tools = {tool.name: tool for tool in await self.server.mcp.list_tools()}
         for name in ("ga_discord_reply", "ga_discord_react"):

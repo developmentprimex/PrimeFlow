@@ -991,7 +991,7 @@ export default function SystemTaskInstancesPage() {
                         <TableCell>{row.kohaBarazimeve}</TableCell>
                         <TableCell>
                           <span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${row.statusClassName}`}>
-                            {row.status === "PAUSED" ? "Stopped" : row.status}
+                            {row.status === "PAUSED" ? "Stopped" : row.status === "WAITING_CONFIRMATION" ? "WFC INT" : row.status}
                           </span>
                         </TableCell>
                         <TableCell>

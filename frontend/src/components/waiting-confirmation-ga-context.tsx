@@ -52,7 +52,7 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
       setTasks(matchingTasks)
       setCount(matchingTasks.length)
     } catch {
-      setError("Could not load waiting confirmation tasks.")
+      setError("Could not load WFC INT tasks.")
     } finally {
       setLoading(false)
     }

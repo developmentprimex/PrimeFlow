@@ -103,6 +103,7 @@ type CommonType =
   | "oneH1550"
   | "oneHNoSlot"
   | "waitingClient"
+  | "waitingConfirmation"
   | "personal"
   | PersonalRowId
   | "external"
@@ -132,6 +133,7 @@ const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
   "internal",
   "bz",
   "waitingClient",
+  "waitingConfirmation",
   "oneH10",
   "oneH11",
   "oneH1150",
@@ -149,6 +151,7 @@ const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
 ]
 const COMMON_FAST_PRINT_ROW_IDS: readonly CommonType[] = [
   "waitingClient",
+  "waitingConfirmation",
   "oneH10",
   "oneH11",
   "oneH1150",
@@ -463,6 +466,8 @@ type FastTaskItemMeta = {
   completedAt?: string | null
   dateIsToday?: boolean
   confirmationOwner?: "KA" | "GENT" | null
+  confirmationAssigneeId?: string | null
+  confirmationAssigneeInitials?: string | null
   isPersonalTask?: boolean
   isSystemTask?: boolean
 }
@@ -652,6 +657,7 @@ type CommonBucket =
   | "blocked"
   | "oneH"
   | "personal"
+  | "waitingConfirmation"
   | "external"
   | "internal"
   | "r1"
@@ -659,7 +665,7 @@ type CommonBucket =
   | "feedback"
   | "priority"
   | "bz"
-type FastTaskRowId = "blocked" | "oneH" | "personal" | PersonalRowId | "r1" | "waitingClient"
+type FastTaskRowId = "blocked" | "oneH" | "personal" | PersonalRowId | "r1" | "waitingClient" | "waitingConfirmation"
 type OneHSlotRowId = "oneH" | "oneH10" | "oneH11" | "oneH1150" | "oneH1420" | "oneH1550" | "oneHNoSlot"
 type FastTaskEntry = BlockedItem | OneHItem | PersonalItem | R1Item
 type CommonWeekTableEntry =
@@ -700,6 +706,7 @@ type CommonViewPayload = {
     blocked: BlockedItem[]
     oneH: OneHItem[]
     personal: PersonalItem[]
+    waitingConfirmation?: PersonalItem[]
     external: ExternalItem[]
     internal: InternalItem[]
     r1: R1Item[]
@@ -892,7 +899,7 @@ const renderCommonTaskStatusIndicator = (
     IN_PROGRESS: { label: "In progress", symbol: "◔", tone: "in-progress" },
     PAUSED: { label: "Stopped", symbol: "||", tone: "paused" },
     DONE: { label: "Done", symbol: "✓", tone: "done" },
-    WAITING_CONFIRMATION: { label: "Waiting confirmation", symbol: "◷", tone: "waiting" },
+    WAITING_CONFIRMATION: { label: "WFC INT", symbol: "◷", tone: "waiting" },
     WAITING_CLIENT: { label: "Waiting client", symbol: "◷", tone: "waiting-client" },
   }
   const indicator = indicators[status]
@@ -904,7 +911,7 @@ const renderCommonTaskStatusIndicator = (
   )
 }
 
-type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange" | "gold" | "slate"
+type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "mint" | "gold" | "slate"
 type CommonTaskFocusFilter = "all" | "new" | "eightAm" | "deadline" | "startToday"
 
 const getCommonTaskColor = (entry: {
@@ -920,7 +927,7 @@ const getCommonTaskColor = (entry: {
   if (isCommonTaskDeadlineActiveOnDate(entry)) return "red"
   if (normalized === "IN_PROGRESS") return "yellow"
   if (normalized === "PAUSED") return "slate"
-  if (normalized === "WAITING_CONFIRMATION") return "orange"
+  if (normalized === "WAITING_CONFIRMATION") return "mint"
   if (normalized === "WAITING_CLIENT") return "gold"
   if (normalized === "TODO") return "pink"
   return null
@@ -956,6 +963,7 @@ type SwimlaneCell = {
   status?: string
   isDone?: boolean
   taskId?: string
+  confirmationAssigneeInitials?: string | null
   userId?: string
   fastTaskOrder?: number | null
   finishPeriod?: "AM" | "PM" | null
@@ -998,7 +1006,7 @@ const COMMON_COLOR_FILTER_OPTIONS: {
   { value: "slate", label: "Stopped", swatch: "#cbd5e1" },
   { value: "red", label: "Red", swatch: "#dc2626" },
   { value: "green", label: "Green", swatch: "#d4ffe1" },
-  { value: "orange", label: "Orange", swatch: "#ffedd5" },
+  { value: "mint", label: "Mint", swatch: "#ccfbf1" },
   { value: "gold", label: "Gold", swatch: "#E2C15B" },
 ]
 
@@ -1165,8 +1173,8 @@ const commonPrintTaskTitle = (entry: { title: string; assignees?: string[]; pers
 }
 const commonPrintPersonalTaskTitle = (entry: { title: string }) => commonPrintTitleLine(entry.title)
 const renderWfcText = (value: string) =>
-  value.split(/(\bWFC\b)/gi).map((part, index) =>
-    /^WFC$/i.test(part) ? (
+  value.split(/(\bWFC(?: INT)?\b)/gi).map((part, index) =>
+    /^WFC(?: INT)?$/i.test(part) ? (
       <span key={`wfc-${index}`} className="task-title-wfc">{part}</span>
     ) : (
       part
@@ -1182,9 +1190,9 @@ const highlightWfcReactNode = (node: React.ReactNode): React.ReactNode => {
 }
 const commonPrintTitleHtml = (value: string) =>
   value
-    .split(/(\bWFC\b)/gi)
+    .split(/(\bWFC(?: INT)?\b)/gi)
     .map((part) =>
-      /^WFC$/i.test(part)
+      /^WFC(?: INT)?$/i.test(part)
         ? `<span class="task-title-wfc" style="color:#DC2626;font-weight:800;">${escapePrintHtml(part)}</span>`
         : escapePrintHtml(part)
     )
@@ -1208,9 +1216,11 @@ const isAppendedWaitingConfirmation = (entry: FastTaskItemMeta & { status?: stri
   entry.isPersonalTask === false && isWaitingConfirmationTask(entry) && Boolean(entry.confirmationOwner)
 const isRoutedWaitingConfirmation = (entry: FastTaskItemMeta & { status?: string | null; isDone?: boolean }) =>
   isWaitingConfirmationTask(entry) && Boolean(entry.confirmationOwner)
-const renderWfcIndicator = (entry: { status?: string | null; isDone?: boolean }) =>
+const confirmationAssigneeLabel = (entry: { confirmationAssigneeInitials?: string | null }) =>
+  entry.confirmationAssigneeInitials ? `CON: ${entry.confirmationAssigneeInitials}` : "Pa konfirmues"
+const renderWfcIndicator = (entry: { status?: string | null; isDone?: boolean; confirmationAssigneeInitials?: string | null }, showConfirmer = false) =>
   isWaitingConfirmationTask(entry) ? (
-    <span className="wfc-indicator" title="Waiting for confirmation">WFC</span>
+    <span className="wfc-indicator" title="WFC INT">{showConfirmer ? confirmationAssigneeLabel(entry) : "WFC INT"}</span>
   ) : null
 const personalTasksForRow = <T extends FastTaskItemMeta & { title: string; status?: string | null; isDone?: boolean }>(
   items: readonly T[],
@@ -1259,7 +1269,7 @@ const renderCommonMarkedTitleLine = (value: string) => {
       boundaries.add(Math.min(end, range.end))
     }
   })
-  for (const match of parsed.text.slice(start, end).matchAll(/\bWFC\b/gi)) {
+  for (const match of parsed.text.slice(start, end).matchAll(/\bWFC(?: INT)?\b/gi)) {
     const tokenStart = start + (match.index || 0)
     boundaries.add(tokenStart)
     boundaries.add(tokenStart + match[0].length)
@@ -1275,7 +1285,7 @@ const renderCommonMarkedTitleLine = (value: string) => {
     const isDone = parsed.doneRanges.some((range) => range.start <= partStart && range.end >= partEnd)
     const isAdded = parsed.addedRanges.some((range) => range.start <= partStart && range.end >= partEnd)
     const className = getCommonTitleMarkClass(isDone, isAdded)
-    const content = /^WFC$/i.test(segment)
+    const content = /^WFC(?: INT)?$/i.test(segment)
       ? <span key={`title-wfc-${idx}-${partStart}`} className="task-title-wfc">{segment}</span>
       : segment
     parts.push(
@@ -1336,7 +1346,7 @@ const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: 
     ? entry.assignees
     : normalizeAssigneeList(entry.person || entry.owner || "")
 const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId | OneHSlotRowId =>
-  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient" || rowId === "waitingConfirmation"
 const isPrintDedupeTaskRowId = (rowId: CommonType) =>
   rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
 const isShtypiTaskRowId = (rowId: CommonType) =>
@@ -1803,6 +1813,7 @@ export default function CommonViewPage() {
     blocked: [] as BlockedItem[],
     oneH: [] as OneHItem[],
     personal: [] as PersonalItem[],
+    waitingConfirmation: [] as PersonalItem[],
     external: [] as ExternalItem[],
     internal: [] as InternalItem[],
     r1: [] as R1Item[],
@@ -2027,7 +2038,7 @@ export default function CommonViewPage() {
       entries: ["late", "absent", "leave", "externalHoliday", "problems", "feedback"],
       meetings: ["external", "internal"],
       system_tasks: ["bz"],
-      tasks: ["blocked", "oneH", "personal", "r1", "priority"],
+      tasks: ["blocked", "oneH", "personal", "waitingConfirmation", "r1", "priority"],
     }),
     []
   )
@@ -3304,7 +3315,7 @@ export default function CommonViewPage() {
           isDone: isCommonTaskDone(status, item.isDone),
         }
       })
-      const normalizedPersonal = payload.items.personal.map((item: any) => {
+      const normalizePersonal = (item: any): PersonalItem => {
         const status = normalizeCommonTaskStatus(item.status, item.isDone)
         return {
           ...item,
@@ -3315,6 +3326,7 @@ export default function CommonViewPage() {
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
+          oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
           oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
           oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
@@ -3326,12 +3338,16 @@ export default function CommonViewPage() {
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
+          confirmationAssigneeId: item.confirmationAssigneeId ?? item.confirmation_assignee_id ?? null,
+          confirmationAssigneeInitials: item.confirmationAssigneeInitials ?? item.confirmation_assignee_initials ?? null,
           isSystemTask: Boolean(item.isSystemTask ?? item.is_system_task),
           isPersonalTask: item.isPersonalTask ?? item.is_personal_task ?? true,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
-      })
+      }
+      const normalizedPersonal = payload.items.personal.map(normalizePersonal)
+      const normalizedWaitingConfirmation = (payload.items.waitingConfirmation || []).map(normalizePersonal)
       const normalizedR1 = payload.items.r1.map((item: any) => {
         const status = normalizeCommonTaskStatus(item.status, item.isDone)
         return {
@@ -3410,6 +3426,8 @@ export default function CommonViewPage() {
               next = { ...next, oneH: normalizedOneH }
             } else if (bucket === "personal") {
               next = { ...next, personal: mergePersonalItems(normalizedPersonal) }
+            } else if (bucket === "waitingConfirmation") {
+              next = { ...next, waitingConfirmation: normalizedWaitingConfirmation }
             } else if (bucket === "r1") {
               next = { ...next, r1: normalizedR1 }
             } else if (bucket === "problems") {
@@ -3498,6 +3516,7 @@ export default function CommonViewPage() {
                 blocked: [],
                 oneH: [],
                 personal: [],
+                waitingConfirmation: [],
                 external: [],
                 internal: [],
                 r1: [],
@@ -3542,6 +3561,7 @@ export default function CommonViewPage() {
           blocked: [] as BlockedItem[],
           oneH: [] as OneHItem[],
           personal: [] as PersonalItem[],
+          waitingConfirmation: [] as PersonalItem[],
           external: [] as ExternalItem[],
           internal: [] as InternalItem[],
           r1: [] as R1Item[],
@@ -3900,11 +3920,8 @@ export default function CommonViewPage() {
 
             const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
             const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
-            const confirmationOwner = getKaGentiConfirmationOwner(
-              t.confirmation_assignee_id
-                ? loadedUsers.find((candidate) => candidate.id === t.confirmation_assignee_id)
-                : null
-            )
+            const confirmer = loadedUsers.find((candidate) => candidate.id === t.confirmation_assignee_id)
+            const confirmationOwner = getKaGentiConfirmationOwner(confirmer)
             const ownerName = assignee?.full_name || assignee?.username || null
             const assigneeNames = t.assignees?.length
               ? t.assignees.map((a) => a.full_name || a.username || a.email || "Unknown")
@@ -4072,13 +4089,8 @@ export default function CommonViewPage() {
                   isSystemTask: Boolean(t.system_template_origin_id || t.system_task_slot_id),
                 })
               }
-              if (
-                !t.is_personal &&
-                !isDone &&
-                normalizedTaskStatus === "WAITING_CONFIRMATION" &&
-                confirmationOwner
-              ) {
-                allData.personal.push({
+              if (!isDone && normalizedTaskStatus === "WAITING_CONFIRMATION") {
+                const waitingTask: PersonalItem = {
                   taskId: t.id,
                   title: t.title,
                   person: assigneeLabel,
@@ -4100,9 +4112,13 @@ export default function CommonViewPage() {
                   createdAt: t.created_at || null,
                   completedAt: null,
                   confirmationOwner,
+                  confirmationAssigneeId: t.confirmation_assignee_id,
+                  confirmationAssigneeInitials: confirmer ? initials(confirmer.full_name || confirmer.username || "") : null,
                   isSystemTask: Boolean(t.system_template_origin_id || t.system_task_slot_id),
-                  isPersonalTask: false,
-                })
+                  isPersonalTask: Boolean(t.is_personal),
+                }
+                allData.waitingConfirmation.push(waitingTask)
+                if (!t.is_personal && confirmationOwner) allData.personal.push(waitingTask)
               }
             }
             if (t.task_type === "adhoc" && t.project_id) {
@@ -4926,6 +4942,14 @@ export default function CommonViewPage() {
       .filter(matchesOneHMarkerFilter)
       .filter((x) => matchesKaGentFilter(x))
       .map(narrowAssigneesForSelectedUser)
+    const waitingConfirmation = commonData.waitingConfirmation
+      .filter((entry) => inSelectedDates(entry.date) && !fullyCoveredDates.has(entry.date))
+      .filter((entry) => matchesSelectedUserEntry(entry) || matchesSelectedUserId(entry.confirmationAssigneeId))
+      .filter((entry) => !isUserHiddenOn(entry.date, entry.userId))
+      .filter(matchesTaskFocusFilter)
+      .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
+      .filter((entry) => matchesKaGentFilter(entry))
     const external = commonData.external
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .flatMap((x) => {
@@ -5009,6 +5033,7 @@ export default function CommonViewPage() {
       blocked,
       oneH,
       personal,
+      waitingConfirmation,
       external,
       internal,
       r1,
@@ -5486,6 +5511,7 @@ export default function CommonViewPage() {
                     : item.confirmation_owner === "KA" || item.confirmation_owner === "GENT"
                       ? item.confirmation_owner
                       : null,
+                confirmationAssigneeInitials: typeof item.confirmation_assignee_initials === "string" ? item.confirmation_assignee_initials : null,
                 isSystemTask: Boolean(item.isSystemTask ?? item.is_system_task),
                 isPersonalTask:
                   typeof item.isPersonalTask === "boolean"
@@ -5498,6 +5524,11 @@ export default function CommonViewPage() {
 
       const normalizedPersonalTasks = normalizeTasks(payload.items.personal)
       const taskRows: Array<{ id: CommonType; label: string; items: PrintTask[] }> = [
+        {
+          id: "waitingConfirmation",
+          label: "WFC INT",
+          items: normalizeTasks(payload.items.waitingConfirmation || []),
+        },
         ...ONE_H_SLOT_ROWS.map((slot) => ({
           id: slot.id,
           label: slot.label,
@@ -5577,7 +5608,7 @@ export default function CommonViewPage() {
                   ? ""
                   : `<span class="print-task-badge period">${escapePrintHtml(getCommonTaskPeriodLabel((item as PrintTask).finishPeriod))}</span>${
                       isWaitingConfirmationTask(item as PrintTask)
-                        ? '<span class="print-task-badge wfc">WFC</span>'
+                        ? `<span class="print-task-badge wfc">${escapePrintHtml(row.id === "waitingConfirmation" ? confirmationAssigneeLabel(item as PrintTask) : "WFC INT")}</span>`
                         : ""
                     }${
                       (item as PrintTask).oneHMarker
@@ -5600,7 +5631,7 @@ export default function CommonViewPage() {
               }).join("")
               const rowHeaders =
                 chunkIndex === 0
-                  ? `<th class="print-slot-number" rowspan="${chunks}">${rowIndex + 1}</th><th class="print-slot-type" rowspan="${chunks}">${escapePrintHtml(row.label)}${
+                  ? `<th class="print-slot-number" rowspan="${chunks}">${rowIndex + 1}</th><th class="print-slot-type${row.id === "waitingConfirmation" ? " waiting-confirmation" : ""}" rowspan="${chunks}">${escapePrintHtml(row.label)}${
                       subtext ? `<span class="print-slot-subtext">${escapePrintHtml(subtext)}</span>` : ""
                     }</th>`
                   : ""
@@ -5654,7 +5685,8 @@ export default function CommonViewPage() {
   .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
   .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
   .print-task-badge.start-today { margin:0; background:#dbeafe; border:1px solid #60a5fa; color:#1d4ed8; }
-  .print-task-badge.wfc { background:#ffedd5; border:1px solid #fb923c; color:#c2410c; }
+  .print-task-badge.wfc { background:#ccfbf1; border:1px solid #0f766e; color:#134e4a; }
+  .print-slot-type.waiting-confirmation { background:#99f6e4; color:#134e4a; }
   .print-task-badge.marker { padding:2px 7px; background:#eff6ff; border:1px solid #93c5fd; color:#dc2626; font-size:14px; font-weight:900; text-shadow:0 0 0 currentColor; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
@@ -5709,7 +5741,14 @@ export default function CommonViewPage() {
     try {
       const response = await apiFetch(`/today-print-report/print-preview?report_date=${encodeURIComponent(reportDate)}`)
       if (!response?.ok) {
-        throw new Error(`Could not load the 1H SHTYPI SOT (Shiko simbolet) report (${response?.status || "network error"}).`)
+        const problem = await response?.json().catch(() => null) as { detail?: unknown } | null | undefined
+        const detail = typeof problem?.detail === "string" ? problem.detail : null
+        if (response?.status === 409) {
+          printWindow.close()
+          toast.error(detail || "Raporti i kësaj date nuk është i disponueshëm.")
+          return
+        }
+        throw new Error(detail || `Could not load the 1H SHTYPI SOT (Shiko simbolet) report (${response?.status || "network error"}).`)
       }
       const report = (await response.json()) as { html?: string; subject?: string }
       if (!report.html) throw new Error("The 1H SHTYPI SOT (Shiko simbolet) report was empty.")
@@ -5765,7 +5804,6 @@ export default function CommonViewPage() {
       printWindow.addEventListener("beforeprint", fitReportToPage)
       printWindow.print()
     } catch (error) {
-      console.error("Failed to print the canonical Today report", error)
       printWindow.close()
       toast.error(error instanceof Error ? error.message : "Failed to load the 1H SHTYPI SOT (Shiko simbolet) report.")
       setPrintTotalPages(1)
@@ -5850,6 +5888,7 @@ export default function CommonViewPage() {
         leave: LeaveItem[]
         externalHoliday: ExternalHolidayItem[]
         waitingClient: FastTaskEntry[]
+        waitingConfirmation: PersonalItem[]
         blocked: BlockedItem[]
         oneH: OneHItem[]
         personal: PersonalItem[]
@@ -5880,6 +5919,7 @@ export default function CommonViewPage() {
           ],
           externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
           waitingClient: [],
+          waitingConfirmation: [],
           blocked: [],
           oneH: [],
           personal: [],
@@ -5918,6 +5958,7 @@ export default function CommonViewPage() {
           false
         ),
         personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
+        waitingConfirmation: sortTasksByOrder(filtered.waitingConfirmation.filter((entry) => entry.date === iso), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
@@ -5955,6 +5996,11 @@ export default function CommonViewPage() {
     const renderCellLines = (rowId: CommonType, iso: string) => {
       const dayData = dataByDay[iso]
       if (!dayData) return []
+      if (rowId === "waitingConfirmation") {
+        return dayData.waitingConfirmation.map((entry, index) =>
+          `${index + 1}. [${confirmationAssigneeLabel(entry)}] ${commonPrintTitleLine(entry.title)}${assigneesSuffix(entry)}`
+        )
+      }
       const entries =
         rowId === "late"
           ? dayData.late
@@ -6026,7 +6072,7 @@ export default function CommonViewPage() {
           (e: OneHItem | R1Item) =>
             `${markerCommentPrefix(e)}${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${
               isOneHSlotRowId(rowId) ? `[${getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}] ` : ""
-            }[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC] " : ""}${
+            }[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC INT] " : ""}${
               isOneHSlotRowId(rowId) && (e as OneHItem).oneHMarker
                 ? `${(e as OneHItem).oneHMarkerByGa
                     ? `(${getOneHMarkerLabel((e as OneHItem).oneHMarker)})`
@@ -6038,7 +6084,7 @@ export default function CommonViewPage() {
       if (isPersonalRowId(rowId)) {
         return (entries as PersonalItem[]).map(
           (e) => `${markerCommentPrefix(e)}${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. `
-            + `[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC] " : ""}`
+            + `[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC INT] " : ""}`
             + `${commonPrintPersonalTaskTitle(e)}${assigneesSuffix(e)}`
         )
       }
@@ -6463,6 +6509,7 @@ export default function CommonViewPage() {
   }
 
   const showCard = (type: CommonType, itemCount?: number) => {
+    if (type === "waitingConfirmation") return typeFilters.size === 0 || typeFilters.has(type)
     if (taskFocusFilter !== "all" && !isFastTaskRowId(type)) return false
     if (taskFocusFilter === "startToday" && itemCount === 0) return false
     if (oneHMarkerFilters.size > 0 || kaGentFilterActive) {
@@ -7968,6 +8015,7 @@ export default function CommonViewPage() {
     leave: "Pushim vjetor ose feste",
     externalHoliday: "Festa zyrtare / External holiday",
     waitingClient: "Detyra qe jane ne pritje te veprimit, informacionit ose konfirmimit nga klienti.",
+    waitingConfirmation: "Detyrat në pritje të konfirmimit dhe personi i zgjedhur te Confirm by.",
     blocked: "JANE DETYRA ME PRIORITET TE LARTE MERRET VETËM ME ATË DETYRË ",
     oneH: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
     oneH10: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
@@ -8553,7 +8601,7 @@ export default function CommonViewPage() {
       userId: item.userId,
       entryDate: item.date,
     }))
-    const waitingClientItems: SwimlaneCell[] = waitingClientSource.map((entry, index) => ({
+    const taskWaitingCells = (entries: FastTaskEntry[]): SwimlaneCell[] => entries.map((entry, index) => ({
       title: entry.title,
       assignees: entryAssignees(entry),
       subtitle: `${formatFastTaskDateLabel(entry.date, entry.isDone, entry.completedAt, entry.startDate, entry.dueDate)}${entry.note ? ` - ${entry.note}` : ""}`,
@@ -8563,12 +8611,15 @@ export default function CommonViewPage() {
       isDone: entry.isDone,
       number: index + 1,
       taskId: entry.taskId,
+      confirmationAssigneeInitials: entry.confirmationAssigneeInitials,
       userId: entry.userId,
       departmentId: entry.departmentId,
       fastTaskOrder: entry.fastTaskOrder,
       finishPeriod: entry.finishPeriod,
       oneHReportSlot: entry.oneHReportSlot,
       oneHMarker: entry.oneHMarker,
+      oneHMarkerByGa: entry.oneHMarkerByGa,
+      oneHMarkerComment: entry.oneHMarkerComment,
       entryDate: entry.date,
       isPaused: entry.isPaused,
       isDeadlineImportant: entry.isDeadlineImportant,
@@ -8580,6 +8631,8 @@ export default function CommonViewPage() {
       dateIsToday: isCommonTaskStartingOnDate(entry),
       isSystemTask: entry.isSystemTask,
     }))
+    const waitingClientItems = taskWaitingCells(waitingClientSource)
+    const waitingConfirmationItems = taskWaitingCells(sortTasksByOrder(filtered.waitingConfirmation, isMultiDate))
 
     const buildFastHeaderBreakdown = (items: SwimlaneCell[]) => {
       const eightAmCount = items.filter((item) => hasEightAmIndicator(item.title, item.isSystemTask)).length
@@ -8823,6 +8876,14 @@ export default function CommonViewPage() {
         items: waitingClientItems,
       },
       {
+        id: "waitingConfirmation",
+        label: "WFC INT",
+        count: waitingConfirmationItems.length,
+        headerClass: "swimlane-header waiting-confirmation",
+        badgeClass: "swimlane-badge waiting-confirmation",
+        items: waitingConfirmationItems,
+      },
+      {
         id: "blocked",
         label: "BLL",
         count: blockedItems.length,
@@ -8910,6 +8971,7 @@ export default function CommonViewPage() {
       leave: LeaveItem[]
       externalHoliday: ExternalHolidayItem[]
       waitingClient: FastTaskEntry[]
+      waitingConfirmation: PersonalItem[]
       blocked: BlockedItem[]
       oneH: OneHItem[]
       personal: PersonalItem[]
@@ -8956,6 +9018,7 @@ export default function CommonViewPage() {
           ],
           externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
           waitingClient: [],
+          waitingConfirmation: [],
           blocked: [],
           oneH: [],
           personal: [],
@@ -8976,6 +9039,7 @@ export default function CommonViewPage() {
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
         externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
         waitingClient: sortTasksByOrder(waitingClient.filter((x) => x.date === iso), false),
+        waitingConfirmation: sortTasksByOrder(filtered.waitingConfirmation.filter((entry) => entry.date === iso), false),
         blocked: sortTasksByOrder(blocked.filter((x) => x.date === iso && !isWaitingClientTask(x)), false, true),
         oneH: sortTasksByOrder(oneH.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         personal: sortTasksByOrder(personal.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
@@ -9295,6 +9359,7 @@ export default function CommonViewPage() {
                       <div className="single-day-print-task-content">
                         <div>
                           {chunkIndex * 6 + cellIndex + 1}.{" "}
+                          {row.id === "waitingConfirmation" ? renderWfcIndicator(item, true) : null}
                           {renderWfcText(
                             isPersonalRowId(row.id)
                               ? commonPrintPersonalTaskTitle(item)
@@ -9336,6 +9401,7 @@ export default function CommonViewPage() {
         else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
         else if (row.id === "externalHoliday") dayEntries[iso] = dayData?.externalHoliday || []
         else if (row.id === "waitingClient") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.waitingClient || [], true)
+        else if (row.id === "waitingConfirmation") dayEntries[iso] = dayData?.waitingConfirmation || []
         else if (row.id === "blocked") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.blocked || [], true)
         else if (isOneHSlotRowId(row.id)) {
           const oneHEntries = includeOneH ? dayData?.oneH || [] : []
@@ -9364,7 +9430,7 @@ export default function CommonViewPage() {
         else if (row.id === "priority") dayEntries[iso] = dayData?.priority || []
         else if (row.id === "diamond") dayEntries[iso] = dayData?.diamond || []
       })
-      if (shortWeek && !Object.values(dayEntries).some((entries) => entries.length > 0)) return []
+      if (shortWeek && row.id !== "waitingConfirmation" && !Object.values(dayEntries).some((entries) => entries.length > 0)) return []
       return [{ row, dayEntries }]
     })
     : []
@@ -10054,6 +10120,7 @@ export default function CommonViewPage() {
           .swimlane-header.externalHoliday { background: var(--externalHoliday-bg) !important; color: #be185d !important; }
           .swimlane-header.blocked { background: var(--blocked-bg) !important; color: #9f1239 !important; }
           .swimlane-header.waiting-client { background: #e2c15b !important; color: #4f3a00 !important; }
+          .swimlane-header.waiting-confirmation { background: #99f6e4 !important; color: #134e4a !important; }
           .swimlane-header.oneh { background: var(--oneh-bg) !important; color: #0369a1 !important; }
           .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
           .swimlane-header.external { background: var(--external-bg) !important; color: #0369a1 !important; }
@@ -10070,6 +10137,7 @@ export default function CommonViewPage() {
           .swimlane-badge.externalHoliday { border-color: var(--externalHoliday-accent) !important; color: #be185d !important; }
           .swimlane-badge.blocked { border-color: var(--blocked-accent) !important; color: #9f1239 !important; }
           .swimlane-badge.waiting-client { border-color: #b8860b !important; color: #4f3a00 !important; }
+          .swimlane-badge.waiting-confirmation { border-color: #0f766e !important; color: #134e4a !important; }
           .swimlane-badge.oneh { border-color: var(--oneh-accent) !important; color: #0369a1 !important; }
           .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
           .swimlane-badge.external { border-color: var(--external-accent) !important; color: #0369a1 !important; }
@@ -11285,7 +11353,7 @@ export default function CommonViewPage() {
           border-left-color: #ffffff;
         }
         .swimlane-cell.task-state-waiting {
-          background: #ffedd5;
+          background: #ccfbf1;
           border-left-color: #ffffff;
         }
         .swimlane-cell.task-state-waiting-client {
@@ -11774,6 +11842,10 @@ export default function CommonViewPage() {
           background: #e2c15b;
           color: #4f3a00;
         }
+        .week-table-row.waiting-confirmation .week-table-label {
+          background: #99f6e4;
+          color: #134e4a;
+        }
         .week-table-row.oneh .week-table-label {
           background: var(--oneh-bg);
         }
@@ -11845,7 +11917,7 @@ export default function CommonViewPage() {
           background: #fef3c7;
         }
         .week-table-entry.task-state-waiting {
-          background: #ffedd5;
+          background: #ccfbf1;
         }
         .week-table-entry.task-state-waiting-client {
           background: #e2c15b;
@@ -11868,9 +11940,11 @@ export default function CommonViewPage() {
         .week-table-view.neutral-all-days .week-table-entry,
         .week-table-view.neutral-all-days .week-table-entry.task-state-done,
         .week-table-view.neutral-all-days .week-table-entry.task-state-in-progress,
-        .week-table-view.neutral-all-days .week-table-entry.task-state-waiting,
         .week-table-view.neutral-all-days .week-table-entry.task-state-todo {
           background: #ffffff;
+        }
+        .week-table-view.neutral-all-days .week-table-entry.task-state-waiting {
+          background: #ccfbf1;
         }
         .week-table-view.neutral-all-days .week-table-entry.one-time-meeting {
           border-color: #dc2626;
@@ -12069,9 +12143,9 @@ export default function CommonViewPage() {
           height: 20px;
           padding: 0 7px;
           border-radius: 999px;
-          background: #ffedd5;
-          border: 1px solid #fb923c;
-          color: #c2410c;
+          background: #ccfbf1;
+          border: 1px solid #0f766e;
+          color: #134e4a;
           font-weight: 800;
           font-size: 10px;
           line-height: 1;
@@ -12330,7 +12404,7 @@ export default function CommonViewPage() {
           background: #bbf7d0 !important;
           color: #166534 !important;
         }
-        .common-task-status-indicator.status-waiting { color: #9a3412 !important; }
+        .common-task-status-indicator.status-waiting { color: #134e4a !important; }
         .common-task-status-indicator.status-waiting-client { color: #854d0e !important; }
         .week-table-entry.calendar-internal-muted .week-table-meeting-title,
         .swimlane-cell.calendar-internal-muted .swimlane-title {
@@ -12528,6 +12602,7 @@ export default function CommonViewPage() {
         .swimlane-header.externalHoliday { background: var(--externalHoliday-bg); color: #be185d; }
         .swimlane-header.blocked { background: var(--blocked-bg); color: #9f1239; }
         .swimlane-header.waiting-client { background: #e2c15b; color: #4f3a00; }
+        .swimlane-header.waiting-confirmation { background: #99f6e4; color: #134e4a; }
         .swimlane-header.oneh { background: var(--oneh-bg); color: #0369a1; }
         .swimlane-header.personal { background: var(--personal-bg); color: #7e22ce; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
@@ -12544,6 +12619,7 @@ export default function CommonViewPage() {
         .swimlane-badge.externalHoliday { border-color: var(--externalHoliday-accent); color: #be185d; }
         .swimlane-badge.blocked { border-color: var(--blocked-accent); color: #9f1239; }
         .swimlane-badge.waiting-client { border-color: #b8860b; color: #4f3a00; }
+        .swimlane-badge.waiting-confirmation { border-color: #0f766e; color: #134e4a; }
         .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #0369a1; }
         .swimlane-badge.personal { border-color: var(--personal-accent); color: #7e22ce; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
@@ -13569,6 +13645,13 @@ export default function CommonViewPage() {
               All
             </button>
             <button
+              className={`chip ${typeFilters.has("waitingConfirmation") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("waitingConfirmation")}
+            >
+              WFC INT
+            </button>
+            <button
               className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("blocked")}
@@ -13848,7 +13931,7 @@ export default function CommonViewPage() {
                 type="button"
                 aria-pressed={kaGentFilterActive}
                 onClick={() => setKaGentFilterActive((active) => !active)}
-                title="Show personal, symbol and WFC tasks for both KA and GENT"
+                title="Show personal, symbol and WFC INT tasks for both KA and GENT"
               >
                 KA/GENT
               </button>
@@ -16487,6 +16570,7 @@ export default function CommonViewPage() {
                       if (rowId === "leave") return "leave"
                       if (rowId === "externalHoliday") return "externalHoliday"
                       if (rowId === "waitingClient") return "waiting-client"
+                      if (rowId === "waitingConfirmation") return "waiting-confirmation"
                       if (rowId === "blocked") return "blocked"
                       if (isOneHSlotRowId(rowId as CommonType)) return "oneh"
                       if (isPersonalRowId(rowId as CommonType)) return "personal"
@@ -16701,7 +16785,7 @@ export default function CommonViewPage() {
                             ) : null}
                           </div>
                         ))
-                      } else if (isOneHSlotRowId(row.id) || row.id === "r1" || row.id === "waitingClient") {
+                      } else if (isOneHSlotRowId(row.id) || row.id === "r1" || row.id === "waitingClient" || row.id === "waitingConfirmation") {
                         return (entries as FastTaskEntry[]).map((e, idx: number) => (
                           <div
                             key={idx}
@@ -16716,11 +16800,11 @@ export default function CommonViewPage() {
                             <div className="week-table-entry-main">
                                   <span>
                                   <span className="week-table-line-number">{idx + 1}.</span>
-                                  {(row.id !== "waitingClient" || e.oneHReportSlot) ? (
+                                  {(isOneHSlotRowId(row.id) || row.id === "r1" || e.oneHReportSlot) ? (
                                     <span className="oneh-slot-indicator">{getOneHReportSlotLabel(e.oneHReportSlot)}</span>
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
-                                  {renderWfcIndicator(e)}
+                                  {renderWfcIndicator(e, row.id === "waitingConfirmation")}
                                   {isShtypiTaskRowId(row.id) ? renderWeekTaskMarkers(e) : null}
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
@@ -17403,7 +17487,7 @@ export default function CommonViewPage() {
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
                                           </span>
                                         ) : null}
-                                        {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
+                                        {isFastTaskRowId(row.id) ? renderWfcIndicator(cell, row.id === "waitingConfirmation") : null}
                                         {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
                                         {taskStatusIndicator}
                                         {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title, cell.isSystemTask) ? (
@@ -17422,7 +17506,7 @@ export default function CommonViewPage() {
                                             {cell.isCalendarMeeting ? <span className="calendar-meeting-badge">CAL</span> : null}
                                           </span>
                                         ) : null}
-                                        {isFastTaskRowId(row.id) && row.id !== "waitingClient"
+                                        {isFastTaskRowId(row.id) && row.id !== "waitingClient" && row.id !== "waitingConfirmation"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
                                         {reviewButton}
@@ -17443,7 +17527,7 @@ export default function CommonViewPage() {
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
                                           </span>
                                         ) : null}
-                                        {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
+                                        {isFastTaskRowId(row.id) ? renderWfcIndicator(cell, row.id === "waitingConfirmation") : null}
                                         {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
                                         {taskStatusIndicator}
                                         {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title, cell.isSystemTask) ? (
@@ -17462,7 +17546,7 @@ export default function CommonViewPage() {
                                             {cell.isCalendarMeeting ? <span className="calendar-meeting-badge">CAL</span> : null}
                                           </span>
                                         ) : null}
-                                        {isFastTaskRowId(row.id) && row.id !== "waitingClient"
+                                        {isFastTaskRowId(row.id) && row.id !== "waitingClient" && row.id !== "waitingConfirmation"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
                                         {reviewButton}

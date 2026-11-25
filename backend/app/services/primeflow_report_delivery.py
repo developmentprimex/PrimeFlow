@@ -27,7 +27,7 @@ from app.models.task import Task
 from app.models.task_strike_event import TaskStrikeEvent
 from app.models.user import User
 from app.services.primeflow_report import (
-    GmailService, GmailVerificationError, PrimeFlowClient,
+    GmailService, GmailVerificationError,
     REPORT_SENDER_EMAIL, ReportDocument, ReportReminderQuestion, ReportUndiscussedNote, clean_description, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
@@ -99,10 +99,12 @@ def _environment_recipients() -> list[str]:
     return [value.strip() for value in raw.split(",") if value.strip()]
 
 
-def validate_report_config(*, require_gmail: bool = True) -> None:
-    required = ["DATABASE_URL", "PRIMEFLOW_API_BASE_URL", "PRIMEFLOW_REPORT_TIMEZONE"]
-    if not os.getenv("PRIMEFLOW_ACCESS_TOKEN"):
-        required.extend(["PRIMEFLOW_EMAIL", "PRIMEFLOW_PASSWORD"])
+def validate_report_config(*, require_gmail: bool = True, require_api: bool = True) -> None:
+    required = ["DATABASE_URL", "PRIMEFLOW_REPORT_TIMEZONE"]
+    if require_api:
+        required.append("PRIMEFLOW_API_BASE_URL")
+        if not os.getenv("PRIMEFLOW_ACCESS_TOKEN"):
+            required.extend(["PRIMEFLOW_EMAIL", "PRIMEFLOW_PASSWORD"])
     if require_gmail:
         required.append("EMAIL_PASSWORD")
     missing = sorted({name for name in required if not os.getenv(name)})
@@ -376,12 +378,13 @@ def report_text_overrides(snapshot, *, interval_start, interval_end):
     return title_overrides, description_overrides
 
 
-async def load_common_view(day: date) -> dict:
-    client = PrimeFlowClient(
-        os.environ["PRIMEFLOW_API_BASE_URL"].rstrip("/"),
-        os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
-    )
-    return await client.common_view(day)
+async def load_common_view(day: date, *, db: AsyncSession | None = None) -> dict:
+    from app.api.routers.common_view import load_report_common_view_with_previous_week
+
+    if db is not None:
+        return await load_report_common_view_with_previous_week(db, day)
+    async with SessionLocal() as session:
+        return await load_report_common_view_with_previous_week(session, day)
 
 
 async def generate_fresh(
@@ -431,12 +434,13 @@ async def render_ga_recipient_email_html(
 ) -> str:
     """Render the same GA-only email body for previews and real delivery."""
     if today_print_html is None:
-        source_data = source_data or await load_common_view(day)
+        source_data = source_data or await load_common_view(day, db=db)
         try:
             today_print_report = await build_today_print_report(
                 day,
                 include_attachment=False,
                 payload=source_data,
+                db=db,
             )
             today_print_html = today_print_report["content_html"]
         except Exception:
@@ -515,7 +519,7 @@ async def deliver_report(
                     run.finished_at = datetime.now(report_timezone())
                     await db.commit()
                     return run
-            source_data = await load_common_view(day)
+            source_data = await load_common_view(day, db=db)
             document = await generate_fresh(day, slot, recipient_map, data=source_data, show_full_mira_notes=show_full_mira_notes)
             attachment_warnings: list[str] = []
             try:
@@ -523,6 +527,7 @@ async def deliver_report(
                     day,
                     include_attachment=True,
                     payload=source_data,
+                    db=db,
                 )
             except Exception as exc:
                 attachment_warnings.append(
@@ -534,6 +539,7 @@ async def deliver_report(
                     day,
                     include_attachment=False,
                     payload=source_data,
+                    db=db,
                 )
             ga_body = render_plain_text(document)
             ga_base_html = render_html(document)

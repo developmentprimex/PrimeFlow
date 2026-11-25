@@ -80,6 +80,7 @@ async def _refresh_saved_metadata(db: AsyncSession, row: M1ReportingPointsReport
 
 
 async def _current_payload(db: AsyncSession, row: M1ReportingPointsReport) -> dict:
+    from app.services.discord_task_deliveries import with_discord_delivery
     from app.services.report_attendance import filter_points_payload
     from app.services.px_note_email import email_preview_text, legacy_email
     from app.services.report_note_attachments import mail_previews_by_row
@@ -101,7 +102,7 @@ async def _current_payload(db: AsyncSession, row: M1ReportingPointsReport) -> di
             note = {**note, "email_preview": current, "content": email_preview_text(current)}
         visible_notes.append(note)
     report["data"]["notes"] = visible_notes
-    return report
+    return await with_discord_delivery(db, report, "M2")
 
 
 @router.get("/recipients")

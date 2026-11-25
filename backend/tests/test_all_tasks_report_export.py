@@ -5,23 +5,54 @@ from types import SimpleNamespace
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from app.api.routers.exports import AllTasksReportExportIn, export_all_tasks_report_xlsx
+from app.api.routers.exports import (
+    AllTasksReportExportIn, CommonViewExportIn, export_all_tasks_report_xlsx, export_common_view_xlsx,
+)
 from app.models.enums import UserRole
 
 
 class TestAllTasksReportExport(unittest.IsolatedAsyncioTestCase):
-    async def test_bz_column_is_compact_only_for_finance(self):
+    async def test_common_view_distinguishes_the_waiting_rows(self):
+        response = await export_common_view_xlsx(
+            CommonViewExportIn(
+                title="Common View",
+                columns=["NR", "LLOJI", "MON"],
+                rows=[["1", "WFE", "Client reply"], ["2", "WFC INT", "[CON: HS] Internal approval"]],
+            ),
+            user=SimpleNamespace(role=UserRole.ADMIN, full_name="HS", username="hs"),
+        )
+        sheet = load_workbook(io.BytesIO(b"".join([chunk async for chunk in response.body_iterator]))).active
+        self.assertEqual(sheet["B5"].fill.fgColor.rgb, "00E2C15B")
+        self.assertEqual(sheet["B6"].fill.fgColor.rgb, "0099F6E4")
+        self.assertEqual(sheet["C6"].value, "[CON: HS] Internal approval")
+
+    async def test_finance_places_user_after_compact_bz_column(self):
         for title, width in (("ALL FINANCE TASK REPORT", 10), ("ALL TASKS REPORT", 14)):
             with self.subTest(title=title):
                 response = await export_all_tasks_report_xlsx(
-                    AllTasksReportExportIn(title=title, rows=[{"bzMe": "GA, HS", "kohaBz": "13:30"}]),
+                    AllTasksReportExportIn(
+                        title=title,
+                        rows=[{"bzMe": "GA, HS", "kohaBz": "13:30", "userInitials": "OH, HS", "status": "WAITING_CONFIRMATION"}],
+                    ),
                     user=SimpleNamespace(role=UserRole.ADMIN, full_name="HS", username="hs"),
                 )
                 sheet = load_workbook(io.BytesIO(b"".join([chunk async for chunk in response.body_iterator]))).active
-                column = next(cell.column for cell in sheet[4] if cell.value == "BZ ME")
+                headers = [cell.value for cell in sheet[4]]
+                column = headers.index("BZ ME") + 1
                 self.assertEqual(sheet.column_dimensions[get_column_letter(column)].width, width)
                 self.assertEqual(sheet.cell(5, column).value, "GA, HS")
-                self.assertEqual(sheet.cell(5, column + 1).value, "13:30")
+                status_cell = sheet.cell(5, headers.index("STATUS") + 1)
+                self.assertEqual(status_cell.value, "WFC INT")
+                self.assertEqual(status_cell.fill.fgColor.rgb, "0099F6E4")
+                if title == "ALL FINANCE TASK REPORT":
+                    self.assertEqual(headers[column:column + 2], ["USER", "KOHA BZ"])
+                    self.assertEqual(sheet.cell(5, column + 1).value, "OH, HS")
+                    self.assertEqual(sheet.cell(5, column + 2).value, "13:30")
+                else:
+                    self.assertEqual(headers[column], "KOHA BZ")
+                    self.assertEqual(headers[-1], "USER")
+                    self.assertEqual(sheet.cell(5, column + 1).value, "13:30")
+                    self.assertEqual(sheet.cell(5, len(headers)).value, "OH, HS")
 
     async def test_finance_export_removes_markup_and_preserves_text_and_breaks(self):
         for frequency in (None, "3M"):

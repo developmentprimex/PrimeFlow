@@ -69,12 +69,42 @@ def test_mixed_marker_requires_two_posts_and_cutoffs_are_inclusive():
     result = _delivery_results(rows, [first], DAY, local_time(17))[0]["deliveries"]
     assert result["M2"]["status"] == "on_time"
     assert result["M3"]["status"] == "missing"
-
     result = _delivery_results(rows, [second, first], DAY, local_time(17))[0]["deliveries"]
     assert result["M2"]["url"].endswith("/1")
     assert result["M3"]["url"].endswith("/2")
     assert result["M3"]["status"] == "on_time"
 
+
+def test_reporting_points_reuse_each_persons_discord_result_for_their_slot(monkeypatch):
+    from app.services import m1_reporting_points as m1, m2_reporting_points as m2, m3_reporting_points as m3
+    from app.services.m3_reporting_points_attachments import export_blocks
+    from app.services.report_attendance import ReportAttendance
+
+    now = local_time(17)
+    first = dict(task("M2", "M3"), id="task:one", task_id="task", person="One Person", initials="OP",
+                 user_id="one", symbol="M2/3", status="TODO")
+    second = dict(first, id="task:two", discord_id="43", person="Two Person", initials="TP", user_id="two")
+    third = dict(first, id="task:three", discord_id="44", person="Absent Person", initials="AP", user_id="three")
+    checked = _delivery_results([first, second, third], [post("1", local_time(12)), post("2", local_time(16), author="43")], DAY, now)
+    check = AsyncMock(return_value=(now, "live", True, checked))
+    monkeypatch.setattr(deliveries, "checked_deliveries", check)
+    monkeypatch.setattr(deliveries, "load_report_attendance", AsyncMock(return_value=ReportAttendance(user_ids={"three"})))
+    report = {"report_date": DAY.isoformat(), "data": {"delivery": [first]}, "manual_answers": {"delivery_choice:task": "PO"}}
+
+    for slot, expected, render_blocks, render_html in (
+        ("M2", ["on_time", "missing"], m1.export_blocks, m1.render_html),
+        ("M2", ["on_time", "missing"], m2.export_blocks, m2.render_html),
+        ("M3", ["missing", "on_time"], export_blocks, m3.render_html),
+    ):
+        connected = asyncio.run(deliveries.with_discord_delivery(None, report, slot))
+        delivery_rows = connected["data"]["delivery"]
+        assert [row["assignees"] for row in delivery_rows] == ["OP", "TP"]
+        assert [row["discord_delivery"]["status"] for row in delivery_rows] == expected
+        assert m3.delivery_summary(connected) == "SA/TOTALI: 1/2"
+        assert "PO/JO · DISCORD" in render_html(connected)
+        table = next(block for block in render_blocks(connected) if block["kind"] == "table"
+                     and any(label == "PO/JO · DISCORD" for _, label, _ in block["columns"]))
+        assert [row[-2]["text"] for row in table["rows"]] == (["PO · 12:00", "JO"] if slot == "M2" else ["JO", "PO · 16:00"])
 
 def test_linked_author_full_title_and_report_date_must_match():
     messages = [

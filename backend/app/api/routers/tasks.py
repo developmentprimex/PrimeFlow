@@ -421,7 +421,7 @@ async def _validate_waiting_confirmation_assignee(
     if confirmation_assignee_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Confirmation assignee is required when status is WAITING_CONFIRMATION",
+            detail="Confirmation assignee is required when status is WFC INT",
         )
     confirmation_user = (
         await db.execute(select(User).where(User.work_staff_filter()).where(User.id == confirmation_assignee_id))
@@ -2210,7 +2210,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
         if not _payload_supports_waiting_confirmation(payload):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="WAITING_CONFIRMATION is only available for 1H, R1, Personal, Bllok, GA/KA note, or plan-note tasks",
+                detail="WFC INT is only available for 1H, R1, Personal, Bllok, GA/KA note, or plan-note tasks",
             )
         await _validate_waiting_confirmation_assignee(db, confirmation_assignee_id)
     elif confirmation_assignee_id is not None:
@@ -3428,7 +3428,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="WAITING_CONFIRMATION is only available for 1H, R1, Personal, Bllok, GA/KA note, or plan-note tasks",
+                detail="WFC INT is only available for 1H, R1, Personal, Bllok, GA/KA note, or plan-note tasks",
             )
         await _validate_waiting_confirmation_assignee(db, task.confirmation_assignee_id)
     if (

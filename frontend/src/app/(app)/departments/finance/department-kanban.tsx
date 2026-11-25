@@ -818,7 +818,7 @@ export default function DepartmentKanban() {
               <TableCell>{formatDateDMY(row?.dueDateIso || task.due_date || "")}</TableCell>
               <TableCell>{row?.lateDays ? <Badge variant="destructive">{row.lateDays}</Badge> : "–"}</TableCell>
               <TableCell>{row?.typeLabel === "SYS" || task.is_system_task ? "SYS" : row?.task.one_h_marker || "–"}</TableCell>
-              <TableCell><span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${weeklyPlanStatusBgClass(status)}`}>{status}</span></TableCell>
+              <TableCell><span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${weeklyPlanStatusBgClass(status)}`}>{status === "WAITING_CONFIRMATION" ? "WFC INT" : status}</span></TableCell>
             </>
           }}
         />
@@ -992,7 +992,7 @@ export default function DepartmentKanban() {
                         </TableCell>
                         <TableCell>
                           <span className={`inline-block max-w-full rounded px-2 py-1 text-xs font-medium uppercase whitespace-normal [overflow-wrap:anywhere] ${row.statusClassName}`}>
-                            {row.status === "PAUSED" ? "Stopped" : row.status}
+                            {row.status === "PAUSED" ? "Stopped" : row.status === "WAITING_CONFIRMATION" ? "WFC INT" : row.status}
                           </span>
                           {isTaskPausedOnDay(row.task, todayIso) && <TaskPauseBadge />}
                         </TableCell>

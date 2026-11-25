@@ -108,7 +108,7 @@ const TASK_STATUS_LABELS: Record<(typeof TASK_STATUSES)[number], string> = {
   IN_PROGRESS: "In Progress",
   PAUSED: "Stopped",
   WAITING_CLIENT: "WFE",
-  WAITING_CONFIRMATION: "Waiting Confirmation",
+  WAITING_CONFIRMATION: "WFC INT",
   DONE: "Done",
 }
 
@@ -191,6 +191,7 @@ function statusLabel(status?: string) {
   if (!status) return "-"
   if (status === "PAUSED") return "Stopped"
   if (status === "WAITING_CLIENT") return "WFE"
+  if (status === "WAITING_CONFIRMATION") return "WFC INT"
   return status
     .replace(/_/g, " ")
     .toLowerCase()
@@ -3934,7 +3935,7 @@ export default function ProjectPage() {
                     : statusValue === "WAITING_CLIENT"
                       ? "border-[#B8860B] border-l-[#B8860B] bg-[#E2C15B]/75"
                     : statusValue === "WAITING_CONFIRMATION"
-                      ? "border-blue-200 border-l-blue-500 bg-blue-50/40"
+                      ? "border-teal-300 border-l-teal-600 bg-teal-100/60"
                       : statusValue === "IN_PROGRESS"
                         ? "border-amber-200 border-l-amber-500"
                         : "border-slate-200 border-l-slate-400"
@@ -5043,7 +5044,7 @@ export default function ProjectPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="text-sm text-muted-foreground">
-              Select manager/admin confirmer before setting task to Waiting Confirmation.
+              Select manager/admin confirmer before setting task to WFC INT.
             </div>
             <div className="space-y-2">
               <Label>Confirm by (Manager/Admin)</Label>

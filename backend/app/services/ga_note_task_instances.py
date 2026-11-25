@@ -482,7 +482,7 @@ def apply_ga_note_assignee_execution_states(
         }:
             raise ValueError(
                 "GA task status must be TODO, IN_PROGRESS, PAUSED, WAITING_CLIENT, "
-                "WAITING_CONFIRMATION, or DONE"
+                "WFC INT, or DONE"
             )
         if state.start_date is not None and state.due_date is not None and state.start_date > state.due_date:
             raise ValueError("Start date cannot be after due date")

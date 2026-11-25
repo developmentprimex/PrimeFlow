@@ -14,6 +14,7 @@ from app.services.m3_reporting_points import (
     REALIZATION_CAPTURE_TIME,
     build_realization_capture,
     locked_report,
+    record_realization_capture,
     refresh_report,
 )
 from app.services.primeflow_report import report_timezone
@@ -38,8 +39,7 @@ async def run_m3_reporting_points_scheduler_once(now: datetime | None = None) ->
             return False
         # Manual answers survive capture.
         if row.generated_at:
-            row.realization = await build_realization_capture(db, day)
-            row.realization_captured_at = now
+            record_realization_capture(row, await build_realization_capture(db, day), now)
         else:
             await refresh_report(db, row, now)
         await db.commit()

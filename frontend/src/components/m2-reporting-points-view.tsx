@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { reportDate, type TaskRow } from "@/components/m3-reporting-points-view"
+import { DiscordDeliveryTable, reportDate, type DeliverySlot, type TaskRow } from "@/components/m3-reporting-points-view"
 import { DAILY_RLZ_REASONS, dailyRlzReasonLabel } from "@/lib/daily-rlz-ui"
 
 export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
@@ -20,11 +20,12 @@ export type UnfinishedPriorityRow = {
 }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
+  discord_delivery_slot?: DeliverySlot
   manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; postponed_am?: TaskRow[]; ga_progress?: TaskRow[]; delivery?: TaskRow[]; pm_due_today?: TaskRow[]; pm_continuation?: TaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
-const TASK_COLORS: Record<string, string> = { TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", PAUSED: "#CBD5E1", DONE: "#C4FDC4", WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#FFEDD5" }
+const TASK_COLORS: Record<string, string> = { TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", PAUSED: "#CBD5E1", DONE: "#C4FDC4", WAITING_CLIENT: "#E2C15B", WAITING_CONFIRMATION: "#CCFBF1" }
 
 function text(row: TaskRow, key: keyof TaskRow) { return String(row[key] ?? "—") }
 function dateChange(row: TaskRow, old: boolean) {
@@ -165,11 +166,14 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
         {!pmDueRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
       </div>
     </section>
-    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">6. SA PER DOREZIM M2?</h2>
+    {report.discord_delivery_slot ? <section className="space-y-3" aria-labelledby="m2-delivery">
+      <h2 id="m2-delivery" className="text-lg font-bold">6. SA PER DOREZIM M2?</h2>
+      <DiscordDeliveryTable rows={deliveryRows} slot={report.discord_delivery_slot} notes={answers} onNoteChange={onAnswerChange} disabled={disabled} />
+    </section> : <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">6. SA PER DOREZIM M2?</h2>
       <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">SA/TOTALI: <span className="text-2xl font-extrabold tabular-nums">{deliveredCount}/{deliveryRows.length}</span></span></div>
       <p className="text-sm text-muted-foreground">Detyrat me simbolet M2 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
       {renderTable(deliveryRows, true)}
-    </section>
+    </section>}
     <section className="space-y-3" aria-labelledby="m2-pm-continuation">
       <h2 id="m2-pm-continuation" className="text-lg font-bold">7. A VAZHDOJNË DETYRAT NË PM?</h2>
       <p className="text-sm text-muted-foreground">Përgjigjet për detyrat e planifikuara në PM sot. Kërkesat për shtyrje në Discord ndryshojnë datat vetëm pas konfirmimit të Diellza Veliut.</p>

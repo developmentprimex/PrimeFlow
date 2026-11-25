@@ -148,6 +148,7 @@ function statusLabel(status?: string) {
   if (status === "PAUSED") return "Stopped"
   if (!status) return "-"
   if (status === "WAITING_CLIENT") return "WFE"
+  if (status === "WAITING_CONFIRMATION") return "WFC INT"
   return status
     .replace(/_/g, " ")
     .toLowerCase()

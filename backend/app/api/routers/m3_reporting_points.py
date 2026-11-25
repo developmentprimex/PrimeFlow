@@ -19,8 +19,8 @@ from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
 from app.services.m3_unheld_meetings import is_meeting_comment_key
 from app.services.m3_reporting_points import (
-    MANUAL_POINTS, current_report_payload, get_settings, locked_report, refresh_report, render_html,
-    render_plain_text, report_payload, send_report,
+    MANUAL_POINTS, REALIZATION_COMMENT_MANAGERS, current_report_payload, get_settings, locked_report,
+    realization_comment_requests, refresh_report, render_html, render_plain_text, report_payload, send_report,
 )
 
 router = APIRouter()
@@ -48,7 +48,7 @@ class ManualAnswersPayload(BaseModel):
     def validate_answers(cls, value: dict[str, str]) -> dict[str, str]:
         value = {key: answer for key, answer in value.items() if key != "underload"}
         if any(key not in MANUAL_POINTS and not is_meeting_comment_key(key)
-               and not is_task_comment_key(key) for key in value):
+               and not is_task_comment_key(key) and key not in REALIZATION_COMMENT_MANAGERS for key in value):
             raise ValueError("Pike manuale e panjohur.")
         if any(len(answer) > 10000 for answer in value.values()):
             raise ValueError("Pergjigjja nuk mund te kete mbi 10000 karaktere.")
@@ -124,13 +124,23 @@ async def generate(report_date: date, db: AsyncSession = Depends(get_db),
 @router.put("/{report_id}/answers")
 async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
                        db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    if any(not is_meeting_comment_key(key) for key in payload.manual_answers):
+    submitted = dict(payload.manual_answers)
+    realization_comments = {key: answer.strip() for key, answer in submitted.items()
+                            if key in REALIZATION_COMMENT_MANAGERS}
+    if any(not is_meeting_comment_key(key) and key not in realization_comments for key in submitted):
         await require_report_manager(user)
     existing = await _by_id(db, report_id)
     if not payload.manual_answers:
         return await current_report_payload(db, existing)
     row = await locked_report(db, existing.report_date)
     await db.refresh(row)
+    if realization_comments:
+        requests = realization_comment_requests(row.realization)
+        if any(key not in requests for key in realization_comments):
+            raise HTTPException(422, "Komenti kërkohet kur realizimi i departamentit është nën 50%.")
+        if any(not answer for answer in realization_comments.values()):
+            raise HTTPException(422, "Shkruaj arsyen e realizimit nën 50%.")
+        submitted.update(realization_comments)
     before = dict(row.manual_answers or {})
     valid_comments = {f"untouched_comment:{item['task_id']}"
                       for item in (row.data or {}).get("untouched", []) if item.get("task_id")}
@@ -140,9 +150,9 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     if any(is_task_comment_key(key) and key not in valid_comments and key not in before
            for key in payload.manual_answers):
         raise HTTPException(422, "Detyra nuk gjendet ne kete raport.")
-    row.manual_answers = {**before, **payload.manual_answers}
+    row.manual_answers = {**before, **submitted}
     from app.api.routers.discord_m3 import capture_report_changes
-    await capture_report_changes(db, row, before, payload.manual_answers)
+    await capture_report_changes(db, row, before, submitted)
     row.status, row.last_error = "DRAFT", None
     row.updated_by = user.id
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m3_reporting_points", entity_id=row.id,

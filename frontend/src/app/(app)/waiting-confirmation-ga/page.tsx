@@ -20,7 +20,7 @@ import type { Department, Project, Task, TaskAssignee } from "@/lib/types"
 import { useWaitingConfirmationGa } from "@/components/waiting-confirmation-ga-context"
 
 const TASK_STATUS_STYLES: Record<string, string> = {
-  WAITING_CONFIRMATION: "bg-blue-50 text-blue-700 border-blue-200",
+  WAITING_CONFIRMATION: "bg-teal-100 text-teal-900 border-teal-300",
   IN_PROGRESS: "bg-amber-50 text-amber-700 border-amber-200",
   PAUSED: "bg-slate-200 text-slate-800 border-slate-400",
   TODO: "bg-slate-100 text-slate-700 border-slate-200",
@@ -188,7 +188,7 @@ export default function WaitingConfirmationGaPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h1 className="text-xl font-semibold tracking-tight">WFC</h1>
+          <h1 className="text-xl font-semibold tracking-tight">WFC INT</h1>
           <p className="text-sm text-muted-foreground">
             Tasks waiting for your confirmation.
           </p>
@@ -205,13 +205,13 @@ export default function WaitingConfirmationGaPage() {
 
       {isLoading ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-          Loading waiting confirmation tasks...
+          Loading WFC INT tasks...
         </div>
       ) : null}
 
       {!isLoading && !combinedError && tasks.length === 0 ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-          No waiting confirmation tasks.
+          No WFC INT tasks.
         </div>
       ) : null}
 
@@ -351,7 +351,7 @@ export default function WaitingConfirmationGaPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={TASK_STATUS_STYLES[status] || TASK_STATUS_STYLES.TODO}>
-                      {status === "WAITING_CONFIRMATION" ? "Waiting Confirmation" : status}
+                      {status === "WAITING_CONFIRMATION" ? "WFC INT" : status}
                     </Badge>
                   </TableCell>
                   <TableCell className="whitespace-nowrap">

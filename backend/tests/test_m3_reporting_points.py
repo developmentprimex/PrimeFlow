@@ -804,6 +804,60 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["sent_at"], row.sent_at.isoformat())
         db.commit.assert_awaited_once()
 
+    async def test_any_report_user_can_save_a_realization_comment_below_50(self):
+        capture = {"percent": 35, "comment": "Jemi nën 50%", "departments": [
+            {"code": "DEV", "percent": 49.9}, {"code": "GD", "percent": 0},
+            {"code": "PCM", "percent": 50}, {"code": "FIN", "percent": 36},
+        ]}
+        row = M3ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={},
+                                      data={}, status="DRAFT", realization=capture)
+        discord_questions = MagicMock()
+        discord_questions.scalars.return_value.all.return_value = []
+        db = SimpleNamespace(get=AsyncMock(return_value=row), refresh=AsyncMock(), commit=AsyncMock(), add=MagicMock(),
+                             execute=AsyncMock(return_value=discord_questions))
+        staff = SimpleNamespace(id=uuid.uuid4(), role=UserRole.STAFF, full_name="Staf")
+        admin = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, full_name="Admin")
+
+        async def save(user, code, comment):
+            return await api.save_answers(row.id, api.ManualAnswersPayload(
+                manual_answers={f"realization_comment:{code}": comment}), db, user)
+
+        with patch.object(api, "locked_report", new=AsyncMock(return_value=row)):
+            for user, code, comment, status in (
+                (staff, "PCM", "Exactly 50%", 422), (staff, "GD", "   ", 422),
+            ):
+                with self.assertRaises(api.HTTPException) as error:
+                    await save(user, code, comment)
+                self.assertEqual(error.exception.status_code, status)
+            await save(staff, "DEV", "  Vonesë <klienti>  ")
+            await save(admin, "GD", "Koment fillestar")
+            report = await save(staff, "GD", "Pritje e materialeve")
+            with self.assertRaises(api.HTTPException) as error:
+                await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={
+                    "overload": "Ndryshim i pikës manuale", "realization_comment:DEV": "Koment tjetër",
+                }), db, staff)
+            self.assertEqual(error.exception.status_code, 403)
+
+        self.assertEqual(row.manual_answers, {
+            "realization_comment:DEV": "Vonesë <klienti>", "realization_comment:GD": "Pritje e materialeve",
+        })
+        self.assertEqual([item.get("comment_manager") for item in report["realization"]["departments"]],
+                         ["Laurent Hoxha", "Diellza Veliu", None, None])
+        self.assertIn("Vonesë &lt;klienti&gt;", service.render_html(report))
+        self.assertIn("Pritje e materialeve", service.render_plain_text(report))
+        from app.services.m3_reporting_points_attachments import export_blocks, report_attachments
+        self.assertIn("Vonesë <klienti>", export_blocks(report)[-1]["rows"][0][-1]["text"])
+        from docx import Document
+        from io import BytesIO
+        from openpyxl import load_workbook
+        from PIL import Image
+        attachments = {mime: content for _, content, mime in report_attachments(report)}
+        word = Document(BytesIO(attachments["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]))
+        self.assertIn("Vonesë <klienti>", [cell.text for cell in word.tables[-1].rows[1].cells])
+        sheet = load_workbook(BytesIO(attachments[XLSX_MIME])).active
+        self.assertIn("Pritje e materialeve", [cell.value for line in sheet for cell in line])
+        Image.open(BytesIO(attachments["image/png"])).verify()
+
     async def test_api_manual_send_reads_current_m3_recipients_and_requires_capture(self):
         row = M3ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data={}, status="DRAFT",
                                       generated_at=datetime.now(timezone.utc))

@@ -40,18 +40,18 @@ const outcomeLabels: Record<string, string> = {
   CRITICAL_ALL: "Deadline Important", CRITICAL_DONE: "Deadline Important të kryera", CRITICAL_NOT_DONE: "Deadline Important pa kryer",
   EXTRA_PROGRESS: "Ekstra në progres", EXTRA_NO_PROGRESS: "Ekstra pa progres", EXTRA_ALL: "Ekstra gjithsej", EXTRA_DONE: "Ekstra të kryera", REALIZED_AS_PLANNED: "Kryer sipas planit", IN_PROGRESS: "Në progres", NO_PROGRESS: "Pa progres", PAUSED: "Stopped",
   POSTPONED_APPROVED: "Shtyrë", POSTPONED_UNAPPROVED: "Shtyrë",
-  WAITING_CONFIRMATION: "Në pritje konfirmimi", COMPLETED_LATE: "Kryer me vonesë",
+  WAITING_CONFIRMATION: "WFC INT", COMPLETED_LATE: "Kryer me vonesë",
   COMPLETED_EARLY: "Kryer para kohe", ADDITIONAL_COMPLETED: "Ekstra e kryer", ADDED_DURING_DAY: "Shtuar gjatë ditës",
   REOPENED: "Rihapur", REASSIGNED_OUT: "Transferuar jashtë", REASSIGNED_IN: "Transferuar brenda",
 }
 const outcomeStyles: Record<string, string> = {
   PAUSED: "border-slate-400 bg-slate-200 text-slate-800",
   REALIZED_AS_PLANNED: "border-[#8BDD8B] bg-[#C4FDC4] text-slate-900", COMPLETED_LATE: "border-[#8BDD8B] bg-[#C4FDC4] text-slate-900", COMPLETED_EARLY: "border-[#8BDD8B] bg-[#C4FDC4] text-slate-900",
-  IN_PROGRESS: "border-[#D6D600] bg-[#FFFF00] text-slate-900", NO_PROGRESS: "border-[#E69CCF] bg-[#FFC4ED] text-slate-900", WAITING_CONFIRMATION: "border-orange-200 bg-[#FFEDD5] text-orange-900",
+  IN_PROGRESS: "border-[#D6D600] bg-[#FFFF00] text-slate-900", NO_PROGRESS: "border-[#E69CCF] bg-[#FFC4ED] text-slate-900", WAITING_CONFIRMATION: "border-teal-300 bg-teal-100 text-teal-900",
   POSTPONED_APPROVED: "border-violet-200 bg-violet-50 text-violet-800", POSTPONED_UNAPPROVED: "border-violet-300 bg-violet-50 text-violet-900",
   ADDITIONAL_COMPLETED: "border-blue-200 bg-blue-50 text-[#2563EB]", ADDED_DURING_DAY: "border-blue-200 bg-blue-50 text-[#2563EB]",
 }
-const statuses: Record<string, string> = { PAUSED: "Stopped", DONE: "Kryer", IN_PROGRESS: "Në progres", TODO: "Pa progres", WAITING_CONFIRMATION: "Në pritje konfirmimi" }
+const statuses: Record<string, string> = { PAUSED: "Stopped", DONE: "Kryer", IN_PROGRESS: "Në progres", TODO: "Pa progres", WAITING_CONFIRMATION: "WFC INT" }
 const closeUi: Record<DailyRealizationPerson["close_state"], [string, string]> = {
   NOT_SAVED: ["Dita e hapur", "border-amber-200 bg-amber-50 text-amber-800"], SAVED: ["✓ Dita e mbyllur", "border-emerald-200 bg-emerald-50 text-emerald-800"],
   STALE: ["⚠ Ka ndryshime pas mbylljes", "border-orange-200 bg-orange-50 text-orange-800"], REOPENED: ["Dita është rihapur", "border-blue-200 bg-blue-50 text-blue-800"], CLOSED_EDIT_WINDOW: ["Afati i mbylljes ka përfunduar", "border-rose-200 bg-rose-50 text-rose-800"],

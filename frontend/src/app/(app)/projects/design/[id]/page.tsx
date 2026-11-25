@@ -124,6 +124,7 @@ function statusLabel(status?: string) {
   if (status === "PAUSED") return "Stopped"
   if (!status) return "-"
   if (status === "WAITING_CLIENT") return "WFE"
+  if (status === "WAITING_CONFIRMATION") return "WFC INT"
   return status
     .replace(/_/g, " ")
     .toLowerCase()
@@ -5551,7 +5552,7 @@ export default function DesignProjectPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="text-sm text-muted-foreground">
-              Select manager/admin confirmer before setting task to Waiting Confirmation.
+              Select manager/admin confirmer before setting task to WFC INT.
             </div>
             <div className="space-y-2">
               <Label>Confirm by (Manager/Admin)</Label>

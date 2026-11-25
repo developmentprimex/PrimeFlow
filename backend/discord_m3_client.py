@@ -41,7 +41,7 @@ def prompt(job, page=0):
         if job.get('comment'):
             text += ' · 💬'
         return text
-    text = f"<@{job['discord_user_id']}> **{'M3' if kind in {'untouched', 'delivery', 'meeting'} else 'NESËR'} · {KINDS[kind]}**\n"
+    text = f"<@{job['discord_user_id']}> **{'M3' if kind in {'untouched', 'delivery', 'meeting', 'realization'} else 'NESËR'} · {KINDS[kind]}**\n"
     if kind == 'tomorrow':
         text += f"**{job['target_date']} · {len(row['tasks'])} detyra**\n"
         text += 'Po për të gjitha plotëson vetëm detyrat ende pa përgjigje. Përgjigjet dhe komentet individuale ruhen.'
@@ -51,6 +51,9 @@ def prompt(job, page=0):
             text += 'Detyra është TODO. Pse nuk ka progres sot? Komento, shëno progresin, mbylle ose shtyje.'
         elif kind == 'delivery':
             text += 'A është dorëzuar për M3? Zgjidh Po ose Jo dhe shto komentin.'
+        elif kind == 'realization':
+            text += (f"Më {datetime.fromisoformat(job['day']):%d.%m.%Y}, realizimi në kontrollin e orës 16:15 "
+                     f"ishte **{row['percent']:g}%**. Pse ishte nën 50%?")
         elif kind == 'meeting':
             if row.get('time'):
                 text += 'Ora: ' + datetime.fromisoformat(row['time']).astimezone(report_timezone()).strftime('%H:%M') + '\n'
@@ -123,6 +126,8 @@ def controls(job, page=0):
         elif kind == 'meeting':
             button('Po, u mbajt', 'held', discord.ButtonStyle.success)
             button('Jo, u anulua', 'canceled')
+        elif kind == 'realization':
+            button('Shkruaj komentin' if not job.get('answered') else 'Ndrysho komentin', 'comment')
         elif kind == 'slot':
             slot = row.get('slot')
             if slot in SLOTS:

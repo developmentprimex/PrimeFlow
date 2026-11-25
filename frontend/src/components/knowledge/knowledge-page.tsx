@@ -411,7 +411,7 @@ function noteCellClass(note: PromptNote, stage: PromptNoteStage) {
   if (statuses.every((s) => s === "DONE")) return "bg-emerald-200"
   if (statuses.some((s) => s === "IN_PROGRESS")) return "bg-yellow-200"
   if (statuses.some((s) => s === "WAITING_CLIENT")) return "bg-[#E2C15B] text-[#4F3A00]"
-  if (statuses.some((s) => s === "WAITING_CONFIRMATION")) return "bg-amber-50"
+  if (statuses.some((s) => s === "WAITING_CONFIRMATION")) return "bg-teal-100"
   return "bg-pink-200"
 }
 

@@ -117,7 +117,7 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
   PAUSED: { label: "Stopped", dot: "bg-slate-500", pill: "bg-slate-200 text-slate-800" },
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
   WAITING_CLIENT: { label: "WFE", dot: "bg-[#B8860B]", pill: "bg-[#E2C15B] text-[#4F3A00]" },
-  WAITING_CONFIRMATION: { label: "Waiting Confirmation", dot: "bg-blue-600", pill: "bg-blue-50 text-blue-700" },
+  WAITING_CONFIRMATION: { label: "WFC INT", dot: "bg-teal-700", pill: "bg-teal-100 text-teal-900" },
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
 }
 const MAX_ATTACHMENT_FILES = 20
@@ -1053,7 +1053,7 @@ function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   if (["in_progress", "in-progress", "in progress"].includes(normalized)) return "IN_PROGRESS"
   if (normalized === "paused") return "PAUSED"
   if (["waiting_client", "waiting-client", "waiting for client", "wfe"].includes(normalized)) return "WAITING_CLIENT"
-  if (["waiting_confirmation", "waiting-confirmation", "waiting confirmation"].includes(normalized)) return "WAITING_CONFIRMATION"
+  if (["waiting_confirmation", "waiting-confirmation", "waiting confirmation", "wfc int"].includes(normalized)) return "WAITING_CONFIRMATION"
   if (["done"].includes(normalized)) return "DONE"
   return "UNKNOWN"
 }
@@ -3776,7 +3776,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                   <SelectItem value="TODO">To do</SelectItem>
                                   <SelectItem value="IN_PROGRESS">In progress</SelectItem>
                                   <SelectItem value="WAITING_CLIENT">WFE</SelectItem>
-                                  <SelectItem value="WAITING_CONFIRMATION">Waiting Confirmation</SelectItem>
+                                  <SelectItem value="WAITING_CONFIRMATION">WFC INT</SelectItem>
                                   <SelectItem value="DONE">Done</SelectItem>
                                 </SelectContent>
                               </Select>
@@ -4335,7 +4335,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     value="WAITING_CONFIRMATION"
                     className="bg-amber-50 text-blue-900 focus:bg-blue-200 focus:text-blue-900"
                   >
-                    Waiting Confirmation
+                    WFC INT
                   </SelectItem>
                   <SelectItem
                     value="DONE"
@@ -4862,7 +4862,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                       </span>
                                     ) : null)}
                                     {note.email_preview ? <NoteEmailPreview email={note.email_preview} /> : manualEmail
-                                      ? <EmailNoteDisclosure title={manualEmail.title} sourceUrl={manualEmail.sourceUrl}>{renderMarkedNoteContent(manualEmail.body, canViewStrikeTimestamps)}</EmailNoteDisclosure>
+                                      ? <EmailNoteDisclosure title={manualEmail.title} sourceUrl={manualEmail.sourceUrl} kind={manualEmail.kind}>{renderMarkedNoteContent(manualEmail.body, canViewStrikeTimestamps)}</EmailNoteDisclosure>
                                       : renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                     {dictationSource && <span className="mt-1 block text-xs text-muted-foreground">{dictationSource}</span>}
                                   </div>
