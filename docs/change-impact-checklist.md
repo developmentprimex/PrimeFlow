@@ -282,6 +282,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   për autorin, reply-n origjinal, reagimet dhe skedarët për çdo ID të lidhur.
   Agjenda e GA-së vazhdon të lexojë tabelën e përmendjeve dhe M1/M2 përdorin
   evidencën e tyre për përgjigjet dhe reagimet.
+  Shkrimet nga Artifact-i kalojnë te `ga_discord_reply` / `ga_discord_react`
+  dhe përdorin identitetin e botit të përmendjeve. Kontrollo autorizimin si GA,
+  ID-të e kontekstit, lidhjen e reply-t te përmendja, heqjen e reagimit të
+  botit dhe që ai reagim të mos numërohet si aprovim i një kolegu.
 
 - M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
   importi nga Common View të mos krijojnë kopje në grupin manual të M2.

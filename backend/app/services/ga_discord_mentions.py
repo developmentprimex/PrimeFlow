@@ -189,7 +189,7 @@ def reactions_out(
             discord_id = str(user.get("discord_id") or "")
             name = people.get(discord_id) or user.get("name") or ""
             users.append({"name": name, "initials": initials(name)})
-            counts = normalize_emoji(str(reaction.get("emoji") or "")) in approvals
+            counts = not user.get("ga_bot") and normalize_emoji(str(reaction.get("emoji") or "")) in approvals
             if counts and discord_id not in {row.author_discord_id, ga_id or ""}:
                 code = initials(name)
                 if code and code not in reviewed:

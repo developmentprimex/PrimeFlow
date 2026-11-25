@@ -8,6 +8,7 @@ from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urljoin
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -23,6 +24,10 @@ from app.schemas.ga_discord_mentions import (
     DISCORD_MESSAGE_ID_PATTERN,
     DiscordMentionAttachments,
     DiscordMentionsFeed,
+    DiscordReactResult,
+    DiscordReactionEmoji,
+    DiscordReplyResult,
+    DiscordReplyText,
 )
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
 
@@ -141,6 +146,7 @@ ASSISTANT_TOOLS = frozenset({
     "ga_item_remove_from_day", "ga_add_comment",
     "todo_list", "todo_create", "todo_update", "todo_complete", "todo_set_steps",
     "ga_time_table", "ga_discord_mentions", "ga_discord_mentions_feed", "ga_discord_mention_attachments", "ga_discord_mark",
+    "ga_discord_reply", "ga_discord_react",
 })
 # Tools that exist only in the assistant profile; the full profile stays as it was.
 ASSISTANT_ONLY_TOOLS = frozenset({
@@ -148,6 +154,7 @@ ASSISTANT_ONLY_TOOLS = frozenset({
     "ga_item_remove_from_day", "ga_add_comment",
     "todo_list", "todo_create", "todo_update", "todo_complete", "todo_set_steps",
     "ga_time_table", "ga_discord_mentions", "ga_discord_mentions_feed", "ga_discord_mention_attachments", "ga_discord_mark",
+    "ga_discord_reply", "ga_discord_react",
 })
 # Existing allowlisted tools that change data (everything else allowlisted only reads).
 ASSISTANT_WRITE_TOOLS = frozenset({
@@ -260,7 +267,8 @@ else:
     mcp = FastMCP("primeflow", instructions=PRIMEFLOW_GUIDE, host=MCP_HOST, port=MCP_PORT)
 
 
-def _tool(name: str | None = None, *, read_only: bool | None = None, destructive: bool | None = None, idempotent: bool | None = None):
+def _tool(name: str | None = None, *, read_only: bool | None = None, destructive: bool | None = None,
+          idempotent: bool | None = None, open_world: bool = False):
     """Register a tool for the active profile.
 
     full profile: identical to ``@mcp.tool(name=...)`` for every pre-existing tool;
@@ -283,7 +291,7 @@ def _tool(name: str | None = None, *, read_only: bool | None = None, destructive
             readOnlyHint=is_read_only,
             destructiveHint=bool(destructive) if not is_read_only else None,
             idempotentHint=idempotent,
-            openWorldHint=False,
+            openWorldHint=open_world,
         )
         return mcp.tool(name=name, annotations=annotations)(fn)
 
@@ -3428,6 +3436,41 @@ async def ga_discord_mention_attachments(
     message_id = id.removeprefix("dc:")
     data = await _request("GET", f"/api/ga-assistant/discord/mentions/feed/{message_id}/attachments")
     return DiscordMentionAttachments.model_validate(data)
+
+
+@_tool(read_only=False, destructive=False, idempotent=True, open_world=True)
+async def ga_discord_react(
+    id: Annotated[str, Field(pattern=DISCORD_MENTION_ID_PATTERN)],
+    emoji: DiscordReactionEmoji,
+    remove: bool = False,
+) -> DiscordReactResult:
+    """Add or remove the bot's own reaction to a GA mention or context message.
+
+    Applies only to the staff-channel feed. Call only when the user clicks the
+    reaction control or asks for that specific reaction on that message.
+    """
+    data = await _request(
+        "POST", f"/api/ga-assistant/discord/mentions/feed/{id.removeprefix('dc:')}/react",
+        json={"emoji": emoji, "remove": remove},
+    )
+    return DiscordReactResult.model_validate(data)
+
+
+@_tool(read_only=False, destructive=False, open_world=True)
+async def ga_discord_reply(
+    id: Annotated[str, Field(pattern=DISCORD_MENTION_ID_PATTERN)],
+    text: DiscordReplyText,
+) -> DiscordReplyResult:
+    """Send a reply as the Discord bot to a staff-channel GA mention or context message.
+
+    PrimeFlow adds the prefix "GA: ". Call only after the user has chosen the
+    exact message and asked to send the given text. Returns the sent ID and URL.
+    """
+    data = await _request(
+        "POST", f"/api/ga-assistant/discord/mentions/feed/{id.removeprefix('dc:')}/reply",
+        json={"text": text, "nonce": uuid4().hex[:24]},
+    )
+    return DiscordReplyResult.model_validate(data)
 
 
 @_tool(read_only=False, destructive=False, idempotent=True)

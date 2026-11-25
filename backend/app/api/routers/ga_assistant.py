@@ -32,6 +32,10 @@ from app.schemas.ga_discord_mentions import (
     DISCORD_MESSAGE_ID_PATTERN,
     DiscordMentionAttachments,
     DiscordMentionsFeed,
+    DiscordReactIn,
+    DiscordReactResult,
+    DiscordReplyIn,
+    DiscordReplyResult,
 )
 from app.services import ga_assistant as svc
 from app.services.audit import add_audit_log
@@ -47,6 +51,12 @@ def ensure_assistant_user(user: User) -> None:
     if is_ga_user(user) or user.role == UserRole.ADMIN:
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the GA account or an admin can use the GA assistant")
+
+
+def require_ga_discord_author(user: User = Depends(get_current_user)) -> User:
+    if not is_ga_user(user):
+        raise HTTPException(403, "Vetëm llogaria e GA-së mund të dërgojë përgjigje dhe reagime në Discord.")
+    return user
 
 
 def _parse_moment(value: str | None, *, default: datetime) -> datetime:
@@ -796,3 +806,36 @@ async def discord_mention_attachments(
     ensure_assistant_user(user)
     links = await mentions.staff_mention_attachment_links(db, message_id)
     return DiscordMentionAttachments(id=f"dc:{message_id}", attachments=links)
+
+
+@router.post("/discord/mentions/feed/{message_id}/reply")
+async def discord_mention_reply(
+    payload: DiscordReplyIn,
+    message_id: str = Path(pattern=DISCORD_MESSAGE_ID_PATTERN),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_ga_discord_author),
+) -> DiscordReplyResult:
+    from app.services import ga_discord_actions as actions, ga_discord_channel_archive as archive
+
+    target = await actions.target_message(db, message_id)
+    result, archived_reply = await actions.create_reply(db, target, payload)
+    _audit(db, user, _audit_id(result.id), "GA_ASSISTANT_DISCORD_REPLY",
+           {"discord_id": result.id, "target_id": f"dc:{message_id}"})
+    await archive.store_messages(db, [archived_reply])
+    return result
+
+
+@router.post("/discord/mentions/feed/{message_id}/react")
+async def discord_mention_react(
+    payload: DiscordReactIn,
+    message_id: str = Path(pattern=DISCORD_MESSAGE_ID_PATTERN),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_ga_discord_author),
+) -> DiscordReactResult:
+    from app.services import ga_discord_actions as actions
+
+    target = await actions.target_message(db, message_id)
+    result = await actions.react(db, target, payload)
+    _audit(db, user, _audit_id(result.id), "GA_ASSISTANT_DISCORD_REACT", result.model_dump())
+    await db.commit()
+    return result

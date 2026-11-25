@@ -1,12 +1,35 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints
 
 DISCORD_MESSAGE_ID_PATTERN = r"^[0-9]{1,32}$"
 DISCORD_MENTION_ID_PATTERN = r"^dc:[0-9]{1,32}$"
 DISCORD_FEED_DEFAULT_LIMIT = 25
 DISCORD_FEED_MAX_LIMIT = 50
+DiscordReplyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1996)]
+DiscordReactionEmoji = Literal["👍", "✅", "👀", "❌"]
+
+
+class DiscordReplyIn(BaseModel):
+    text: DiscordReplyText
+    nonce: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,25}$")
+
+
+class DiscordReplyResult(BaseModel):
+    id: str
+    url: str
+
+
+class DiscordReactIn(BaseModel):
+    emoji: DiscordReactionEmoji
+    remove: bool = False
+
+
+class DiscordReactResult(BaseModel):
+    id: str
+    emoji: DiscordReactionEmoji
+    removed: bool
 
 
 class DiscordFeedReactor(BaseModel):

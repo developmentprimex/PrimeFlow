@@ -302,6 +302,58 @@ class GaAssistantDbTests(unittest.IsolatedAsyncioTestCase):
             item = (await self.get(paths[0]))["items"][0]["context"]["para"][0]
             self.assertEqual(item["reactions"][0]["users"][0]["name"], "Arta Berisha")
 
+            from sqlalchemy import select
+            from app.models.enums import UserRole
+            from app.models.user import User
+
+            replies_path = "/discord/mentions/feed/191"
+            url = "https://discord.com/api/v10/channels/20/messages/191"
+            source = {"id": "191", "channel_id": "20", "author": {"id": "77"}, "mentions": []}
+            original_request = httpx.AsyncClient.request
+            discord_calls = []
+
+            async def request(client, method, address, **kwargs):
+                if not address.startswith("https://discord.com/api/v10/"):
+                    return await original_request(client, method, address, **kwargs)
+                discord_calls.append((method, address, kwargs))
+                req = httpx.Request(method, address)
+                if method == "GET":
+                    return httpx.Response(200, request=req, json=source)
+                if method == "POST":
+                    return httpx.Response(200, request=req, json={
+                        "id": "300", "channel_id": "20", "author": {"id": "99", "username": "GA bot", "bot": True},
+                        "timestamp": (at + timedelta(minutes=8)).isoformat(), "content": "GA: Mirë @everyone",
+                        "message_reference": {"message_id": "191"}, "attachments": [],
+                    })
+                return httpx.Response(204, request=req)
+
+            with patch.object(httpx.AsyncClient, "request", request):
+                reply = await self.post(replies_path + "/reply", {"text": "Mirë @everyone", "nonce": "abcdef"})
+                self.assertEqual(reply, {"id": "dc:300", "url": "https://discord.com/channels/10/20/300"})
+                post_call = discord_calls[1]
+                self.assertEqual(post_call[1], "https://discord.com/api/v10/channels/20/messages")
+                self.assertEqual(post_call[2]["json"], {
+                    "content": "GA: Mirë @everyone", "message_reference": {"message_id": "191", "fail_if_not_exists": True},
+                    "allowed_mentions": {"parse": [], "replied_user": False}, "nonce": "abcdef", "enforce_nonce": True,
+                })
+                responses = (await self.get(paths[0]))["items"][0]["context"]["përgjigjet"]
+                self.assertIn("dc:300", [item["id"] for item in responses])
+                for remove, method in ((False, "PUT"), (True, "DELETE")):
+                    result = await self.post(replies_path + "/react", {"emoji": "👀", "remove": remove})
+                    self.assertEqual(result, {"id": "dc:191", "emoji": "👀", "removed": remove})
+                    self.assertEqual(discord_calls[-1][:2], (method, url + "/reactions/%F0%9F%91%80/@me"))
+
+                before = len(discord_calls)
+                await self.post("/discord/mentions/feed/190/reply", {"text": "test"}, expect=404)
+                await self.post(replies_path + "/react", {"emoji": "not an emoji"}, expect=422)
+                await self.post(replies_path + "/react", {"emoji": "👍"}, token=self.staff_token, expect=403)
+                async with self.SessionLocal() as db:
+                    other = await db.scalar(select(User).where(User.id == self.colleague.id))
+                    other.role = UserRole.ADMIN
+                    await db.commit()
+                await self.post(replies_path + "/reply", {"text": "test"}, token=self.staff_token, expect=403)
+                self.assertEqual(len(discord_calls), before)
+
             url = "https://discord.com/api/v10/channels/20/messages/191"
             fresh = "https://cdn.discordapp.com/attachments/20/30/plan.pdf?ex=fresh"
             original_get = httpx.AsyncClient.get

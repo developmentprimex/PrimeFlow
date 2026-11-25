@@ -192,6 +192,32 @@ class AssistantProfileTests(unittest.IsolatedAsyncioTestCase):
             request.assert_awaited_once_with("GET", "/api/ga-assistant/discord/mentions/feed/1002/attachments")
         self.assertEqual(structured, data)
 
+    async def test_discord_actions_register_as_writes_and_return_confirmed_results(self) -> None:
+        tools = {tool.name: tool for tool in await self.server.mcp.list_tools()}
+        for name in ("ga_discord_reply", "ga_discord_react"):
+            self.assertFalse(tools[name].annotations.readOnlyHint)
+            self.assertTrue(tools[name].annotations.openWorldHint)
+        self.assertTrue(tools["ga_discord_react"].annotations.idempotentHint)
+
+        reply = {"id": "dc:300", "url": "https://discord.com/channels/10/20/300"}
+        with patch.object(self.server, "_request", AsyncMock(return_value=reply)) as request:
+            _, structured = await self.server.mcp.call_tool("ga_discord_reply", {"id": "dc:191", "text": " Mirë "})
+            self.assertEqual(structured, reply)
+            self.assertEqual(request.await_args.args, ("POST", "/api/ga-assistant/discord/mentions/feed/191/reply"))
+            body = request.await_args.kwargs["json"]
+            self.assertEqual(body["text"], "Mirë")
+            self.assertRegex(body["nonce"], r"^[0-9a-f]{24}$")
+
+        reaction = {"id": "dc:191", "emoji": "👍", "removed": True}
+        with patch.object(self.server, "_request", AsyncMock(return_value=reaction)) as request:
+            _, structured = await self.server.mcp.call_tool(
+                "ga_discord_react", {"id": "dc:191", "emoji": "👍", "remove": True},
+            )
+            self.assertEqual(structured, reaction)
+            request.assert_awaited_once_with(
+                "POST", "/api/ga-assistant/discord/mentions/feed/191/react", json={"emoji": "👍", "remove": True},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

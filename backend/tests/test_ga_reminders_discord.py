@@ -121,6 +121,12 @@ class ReactionTests(unittest.TestCase):
         out = mentions.mention_out(self.row([]), {}, TZ)
         self.assertEqual((out["reactions"], out["reviewed_by"], out["ready_for_ga"]), ([], [], False))
 
+    def test_bot_reactions_do_not_count_as_staff_review(self) -> None:
+        row = self.row([{"emoji": "✅", "count": 1, "users": [{"discord_id": "99", "name": "GA Bot", "ga_bot": True}]}])
+        out = mentions.mention_out(row, {}, TZ)
+        self.assertEqual(out["reactions"][0]["count"], 1)
+        self.assertEqual((out["reviewed_by"], out["ready_for_ga"]), ([], False))
+
 
 class BotFilterTests(unittest.TestCase):
     """The bot classifies mentions and restricts all-message collection to the staff channel."""

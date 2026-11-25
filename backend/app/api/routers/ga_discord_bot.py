@@ -33,6 +33,7 @@ class Attachment(BaseModel):
 class ReactionUser(BaseModel):
     discord_id: str = Field(pattern=SNOWFLAKE)
     name: str = Field(default="", max_length=200)
+    ga_bot: bool = False
 
 
 class ReactionIn(BaseModel):

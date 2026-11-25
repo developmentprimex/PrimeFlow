@@ -75,6 +75,8 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 | `ga_discord_mentions(since?, until?, only_open=true)` | Mesazhet në kanalet e serverit që e përmendin GA-në, një rol të saj, ose i përgjigjen asaj: kush (emri + inicialet), kanali, koha, teksti, linku, bashkëngjitjet, statusi |
 | `ga_discord_mentions_feed(before?, limit=25)` | Lista vetëm për lexim për Claude Artifact, me përmendjet direkte të GA-së nga `#det-nga-stafi-per-ga` dhe reagimet e tyre aktuale |
 | `ga_discord_mention_attachments(id)` | Linket e freskëta të bashkëngjitjeve nga një mesazh i listës, me emër dhe lloj skedari |
+| `ga_discord_reply(id, text)` | Boti dërgon `GA: <text>` si reply në Discord dhe kthen `id` e `url` të përgjigjes |
+| `ga_discord_react(id, emoji, remove=false)` | Shton ose heq reagimin e botit për 👍, ✅, 👀 ose ❌. Kthen `id`, `emoji` dhe `removed` |
 | `ga_discord_mark(id, status)` | `seen` / `done` (ose `new`); në Discord s'ndryshon asgjë |
 
 ## Reminders “R:” të iPhone-it (GA Time Table)
@@ -101,9 +103,9 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 
 ## Discord: mentions e GA-së
 
-- Bot i veçantë, vetëm lexim: `backend/discord_ga_mentions.py`, procesi PM2
+- Procesi i leximit të botit: `backend/discord_ga_mentions.py`, procesi PM2
   `primeflow-ga-discord-mentions`. Intents: Guilds, Guild Messages, Guild Message Reactions, Message Content.
-  Leje: View Channels + Read Message History. S'shkruan, s'reagon, s'fshin; DM-të s'lexohen.
+  Lejet për mbledhjen: View Channels + Read Message History. Leximi mbulon kanalet e serverit dhe thread-et publike të disponueshme.
 - Ruan te `ga_discord_mentions` (migrimi 0195) çdo mesazh që përmend GA-në (`@` e saj ose një
   rol që ka), ose që i përgjigjet një mesazhi të saj. GA-ja njihet nga lidhja e saj Discord
   në PrimeFlow (`discord_links`) ose nga `GA_DISCORD_USER_ID`.
@@ -139,6 +141,9 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
   - Çdo mesazh i kontekstit ka ID `dc:…`, autor, kohë, tekst, emra skedarësh, reagime dhe linkun te Discord.
     Përdor të njëjtin `ga_discord_mention_attachments` me ID-në e mesazhit të kontekstit.
 - Për faqen pasuese, ktheje `next_before` si `before` dhe përdor të njëjtin `limit` (1–50). `next_before: null` shënon fundin. Për të marrë ndryshime të reja, rifresko faqen e parë pa `before`; përditëso rreshtat ekzistues sipas `id` që shtimi ose heqja e reagimeve të shfaqet te i njëjti mesazh.
+- Për veprime nga Artifact-i, aktivizo `ga_discord_reply` dhe `ga_discord_react`. Vetëm llogaria GA mund t'i thërrasë. Të dy mjetet pranojnë ID-të `dc:…` të përmendjeve nga `#det-nga-stafi-per-ga` dhe të mesazheve të kontekstit. Veprimet kryhen me identitetin e botit dhe ruhen në auditin e PrimeFlow.
+- Thirr `ga_discord_reply` vetëm kur GA klikon **Dërgo**. Kalo tekstin që ajo ka shkruar. Boti shton prefiksin `GA: `. Përgjigjja lidhet në Discord me mesazhin e zgjedhur dhe shfaqet te `context["përgjigjet"]` në rifreskimin pasues, edhe kur mesazhi i zgjedhur është pjesë e kontekstit.
+- Për reagimet, përdor `remove=false` për shtim dhe `remove=true` për heqjen e reagimit të botit. Reagimi shfaqet pasi boti sinkronizon ndryshimin nga Discord. Reagimet e këtij boti nuk numërohen si aprovim nga kolegët. Boti kërkon **Send Messages** dhe **Add Reactions** në kanalin e stafit, si edhe **Send Messages in Threads** për t'u përgjigjur në thread-et publike.
 - Pas deployment-it, provoje me një përmendje direkte dhe një skedar në kanal, shto një reaction dhe hiqe. Verifiko që skedari hapet me linkun e kërkuar nga mjeti dhe që `reactions` ndryshon duke ruajtur të njëjtin `id`.
 
 ### Si klasifikohen elementet

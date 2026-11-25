@@ -27,6 +27,7 @@ class GaDiscordChannelMessage(Base):
     jump_url: Mapped[str] = mapped_column(String(300))
     attachments: Mapped[list] = mapped_column(JSONB, server_default="[]")
     reply_to_message_id: Mapped[str | None] = mapped_column(String(32))
+    reply_context_ids: Mapped[list[str]] = mapped_column(JSONB, server_default="[]")
     reactions: Mapped[list] = mapped_column(JSONB, server_default="[]")
     reactions_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

@@ -9,7 +9,7 @@ What it stores (PrimEx server channels and public threads only, never DMs):
 It also follows the reactions on stored mentions (who already reviewed a message):
 live through reaction add/remove events, and once over REST for older mentions.
 
-It never sends, edits, reacts to or deletes anything: it only connects with the
+The gateway worker only reads Discord and connects with the
 Guilds, Guild Messages, Guild Message Reactions and Message Content intents, and needs
 only the View Channels and Read Message History permissions. The token is read from backend/.env
 (GA_DISCORD_MENTIONS_BOT_TOKEN); without it the process exits at once.
@@ -101,7 +101,7 @@ def emoji_label(emoji) -> str:
     return str(emoji)
 
 
-async def read_reactions(message) -> list[dict]:
+async def read_reactions(message, ga_bot_id: int | None = None) -> list[dict]:
     """[{emoji, count, users:[{discord_id, name}]}] of a message (REST, read-only)."""
     out = []
     for reaction in getattr(message, "reactions", None) or []:
@@ -109,18 +109,21 @@ async def read_reactions(message) -> list[dict]:
         try:
             async for user in reaction.users(limit=REACTION_USERS_LIMIT):
                 name = getattr(user, "display_name", None) or getattr(user, "global_name", None) or user.name or ""
-                users.append({"discord_id": str(user.id), "name": name[:200]})
+                value = {"discord_id": str(user.id), "name": name[:200]}
+                if user.id == ga_bot_id:
+                    value["ga_bot"] = True
+                users.append(value)
         except discord.DiscordException as exc:
             log.info("Reaction users unavailable: %s", type(exc).__name__)
         out.append({"emoji": emoji_label(reaction.emoji)[:100], "count": int(reaction.count), "users": users})
     return out[:50]
 
 
-async def archive_snapshot(message) -> dict:
+async def archive_snapshot(message, ga_bot_id: int | None = None) -> dict:
     return {
         **archive_payload(message),
         "reactions_synced_at": datetime.now(timezone.utc).isoformat(),
-        "reactions": await read_reactions(message),
+        "reactions": await read_reactions(message, ga_bot_id),
     }
 
 
@@ -274,15 +277,16 @@ class GaMentionsBot(discord.Client):
             if getattr(channel, "guild", None) is None:
                 return
             message = await channel.fetch_message(message_id)  # GET /channels/{id}/messages/{id}
-            if self.is_staff_channel(channel) and message.type != discord.MessageType.thread_starter_message:
-                snapshot = await archive_snapshot(message)
+            archived = self.is_staff_channel(channel) and message.type != discord.MessageType.thread_starter_message
+            if archived:
+                snapshot = await archive_snapshot(message, self.user.id if self.user else None)
                 await self.post_batch("/channel-messages", {"messages": [snapshot]})
                 reactions = snapshot["reactions"]
                 observed_at = snapshot["reactions_synced_at"]
             else:
                 observed_at = datetime.now(timezone.utc).isoformat()
-                reactions = await read_reactions(message)
-            if message_id in self.tracked:
+                reactions = await read_reactions(message, self.user.id if self.user else None)
+            if archived or message_id in self.tracked:
                 response = await self.api.post("/reactions", json={
                     "message_id": str(message_id), "reactions": reactions, "observed_at": observed_at,
                 })
@@ -361,7 +365,7 @@ class GaMentionsBot(discord.Client):
             async for message in channel.history(limit=None, after=after, oldest_first=True):
                 if message.type == discord.MessageType.thread_starter_message:
                     continue
-                batch.append(await archive_snapshot(message))
+                batch.append(await archive_snapshot(message, self.user.id if self.user else None))
                 if len(batch) == POST_BATCH:
                     if not await self.post_batch("/channel-messages", {"messages": batch, "checkpoint_channel_id": channel_id}):
                         return
@@ -394,7 +398,7 @@ class GaMentionsBot(discord.Client):
                         reasons = self.concerns_ga(message)
                         if reasons:
                             payload = message_payload(message, reasons)
-                            payload["reactions"] = await read_reactions(message)
+                            payload["reactions"] = await read_reactions(message, self.user.id if self.user else None)
                             found.append(payload)
                 except discord.DiscordException as exc:
                     log.info("Skipped #%s during backfill: %s", getattr(channel, "name", "?"), type(exc).__name__)

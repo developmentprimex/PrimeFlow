@@ -46,6 +46,8 @@ async def store_messages(
             newer_snapshot = or_(message.reactions_synced_at.is_(None), incoming.reactions_synced_at >= message.reactions_synced_at)
             updates["reactions"] = case((newer_snapshot, incoming.reactions), else_=message.reactions)
             updates["reactions_synced_at"] = case((newer_snapshot, incoming.reactions_synced_at), else_=message.reactions_synced_at)
+        if "reply_context_ids" in values:
+            updates["reply_context_ids"] = incoming.reply_context_ids
         await db.execute(statement.on_conflict_do_update(index_elements=[message.id], set_=updates))
 
     if checkpoint_channel_id and messages:
@@ -78,7 +80,11 @@ def _context_relationships():
     before = and_(same_author, message.created_at >= mention.created_at - CONTEXT_WINDOW, position < anchor)
     after = and_(same_author, message.created_at <= mention.created_at + CONTEXT_WINDOW, position > anchor)
     original = and_(in_channel, message.id == mention.reply_to_message_id)
-    responses = or_(message.reply_to_message_id == mention.id, message.channel_id == mention.id)
+    responses = or_(
+        message.reply_to_message_id == mention.id,
+        message.channel_id == mention.id,
+        message.reply_context_ids.contains(func.jsonb_build_array(mention.id)),
+    )
     return before, after, original, responses
 
 
@@ -114,3 +120,11 @@ async def get_context_message(db: AsyncSession, message_id: str) -> GaDiscordCha
         .exists()
     )
     return await db.scalar(select(message).where(message.id == message_id, linked))
+
+
+async def context_mention_ids(db: AsyncSession, message_id: str) -> list[str]:
+    message, mention = GaDiscordChannelMessage, GaDiscordMention
+    return list(await db.scalars(
+        select(mention.id).join(message, _linked_context(*_context_relationships()))
+        .where(staff_mention_scope(), message.id == message_id)
+    ))
