@@ -3,7 +3,7 @@ import type { MiraNote } from "@/lib/mira"
 export type MiraNoteGroup = "1H" | "AI_AGENT" | "OTHER"
 
 export const MIRA_DEVELOPMENT_NAME = "Mira Zhvillim"
-export const DEVELOPMENT_MEETING_NAME = "Zhvillim"
+export const DEVELOPMENT_MEETING_NAME = "ZHVILLIM"
 const developmentMeetingPrefix = /^(?:(?:(?:Mira[ \t]+)?AI[ \t_-]*Agent|Mira[ \t]+Zhvillim)\b|Zhvillim(?=\s+(?:\d|·)|$))/i
 
 export function developmentMeetingTitle(title: string): string {

@@ -61,7 +61,7 @@ test("the meeting list opens Desktop notes and sharing persists", async ({ page 
   await expect(page.getByRole("link", { name: "Shfaqet në PX Notes" })).toBeVisible()
 })
 
-test("meeting dates appear once per row in an aligned column", async ({ page }) => {
+test("meeting dates appear once in the list and in meeting details", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await shell(page)
   const discord = { ...meeting, id: "discord-meeting", source: "discord", group: "1H",
@@ -71,9 +71,11 @@ test("meeting dates appear once per row in an aligned column", async ({ page }) 
   await page.route("**/api/mira/meeting-catalog?*", route => route.fulfill({
     json: { items: [discord, agent, meeting], total: 3, follow_up: [] },
   }))
-  await page.route(`**/api/mira/meeting-catalog/discord/${agent.id}`, route => route.fulfill({
-    json: { ...agent, host_ids: [], notes: [], transcript: [] },
-  }))
+  for (const item of [discord, agent]) {
+    await page.route(`**/api/mira/meeting-catalog/discord/${item.id}`, route => route.fulfill({
+      json: { ...item, host_ids: [], notes: [], transcript: [] },
+    }))
+  }
   await page.goto("/mira?tab=takimet")
   const discordRow = page.getByRole("link", { name: /^1H 820/ })
   const desktopRow = page.getByRole("link", { name: /^Takimi me ekipin/ })
@@ -82,18 +84,23 @@ test("meeting dates appear once per row in an aligned column", async ({ page }) 
   await expect(discordRow.getByText("24.11.2026 08:08", { exact: false })).toHaveCount(1)
   await expect(desktopRow.locator("time")).toHaveText("28.10.2026 10:30")
   expect((await discordRow.locator("time").boundingBox())?.x).toBe((await desktopRow.locator("time").boundingBox())?.x)
-  await expect(page.getByRole("button", { name: "Zhvillim", exact: true })).toBeVisible()
-  const agentRow = page.getByRole("link", { name: /^Zhvillim/ })
+  await expect(page.getByRole("button", { name: "ZHVILLIM", exact: true })).toBeVisible()
+  const agentRow = page.getByRole("link", { name: /^ZHVILLIM/ })
   await expect(discordRow.getByText("1H", { exact: true })).toHaveCount(0)
   await expect(discordRow.getByText("Discord", { exact: true })).toHaveCount(0)
-  await expect(agentRow.getByText("Zhvillim", { exact: true })).toHaveCount(1)
+  await expect(agentRow.getByText("ZHVILLIM", { exact: true })).toHaveCount(1)
   await expect(agentRow.getByText("Discord", { exact: true })).toHaveCount(0)
   await expect(discordRow.locator("img")).toHaveAttribute("src", /mira-avatar\.png/)
   await expect(agentRow.locator("img")).toHaveAttribute("src", /mira-ai-agent-avatar\.png/)
   await expect(agentRow.getByText("1 detyrë e krijuar")).toBeVisible()
   await expect(agentRow.getByText("2 shënime të krijuara")).toBeVisible()
+  await discordRow.click()
+  const heading = page.getByRole("heading", { name: "1H 820/10/11/1150/1420/16 · 24.11.2026 08:08", exact: true })
+  await expect(heading.locator("time")).toHaveText("24.11.2026 08:08")
+  await expect(heading.locator("..").getByText("24.11.2026 08:08", { exact: false })).toHaveCount(1)
+  await page.getByRole("link", { name: "Kthehu te takimet" }).click()
   await agentRow.click()
-  await expect(page.getByRole("heading", { name: "Zhvillim", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "ZHVILLIM · 24.11.2026 08:08", exact: true })).toBeVisible()
 })
 
 test("a PX Notes link opens the exact note and failed sharing keeps the action available", async ({ page }) => {

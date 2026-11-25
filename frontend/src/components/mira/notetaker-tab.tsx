@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { ChevronRight } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -13,7 +14,7 @@ import { MeetingNotes, type MeetingNote } from "@/components/mira/notes-tab"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY } from "@/lib/dates"
 import { dayLabel, groupTranscriptBySpeaker, json, STATUS_LABELS, transcriptTime as timestamp, type MeetingDetail as HostDetail } from "@/lib/mira"
-import { memoryKindLabels, type MemoryListItem } from "@/lib/mira-memory"
+import { memoryKindLabels, type MemoryDetail, type MemoryListItem } from "@/lib/mira-memory"
 import { DEVELOPMENT_MEETING_NAME, developmentMeetingTitle } from "@/lib/mira-note-groups"
 import { cn } from "@/lib/utils"
 
@@ -48,6 +49,7 @@ type MemoryPoint = Pick<MemoryListItem, "id" | "title" | "kind" | "status"> & {
   questions: string[]
   answers: Record<string, string>
   sources: Source[]
+  version?: number
   needs_follow_up: boolean
   discussion_state?: "NEW" | "REPEATED" | "RESOLVED"
 }
@@ -106,19 +108,19 @@ function meetingView(value: string | null): keyof typeof views {
 }
 
 const dateTime = new Intl.DateTimeFormat("sq-AL", { dateStyle: "medium", timeStyle: "short" })
-const listDateTime = new Intl.DateTimeFormat("en-GB", {
+const meetingDateTime = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Budapest", day: "2-digit", month: "2-digit", year: "numeric",
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 })
 
-function meetingListTitle(meeting: Meeting) {
-  // Discord's automatic titles include the recording time after the middle dot.
-  if (meeting.source !== "discord") return meeting.title
+function meetingDisplayTitle(meeting: Pick<MeetingDetail, "source" | "title" | "started_at">) {
+  // The recording time already appears separately when the API supplies it.
+  if (meeting.source !== "discord" || !meeting.started_at) return meeting.title
   return meeting.title.replace(/\s+·\s+\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}$/, "") || meeting.title
 }
 
-function meetingListDate(value: string) {
-  const parts = Object.fromEntries(listDateTime.formatToParts(new Date(value)).map(part => [part.type, part.value]))
+function meetingDisplayDate(value: string) {
+  const parts = Object.fromEntries(meetingDateTime.formatToParts(new Date(value)).map(part => [part.type, part.value]))
   return `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}`
 }
 
@@ -165,14 +167,14 @@ function PreviousPoints({ points, title }: { points: PreviousPoint[]; title: str
 
 function Clarifications({ detail, onAnswer }: {
   detail: MeetingDetail
-  onAnswer: (itemId: string, question: string, answer: string) => void
+  onAnswer: (itemId: string, question: string, answer: string, version?: number) => void
 }) {
   const { apiFetch } = useAuth()
   const [editing, setEditing] = useState<{ itemId: string; question: string } | null>(null)
   const [answer, setAnswer] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
-  const points = detail.memory?.points.filter((point) => point.questions.length > 0) ?? []
+  const points = detail.memory?.points.filter((point) => point.status === "OPEN" && point.questions.length > 0) ?? []
   if (!points.length) return null
 
   async function submit() {
@@ -180,12 +182,12 @@ function Clarifications({ detail, onAnswer }: {
     setBusy(true)
     setError("")
     try {
-      const result = await json<{ question: string; answer: string }>(await apiFetch(`/mira-memory/items/${editing.itemId}/clarifications`, {
+      const result = await json<{ question: string; answer: string; version?: number }>(await apiFetch(`/mira-memory/items/${editing.itemId}/clarifications`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ meeting_id: detail.id, question: editing.question, answer }),
       }))
-      onAnswer(editing.itemId, result.question, result.answer)
+      onAnswer(editing.itemId, result.question, result.answer, result.version)
       setEditing(null)
     } catch (error) {
       setError(error instanceof Error ? error.message : "Përgjigjja nuk u ruajt.")
@@ -216,7 +218,12 @@ function Clarifications({ detail, onAnswer }: {
     </section>
 }
 
-function MeetingMemory({ detail, filter }: { detail: MeetingDetail; filter: string }) {
+function MeetingMemory({ detail, filter, closing, onClose }: {
+  detail: MeetingDetail
+  filter: string
+  closing: Set<string>
+  onClose: (point: MemoryPoint) => void
+}) {
   const points = (detail.memory?.points ?? []).filter((point) => filter !== "open" || point.needs_follow_up)
   if (!points.length) {
     const status = detail.memory?.status
@@ -228,7 +235,14 @@ function MeetingMemory({ detail, filter }: { detail: MeetingDetail; filter: stri
   return <section className="space-y-2 text-sm">
       <ul className="divide-y rounded-md border">
         {points.map((point) => <li key={point.id} id={`point-${point.id}`} className="scroll-mt-24 space-y-1 px-3 py-2 target:bg-muted">
-          <Link className="font-medium underline" href={`/mira?tab=kujtesa&item=${point.id}`}>{point.title}</Link>
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <Link className="min-w-0 break-words font-medium underline" href={`/mira?tab=kujtesa&item=${point.id}`}>{point.title}</Link>
+            {point.status === "OPEN" && <Button type="button" size="sm" variant="outline"
+              aria-label={`Mbyll pikën ${point.title}`} disabled={closing.has(point.id)}
+              onClick={() => onClose(point)}>
+              {closing.has(point.id) ? "Po mbyllet…" : "Mbyll pikën"}
+            </Button>}
+          </div>
           <p className="text-xs text-muted-foreground">
             {memoryKindLabels[point.kind]} · {point.status === "OPEN" ? "Hapur" : "Mbyllur"}
             {point.discussion_state === "NEW" && " · Pikë e re"}
@@ -276,6 +290,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
   const [followUpQuery, setFollowUpQuery] = useState("")
   const [error, setError] = useState<{ key: string; message: string } | null>(null)
   const [reload, setReload] = useState(0)
+  const [closingPoints, setClosingPoints] = useState(() => new Set<string>())
   const [summaryRequest, setSummaryRequest] = useState<{ id: string; error?: string } | null>(null)
   const [transcriptAnchor, setTranscriptAnchor] = useState("")
   const selected = view === null && (detail?.source === "host" || detail?.source === "desktop")
@@ -364,6 +379,51 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
     }
   }
 
+  async function closePoint(point: MemoryPoint) {
+    if (!detail || closingPoints.has(point.id)) return
+    const detailId = detail.id
+    const path = `/mira-memory/items/${point.id}`
+    setClosingPoints(current => new Set(current).add(point.id))
+    try {
+      // Older catalog responses can omit the version during a rolling release.
+      let version = point.version
+      if (version === undefined) {
+        const latest = await json<MemoryDetail>(await apiFetch(path))
+        if (latest.status !== "OPEN") {
+          setReload(current => current + 1)
+          return
+        }
+        version = latest.version
+      }
+      const response = await apiFetch(`${path}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "close", version }),
+      })
+      if (response.status === 409) setReload(current => current + 1)
+      const closed = await json<MemoryDetail>(response)
+      setDetail(current => {
+        if (!current?.memory || current.id !== detailId) return current
+        return { ...current, memory: {
+          ...current.memory,
+          points: current.memory.points.map(item => item.id === point.id
+            ? { ...item, status: closed.status, version: closed.version, needs_follow_up: false } : item),
+          previous: current.memory.previous.map(item => item.id === point.id
+            ? { ...item, status: closed.status } : item),
+        } }
+      })
+      toast.success("Pika u mbyll.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Pika nuk u mbyll. Provo përsëri.")
+    } finally {
+      setClosingPoints(current => {
+        const next = new Set(current)
+        next.delete(point.id)
+        return next
+      })
+    }
+  }
+
   if (error?.key === requestKey) return <p role="alert" className="mt-4 text-sm">{error.message}{" "}
     <button type="button" className="underline" onClick={() => { setError(null); setReload(value => value + 1) }}>Provo përsëri</button>
     {meetingId && <> · <Link className="underline" href={base}>Kthehu te takimet</Link></>}
@@ -405,7 +465,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
         <ul className="divide-y overflow-hidden rounded-lg border text-sm">
           {list.items.map((item) => {
             const aiAgent = item.recorder === "ai_agent" || item.group === "AI_AGENT"
-            const title = meetingListTitle(item)
+            const title = meetingDisplayTitle(item)
             const tasks = item.created_task_count ?? 0
             const notes = item.created_note_count ?? 0
             return (
@@ -431,7 +491,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
                   </span>
                 </span>
                 <time dateTime={item.started_at} className="col-start-1 row-start-2 whitespace-nowrap pl-11 text-xs font-medium tabular-nums text-foreground lg:col-start-2 lg:row-start-1 lg:pl-0">
-                  {meetingListDate(item.started_at)}
+                  {meetingDisplayDate(item.started_at)}
                 </time>
                 <span className="col-start-1 row-start-3 flex flex-wrap items-center gap-x-2 gap-y-1 pl-11 text-xs text-muted-foreground lg:col-start-3 lg:row-start-1 lg:justify-end lg:pl-0">
                   {item.source === "desktop" && <span>{sources.desktop}</span>}
@@ -461,16 +521,26 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
     detail.host?.status !== "DISCORD_REPORT")
   const active = available.includes(selected) ? selected : available[0]
   const url = (key: string) => miraMeetingUrl(detail.id, detail.source, key)
+  const navigation = available.flatMap(key => key === "memory" ? [
+    { label: views.memory, href: url("memory"), current: active === "memory" && !pointFilter },
+    { label: "Pikat e hapura", href: url("memory") + "&filter=open", current: active === "memory" && pointFilter === "open" },
+    { label: "Historiku i takimeve", href: url("memory") + "&filter=history", current: active === "memory" && pointFilter === "history" },
+  ] : [{ label: views[key], href: url(key), current: active === key }])
+  const title = meetingDisplayTitle(detail)
   const createdNotes = detail.notes.filter(note => note.created_during_meeting)
   const createdTasks = detail.created_tasks ?? []
   return (
     <section className="mt-5 space-y-4">
       <Link href={base} className="text-sm underline">Kthehu te takimet</Link>
       <header>
-        <h2 className="text-lg font-semibold">{detail.source === "discord" ? developmentMeetingTitle(detail.title) : detail.title}</h2>
+        <h2 className="text-xl font-semibold">
+          {detail.source === "discord" ? developmentMeetingTitle(title) : title}
+          {detail.started_at ? <> · <time dateTime={detail.started_at} className="whitespace-nowrap tabular-nums">
+            {meetingDisplayDate(detail.started_at)}
+          </time></> : detail.host && ` · ${dayLabel(detail.host.date)}`}
+        </h2>
         <p className="text-sm text-muted-foreground">
-          {detail.started_at ? dateTime.format(new Date(detail.started_at)) : detail.host && dayLabel(detail.host.date)}
-          {" · "}{sources[detail.source]}
+          {sources[detail.source]}
           {detail.status && recordingStatuses[detail.status] && ` · ${recordingStatuses[detail.status]}`}
         </p>
       </header>
@@ -515,10 +585,10 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
         </Table>
       </section>}
       <nav aria-label="Pamjet e takimit" className="flex flex-wrap gap-4 border-b pb-2 text-sm">
-        {available.map(key => (
-          <Link key={key} href={url(key)} aria-current={active === key ? "page" : undefined} className={cn("rounded-md px-3 py-1.5", active === key
+        {navigation.map(({ label, href, current }) => (
+          <Link key={label} href={href} aria-current={current ? "page" : undefined} className={cn("rounded-md px-3 py-1.5", current
             ? "bg-violet-100 font-semibold text-violet-900 dark:bg-violet-950 dark:text-violet-200"
-            : "text-muted-foreground hover:bg-violet-50 dark:hover:bg-violet-950/40")}>{views[key]}</Link>
+            : "text-muted-foreground hover:bg-violet-50 dark:hover:bg-violet-950/40")}>{label}</Link>
         ))}
       </nav>
       {active === "quick" && (quick ? Object.entries(sections).map(([key, label]) => {
@@ -556,20 +626,15 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
             </p>}
           </section>} />
       </>}
-      {active === "memory" && <nav aria-label="Filtri i pikave" className="flex flex-wrap gap-4 text-sm">
-        {[["", "Të gjitha"], ["open", "Pikat e hapura"], ["history", "Historiku i takimeve"]].map(([value, label]) =>
-          <Link key={label} href={url("memory") + (value ? `&filter=${value}` : "")}
-            aria-current={pointFilter === value ? "page" : undefined}
-            className={pointFilter === value ? "font-semibold underline" : "text-muted-foreground"}>{label}</Link>)}
-      </nav>}
       {(active === "quick" || (active === "memory" && pointFilter !== "history")) && <Clarifications key={detail.id} detail={detail}
-        onAnswer={(itemId, question, answer) => setDetail((current) => {
+        onAnswer={(itemId, question, answer, version) => setDetail((current) => {
           if (!current?.memory || current.id !== detail.id) return current
           return { ...current, memory: { ...current.memory, points: current.memory.points.map((point) => point.id === itemId
-            ? { ...point, questions: point.questions.filter((value) => value !== question), answers: { ...point.answers, [question]: answer } }
+            ? { ...point, version, questions: point.questions.filter((value) => value !== question), answers: { ...point.answers, [question]: answer } }
             : point) } }
         })} />}
-      {active === "memory" && pointFilter !== "history" && <MeetingMemory detail={detail} filter={pointFilter} />}
+      {active === "memory" && pointFilter !== "history" && <MeetingMemory detail={detail} filter={pointFilter}
+        closing={closingPoints} onClose={closePoint} />}
       {active === "memory" && pointFilter === "history" && (detail.memory?.previous.length
         ? <PreviousPoints points={detail.memory.previous} title="Diskutimet e mëparshme" />
         : <p className="text-sm">{detail.memory?.status === "PENDING" || detail.memory?.status === "RUNNING"

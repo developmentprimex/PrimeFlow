@@ -16,9 +16,18 @@ from app.models.department import Department
 from app.models.enums import UserRole
 from app.schemas.department import DepartmentOut, DepartmentRealizationModeUpdate
 from app.services.audit import add_audit_log
+from app.services.development_m1 import build_development_m1
 
 
 router = APIRouter()
+
+
+@router.get("/development/m1")
+async def get_development_m1(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    report = await build_development_m1(db, user)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Development department not found")
+    return report
 
 
 def _clients_path_for_department(department: Department) -> Path | None:

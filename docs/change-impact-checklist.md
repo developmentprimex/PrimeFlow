@@ -79,13 +79,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | Nisja e botëve të regjistrimit | Boti kryesor i Discord-it dhe Mira Zhvillim përdorin të njëjtin format të shënimeve. Moduli `discord_voice_note_format.py` ndan etiketat dhe datën nga klienti OpenAI dhe router-at FastAPI. Kontrollo importin e të dy botëve në një proces të pastër dhe gatishmërinë në Discord pas deployment-it. |
 | Ask MIRA | Komanda `/mira pyet`, përmendjet e botit kryesor, API-ja Discord dhe lidhjet te segmentet e Notetaker. Karta private shfaq pyetjen, përgjigjen dhe burimet e lidhura. Transkripti është burimi, kujtesa mban kontekstin dhe qasja verifikohet sërish para kthimit të burimeve. Kontrollo dërgimin privat, identitetin e revokuar, kufirin e pyetjeve, hapjen e lidhjeve dhe komandat e raportimit 1H që ndajnë grupin `/mira`. |
 | Mira Notetaker / Kujtesa e takimit | Notetaker dhe Kujtesa shfaqin pikat, sqarimet, burimet dhe historikun për përdoruesit e autentikuar. Çdo përdorues mund të japë sqarim dhe historiku ruan autorin. Projekti lidhet nga një përputhje unike në departamentin e takimit. Kontrollo që një çështje e përsëritur të ruajë burimet edhe kur takimet u nisën nga dy persona dhe që sqarimet të ruhen veç transkriptit. Kontrollo regresionin te raportimi orar, PX Notes dhe dërgimi në Discord. |
-| Mira Notetaker / Pamjet e takimit | Pikat e hapura përdorin të njëjtat kategori si lista e ndjekjes për takimin e radhës. Historiku çon te takimi i mëparshëm. Lidhjet nga Kujtesa dhe Discord duhet të hapin takimin dhe të theksojnë segmentin burimor kur lidhja përmban ID-në e segmentit. |
-| Mira → Takimet | Katalogu bashkon 1H Host dhe regjistrimin Discord nga `voice_meeting_id` ose nga sloti i regjistrimit automatik. Raportimi i stafit pa Host hapet brenda regjistrimit të po atij sloti kur ka një të tillë. Shënimet e vjetra pa takim të lidhur mbeten të arritshme brenda Takimeve. Kontrollo lidhjet e vjetra Notetaker dhe Shënimet, hapjen e pikave nga Kujtesa, lidhjen e shënimit nga PX Notes, panelet Discord dhe lidhjet e segmentit nga Ask MIRA. Transkripti Desktop kufizohet te pronari. 1H Reports, After Break Report dhe M1 PIKAT përdorin burimet dhe filtrat e tyre ekzistues. |
+| Mira Notetaker / Pamjet e takimit | Pikat e hapura dhe Historiku i takimeve hapen nga shiriti i pamjeve të takimit. Mbyllja nga rreshti përdor statusin dhe versionin e së njëjtës pikë në Kujtesë. Kontrollo listën e pikave të hapura, numrin në katalog, „Për t’u ndjekur“, autorin në Kujtesë dhe rifreskimin pas konfliktit. Historiku çon te takimi i mëparshëm. Lidhjet nga Kujtesa dhe Discord duhet të hapin takimin dhe të theksojnë segmentin burimor kur lidhja përmban ID-në e segmentit. |
+| Mira → Takimet | Lista dhe detajet përdorin të njëjtin format të datës dhe orës së takimit. Në detaje, data dhe ora shfaqen pranë titullit. Titulli Discord shkurtohet kur data dhe ora vijnë edhe nga regjistrimi. Katalogu bashkon 1H Host dhe regjistrimin Discord nga `voice_meeting_id` ose nga sloti i regjistrimit automatik. Raportimi i stafit pa Host hapet brenda regjistrimit të po atij sloti kur ka një të tillë. Shënimet e vjetra pa takim të lidhur mbeten të arritshme brenda Takimeve. Kontrollo lidhjet e vjetra Notetaker dhe Shënimet, hapjen e pikave nga Kujtesa, lidhjen e shënimit nga PX Notes, panelet Discord dhe lidhjet e segmentit nga Ask MIRA. Transkripti Desktop kufizohet te pronari. 1H Reports, After Break Report dhe M1 PIKAT përdorin burimet dhe filtrat e tyre ekzistues. |
 | Mira → Shënimet dhe transkripti | Pamja e përbashkët grupon segmentet radhazi sipas folësit për Discord dhe Host dhe ruan tekstin origjinal të shënimit. Për Discord, lidhjet e segmentit vazhdojnë të theksojnë fragmentin e saktë brenda bllokut. Kontrollo lidhjet nga Kujtesa dhe Ask MIRA, lidhjet e shënimit nga PX Notes dhe qasjen për transkriptin Desktop, ku regjistrimi nuk dallon folësit. Seksioni i përgjithshëm i takimit lidh detyrat dhe shënimet e krijuara nga Host ose nga diktimi Discord; Discord ruan ID-të me krijimin në të njëjtin transaksion. Kontrollo Task Details, PX Notes dhe riprovimin pa kopje. |
 | Mira → Treguesit në listën e takimeve | Numrat pranë titullit numërojnë detyrat dhe shënimet ende të disponueshme, të lidhura me Host ose diktimin Discord. Kur Host dhe regjistrimi hapen bashkë, numrat shfaqen te rreshti i përbashkët. Mira Zhvillim përdor avatarin jeshil të Discord-it në listë. Kontrollo që numrat të përputhen me seksionin “Detyra dhe shënime nga takimi”. |
 | Mira Notetaker / Diktimi i detyrës | “Mira, detyrë për [inicialet] … fund detyre” nga një folës i lidhur në Discord krijon një detyrë 1H pa slot të paracaktuar në kanalin 1H ose Mira Zhvillim dhe e cakton vetëm kur përputhet një punonjës aktiv. Verifiko My View, pamjen e departamentit, Open Tasks, Task Details, njoftimin e caktimit, filtrin e raportimit 1H dhe riprovimin pa kopje. |
 | Mira Zhvillim / hyrja automatike | Discord Mira Zhvillim (orari, prania, regjistrimi), mira-kontrolli (paneli Mira Zhvillim), Mira / shënimet, PX Notes (shikimi dhe ruajtja). Orari dhe request_id `autoai-` janë të veçantë nga regjistruesi 1H (`auto1h-`) dhe Mira Host. Finalizuesi i përbashkët ruan automatikisht shënimet e `auto1h-` dhe të `autoai-` me recorder `ai_agent`; nisjet manuale mbeten me ruajtje manuale. Kontrollo deduplikimin, lidhjen me transkriptin, statusin Ruajtur dhe kthimin te ruajtja manuale pas dështimit. |
-| Emri i takimeve Zhvillim dhe botit Mira Zhvillim | Mira → Takimet (filtri Zhvillim, lista, kërkimi, detajet dhe historiku), Discord (emri i botit, paneli, komandat dhe ftesat), PX Notes dhe printimi, Task Details, Common View, My View, Development, Graphic Design, Product Content, Finance dhe eksportet Excel që lexojnë burimin e diktimit. Kontrollo titujt e vjetër dhe shënimet e ruajtura me emrin e mëparshëm. |
+| Emri i takimeve ZHVILLIM dhe botit Mira Zhvillim | Mira → Takimet (filtri ZHVILLIM, lista, kërkimi, detajet dhe historiku), Discord (emri i botit, paneli, komandat dhe ftesat), PX Notes dhe printimi, Task Details, Common View, My View, Development, Graphic Design, Product Content, Finance dhe eksportet Excel që lexojnë burimin e diktimit. Kontrollo titujt e vjetër dhe shënimet e ruajtura me emrin e mëparshëm. |
 | Takimet (shënimet e takimeve) | Takimet, Takimi (seancat), Historia e klientit, Regjistrimet (Shënim / Injoro / screenshot), PX Notes (Dërgo / Bashko në PX), Meeting Scheduler (Trajnim), Sidebar |
 | Mira Host / takimet 1H | Mira (nisje/ndalim/status), Discord 1H (hyrja, prania, radha, audioja), PX Notes, Common View, 1H SHTYPI Today, 1H Reports (Done dhe strike), Task Details |
 | Raporte / email / eksporte | Reports, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, PX JAV Kontrolli, Weekly Planning Check, Kontrolli ditor RLZ, Print Preview, Print, Email, Exports, History |
@@ -107,6 +107,47 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   javën e plotë. Në Common View rreshti mbetet i dukshëm me filtrin All ose
   WFC INT kur rezultati është bosh. Waiting Client dhe rreshtat e personalëve për KA/GENT
   vazhdojnë të përdorin klasifikimet e tyre.
+
+- Development → Meetings → M1 dhe seksioni M1 Zhvillim në Export Excel përdorin
+  të njëjtin raport ditor. Mungesat, vonesat, pushimet dhe takimet lexohen nga
+  Common View. Takimet externe të ditës përfshijnë të gjitha departamentet.
+  Pika “Takimet interne” lexon takimet e ditës nga të gjitha departamentet.
+  M1 e shfaq checklistën në gjithë gjerësinë; tabelat e takimeve dhe paneli
+  Microsoft Calendar janë në pamjet e tjera të Meetings.
+  Kartat e takimeve në M1 përdorin të njëjtin renderim në Department dhe My View
+  të Development. Kartat marrin ngjyrat, orën dhe shenjat CAL/MANUAL/PARA/PAS
+  nga të dhënat dhe stilet e Common View. Takimet e anuluara kanë titull të
+  vijëzuar me të kuqe. Excel përdor etiketat e plota dhe paletën e raporteve.
+  Në ekran, kartat e takimeve vendosen krah për krah dhe rreshti lëviz
+  horizontalisht kur kartat nuk zënë vend. Takimet e anuluara dalin në fund
+  të rreshtit, sipas renditjes së Common View ditore.
+  Anulimi nga Department → Meetings → M1 përdor statusin e takimit për datën
+  e kartës përmes API-së së Common View. Dialogu tregon efektin te taskat e
+  gjeneruara dhe takimet interne të lidhura. My View e shfaq statusin.
+  Takimet interne me KA kufizohen te Zhvillimi. Detyrat ndjekin datat e
+  planifikimit, caktimet dhe simbolet KA/GENT/F; detyrat personale përdorin
+  prefikset KA/Genti të raporteve M1/M3.
+  Në ekran, kartat e detyrave përdorin ngjyrën për statusin. Teksti i statusit
+  mbetet i disponueshëm për lexuesit e ekranit dhe në Excel.
+  Personat e caktuar në kartat e detyrave përdorin të njëjtin rregull inicialesh
+  si Common View. Excel shfaq emrat e plotë.
+  Kopjet me të njëjtin burim ose grup shfaqen në një rresht për pikë, me
+  personat, simbolet dhe komentet e bashkuara edhe në Excel.
+  Tick-u ruhet në checklistën ekzistuese dhe klikimi te pyetja hap përgjigjen.
+  Takimet interne me KA dhe pyetjet për KA/Gentin shfaqen nën të njëjtën
+  pikë me një tick, edhe në Excel. Për checklistat ekzistuese përdoret
+  tick-u i pikës së parë të çiftit sipas rendit të ruajtur.
+  Excel vendos përgjigjen me ngjyra poshtë pyetjes përkatëse në të njëjtën
+  checklistë. Ndryshimi i rendit dhe redaktimi i pyetjes ruajnë lidhjen me
+  përgjigjen. Diskutimi i detyrave AM/PM mbetet pikë manuale.
+  PX Notes të padiskutuara ndjekin filtrin e M1 dhe M2. Veprimi “Shëno si të
+  diskutuar” përdor statusin e përbashkët të PX Notes, që lexohet edhe nga
+  M1, M2, M1 PIKAT për importet Gmail dhe 1H Reports. Kontrollo Excel, My View
+  dhe checklistat manuale të Development e Product Content Manager. Chat-i i
+  Teams Personal mbetet pikë manuale.
+  Në Development M1, shënimet nga email-et mblidhen nën “Email-et” me grup
+  fillimisht të mbyllur. Rreshtat e hapur shfaqin vetëm titullin e shkurtër dhe
+  veprimin e diskutimit. Excel përdor tekstin e raportit.
 
 - Arsyeja `PV` pranohet pa koment në raportin ditor RLZ, te shtyrjet e
   detyrave dhe në përgjigjet M2 që përdorin listën e arsyeve. Kontrollo

@@ -177,6 +177,48 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
   await expect(page.getByRole("heading", { name: "Takimi paraprak Modeco" })).toBeVisible()
 })
 
+test("meeting navigation lets staff close a point and refreshes a conflicting version", async ({ page }) => {
+  await shell(page)
+  const meeting = "44444444-4444-4444-8444-444444444444"
+  let version = 3
+  let status = "OPEN"
+  const writes: unknown[] = []
+  await page.route(`**/api/mira/meeting-catalog/discord/${meeting}`, route => route.fulfill({ json: {
+    id: meeting, source: "discord", title: "Takimi Modeco", status: "SAVED", host_ids: [], notes: [],
+    quick_summary: null, transcript: [],
+    memory: { points: [{ ...list.items[0], status, version, needs_follow_up: status === "OPEN",
+      text: "Oferta kërkon kontroll.", questions: [], answers: {}, sources: [] }], previous: [] },
+  } }))
+  await page.route(`**/api/mira-memory/items/${offer}/status`, async route => {
+    writes.push(route.request().postDataJSON())
+    if (version === 3) {
+      version = 4
+      return route.fulfill({ status: 409, json: { detail: "Pika është ndryshuar ndërkohë. U rifreskua." } })
+    }
+    version = 5
+    status = "CLOSED"
+    return route.fulfill({ json: detail(version, { status }) })
+  })
+
+  await page.goto(`/mira?tab=takimet&meeting=${meeting}&source=discord&view=quick`)
+  const nav = page.getByRole("navigation", { name: "Pamjet e takimit" })
+  await expect(nav.getByRole("link", { name: "Historiku i takimeve" })).toBeVisible()
+  await nav.getByRole("link", { name: "Pikat e hapura" }).click()
+  await expect(nav.getByRole("link", { name: "Pikat e hapura" })).toHaveAttribute("aria-current", "page")
+  const close = page.getByRole("button", { name: /^Mbyll pikën/ })
+  const refreshed = page.waitForResponse(response => response.url().endsWith(`/meeting-catalog/discord/${meeting}`))
+  await close.click()
+  await refreshed
+  await expect(page.getByText("Pika është ndryshuar ndërkohë. U rifreskua.")).toBeVisible()
+  await close.click()
+  await expect(page.getByText("Nuk ka pika të hapura të ruajtura për këtë takim.")).toBeVisible()
+  expect(writes).toEqual([{ action: "close", version: 3 }, { action: "close", version: 4 }])
+
+  await nav.getByRole("link", { name: "Pikat e takimit" }).click()
+  await expect(page.getByText("Detyrë · Mbyllur")).toBeVisible()
+  await expect(close).toHaveCount(0)
+})
+
 test("Notetaker can filter open points before the next meeting", async ({ page }) => {
   await shell(page)
   const point = { id: offer, title: "Oferta Modeco", text: "Pritet përgjigjja.", meeting_id: offer,
