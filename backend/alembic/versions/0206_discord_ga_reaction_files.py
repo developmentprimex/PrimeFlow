@@ -1,4 +1,4 @@
-"""Retain source message details for GA reaction attachments."""
+"""Restore the deployed attachment count for Discord GA reactions."""
 
 import sqlalchemy as sa
 from alembic import op
@@ -11,12 +11,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("discord_ga_reactions", sa.Column("message_channel_id", sa.String(32)))
-    op.add_column("discord_ga_reactions", sa.Column("message_author_id", sa.String(32)))
-    op.add_column("discord_ga_reactions", sa.Column("attachment_count", sa.Integer()))
+    op.add_column("discord_ga_reactions", sa.Column("attachment_count", sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
     op.drop_column("discord_ga_reactions", "attachment_count")
-    op.drop_column("discord_ga_reactions", "message_author_id")
-    op.drop_column("discord_ga_reactions", "message_channel_id")

@@ -2,6 +2,7 @@
 from sqlalchemy import or_
 
 from app.models.ga_note import GaNote
+from app.services.mira_development_name import NAME
 
 
 def mira_note_expression():
@@ -14,5 +15,5 @@ def is_mira_note(note) -> bool:
 
 
 def append_mira_dictation_label(content: str, source: str | None) -> str:
-    label = {"1h": "Nga Mira 1H", "ai_agent": "Nga Mira AI Agent"}.get(source)
+    label = {"1h": "Nga Mira 1H", "ai_agent": f"Nga {NAME}"}.get(source)
     return f"{content}\n{label}" if label else content

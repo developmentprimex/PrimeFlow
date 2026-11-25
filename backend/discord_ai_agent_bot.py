@@ -25,6 +25,7 @@ if private_env.exists():
                        value or (key in {'DISCORD_AI_AGENT_AUTO_JOIN_TIMES', 'DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID'} and value is not None)):
             os.environ.setdefault(key, value)
 from app.config import settings
+from app.services.mira_development_name import COMMAND, MEETING_NAME, NAME
 from discord_logging import worker_logging
 import discord_voice_meetings as voice
 
@@ -100,12 +101,14 @@ class AIAgentBot(discord.Client):
 
     async def setup_hook(self):
         guild = discord.Object(id=int(settings.DISCORD_GUILD_ID))
-        voice.register_meeting_commands(self, guild, name='ai-agent')
-        group = self.tree.get_command('ai-agent', guild=guild)
-        @group.command(name='statusi', description='Gjendja e regjistrimit të Mira AI Agent')
+        voice.register_meeting_commands(self, guild, name=COMMAND, label=NAME)
+        group = self.tree.get_command(COMMAND, guild=guild)
+        @group.command(name='statusi', description=f'Gjendja e regjistrimit të {NAME}')
         async def status(interaction: discord.Interaction):
             active = self.meeting_capture.active
-            text = 'Mira AI Agent po merr shënime.' if active and active.get('listening') and not active.get('finishing') else 'Mira AI Agent është gati. Hyr në AI Agent dhe përdor /ai-agent fillo.'
+            listening = active and active.get('listening') and not active.get('finishing')
+            text = (f'{NAME} po merr shënime.' if listening
+                    else f'{NAME} është gati. Hyr në kanalin Zhvillim dhe përdor /{COMMAND} fillo.')
             await interaction.response.send_message(text, ephemeral=True)
         await self.tree.sync(guild=guild)
         self.watch_capture.start()
@@ -178,10 +181,33 @@ class AIAgentBot(discord.Client):
         temporary.replace(STATUS_FILE)
         log.info('Mira AI Agent connected; voice permissions ready=%s', status['ready'])
 
+    async def refresh_display_name(self):
+        guild = self.get_guild(int(settings.DISCORD_GUILD_ID))
+        member = guild.me if guild else None
+        if member and member.display_name != NAME:
+            try:
+                await member.edit(nick=NAME)
+            except discord.HTTPException as exc:
+                log.warning('Could not set the server nickname for %s: HTTP %s', NAME, exc.status)
+        if not guild or not settings.DISCORD_MEETING_CONTROL_CHANNEL_ID:
+            return
+        channel = guild.get_channel(int(settings.DISCORD_MEETING_CONTROL_CHANNEL_ID))
+        if not isinstance(channel, discord.TextChannel):
+            return
+        old_topic = 'PrimeFlow shared meeting controls: 1H and AI Agent'
+        if channel.topic == old_topic:
+            try:
+                response = await self.admin_http.patch(
+                    f'/channels/{channel.id}', json={'topic': f'PrimeFlow shared meeting controls: 1H and {NAME}'})
+                response.raise_for_status()
+            except httpx.HTTPError:
+                log.warning('Could not update the topic for the configured Mira control channel')
+
     async def on_ready(self):
         await self.meeting_capture.cleanup_idle_voice()
         self.publish_status()
         await self.verify_release()
+        await self.refresh_display_name()
 
     async def on_resumed(self):
         await self.meeting_capture.cleanup_idle_voice()
@@ -235,13 +261,13 @@ class AIAgentCapture(voice.MeetingCaptureCoordinator):
         guild, channel = self.organizer_channel(owner)
         target = guild.get_channel(int(settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID or 0))
         if not isinstance(target, discord.VoiceChannel):
-            raise ValueError('Kanali zanor AI Agent nuk u gjet.')
+            raise ValueError('Kanali zanor Zhvillim nuk u gjet.')
         actor = dict(discord_user_id=str(owner), guild_id=str(guild.id), channel_id=str(channel.id),
                      voice_channel_id=str(target.id))
         # Separate request IDs let the finalizer auto-save scheduled AI Agent notes.
         request_id = f"autoai-{slot.strftime('%Y%m%d%H%M')}" + (f'-{attempt}' if attempt > 1 else '')
         await self.begin(actor=actor, guild=guild, voice=target, request_id=request_id,
-                         title=f'AI Agent · {slot.strftime("%d.%m.%Y %H:%M")}', department_id=None, notify=channel.send)
+                         title=f'{MEETING_NAME} · {slot.strftime("%d.%m.%Y %H:%M")}', department_id=None, notify=channel.send)
 
     async def start(self, interaction, title, department_id):
         from discord_meeting_control import in_control
@@ -249,7 +275,7 @@ class AIAgentCapture(voice.MeetingCaptureCoordinator):
             return await super().start(interaction,title,department_id)
         channel = getattr(getattr(interaction.user, 'voice', None), 'channel', None)
         if str(getattr(channel, 'id', '')) != settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID:
-            raise ValueError('Hyr në kanalin zanor AI Agent, pastaj përdor /ai-agent fillo.')
+            raise ValueError(f'Hyr në kanalin zanor Zhvillim, pastaj përdor /{COMMAND} fillo.')
         await super().start(interaction, title, department_id)
 
 

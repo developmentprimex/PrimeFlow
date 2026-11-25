@@ -3,15 +3,16 @@ from __future__ import annotations
 
 import hmac
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
-from app.services import ga_discord_channel_archive as archive, ga_discord_mentions as mentions
+from app.services import ga_discord_channel_archive as archive
+from app.services import ga_discord_mentions as mentions
 
 router = APIRouter()
 
@@ -34,12 +35,15 @@ class ReactionUser(BaseModel):
     discord_id: str = Field(pattern=SNOWFLAKE)
     name: str = Field(default="", max_length=200)
     ga_bot: bool = False
+    bot: bool | None = None
+    burst: bool | None = None
 
 
 class ReactionIn(BaseModel):
     emoji: str = Field(min_length=1, max_length=100)
     count: int = Field(ge=0, le=100000)
     users: list[ReactionUser] = Field(default_factory=list, max_length=100)
+    emoji_key: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class MessageIn(BaseModel):
@@ -73,6 +77,16 @@ class MentionIn(MessageIn):
 class ArchivedMessageIn(MessageIn):
     parent_channel_id: str | None = Field(default=None, pattern=SNOWFLAKE)
     reactions_synced_at: datetime | None = None
+    reaction_session_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    reaction_sequence: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_reaction_cursor(self):
+        if (self.reaction_session_id is None) != (self.reaction_sequence is None):
+            raise ValueError("Reaction session and sequence must be provided together.")
+        if self.reaction_session_id is not None and (self.reactions is None or self.reactions_synced_at is None):
+            raise ValueError("Reaction order requires a current snapshot.")
+        return self
 
 
 class MentionBatch(BaseModel):
@@ -88,6 +102,27 @@ class ReactionsUpdate(BaseModel):
     message_id: str = Field(pattern=SNOWFLAKE)
     reactions: list[ReactionIn] = Field(max_length=50)
     observed_at: datetime | None = None
+
+
+class ReactionEventIn(BaseModel):
+    message_id: str = Field(pattern=SNOWFLAKE)
+    guild_id: str = Field(pattern=SNOWFLAKE)
+    channel_id: str = Field(pattern=SNOWFLAKE)
+    parent_channel_id: str | None = Field(default=None, pattern=SNOWFLAKE)
+    session_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    sequence: int = Field(ge=1)
+    kind: Literal["add", "remove", "clear", "clear_emoji"]
+    user_id: str | None = Field(default=None, pattern=SNOWFLAKE)
+    emoji_key: str | None = Field(default=None, min_length=1, max_length=100)
+    burst: bool = False
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        if self.kind in {"add", "remove"} and (self.user_id is None or self.emoji_key is None):
+            raise ValueError("A reaction add or removal requires a user and an emoji.")
+        if self.kind == "clear_emoji" and self.emoji_key is None:
+            raise ValueError("An emoji clear requires an emoji.")
+        return self
 
 
 @router.get("/context", dependencies=[Depends(require_mentions_bot)])
@@ -145,3 +180,11 @@ async def store_reactions(payload: ReactionsUpdate, db: AsyncSession = Depends(g
         db, payload.message_id, [reaction.model_dump() for reaction in payload.reactions], observed_at=payload.observed_at,
     )
     return {"updated": updated}
+
+
+@router.post("/reaction-events", dependencies=[Depends(require_mentions_bot)])
+async def store_reaction_event(payload: ReactionEventIn, db: Annotated[AsyncSession, Depends(get_db)]) -> dict:
+    if not archive.archive_scope(payload.guild_id, payload.channel_id, payload.parent_channel_id):
+        raise HTTPException(422, "Reaction events must belong to the GA staff channel archive.")
+    await archive.store_reaction_event(db, payload.model_dump(exclude={"guild_id", "channel_id", "parent_channel_id"}))
+    return {"stored": True}

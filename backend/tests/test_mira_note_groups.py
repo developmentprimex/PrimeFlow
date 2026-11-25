@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 os.environ.setdefault('DATABASE_URL', 'postgresql+asyncpg://test:test@127.0.0.1/test')
 os.environ.setdefault('JWT_SECRET', 'mira-note-groups-test-secret')
 from app.services import mira_note_groups as groups
+from app.services.mira_development_name import meeting_note_heading, meeting_title
 
 
 class MiraNoteGroupsTests(unittest.IsolatedAsyncioTestCase):
@@ -13,9 +14,18 @@ class MiraNoteGroupsTests(unittest.IsolatedAsyncioTestCase):
         for note, expected in [({'kind':'1H','title':'Summary'}, '1H'),
                 ({'source':'DISCORD','title':'1H 820/10/11 · 29.10.2026'}, '1H'),
                 ({'source':'DISCORD','title':'AI AGENT 08-05 & 12-00'}, 'AI_AGENT'),
+                ({'source':'DISCORD','title':'Mira Zhvillim · 29.10.2026'}, 'AI_AGENT'),
                 ({'source':'DESKTOP','title':'AI Agent interview'}, 'OTHER'),
                 ({'source':'DISCORD','title':'Internal meeting'}, 'OTHER')]:
             self.assertEqual(groups.note_group(note), expected)
+
+    def test_historical_heading_changes_without_altering_note_body(self):
+        self.assertEqual(meeting_title('AI AGENT 08-05 & 12-00'), 'Zhvillim 08-05 & 12-00')
+        self.assertEqual(meeting_title('ZHVILLIM · 25.11.2026 08:04'), 'Zhvillim · 25.11.2026 08:04')
+        self.assertEqual(meeting_title('Mira Zhvillim'), 'Zhvillim')
+        self.assertEqual(meeting_title('Takimi me ekipin'), 'Takimi me ekipin')
+        self.assertEqual(meeting_note_heading('E mërkurë, 25 nëntor 2026\nAI Agent\n\nAI Agent was mentioned.'),
+                         'E mërkurë, 25 nëntor 2026\nZhvillim\n\nAI Agent was mentioned.')
 
     async def test_channel_identity_classifies_custom_titles_and_preserves_note_actions(self):
         note_id = str(uuid.uuid4())

@@ -1,4 +1,4 @@
-"""Durable, recipient-scoped AI Agent invitations, independent of audio capture."""
+"""Durable, recipient-scoped Mira Zhvillim invitations, independent of audio capture."""
 from datetime import datetime, timedelta
 import hashlib
 import uuid
@@ -8,6 +8,8 @@ from sqlalchemy.dialects.postgresql import insert
 from app.models.discord_assistant import DiscordLink, DiscordReminder
 from app.models.user import User
 
+# The scheduler also loads this module as a standalone copy.
+NAME = 'Mira Zhvillim'
 
 def due(at, slot, config):
     if not config.get('enabled') or slot not in config['times']:
@@ -42,11 +44,11 @@ async def claim(db, at, slot, config):
 
 
 def invitation(job):
-    marker=f'AI Agent invitation · {job["day"]} · {job["slot"]}'
-    return {'content':f'<@{job["discord_user_id"]}> 🔔 **Takimi AI Agent · {job["slot"]}**\nKyçu në kanalin zanor AI Agent.',
+    marker=f'{NAME} · {job["day"]} · {job["slot"]}'
+    return {'content':f'<@{job["discord_user_id"]}> 🔔 **Takimi {NAME} · {job["slot"]}**\nKyçu në kanalin zanor Zhvillim.',
         'allowed_mentions':{'parse':[],'users':[job['discord_user_id']],'replied_user':False},
         'embeds':[{'description':f'🎧 <#{job["voice_channel_id"]}>','color':0x00A88F,'footer':{'text':marker}}],
-        'components':[{'type':1,'components':[{'type':2,'style':5,'label':'Kyçu në AI Agent',
+        'components':[{'type':1,'components':[{'type':2,'style':5,'label':'Kyçu në Zhvillim',
             'url':f'https://discord.com/channels/{job["guild_id"]}/{job["voice_channel_id"]}'}]}],
         'nonce':hashlib.sha256(('ai-agent-invite:'+job['id']).encode()).hexdigest()[:24],'enforce_nonce':True}
 
@@ -56,9 +58,9 @@ async def deliver(client, job, *, bot_id):
     # If a send succeeded but the receipt failed, a retry reuses the existing message.
     response=await client.get(f'/channels/{job["channel_id"]}/messages',params={'limit':100})
     response.raise_for_status()
-    marker=payload['embeds'][0]['footer']['text']
+    markers = {payload['embeds'][0]['footer']['text'], f'AI Agent invitation · {job["day"]} · {job["slot"]}'}
     for message in response.json():
-        if message.get('author',{}).get('id')==bot_id and any(embed.get('footer',{}).get('text')==marker for embed in message.get('embeds',[])):
+        if message.get('author',{}).get('id')==bot_id and any(embed.get('footer',{}).get('text') in markers for embed in message.get('embeds',[])):
             return message['id']
     response=await client.post(f'/channels/{job["channel_id"]}/messages',json=payload)
     response.raise_for_status()

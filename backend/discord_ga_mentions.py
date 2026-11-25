@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -101,7 +102,12 @@ def emoji_label(emoji) -> str:
     return str(emoji)
 
 
-async def read_reactions(message, ga_bot_id: int | None = None) -> list[dict]:
+def emoji_key(emoji) -> str:
+    custom_id = getattr(emoji, "id", None)
+    return f"id:{custom_id}" if custom_id else str(emoji)
+
+
+async def read_reactions(message, ga_bot_id: int | None = None, *, include_evidence: bool = False) -> list[dict]:
     """[{emoji, count, users:[{discord_id, name}]}] of a message (REST, read-only)."""
     out = []
     for reaction in getattr(message, "reactions", None) or []:
@@ -112,10 +118,21 @@ async def read_reactions(message, ga_bot_id: int | None = None) -> list[dict]:
                 value = {"discord_id": str(user.id), "name": name[:200]}
                 if user.id == ga_bot_id:
                     value["ga_bot"] = True
+                if include_evidence:
+                    value["bot"] = user.bot
                 users.append(value)
+            remaining = REACTION_USERS_LIMIT - len(users)
+            if include_evidence and remaining and reaction.burst_count:
+                async for user in reaction.users(limit=remaining, type=discord.ReactionType.burst):
+                    name = getattr(user, "display_name", None) or getattr(user, "global_name", None) or user.name or ""
+                    users.append({"discord_id": str(user.id), "name": name[:200], "ga_bot": user.id == ga_bot_id,
+                                  "bot": user.bot, "burst": True})
         except discord.DiscordException as exc:
             log.info("Reaction users unavailable: %s", type(exc).__name__)
-        out.append({"emoji": emoji_label(reaction.emoji)[:100], "count": int(reaction.count), "users": users})
+        value = {"emoji": emoji_label(reaction.emoji)[:100], "count": int(reaction.count), "users": users}
+        if include_evidence:
+            value["emoji_key"] = emoji_key(reaction.emoji)[:100]
+        out.append(value)
     return out[:50]
 
 
@@ -123,7 +140,7 @@ async def archive_snapshot(message, ga_bot_id: int | None = None) -> dict:
     return {
         **archive_payload(message),
         "reactions_synced_at": datetime.now(timezone.utc).isoformat(),
-        "reactions": await read_reactions(message, ga_bot_id),
+        "reactions": await read_reactions(message, ga_bot_id, include_evidence=True),
     }
 
 
@@ -148,6 +165,8 @@ class GaMentionsBot(discord.Client):
         self.archive_channels: set[int] = set()
         self.tracked: set[int] = set()
         self.pending_reactions: dict[int, asyncio.Task] = {}
+        self.reaction_session_id = uuid.uuid4().hex
+        self.reaction_sequence: dict[int, int] = {}
 
     async def close(self) -> None:
         await self.api.aclose()
@@ -241,26 +260,38 @@ class GaMentionsBot(discord.Client):
         if await self.refresh_context(force=True):
             asyncio.create_task(self.backfill_archive())
 
+    async def on_disconnect(self) -> None:
+        self.reaction_session_id = uuid.uuid4().hex
+        self.reaction_sequence.clear()
+
     async def on_raw_reaction_add(self, payload) -> None:
-        self.reaction_changed(payload)
+        await self.capture_reaction(payload, "add")
 
     async def on_raw_reaction_remove(self, payload) -> None:
-        self.reaction_changed(payload)
+        await self.capture_reaction(payload, "remove")
 
     async def on_raw_reaction_clear(self, payload) -> None:
-        self.reaction_changed(payload)
+        await self.capture_reaction(payload, "clear")
 
     async def on_raw_reaction_clear_emoji(self, payload) -> None:
-        self.reaction_changed(payload)
+        await self.capture_reaction(payload, "clear_emoji")
 
-    def reaction_changed(self, payload) -> None:
+    async def capture_reaction(self, payload, kind: str) -> None:
+        event = self.reaction_changed(payload, kind)
+        if event is not None:
+            await self.post_batch("/reaction-events", event)
+
+    def reaction_changed(self, payload, kind: str | None = None) -> dict | None:
         """Re-read the reactions of a stored mention (debounced: one REST read per burst)."""
         guild_id = getattr(payload, "guild_id", None)
         if guild_id is None or str(guild_id) != str(self.context.get("guild_id")):
             return  # DMs and other servers are never read
-        if (payload.message_id not in self.tracked and payload.channel_id not in self.archive_channels
-                and str(payload.channel_id) != self.context.get("staff_channel_id")
-                and not self.is_staff_channel(self.get_channel(payload.channel_id))):
+        staff = self.context.get("staff_channel_id")
+        channel_id = str(payload.channel_id)
+        channel = self.get_channel(payload.channel_id)
+        archived = (channel_id == staff or self.is_staff_channel(channel)
+                    or (channel is None and payload.channel_id in self.archive_channels))
+        if not archived and payload.message_id not in self.tracked:
             return
         pending = self.pending_reactions.pop(payload.message_id, None)
         if pending is not None:
@@ -268,6 +299,18 @@ class GaMentionsBot(discord.Client):
         self.pending_reactions[payload.message_id] = asyncio.create_task(
             self.sync_reactions(payload.channel_id, payload.message_id, delay=REACTION_DEBOUNCE_SECONDS)
         )
+        if archived and kind is not None:
+            sequence = self.reaction_sequence.get(payload.message_id, 0) + 1
+            self.reaction_sequence[payload.message_id] = sequence
+            emoji = getattr(payload, "emoji", None)
+            user_id = getattr(payload, "user_id", None)
+            return {"message_id": str(payload.message_id), "guild_id": str(guild_id), "channel_id": channel_id,
+                    "parent_channel_id": staff if channel_id != staff else None,
+                    "session_id": self.reaction_session_id, "sequence": sequence, "kind": kind,
+                    "user_id": str(user_id) if user_id is not None else None,
+                    "emoji_key": emoji_key(emoji)[:100] if emoji is not None else None,
+                    "burst": getattr(payload, "burst", False)}
+        return None
 
     async def sync_reactions(self, channel_id: int, message_id: int, *, delay: float = 0.0) -> None:
         try:
@@ -276,15 +319,19 @@ class GaMentionsBot(discord.Client):
             channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
             if getattr(channel, "guild", None) is None:
                 return
+            session_id = self.reaction_session_id
+            sequence = self.reaction_sequence.get(message_id)
+            observed_at = datetime.now(timezone.utc).isoformat()
             message = await channel.fetch_message(message_id)  # GET /channels/{id}/messages/{id}
             archived = self.is_staff_channel(channel) and message.type != discord.MessageType.thread_starter_message
             if archived:
                 snapshot = await archive_snapshot(message, self.user.id if self.user else None)
+                snapshot["reactions_synced_at"] = observed_at
+                if sequence is not None and session_id == self.reaction_session_id:
+                    snapshot.update(reaction_session_id=session_id, reaction_sequence=sequence)
                 await self.post_batch("/channel-messages", {"messages": [snapshot]})
                 reactions = snapshot["reactions"]
-                observed_at = snapshot["reactions_synced_at"]
             else:
-                observed_at = datetime.now(timezone.utc).isoformat()
                 reactions = await read_reactions(message, self.user.id if self.user else None)
             if archived or message_id in self.tracked:
                 response = await self.api.post("/reactions", json={

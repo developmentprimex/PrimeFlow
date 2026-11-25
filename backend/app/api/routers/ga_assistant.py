@@ -20,6 +20,8 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
 from app.models.enums import TaskStatus, UserRole
+from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
+from app.models.ga_time_slot_entry import GaTimeSlotEntry
 from app.models.oauth import GaAssistantItemTime
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
@@ -39,6 +41,7 @@ from app.schemas.ga_discord_mentions import (
 )
 from app.services import ga_assistant as svc
 from app.services.audit import add_audit_log
+from app.services.ga_icloud_sync import PENDING_COMPLETE
 from app.services.ga_identity import is_ga_user
 
 router = APIRouter()
@@ -90,8 +93,8 @@ def _audit(db: AsyncSession, user: User, entity_id: uuid.UUID, action: str, afte
 
 ITEM_PREFIXES = (svc.PREFIX_TASK, svc.PREFIX_MEETING, svc.PREFIX_EVENT, svc.PREFIX_TODO, svc.PREFIX_TIME_TABLE, svc.PREFIX_DISCORD)
 IPHONE_READ_ONLY = (
-    "iPhone reminders (tt:) come from the one-way iPhone Sync (iPhone -> PrimeFlow); PrimeFlow cannot change them "
-    "on the phone. Complete, move or edit the reminder in Reminders on the iPhone; the next sync updates PrimeFlow. "
+    "iPhone reminders (tt:) can be marked done through the paired Shortcut. "
+    "Move or edit a reminder in Reminders on the iPhone; the next sync updates PrimeFlow. "
     "remove_from_day can still hide it from GA's assistant day."
 )
 
@@ -234,6 +237,7 @@ async def agenda(
     start: str = Query(..., description="ISO 8601 start (inclusive)"),
     end: str = Query(..., description="ISO 8601 end (exclusive)"),
     include_untimed: bool = False,
+    include_live_microsoft: bool = True,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
@@ -245,7 +249,8 @@ async def agenda(
         raise HTTPException(status_code=422, detail="end must be after start and the window at most 31 days")
     last_day = (window_end - timedelta(microseconds=1)).date()
     items, warnings = await svc.collect_items(
-        db, user, window_start.date(), last_day, include_microsoft=is_ga_user(user), now=now
+        db, user, window_start.date(), last_day, include_microsoft=is_ga_user(user),
+        include_live_microsoft=include_live_microsoft, now=now,
     )
     selected = svc.select_agenda(items, window_start, window_end, include_untimed=include_untimed)
     return {
@@ -334,6 +339,39 @@ class ItemCommentIn(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+async def request_iphone_completion(db: AsyncSession, user: User, item_id: str, key: str) -> dict:
+    if not is_ga_user(user):
+        raise HTTPException(403, "Only GA can complete reminders on the paired iPhone.")
+    target_reminder = select(GaTimeSlotEntry.id).where(
+        GaTimeSlotEntry.sync_connection_id == GaIcloudSyncConnection.id,
+        GaTimeSlotEntry.user_id == user.id, GaTimeSlotEntry.source_type == "reminder",
+        GaTimeSlotEntry.source_external_id == key,
+    ).exists()
+    connection = (await db.execute(
+        select(GaIcloudSyncConnection).where(
+            GaIcloudSyncConnection.ga_user_id == user.id, GaIcloudSyncConnection.revoked_at.is_(None),
+            target_reminder,
+        ).order_by(GaIcloudSyncConnection.created_at.desc()).limit(1).with_for_update()
+    )).scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(404, "iPhone reminder not found on an active pairing.")
+    entry = (await db.execute(select(GaTimeSlotEntry).where(
+        GaTimeSlotEntry.sync_connection_id == connection.id, GaTimeSlotEntry.user_id == user.id,
+        GaTimeSlotEntry.source_type == "reminder", GaTimeSlotEntry.source_external_id == key,
+    ))).scalars().first()
+    if entry is None:
+        raise HTTPException(404, "iPhone reminder not found.")
+    if entry.is_completed:
+        return {"item_id": item_id, "result": "already_done", "status": "completed"}
+    if not entry.reminder_source or not svc.is_iphone_completion_key(key):
+        raise HTTPException(409, "Sync the reminder from the paired iPhone once to load its original title and due date.")
+    if entry.completion_requested_at is None:
+        entry.completion_requested_at = datetime.now(timezone.utc)
+        _audit(db, user, entry.id, "GA_ASSISTANT_IPHONE_COMPLETION_REQUESTED", {"item_id": item_id})
+        await db.commit()
+    return {"item_id": item_id, "result": PENDING_COMPLETE, "status": PENDING_COMPLETE}
+
+
 @router.post("/items/done")
 async def item_done(payload: ItemDoneIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     ensure_assistant_user(user)
@@ -392,7 +430,7 @@ async def item_done(payload: ItemDoneIn, db: AsyncSession = Depends(get_db), use
         await _set_discord_status(db, user, raw, "done")
         return {"item_id": payload.item_id, "result": "done", "status": "done"}
     if prefix == svc.PREFIX_TIME_TABLE:
-        raise HTTPException(status_code=409, detail=IPHONE_READ_ONLY)
+        return await request_iphone_completion(db, user, payload.item_id, raw)
     raise HTTPException(status_code=409, detail="Outlook events are read-only here")
 
 
@@ -784,7 +822,7 @@ async def discord_mentions_feed(
 
     page = rows[:limit]
     tz = svc.ga_tz()
-    items = await mentions.render_with_context(db, page, tz)
+    items = await mentions.render_feed(db, page, tz)
     return {
         "channel_id": settings.DISCORD_GA_REPLIES_CHANNEL_ID,
         "timezone": settings.GA_TIMEZONE,

@@ -83,6 +83,11 @@ class DiscordFeedMention(DiscordContextMessage):
     status: Literal["new", "seen", "done"]
     reviewed_by: list[str]
     ready_for_ga: bool
+    ga_replied: bool = False
+    ga_reacted: bool = False
+    others_reacted_before_ga: bool = False
+    others_reacted_before_ga_names: list[str] = Field(default_factory=list)
+    others_reacted_before_ga_known: bool = False
 
 
 class DiscordMentionsFeed(BaseModel):

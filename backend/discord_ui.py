@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.config import settings
+from app.services.mira_development_name import NAME
 
 LIST_PER_PAGE = 20
 POINTS_SHOWN = 25
@@ -617,7 +618,7 @@ def meeting_alert(job: dict, voice_url: str | None = None):
         if one_h_url:
             view.add_item(discord.ui.Button(label='🎧 Hyr në 1H', url=one_h_url, row=0))
         if ai_url:
-            view.add_item(discord.ui.Button(label='🎧 Hyr në AI Agent', url=ai_url, row=0))
+            view.add_item(discord.ui.Button(label=f'🎧 Hyr në {NAME}', url=ai_url, row=0))
     return content[:2000], embed, view
 
 

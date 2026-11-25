@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useReportDate } from "@/lib/report-link-date"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
 import { AfterBreakReportMailboxes, type MailResult, type ReportMailboxSource } from "@/components/report-mailbox"
 import { installReportNoteControls, ReportNoteAttachmentDialog, ReportNoteCell, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
@@ -183,7 +184,7 @@ export default function AfterBreakReportPage() {
   const isManagerOrAdmin = ["ADMIN", "MANAGER"].includes(String(user?.role || "").toUpperCase())
   const canEdit = Boolean(user)
   const canManageDelivery = isManagerOrAdmin
-  const [reportDate, setReportDate] = React.useState(todayIso())
+  const [reportDate, setReportDate] = useReportDate(todayIso)
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const explanationSaveQueue = React.useRef<Promise<void>>(Promise.resolve())
   const pendingExplanationValues = React.useRef(new Map<string, string>())

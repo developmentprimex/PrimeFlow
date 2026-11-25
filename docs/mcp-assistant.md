@@ -62,7 +62,7 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 
 | Tool | Çfarë bën |
 |---|---|
-| `ga_agenda(start, end, include_untimed=false)` | Elementet me orë në `[start, end)`, të të gjitha burimeve |
+| `ga_agenda(start, end, include_untimed=false, include_live_microsoft=true)` | Elementet me orë në `[start, end)`, të të gjitha burimeve |
 | `ga_leftovers(as_of)` | Të papërfunduarat para `as_of`, më të vjetrat së pari, me ditët e vonesës |
 | `ga_untimed_today(date)` | Detyrat pa orë për ditën |
 | `ga_item_done(item_id, comment?, override_reason?)` | Detyrë → DONE. Detyrat normale kërkojnë komentin e rezultatit të GA-së (rregulli RLZ, si në UI); 1H/speciale jo. BZ ku GA s'është assignee → “BZ u mbajt” (koment + audit), pa e mbyllur detyrën e kolegut. Takim → “Mbajtur”. To Do → completed |
@@ -79,6 +79,23 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 | `ga_discord_react(id, emoji, remove=false)` | Shton ose heq reagimin e botit për 👍, ✅, 👀 ose ❌. Kthen `id`, `emoji` dhe `removed` |
 | `ga_discord_mark(id, status)` | `seen` / `done` (ose `new`); në Discord s'ndryshon asgjë |
 
+## Raportet ASIST GA – DET GA
+
+| Mjeti | Fushat dhe përdorimi |
+|---|---|
+| `ga_report_links(date)` | `links[]` me `key`, `title`, `url`, `available`. Gjashtë faqet M1/M2/M3 dhe PIKAT, plus 1H SHTYPI Sot/Nesër, hapen në datën e kërkuar. `available` tregon se faqja ka një link, ndërsa vetë faqja tregon nëse raporti është ruajtur për atë ditë. |
+| `ga_m1_reorg_get(date)` dhe `ga_m1_reorg(date, answer, comment?)` | Lexojnë dhe ruajnë përgjigjen e M1 Pikat. Kthejnë `date`, `answer` (`po`, `jo` ose `null`) dhe `comment`. Kur përgjigjja ekzistuese është vetëm tekst i lirë, kthehet te `comment`. |
+| `ga_1h_comments(since?, only_new=false)` dhe `ga_1h_comment_mark(id, status)` | `items[]` me `id`, `task: {id, title, link}`, `author: {name, initials}`, `time`, `text`, `status: new/seen`. Përdor ID-në e plotë të kthyer nga lista. Redaktimi krijon një version për t'u lexuar përsëri. |
+| `ga_agenda(...)` | Detyrat përfshijnë simbolet GA dhe F, `symbols` dhe `daypart: AM/PM/null`. Takimet japin `type: EXT/INT/BZ`, `held`, `join_url` për Teams dhe `notes_url` kur gjenden shënimet. |
+| `ga_devices(date)` dhe `ga_device_mark(id, status, comment?)` | Detyrat me titullin GA Devices kthejnë `id`, `title`, `category`, `person`, `time`, `link`, `status`. `reacted` ruan reagimin në listën GA Devices. `done` përdor rregullat e zakonshme të përfundimit të detyrës. |
+| `list_ga_notes(note_type="GA", unconverted_only=true, since?)` | Lexon shënimet e ruajtura sipas kohës së krijimit. Fushat përfshijnë `status`, `is_discussed`, `is_converted_to_task`, `author`, `created_at`. |
+| `ga_px_tasks(date, until)` | Detyrat e GA-së me afat nga fillimi i datës deri te ora lokale `until`, përfshirë vetë orën. `items[]` me `id`, `title`, `due_at`, `status`, `link` dhe `scope: "PX"`. Afatet pa orë nuk futen në një raport të ndërmjetëm. |
+| `ga_discord_mentions_feed(...)` | Çdo përmendje ka `ga_replied`, `ga_reacted`, `others_reacted_before_ga`, `others_reacted_before_ga_names` dhe `others_reacted_before_ga_known`. Lexo edhe fushën `known` për reagimet e vjetra ose kur renditja nuk mund të verifikohet. |
+
+Për rifreskimin çdo dy minuta, përdor `include_live_microsoft=false` te agjenda,
+`since` te komentet e shënimet dhe faqen e parë të feed-it Discord. Takimet e
+sinkronizuara, iPhone Sync dhe Discord vazhdojnë të lexohen nga PrimeFlow.
+
 ## Reminders “R:” të iPhone-it (GA Time Table)
 
 - Burimi: rreshtat që iPhone Sync i importon te `ga_time_slot_entries` (`source_type=reminder`),
@@ -86,14 +103,16 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 - Ora merret nga “R: HH:MM”. “R: 00:00” = pa orë → untimed për ditën e kolonës.
   Reminder pa datë (iPhone Sync e vendos në ditën e parë të dritares) del si untimed **çdo ditë**
   derisa të kryhet.
-- Sinkronizimi është vetëm iPhone → PrimeFlow, prandaj `can_complete=false` dhe
-  `ga_item_done/postpone/set_time/add_comment` kthejnë 409 me shpjegim. Kryhet në iPhone;
-  sinkronizimi i radhës e heq. `ga_item_remove_from_day` lejohet (fshehje për një ditë).
+- Pas një importi që sjell titullin dhe datën e origjinës, `ga_item_done` për një
+  `tt:…` kthen `pending_complete`. Agjenda shfaq «✓ në pritje për iPhone» derisa
+  Shortcut-i ta kryejë në telefon dhe ta konfirmojë. Ndryshimi i orës dhe i tekstit
+  bëhen në iPhone. `ga_item_remove_from_day` mund ta fshehë për një ditë.
 - Të pakryerat e ditëve të kaluara dalin te `ga_leftovers` me `days_late`, vetëm brenda dritares
   së fundit të sinkronizimit (sot − 7 ditë); më të vjetrat s'rifreskohen më nga telefoni.
   Kur sinkronizimi i fundit është më i vjetër se 24 orë, del një warning.
-- I njëjti reminder në To Do dhe në iPhone Sync (titull + ditë) kthehet një herë: si element To Do,
-  me `linked_ids: ["tt:…"]`.
+- I njëjti reminder në To Do dhe në iPhone Sync (titull + ditë) kthehet një herë.
+  Agjenda përdor elementin To Do zakonisht dhe elementin e iPhone-it gjatë pritjes
+  për konfirmim. `linked_ids` përmban ID-në tjetër.
 
 ## Microsoft To Do: rregulla shtesë
 

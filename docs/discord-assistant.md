@@ -1,32 +1,32 @@
 # Asistenti personal PrimeFlow në Discord
 
-## Identiteti Mira AI Agent
+## Identiteti Mira Zhvillim
 
-`python discord_ai_agent_bot.py` lidh regjistruesin e veçantë të kanalit AI Agent.
+`python discord_ai_agent_bot.py` lidh regjistruesin e veçantë të kanalit zanor Zhvillim.
 Konfiguro `DISCORD_AI_AGENT_BOT_TOKEN` dhe `DISCORD_AI_AGENT_VOICE_CHANNEL_ID`
 në `.env`. Në server ruhen te `C:\PrimeFlowOps\MiraAIAgent\.env`, jashtë
 checkout-it të publikimit (`DISCORD_AI_AGENT_ENV_FILE` e ndryshon këtë vend).
 Token-i duhet të jetë i ndryshëm nga `DISCORD_BOT_TOKEN` dhe
 `MIRA_HOST_BOT_TOKEN`. Publiko `DISCORD_AI_AGENT_BOT_USER_ID` dhe ID-në e kanalit
-AI Agent edhe te `.env` e API-së/botit kryesor, që të ruajnë lejet dhe ndarjen.
+Zhvillim edhe te `.env` e API-së/botit kryesor, që të ruajnë lejet dhe ndarjen.
 
-Hyr në kanalin zanor AI Agent dhe nga kanali yt personal përdor
-`/ai-agent fillo`. `/ai-agent mbaro` ndal dëgjimin dhe përgatit shënimet;
-`/ai-agent statusi` tregon nëse po dëgjon. Boti vetëm merr shënime, pa folur.
+Hyr në kanalin zanor Zhvillim dhe nga kanali yt personal përdor
+`/mira-zhvillim fillo`. `/mira-zhvillim mbaro` ndal dëgjimin dhe përgatit shënimet;
+`/mira-zhvillim statusi` tregon nëse po dëgjon. Boti vetëm merr shënime, pa folur.
 Hyn automatikisht nga e hëna në të premte në **08:04, 11:59 dhe 16:09**, sipas
 `APP_TIMEZONE` (Europe/Budapest), edhe kur kanali është bosh. Orari i veçantë
 `DISCORD_AI_AGENT_AUTO_JOIN_TIMES` mund të boshatiset për ta çaktivizuar;
 `DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID` përcakton organizatorin e lidhur në
-PrimeFlow. Të dyja mund të vendosen edhe te `.env` private e AI Agent.
+PrimeFlow. Të dyja mund të vendosen edhe te `.env` private e Mira Zhvillim.
 Kontrolli bëhet çdo 15 sekonda, me deri në tri tentativa lidhjeje brenda katër
 minutave nga orari. Një regjistrim aktiv nuk ndërpritet nga orari automatik.
 Nuk hyn vetëm pse procesi lidhet; hyn kur bie orari. Nëse askush nuk vjen,
 del pas 10 minutash. Kur largohet personi i fundit,
 ndalet pas 30 sekondash. Shënimet e takimeve të nisura nga orari ruhen
-automatikisht në PX Notes, njësoj si 1H, dhe paneli AI Agent te `mira-kontrolli`
+automatikisht në PX Notes, njësoj si 1H, dhe paneli Mira Zhvillim te `mira-kontrolli`
 shfaq gjendjen **Ruajtur** me lidhjen te Mira → Shënimet. Nëse ruajtja dështon,
 shënimet mbeten të gatshme për shikim/ruajtje manuale. Takimet e nisura me
-`/ai-agent fillo` ruajnë rrjedhën ekzistuese të shikimit dhe ruajtjes manuale.
+`/mira-zhvillim fillo` ruajnë rrjedhën ekzistuese të shikimit dhe ruajtjes manuale.
 
 Nëse regjistrimi përfundoi ose u ndërpre, **Mbaro** e verifikon sesionin në API dhe
 heq lidhjen zanore të mbetur; shënimet e gatshme ruhen. Një buton i vjetër nuk
@@ -36,7 +36,7 @@ hiqet kur ndalet dëgjimi. Kërkesat e autorizuara të ndalimit zbatohen edhe ng
 punëtori që e mban regjistrimin, gjatë rrahjes së radhës të lidhjes.
 
 Migrimi `0174_discord_separate_recorders` lejon një takim aktiv për secilin
-regjistrues (`primary` për 1H dhe `ai_agent` për AI Agent), me sesione,
+regjistrues (`primary` për 1H dhe `ai_agent` për Mira Zhvillim), me sesione,
 token-a punëtori dhe segmente audio të veçanta. `/takimi` mbetet për regjistruesin
 ekzistues; komandat `/mira` dhe Mira Host nuk ndryshohen.
 `.discord-ai-agent-status.json` verifikon identitetin, serverin dhe lejet e kanalit.
@@ -223,7 +223,7 @@ Del me `/takimi mbaro`,
 30 sekonda pasi del personi i fundit, ose pas 10 minutash nëse s'vjen askush.
 Shënimet e këtyre takimeve ruhen direkt në PX Notes dhe nuk dërgohen në Discord.
 
-Mbahet një takim në një kohë për regjistrues; 1H dhe AI Agent mund të dëgjohen
+Mbahet një takim në një kohë për regjistrues; 1H dhe Mira Zhvillim mund të dëgjohen
 njëkohësisht. Pas ndalimit, Mira del nga voice
 channel menjëherë; radha lokale e transkriptimit përfundon përpara se të nisë
 një takim i ri. Shënimet e ruajtura kanë lejet normale të PX Notes. Teksti i
@@ -643,7 +643,7 @@ para), si dhe anulimet dhe përsëritjet, njësoj si njoftimet në shfletues.
 - **Takim i jashtëm:** "🔔 Takim pas N min", me butonin **🔗 Hap takimin** kur
   takimi ka link.
 - **Takim i brendshëm:** kujtesa para takimit dhe, kur fillon, "🔴 Takimi po fillon
-  tani" për secilin pjesëmarrës, me **🎧 Hyr në 1H** dhe **🎧 Hyr në AI Agent**
+  tani" për secilin pjesëmarrës, me **🎧 Hyr në 1H** dhe **🎧 Hyr në Mira Zhvillim**
   në një rresht, sipas `DISCORD_1H_VOICE_CHANNEL_ID` dhe
   `DISCORD_AI_AGENT_VOICE_CHANNEL_ID`. Kur mungon kanali 1H, përdoret lidhja zanore
   e përgjithshme si rezervë.
@@ -767,7 +767,7 @@ humbasë kërkesat në pritje. Komenti i shtyrjes shfaqet në kolonën **Komenti
 # Shared meeting controls
 
 `DISCORD_MEETING_CONTROL_CHANNEL_ID` identifies the `mira-kontrolli` text channel.
-The primary bot owns the 1H panel; Mira AI Agent owns the AI Agent panel. Each
+The primary bot owns the 1H panel; Mira Zhvillim owns the Mira Zhvillim panel. Each
 panel starts its fixed configured voice channel even when the person pressing
 Start is not in voice. Start/Stop/Save actions require an enabled Discord link
 and an active PrimeFlow account, and are recorded in `audit_logs` with the actor.
@@ -785,9 +785,9 @@ and remove only duplicate controls, preserving meeting notes and conversation.
 Panel creation and repositioning suppress Discord notifications (`silent=True`).
 The separately scheduled meeting invitations continue to notify their recipients.
 The configured shared channel also accepts `/takimi fillo`, `/takimi mbaro`,
-`/ai-agent fillo`, and `/ai-agent mbaro`. The 1H scheduler posts its recordings
+`/mira-zhvillim fillo`, and `/mira-zhvillim mbaro`. The 1H scheduler posts its recordings
 to this channel when configured. Saved notes appear under Mira → Shënimet,
-in the existing 1H / AI Agent groups. Personal recordings keep their private
+in the existing 1H / Mira Zhvillim groups. Personal recordings keep their private
 notes; the common panel can stop an active recording in its fixed voice, but
 cannot read or save its personal notes. The speaking Mira Host is separate.
 
@@ -800,19 +800,21 @@ not require the caller to join voice. Outside the shared channel, host start
 and stop commands keep the existing admin/manager requirement. The two silent
 recorders continue independently.
 
-AI Agent invitations run on weekdays at 08:05, 12:00 and 16:10 in the app timezone.
+Mira Zhvillim invitations run on weekdays at 08:05, 12:00 and 16:10 in the app timezone.
 The four configured development recipients (Rinesa, Elsa, Endi and Laurent) receive
-the invitation in their personal PrimeFlow text channels from Mira AI Agent,
-with a link to the AI Agent voice channel. The Windows tasks
+the invitation in their personal PrimeFlow text channels from Mira Zhvillim,
+with a link to the Zhvillim voice channel. The Windows tasks
 `PrimeFlow-AIAgent-0805`, `PrimeFlow-AIAgent-1200` and `PrimeFlow-AIAgent-1610`
 run `C:\PrimeFlowOps\AIAgentReminders\run.py` with the corresponding slot.
 That persistent directory holds the task settings and the installed reminder
-service. The script source is `backend/scripts/discord_ai_agent_reminders.py`.
+service. Verified backend releases update the installed `service.py` from
+`backend/app/services/discord_ai_agent_reminders.py`. The script source is
+`backend/scripts/discord_ai_agent_reminders.py`.
 It uses the independent bot's existing private token file. The durable
 `AI_AGENT_HH:MM` reminder buckets prevent duplicate invitations after restarts;
 only a five-minute current-time window is eligible, with no past-slot backfill.
 Before each due slot, the worker verifies the four personal channels and restores
-the AI Agent bot's access if a channel privacy repair removed it. HTTP delivery
+the Mira Zhvillim bot's access if a channel privacy repair removed it. HTTP delivery
 failures include the recipient, status and Discord error in the slot log.
 
 ## Mira Host conversation and delivery

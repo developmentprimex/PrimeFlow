@@ -4744,7 +4744,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     const canCreateTask = !isPxJavNote && !isClosed && (!hasProject || isDevLinked)
                     const showManualOnly = hasProject && !isDevLinked
                     const dictationSource = miraDictationLabel(note.mira_dictation_source)
-                    const shenimiCellClass = dictationSource && !hasTask ? "" : isClosed
+                    const shenimiCellClass = isClosed
                       ? "bg-slate-300 opacity-70"
                       : hasTask
                         ? aggregatedStatus === "TODO"
@@ -4758,9 +4758,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                 : aggregatedStatus === "WAITING_CONFIRMATION"
                                   ? "bg-amber-50"
                                   : "bg-slate-100"
-                        : note.from_mira
-                          ? "bg-violet-100"
-                          : "bg-sky-200"
+                        : "bg-sky-200"
 
                     // Only show department if:
                     // 1. Note has a project (always show projects)
@@ -4785,7 +4783,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                 {note.from_mira ? (
                                   <button
                                     type="button"
-                                    className="flex min-w-0 items-center gap-2 rounded-md text-left hover:bg-violet-200/60"
+                                    className="flex min-w-0 items-center gap-2 rounded-md text-left hover:bg-black/5"
                                     aria-expanded={!miraCollapsed}
                                     title={miraCollapsed ? "Hap shënimin e Mira-s" : "Mbyll shënimin e Mira-s"}
                                     onClick={() => toggleMiraNote(note.id)}

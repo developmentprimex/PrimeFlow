@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { changedManualAnswers, clearSavedManualDraft, readManualDraft, writeManualDraft } from "@/lib/m2-reporting-points-draft"
 import { reportResponseJson as responseJson } from "@/lib/report-response"
+import { useReportDate } from "@/lib/report-link-date"
 import { ReportingPointsManagement } from "@/components/reporting-points-management"
 import { M2ReportingPointsView, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m2-reporting-points-view"
 
@@ -29,7 +30,7 @@ function draftStorage() {
 
 export default function M2ReportingPointsPage() {
   const { user, loading: authLoading, apiFetch } = useAuth()
-  const [day, setDay] = React.useState(today)
+  const [day, setDay] = useReportDate(today)
   const [report, setReport] = React.useState<ReportingPointsReport | null>(null)
   const activeReportId = React.useRef<string | undefined>(undefined)
   React.useEffect(() => { activeReportId.current = report?.id }, [report?.id])

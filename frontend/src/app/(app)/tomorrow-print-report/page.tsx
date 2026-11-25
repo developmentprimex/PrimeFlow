@@ -3,6 +3,7 @@
 import { taskMarkerLabel, splitTaskMarkers, openTaskMarkerPicker, type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
+import { useReportLinkDate } from "@/lib/report-link-date"
 import { createPortal } from "react-dom"
 import { ChevronDown, Minus, Plus, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
@@ -239,7 +240,10 @@ export function PrintReportPage({
   const [snapshotLoading, setSnapshotLoading] = React.useState(true)
   const [snapshotError, setSnapshotError] = React.useState("")
   const [frozenHistory, setFrozenHistory] = React.useState<FrozenHistory[]>([])
-  const [selectedReportDate, setSelectedReportDate] = React.useState("")
+  const linkedReportDate = useReportLinkDate()
+  const currentReportDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Belgrade", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  const [reportDateOverride, setSelectedReportDate] = React.useState<string | null>(null)
+  const selectedReportDate = reportDateOverride ?? (!embedded && linkedReportDate !== currentReportDate ? linkedReportDate : "")
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const [generatingAction, setGeneratingAction] = React.useState<"generate" | null>(null)
@@ -401,7 +405,7 @@ export function PrintReportPage({
       const promise = (async (): Promise<Preview | null> => {
         // Opening a current report always rebuilds it. Today's endpoint returns
         // the frozen copy after 16:00; historical dates are read without writes.
-        const response = selectedReportDate && today
+        const response = selectedReportDate
           ? await apiFetch(`${API}/snapshot?report_date=${selectedReportDate}`, { cache: "no-store" })
           : await apiFetch(`${API}/generate`, { method: "POST" })
         if (response.status === 404) return null
@@ -428,7 +432,7 @@ export function PrintReportPage({
         setSnapshotLoading(false)
       }
     }
-  }, [API, apiFetch, authLoading, selectedReportDate, today, user?.id])
+  }, [API, apiFetch, authLoading, selectedReportDate, user?.id])
 
   React.useEffect(() => { void loadSnapshot() }, [loadSnapshot])
 
@@ -547,7 +551,7 @@ export function PrintReportPage({
   }
 
   const generateReport = async () => {
-    if (today && (preview?.is_frozen || selectedReportDate)) return
+    if (selectedReportDate || (today && preview?.is_frozen)) return
     if (preview && !window.confirm("Regenerate this saved report with the latest data?")) return
     setGeneratingAction("generate")
     try {
@@ -622,7 +626,7 @@ export function PrintReportPage({
 
   const setupPreviewMarkerControls = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
-    if (!document || (today && (preview?.is_frozen || selectedReportDate))) return
+    if (!document || selectedReportDate || (today && preview?.is_frozen)) return
 
     const openMarkerCommentModal = (initialValue: string) => new Promise<string | null>((resolve) => {
       markerModalCleanupRef.current?.()
@@ -982,6 +986,7 @@ export function PrintReportPage({
   }
 
   const sendNow = async () => {
+    if (selectedReportDate) return
     setSending(true)
     try {
       const response = await apiFetch(`${API}/send`, { method: "POST" })
@@ -1134,7 +1139,7 @@ export function PrintReportPage({
           <Button
             variant="outline"
             onClick={() => void generateReport()}
-            disabled={!user || generatingAction !== null || snapshotLoading || (today && (Boolean(preview?.is_frozen) || Boolean(selectedReportDate)))}
+            disabled={!user || generatingAction !== null || snapshotLoading || Boolean(selectedReportDate) || (today && Boolean(preview?.is_frozen))}
           >
             <RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} />
             {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}
@@ -1154,8 +1159,8 @@ export function PrintReportPage({
         </div>
         <div className="flex flex-wrap gap-2">
           {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}{strikesFilterControl}{strikeTotalControl}</> : null}
-          <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading || (today && (Boolean(preview?.is_frozen) || Boolean(selectedReportDate)))}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
-          {canManage ? <Button onClick={() => void sendNow()} disabled={sending || (today && Boolean(selectedReportDate))}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
+          <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading || Boolean(selectedReportDate) || (today && Boolean(preview?.is_frozen))}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
+          {canManage ? <Button onClick={() => void sendNow()} disabled={sending || Boolean(selectedReportDate)}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
       </div>
 
@@ -1209,8 +1214,12 @@ export function PrintReportPage({
         <Label htmlFor="today-frozen-history">Historiku i raporteve të ngrira</Label>
         <select id="today-frozen-history" className="h-9 rounded-md border px-3 text-sm" value={selectedReportDate} onChange={(event) => { setPreview(null); setSelectedReportDate(event.target.value) }}>
           <option value="">Raporti i sotëm</option>
+          {selectedReportDate && !frozenHistory.some((row) => row.report_date === selectedReportDate) ? <option value={selectedReportDate}>{selectedReportDate}</option> : null}
           {frozenHistory.map((row) => <option key={row.report_date} value={row.report_date}>{row.report_date} — 16:00</option>)}
         </select>
+      </div> : selectedReportDate ? <div className="flex items-center gap-3 rounded-lg border bg-white p-4">
+        <span>{selectedReportDate}</span>
+        <Button variant="outline" onClick={() => { setPreview(null); setSelectedReportDate("") }}>Raporti aktual</Button>
       </div> : null}
 
       {snapshotLoading && !preview ? (

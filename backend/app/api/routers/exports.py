@@ -72,6 +72,7 @@ from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.task_marker import one_h_marker_label
 from app.services.note_markup import parse_marked_note_content
 from app.services.ga_identity import resolve_ga_user
+from app.services.mira_development_name import meeting_note_heading
 from app.services.report_note_visibility import append_mira_dictation_label
 from app.services.px_note_email import email_preview, email_preview_text
 from app.services.task_reporting_choices import shared_task_assignee_ids
@@ -7455,7 +7456,8 @@ async def export_ga_notes_xlsx(
         
         # Clean content (remove HTML if any)
         email = email_preview(note)
-        content = email_preview_text(email) if email else (_strip_html(note.content) if note.content else "")
+        note_content = meeting_note_heading(note.content) if note.from_mira and not note.from_mira_desktop else note.content
+        content = email_preview_text(email) if email else (_strip_html(note_content) if note_content else "")
         content = append_mira_dictation_label(content, getattr(note, "mira_dictation_source", None))
 
         if note.status == GaNoteStatus.CLOSED:

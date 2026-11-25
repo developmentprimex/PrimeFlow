@@ -133,6 +133,164 @@ class GaAssistantDbTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.status_code, expect, res.text)
         return res.json()
 
+    async def test_iphone_reminder_completion_waits_for_paired_shortcut(self) -> None:
+        from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
+        from app.services.ga_icloud_sync import generate_connection_token
+
+        connection_id = uuid.uuid4()
+        token, token_hash = generate_connection_token(connection_id)
+        async with self.SessionLocal() as db:
+            db.add(GaIcloudSyncConnection(
+                id=connection_id, ga_user_id=self.ga.id, created_by_id=self.ga.id,
+                device_name="Test iPhone", calendar_name="Work calendar",
+                reminder_list_name="REMINDER", token_hash=token_hash,
+                created_at=self.at(self.today - timedelta(days=1)),
+            ))
+            unrelated_id = uuid.uuid4()
+            _, unrelated_hash = generate_connection_token(unrelated_id)
+            db.add(GaIcloudSyncConnection(
+                id=unrelated_id, ga_user_id=self.ga.id, created_by_id=self.ga.id,
+                device_name="Another iPhone", calendar_name="Other calendar",
+                reminder_list_name="OTHER", token_hash=unrelated_hash,
+                created_at=self.at(self.today),
+            ))
+            await db.commit()
+
+        day = self.today
+        while day.weekday() > 4:
+            day += timedelta(days=1)
+        # Preserve the original offset, seconds, spacing, and punctuation.
+        due_at = self.at(day, 10, 15).astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:37Z")
+        title = "  Kujtesë · me  shënim  "
+        reminder = {"id": "phone-reminder-1", "title": title, "due_at": due_at, "notes": "dytësore"}
+        base = "/api/ga-time-slots/icloud-sync"
+        headers = {"X-PrimeFlow-Sync-Token": token}
+        import_payload = {
+            "sync_window_start": day.isoformat(), "sync_window_end": day.isoformat(), "timezone": str(TZ),
+            "calendar_name": "Work calendar", "reminder_list_name": "REMINDER",
+            "reminders": [reminder, {"title": "Pa datë"}],
+        }
+
+        async def sync(payload):
+            response = await self.client.post(f"{base}/import", headers=headers, json=payload)
+            self.assertEqual(response.status_code, 200, response.text)
+
+        async def agenda():
+            payload = await self.get("/agenda", start=self.at(day).isoformat(),
+                                     end=self.at(day + timedelta(days=1)).isoformat(), include_untimed="true")
+            return {entry["id"]: entry for entry in payload["items"] if entry["source"] == "iphone_sync"}
+
+        async def completed():
+            response = await self.client.get(f"{base}/completed", headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn("no-store", response.headers["Cache-Control"])
+            return response.json()
+
+        await sync(import_payload)
+        entries = await agenda()
+        timed = next(entry for entry in entries.values() if entry["start"])
+        untimed = next(entry for entry in entries.values() if not entry["start"])
+        self.assertTrue(timed["can_complete"])
+        self.assertTrue(untimed["can_complete"])
+        for row in (timed, untimed):
+            result = await self.post("/items/done", {"item_id": row["id"]})
+            self.assertEqual(result["status"], "pending_complete")
+        await self.post("/items/done", {"item_id": timed["id"]})
+        self.assertEqual((await self.client.get(f"{base}/completed", headers=self.h())).status_code, 401)
+        queue = {item["id"]: item for item in await completed()}
+        self.assertEqual(queue[timed["id"]], {"id": timed["id"], "title": title, "due_at": due_at})
+        self.assertIsNone(queue[untimed["id"]]["due_at"])
+
+        # Keep a pending row even when the next import omits the reminder.
+        await sync({**import_payload, "reminders": []})
+        for row in (await agenda()).values():
+            self.assertEqual(row["status"], "pending_complete")
+            self.assertEqual(row["status_label"], "✓ në pritje për iPhone")
+            self.assertFalse(row["is_open"])
+        self.assertEqual(len(await completed()), 2)
+        ack_payload = {"ids": [timed["id"], untimed["id"], timed["id"]]}
+        for expected in (2, 0):
+            ack = await self.client.post(f"{base}/completed/ack", headers=headers, json=ack_payload)
+            self.assertEqual((ack.status_code, ack.json()), (200, {"acknowledged": expected}))
+        self.assertEqual(await completed(), [])
+        await sync(import_payload)
+        self.assertEqual(await agenda(), {})
+        self.assertEqual((await self.post("/items/done", {"item_id": timed["id"]}))["result"], "already_done")
+
+    async def test_asist_ga_report_reads_and_actions(self) -> None:
+        from time import perf_counter
+        from sqlalchemy import select
+        from app.models.enums import GaNoteType
+        from app.models.ga_note import GaNote
+        from app.models.m1_reporting_points import M1ReportingPointsReport
+
+        day = self.today.isoformat()
+        old = self.today - timedelta(days=2)
+        async with self.SessionLocal() as db:
+            note = GaNote(content="Për sqarim", note_type=GaNoteType.GA, created_by=self.colleague.id, created_at=self.at(self.today, 8))
+            done_note = GaNote(content="Task i krijuar", note_type=GaNoteType.GA, created_by=self.ga.id,
+                               created_at=self.at(self.today, 8), is_converted_to_task=True)
+            older_note = GaNote(content="Më herët", note_type=GaNoteType.GA, created_at=self.at(old))
+            report = M1ReportingPointsReport(report_date=self.today, manual_answers={"plan_changes": "Ruaj këtë"},
+                                             generated_at=self.at(self.today, 7))
+            db.add_all([note, done_note, older_note, report])
+            await db.flush()
+            device = await db.get(self.Task, self.t_f.id)
+            device.title, device.is_1h_report, device.one_h_report_slot = "FG: GA DEVICES", True, "10:00"
+            device.due_date = self.at(self.today, 10)
+            ga_due = await db.get(self.Task, self.t_1h.id)
+            ga_due.due_date = self.at(self.today, 10)
+            ga_late = await db.get(self.Task, self.t_untimed.id)
+            ga_late.due_date = self.at(self.today, 10, 1)
+            await db.commit()
+
+        timings = {}
+
+        async def timed_get(path, **params):
+            started = perf_counter()
+            result = await self.get(path, **params)
+            timings[path] = round((perf_counter() - started) * 1000, 1)
+            return result
+
+        links = {row["key"]: row for row in (await timed_get("/report-links", date=day))["links"]}
+        self.assertEqual(len(links), 8)
+        self.assertTrue(links["m1_pikat"]["url"].endswith(f"/m1-reporting-points?date={day}"))
+        self.assertTrue(links["m2_pikat"]["url"].endswith(f"/m2-reporting-points?date={day}"))
+        self.assertEqual((await timed_get("/m1/reorg", date=day))["answer"], None)
+        await self.post("/m1/reorg", {"date": day, "answer": "po", "comment": "- Propozim i GA"})
+        self.assertEqual(await self.get("/m1/reorg", date=day), {
+            "date": day, "answer": "po", "comment": "- Propozim i GA",
+        })
+        await self.post("/m1/reorg", {"date": day, "answer": None, "comment": "Po pres përgjigje."})
+        self.assertIsNone((await self.get("/m1/reorg", date=day))["answer"])
+        async with self.SessionLocal() as db:
+            answers = (await db.execute(select(M1ReportingPointsReport.manual_answers))).scalar_one()
+            self.assertEqual(answers["plan_changes"], "Ruaj këtë")
+
+        px = await timed_get("/px-tasks", date=day, until="10:00")
+        self.assertEqual([(row["id"], row["scope"]) for row in px["items"]], [(f"pf_task:{self.t_1h.id}", "PX")])
+        devices = (await timed_get("/devices", date=day))["items"]
+        self.assertEqual(len(devices), 1)
+        device = devices[0]
+        self.assertEqual((device["category"], device["person"], device["status"]), ("fizikisht", "Colleague Test", "pending"))
+        await self.post("/devices/mark", {"id": device["id"], "status": "reacted"})
+        await self.post("/devices/mark", {"id": device["id"], "status": "reacted"})
+        self.assertEqual((await self.get("/devices", date=day))["items"][0]["status"], "reacted")
+        await self.post("/devices/mark", {"id": device["id"], "status": "done"}, expect=409)
+
+        started = perf_counter()
+        response = await self.client.get("/api/ga-notes", params={
+            "since": self.at(self.today, 7).isoformat(), "unconverted_only": "true", "note_type": "GA", "sync_mailbox": "false",
+        }, headers=self.h())
+        timings["/api/ga-notes"] = round((perf_counter() - started) * 1000, 1)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([(row["content"], row["author"]) for row in response.json()], [("Për sqarim", "Colleague Test")])
+        await timed_get("/agenda", start=self.at(self.today, 8).isoformat(), end=self.at(self.today, 16).isoformat(),
+                        include_live_microsoft="false")
+        await timed_get("/1h/comments", since=self.at(self.today, 7).isoformat(), only_new="true")
+        await timed_get("/discord/mentions/feed")
+        print(f"ASIST GA local read timings in milliseconds: {timings}")
+
     async def test_discord_artifact_feed_filters_the_channel_and_shows_reaction_changes(self) -> None:
         from app.models.ga_discord_mention import GaDiscordMention
         from app.services.ga_discord_mentions import bridge_secret

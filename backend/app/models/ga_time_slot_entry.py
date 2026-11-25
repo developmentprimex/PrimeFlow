@@ -1,8 +1,18 @@
 import uuid
 from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, String, Time, false, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Time,
+    false,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -38,6 +48,8 @@ class GaTimeSlotEntry(Base):
     source_external_id: Mapped[str | None] = mapped_column(String(700), nullable=True)
     source_name: Mapped[str | None] = mapped_column(String(320), nullable=True)
     is_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    reminder_source: Mapped[dict[str, str | None] | None] = mapped_column(JSONB, nullable=True)
+    completion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

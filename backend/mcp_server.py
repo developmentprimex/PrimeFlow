@@ -147,6 +147,8 @@ ASSISTANT_TOOLS = frozenset({
     "todo_list", "todo_create", "todo_update", "todo_complete", "todo_set_steps",
     "ga_time_table", "ga_discord_mentions", "ga_discord_mentions_feed", "ga_discord_mention_attachments", "ga_discord_mark",
     "ga_discord_reply", "ga_discord_react",
+    "ga_report_links", "ga_m1_reorg_get", "ga_m1_reorg", "ga_1h_comments", "ga_1h_comment_mark",
+    "ga_devices", "ga_device_mark", "ga_px_tasks",
 })
 # Tools that exist only in the assistant profile; the full profile stays as it was.
 ASSISTANT_ONLY_TOOLS = frozenset({
@@ -155,6 +157,8 @@ ASSISTANT_ONLY_TOOLS = frozenset({
     "todo_list", "todo_create", "todo_update", "todo_complete", "todo_set_steps",
     "ga_time_table", "ga_discord_mentions", "ga_discord_mentions_feed", "ga_discord_mention_attachments", "ga_discord_mark",
     "ga_discord_reply", "ga_discord_react",
+    "ga_report_links", "ga_m1_reorg_get", "ga_m1_reorg", "ga_1h_comments", "ga_1h_comment_mark",
+    "ga_devices", "ga_device_mark", "ga_px_tasks",
 })
 # Existing allowlisted tools that change data (everything else allowlisted only reads).
 ASSISTANT_WRITE_TOOLS = frozenset({
@@ -1678,10 +1682,21 @@ async def list_leave_blocks(
 
 
 @_tool()
-async def list_ga_notes(project_id: str | None = None, department_ref: str | None = None) -> Any:
-    """List GA/KA notes, optionally for a project or department."""
+async def list_ga_notes(
+    project_id: str | None = None, department_ref: str | None = None,
+    unconverted_only: bool = False, since: str | None = None,
+    note_type: Literal["GA", "KA"] | None = None,
+) -> Any:
+    """List GA/KA notes. For new notes to clarify, use unconverted_only and an ISO since timestamp.
+
+    Filtered reads use stored notes. Items include author, created_at, status,
+    is_discussed and is_converted_to_task.
+    """
     department_id = await _resolve_department_id(department_ref)
-    return await _request("GET", "/api/ga-notes", params={"project_id": project_id, "department_id": department_id})
+    params = {"project_id": project_id, "department_id": department_id}
+    if unconverted_only or since is not None or note_type is not None:
+        params.update(unconverted_only=unconverted_only, since=since, note_type=note_type, sync_mailbox=False)
+    return await _request("GET", "/api/ga-notes", params=params)
 
 
 @_tool()
@@ -3125,12 +3140,13 @@ async def health_check() -> dict[str, Any]:
 
 
 @_tool(read_only=True)
-async def ga_agenda(start: str, end: str, include_untimed: bool = False) -> Any:
+async def ga_agenda(start: str, end: str, include_untimed: bool = False,
+                    include_live_microsoft: bool = True) -> Any:
     """
     GA's agenda for the window [start, end): GA TASKS, BZ ME GA TASKS (koha_bz, bz_with),
-    tasks with the F symbol, PrimeFlow meetings (TAK INT/EXT), Outlook events and
+    tasks with GA and F symbols, PrimeFlow meetings (TAK INT/EXT), Outlook events and
     Microsoft To Do reminders of info@ (not "Flagged Emails"), GA's iPhone reminders from the
-    GA Time Table "R:" rows (source iphone_sync, id tt:..., read-only) and Discord messages
+    GA Time Table "R:" rows (source iphone_sync, id tt:...) and Discord messages
     that mention GA (kind DISCORD, id dc:..., untimed on the day written), each with a
     source-prefixed id. A reminder in both To Do and iPhone Sync is listed once (the To Do
     item, with the tt: id in linked_ids). To Do/iPhone reminders without a date are untimed
@@ -3138,9 +3154,62 @@ async def ga_agenda(start: str, end: str, include_untimed: bool = False) -> Any:
 
     start/end: ISO 8601 (e.g. 2026-11-19T08:00:00+01:00). Items without a time are left
     out unless include_untimed=true (then the untimed open items of the covered days are added).
-    Use this for the scheduled reports (08:00, 09:00, 11:50, 14:20, 16:00).
+    For report polling pass include_live_microsoft=false to use the local data, including
+    synced PrimeFlow meetings, instead of live Outlook and To Do. Tasks expose symbols and
+    daypart. Meetings expose type, join_url, notes_url and held when known.
     """
-    return await _request("GET", "/api/ga-assistant/agenda", params={"start": start, "end": end, "include_untimed": include_untimed})
+    params = {"start": start, "end": end, "include_untimed": include_untimed}
+    if not include_live_microsoft:
+        params["include_live_microsoft"] = False
+    return await _request("GET", "/api/ga-assistant/agenda", params=params)
+
+
+@_tool(read_only=True)
+async def ga_report_links(date: str) -> Any:
+    """Return the ASIST GA report links for an ISO local date. Each link has key, title, url and available."""
+    return await _request("GET", "/api/ga-assistant/report-links", params={"date": date})
+
+
+@_tool(read_only=True)
+async def ga_m1_reorg_get(date: str) -> Any:
+    """Read the M1 Pikat reorganization answer for an ISO date. Returns answer (po, jo or null) and comment."""
+    return await _request("GET", "/api/ga-assistant/m1/reorg", params={"date": date})
+
+
+@_tool()
+async def ga_m1_reorg(date: str, answer: Literal["po", "jo"] | None, comment: str = "") -> Any:
+    """Save the M1 Pikat reorganization answer and optional comment. Pass null for unanswered."""
+    return await _request("POST", "/api/ga-assistant/m1/reorg", json={"date": date, "answer": answer, "comment": comment})
+
+
+@_tool(read_only=True)
+async def ga_1h_comments(since: str | None = None, only_new: bool = False) -> Any:
+    """Read 1H task comments with id, task, author, time, text, and new/seen status. since is ISO 8601."""
+    return await _request("GET", "/api/ga-assistant/1h/comments", params={"since": since, "only_new": only_new})
+
+
+@_tool()
+async def ga_1h_comment_mark(id: str, status: Literal["new", "seen"]) -> Any:
+    """Set the current account's new/seen status for the exact 1H comment id returned by ga_1h_comments."""
+    return await _request("POST", "/api/ga-assistant/1h/comments/mark", json={"id": id, "status": status})
+
+
+@_tool(read_only=True)
+async def ga_devices(date: str) -> Any:
+    """List GA Devices work tasks for an ISO date with id, title, category, person, time, link and status."""
+    return await _request("GET", "/api/ga-assistant/devices", params={"date": date})
+
+
+@_tool()
+async def ga_device_mark(id: str, status: Literal["reacted", "done"], comment: str | None = None) -> Any:
+    """Acknowledge a GA Devices task, or close it as GA if assigned/confirming. Use comment for the closure result."""
+    return await _request("POST", "/api/ga-assistant/devices/mark", json={"id": id, "status": status, "comment": comment})
+
+
+@_tool(read_only=True)
+async def ga_px_tasks(date: str, until: str) -> Any:
+    """List GA's tasks due on the ISO date up to and including the local report cutoff HH:MM, with scope PX."""
+    return await _request("GET", "/api/ga-assistant/px-tasks", params={"date": date, "until": until})
 
 
 @_tool(read_only=True)
@@ -3174,8 +3243,8 @@ async def ga_item_done(item_id: str, comment: str | None = None, override_reason
     is only for an explicit exception.
     BZ where GA is not an assignee -> records "BZ u mbajt" (comment + audit) without closing
     the colleague's task. Meeting -> "Mbajtur". To Do -> completed. Discord mention (dc:) -> done.
-    Outlook events and iPhone reminders (tt:, can_complete=false: the iPhone Sync is one-way)
-    are read-only: GA completes those on the iPhone.
+    An iPhone reminder (tt:) returns pending_complete until the paired Shortcut
+    completes and acknowledges it. Outlook calendar events are read-only.
     """
     return await _request(
         "POST",
@@ -3418,6 +3487,8 @@ async def ga_discord_mentions_feed(
     Context fields: `para` and `pas` are the same author's messages up to 2 minutes
     before and after; `reply` is the original message, if any; `përgjigjet` contains
     replies and the mention's thread messages. Context IDs also work for file links.
+    Each mention includes ga_replied, ga_reacted and others_reacted_before_ga with
+    names and a flag telling whether reaction ordering is known.
     """
     data = await _request(
         "GET", "/api/ga-assistant/discord/mentions/feed", params={"before": before, "limit": limit}

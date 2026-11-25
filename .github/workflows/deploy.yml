@@ -879,6 +879,18 @@ jobs:
           $ErrorActionPreference = 'Stop'
           . ./deploy/origins.ps1
           Test-PrimeFlowOrigin api 8080 -Public
+          # The scheduled Discord reminders load an installed copy outside the checkout.
+          $reminderService = 'C:\PrimeFlowOps\AIAgentReminders\service.py'
+          if (Test-Path -LiteralPath $reminderService -PathType Leaf) {
+            $source = (Resolve-Path -LiteralPath 'backend/app/services/discord_ai_agent_reminders.py').Path
+            $pending = "$reminderService.$env:GITHUB_RUN_ID.$env:GITHUB_RUN_ATTEMPT.tmp"
+            try {
+              [IO.File]::Copy($source, $pending, $true)
+              [IO.File]::Replace($pending, $reminderService, [NullString]::Value)
+            } finally {
+              if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
+            }
+          }
           $stateDir = Join-Path $env:PM2_HOME "primeflow-deploy"
           Set-Content -Path (Join-Path $stateDir "backend.sha") -Value $env:GITHUB_SHA -Encoding ascii
 

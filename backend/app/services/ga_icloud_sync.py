@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-
 TOKEN_PREFIX = "pfga"
+PENDING_COMPLETE = "pending_complete"
 UNTIMED_START = time(0, 0)
 UNTIMED_END = time(0, 1)
 
@@ -30,6 +30,7 @@ class PreparedSyncItem:
     source_external_id: str
     source_name: str
     is_completed: bool = False
+    reminder_source: dict[str, str | None] | None = None
 
 
 def generate_connection_token(connection_id: uuid.UUID) -> tuple[str, str]:
@@ -143,6 +144,7 @@ def prepare_reminder_item(
     zone: ZoneInfo,
     rows: list[TimeRow],
     is_completed: bool = False,
+    original_due_at: str | None = None,
 ) -> PreparedSyncItem:
     safe_title = clean_text(title, limit=600) or "Untitled reminder"
     safe_notes = clean_text(notes or "", limit=300)
@@ -158,7 +160,7 @@ def prepare_reminder_item(
         item_date = due_date or fallback_date
         start_value, end_value = UNTIMED_START, UNTIMED_END
         content = f"REMINDER: {safe_title}"
-        due_key = item_date.isoformat()
+        due_key = due_date.isoformat() if due_date else None
     if safe_notes:
         content = f"{content} · {safe_notes}"
     return PreparedSyncItem(
@@ -170,4 +172,9 @@ def prepare_reminder_item(
         source_external_id=source_key(external_id, safe_title, due_key),
         source_name=reminder_list_name,
         is_completed=is_completed,
+        reminder_source={
+            "title": title,
+            "due_at": (original_due_at or due_at.isoformat()) if due_at else due_key,
+            "id": external_id,
+        },
     )

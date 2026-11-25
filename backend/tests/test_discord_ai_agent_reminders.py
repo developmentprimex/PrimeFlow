@@ -38,12 +38,16 @@ class InvitationTests(unittest.IsolatedAsyncioTestCase):
     async def test_invitation_mentions_only_recipient_and_retries_do_not_duplicate(self):
         job=self.job();payload=service.invitation(job)
         self.assertEqual(payload['allowed_mentions']['users'],['12'])
+        self.assertIn('Takimi Mira Zhvillim', payload['content'])
         self.assertEqual(payload['components'][0]['components'][0]['url'],'https://discord.com/channels/123/66')
         self.assertEqual(payload['nonce'],service.invitation(job)['nonce'])
         marker=payload['embeds'][0]['footer']['text']
         response=Mock();response.json.return_value=[{'id':'999','author':{'id':'777'},'embeds':[{'footer':{'text':marker}}]}]
         client=SimpleNamespace(get=AsyncMock(return_value=response),post=AsyncMock())
         self.assertEqual(await service.deliver(client,job,bot_id='777'),'999')
+        client.post.assert_not_awaited()
+        response.json.return_value[0]['embeds'][0]['footer']['text'] = 'AI Agent invitation · 2026-10-29 · 16:10'
+        self.assertEqual(await service.deliver(client, job, bot_id='777'), '999')
         client.post.assert_not_awaited()
         response.json.return_value=[]
         sent=Mock();sent.json.return_value={'id':'1000'};client.post.return_value=sent

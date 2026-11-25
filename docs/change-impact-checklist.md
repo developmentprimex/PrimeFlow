@@ -75,16 +75,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | Planifikim | Weekly Planner, Monthly Planner, PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, Realization, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Realization dhe Reviews | My View, Department Views, Finance View, Realization, Reviews, Common View, Weekly Planner, Kontrolli ditor RLZ, M3 PIKAT |
 | Regjistrime dhe Mira | Regjistrimet, Mira, Meetings, PX Notes, Task Details |
-| Mira Notetaker / Smart Notes | Mira → Notetaker dhe API-ja e historikut shfaqin çdo takim të përpunuar për të gjithë përdoruesit e autentikuar të PrimeFlow, pavarësisht organizatorit ose kanalit të nisjes. Përmbledhja ruhet veç shënimeve dhe transkriptit. Kontrollo Discord (`/takimi`, AI Agent, `mira-kontrolli`, kanalet personale), Mira → Shënimet, PX Notes, lidhjet e transkriptit dhe përjashtimin ekzistues të Mira Notes nga 1H Reports, After Break Report dhe M1 PIKAT. |
-| Nisja e botëve të regjistrimit | Boti kryesor i Discord-it dhe AI Agent përdorin të njëjtin format të shënimeve. Moduli `discord_voice_note_format.py` ndan etiketat dhe datën nga klienti OpenAI dhe router-at FastAPI. Kontrollo importin e të dy botëve në një proces të pastër dhe gatishmërinë në Discord pas deployment-it. |
+| Mira Notetaker / Smart Notes | Mira → Notetaker dhe API-ja e historikut shfaqin çdo takim të përpunuar për të gjithë përdoruesit e autentikuar të PrimeFlow, pavarësisht organizatorit ose kanalit të nisjes. Përmbledhja ruhet veç shënimeve dhe transkriptit. Kontrollo Discord (`/takimi`, Mira Zhvillim, `mira-kontrolli`, kanalet personale), Mira → Shënimet, PX Notes, lidhjet e transkriptit dhe përjashtimin ekzistues të Mira Notes nga 1H Reports, After Break Report dhe M1 PIKAT. |
+| Nisja e botëve të regjistrimit | Boti kryesor i Discord-it dhe Mira Zhvillim përdorin të njëjtin format të shënimeve. Moduli `discord_voice_note_format.py` ndan etiketat dhe datën nga klienti OpenAI dhe router-at FastAPI. Kontrollo importin e të dy botëve në një proces të pastër dhe gatishmërinë në Discord pas deployment-it. |
 | Ask MIRA | Komanda `/mira pyet`, përmendjet e botit kryesor, API-ja Discord dhe lidhjet te segmentet e Notetaker. Karta private shfaq pyetjen, përgjigjen dhe burimet e lidhura. Transkripti është burimi, kujtesa mban kontekstin dhe qasja verifikohet sërish para kthimit të burimeve. Kontrollo dërgimin privat, identitetin e revokuar, kufirin e pyetjeve, hapjen e lidhjeve dhe komandat e raportimit 1H që ndajnë grupin `/mira`. |
 | Mira Notetaker / Kujtesa e takimit | Notetaker dhe Kujtesa shfaqin pikat, sqarimet, burimet dhe historikun për përdoruesit e autentikuar. Çdo përdorues mund të japë sqarim dhe historiku ruan autorin. Projekti lidhet nga një përputhje unike në departamentin e takimit. Kontrollo që një çështje e përsëritur të ruajë burimet edhe kur takimet u nisën nga dy persona dhe që sqarimet të ruhen veç transkriptit. Kontrollo regresionin te raportimi orar, PX Notes dhe dërgimi në Discord. |
 | Mira Notetaker / Pamjet e takimit | Pikat e hapura përdorin të njëjtat kategori si lista e ndjekjes për takimin e radhës. Historiku çon te takimi i mëparshëm. Lidhjet nga Kujtesa dhe Discord duhet të hapin takimin dhe të theksojnë segmentin burimor kur lidhja përmban ID-në e segmentit. |
 | Mira → Takimet | Katalogu bashkon 1H Host dhe regjistrimin Discord nga `voice_meeting_id` ose nga sloti i regjistrimit automatik. Raportimi i stafit pa Host hapet brenda regjistrimit të po atij sloti kur ka një të tillë. Shënimet e vjetra pa takim të lidhur mbeten të arritshme brenda Takimeve. Kontrollo lidhjet e vjetra Notetaker dhe Shënimet, hapjen e pikave nga Kujtesa, lidhjen e shënimit nga PX Notes, panelet Discord dhe lidhjet e segmentit nga Ask MIRA. Transkripti Desktop kufizohet te pronari. 1H Reports, After Break Report dhe M1 PIKAT përdorin burimet dhe filtrat e tyre ekzistues. |
 | Mira → Shënimet dhe transkripti | Pamja e përbashkët grupon segmentet radhazi sipas folësit për Discord dhe Host dhe ruan tekstin origjinal të shënimit. Për Discord, lidhjet e segmentit vazhdojnë të theksojnë fragmentin e saktë brenda bllokut. Kontrollo lidhjet nga Kujtesa dhe Ask MIRA, lidhjet e shënimit nga PX Notes dhe qasjen për transkriptin Desktop, ku regjistrimi nuk dallon folësit. Seksioni i përgjithshëm i takimit lidh detyrat dhe shënimet e krijuara nga Host ose nga diktimi Discord; Discord ruan ID-të me krijimin në të njëjtin transaksion. Kontrollo Task Details, PX Notes dhe riprovimin pa kopje. |
-| Mira → Treguesit në listën e takimeve | Numrat pranë titullit numërojnë detyrat dhe shënimet ende të disponueshme, të lidhura me Host ose diktimin Discord. Kur Host dhe regjistrimi hapen bashkë, numrat shfaqen te rreshti i përbashkët. AI Agent përdor avatarin jeshil të Discord-it në listë. Kontrollo që numrat të përputhen me seksionin “Detyra dhe shënime nga takimi”. |
-| Mira Notetaker / Diktimi i detyrës | “Mira, detyrë për [inicialet] … fund detyre” nga një folës i lidhur në Discord krijon një detyrë 1H pa slot të paracaktuar në kanalin 1H ose AI Agent dhe e cakton vetëm kur përputhet një punonjës aktiv. Verifiko My View, pamjen e departamentit, Open Tasks, Task Details, njoftimin e caktimit, filtrin e raportimit 1H dhe riprovimin pa kopje. |
-| Mira AI Agent / hyrja automatike | Discord AI Agent (orari, prania, regjistrimi), mira-kontrolli (paneli AI Agent), Mira / shënimet, PX Notes (shikimi dhe ruajtja). Orari dhe request_id `autoai-` janë të veçantë nga regjistruesi 1H (`auto1h-`) dhe Mira Host. Finalizuesi i përbashkët ruan automatikisht shënimet e `auto1h-` dhe të `autoai-` me recorder `ai_agent`; nisjet manuale mbeten me ruajtje manuale. Kontrollo deduplikimin, lidhjen me transkriptin, statusin Ruajtur dhe kthimin te ruajtja manuale pas dështimit. |
+| Mira → Treguesit në listën e takimeve | Numrat pranë titullit numërojnë detyrat dhe shënimet ende të disponueshme, të lidhura me Host ose diktimin Discord. Kur Host dhe regjistrimi hapen bashkë, numrat shfaqen te rreshti i përbashkët. Mira Zhvillim përdor avatarin jeshil të Discord-it në listë. Kontrollo që numrat të përputhen me seksionin “Detyra dhe shënime nga takimi”. |
+| Mira Notetaker / Diktimi i detyrës | “Mira, detyrë për [inicialet] … fund detyre” nga një folës i lidhur në Discord krijon një detyrë 1H pa slot të paracaktuar në kanalin 1H ose Mira Zhvillim dhe e cakton vetëm kur përputhet një punonjës aktiv. Verifiko My View, pamjen e departamentit, Open Tasks, Task Details, njoftimin e caktimit, filtrin e raportimit 1H dhe riprovimin pa kopje. |
+| Mira Zhvillim / hyrja automatike | Discord Mira Zhvillim (orari, prania, regjistrimi), mira-kontrolli (paneli Mira Zhvillim), Mira / shënimet, PX Notes (shikimi dhe ruajtja). Orari dhe request_id `autoai-` janë të veçantë nga regjistruesi 1H (`auto1h-`) dhe Mira Host. Finalizuesi i përbashkët ruan automatikisht shënimet e `auto1h-` dhe të `autoai-` me recorder `ai_agent`; nisjet manuale mbeten me ruajtje manuale. Kontrollo deduplikimin, lidhjen me transkriptin, statusin Ruajtur dhe kthimin te ruajtja manuale pas dështimit. |
+| Emri i takimeve Zhvillim dhe botit Mira Zhvillim | Mira → Takimet (filtri Zhvillim, lista, kërkimi, detajet dhe historiku), Discord (emri i botit, paneli, komandat dhe ftesat), PX Notes dhe printimi, Task Details, Common View, My View, Development, Graphic Design, Product Content, Finance dhe eksportet Excel që lexojnë burimin e diktimit. Kontrollo titujt e vjetër dhe shënimet e ruajtura me emrin e mëparshëm. |
 | Takimet (shënimet e takimeve) | Takimet, Takimi (seancat), Historia e klientit, Regjistrimet (Shënim / Injoro / screenshot), PX Notes (Dërgo / Bashko në PX), Meeting Scheduler (Trajnim), Sidebar |
 | Mira Host / takimet 1H | Mira (nisje/ndalim/status), Discord 1H (hyrja, prania, radha, audioja), PX Notes, Common View, 1H SHTYPI Today, 1H Reports (Done dhe strike), Task Details |
 | Raporte / email / eksporte | Reports, 1H SHTYPI Today, 1H SHTYPI Tomorrow, 1H Reports, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT, PX JAV Kontrolli, Weekly Planning Check, Kontrolli ditor RLZ, Print Preview, Print, Email, Exports, History |
@@ -311,6 +312,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   që përdor PDF-ja e NEWS-PX shfaqin `✓ Done`. Eksporti `ga-time.xlsx`,
   bashkëngjitjet GA të 1H dhe agjenda e Asistentes GA i përjashtojnë hyrjet e
   kryera. Verifiko të dyja gjendjet pas një sinkronizimi të përsëritur.
+  `ga_item_done` vendos kërkesën e kryerjes së një `tt:` në pritje deri te
+  konfirmimi i Shortcut-it. Verifiko që `ga_agenda` e shfaq në pritje dhe
+  listat e punës së hapur e përjashtojnë. Hyrjet në pritje dhe të konfirmuara
+  ruhen gjatë një importi të përsëritur. Pas konfirmimit, tabela ditore
+  dhe eksportet lexojnë `is_completed` si për kryerjet nga iPhone.
 
 - M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
   e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
@@ -337,6 +343,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   dhe përdorin identitetin e botit të përmendjeve. Kontrollo autorizimin si GA,
   ID-të e kontekstit, lidhjen e reply-t te përmendja, heqjen e reagimit të
   botit dhe që ai reagim të mos numërohet si aprovim i një kolegu.
+  Në feed-in e ASIST GA – DET GA, `ga_replied` lexon përgjigjet e arkivuara të
+  GA-së në kanal ose në thread-et publike të lidhura dhe përgjigjet nga
+  veprimi i audituar i PrimeFlow.
+  `ga_reacted` lexon reagimet aktive të GA-së dhe botit të përmendjeve.
+  Emrat te `others_reacted_before_ga` kërkojnë që shtimi i reagimit aktiv të
+  kolegut të jetë parë para reagimit të parë aktiv të GA-së ose botit në të
+  njëjtin sesion të botit. Kontrollo shtimin, heqjen, pastrimin dhe lidhjen
+  pas ndërprerjes. `others_reacted_before_ga_known` është false kur mungon
+  evidenca për renditjen, përfshirë reagimet historike të lexuara vetëm me REST
+  dhe mesazhet që kanë reagime të stafit por presin një reagim të GA-së.
 
 - M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
   importi nga Common View të mos krijojnë kopje në grupin manual të M2.
@@ -623,9 +639,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 - Mira regjistruese hyn në kanalin 1H edhe në 07:59 në ditët e punës, sipas
   `DISCORD_1H_AUTO_JOIN_TIMES` dhe `APP_TIMEZONE`. Kontrollo hyrjen në Discord,
   gjendjen te `mira-kontrolli` dhe ruajtjen te Mira → Shënimet dhe PX Notes.
-  Mira Host dhe AI Agent kanë orare të veçanta.
+  Mira Host dhe Mira Zhvillim kanë orare të veçanta.
 
-- Hyrja automatike e Mira AI Agent dërgon `request_id=autoai-YYYYMMDDHHMM`
+- Hyrja automatike e Mira Zhvillim dërgon `request_id=autoai-YYYYMMDDHHMM`
   (tentativat pasuese shtojnë `-2` / `-3`). Skema `VoiceStart` te
   `backend/app/schemas/discord_voice_meeting.py` duhet t'i pranojë bashkë me
   `auto1h-` dhe ID-të numerike të nisjeve manuale; përndryshe API-ja e refuzon
@@ -634,13 +650,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Testet me skema të izoluara të shënimeve duhet të krijojnë edhe `MeetingNote`,
   sepse leximi i `GaNote` ngarkon flamurin `from_meeting` përmes `meeting_notes`.
 
-- Konfirmimi i klikimeve në Discord përdoret nga panelet 1H dhe AI Agent në
+- Konfirmimi i klikimeve në Discord përdoret nga panelet 1H dhe Mira Zhvillim në
   `mira-kontrolli` dhe nga butonat e regjistrimit e të shënimeve në mesazhe.
   Kontrollo konfirmimin para thirrjeve në PrimeFlow, dukshmërinë në kanalin
   e kontrollit dhe në kanalet personale, si dhe ruajtjen te Mira / PX Notes.
   Kur Discord kthen `10062`, logu i botit tregon moshën e klikimit në hyrje
   dhe kohën e kërkesës së konfirmimit. Veprimi i skaduar nuk ekzekutohet.
-- Deploy-et me ndryshime të verifikuara vetëm në API i mbajnë 1H dhe AI Agent
+- Deploy-et me ndryshime të verifikuara vetëm në API i mbajnë 1H dhe Mira Zhvillim
   aktivë. Të dy botët përdorin gateway-n lokal `18080` që ndjek API-në aktive.
   Kontrollo panelin `mira-kontrolli`, komandat personale, raportet Discord dhe
   njoftimin e përfundimit të `/push` me botin që vazhdon të punojë. Kur duhet
@@ -652,7 +668,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   dhe hyrjen reale në Discord në një provë të veçantë. Kontrolli i deploy-it
   nuk nis një regjistrim. Ruaj radhën e rikuperimit të transkripteve të Mira Host
   në të njëjtën dosje, pavarësisht versionit të botit.
-  Nisjet automatike të 1H dhe AI Agent nuk harxhojnë tentativa gjatë
+  Nisjet automatike të 1H dhe Mira Zhvillim nuk harxhojnë tentativa gjatë
   verifikimit. Ato rifillojnë brenda dritares ekzistuese prej katër minutash.
 
 - Taskat e krijuara drejtpërdrejt nga Regjistrimet krijojnë PX Note me
@@ -807,6 +823,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   PX Notes lidh te “Të gjitha”; shiritat e njoftimeve dhe dialogu i përbashkët
   i komenteve përdorin gjendjen dhe datën e përditësimit të listës bazë.
   Raportet dhe eksportet lexojnë simbolin dhe tekstin nga të dhënat e detyrës.
+- PrimeFlow MCP liston komentet personale dhe versionin aktual të komenteve
+  te simbolet për detyrat 1H. Gjendja `new` ose `seen` ruhet për llogarinë
+  e asistentit dhe për versionin e komentit. Kontrollo Task Details dhe
+  Simbolet dhe komentet për të njëjtin tekst, si edhe njohjen e komenteve
+  të redaktuara si të reja. Njoftimet dhe konfirmimet e përgjegjësve përdorin
+  `task_marker_comment_inbox`. M1 «A KA KOMENTE NE PF?» përdor historikun
+  `task_symbol_comment_events`. SHTYPI lexon komentin e detyrës.
 - SHTYPI Today dhe Tomorrow ndajnë komponentin dhe gjeneruesin bazë, por kanë
   dallime në data, gjenerim dhe historik. 1H Reports ka gjenerues tjetër.
   Mungesa ose PV tërëditore (08:00–16:00) përjashton detyrat nga gjenerimi i ri
@@ -973,7 +996,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ka kopje të ngrirë në 16:00; ruaj historikun dhe dallimin para/pas cutoff-it.
 - Notes nga Mira kanë rregulla të veçanta dukshmërie në raporte. Mos supozo se
   çdo Note duhet të dalë në çdo raport; dallo regjistrimin nga tasku i krijuar.
-- Regjistruesit Discord 1H dhe AI Agent ruajnë fillimisht tekstin e transkriptuar
+- Regjistruesit Discord 1H dhe Mira Zhvillim ruajnë fillimisht tekstin e transkriptuar
   sipas folësit, pa kohë pranë replikave, pastaj një përmbledhje të shkurtër nga i njëjti takim.
   Kontrollo përmbajtjen te Mira → Shënimet, PX Notes dhe rezultati në Discord
   për ruajtje manuale. Pas dështimit përfundimtar të përmbledhjes, transkripti
@@ -988,7 +1011,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Në diktimin e detyrave, `EFA` përputhet
   edhe me profilin “Elsa Ferati”. Nëse përputhen dy profile aktive, detyra
   nuk krijohet.
-- Diktimi i një detyre nga 1H ose AI Agent ruan në të njëjtin transaksion
+- Diktimi i një detyre nga 1H ose Mira Zhvillim ruan në të njëjtin transaksion
   detyrën 1H dhe shënimin e lidhur në PX Notes. Kontrollo që “Task Created”
   të hapë detyrën ekzistuese dhe që burimi të shfaqet te Task Details,
   Common View, My View, Development, Graphic Design, Product Content,
@@ -1106,7 +1129,7 @@ që shërben gjatë kalimit. Ndaje heqjen e kolonave ose ndryshimin e kontratës
 nga deploy-i që zhvendos lexuesit. Kontrollo hyrjen, një faqe të hapur që
 ngarkon një chunk të vjetër dhe një kërkesë API në vazhdim. Para rinisjes
 së botëve, `backend/scripts/wait_for_mira_deploy.py` pret mbylljen e seancave
-1H dhe AI Agent, përfundimin e shënimeve dhe mbylljen e takimit Mira Host.
+1H dhe Mira Zhvillim, përfundimin e shënimeve dhe mbylljen e takimit Mira Host.
 
 `.github/workflows/deploy.yml` përdor `frontend/scripts/wait-for-readiness.ps1`
 për kandidatin, rikthimin e versionit të mëparshëm dhe kontrollin përfundimtar.
@@ -1118,6 +1141,19 @@ kontrollit të commit-it të ri përditësohet shënuesi `frontend.sha`. Prova l
 e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
+
+- ASIST GA – DET GA lidh M1 Start of Day, After Break, Meetings Report,
+  M1/M2/M3 PIKAT dhe 1H SHTYPI Sot/Nesër me `?date=YYYY-MM-DD`.
+  Për datat e arkivuara SHTYPI përdor snapshot-in e datës, edhe te Nesër.
+  Ruajtja MCP e pikës «A duhet riorganizim?» përdor përgjigjen manuale të
+  M1 PIKAT. Kontrollo edhe preview, email dhe eksportet e M1 PIKAT. Lista
+  PX e afateve përdor përgjegjësin ose konfirmuesin GA si lista GA Tasks.
+  Agjenda MCP lexon simbolet e ruajtura që përdorin Common View, 1H
+  dhe raportet M1/M2/M3. Takimet lexojnë të njëjtën ditë dhe status si GA
+  Time Table dhe shënimet e Takimeve. Shënimi «reacted» te GA Devices është
+  gjendje e listës MCP. Përfundimi i detyrës kalon nga shërbimi ekzistues
+  dhe pasqyrohet në Task Details, Common View, My View, Development,
+  Graphic Design, Product Content, Finance dhe në raportet e lidhura.
 
 - Tema Light / Dark / System: `frontend/src/lib/theme.ts` vendos klasën `dark`
   para renderimit dhe ruan `primex-theme` në localStorage; System ndjek ndryshimet

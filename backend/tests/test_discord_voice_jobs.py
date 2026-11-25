@@ -44,7 +44,12 @@ class VoiceJobTests(PostgresMeetingTests):
             host = Mira1HMeeting(id=uuid.uuid4(), meeting_date=day, slot=slot, status="DONE")
             desktop = MiraDesktopSession(id=uuid.uuid4(), user_id=self.uid, title="Desktop session",
                 status="SAVED", note_id=desktop_note.id, notes="Owner-only draft")
-            db.add_all([voice, host, desktop])
+            development = Meeting(id=uuid.uuid4(), user_id=self.uid, link_id=self.lid, guild_id="123",
+                voice_channel_id="66", private_channel_id="44", request_id="autoai-202610200804",
+                instance_id=uuid.uuid4(), capture_token_hash="test", recorder="ai_agent",
+                title="AI AGENT 08-05 & 12-00", draft_text="AI AGENT 08-05 & 12-00\n\nHistorical notes.",
+                status="READY")
+            db.add_all([voice, development, host, desktop])
             await db.flush()
             db.add_all([
                 Mira1HEvent(meeting_date=day, slot=slot, kind="PX_NOTE", meeting_id=host.id, note_id=host_note.id),
@@ -54,12 +59,17 @@ class VoiceJobTests(PostgresMeetingTests):
 
             result = await catalog.list_meetings(db, user, limit=30, offset=0, group=None, query="", follow_up_query="")
             self.assertEqual({(row["source"], row["id"]) for row in result["items"]},
-                             {("discord", str(voice.id)), ("desktop", str(desktop.id))})
+                             {("discord", str(voice.id)), ("discord", str(development.id)), ("desktop", str(desktop.id))})
             self.assertTrue(result["has_unlinked_notes"])
             voice_row = next(row for row in result["items"] if row["id"] == str(voice.id))
             self.assertEqual(voice_row["recorder"], "primary")
             self.assertEqual(voice_row["created_note_count"], 1)
             self.assertEqual(voice_row["created_task_count"], 0)
+            result = await catalog.list_meetings(db, user, limit=30, offset=0, group="AI_AGENT",
+                query="Zhvillim", follow_up_query="")
+            self.assertEqual([row["title"] for row in result["items"]], ["Zhvillim 08-05 & 12-00"])
+            detail = await catalog.meeting_detail(db, user, "discord", development.id)
+            self.assertEqual(detail["full_notes"], "Zhvillim 08-05 & 12-00\n\nHistorical notes.")
             result = await catalog.list_meetings(db, user, limit=30, offset=0, group="1H",
                 query="Host saved note", follow_up_query="")
             self.assertEqual([row["id"] for row in result["items"]], [str(voice.id)])
@@ -190,7 +200,7 @@ class VoiceJobTests(PostgresMeetingTests):
             workbook = load_workbook(BytesIO(data))
             self.assertEqual(
                 {workbook.active[f"B{row}"].value for row in (5, 6)},
-                {"Kontrollo ofertën ai_agent\nNga Mira AI Agent", "Kontrollo ofertën primary\nNga Mira 1H"},
+                {"Kontrollo ofertën ai_agent\nNga Mira Zhvillim", "Kontrollo ofertën primary\nNga Mira 1H"},
             )
             workbook.close()
 

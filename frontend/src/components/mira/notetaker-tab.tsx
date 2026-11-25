@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY } from "@/lib/dates"
 import { dayLabel, groupTranscriptBySpeaker, json, STATUS_LABELS, transcriptTime as timestamp, type MeetingDetail as HostDetail } from "@/lib/mira"
 import { memoryKindLabels, type MemoryListItem } from "@/lib/mira-memory"
+import { DEVELOPMENT_MEETING_NAME, developmentMeetingTitle } from "@/lib/mira-note-groups"
 import { cn } from "@/lib/utils"
 
 const sections = {
@@ -76,7 +77,7 @@ const base = "/mira?tab=takimet"
 const endpoint = "/mira/notetaker/meetings"
 const catalog = "/mira/meeting-catalog"
 const pageSize = 30
-const groups = { "1H": "1H", AI_AGENT: "AI Agent", OTHER: "Të tjera" } as const
+const groups = { "1H": "1H", AI_AGENT: DEVELOPMENT_MEETING_NAME, OTHER: "Të tjera" } as const
 const groupColors = {
   "1H": "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200",
   AI_AGENT: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
@@ -122,8 +123,9 @@ function meetingListDate(value: string) {
 }
 
 function DiscordTranscript({ segments, anchor }: { segments: TranscriptSegment[]; anchor: string }) {
-  if (!segments.length) return <p className="text-sm">Nuk ka segmente të transkriptuara.</p>
-  const turns = groupTranscriptBySpeaker(segments, segment => segment.speaker_key ?? segment.speaker)
+  const visibleSegments = segments.filter(segment => segment.text.trim())
+  if (!visibleSegments.length) return <p className="text-sm">Nuk ka segmente të transkriptuara.</p>
+  const turns = groupTranscriptBySpeaker(visibleSegments, segment => segment.speaker_key ?? segment.speaker)
   return <ul className="divide-y text-sm">
     {turns.map(turn => {
       const first = turn[0]
@@ -403,6 +405,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
         <ul className="divide-y overflow-hidden rounded-lg border text-sm">
           {list.items.map((item) => {
             const aiAgent = item.recorder === "ai_agent" || item.group === "AI_AGENT"
+            const title = meetingListTitle(item)
             const tasks = item.created_task_count ?? 0
             const notes = item.created_note_count ?? 0
             return (
@@ -416,7 +419,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
                   <Image src={aiAgent ? "/mira-ai-agent-avatar.png" : "/mira-avatar.png"} alt="" width={34} height={34}
                     className={cn("shrink-0 rounded-full border", aiAgent ? "border-emerald-400" : "border-blue-400")} />
                   <span className="min-w-0">
-                    <span className="block break-words">{meetingListTitle(item)}</span>
+                    <span className="block break-words">{aiAgent ? developmentMeetingTitle(title) : title}</span>
                     {(tasks > 0 || notes > 0) && <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
                       {tasks > 0 && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-900 dark:bg-blue-950 dark:text-blue-200">
                         {tasks} {tasks === 1 ? "detyrë e krijuar" : "detyra të krijuara"}
@@ -464,7 +467,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
     <section className="mt-5 space-y-4">
       <Link href={base} className="text-sm underline">Kthehu te takimet</Link>
       <header>
-        <h2 className="text-lg font-semibold">{detail.title}</h2>
+        <h2 className="text-lg font-semibold">{detail.source === "discord" ? developmentMeetingTitle(detail.title) : detail.title}</h2>
         <p className="text-sm text-muted-foreground">
           {detail.started_at ? dateTime.format(new Date(detail.started_at)) : detail.host && dayLabel(detail.host.date)}
           {" · "}{sources[detail.source]}
@@ -474,19 +477,21 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
       {detail.partial && <p className="rounded-md border border-amber-500/50 px-3 py-2 text-sm">Regjistrimi ose transkripti është i pjesshëm.</p>}
       {(createdTasks.length > 0 || createdNotes.length > 0) && <section className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-900 dark:bg-violet-950/30">
         <h3 className="text-sm font-semibold">Detyra dhe shënime nga takimi</h3>
-        {createdTasks.length > 0 && <Table aria-label="Detyrat e krijuara nga takimi"
+        <Table aria-label="Detyra dhe shënime nga takimi"
           containerClassName="rounded-md border border-violet-200 dark:border-violet-900"
-          className="min-w-[28rem] table-fixed bg-background">
+          className="min-w-[36rem] table-fixed bg-background">
           <TableHeader className="bg-violet-100/60 dark:bg-violet-950/60">
             <TableRow>
-              <TableHead scope="col">Detyra</TableHead>
+              <TableHead scope="col" className="w-24">Lloji</TableHead>
+              <TableHead scope="col">Përmbajtja</TableHead>
               <TableHead scope="col" className="w-1/4">Përgjegjësi</TableHead>
               <TableHead scope="col" className="w-32">Data e fillimit</TableHead>
               <TableHead scope="col" className="w-28">Afati</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {createdTasks.map(task => <TableRow key={task.id}>
+            {createdTasks.map(task => <TableRow key={`task-${task.id}`}>
+              <TableCell className="font-medium text-blue-800 dark:text-blue-200">Detyrë</TableCell>
               <TableCell className="whitespace-normal [overflow-wrap:anywhere]">
                 <Link href={`/tasks/${task.id}`} className="underline underline-offset-2">{task.title}</Link>
               </TableCell>
@@ -496,15 +501,18 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
               <TableCell className="tabular-nums">{formatDateDMY(task.start_date, "—")}</TableCell>
               <TableCell className="tabular-nums">{formatDateDMY(task.due_date, "—")}</TableCell>
             </TableRow>)}
+            {createdNotes.map(note => <TableRow key={`note-${note.id}`}>
+              <TableCell className="font-medium text-violet-800 dark:text-violet-200">Shënim</TableCell>
+              <TableCell className="whitespace-normal [overflow-wrap:anywhere]">
+                <Link href={miraMeetingUrl(detail.id, detail.source, "full", `note-${note.note_id ?? note.id}`)}
+                  className="underline underline-offset-2">{note.content.trim().split("\n")[0]?.slice(0, 140) || note.title}</Link>
+              </TableCell>
+              <TableCell>—</TableCell>
+              <TableCell>—</TableCell>
+              <TableCell>—</TableCell>
+            </TableRow>)}
           </TableBody>
-        </Table>}
-        {createdNotes.length > 0 && <ul className="space-y-1.5 text-sm">
-          {createdNotes.map(note => <li key={note.id} className="flex flex-wrap items-baseline gap-x-2">
-            <span className="text-xs font-medium text-violet-800 dark:text-violet-200">Shënim</span>
-            <Link href={miraMeetingUrl(detail.id, detail.source, "full", `note-${note.note_id ?? note.id}`)}
-              className="min-w-0 break-words underline underline-offset-2">{note.content.trim().split("\n")[0]?.slice(0, 140) || note.title}</Link>
-          </li>)}
-        </ul>}
+        </Table>
       </section>}
       <nav aria-label="Pamjet e takimit" className="flex flex-wrap gap-4 border-b pb-2 text-sm">
         {available.map(key => (

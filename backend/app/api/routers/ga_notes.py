@@ -46,6 +46,7 @@ from app.services.daily_realization_events import record_task_semantic_events, t
 from app.services.task_postponement import check_note_postponement_explanations, save_postponement_daily_explanation
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
 from app.services.task_marker import active_one_h_marker, current_effective_marker_date, marker_is_by_ga, normalize_marker_comment, note_bundle_marker_update, sync_note_task_marker, sync_note_assignee_markers
+from app.services.mira_development_name import meeting_note_heading
 from app.services.marker_comments import record_initial_marker_comments
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.task_daily_progress import sync_task_daily_finish_period, upsert_explicit_task_daily_status
@@ -116,7 +117,7 @@ def _attachment_out(attachment: GaNoteAttachment) -> GaNoteAttachmentOut:
 def _note_out(note: GaNote) -> GaNoteOut:
     return GaNoteOut(
         id=note.id,
-        content=note.content,
+        content=meeting_note_heading(note.content) if note.from_mira and not note.from_mira_desktop else note.content,
         email_preview=email_preview(note),
         created_by=note.created_by,
         note_type=note.note_type,
@@ -361,10 +362,14 @@ async def _save_ga_note_attachments(
 async def list_ga_notes(
     project_id: uuid.UUID | None = None,
     department_id: uuid.UUID | None = None,
+    unconverted_only: bool = False,
+    since: datetime | None = None,
+    note_type: GaNoteType | None = None,
+    sync_mailbox: bool = True,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[GaNoteOut]:
-    if project_id is None and department_id is None:
+    if sync_mailbox and project_id is None and department_id is None:
         await sync_gmail_px_notes()
     # Keep recent closed notes and any Mira note explicitly shared to PX Notes.
     closed_cutoff = datetime.utcnow() - timedelta(days=30)
@@ -392,6 +397,20 @@ async def list_ga_notes(
     elif department_id is not None:
         stmt = stmt.where(GaNote.department_id == department_id)
 
+    if unconverted_only:
+        stmt = stmt.where(GaNote.is_converted_to_task.is_(False))
+    if note_type is not None:
+        stmt = stmt.where(GaNote.note_type == note_type)
+    if since is not None:
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=ZoneInfo(settings.GA_TIMEZONE))
+        stmt = stmt.where(GaNote.created_at >= since)
+
+    if not sync_mailbox or unconverted_only or since is not None or note_type is not None:
+        rows = (await db.execute(
+            stmt.add_columns(User.full_name, User.username).outerjoin(User, User.id == GaNote.created_by)
+        )).all()
+        return [_note_out(note).model_copy(update={"author": full_name or username}) for note, full_name, username in rows]
     notes = (await db.execute(stmt)).scalars().all()
     return [_note_out(n) for n in notes]
 

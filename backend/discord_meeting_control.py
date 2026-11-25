@@ -8,6 +8,7 @@ import time
 import discord
 from app.config import settings
 from app.services.discord_voice_note_format import meeting_url
+from app.services.mira_development_name import NAME
 
 log = logging.getLogger('primeflow.discord.control')
 PREFIX = '/bot/voice-meetings'
@@ -59,7 +60,7 @@ def require_control(interaction):
 
 
 def panel_content(recorder, data):
-    label = '1H' if recorder == 'primary' else 'AI Agent'
+    label = '1H' if recorder == 'primary' else NAME
     meeting = data.get('meeting') or {}
     status = meeting.get('status')
     states = {'STARTING':'Duke u lidhur', 'LISTENING':'Duke regjistruar', 'FINALIZING':'Duke përgatitur shënimet',

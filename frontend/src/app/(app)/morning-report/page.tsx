@@ -23,6 +23,7 @@ import {
   reportSectionPreviewText,
 } from "@/components/report-section-editor"
 import { useAuth } from "@/lib/auth"
+import { useReportDate } from "@/lib/report-link-date"
 import { addManualReportSection, isCustomManualReportSection, ManualReportQuestionAdd, ManualReportQuestionDelete } from "@/components/manual-report-question-add"
 
 type Section = { section_key?: string; title: string; body: string }
@@ -208,7 +209,7 @@ export default function MorningReportPage() {
   const isManagerOrAdmin = ["ADMIN", "MANAGER"].includes(String(user?.role || "").toUpperCase())
   const canEdit = Boolean(user)
   const canManageDelivery = isManagerOrAdmin
-  const [reportDate, setReportDate] = React.useState(todayIso())
+  const [reportDate, setReportDate] = useReportDate(todayIso)
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)
   const feedbackQueue = React.useRef(Promise.resolve())
