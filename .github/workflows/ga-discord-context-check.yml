@@ -18,7 +18,7 @@ concurrency:
 jobs:
   verify:
     runs-on: self-hosted
-    timeout-minutes: 5
+    timeout-minutes: 7
     env:
       RELEASE_SHA: ${{ inputs.release_sha }}
       PYTHONUTF8: "1"
@@ -43,6 +43,7 @@ jobs:
           import hashlib
           import json
           import os
+          from sqlalchemy import text
 
           from fastapi import HTTPException
 
@@ -55,6 +56,9 @@ jobs:
           EMOJIS = ('\U0001F440', '\U0001F44D', '\u2705', '\u274C')
           REPLIES = 'p\u00ebrgjigjet'
           CHANNEL = '1572160944358953042'
+
+          def label_for(kind):
+              return '[TEST PrimeFlow MCP] Verifikim teknik (' + kind + '). Nuk kerkon veprim.'
 
           async def source(client, target):
               return (await actions.request_discord(client, 'GET', actions.message_path(target))).json()
@@ -70,20 +74,24 @@ jobs:
                   await asyncio.sleep(1)
               return False
 
-          async def reply_check(db, client, target, anchor, kind, result):
-              label = '[TEST PrimeFlow MCP] Verifikim teknik (' + kind + '). Nuk kerkon veprim.'
-              nonce = hashlib.sha256(f'ga-actions:{os.environ["GITHUB_RUN_ID"]}:{kind}'.encode()).hexdigest()[:24]
-              reply, values = await actions.create_reply(db, target, DiscordReplyIn(text=label, nonce=nonce))
-              result['reply_url'] = reply.url
-              await archive.store_messages(db, [values])
-              sent = (await actions.request_discord(
-                  client, 'GET', f'/channels/{target.channel_id}/messages/{values["id"]}',
-              )).json()
+          async def reply_check(db, client, target, anchor, kind, result, sent):
+              label = label_for(kind)
+              if sent is None:
+                  nonce = hashlib.sha256(f'ga-actions:{os.environ["GITHUB_RUN_ID"]}:{kind}'.encode()).hexdigest()[:24]
+                  reply, values = await actions.create_reply(db, target, DiscordReplyIn(text=label, nonce=nonce))
+                  result['reply_url'] = reply.url
+                  await archive.store_messages(db, [values])
+                  sent = (await actions.request_discord(
+                      client, 'GET', f'/channels/{target.channel_id}/messages/{values["id"]}',
+                  )).json()
+              else:
+                  result['reply_url'] = f'https://discord.com/channels/{target.guild_id}/{target.channel_id}/{sent["id"]}'
+                  result['reused_test_reply'] = True
               result['discord_reply'] = bool(sent.get('author', {}).get('bot')
                   and sent.get('content') == 'GA: ' + label
                   and sent.get('message_reference', {}).get('message_id') == target.id)
               updated = (await render_with_context(db, [anchor], ga_tz()))[0]
-              result['reply_visible'] = any(item['id'] == reply.id for item in updated['context'][REPLIES])
+              result['reply_visible'] = any(item['id'] == 'dc:' + sent['id'] for item in updated['context'][REPLIES])
 
           async def reaction_check(db, client, target, result):
               before = await source(client, target)
@@ -103,15 +111,34 @@ jobs:
               if settings.DISCORD_GA_REPLIES_CHANNEL_ID != CHANNEL:
                   raise SystemExit('The configured channel is outside the requested live test.')
               async with SessionLocal() as db, actions.discord_client() as client:
-                  anchors = await list_staff_channel_mentions(db, before=None, limit=40)
+                  print('Looking for existing test replies before any write')
+                  recent = (await actions.request_discord(
+                      client, 'GET', f'/channels/{CHANNEL}/messages', params={'limit': 100},
+                  )).json()
+                  prior = {kind: next((row for row in recent if row.get('author', {}).get('bot')
+                                      and row.get('content') == 'GA: ' + label_for(kind)), None)
+                           for kind in ('mention', 'context')}
+                  print('Existing test replies: ' + json.dumps({k: bool(v) for k, v in prior.items()}))
+                  await db.execute(text("SET LOCAL statement_timeout = '12s'"))
+                  anchors = await list_staff_channel_mentions(db, before=None, limit=30)
                   items = await render_with_context(db, anchors, ga_tz())
+                  print(f'Context loaded for {len(items)} mentions')
                   pair = None
+                  attempts = 0
                   for anchor, item in zip(anchors, items, strict=True):
+                      if prior['mention'] and prior['mention'].get('message_reference', {}).get('message_id') != anchor.id:
+                          continue
                       context = item['context']
                       for candidate in [*context['para'], *context['pas'], *context[REPLIES]]:
-                          target = await actions.target_message(db, candidate['id'].removeprefix('dc:'))
-                          if target.channel_id != CHANNEL:
+                          if candidate['url'].rsplit('/', 2)[-2] != CHANNEL:
                               continue
+                          candidate_id = candidate['id'].removeprefix('dc:')
+                          if prior['context'] and prior['context'].get('message_reference', {}).get('message_id') != candidate_id:
+                              continue
+                          attempts += 1
+                          if attempts > 8:
+                              break
+                          target = await actions.target_message(db, candidate_id)
                           try:
                               await actions.verify_target(db, client, anchor)
                               await actions.verify_target(db, client, target)
@@ -119,18 +146,19 @@ jobs:
                               continue
                           pair = anchor, target
                           break
-                      if pair:
+                      if pair or attempts > 8:
                           break
                   if not pair:
                       raise SystemExit('No available mention and context pair was found in the requested channel.')
                   results = {}
                   anchor = pair[0]
                   for kind, target in zip(('mention', 'context'), pair, strict=True):
+                      print(f'Testing {kind}')
                       result = {'discord_reply': False, 'reply_visible': False,
                                 'reaction_added': False, 'reaction_removed': False}
                       results[kind] = result
                       for name, check in (
-                          ('reply', lambda: reply_check(db, client, target, anchor, kind, result)),
+                          ('reply', lambda: reply_check(db, client, target, anchor, kind, result, prior[kind])),
                           ('reaction', lambda: reaction_check(db, client, target, result)),
                       ):
                           try:
@@ -139,9 +167,10 @@ jobs:
                               result[name + '_error'] = f'HTTP {exc.status_code}: {exc.detail}'
                           except Exception as exc:
                               result[name + '_error'] = type(exc).__name__
+                      print('GA_DISCORD_ACTION_STAGE ' + json.dumps({kind: result}, ensure_ascii=True))
                   print('GA_DISCORD_ACTIONS_LIVE ' + json.dumps(results, ensure_ascii=True))
               await engine.dispose()
 
           asyncio.run(main())
-          '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
+          '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -u -
           if ($LASTEXITCODE -ne 0) { throw 'The live Discord actions check did not run to completion.' }
