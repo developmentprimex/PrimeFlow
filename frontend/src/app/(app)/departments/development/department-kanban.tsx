@@ -16,7 +16,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
-import { Check, GripVertical, Pencil, Printer, RotateCcw, Trash2 } from "lucide-react"
+import { Check, ChevronRight, GripVertical, Pencil, Printer, RotateCcw, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -32,6 +32,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { DailyRlzCommentField, DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
 import { DailyReportMeetingsTable } from "@/components/daily-report-meetings-table"
+import { DevelopmentM1Answer, useDevelopmentM1Report } from "@/components/development-m1-report"
 import { MeetingCanceledBadge } from "@/components/meeting-canceled-badge"
 import { useCanceledMeetings } from "@/lib/use-canceled-meetings"
 import { PxJavPlanningBriefView } from "@/components/px-jav-planning-brief-view"
@@ -299,11 +300,15 @@ const INTERNAL_MEETING = {
       tabLabel: "M1",
       label: "M1 PER ZHVILLIM (BLIC 08:05 - 08:15 MAX)",
       items: [
-        "A ka mungesa, a ndryshon plani per sot?",
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
-        "A ka e-mails te reja ne IT?",
-        "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
+        "Vonesa/mungesa, a ndryshon plani për sot?",
+        "Takimet externe?",
+        "Takimet interne?",
+        "Çfarë kemi me KA / Gentin sot?",
+        "Shënime në Teams Zhvillim / a ka ndryshim të planit?",
+        "PX Notes të reja në PrimeFlow?",
+        "EF/RA: FRG: a ka vizitorë të rinj?",
+        "Diskutohen detyrat e secilit për AM/PM",
+        "Fizikisht me GA, detyrat me simbolin F?",
       ],
     },
     M2: {
@@ -1542,6 +1547,8 @@ export default function DepartmentKanban() {
   const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
   const [internalMeetingChecklistId, setInternalMeetingChecklistId] = React.useState<string | null>(null)
   const [internalMeetingItems, setInternalMeetingItems] = React.useState<ChecklistItem[]>([])
+  const m1 = useDevelopmentM1Report(activeTab === "meetings" && internalSlot === "M1" && internalMeetingItems.length > 0)
+  const hiddenM1Items = new Set(m1.report?.hidden_item_ids)
   const [newInternalMeetingItem, setNewInternalMeetingItem] = React.useState("")
   const [addingInternalMeetingItem, setAddingInternalMeetingItem] = React.useState(false)
   const [editingInternalMeetingItemId, setEditingInternalMeetingItemId] = React.useState<string | null>(null)
@@ -6717,6 +6724,7 @@ export default function DepartmentKanban() {
       }
       const created = (await res.json()) as ChecklistItem
       setInternalMeetingItems((prev) => [...prev, created])
+      if (internalSlot === "M1") m1.reload()
       setNewInternalMeetingItem("")
       toast.success("Internal meeting item added")
     } finally {
@@ -6753,7 +6761,7 @@ export default function DepartmentKanban() {
       .filter((item) => item.id !== editingInternalMeetingItemId)
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
     const slotSiblings = orderedWithoutCurrent.filter(
-      (item) => resolveInternalMeetingSlot(item.day) === internalSlot,
+      (item) => resolveInternalMeetingSlot(item.day) === internalSlot && !hiddenM1Items.has(item.id),
     )
     const targetIndex = Math.min(requestedDisplayPosition - 1, slotSiblings.length)
     let requestedStoredPosition = orderedWithoutCurrent.length + 1
@@ -6767,10 +6775,15 @@ export default function DepartmentKanban() {
 
     setSavingInternalMeetingItem(true)
     try {
+      const combinedM1 = m1.report?.item_sections[editingInternalMeetingItemId] === "ka_gent"
       const res = await apiFetch(`/checklist-items/${editingInternalMeetingItemId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, position: requestedStoredPosition }),
+        body: JSON.stringify({
+          title,
+          position: requestedStoredPosition,
+          ...(combinedM1 ? { keyword: "development-m1:ka_gent" } : {}),
+        }),
       })
       if (!res.ok) {
         toast.error("Failed to update internal meeting item")
@@ -6786,6 +6799,7 @@ export default function DepartmentKanban() {
         setInternalMeetingItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       }
       cancelEditInternalMeetingItem()
+      if (internalSlot === "M1") m1.reload()
       toast.success("Checklist item updated")
     } finally {
       setSavingInternalMeetingItem(false)
@@ -6865,9 +6879,9 @@ export default function DepartmentKanban() {
   }, [apiFetch, msConnected])
 
   React.useEffect(() => {
-    if (activeTab !== "meetings") return
+    if (activeTab !== "meetings" || internalSlot === "M1") return
     void loadMicrosoftStatus()
-  }, [activeTab, loadMicrosoftStatus])
+  }, [activeTab, internalSlot, loadMicrosoftStatus])
 
   React.useEffect(() => {
     if (msParam === "connected") {
@@ -6877,9 +6891,9 @@ export default function DepartmentKanban() {
   }, [msParam, loadMicrosoftStatus])
 
   React.useEffect(() => {
-    if (!msConnected || activeTab !== "meetings") return
+    if (!msConnected || activeTab !== "meetings" || internalSlot === "M1") return
     void loadMicrosoftEvents()
-  }, [msConnected, activeTab, loadMicrosoftEvents])
+  }, [msConnected, activeTab, internalSlot, loadMicrosoftEvents])
 
   const submitInternalNote = async () => {
     const title = internalNoteTitle.trim()
@@ -10332,8 +10346,8 @@ export default function DepartmentKanban() {
         {activeTab === "meetings" ? (
           <div className="space-y-4 sm:space-y-6">
             <div className="text-lg sm:text-xl font-semibold">Meetings</div>
-            <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-              <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
+            <div className={cn("grid grid-cols-1 gap-4", internalSlot !== "M1" && "lg:grid-cols-2")}>
+              <Card hidden={internalSlot === "M1"} className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-sm font-semibold">External Meetings</div>
                   <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
@@ -10977,7 +10991,7 @@ export default function DepartmentKanban() {
                     {exportingInternalMeetings ? "Exporting..." : "Export Excel"}
                   </Button>
                 </div>
-                {todayInternalMeetings.length ? (
+                {internalSlot !== "M1" && todayInternalMeetings.length ? (
                   <div className="rounded-md border border-slate-200">
                     <Table>
                       <TableHeader>
@@ -11021,7 +11035,24 @@ export default function DepartmentKanban() {
                   ))}
                 </div>
                 <div className="space-y-3">
-                  <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-semibold">
+                      {INTERNAL_MEETING.slots[internalSlot].label}
+                      {internalSlot === "M1" && m1.report ? ` · ${formatDateDMY(m1.report.date)}` : ""}
+                    </div>
+                    {internalSlot === "M1" && internalMeetingItems.length ? (
+                      <Button type="button" variant="outline" size="sm" onClick={m1.reload}
+                        disabled={m1.loading || m1.savingNote !== null || m1.cancelingMeeting !== null}>
+                        Rifresko
+                      </Button>
+                    ) : null}
+                  </div>
+                  {internalSlot === "M1" && m1.loading && !m1.report ? (
+                    <p role="status" className="text-sm text-muted-foreground">Po ngarkohen përgjigjet…</p>
+                  ) : null}
+                  {internalSlot === "M1" && m1.failed ? (
+                    <p role="alert" className="text-sm text-destructive">Përgjigjet nuk u ngarkuan. Provo Rifresko.</p>
+                  ) : null}
                   {!isReadOnly ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <Input
@@ -11042,27 +11073,32 @@ export default function DepartmentKanban() {
                   ) : null}
                   <div className="space-y-2">
                     {internalMeetingItems
-                      .filter((item) => resolveInternalMeetingSlot(item.day) === internalSlot)
-                      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                      .filter((item) => resolveInternalMeetingSlot(item.day) === internalSlot && !hiddenM1Items.has(item.id))
+                      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) ||
+                        (internalSlot === "M1" ? a.id.localeCompare(b.id) : 0))
                       .map((item, idx) => {
                         const isEditing = editingInternalMeetingItemId === item.id
-                        const displayTitle = (internalSlot === "M2" || internalSlot === "M3")
+                        const answer = internalSlot === "M1"
+                          ? m1.report?.sections.find((section) => section.key === m1.report?.item_sections[item.id])
+                          : undefined
+                        const displayTitle = answer?.key === "ka_gent" ? answer.title : (internalSlot === "M2" || internalSlot === "M3")
                           ? (item.title || "").toUpperCase()
                           : (item.title || "")
                         return (
                           <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
                             <Checkbox
+                              aria-label={displayTitle}
                               checked={Boolean(item.is_checked)}
                               onCheckedChange={(checked) => toggleInternalMeetingItem(item.id, Boolean(checked))}
                             />
-                            <div className="flex-1">
+                            <div className="min-w-0 flex-1">
                               {isEditing ? (
                                 <div className="flex items-center gap-2">
                                   <Input
                                     type="number"
                                     min={1}
                                     max={internalMeetingItems.filter(
-                                      (candidate) => resolveInternalMeetingSlot(candidate.day) === internalSlot,
+                                      (candidate) => resolveInternalMeetingSlot(candidate.day) === internalSlot && !hiddenM1Items.has(candidate.id),
                                     ).length}
                                     value={editingInternalMeetingItemPosition}
                                     onChange={(e) => setEditingInternalMeetingItemPosition(e.target.value)}
@@ -11076,6 +11112,17 @@ export default function DepartmentKanban() {
                                     placeholder="Checklist item"
                                   />
                                 </div>
+                              ) : answer ? (
+                                <details className="group">
+                                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                                    <span>{idx + 1}. {displayTitle}</span>
+                                    <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
+                                  </summary>
+                                  <DevelopmentM1Answer section={answer} readOnly={isReadOnly}
+                                    pending={m1.loading || m1.failed} savingNote={m1.savingNote}
+                                    markDiscussed={m1.markDiscussed} cancelingMeeting={m1.cancelingMeeting}
+                                    cancelMeeting={m1.cancelMeeting} />
+                                </details>
                               ) : (
                                 <div className="text-sm text-muted-foreground">
                                   {idx + 1}. {displayTitle}
@@ -11110,7 +11157,9 @@ export default function DepartmentKanban() {
                                     <Button
                                       size="icon"
                                       variant="outline"
-                                      onClick={() => startEditInternalMeetingItem(item, idx + 1)}
+                                      onClick={() => startEditInternalMeetingItem(
+                                        answer?.key === "ka_gent" ? { ...item, title: displayTitle } : item, idx + 1,
+                                      )}
                                       aria-label="Edit internal meeting item"
                                       title="Edit"
                                     >
@@ -11133,7 +11182,7 @@ export default function DepartmentKanban() {
                           </div>
                         )
                       })}
-                    {!internalMeetingItems.some((item) => resolveInternalMeetingSlot(item.day) === internalSlot) ? (
+                    {!internalMeetingItems.some((item) => resolveInternalMeetingSlot(item.day) === internalSlot && !hiddenM1Items.has(item.id)) ? (
                       <div className="text-sm text-muted-foreground">No checklist items yet.</div>
                     ) : null}
                   </div>

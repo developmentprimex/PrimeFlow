@@ -20,12 +20,12 @@ class MiraNoteGroupsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(groups.note_group(note), expected)
 
     def test_historical_heading_changes_without_altering_note_body(self):
-        self.assertEqual(meeting_title('AI AGENT 08-05 & 12-00'), 'Zhvillim 08-05 & 12-00')
-        self.assertEqual(meeting_title('ZHVILLIM · 25.11.2026 08:04'), 'Zhvillim · 25.11.2026 08:04')
-        self.assertEqual(meeting_title('Mira Zhvillim'), 'Zhvillim')
+        self.assertEqual(meeting_title('AI AGENT 08-05 & 12-00'), 'ZHVILLIM 08-05 & 12-00')
+        self.assertEqual(meeting_title('ZHVILLIM · 25.11.2026 08:04'), 'ZHVILLIM · 25.11.2026 08:04')
+        self.assertEqual(meeting_title('Mira Zhvillim'), 'ZHVILLIM')
         self.assertEqual(meeting_title('Takimi me ekipin'), 'Takimi me ekipin')
         self.assertEqual(meeting_note_heading('E mërkurë, 25 nëntor 2026\nAI Agent\n\nAI Agent was mentioned.'),
-                         'E mërkurë, 25 nëntor 2026\nZhvillim\n\nAI Agent was mentioned.')
+                         'E mërkurë, 25 nëntor 2026\nZHVILLIM\n\nAI Agent was mentioned.')
 
     async def test_channel_identity_classifies_custom_titles_and_preserves_note_actions(self):
         note_id = str(uuid.uuid4())

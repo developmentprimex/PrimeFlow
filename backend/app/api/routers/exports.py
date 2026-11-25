@@ -68,6 +68,7 @@ from app.services.daily_report_logic import (
     task_is_visible_to_user,
 )
 from app.services.ga_time_table import get_ga_time_table_rows
+from app.services.development_m1 import DEVELOPMENT_CHECKLIST_KEY, build_development_m1
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.task_marker import one_h_marker_label
 from app.services.note_markup import parse_marked_note_content
@@ -3735,7 +3736,6 @@ async def export_department_internal_meetings_xlsx(
     user=Depends(get_current_user),
 ):
     ensure_reports_access(user)
-
     checklists = (
         await db.execute(
             select(Checklist)
@@ -3759,6 +3759,12 @@ async def export_department_internal_meetings_xlsx(
         for item in checklist.items
         if item.item_type == ChecklistItemType.CHECKBOX
     ]
+    development_m1 = (
+        await build_development_m1(db, user, checklist_items=all_items)
+        if group_key == DEVELOPMENT_CHECKLIST_KEY else None
+    )
+    m1_sections = {section["key"]: section for section in development_m1["sections"]} if development_m1 else {}
+    item_sections = development_m1["item_sections"] if development_m1 else {}
 
     wb = Workbook()
     ws = wb.active
@@ -3784,10 +3790,15 @@ async def export_department_internal_meetings_xlsx(
     row_idx = 3
     for slot_key, slot_label in slot_specs:
         slot_items = sorted(
-            [item for item in all_items if (item.day or "M1") == slot_key],
+            [
+                item for item in all_items if (item.day or "M1") == slot_key
+                and (not development_m1 or str(item.id) not in development_m1.get("hidden_item_ids", []))
+            ],
             key=lambda item: (item.position if item.position is not None else 0, str(item.id)),
         )
 
+        if slot_key == "M1" and development_m1:
+            slot_label += f" · {development_m1['date']}"
         ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=last_col)
         section_cell = ws.cell(row=row_idx, column=1, value=slot_label)
         section_cell.font = Font(bold=True, size=12)
@@ -3818,13 +3829,17 @@ async def export_department_internal_meetings_xlsx(
 
         rows = slot_items or [None]
         for item_index, item in enumerate(rows, start=1):
+            answer = m1_sections.get(item_sections.get(str(item.id))) if slot_key == "M1" and item else None
             values = (
-                [item_index, item.title or "", "\u2713" if item.is_checked else ""]
+                [item_index, answer["title"] if answer and answer["key"] == "ka_gent" else item.title or "",
+                 "\u2713" if item.is_checked else ""]
                 if item is not None
                 else ["", "No checklist items", ""]
             )
             for col_idx, value in enumerate(values, start=1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                if isinstance(value, str):
+                    cell.data_type = "s"
                 cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True, readingOrder=1)
                 if col_idx == 1:
                     cell.font = Font(bold=True)
@@ -3832,9 +3847,40 @@ async def export_department_internal_meetings_xlsx(
                     left=thick if col_idx == 1 else thin,
                     right=thick if col_idx == last_col else thin,
                     top=thin,
-                    bottom=thick if item_index == len(rows) else thin,
+                    bottom=thick if item_index == len(rows) and not answer else thin,
                 )
             row_idx += 1
+            if answer:
+                answer_rows = list(answer["rows"])
+                if answer["message"] or not answer_rows:
+                    answer_rows.append({"title": answer["message"] or "Nuk ka për sot.", "detail": ""})
+                for index, row in enumerate(answer_rows):
+                    symbol = one_h_marker_label(row.get("marker"), row.get("marker_by_ga", False))
+                    detail = "\n".join(filter(None, (", ".join(row.get("task_assignees", [])), row["detail"])))
+                    details = " · ".join(filter(None, (
+                        *row.get("labels", []), symbol, detail, row.get("marker_comment"),
+                        row.get("meeting_url") if not row.get("canceled") else None,
+                    )))
+                    content = "\n".join(filter(None, (row["title"], details)))
+                    cell = ws.cell(row=row_idx, column=2, value=content)
+                    cell.data_type = "s"
+                    cell.alignment = Alignment(vertical="top", wrap_text=True, indent=1)
+                    ws.row_dimensions[row_idx].height = min(409, 15 * sum(
+                        max(1, (len(line) + 84) // 85) for line in content.splitlines()
+                    ))
+                    bottom = thick if item_index == len(rows) and index == len(answer_rows) - 1 else thin
+                    ws.cell(row=row_idx, column=1).border = Border(left=thick, right=thin, bottom=bottom)
+                    ws.cell(row=row_idx, column=3).border = Border(right=thick, bottom=bottom)
+                    cell.border = Border(bottom=bottom)
+                    if color := row.get("color"):
+                        cell.fill = PatternFill(fill_type="solid", fgColor=color.lstrip("#"))
+                    if border := row.get("border"):
+                        cell.border = Border(left=Side(style="medium", color=border.lstrip("#")), bottom=bottom)
+                    if row.get("canceled"):
+                        cell.font = Font(strike=True)
+                    if row.get("heading"):
+                        cell.font = Font(bold=True)
+                    row_idx += 1
         row_idx += 2
 
     ws.freeze_panes = "A3"

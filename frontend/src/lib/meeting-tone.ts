@@ -15,7 +15,7 @@ type MeetingToneInput = {
   calendarImported?: boolean
 }
 
-type InternalMeetingToneInput = {
+export type InternalMeetingToneInput = {
   recurrenceType?: string | null
   recurrence_type?: string | null
   pairedExternalMeetingId?: string | null
@@ -41,6 +41,12 @@ export const isManualInternalMeeting = (meeting: InternalMeetingToneInput): bool
 export const isCalendarLinkedInternalMeeting = (meeting: InternalMeetingToneInput): boolean =>
   !isManualInternalMeeting(meeting) &&
   Boolean(meeting.linkedExternalCalendarImported ?? meeting.linked_external_calendar_imported)
+
+export const internalMeetingRelation = (meeting: InternalMeetingToneInput): "PARA" | "PAS" | undefined => {
+  if (meeting.preExternalMeetingId || meeting.pre_external_meeting_id) return "PARA"
+  if (meeting.pairedExternalMeetingId || meeting.paired_external_meeting_id) return "PAS"
+  return undefined
+}
 
 export const meetingLegendTone = ({
   categories,

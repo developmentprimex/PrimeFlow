@@ -3,7 +3,7 @@
 import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
-import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
+import { calendarMeetingTimeRange, formatTimeLabel, parseTimeValue } from "@/lib/calendar-meeting-time"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
 
@@ -21,12 +21,14 @@ import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { internalMeetingDateOn, internalMeetingWeekDate, type InternalMeetingListFilter } from "@/lib/internal-meeting-list"
 import { fitReportToSinglePage } from "@/lib/print-report-fit"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
+import { personInitials as initials } from "@/lib/person-initials"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { isProjectCoverageDepartment, personalUsersForOneHSlot, projectUsersForOneHSlot, type ProjectTaskCoverage } from "@/lib/one-h-project-coverage"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
 import {
   internalMeetingLegendTone,
   isCalendarLinkedInternalMeeting,
+  internalMeetingRelation,
   isManualInternalMeeting,
   meetingLegendTone,
 } from "@/lib/meeting-tone"
@@ -528,12 +530,6 @@ type InternalItem = {
   linked_external_calendar_imported?: boolean
   linkedExternalRecurrenceType?: string | null
   linked_external_recurrence_type?: string | null
-}
-
-const internalMeetingRelation = (meeting: Pick<InternalItem, "preExternalMeetingId" | "pre_external_meeting_id" | "pairedExternalMeetingId" | "paired_external_meeting_id">): "PARA" | "PAS" | undefined => {
-  if (meeting.preExternalMeetingId || meeting.pre_external_meeting_id) return "PARA"
-  if (meeting.pairedExternalMeetingId || meeting.paired_external_meeting_id) return "PAS"
-  return undefined
 }
 
 const expandExternalMeetingDates = (meeting: Meeting, start: Date | null): Date[] => {
@@ -1133,15 +1129,6 @@ const parseFilenameFromDisposition = (headerValue: string | null) => {
   }
 }
 
-const initials = (name: string) => {
-  const cleaned = name.trim()
-  if (!cleaned) return "?"
-  if (cleaned.replace(/\s+/g, " ").toLocaleLowerCase() === "haris shaqiri") return "HSH"
-  const parts = cleaned.split(/\s+/)
-  const first = parts[0]?.[0] || ""
-  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] || "" : ""
-  return `${first}${last}`.toUpperCase()
-}
 const getKaGentiConfirmationOwner = (
   confirmationUser?: Pick<User, "full_name" | "username" | "email"> | null
 ): "KA" | "GENT" | null => {
@@ -1584,15 +1571,6 @@ export default function CommonViewPage() {
     const match = String(value).match(/^(\d{2}:\d{2})/)
     return match ? match[1] : String(value)
   }
-  const parseTimeValue = (value: string) => {
-    const match = /^(\d{2}):(\d{2})$/.exec(value)
-    if (!match) return null
-    const hours = Number(match[1])
-    const minutes = Number(match[2])
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
-    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
-    return { hours, minutes }
-  }
   const parseTimeToMinutes = React.useCallback((value?: string | null) => {
     if (!value) return null
     let normalized = value.trim()
@@ -1629,25 +1607,6 @@ export default function CommonViewPage() {
     if (Number.isNaN(date.getTime())) return ""
     const pad2 = (n: number) => String(n).padStart(2, "0")
     return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
-  }
-  const formatTimeLabel = (value?: string): string => {
-    if (!value) return ""
-    const normalized = value.trim().replace(/\s*\(\+\d+d\)/g, "")
-    if (!normalized || normalized.toLowerCase() === "tbd") return normalized
-    if (/^\d{2}:\d{2} - \d{2}:\d{2}(?: \(\+\d+d\))?$/.test(normalized)) return normalized
-    if (/am|pm/i.test(normalized)) return normalized
-    if (normalized.includes("-")) {
-      const [startRaw, endRaw] = normalized.split("-").map((part) => part.trim())
-      const startLabel: string = formatTimeLabel(startRaw)
-      const endLabel: string = formatTimeLabel(endRaw)
-      if (startLabel && endLabel) return `${startLabel} - ${endLabel}`
-      return normalized
-    }
-    const parsed = parseTimeValue(normalized)
-    if (!parsed) return normalized
-    const temp = new Date()
-    temp.setHours(parsed.hours, parsed.minutes, 0, 0)
-    return formatTime(temp)
   }
   const formatFastTaskDateLabel = (
     date: string,
@@ -10698,14 +10657,6 @@ export default function CommonViewPage() {
           background: #ffffff;
           box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
         }
-        .outlook-manual { background: #fff4cc !important; border-color: #d6b44c !important; }
-        .outlook-violet { background: #e5e7fb !important; border-color: #7167d9 !important; }
-        .outlook-blue { background: #dcecff !important; border-color: #5b9fe8 !important; }
-        .outlook-teal { background: #cceff1 !important; border-color: #35abb4 !important; }
-        .outlook-yellow { background: #ffe38f !important; border-color: #e6ad00 !important; }
-        .outlook-brown { background: #c9a98a !important; border-color: #8b623d !important; }
-        .outlook-orange { background: #ffd7ad !important; border-color: #e87922 !important; }
-        .outlook-red { background: #ffd5dc !important; border-color: #e55361 !important; }
         .external-meeting-title {
           overflow-wrap: anywhere;
           white-space: normal;
@@ -12036,72 +11987,6 @@ export default function CommonViewPage() {
           color: #991b1b;
           background: #fee2e2;
           border-color: #fca5a5;
-        }
-        .meeting-time-chip {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-width: 0;
-          height: 22px;
-          padding: 0 8px;
-          border: 1px solid #93c5fd;
-          border-radius: 999px;
-          background: #eff6ff;
-          color: #1d4ed8;
-          font-size: 10px;
-          font-weight: 800;
-          line-height: 1;
-          white-space: nowrap;
-          flex: 0 0 auto;
-        }
-        .manual-meeting-badge {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 20px;
-          padding: 0 7px;
-          border: 1px solid #1e3a8a;
-          border-radius: 999px;
-          background: #1d4ed8;
-          color: #ffffff;
-          font-size: 9px;
-          font-weight: 900;
-          line-height: 1;
-          letter-spacing: 0.06em;
-          white-space: nowrap;
-        }
-        .calendar-meeting-badge {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 20px;
-          padding: 0 7px;
-          border: 1px solid #0f766e;
-          border-radius: 999px;
-          background: #0d9488;
-          color: #ffffff;
-          font-size: 9px;
-          font-weight: 900;
-          line-height: 1;
-          letter-spacing: 0.06em;
-          white-space: nowrap;
-        }
-        .meeting-relation-badge {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 20px;
-          padding: 0 7px;
-          border: 1px solid #475569;
-          border-radius: 999px;
-          background: #f8fafc;
-          color: #0f172a;
-          font-size: 9px;
-          font-weight: 900;
-          line-height: 1;
-          white-space: nowrap;
-          flex: 0 0 auto;
-          margin-right: 5px;
         }
         .meeting-origin-row {
           display: inline-flex;

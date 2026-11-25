@@ -137,3 +137,79 @@
 @media print {
   :root { color-scheme: light; }
 }
+
+.outlook-manual { background: #fff4cc !important; border-color: #d6b44c !important; }
+.outlook-violet { background: #e5e7fb !important; border-color: #7167d9 !important; }
+.outlook-blue { background: #dcecff !important; border-color: #5b9fe8 !important; }
+.outlook-teal { background: #cceff1 !important; border-color: #35abb4 !important; }
+.outlook-yellow { background: #ffe38f !important; border-color: #e6ad00 !important; }
+.outlook-brown { background: #c9a98a !important; border-color: #8b623d !important; }
+.outlook-orange { background: #ffd7ad !important; border-color: #e87922 !important; }
+.outlook-red { background: #ffd5dc !important; border-color: #e55361 !important; }
+
+.meeting-time-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.manual-meeting-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid #1e3a8a;
+  border-radius: 999px;
+  background: #1d4ed8;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.calendar-meeting-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid #0f766e;
+  border-radius: 999px;
+  background: #0d9488;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.meeting-relation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid #475569;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  margin-right: 5px;
+}

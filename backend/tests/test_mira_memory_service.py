@@ -9,7 +9,7 @@ from app.models.discord_voice_meeting import DiscordVoiceMeeting as Meeting, Dis
 from app.models.mira_memory import MiraMemoryItem as Item, MiraMemoryEvent as Event
 from app.models.project import Project
 from app.models.user import User
-from app.schemas.mira_memory import MemoryClarification, MemoryEdit
+from app.schemas.mira_memory import MemoryClarification, MemoryEdit, MemoryStatusChange
 from app.services import discord_voice_meetings as voice
 from app.services import mira_memory
 
@@ -260,12 +260,15 @@ class MemoryServiceTests(MemoryTests):
             await db.commit()
             item = (await db.scalars(select(Item))).one()
             payload = MemoryClarification(meeting_id=meeting.id, question=question, answer='Të premten.')
-            await mira_memory.answer_clarification(db, colleague, item.id, payload)
-            await mira_memory.answer_clarification(db, colleague, item.id, payload)
+            answer = await mira_memory.answer_clarification(db, colleague, item.id, payload)
+            retry = await mira_memory.answer_clarification(db, colleague, item.id, payload)
+            self.assertEqual(answer, retry)
+            self.assertEqual(answer['version'], 2)
             result = await voice.meeting_record(db, meeting.id)
             self.assertEqual(result['transcript'][0]['text'], transcript)
             point = result['memory']['points'][0]
             self.assertEqual((point['questions'], point['answers']), ([], {question: 'Të premten.'}))
+            self.assertEqual(point['version'], answer['version'])
             visible = await mira_memory.get_item(db, item.id)
             answers = [value for value in visible['events'] if value['kind'] == 'ANSWER']
             self.assertEqual([(value['user_name'], value['meeting_id']) for value in answers],
@@ -277,6 +280,12 @@ class MemoryServiceTests(MemoryTests):
             edited = await mira_memory.edit_item(db, colleague, item.id,
                 MemoryEdit(version=2, title='Përgjigjja e klientit', description='Pritet deri të premten.'))
             self.assertEqual(edited['description'], 'Pritet deri të premten.')
+            latest = (await voice.meeting_record(db, meeting.id))['memory']['points'][0]
+            await mira_memory.set_status(db, colleague, item.id, MemoryStatusChange(version=latest['version'], action='close'))
+            closed = (await voice.meeting_record(db, meeting.id))['memory']['points'][0]
+            self.assertEqual((closed['status'], closed['needs_follow_up']), ('CLOSED', False))
+            self.assertEqual((await mira_memory.list_items(db, 'open'))['items'], [])
+            self.assertEqual((await mira_memory.list_items(db, 'closed'))['items'][0]['id'], str(item.id))
 
 
 def test_relative_deadline_uses_meeting_date_in_local_timezone():

@@ -9,6 +9,7 @@ from app.schemas.internal_meeting_session import (
     InternalMeetingSessionEnsure,
     InternalMeetingSessionOut,
 )
+from app.services.development_m1 import ensure_development_m1_internal_item
 from app.services.internal_meeting_sessions import ensure_internal_meeting_session
 
 
@@ -30,7 +31,7 @@ async def ensure_session(
             status_code = status.HTTP_404_NOT_FOUND
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
-    return InternalMeetingSessionOut(
+    result = InternalMeetingSessionOut(
         session_id=session.id,
         checklist_id=session.checklist_id,
         session_date=session.session_date,
@@ -38,3 +39,6 @@ async def ensure_session(
         ends_at=session.ends_at,
         reset_at=session.reset_at,
     )
+    if await ensure_development_m1_internal_item(db, payload.checklist_id):
+        await db.commit()
+    return result

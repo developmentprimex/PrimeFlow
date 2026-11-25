@@ -15,7 +15,7 @@ test("Zhvillim and 1H notes stay separate, including old Discord titles", () => 
   assert.equal(group({ title: "AI AGENT 08-05 & 12-00 · 29.10.2026", source: "DISCORD" }), "AI_AGENT")
   assert.equal(group({ title: "Mira Zhvillim · 29.10.2026", source: "DISCORD" }), "AI_AGENT")
   assert.equal(group({ title: "Zhvillim", source: "DISCORD" }), "AI_AGENT")
-  assert.equal(developmentMeetingTitle("Mira Zhvillim · 29.10.2026"), "Zhvillim · 29.10.2026")
+  assert.equal(developmentMeetingTitle("Mira Zhvillim · 29.10.2026"), "ZHVILLIM · 29.10.2026")
   assert.equal(group({ title: "Custom title", source: "DISCORD", meeting_group: "AI_AGENT" }), "AI_AGENT")
   assert.equal(group({ title: "AI Agent", source: "DESKTOP" }), "OTHER")
   assert.equal(group({ title: "Other notes", source: "DISCORD" }), "OTHER")

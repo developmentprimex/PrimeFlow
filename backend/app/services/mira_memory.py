@@ -351,6 +351,7 @@ async def meeting_points(db, meeting, segments):
         details = event.details or {}
         point = points.setdefault(item.id, {
             'id': str(item.id), 'title': item.title, 'kind': item.kind, 'status': item.status,
+            'version': item.version,
             'needs_follow_up': item.status == 'OPEN' and item.kind in FOLLOW_UP_KINDS,
             'text': event.text, 'correction': item.description if item.human_edited else None,
             'sources': {}, 'questions': [], 'answers': {}, 'project': None, 'project_id': None, 'requested_by': None,
@@ -477,7 +478,7 @@ async def answer_clarification(db, user, item_id, payload) -> dict:
         db.add(Event(id=uuid.uuid4(), item_id=item.id, kind='ANSWER', text=answer, meeting_id=meeting,
             user_id=user.id, details={'question': question}, created_at=now()))
     await db.commit()
-    return {'question': question, 'answer': answer}
+    return {'question': question, 'answer': answer, 'version': item.version}
 
 
 async def retry_failed(db, user) -> dict:

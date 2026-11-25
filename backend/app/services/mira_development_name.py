@@ -3,7 +3,7 @@
 import re
 
 NAME = "Mira Zhvillim"
-MEETING_NAME = "Zhvillim"
+MEETING_NAME = "ZHVILLIM"
 COMMAND = "mira-zhvillim"
 MEETING_NAME_PREFIX = re.compile(
     r"^(?:(?:(?:Mira[ \t]+)?AI[ \t_-]*Agent|Mira[ \t]+Zhvillim)\b|Zhvillim(?=\s+(?:\d|·)|$))",
