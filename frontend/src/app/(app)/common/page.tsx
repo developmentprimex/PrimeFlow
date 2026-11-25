@@ -1445,14 +1445,19 @@ const getFastTaskDisplayNumber = (
 const hasEightAmIndicator = (title?: string | null, isSystemTask = false) =>
   /\b0?8:00\b/.test(title || "") || (!isSystemTask && /\bEM\b/i.test(title || ""))
 
-type WeekTaskSource = "blocked" | "oneH" | "personal" | "r1"
+type WeekTaskSource = "blocked" | "oneH" | "personal" | "r1" | "waitingConfirmation"
+
+const getShortWeekTaskPriority = (entry: FastTaskEntry) => {
+  if (hasEightAmIndicator(entry.title, entry.isSystemTask)) return 0
+  if (entry.isDeadlineImportant) return 1
+  if (splitTaskMarkers(entry.oneHMarker).includes("CLIENT_URGENT")) return 2
+  return null
+}
 
 const matchesShortWeekTask = (entry: FastTaskEntry, source: WeekTaskSource) =>
   source === "blocked" ||
   (source === "personal" && entry.isPersonalTask !== false && getPersonalTaskGroup(entry) === "GA") ||
-  Boolean(entry.isDeadlineImportant) ||
-  hasEightAmIndicator(entry.title, entry.isSystemTask) ||
-  splitTaskMarkers(entry.oneHMarker).includes("CLIENT_URGENT")
+  getShortWeekTaskPriority(entry) !== null
 
 const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
   const normalized = (finishPeriod || "").trim().toUpperCase()
@@ -2079,6 +2084,24 @@ export default function CommonViewPage() {
     },
     [getPersonSortKey, users]
   )
+  const compareTaskAssigneeOrder = React.useCallback(
+    (
+      a: { departmentId?: string; person?: string; owner?: string; assignees?: string[]; userId?: string },
+      b: { departmentId?: string; person?: string; owner?: string; assignees?: string[]; userId?: string }
+    ) => {
+      const metaA = getDepartmentMeta(a.departmentId)
+      const metaB = getDepartmentMeta(b.departmentId)
+      if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank
+      if (metaA.rank === 3) {
+        const nameCmp = metaA.name.localeCompare(metaB.name)
+        if (nameCmp) return nameCmp
+      }
+      const personA = getWeeklyPlannerPersonSortKey(a)
+      const personB = getWeeklyPlannerPersonSortKey(b)
+      return personA[0] - personB[0] || personA[1] - personB[1] || personA[2].localeCompare(personB[2])
+    },
+    [getDepartmentMeta, getWeeklyPlannerPersonSortKey]
+  )
   const compareTaskOrder = React.useCallback(
     (
       a: {
@@ -2115,18 +2138,8 @@ export default function CommonViewPage() {
       const isDoneA = Boolean(a.isDone)
       const isDoneB = Boolean(b.isDone)
       if (isDoneA !== isDoneB) return isDoneA ? 1 : -1
-      const metaA = getDepartmentMeta(a.departmentId)
-      const metaB = getDepartmentMeta(b.departmentId)
-      if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank
-      if (metaA.rank === 3) {
-        const nameCmp = metaA.name.localeCompare(metaB.name)
-        if (nameCmp) return nameCmp
-      }
-      const personA = getWeeklyPlannerPersonSortKey(a)
-      const personB = getWeeklyPlannerPersonSortKey(b)
-      if (personA[0] !== personB[0]) return personA[0] - personB[0]
-      if (personA[1] !== personB[1]) return personA[1] - personB[1]
-      if (personA[2] !== personB[2]) return personA[2].localeCompare(personB[2])
+      const assigneeCmp = compareTaskAssigneeOrder(a, b)
+      if (assigneeCmp) return assigneeCmp
       const slotRankA = oneHReportSlotRank(a.oneHReportSlot)
       const slotRankB = oneHReportSlotRank(b.oneHReportSlot)
       if (slotRankA !== slotRankB) return slotRankA - slotRankB
@@ -2144,7 +2157,7 @@ export default function CommonViewPage() {
       if (statusRankA !== statusRankB) return statusRankA - statusRankB
       return (a.title || "").localeCompare(b.title || "")
     },
-    [getDepartmentMeta, getWeeklyPlannerPersonSortKey]
+    [compareTaskAssigneeOrder]
   )
   const sortTasksByOrder = React.useCallback(
     <T extends {
@@ -2184,6 +2197,14 @@ export default function CommonViewPage() {
     },
     [compareTaskOrder]
   )
+  const compareShortWeekOneH = React.useCallback((a: OneHItem, b: OneHItem) => {
+    const periodCmp = getCommonTaskPeriodSortRank(a.finishPeriod) - getCommonTaskPeriodSortRank(b.finishPeriod)
+    if (periodCmp) return periodCmp
+    const assigneeCmp = compareTaskAssigneeOrder(a, b)
+    if (assigneeCmp) return assigneeCmp
+    const priorityCmp = (getShortWeekTaskPriority(a) ?? 3) - (getShortWeekTaskPriority(b) ?? 3)
+    return priorityCmp || compareTaskOrder(a, b)
+  }, [compareTaskAssigneeOrder, compareTaskOrder])
   const compareReportPrintOrder = React.useCallback(
     (
       a: {
@@ -8973,6 +8994,7 @@ export default function CommonViewPage() {
     const oneH = tasksForWeekTable(filtered.oneH, "oneH")
     const personal = tasksForWeekTable(filtered.personal, "personal")
     const r1 = tasksForWeekTable(filtered.r1, "r1")
+    const waitingConfirmation = tasksForWeekTable(filtered.waitingConfirmation, "waitingConfirmation")
     const includeWaitingClientSource = (source: WeekTaskSource) =>
       !shortWeek || typeFilters.size === 0 || typeFilters.has(source)
     const waitingClient = [
@@ -9014,15 +9036,16 @@ export default function CommonViewPage() {
         }
         return
       }
+      const dailyOneH = oneH.filter((x) => x.date === iso && !isWaitingClientTask(x))
       dataByDay[iso] = {
         late: filtered.late.filter((x) => x.date === iso),
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
         externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
         waitingClient: sortTasksByOrder(waitingClient.filter((x) => x.date === iso), false),
-        waitingConfirmation: sortTasksByOrder(filtered.waitingConfirmation.filter((entry) => entry.date === iso), false),
+        waitingConfirmation: sortTasksByOrder(waitingConfirmation.filter((entry) => entry.date === iso), false),
         blocked: sortTasksByOrder(blocked.filter((x) => x.date === iso && !isWaitingClientTask(x)), false, true),
-        oneH: sortTasksByOrder(oneH.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
+        oneH: shortWeek ? dailyOneH.sort(compareShortWeekOneH) : sortTasksByOrder(dailyOneH, false),
         personal: sortTasksByOrder(personal.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
@@ -9042,7 +9065,7 @@ export default function CommonViewPage() {
     })
     
     return dataByDay
-  }, [allDaysSelected, allUsersLeaveByDate, weekISOs, filtered, filteredDiamondItems, shortWeek, sortByTime, sortTasksByOrder, typeFilters])
+  }, [allDaysSelected, allUsersLeaveByDate, weekISOs, filtered, filteredDiamondItems, shortWeek, sortByTime, sortTasksByOrder, compareShortWeekOneH, typeFilters])
 
   const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
   const scrollSwimlaneRow = React.useCallback((rowId: CommonType, direction: "left" | "right") => {
@@ -9411,7 +9434,7 @@ export default function CommonViewPage() {
         else if (row.id === "priority") dayEntries[iso] = dayData?.priority || []
         else if (row.id === "diamond") dayEntries[iso] = dayData?.diamond || []
       })
-      if (shortWeek && row.id !== "waitingConfirmation" && !Object.values(dayEntries).some((entries) => entries.length > 0)) return []
+      if (shortWeek && !Object.values(dayEntries).some((entries) => entries.length > 0)) return []
       return [{ row, dayEntries }]
     })
     : []
@@ -11878,6 +11901,11 @@ export default function CommonViewPage() {
           display: flex;
           flex-direction: column;
           gap: 4px;
+        }
+        .week-table-period-heading {
+          font-size: 10px;
+          font-weight: 700;
+          border-bottom: 1px solid #cbd5e1;
         }
         .week-table-entry {
           font-size: 10px;
@@ -16766,7 +16794,8 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (isOneHSlotRowId(row.id) || row.id === "r1" || row.id === "waitingClient" || row.id === "waitingConfirmation") {
-                        return (entries as FastTaskEntry[]).map((e, idx: number) => (
+                        const tasks = entries as FastTaskEntry[]
+                        const renderTask = (e: FastTaskEntry, idx: number) => (
                           <div
                             key={idx}
                             className={[
@@ -16801,7 +16830,20 @@ export default function CommonViewPage() {
                               ))}
                             </div>
                           </div>
-                        ))
+                        )
+                        if (shortWeek && isOneHSlotRowId(row.id)) {
+                          return (["AM", "PM"] as const).map((period, rank) => {
+                            const tasksInPeriod = tasks.filter((entry) => getCommonTaskPeriodSortRank(entry.finishPeriod) === rank)
+                            const offset = period === "AM" ? 0 : tasks.length - tasksInPeriod.length
+                            return tasksInPeriod.length ? (
+                              <div key={period} role="group" aria-label={period} className="week-table-entries">
+                                <div className="week-table-period-heading">{period}</div>
+                                {tasksInPeriod.map((entry, index) => renderTask(entry, offset + index))}
+                              </div>
+                            ) : null
+                          })
+                        }
+                        return tasks.map(renderTask)
                       } else if (isPersonalRowId(row.id)) {
                         return (entries as PersonalItem[]).map((e, idx: number) => (
                           <div

@@ -564,6 +564,7 @@ def report_table_columns(key: str, movement: str = "", *, discord_delivery: bool
         return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
                 ("project", "PRJK", 96), ("am_pm", "AM/PM", 48), ("task_type", "LLOJI", 48),
                 ("marker", "SIMBOLI", 60), ("title", "TITULLI", 360),
+                *([("delivery_details", "DORËZIMI", 300)] if discord_delivery else []),
                 ("choice", "PO/JO · DISCORD" if discord_delivery else "PO/JO", 130 if discord_delivery else 50),
                 ("answer", "KOMENTI" if discord_delivery else "PERGJIGJJA MANUALE", 240 if discord_delivery else 300)]
     if key == "postponed_today":
@@ -588,8 +589,42 @@ def effective_task_comment(row: dict, report: dict, prefix: str) -> str:
     return (answers[key] if key in answers else row.get("comment")) or "-"
 
 
+def _delivery_detail_lines(delivery: dict) -> list[tuple[str, str | None]]:
+    details = delivery.get("details")
+    if not details:
+        return []
+    lines = [(details["content"], None)] if details["content"] else []
+    if details["attachments"]:
+        lines.append(("Skedarët e bashkëngjitur", None))
+        lines.extend((file["name"], file.get("url")) for file in details["attachments"])
+    if delivery.get("url"):
+        lines.append(("Hap postimin në Discord", delivery["url"]))
+    return lines
+
+
+def delivery_details_html(delivery: dict) -> str:
+    lines = _delivery_detail_lines(delivery)
+    if not lines:
+        return "—"
+    body = "<br>".join(
+        f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noreferrer">{_cell(text)}</a>'
+        if url else _cell(text)
+        for text, url in lines
+    )
+    return f"<div style='white-space:pre-wrap;overflow-wrap:anywhere'>{body}</div>"
+
+
+def delivery_export_metadata(row: dict) -> dict:
+    delivery = row.get("discord_delivery") or {}
+    return {"delivery": delivery, "url": delivery.get("url")} if delivery.get("details") else {}
+
+
 def report_table_value(row: dict, column: str, index: int, kind: str, report: dict | None = None, section: str = "") -> Any:
     if section == "delivery":
+        if column == "delivery_details":
+            delivery = row.get("discord_delivery") or {}
+            return "\n".join(url if url and url == delivery.get("url") else text
+                             for text, url in _delivery_detail_lines(delivery)) or "—"
         if row.get("discord_delivery"):
             if column == "choice":
                 from app.services.discord_task_deliveries import delivery_text
@@ -671,7 +706,7 @@ def render_html(report: dict) -> str:
                 for column_index, (column, _, width) in enumerate(columns):
                     color = ("#fee2e2" if row.get("risk") == "RREZIK" else "#dcfce7") if column == "risk" else row_fill
                     text_color = row_color
-                    if key == "delivery" and column in {"choice", "answer"}:
+                    if key == "delivery" and column in {"choice", "answer", "delivery_details"}:
                         color, text_color = "#ffffff", "#000000"
                         choice = report_table_value(row, column, index, kind, report, key)
                         if column == "choice" and choice in {"PO", "JO"}:
@@ -689,7 +724,9 @@ def render_html(report: dict) -> str:
                     if column == "risk":
                         style += ";font-weight:700;color:" + ("#7f1d1d" if row.get("risk") == "RREZIK" else "#14532d")
                     value = _cell(report_table_value(row, column, index, kind, report, key))
-                    if column == "title":
+                    if column == "delivery_details":
+                        value = delivery_details_html(row.get("discord_delivery") or {})
+                    elif column == "title":
                         if key == "delivery":
                             value = _cell(report_table_value(row, column, index, kind, report, key))
                         elif row.get("marker"):

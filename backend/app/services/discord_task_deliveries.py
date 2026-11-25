@@ -6,6 +6,7 @@ import re
 import unicodedata
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta
+from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -184,14 +185,15 @@ async def _archived_messages(db: AsyncSession, guild_id: str, authors: set[str],
     channel = GaDiscordChannelMessage
     start = datetime.combine(day, time.min, now.tzinfo)
     end = datetime.combine(day + timedelta(days=1), time.min, now.tzinfo)
-    rows = (await db.execute(select(channel.id, channel.author_discord_id, channel.content, channel.created_at, channel.edited_at)
+    rows = (await db.execute(select(channel.id, channel.author_discord_id, channel.content,
+                                   channel.created_at, channel.edited_at, channel.attachments)
                              .where(channel.guild_id == guild_id,
                                     channel.channel_id == settings.DISCORD_GA_REPLIES_CHANNEL_ID,
                                     channel.author_discord_id.in_(authors),
                                     channel.created_at >= start, channel.created_at < end))).all()
     return [{"id": message_id, "author": {"id": author}, "content": content, "timestamp": created.isoformat(),
-             "edited_timestamp": edited.isoformat() if edited else None}
-            for message_id, author, content, created, edited in rows]
+             "edited_timestamp": edited.isoformat() if edited else None, "attachments": attachments}
+            for message_id, author, content, created, edited, attachments in rows]
 
 
 async def _channel_messages(day: date, now: datetime) -> list[dict]:
@@ -235,9 +237,31 @@ async def _channel_messages(day: date, now: datetime) -> list[dict]:
     return messages
 
 
+def _delivery_details(message: dict, *, live: bool) -> dict:
+    attachments = []
+    channel_path = f"/attachments/{settings.DISCORD_GA_REPLIES_CHANNEL_ID}/"
+    for attachment in message.get("attachments") or []:
+        name = attachment.get("filename") or attachment.get("name")
+        if not name:
+            continue
+        file = {"name": name}
+        url = attachment.get("url")
+        if live and isinstance(url, str):
+            try:
+                asset = urlsplit(url)
+            except ValueError:
+                pass
+            else:
+                if (asset.scheme == "https" and asset.netloc in {"cdn.discordapp.com", "media.discordapp.net"}
+                        and asset.path.startswith(channel_path)):
+                    file["url"] = url
+        attachments.append(file)
+    return {"content": message.get("content", ""), "attachments": attachments}
+
+
 def _delivery_results(
     rows: list[dict], messages: list[dict] | None, day: date, now: datetime, *,
-    guild_id: str | None = None, complete: bool = True,
+    guild_id: str | None = None, complete: bool = True, include_details: bool = False,
 ) -> list[dict]:
     titles = Counter((row["discord_id"], _normalize(row["title"])) for row in rows)
     matches = defaultdict(dict)
@@ -252,18 +276,18 @@ def _delivery_results(
         if sent_at.astimezone(now.tzinfo).date() != day or verified_at.date() != day:
             continue
         for title in _message_titles(message.get("content", "")):
-            matches[(author["id"], title)][message["id"]] = verified_at
+            matches[(author["id"], title)][message["id"]] = (verified_at, message)
 
     deadlines = {slot: datetime.combine(day, time.fromisoformat(value), now.tzinfo) for slot, value in DEADLINES.items()}
     result = []
     for row in rows:
         key = (row["discord_id"], _normalize(row["title"]))
-        evidence = sorted(matches[key].items(), key=lambda item: item[1])
+        evidence = sorted(matches[key].values(), key=lambda item: item[0])
         deliveries = {}
         for slot in row["slots"]:
             applicable = evidence
             if len(row["slots"]) == 2:
-                applicable = [(message_id, at) for message_id, at in evidence
+                applicable = [(at, message) for at, message in evidence
                               if (at <= deadlines["M2"]) == (slot == "M2")]
             status = "pending" if now <= deadlines[slot] else "missing"
             record = {"status": status}
@@ -272,12 +296,15 @@ def _delivery_results(
             elif key[1] == "-" or titles[key] > 1:
                 record["status"] = "ambiguous"
             elif applicable:
-                message_id, at = applicable[0]
+                at, message = applicable[0]
+                message_id = message["id"]
                 record = {
                     "status": "on_time" if at <= deadlines[slot] else "late",
                     "verified_at": at.isoformat(),
                     "url": f"https://discord.com/channels/{guild_id or settings.DISCORD_GUILD_ID}/{settings.DISCORD_GA_REPLIES_CHANNEL_ID}/{message_id}",
                 }
+                if include_details:
+                    record["details"] = _delivery_details(message, live=complete)
             elif messages is None or not complete:
                 record["status"] = "unavailable"
             deliveries[slot] = record
@@ -286,7 +313,9 @@ def _delivery_results(
     return result
 
 
-async def checked_deliveries(db: AsyncSession, day: date) -> tuple[datetime, str, bool, list[dict]]:
+async def checked_deliveries(
+    db: AsyncSession, day: date, *, include_details: bool = False,
+) -> tuple[datetime, str, bool, list[dict]]:
     now = datetime.now(report_timezone())
     guild_id = await _staff_guild(db)
     rows = await _task_rows(db, day, now.date(), guild_id)
@@ -308,7 +337,8 @@ async def checked_deliveries(db: AsyncSession, day: date) -> tuple[datetime, str
     comments = dict((await db.execute(select(comment_model.row_id, comment_model.comment).where(
         comment_model.report_date == day,
     ))).tuples().all()) if rows and comments_available else {}
-    checked = _delivery_results(rows, messages, day, now, guild_id=guild_id, complete=source == "live")
+    checked = _delivery_results(rows, messages, day, now, guild_id=guild_id, complete=source == "live",
+                                include_details=include_details)
     return now, source, comments_available, [{**row, "comment": comments.get(row["id"], "")} for row in checked]
 
 
@@ -316,7 +346,7 @@ async def with_discord_delivery(db: AsyncSession, report: dict, slot: str) -> di
     if "delivery" not in report["data"]:
         return report
     day = date.fromisoformat(report["report_date"])
-    _, _, _, rows = await checked_deliveries(db, day)
+    _, _, _, rows = await checked_deliveries(db, day, include_details=True)
     attendance = await load_report_attendance(db, day)
     report_task_ids = {row["task_id"] for row in report["data"]["delivery"]}
     deliveries = [
@@ -337,7 +367,7 @@ def delivery_text(row: dict) -> str:
 
 
 async def build_report(db: AsyncSession, day: date) -> dict:
-    now, source, comments_available, checked = await checked_deliveries(db, day)
+    now, source, comments_available, checked = await checked_deliveries(db, day, include_details=True)
     slot_day = effective_slot_date(day)
     differences = await reporting_differences(db, day, now, marker_day=current_effective_marker_date(),
                                               slot_day=slot_day)

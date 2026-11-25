@@ -238,6 +238,7 @@ test("Common View distinguishes WFC INT from WFE and shows the selected confirme
 test("Common View Short filters both workweeks and the weekly print", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await fixture(page)
+  let includeShortConfirmations = true
   await page.route(/\/api\/common-view\?/, (route) => {
     const url = new URL(route.request().url())
     const week = url.searchParams.get("week_start")!
@@ -261,6 +262,14 @@ test("Common View Short filters both workweeks and the weekly print", async ({ p
         r1: [task(1, "Deadline review", { is_deadline_important: true })],
         blocked: [task(3, "Blocked review")],
         personal: [task(4, "GA: Personal review"), task(4, "KA: Other review")],
+        waitingConfirmation: [
+          task(0, "Ordinary approval", { oneHMarker: "DOUBLE_EXCLAM" }),
+          ...(includeShortConfirmations ? [
+            task(1, "Deadline approval", { isDeadlineImportant: true }),
+            task(2, "08:00 approval workflow"),
+            task(3, "Urgent approval", { oneHMarker: "M3,CLIENT_URGENT" }),
+          ] : []),
+        ].map(entry => ({ ...entry, status: "WAITING_CONFIRMATION" })),
       },
     } })
   })
@@ -274,6 +283,9 @@ test("Common View Short filters both workweeks and the weekly print", async ({ p
   expect((await nextWeekShort.boundingBox())!.y).toBe((await thisWeekShort.boundingBox())!.y)
   await expect(thisWeekShort).toHaveCSS("background-color", "rgb(240, 253, 250)")
   const table = page.locator(".week-table-view")
+  const confirmation = table.locator(".week-table-row.waiting-confirmation")
+  const excludedApproval = confirmation.getByText("Ordinary approval")
+  const matchingApprovals = ["Deadline approval", "08:00 approval workflow", "Urgent approval"]
   const matching = ["Urgent review", "Deadline review", "08:00 inventory", "Blocked review", "Personal review"]
   const excluded = ["Ordinary review", "Other review", "External meeting"]
   for (const week of ["This Week", "Next Week"]) {
@@ -285,17 +297,82 @@ test("Common View Short filters both workweeks and the weekly print", async ({ p
       await expect(table.locator(`tbody tr td:nth-child(${day + 3})`).getByText(title)).toBeVisible()
     }
     for (const title of excluded) await expect(table.getByText(title)).toHaveCount(0)
-    await expect(table.locator("tbody tr")).toHaveCount(4)
+    for (const title of matchingApprovals) await expect(confirmation.getByText(title, { exact: true })).toBeVisible()
+    await expect(excludedApproval).toHaveCount(0)
+    await expect(table.locator("tbody tr")).toHaveCount(5)
   }
 
   await page.emulateMedia({ media: "print" })
   await expect(table.getByText("COMMON VIEW - WEEK PLAN SHORT")).toBeVisible()
   await expect(table.getByText("Urgent review")).toBeVisible()
   await expect(table.getByText("Ordinary review")).toHaveCount(0)
+  for (const title of matchingApprovals) await expect(confirmation.getByText(title, { exact: true })).toBeVisible()
+  await expect(excludedApproval).toHaveCount(0)
   await page.emulateMedia({ media: "screen" })
 
   await page.getByRole("button", { name: "Next Week", exact: true }).click()
   for (const title of excluded) await expect(table.getByText(title)).toBeVisible()
+  await expect(excludedApproval).toBeVisible()
+
+  includeShortConfirmations = false
+  await page.reload()
+  await fullWeek.click()
+  await expect(excludedApproval).toBeVisible()
+  await nextWeekShort.click()
+  await expect(confirmation).toHaveCount(0)
+})
+
+test("Common View Short groups 1H by period and sorts each user's tasks by priority", async ({ page }) => {
+  await fixture(page)
+  const orderedUsers = owners.map((owner, index) => ({ ...owner, weekly_planner_sort_order: 2 - index }))
+  await page.route(/\/api\/common-view\?/, (route) => {
+    const params = new URL(route.request().url()).searchParams
+    const week = params.get("week_start")!
+    const included = params.get("include")!.split(",")
+    const task = (userIndex: number, title: string, fields = {}) => ({
+      title, date: week, status: "TODO", finishPeriod: "AM", oneHMarker: "CLIENT_URGENT",
+      userId: owners[userIndex].id, person: owners[userIndex].full_name, departmentId: department.id,
+      ...fields,
+    })
+    const items = Object.fromEntries([
+      "late", "absent", "leave", "externalHoliday", "waitingClient", "waitingConfirmation", "blocked",
+      "r1", "personal", "external", "internal", "bz", "problems", "feedback", "priority", "diamond",
+    ].map(name => [name, []]))
+    return route.fulfill({ json: {
+      week_start: week, included, requested: included, missing: [], users: orderedUsers, departments: [department],
+      items: { ...items, oneH: [
+        task(0, "08:00 first user"),
+        task(1, "Urgent second user", { oneHReportSlot: "10:00" }),
+        task(1, "Deadline second user", { oneHMarker: null, isDeadlineImportant: true }),
+        task(1, "08:00 second user", { oneHReportSlot: "11:00", isDeadlineImportant: true, status: "DONE" }),
+        task(0, "Urgent first user PM", { finishPeriod: "PM" }),
+        task(1, "Urgent second user PM", { finishPeriod: "PM" }),
+        task(1, "08:00 second user PM", { finishPeriod: "PM" }),
+      ] },
+    } })
+  })
+
+  await page.goto("/common")
+  const row = page.locator(".week-table-row.oneh")
+  const am = row.getByRole("group", { name: "AM", exact: true })
+  const pm = row.getByRole("group", { name: "PM", exact: true })
+  const expectedAM = ["08:00 second user", "Deadline second user", "Urgent second user", "08:00 first user"]
+  const expectedPM = ["08:00 second user PM", "Urgent second user PM", "Urgent first user PM"]
+  for (const week of ["This Week Short", "Next Week Short"]) {
+    await page.getByRole("button", { name: week, exact: true }).click()
+    await expect(row.getByRole("group")).toHaveText([/^AM/, /^PM/])
+    await expect(am.locator(".week-table-entry-main > span > span").filter({ hasText: /user/ }))
+      .toHaveText(expectedAM)
+    await expect(pm.locator(".week-table-entry-main > span > span").filter({ hasText: /user/ }))
+      .toHaveText(expectedPM)
+  }
+  await page.emulateMedia({ media: "print" })
+  await expect(am.getByText("08:00 second user", { exact: true })).toBeVisible()
+  await expect(pm.getByText("Urgent first user PM", { exact: true })).toBeVisible()
+  await page.emulateMedia({ media: "screen" })
+  await page.getByRole("button", { name: "Next Week", exact: true }).click()
+  await expect(am).toHaveCount(0)
+  await expect(pm).toHaveCount(0)
 })
 
 async function chooseGroupSymbols(page: Page) {

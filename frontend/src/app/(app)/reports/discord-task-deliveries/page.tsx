@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { ExternalLink, RefreshCw } from "lucide-react"
+import { DiscordDeliveryDetails, type DiscordDelivery } from "@/components/discord-delivery-details"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -9,8 +10,7 @@ import { useAuth } from "@/lib/auth"
 import { getPlainMarkedText } from "@/lib/note-markup"
 
 type Slot = "M2" | "M3"
-type Status = "on_time" | "late" | "missing" | "pending" | "unlinked" | "unavailable" | "ambiguous"
-type Delivery = { status: Status; verified_at?: string; url?: string }
+type Status = DiscordDelivery["status"]
 type Row = {
   id: string
   person: string
@@ -25,7 +25,7 @@ type Row = {
   foreground: string
   eight_am: boolean
   comment: string
-  deliveries: Partial<Record<Slot, Delivery>>
+  deliveries: Partial<Record<Slot, DiscordDelivery>>
 }
 type Report = {
   report_date: string
@@ -84,7 +84,7 @@ const statusLabels: Record<Status, string> = {
   ambiguous: "Titull i paqartë",
 }
 
-function DeliveryCell({ delivery, formatTime, label, className }: { delivery?: Delivery; formatTime: (value: string) => string; label: string; className: string }) {
+function DeliveryCell({ delivery, formatTime, label, className }: { delivery?: DiscordDelivery; formatTime: (value: string) => string; label: string; className: string }) {
   const status = delivery?.status
   const tone = status === "on_time" || status === "late" ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
     : status === "missing" ? "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200"
@@ -99,6 +99,7 @@ function DeliveryCell({ delivery, formatTime, label, className }: { delivery?: D
           {formatTime(delivery.verified_at)} <ExternalLink className="size-3" aria-hidden="true" />
         </a>
       )}
+      <DiscordDeliveryDetails delivery={delivery} label={label} />
     </td>
   )
 }

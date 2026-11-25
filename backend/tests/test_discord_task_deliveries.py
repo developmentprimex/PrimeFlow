@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date, datetime
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -75,6 +76,45 @@ def test_mixed_marker_requires_two_posts_and_cutoffs_are_inclusive():
     assert result["M3"]["status"] == "on_time"
 
 
+def test_bz_m3_shows_only_the_matching_posts_and_discord_files(monkeypatch):
+    monkeypatch.setattr(deliveries.settings, "DISCORD_GA_REPLIES_CHANNEL_ID", "123")
+    file_url = "https://cdn.discordapp.com/attachments/123/456/result.txt"
+    first = post("1", local_time(12), title=task()["title"] + "\nM2 result", attachments=[
+        {"filename": "result.txt", "url": file_url},
+        {"filename": "other.txt", "url": "https://example.com/attachments/123/789/other.txt"},
+    ])
+    second = post("2", local_time(16), title=task()["title"] + "\nM3 result")
+    rows = [task("M2", "M3")]
+    now = local_time(17)
+
+    result = _delivery_results(rows, [second, first], DAY, now, include_details=True)[0]["deliveries"]
+
+    assert result["M2"]["details"] == {
+        "content": first["content"],
+        "attachments": [{"name": "result.txt", "url": file_url}, {"name": "other.txt"}],
+    }
+    assert result["M3"]["details"] == {"content": second["content"], "attachments": []}
+    shared = _delivery_results(rows, [first, second], DAY, now)[0]["deliveries"]
+    assert all("details" not in record for record in shared.values())
+
+
+def test_bz_m3_archive_retains_file_names_when_live_links_are_unavailable():
+    content = task()["title"] + "\nArchived result"
+    db = SimpleNamespace(execute=AsyncMock(return_value=Mock(
+        **{"all.return_value": [("1", "42", content, local_time(16), None, [
+            {"name": "archived.txt", "url": "https://cdn.discordapp.com/attachments/123/456/archived.txt"},
+        ])]},
+    )))
+    now = local_time(17)
+
+    messages = asyncio.run(deliveries._archived_messages(db, "123", {"42"}, DAY, now))
+    result = _delivery_results([task("M3")], messages, DAY, now, complete=False,
+                               include_details=True)[0]["deliveries"]["M3"]
+
+    assert result["details"] == {"content": content, "attachments": [{"name": "archived.txt"}]}
+    assert result["url"].endswith("/1")
+
+
 def test_reporting_points_reuse_each_persons_discord_result_for_their_slot(monkeypatch):
     from app.services import m1_reporting_points as m1, m2_reporting_points as m2, m3_reporting_points as m3
     from app.services.m3_reporting_points_attachments import export_blocks
@@ -85,26 +125,82 @@ def test_reporting_points_reuse_each_persons_discord_result_for_their_slot(monke
                  user_id="one", symbol="M2/3", status="TODO")
     second = dict(first, id="task:two", discord_id="43", person="Two Person", initials="TP", user_id="two")
     third = dict(first, id="task:three", discord_id="44", person="Absent Person", initials="AP", user_id="three")
-    checked = _delivery_results([first, second, third], [post("1", local_time(12)), post("2", local_time(16), author="43")], DAY, now)
+    monkeypatch.setattr(deliveries.settings, "DISCORD_GA_REPLIES_CHANNEL_ID", "123")
+    file_url = "https://cdn.discordapp.com/attachments/123/456/result.txt"
+    messages = [
+        post("1", local_time(12), title=first["title"] + "\nMorning <result>", attachments=[
+            {"filename": "morning.txt", "url": file_url},
+        ]),
+        post("2", local_time(16), author="43", title=first["title"] + "\nAfternoon result"),
+    ]
+    checked = _delivery_results([first, second, third], messages, DAY, now, include_details=True)
     check = AsyncMock(return_value=(now, "live", True, checked))
     monkeypatch.setattr(deliveries, "checked_deliveries", check)
     monkeypatch.setattr(deliveries, "load_report_attendance", AsyncMock(return_value=ReportAttendance(user_ids={"three"})))
     report = {"report_date": DAY.isoformat(), "data": {"delivery": [first]}, "manual_answers": {"delivery_choice:task": "PO"}}
 
-    for slot, expected, render_blocks, render_html in (
-        ("M2", ["on_time", "missing"], m1.export_blocks, m1.render_html),
-        ("M2", ["on_time", "missing"], m2.export_blocks, m2.render_html),
-        ("M3", ["missing", "on_time"], export_blocks, m3.render_html),
+    for slot, expected, render_blocks, render_html, render_plain in (
+        ("M2", ["on_time", "missing"], m1.export_blocks, m1.render_html, m1.render_plain_text),
+        ("M2", ["on_time", "missing"], m2.export_blocks, m2.render_html, m2.render_plain_text),
+        ("M3", ["missing", "on_time"], export_blocks, m3.render_html, m3.render_plain_text),
     ):
         connected = asyncio.run(deliveries.with_discord_delivery(None, report, slot))
         delivery_rows = connected["data"]["delivery"]
         assert [row["assignees"] for row in delivery_rows] == ["OP", "TP"]
         assert [row["discord_delivery"]["status"] for row in delivery_rows] == expected
         assert m3.delivery_summary(connected) == "SA/TOTALI: 1/2"
-        assert "PO/JO · DISCORD" in render_html(connected)
+        rendered_html = render_html(connected)
+        assert "PO/JO · DISCORD" in rendered_html
         table = next(block for block in render_blocks(connected) if block["kind"] == "table"
                      and any(label == "PO/JO · DISCORD" for _, label, _ in block["columns"]))
         assert [row[-2]["text"] for row in table["rows"]] == (["PO · 12:00", "JO"] if slot == "M2" else ["JO", "PO · 16:00"])
+        delivered_index = 0 if slot == "M2" else 1
+        evidence = delivery_rows[delivered_index]["discord_delivery"]
+        assert evidence["details"]["content"] == messages[delivered_index]["content"]
+        assert "details" not in delivery_rows[1 - delivered_index]["discord_delivery"]
+        details_column = next(i for i, (key, _, _) in enumerate(table["columns"]) if key == "delivery_details")
+        details = table["rows"][delivered_index][details_column]
+        assert details["url"] == evidence["url"]
+        assert evidence["url"] in details["text"]
+        assert evidence["url"] in render_plain(connected)
+        if slot == "M2":
+            assert "Morning &lt;result&gt;" in rendered_html
+            assert file_url in rendered_html and "morning.txt" in details["text"]
+        else:
+            assert "Afternoon result" in rendered_html
+    assert all(call.kwargs == {"include_details": True} for call in check.await_args_list)
+
+
+def test_report_files_export_the_discord_delivery_and_source_links():
+    from docx import Document
+    from openpyxl import load_workbook
+    from PIL import Image
+
+    from app.services import m1_reporting_points as m1, m2_reporting_points as m2
+    from app.services.m3_reporting_points_attachments import report_attachments as m3_attachments
+
+    source = "https://discord.com/channels/123/456/789"
+    file_url = "https://cdn.discordapp.com/attachments/456/789/results.txt"
+    row = dict(task("M2", "M3"), task_id="task", assignees="OP", status="TODO", symbol="M2/3",
+               discord_delivery={"status": "on_time", "url": source, "details": {
+                   "content": "Discord result\nSecond line",
+                   "attachments": [{"name": "results.txt", "url": file_url}],
+               }})
+    for slot, attachments in (("M2", m1.report_attachments), ("M2", m2.report_attachments), ("M3", m3_attachments)):
+        report = {"report_date": DAY.isoformat(), "discord_delivery_slot": slot, "data": {"delivery": [row]}}
+        files = {filename.rsplit(".", 1)[-1]: content for filename, content, _ in attachments(report)}
+        document = Document(BytesIO(files["docx"]))
+        assert any("Discord result\nSecond line" in cell.text
+                   for table in document.tables for row_cells in table.rows for cell in row_cells.cells)
+        assert {source, file_url} <= {rel.target_ref for rel in document.part.rels.values() if rel.is_external}
+        workbook = load_workbook(BytesIO(files["xlsx"]))
+        cell = next(cell for cells in workbook.active.iter_rows() for cell in cells
+                    if isinstance(cell.value, str) and "Discord result" in cell.value)
+        assert "results.txt" in cell.value and source in cell.value
+        assert cell.hyperlink.target == source
+        workbook.close()
+        with Image.open(BytesIO(files["png"])) as image:
+            image.verify()
 
 def test_linked_author_full_title_and_report_date_must_match():
     messages = [
