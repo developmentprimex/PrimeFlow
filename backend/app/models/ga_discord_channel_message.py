@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +30,20 @@ class GaDiscordChannelMessage(Base):
     reply_context_ids: Mapped[list[str]] = mapped_column(JSONB, server_default="[]")
     reactions: Mapped[list] = mapped_column(JSONB, server_default="[]")
     reactions_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reaction_session_id: Mapped[str | None] = mapped_column(String(32))
+    reaction_sequence: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class GaDiscordReactionEvent(Base):
+    __tablename__ = "ga_discord_reaction_events"
+
+    message_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    user_id: Mapped[str | None] = mapped_column(String(32))
+    emoji_key: Mapped[str | None] = mapped_column(String(100))
+    burst: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
 
 class GaDiscordArchiveCheckpoint(Base):

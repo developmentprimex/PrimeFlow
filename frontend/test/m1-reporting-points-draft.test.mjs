@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { clearSavedManualDraft, readManualDraft, shouldAdvanceReportDay, writeManualDraft } from "../src/lib/m1-reporting-points-draft.ts"
+import { changedManualAnswers, clearSavedManualDraft, readManualDraft, shouldAdvanceReportDay, writeManualDraft } from "../src/lib/m1-reporting-points-draft.ts"
 import { shouldRegenerateTaskData } from "../src/lib/m1-reporting-points-data.ts"
 
 function memoryStorage() {
@@ -27,6 +27,12 @@ test("M1 moves to tomorrow only after today's edits are saved", () => {
   assert.equal(shouldAdvanceReportDay("2026-10-13", "2026-10-13", "2026-10-14", false), true)
   assert.equal(shouldAdvanceReportDay("2026-10-13", "2026-10-13", "2026-10-14", true), false)
   assert.equal(shouldAdvanceReportDay("2026-10-12", "2026-10-13", "2026-10-14", false), false)
+})
+
+test("M1 saves only locally changed answers so an MCP update to a different answer survives", () => {
+  const original = { plan_changes: "Jo", reorganization: "Jo" }
+  assert.deepEqual(changedManualAnswers(original, { ...original, plan_changes: "Po" }), { plan_changes: "Po" })
+  assert.deepEqual(changedManualAnswers(original, { plan_changes: "Jo" }), { reorganization: "" })
 })
 
 test("M1 refreshes today's unsent report when task columns or order are old", () => {

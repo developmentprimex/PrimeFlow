@@ -286,6 +286,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   dhe përdorin identitetin e botit të përmendjeve. Kontrollo autorizimin si GA,
   ID-të e kontekstit, lidhjen e reply-t te përmendja, heqjen e reagimit të
   botit dhe që ai reagim të mos numërohet si aprovim i një kolegu.
+  Në feed-in e ASIST GA – DET GA, `ga_replied` lexon përgjigjet e arkivuara të
+  GA-së në kanal ose në thread-et publike të lidhura dhe përgjigjet nga
+  veprimi i audituar i PrimeFlow.
+  `ga_reacted` lexon reagimet aktive të GA-së dhe botit të përmendjeve.
+  Emrat te `others_reacted_before_ga` kërkojnë që shtimi i reagimit aktiv të
+  kolegut të jetë parë para reagimit të parë aktiv të GA-së ose botit në të
+  njëjtin sesion të botit. Kontrollo shtimin, heqjen, pastrimin dhe lidhjen
+  pas ndërprerjes. `others_reacted_before_ga_known` është false kur mungon
+  evidenca për renditjen, përfshirë reagimet historike të lexuara vetëm me REST
+  dhe mesazhet që kanë reagime të stafit por presin një reagim të GA-së.
 
 - M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
   importi nga Common View të mos krijojnë kopje në grupin manual të M2.
@@ -738,6 +748,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   PX Notes lidh te “Të gjitha”; shiritat e njoftimeve dhe dialogu i përbashkët
   i komenteve përdorin gjendjen dhe datën e përditësimit të listës bazë.
   Raportet dhe eksportet lexojnë simbolin dhe tekstin nga të dhënat e detyrës.
+- PrimeFlow MCP liston komentet personale dhe versionin aktual të komenteve
+  te simbolet për detyrat 1H. Gjendja `new` ose `seen` ruhet për llogarinë
+  e asistentit dhe për versionin e komentit. Kontrollo Task Details dhe
+  Simbolet dhe komentet për të njëjtin tekst, si edhe njohjen e komenteve
+  të redaktuara si të reja. Njoftimet dhe konfirmimet e përgjegjësve përdorin
+  `task_marker_comment_inbox`. M1 «A KA KOMENTE NE PF?» përdor historikun
+  `task_symbol_comment_events`. SHTYPI lexon komentin e detyrës.
 - SHTYPI Today dhe Tomorrow ndajnë komponentin dhe gjeneruesin bazë, por kanë
   dallime në data, gjenerim dhe historik. 1H Reports ka gjenerues tjetër.
   Mungesa ose PV tërëditore (08:00–16:00) përjashton detyrat nga gjenerimi i ri
@@ -1049,6 +1066,19 @@ kontrollit të commit-it të ri përditësohet shënuesi `frontend.sha`. Prova l
 e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
+
+- ASIST GA – DET GA lidh M1 Start of Day, After Break, Meetings Report,
+  M1/M2/M3 PIKAT dhe 1H SHTYPI Sot/Nesër me `?date=YYYY-MM-DD`.
+  Për datat e arkivuara SHTYPI përdor snapshot-in e datës, edhe te Nesër.
+  Ruajtja MCP e pikës «A duhet riorganizim?» përdor përgjigjen manuale të
+  M1 PIKAT. Kontrollo edhe preview, email dhe eksportet e M1 PIKAT. Lista
+  PX e afateve përdor përgjegjësin ose konfirmuesin GA si lista GA Tasks.
+  Agjenda MCP lexon simbolet e ruajtura që përdorin Common View, 1H
+  dhe raportet M1/M2/M3. Takimet lexojnë të njëjtën ditë dhe status si GA
+  Time Table dhe shënimet e Takimeve. Shënimi «reacted» te GA Devices është
+  gjendje e listës MCP. Përfundimi i detyrës kalon nga shërbimi ekzistues
+  dhe pasqyrohet në Task Details, Common View, My View, Development,
+  Graphic Design, Product Content, Finance dhe në raportet e lidhura.
 
 - Tema Light / Dark / System: `frontend/src/lib/theme.ts` vendos klasën `dark`
   para renderimit dhe ruan `primex-theme` në localStorage; System ndjek ndryshimet

@@ -234,6 +234,7 @@ async def agenda(
     start: str = Query(..., description="ISO 8601 start (inclusive)"),
     end: str = Query(..., description="ISO 8601 end (exclusive)"),
     include_untimed: bool = False,
+    include_live_microsoft: bool = True,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
@@ -245,7 +246,8 @@ async def agenda(
         raise HTTPException(status_code=422, detail="end must be after start and the window at most 31 days")
     last_day = (window_end - timedelta(microseconds=1)).date()
     items, warnings = await svc.collect_items(
-        db, user, window_start.date(), last_day, include_microsoft=is_ga_user(user), now=now
+        db, user, window_start.date(), last_day, include_microsoft=is_ga_user(user),
+        include_live_microsoft=include_live_microsoft, now=now,
     )
     selected = svc.select_agenda(items, window_start, window_end, include_untimed=include_untimed)
     return {
@@ -784,7 +786,7 @@ async def discord_mentions_feed(
 
     page = rows[:limit]
     tz = svc.ga_tz()
-    items = await mentions.render_with_context(db, page, tz)
+    items = await mentions.render_feed(db, page, tz)
     return {
         "channel_id": settings.DISCORD_GA_REPLIES_CHANNEL_ID,
         "timezone": settings.GA_TIMEZONE,

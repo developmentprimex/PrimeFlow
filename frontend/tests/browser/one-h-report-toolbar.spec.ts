@@ -4,6 +4,38 @@ import path from "node:path"
 
 const backend = path.resolve(__dirname, "../../../backend")
 
+test("ASIST GA report links load the requested date on all eight PrimeFlow pages", async ({ page }) => {
+  const account = { id: "ga-date-test", email: "ga@example.test", full_name: "GA Date Test", role: "ADMIN", is_active: true }
+  const day = "2026-10-23"
+  const paths = [
+    "/morning-report", "/after-break-report", "/meetings-report", "/m1-reporting-points",
+    "/m2-reporting-points", "/m3-reporting-points", "/today-print-report", "/tomorrow-print-report",
+  ]
+  const writes: string[] = []
+  await page.addInitScript(user => {
+    localStorage.setItem("primex_access_token", "test-only-browser-token")
+    localStorage.setItem("primex_user", JSON.stringify(user))
+  }, account)
+  await page.route("**/api/**", route => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (pathname === "/api/auth/me") return route.fulfill({ json: account })
+    if (pathname.endsWith("/generate")) writes.push(pathname)
+    if (paths.some(path => pathname === `/api${path}` || pathname === `/api${path}/snapshot`)) {
+      return route.fulfill({ status: 404, json: { detail: "No archived report" } })
+    }
+    return route.fulfill({ json: [] })
+  })
+  for (const path of paths) {
+    const endpoint = `/api${path}${path.endsWith("print-report") ? "/snapshot" : ""}`
+    const request = page.waitForRequest(req => new URL(req.url()).pathname === endpoint)
+    await page.goto(`${path}?date=${day}`)
+    const url = new URL((await request).url())
+    expect(url.searchParams.get("report_date"), path).toBe(day)
+  }
+  expect(writes).toEqual([])
+})
+
 test("PX Notes expands the saved summary and opens the original email separately", async ({ page }) => {
   const user = { id: "note-test-admin", full_name: "Notes admin", email: "admin@example.test", role: "ADMIN", is_active: true }
   const originalEmailUrl = "https://outlook.office.com/mail/deeplink/read/test"

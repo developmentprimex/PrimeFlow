@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import uuid
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit
@@ -22,8 +23,12 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.audit_log import AuditLog
 from app.models.discord_assistant import DiscordLink
-from app.models.ga_discord_channel_message import GaDiscordChannelMessage
+from app.models.ga_discord_channel_message import (
+    GaDiscordChannelMessage,
+    GaDiscordReactionEvent,
+)
 from app.models.ga_discord_mention import GaDiscordMention
 from app.models.user import User
 from app.schemas.ga_discord_mentions import DiscordAttachmentLink
@@ -121,11 +126,18 @@ async def set_reactions(
     observed_at = observed_at or datetime.now(timezone.utc)
     updated = False
     for model in (GaDiscordMention, GaDiscordChannelMessage):
+        values = {"reactions": reactions, "reactions_synced_at": observed_at}
+        newer_snapshot = model.reactions_synced_at <= observed_at
+        if model is GaDiscordChannelMessage:
+            # A staff snapshot is already stored by the archive endpoint. An
+            # independent, newer REST-only update has no matching event cursor.
+            newer_snapshot = model.reactions_synced_at < observed_at
+            values.update(reaction_session_id=None, reaction_sequence=None)
         row_id = await db.scalar(
             update(model).where(
                 model.id == message_id,
-                or_(model.reactions_synced_at.is_(None), model.reactions_synced_at <= observed_at),
-            ).values(reactions=reactions, reactions_synced_at=observed_at).returning(model.id)
+                or_(model.reactions_synced_at.is_(None), newer_snapshot),
+            ).values(**values).returning(model.id)
         )
         updated |= row_id is not None
     await db.commit()
@@ -210,20 +222,28 @@ async def render_with_context(db: AsyncSession, rows: list[GaDiscordMention], tz
     if not rows:
         return []
     items = await render(db, rows, tz)
+    candidate_ids = [row.id for row in rows if archive.archive_scope(row.guild_id, row.channel_id, None)
+                     and "mention" in row.reasons]
+    await _add_context(db, rows, items, tz, candidate_ids)
+    return items
+
+
+async def _add_context(
+    db: AsyncSession, rows: list[GaDiscordMention], items: list[dict[str, Any]], tz: ZoneInfo,
+    candidate_ids: list[str],
+) -> set[tuple[str, str, str]]:
     contexts = {
         row.id: {"para": [], "pas": [], "reply": None, "përgjigjet": []}
         for row in rows
     }
     for row, item in zip(rows, items, strict=True):
         item["context"] = contexts[row.id]
-    candidate_ids = [row.id for row in rows if archive.archive_scope(row.guild_id, row.channel_id, None)
-                     and "mention" in row.reasons]
     if not candidate_ids:
-        return items
+        return set()
 
     matches = await archive.context_rows(db, candidate_ids)
     if not matches:
-        return items
+        return set()
     messages = {row.id: row for _, row, *_ in matches}
     people = await reactor_names(db, list(messages.values()))
     authors = await _discord_display_names(db, {row.author_discord_id for row in messages.values()},
@@ -246,6 +266,108 @@ async def render_with_context(db: AsyncSession, rows: list[GaDiscordMention], tz
             context["reply"] = value
         if response:
             context["përgjigjet"].append(value)
+    return {(anchor_id, row.id, row.author_discord_id) for anchor_id, row, *_, response in matches if response}
+
+
+def feed_reaction_activity(
+    row: GaDiscordMention | GaDiscordChannelMessage, events: list[GaDiscordReactionEvent],
+    ga_id: str | None, names: dict[str, str],
+) -> tuple[bool, list[str], bool]:
+    """Current GA reaction, proven earlier colleagues, and whether the ordering is complete."""
+    possible_ga = set()
+    colleagues = {}
+    snapshots = row.reactions or []
+    complete = row.reactions_synced_at is not None
+    for reaction in snapshots:
+        users = reaction.get("users") or []
+        complete &= len(users) == reaction["count"]
+        emoji_key = reaction.get("emoji_key") or reaction["emoji"]
+        for user in users:
+            discord_id = user["discord_id"]
+            key = (emoji_key, discord_id, bool(user.get("burst")))
+            if discord_id == ga_id or user.get("ga_bot"):
+                possible_ga.add(key)
+            elif not user.get("bot"):
+                colleagues[key] = names.get(discord_id) or user.get("name") or discord_id
+    reacted = bool(possible_ga)
+    if not colleagues:
+        return reacted, [], complete
+
+    last_sequence = getattr(row, "reaction_sequence", None)
+    if not reacted or not last_sequence or ga_id is None or not complete:
+        return reacted, [], False
+    timeline = sorted((event for event in events if event.sequence <= last_sequence), key=lambda event: event.sequence)
+    if len(timeline) != last_sequence:
+        return reacted, [], False
+
+    active = {}
+    for event in timeline:
+        key = (event.emoji_key, event.user_id, event.burst)
+        if event.kind == "add":
+            active.setdefault(key, event.sequence)
+        elif event.kind == "remove":
+            active.pop(key, None)
+        elif event.kind == "clear_emoji":
+            active = {key: seq for key, seq in active.items() if key[0] != event.emoji_key}
+        else:
+            active.clear()
+    if not possible_ga.issubset(active):
+        return reacted, [], False
+    cutoff = min(active[key] for key in possible_ga)
+    earlier = sorted(
+        ((active[key], name) for key, name in colleagues.items() if key in active and active[key] < cutoff),
+    )
+    return reacted, list(dict.fromkeys(name for _, name in earlier)), colleagues.keys() <= active.keys()
+
+
+async def render_feed(db: AsyncSession, rows: list[GaDiscordMention], tz: ZoneInfo) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    ids = [row.id for row in rows]
+    archived = {row.id: row for row in await db.scalars(
+        select(GaDiscordChannelMessage).where(GaDiscordChannelMessage.id.in_(ids))
+    )}
+    snapshots = []
+    for row in rows:
+        candidate = archived.get(row.id)
+        if (candidate is not None and candidate.reactions_synced_at is not None
+                and (row.reactions_synced_at is None or candidate.reactions_synced_at >= row.reactions_synced_at)):
+            snapshots.append(candidate)
+        else:
+            snapshots.append(row)
+    people = await reactor_names(db, snapshots)
+    ga_id = await ga_discord_id(db)
+    authors = await author_names(db, rows)
+    approvals = approval_emojis()
+    items = [mention_out(row, authors, tz, people=people, ga_id=ga_id, approvals=approvals) for row in rows]
+    responses = await _add_context(db, rows, items, tz, ids)
+    reply_ids = {reply_id for _, reply_id, author_id in responses if author_id != ga_id}
+    audited = set()
+    if reply_ids:
+        discord_id = AuditLog.after["discord_id"].as_string()
+        entity_ids = [uuid.uuid5(uuid.NAMESPACE_URL, f"primeflow-ga-assistant:dc:{reply_id}") for reply_id in reply_ids]
+        audited = set(await db.scalars(select(discord_id).where(
+            AuditLog.entity_type == "ga_assistant", AuditLog.entity_id.in_(entity_ids),
+            AuditLog.action == "GA_ASSISTANT_DISCORD_REPLY",
+        )))
+    replied = {anchor_id for anchor_id, reply_id, author_id in responses
+               if author_id == ga_id or f"dc:{reply_id}" in audited}
+
+    cursors = [(row.id, row.reaction_session_id) for row in snapshots
+               if isinstance(row, GaDiscordChannelMessage) and row.reaction_session_id]
+    events = defaultdict(list)
+    if cursors:
+        event = GaDiscordReactionEvent
+        for evidence in await db.scalars(select(event).where(tuple_(event.message_id, event.session_id).in_(cursors))):
+            events[evidence.message_id].append(evidence)
+
+    for row, item in zip(snapshots, items, strict=True):
+        item["reactions"], item["reviewed_by"] = reactions_out(row, people, ga_id, approvals)
+        item["ready_for_ga"] = bool(item["reviewed_by"])
+        item["reactions_synced_at"] = row.reactions_synced_at.isoformat() if row.reactions_synced_at else None
+        reacted, names, known = feed_reaction_activity(row, events[row.id], ga_id, people)
+        item.update(ga_replied=row.id in replied, ga_reacted=reacted, others_reacted_before_ga=bool(names),
+                    others_reacted_before_ga_names=names, others_reacted_before_ga_known=known)
     return items
 
 

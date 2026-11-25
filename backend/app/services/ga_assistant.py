@@ -8,6 +8,8 @@ Sources and the rules they mirror:
   ``BZ``       = GA is only an alignment (BZ) person, by task or system template ("BZ ME GA Tasks").
   ``F_TASK``   = any other active task carrying the task symbol ``F`` = "DET FIZIKISHT (ME GA)"
                  (``tasks.one_h_marker``), selected like M1 "FIZIKISHT ME GA?".
+  ``GA_MARKED_TASK`` = any other active task carrying the GA symbol (stored as ``FLAG``),
+                       selected on the same days as an F task.
 * Meetings, like the GA Time Table: every visible external meeting plus manual
   internal meetings, expanded per day with their held/canceled status.
 * Outlook events and Microsoft To Do tasks of the organizer mailbox (GA only).
@@ -22,7 +24,7 @@ Sources and the rules they mirror:
 
 Times: a per-day assistant override (``ga_assistant_item_times``) wins, then the
 BZ time of the system template, then the 1H slot, then a due time on the task.
-Items without any of these are "untimed" and carry only AM/PM when known.
+An explicit AM/PM supplies a fallback time. Items without a time or period are untimed.
 """
 from __future__ import annotations
 
@@ -32,16 +34,19 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.audit_log import AuditLog
 from app.models.ga_discord_mention import GaDiscordMention  # noqa: F401 - mapper registration
 from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
 from app.models.ga_time_slot_entry import GaTimeSlotEntry
-from app.models.meeting import Meeting, MeetingParticipant
+from app.models.meeting import Meeting
+from app.models.meeting_note import MeetingNote
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.oauth import GaAssistantItemTime
 from app.models.system_task_template import SystemTaskTemplate
@@ -55,16 +60,21 @@ from app.services.meeting_scheduler import meeting_occurrence_window
 from app.services.after_break_report import _task_covers_day  # Common View day rule (M1/End Week BZ)
 from app.services.morning_report import _marked_task_identity  # M1 grouping of linked marked copies
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
+from app.services.task_marker import ONE_H_MARKER_SYMBOLS
 
 logger = logging.getLogger(__name__)
 
 KIND_GA_TASK = "GA_TASK"
 KIND_BZ = "BZ"
 KIND_F_TASK = "F_TASK"
+KIND_GA_MARKED_TASK = "GA_MARKED_TASK"
 KIND_MEETING = "MEETING"
 KIND_EVENT = "EVENT"
 KIND_REMINDER = "REMINDER"
 KIND_DISCORD = "DISCORD"
+TASK_KINDS = {KIND_GA_TASK, KIND_BZ, KIND_F_TASK, KIND_GA_MARKED_TASK}
+GA_MARKERS = {"F", "FLAG"}
+DAYPART_STARTS = {"AM": time(9), "PM": time(13, 30)}
 
 PREFIX_TASK = "pf_task:"
 PREFIX_MEETING = "pf_meeting:"
@@ -177,8 +187,23 @@ class AgendaItem:
     assignees: list[str] = field(default_factory=list)
     item_key: str = ""
     linked_ids: list[str] = field(default_factory=list)
+    meeting_type: str | None = None
+    held: bool | None = None
+    join_url: str | None = None
+    notes_url: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        daypart = None
+        symbols = []
+        if self.kind in TASK_KINDS:
+            daypart = self.am_pm if self.am_pm in DAYPART_STARTS else None
+            if daypart is None and self.start is not None:
+                clock = self.start.time()
+                if clock >= DAYPART_STARTS["PM"]:
+                    daypart = "PM"
+                elif clock >= DAYPART_STARTS["AM"]:
+                    daypart = "AM"
+            symbols = [ONE_H_MARKER_SYMBOLS.get(marker, marker) for marker in self.markers]
         return {
             "id": self.id,
             "source": self.source,
@@ -189,10 +214,15 @@ class AgendaItem:
             "end": self.end.isoformat() if self.end else None,
             "time_basis": self.time_basis,
             "am_pm": self.am_pm,
+            "daypart": daypart,
             "due_date": self.due_date,
             "original_due_date": self.original_due_date,
             "days_late": self.days_late,
             "status": self.status,
+            "type": self.meeting_type,
+            "held": self.held,
+            "join_url": self.join_url,
+            "notes_url": self.notes_url,
             "priority": self.priority,
             "bz_with": self.bz_with,
             "frequency": self.frequency,
@@ -200,6 +230,7 @@ class AgendaItem:
             "can_complete": self.can_complete,
             "url": self.url,
             "markers": self.markers,
+            "symbols": symbols,
             "assignees": self.assignees,
             "linked_ids": self.linked_ids,
         }
@@ -255,13 +286,14 @@ async def collect_task_items(
     )
     assigned_ids = select(TaskAssignee.task_id).where(TaskAssignee.user_id == owner_id)
     aligned_ids = select(TaskAlignmentUser.task_id).where(TaskAlignmentUser.user_id == owner_id)
-    has_f = or_(Task.one_h_marker == "F", Task.one_h_marker.like("F,%"), Task.one_h_marker.like("%,F"))
+    delimited_markers = literal(",") + Task.one_h_marker + ","
+    has_ga_marker = or_(delimited_markers.like("%,F,%"), delimited_markers.like("%,FLAG,%"))
     relevance = [
         Task.assigned_to == owner_id,
         Task.id.in_(assigned_ids),
         Task.id.in_(aligned_ids),
         and_(Task.status == "WAITING_CONFIRMATION", Task.confirmation_assignee_id == owner_id),
-        has_f,
+        and_(has_ga_marker, Task.work_staff_filter()),
     ]
     if aligned_template_ids:
         relevance.append(Task.system_template_origin_id.in_(aligned_template_ids))
@@ -335,15 +367,15 @@ async def collect_task_items(
             kind = KIND_GA_TASK
         elif has_task_alignment or has_template_alignment:
             kind = KIND_BZ
-        elif "F" in markers:
-            kind = KIND_F_TASK
+        elif GA_MARKERS.intersection(markers):
+            kind = KIND_F_TASK if "F" in markers else KIND_GA_MARKED_TASK
         else:
             continue
 
-        if kind == KIND_F_TASK:
+        if kind in {KIND_F_TASK, KIND_GA_MARKED_TASK}:
             # "F" = DET FIZIKISHT ME GA: the M1 rule (morning report "FIZIKISHT ME GA?") lists a
             # marked task on every day its Start-Due interval covers (Common View planning rule),
-            # one row per group of linked copies. Unfinished F work from before today is reported
+            # one row per group of linked copies. Unfinished marked work from before today is reported
             # once, on its due day, as a leftover.
             days = [
                 day for day in _days(day_from, day_to)
@@ -351,7 +383,7 @@ async def collect_task_items(
             ]
             if is_open and day_from <= plan_day < today:
                 days.append(plan_day)
-            identity = f"f:{_marked_task_identity(task)}:{','.join(sorted(markers))}"
+            identity = f"marked:{_marked_task_identity(task)}:{','.join(sorted(markers))}"
         else:
             # GA TASKS / BZ ME GA TASKS: one row on the task's planned day (admin-tasks getTaskDateIso).
             if (plan_day < day_from and not is_open) or plan_day > day_to:
@@ -408,10 +440,30 @@ async def collect_task_items(
                 item.start, item.time_basis = datetime.combine(day, parse_hhmm(task.one_h_report_slot), tzinfo=tz), "one_h_slot"
             elif (due_time := due_time_of(task, tz)) is not None and day == plan_day:
                 item.start, item.time_basis = datetime.combine(day, due_time, tzinfo=tz), "due"
-            elif item.am_pm:
-                item.time_basis = "ampm"
+            elif (part_start := DAYPART_STARTS.get(item.am_pm)) is not None:
+                item.start, item.time_basis = datetime.combine(day, part_start, tzinfo=tz), "ampm"
             items[dedupe] = item
-    return list(items.values())
+    result = list(items.values())
+    await _set_bz_held(db, owner, result)
+    return result
+
+
+async def _set_bz_held(db: AsyncSession, owner: User, items: list[AgendaItem]) -> None:
+    # A BZ occurrence has its own concrete task ID, including system task instances.
+    bz_items = {uuid.UUID(item.id.removeprefix(PREFIX_TASK)): item for item in items if item.kind == KIND_BZ}
+    if not bz_items:
+        return
+    held = set((await db.execute(
+        select(AuditLog.entity_id).where(
+            AuditLog.entity_type == "ga_assistant",
+            AuditLog.action == "GA_ASSISTANT_BZ_HELD",
+            AuditLog.actor_user_id == owner.id,
+            AuditLog.entity_id.in_(bz_items),
+        ).distinct()
+    )).scalars().all())
+    for task_id, item in bz_items.items():
+        item.meeting_type = "BZ"
+        item.held = task_id in held
 
 
 def _days(day_from: date, day_to: date):
@@ -419,6 +471,19 @@ def _days(day_from: date, day_to: date):
     while day <= day_to:
         yield day
         day += timedelta(days=1)
+
+
+def _teams_join_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    url = url.strip()
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme == "https" and parsed.hostname in {"teams.microsoft.com", "teams.live.com", "teams.cloud.microsoft"}:
+            return url
+    except ValueError:
+        pass
+    return None
 
 
 async def collect_meeting_items(db: AsyncSession, owner: User, day_from: date, day_to: date, *, tz: ZoneInfo) -> list[AgendaItem]:
@@ -448,18 +513,26 @@ async def collect_meeting_items(db: AsyncSession, owner: User, day_from: date, d
     meetings = [meeting for meeting in meetings if is_common_view_visible_meeting(meeting)]
     if not meetings:
         return []
+    meeting_ids = [meeting.id for meeting in meetings]
     statuses = {
         (row.meeting_id, row.occurrence_date): row.status
         for row in (
             await db.execute(
                 select(MeetingOccurrenceStatus).where(
-                    MeetingOccurrenceStatus.meeting_id.in_([meeting.id for meeting in meetings]),
+                    MeetingOccurrenceStatus.meeting_id.in_(meeting_ids),
                     MeetingOccurrenceStatus.occurrence_date >= day_from,
                     MeetingOccurrenceStatus.occurrence_date <= day_to,
                 )
             )
         ).scalars().all()
     }
+    noted_occurrences = set((await db.execute(
+        select(MeetingNote.meeting_id, MeetingNote.occurrence_date).where(
+            MeetingNote.meeting_id.in_(meeting_ids),
+            MeetingNote.occurrence_date >= day_from,
+            MeetingNote.occurrence_date <= day_to,
+        ).distinct()
+    )).all())
     items: list[AgendaItem] = []
     day = day_from
     while day <= day_to:
@@ -473,13 +546,14 @@ async def collect_meeting_items(db: AsyncSession, owner: User, day_from: date, d
                 continue
             status = statuses.get((meeting.id, day)) or ""
             key = f"{PREFIX_MEETING}{meeting.id}@{day.isoformat()}"
+            meeting_type = "INT" if meeting.meeting_type == "internal" else "EXT"
             items.append(
                 AgendaItem(
                     id=key,
                     item_key=key,
                     source="primeflow",
                     kind=KIND_MEETING,
-                    title=f"{'TAK INT' if meeting.meeting_type == 'internal' else 'TAK EXT'}: {meeting.title}",
+                    title=f"TAK {meeting_type}: {meeting.title}",
                     day=day,
                     start=start,
                     end=end,
@@ -488,6 +562,13 @@ async def collect_meeting_items(db: AsyncSession, owner: User, day_from: date, d
                     can_complete=status == "",
                     is_open=status == "",
                     url=frontend_url("/admin-tasks#ga-time-table"),
+                    meeting_type=meeting_type,
+                    held=status == "held",
+                    join_url=_teams_join_url(meeting.meeting_url),
+                    notes_url=(
+                        frontend_url(f"/meetings/{meeting.id}?date={day.isoformat()}")
+                        if (meeting.id, day) in noted_occurrences else None
+                    ),
                 )
             )
         day += timedelta(days=1)
@@ -535,6 +616,7 @@ async def collect_microsoft_items(
                     id=key, item_key=key, source="outlook", kind=KIND_EVENT, title=event.get("subject") or "(pa titull)",
                     day=ev_start.date(), start=None if all_day else ev_start, end=None if all_day else ev_end,
                     time_basis=None if all_day else "event", status="PLANNED", url=event.get("webLink"),
+                    join_url=_teams_join_url((event.get("onlineMeeting") or {}).get("joinUrl") or event.get("onlineMeetingUrl")),
                 )
             )
     except Exception as exc:
@@ -750,7 +832,7 @@ def apply_day_states(items: list[AgendaItem], states: dict[tuple[str, date], Day
         state = states.get((item.item_key, item.day)) if item.day else None
         if state and state.removed:
             continue
-        if state and state.time_override and item.kind in {KIND_GA_TASK, KIND_BZ, KIND_F_TASK}:
+        if state and state.time_override and item.kind in TASK_KINDS:
             if state.time_value is None:
                 item.start, item.time_basis = None, ("ampm" if item.am_pm else None)
             else:
@@ -760,17 +842,20 @@ def apply_day_states(items: list[AgendaItem], states: dict[tuple[str, date], Day
 
 
 async def collect_items(
-    db: AsyncSession, owner: User, day_from: date, day_to: date, *, include_microsoft: bool, now: datetime | None = None,
+    db: AsyncSession, owner: User, day_from: date, day_to: date, *, include_microsoft: bool,
+    include_live_microsoft: bool = True, now: datetime | None = None,
 ) -> tuple[list[AgendaItem], list[str]]:
     tz = ga_tz()
     today = (now or datetime.now(tz)).astimezone(tz).date()
     items = await collect_task_items(db, owner, day_from, day_to, today=today, tz=tz)
     items += await collect_meeting_items(db, owner, day_from, day_to, tz=tz)
     warnings: list[str] = []
-    if include_microsoft:  # the GA's own sources: Outlook/To Do, iPhone reminders, Discord mentions
-        ms_items, warnings = await collect_microsoft_items(db, owner, day_from, day_to, tz=tz, today=today)
+    if include_microsoft:  # GA's private sources include both live Graph and local records.
+        if include_live_microsoft:
+            ms_items, warnings = await collect_microsoft_items(db, owner, day_from, day_to, tz=tz, today=today)
+            items += ms_items
         tt_items, tt_warnings = await collect_time_table_reminders(db, owner, day_from, day_to, tz=tz, today=today, now=now)
-        items = dedupe_reminders(items + ms_items + tt_items)
+        items = dedupe_reminders(items + tt_items)
         warnings += tt_warnings
         items += await collect_discord_items(db, day_from, day_to, tz=tz)
     states = await load_day_states(db, owner.id, min(day_from, today) - timedelta(days=LEFTOVER_LOOKBACK_DAYS), day_to)
@@ -780,7 +865,8 @@ async def collect_items(
 def sort_key(item: AgendaItem):
     return (
         item.start or datetime.max.replace(tzinfo=timezone.utc),
-        {KIND_GA_TASK: 0, KIND_BZ: 1, KIND_F_TASK: 2, KIND_MEETING: 3, KIND_EVENT: 4, KIND_REMINDER: 5, KIND_DISCORD: 6}.get(item.kind, 9),
+        {KIND_GA_TASK: 0, KIND_BZ: 1, KIND_F_TASK: 2, KIND_GA_MARKED_TASK: 2, KIND_MEETING: 3,
+         KIND_EVENT: 4, KIND_REMINDER: 5, KIND_DISCORD: 6}.get(item.kind, 9),
         item.title.casefold(),
     )
 
@@ -823,7 +909,7 @@ def select_untimed(items: list[AgendaItem], day: date) -> list[AgendaItem]:
         (
             item for item in items
             if item.is_open and item.start is None and item.day == day
-            and item.kind in {KIND_GA_TASK, KIND_BZ, KIND_F_TASK, KIND_REMINDER, KIND_DISCORD}
+            and item.kind in TASK_KINDS | {KIND_REMINDER, KIND_DISCORD}
         ),
         key=sort_key,
     )

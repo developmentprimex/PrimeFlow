@@ -12,9 +12,10 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { clearSavedManualDraft, readManualDraft, shouldAdvanceReportDay, writeManualDraft } from "@/lib/m1-reporting-points-draft"
+import { changedManualAnswers, clearSavedManualDraft, readManualDraft, shouldAdvanceReportDay, writeManualDraft } from "@/lib/m1-reporting-points-draft"
 import { shouldRegenerateTaskData } from "@/lib/m1-reporting-points-data"
 import { reportResponseJson as responseJson } from "@/lib/report-response"
+import { useReportDate } from "@/lib/report-link-date"
 import { ReportingPointsManagement } from "@/components/reporting-points-management"
 import { M1ReportingPointsView, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m1-reporting-points-view"
 
@@ -32,8 +33,10 @@ function draftStorage() {
 
 export default function M1ReportingPointsPage() {
   const { user, loading: authLoading, apiFetch } = useAuth()
-  const [day, setDay] = React.useState(today)
+  const [day, setDay, linkedDay] = useReportDate(today)
   const [report, setReport] = React.useState<ReportingPointsReport | null>(null)
+  const activeReportId = React.useRef<string | undefined>(undefined)
+  React.useEffect(() => { activeReportId.current = report?.id }, [report?.id])
   const [answers, setAnswers] = React.useState<ManualAnswers>({})
   const [recipients, setRecipients] = React.useState<Recipients | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
@@ -50,7 +53,7 @@ export default function M1ReportingPointsPage() {
   const previousToday = React.useRef(today())
   const canAccess = !!user
   const canManage = !!user && (["ADMIN", "MANAGER"].includes(user.role) || (user.full_name || "").trim().toLowerCase() === "laurent hoxha")
-  const dirty = !!report && (Array.from(new Set([...Object.keys(answers), ...Object.keys(report.manual_answers)])) as ManualKey[]).some((key) => (answers[key] || "") !== (report.manual_answers[key] || ""))
+  const dirty = !!report && Object.keys(changedManualAnswers(report.manual_answers, answers)).length > 0
 
   const acceptReport = React.useCallback((value: ReportingPointsReport) => {
     setReport(value)
@@ -93,6 +96,7 @@ export default function M1ReportingPointsPage() {
   }, [apiFetch, day, canAccess, acceptReport])
 
   React.useEffect(() => {
+    if (linkedDay === day) return
     const advanceDay = () => {
       const next = today()
       const previous = previousToday.current
@@ -112,7 +116,7 @@ export default function M1ReportingPointsPage() {
       window.removeEventListener("focus", advanceDay)
       document.removeEventListener("visibilitychange", advanceDay)
     }
-  }, [day, dirty, savingAnswers, busy])
+  }, [day, linkedDay, setDay, dirty, savingAnswers, busy])
 
   React.useEffect(() => {
     if (!canAccess) return
@@ -142,7 +146,7 @@ export default function M1ReportingPointsPage() {
   React.useEffect(() => {
     if (!report || !dirty || !canAccess || savingAnswers || busy || saveError) return
     const reportId = report.id
-    const savedAnswers = { ...answers }
+    const savedAnswers = changedManualAnswers(report.manual_answers, answers)
     const savedDay = report.report_date
     const timer = window.setTimeout(async () => {
       setSavingAnswers(true)
@@ -151,7 +155,10 @@ export default function M1ReportingPointsPage() {
           method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: savedAnswers }),
         }))
         // Preserve newer edits; the next save starts after this one finishes.
-        setReport((previous) => previous?.id === reportId ? value : previous)
+        if (activeReportId.current === reportId) {
+          setReport(value)
+          setAnswers((latest) => ({ ...value.manual_answers, ...changedManualAnswers(answers, latest) }))
+        }
         if (user?.id) clearSavedManualDraft(draftStorage(), user.id, savedDay, savedAnswers)
       } catch (error) {
         setSaveError(error instanceof Error ? error.message : "Përgjigjet nuk u ruajtën.")
@@ -181,10 +188,11 @@ export default function M1ReportingPointsPage() {
 
   const save = () => action("save", async () => {
     if (!report) return
+    const changes = changedManualAnswers(report.manual_answers, answers)
     const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${report.id}/answers`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: answers }),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: changes }),
     }))
-    if (user?.id) clearSavedManualDraft(draftStorage(), user.id, day, answers)
+    if (user?.id) clearSavedManualDraft(draftStorage(), user.id, day, changes)
     acceptReport(value)
     toast.success("Përgjigjet u ruajtën.")
   })
@@ -213,7 +221,7 @@ export default function M1ReportingPointsPage() {
 
   const changeAnswer = (key: ManualKey, value: string) => {
     const next = { ...answers, [key]: value }
-    if (user?.id) writeManualDraft(draftStorage(), user.id, day, next)
+    if (user?.id && report) writeManualDraft(draftStorage(), user.id, day, changedManualAnswers(report.manual_answers, next))
     setSaveError(null)
     setAnswers(next)
   }

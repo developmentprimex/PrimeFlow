@@ -7,7 +7,11 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.ga_discord_channel_message import GaDiscordArchiveCheckpoint, GaDiscordChannelMessage
+from app.models.ga_discord_channel_message import (
+    GaDiscordArchiveCheckpoint,
+    GaDiscordChannelMessage,
+    GaDiscordReactionEvent,
+)
 from app.models.ga_discord_mention import GaDiscordMention
 
 CONTEXT_WINDOW = timedelta(minutes=2)
@@ -34,6 +38,8 @@ async def store_messages(
         if values["reactions"] is None:
             values.pop("reactions")
             values.pop("reactions_synced_at")
+            values.pop("reaction_session_id", None)
+            values.pop("reaction_sequence", None)
         elif values["reactions_synced_at"] is None:
             values["reactions_synced_at"] = datetime.now(timezone.utc)
 
@@ -44,8 +50,8 @@ async def store_messages(
         updates = {field: case((is_newer, incoming[field]), else_=getattr(message, field)) for field in fields}
         if "reactions" in values:
             newer_snapshot = or_(message.reactions_synced_at.is_(None), incoming.reactions_synced_at >= message.reactions_synced_at)
-            updates["reactions"] = case((newer_snapshot, incoming.reactions), else_=message.reactions)
-            updates["reactions_synced_at"] = case((newer_snapshot, incoming.reactions_synced_at), else_=message.reactions_synced_at)
+            for field in ("reactions", "reactions_synced_at", "reaction_session_id", "reaction_sequence"):
+                updates[field] = case((newer_snapshot, incoming[field]), else_=getattr(message, field))
         if "reply_context_ids" in values:
             updates["reply_context_ids"] = incoming.reply_context_ids
         await db.execute(statement.on_conflict_do_update(index_elements=[message.id], set_=updates))
@@ -69,6 +75,11 @@ def staff_mention_scope():
         mention.channel_id == settings.DISCORD_GA_REPLIES_CHANNEL_ID,
         mention.reasons.contains(["mention"]),
     )
+
+
+async def store_reaction_event(db: AsyncSession, values: dict) -> None:
+    await db.execute(insert(GaDiscordReactionEvent).values(**values).on_conflict_do_nothing())
+    await db.commit()
 
 
 def _context_relationships():

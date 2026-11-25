@@ -150,13 +150,19 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     existing = await _by_id(db, report_id)
     row = await locked_report(db, existing.report_date)
     await db.refresh(row)
+    await save_locked_manual_answers(db, row, payload.manual_answers, user)
+    return await _current_payload(db, row)
+
+
+async def save_locked_manual_answers(
+    db: AsyncSession, row: M1ReportingPointsReport, answers: dict[str, str], user: User
+) -> None:
     before = dict(row.manual_answers or {})
-    row.manual_answers = {**before, **payload.manual_answers}
+    row.manual_answers = {**before, **answers}
     row.status, row.last_error, row.updated_by = "DRAFT", None, user.id
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m1_reporting_points", entity_id=row.id,
                   action="SAVE_ANSWERS", before=before, after=row.manual_answers)
     await db.commit()
-    return await _current_payload(db, row)
 
 
 @router.get("/{report_id}/preview")

@@ -26,6 +26,7 @@ class GaNoteOut(BaseModel):
     content: str
     email_preview: dict[str, str] | None = None
     created_by: uuid.UUID | None = None
+    author: str | None = None
     note_type: GaNoteType
     status: GaNoteStatus
     priority: GaNotePriority | None = None

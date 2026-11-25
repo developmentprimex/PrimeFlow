@@ -361,10 +361,14 @@ async def _save_ga_note_attachments(
 async def list_ga_notes(
     project_id: uuid.UUID | None = None,
     department_id: uuid.UUID | None = None,
+    unconverted_only: bool = False,
+    since: datetime | None = None,
+    note_type: GaNoteType | None = None,
+    sync_mailbox: bool = True,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[GaNoteOut]:
-    if project_id is None and department_id is None:
+    if sync_mailbox and project_id is None and department_id is None:
         await sync_gmail_px_notes()
     # Keep recent closed notes and any Mira note explicitly shared to PX Notes.
     closed_cutoff = datetime.utcnow() - timedelta(days=30)
@@ -392,6 +396,20 @@ async def list_ga_notes(
     elif department_id is not None:
         stmt = stmt.where(GaNote.department_id == department_id)
 
+    if unconverted_only:
+        stmt = stmt.where(GaNote.is_converted_to_task.is_(False))
+    if note_type is not None:
+        stmt = stmt.where(GaNote.note_type == note_type)
+    if since is not None:
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=ZoneInfo(settings.GA_TIMEZONE))
+        stmt = stmt.where(GaNote.created_at >= since)
+
+    if not sync_mailbox or unconverted_only or since is not None or note_type is not None:
+        rows = (await db.execute(
+            stmt.add_columns(User.full_name, User.username).outerjoin(User, User.id == GaNote.created_by)
+        )).all()
+        return [_note_out(note).model_copy(update={"author": full_name or username}) for note, full_name, username in rows]
     notes = (await db.execute(stmt)).scalars().all()
     return [_note_out(n) for n in notes]
 

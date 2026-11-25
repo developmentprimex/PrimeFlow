@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useReportDate } from "@/lib/report-link-date"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
 import { M3TomorrowSymbolsTable } from "@/components/m3-tomorrow-symbols-table"
 import { CalendarDays, CheckCircle2, Clock3, Eye, History, Mail, Pencil, RefreshCw, Save, Send, Settings, ShieldCheck } from "lucide-react"
@@ -303,7 +304,7 @@ export default function MeetingsReportPage() {
   const { apiFetch, loading: authLoading, user } = useAuth()
   const canAccess = !authLoading && Boolean(user)
   const canManageDelivery = user?.role === "ADMIN" || user?.role === "MANAGER"
-  const [reportDate, setReportDate] = React.useState(todayIso())
+  const [reportDate, setReportDate] = useReportDate(todayIso)
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)

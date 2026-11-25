@@ -133,6 +133,80 @@ class GaAssistantDbTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.status_code, expect, res.text)
         return res.json()
 
+    async def test_asist_ga_report_reads_and_actions(self) -> None:
+        from time import perf_counter
+        from sqlalchemy import select
+        from app.models.enums import GaNoteType
+        from app.models.ga_note import GaNote
+        from app.models.m1_reporting_points import M1ReportingPointsReport
+
+        day = self.today.isoformat()
+        old = self.today - timedelta(days=2)
+        async with self.SessionLocal() as db:
+            note = GaNote(content="Për sqarim", note_type=GaNoteType.GA, created_by=self.colleague.id, created_at=self.at(self.today, 8))
+            done_note = GaNote(content="Task i krijuar", note_type=GaNoteType.GA, created_by=self.ga.id,
+                               created_at=self.at(self.today, 8), is_converted_to_task=True)
+            older_note = GaNote(content="Më herët", note_type=GaNoteType.GA, created_at=self.at(old))
+            report = M1ReportingPointsReport(report_date=self.today, manual_answers={"plan_changes": "Ruaj këtë"},
+                                             generated_at=self.at(self.today, 7))
+            db.add_all([note, done_note, older_note, report])
+            await db.flush()
+            device = await db.get(self.Task, self.t_f.id)
+            device.title, device.is_1h_report, device.one_h_report_slot = "FG: GA DEVICES", True, "10:00"
+            device.due_date = self.at(self.today, 10)
+            ga_due = await db.get(self.Task, self.t_1h.id)
+            ga_due.due_date = self.at(self.today, 10)
+            ga_late = await db.get(self.Task, self.t_untimed.id)
+            ga_late.due_date = self.at(self.today, 10, 1)
+            await db.commit()
+
+        timings = {}
+
+        async def timed_get(path, **params):
+            started = perf_counter()
+            result = await self.get(path, **params)
+            timings[path] = round((perf_counter() - started) * 1000, 1)
+            return result
+
+        links = {row["key"]: row for row in (await timed_get("/report-links", date=day))["links"]}
+        self.assertEqual(len(links), 8)
+        self.assertTrue(links["m1_pikat"]["url"].endswith(f"/m1-reporting-points?date={day}"))
+        self.assertTrue(links["m2_pikat"]["url"].endswith(f"/m2-reporting-points?date={day}"))
+        self.assertEqual((await timed_get("/m1/reorg", date=day))["answer"], None)
+        await self.post("/m1/reorg", {"date": day, "answer": "po", "comment": "- Propozim i GA"})
+        self.assertEqual(await self.get("/m1/reorg", date=day), {
+            "date": day, "answer": "po", "comment": "- Propozim i GA",
+        })
+        await self.post("/m1/reorg", {"date": day, "answer": None, "comment": "Po pres përgjigje."})
+        self.assertIsNone((await self.get("/m1/reorg", date=day))["answer"])
+        async with self.SessionLocal() as db:
+            answers = (await db.execute(select(M1ReportingPointsReport.manual_answers))).scalar_one()
+            self.assertEqual(answers["plan_changes"], "Ruaj këtë")
+
+        px = await timed_get("/px-tasks", date=day, until="10:00")
+        self.assertEqual([(row["id"], row["scope"]) for row in px["items"]], [(f"pf_task:{self.t_1h.id}", "PX")])
+        devices = (await timed_get("/devices", date=day))["items"]
+        self.assertEqual(len(devices), 1)
+        device = devices[0]
+        self.assertEqual((device["category"], device["person"], device["status"]), ("fizikisht", "Colleague Test", "pending"))
+        await self.post("/devices/mark", {"id": device["id"], "status": "reacted"})
+        await self.post("/devices/mark", {"id": device["id"], "status": "reacted"})
+        self.assertEqual((await self.get("/devices", date=day))["items"][0]["status"], "reacted")
+        await self.post("/devices/mark", {"id": device["id"], "status": "done"}, expect=409)
+
+        started = perf_counter()
+        response = await self.client.get("/api/ga-notes", params={
+            "since": self.at(self.today, 7).isoformat(), "unconverted_only": "true", "note_type": "GA", "sync_mailbox": "false",
+        }, headers=self.h())
+        timings["/api/ga-notes"] = round((perf_counter() - started) * 1000, 1)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([(row["content"], row["author"]) for row in response.json()], [("Për sqarim", "Colleague Test")])
+        await timed_get("/agenda", start=self.at(self.today, 8).isoformat(), end=self.at(self.today, 16).isoformat(),
+                        include_live_microsoft="false")
+        await timed_get("/1h/comments", since=self.at(self.today, 7).isoformat(), only_new="true")
+        await timed_get("/discord/mentions/feed")
+        print(f"ASIST GA local read timings in milliseconds: {timings}")
+
     async def test_discord_artifact_feed_filters_the_channel_and_shows_reaction_changes(self) -> None:
         from app.models.ga_discord_mention import GaDiscordMention
         from app.services.ga_discord_mentions import bridge_secret
