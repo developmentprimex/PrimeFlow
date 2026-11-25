@@ -2,29 +2,146 @@ name: GA Discord Context Check
 
 on:
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: "Commit that introduced the Discord actions"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: primeflow-ga-discord-context-check
+  group: primeflow-ga-discord-action-check
   cancel-in-progress: false
 
 jobs:
   verify:
     runs-on: self-hosted
-    timeout-minutes: 7
+    timeout-minutes: 5
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      PYTHONUTF8: "1"
     steps:
-      - name: Verify deployed staff-channel context against Discord
+      - name: Verify two labeled replies and temporary reactions in Discord
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $deployed = (Get-Content -LiteralPath 'C:\pm2-system\primeflow-deploy\backend.sha' -Raw).Trim()
-          if ($deployed -notmatch '^[0-9a-f]{40}$') { throw 'The deployed backend commit is unavailable.' }
+          if ($deployed -notmatch '^[0-9a-f]{40}$' -or $env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw 'The backend deployment or the requested release could not be verified.'
+          }
           Set-Location -LiteralPath $env:GITHUB_WORKSPACE
-          git -c "safe.directory=$env:GITHUB_WORKSPACE" diff --quiet $deployed HEAD -- backend/scripts/check_ga_discord_context.py backend/app/services/ga_discord_channel_archive.py backend/app/services/ga_discord_mentions.py backend/app/schemas/ga_discord_mentions.py backend/discord_ga_mentions.py
+          git -c "safe.directory=$env:GITHUB_WORKSPACE" merge-base --is-ancestor $env:RELEASE_SHA $deployed
+          if ($LASTEXITCODE -ne 0) { throw 'The requested Discord actions have not been deployed.' }
+          git -c "safe.directory=$env:GITHUB_WORKSPACE" diff --quiet $deployed HEAD -- backend/app/services/ga_discord_actions.py backend/app/services/ga_discord_channel_archive.py backend/app/services/ga_discord_mentions.py backend/app/schemas/ga_discord_mentions.py
           if ($LASTEXITCODE -ne 0) { throw 'The staff context code in this checkout differs from the deployed backend.' }
           Write-Host "Checking deployed backend $deployed"
           Set-Location -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'backend')
-          & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -m scripts.check_ga_discord_context
-          if ($LASTEXITCODE -ne 0) { throw 'The Discord context check could not be completed.' }
+          @'
+          import asyncio
+          import hashlib
+          import json
+          import os
+
+          from fastapi import HTTPException
+
+          from app.db import SessionLocal, engine
+          from app.schemas.ga_discord_mentions import DiscordReactIn, DiscordReplyIn
+          from app.services import ga_discord_actions as actions, ga_discord_channel_archive as archive
+          from app.services.ga_assistant import ga_tz
+          from app.services.ga_discord_mentions import list_staff_channel_mentions, render_with_context
+
+          EMOJIS = ('\U0001F440', '\U0001F44D', '\u2705', '\u274C')
+          REPLIES = 'p\u00ebrgjigjet'
+          CHANNEL = '1572160944358953042'
+
+          async def source(client, target):
+              return (await actions.request_discord(client, 'GET', actions.message_path(target))).json()
+
+          def owned(message, emoji):
+              return any(r.get('me') and r.get('emoji', {}).get('name') == emoji
+                         for r in message.get('reactions', []))
+
+          async def has_reaction(client, target, emoji, expected):
+              for _ in range(4):
+                  if owned(await source(client, target), emoji) == expected:
+                      return True
+                  await asyncio.sleep(1)
+              return False
+
+          async def reply_check(db, client, target, anchor, kind, result):
+              label = '[TEST PrimeFlow MCP] Verifikim teknik (' + kind + '). Nuk kerkon veprim.'
+              nonce = hashlib.sha256(f'ga-actions:{os.environ["GITHUB_RUN_ID"]}:{kind}'.encode()).hexdigest()[:24]
+              reply, values = await actions.create_reply(db, target, DiscordReplyIn(text=label, nonce=nonce))
+              result['reply_url'] = reply.url
+              await archive.store_messages(db, [values])
+              sent = (await actions.request_discord(
+                  client, 'GET', f'/channels/{target.channel_id}/messages/{values["id"]}',
+              )).json()
+              result['discord_reply'] = bool(sent.get('author', {}).get('bot')
+                  and sent.get('content') == 'GA: ' + label
+                  and sent.get('message_reference', {}).get('message_id') == target.id)
+              updated = (await render_with_context(db, [anchor], ga_tz()))[0]
+              result['reply_visible'] = any(item['id'] == reply.id for item in updated['context'][REPLIES])
+
+          async def reaction_check(db, client, target, result):
+              before = await source(client, target)
+              emoji = next((candidate for candidate in EMOJIS if not owned(before, candidate)), None)
+              if emoji is None:
+                  result['reaction_error'] = 'all_test_reactions_already_present'
+                  return
+              try:
+                  await actions.react(db, target, DiscordReactIn(emoji=emoji))
+                  result['reaction_added'] = await has_reaction(client, target, emoji, True)
+              finally:
+                  await actions.react(db, target, DiscordReactIn(emoji=emoji, remove=True))
+                  result['reaction_removed'] = await has_reaction(client, target, emoji, False)
+
+          async def main():
+              from app.config import settings
+              if settings.DISCORD_GA_REPLIES_CHANNEL_ID != CHANNEL:
+                  raise SystemExit('The configured channel is outside the requested live test.')
+              async with SessionLocal() as db, actions.discord_client() as client:
+                  anchors = await list_staff_channel_mentions(db, before=None, limit=40)
+                  items = await render_with_context(db, anchors, ga_tz())
+                  pair = None
+                  for anchor, item in zip(anchors, items, strict=True):
+                      context = item['context']
+                      for candidate in [*context['para'], *context['pas'], *context[REPLIES]]:
+                          target = await actions.target_message(db, candidate['id'].removeprefix('dc:'))
+                          if target.channel_id != CHANNEL:
+                              continue
+                          try:
+                              await actions.verify_target(db, client, anchor)
+                              await actions.verify_target(db, client, target)
+                          except HTTPException:
+                              continue
+                          pair = anchor, target
+                          break
+                      if pair:
+                          break
+                  if not pair:
+                      raise SystemExit('No available mention and context pair was found in the requested channel.')
+                  results = {}
+                  anchor = pair[0]
+                  for kind, target in zip(('mention', 'context'), pair, strict=True):
+                      result = {'discord_reply': False, 'reply_visible': False,
+                                'reaction_added': False, 'reaction_removed': False}
+                      results[kind] = result
+                      for name, check in (
+                          ('reply', lambda: reply_check(db, client, target, anchor, kind, result)),
+                          ('reaction', lambda: reaction_check(db, client, target, result)),
+                      ):
+                          try:
+                              await check()
+                          except HTTPException as exc:
+                              result[name + '_error'] = f'HTTP {exc.status_code}: {exc.detail}'
+                          except Exception as exc:
+                              result[name + '_error'] = type(exc).__name__
+                  print('GA_DISCORD_ACTIONS_LIVE ' + json.dumps(results, ensure_ascii=True))
+              await engine.dispose()
+
+          asyncio.run(main())
+          '@ | & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -
+          if ($LASTEXITCODE -ne 0) { throw 'The live Discord actions check did not run to completion.' }
