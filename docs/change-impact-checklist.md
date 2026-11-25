@@ -375,6 +375,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Artifact-i përdor `ga_discord_mention_attachments` dhe botin e përmendjeve
   për të kërkuar linket e përkohshme nga Discord. Kontrollo hapjen nga një
   përmendje direkte dhe refuzimin për burimet jashtë listës së kanalit.
+  `ga_discord_attachment_content` përdor të njëjtin verifikim për të shkarkuar
+  skedarin nga CDN-ja e Discord-it dhe për ta kthyer si tabelë, tekst ose imazh
+  MCP. Kontrollo emrin e saktë, ID-të e kontekstit dhe kufizimet e skedarëve.
   Arkivi `ga_discord_channel_messages` furnizon `context` në të dy mjetet e
   përmendjeve. Kontrollo kanalin dhe thread-et publike, dritaren dyminutëshe
   për autorin, reply-n origjinal, reagimet dhe skedarët për çdo ID të lidhur.

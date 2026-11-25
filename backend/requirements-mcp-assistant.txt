@@ -8,3 +8,9 @@ asyncpg==0.30.0
 python-dotenv==1.0.1
 # Windows has no system IANA time-zone database: without tzdata ZoneInfo("Europe/Belgrade") fails.
 tzdata==2026.3
+openpyxl==3.1.5
+defusedxml==0.7.1
+xlrd==2.0.2
+python-docx==1.1.2
+pypdf==6.18.1
+Pillow==11.1.0

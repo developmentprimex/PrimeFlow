@@ -75,6 +75,7 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 | `ga_discord_mentions(since?, until?, only_open=true)` | Mesazhet në kanalet e serverit që e përmendin GA-në, një rol të saj, ose i përgjigjen asaj: kush (emri + inicialet), kanali, koha, teksti, linku, bashkëngjitjet, statusi |
 | `ga_discord_mentions_feed(before?, limit=25)` | Lista vetëm për lexim për Claude Artifact, me përmendjet direkte të GA-së nga `#det-nga-stafi-per-ga` dhe reagimet e tyre aktuale |
 | `ga_discord_mention_attachments(id)` | Linket e freskëta të bashkëngjitjeve nga një mesazh i listës, me emër dhe lloj skedari |
+| `ga_discord_attachment_content(id, name)` | Lexon skedarin me emrin e saktë te një përmendje ose mesazh konteksti. Excel/CSV kthejnë `sheets` me `name`, `csv`, `row_count`; DOCX/PDF/TXT kthejnë `text`; PNG/JPG kthejnë imazh MCP. |
 | `ga_discord_reply(id, text)` | Boti dërgon `GA: <text>` si reply në Discord dhe kthen `id` e `url` të përgjigjes |
 | `ga_discord_react(id, emoji, remove=false)` | Shton ose heq reagimin e botit për 👍, ✅, 👀 ose ❌. Kthen `id`, `emoji` dhe `removed` |
 | `ga_discord_mark(id, status)` | `seen` / `done` (ose `new`); në Discord s'ndryshon asgjë |
@@ -121,6 +122,11 @@ sinkronizuara, iPhone Sync dhe Discord vazhdojnë të lexohen nga PrimeFlow.
   derisa të kryhet.
 
 ## Discord: mentions e GA-së
+
+`ga_discord_attachment_content` lexon deri në 2 000 rreshta në total dhe
+shënon `truncated` kur rezultati shkurtohet. PDF-ja përdor tekstin e
+integruar. Për PDF të skanuara pa tekst kthehet një shpjegim. Për fotot
+limiti është 4 MB, për skedarët e tjerë 12 MB.
 
 - Procesi i leximit të botit: `backend/discord_ga_mentions.py`, procesi PM2
   `primeflow-ga-discord-mentions`. Intents: Guilds, Guild Messages, Guild Message Reactions, Message Content.
