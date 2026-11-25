@@ -121,9 +121,15 @@ class ReactionTests(unittest.TestCase):
         out = mentions.mention_out(self.row([]), {}, TZ)
         self.assertEqual((out["reactions"], out["reviewed_by"], out["ready_for_ga"]), ([], [], False))
 
+    def test_bot_reactions_do_not_count_as_staff_review(self) -> None:
+        row = self.row([{"emoji": "✅", "count": 1, "users": [{"discord_id": "99", "name": "GA Bot", "ga_bot": True}]}])
+        out = mentions.mention_out(row, {}, TZ)
+        self.assertEqual(out["reactions"][0]["count"], 1)
+        self.assertEqual((out["reviewed_by"], out["ready_for_ga"]), ([], False))
+
 
 class BotFilterTests(unittest.TestCase):
-    """The bot keeps only messages that concern the GA."""
+    """The bot classifies mentions and restricts all-message collection to the staff channel."""
 
     def setUp(self) -> None:
         try:
@@ -154,10 +160,43 @@ class BotFilterTests(unittest.TestCase):
     def test_reaction_events_only_for_tracked_server_messages(self) -> None:
         client = object.__new__(self.bot.GaMentionsBot)
         client.context, client.tracked, client.pending_reactions = {"guild_id": "1"}, {500}, {}
+        client.archive_channels = set()
+        client.get_channel = lambda _id: None
         client.reaction_changed(SimpleNamespace(guild_id=None, message_id=500, channel_id=9))  # DM
         client.reaction_changed(SimpleNamespace(guild_id=2, message_id=500, channel_id=9))  # other server
         client.reaction_changed(SimpleNamespace(guild_id=1, message_id=501, channel_id=9))  # not a GA mention
         self.assertEqual(client.pending_reactions, {})
+
+    def test_archives_staff_messages_even_without_a_mention(self) -> None:
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        import discord
+
+        client = object.__new__(self.bot.GaMentionsBot)
+        client.context = {"guild_id": "1", "staff_channel_id": "20"}
+        client.archive_channels = set()
+        client.refresh_context = AsyncMock(return_value=True)
+        client.post_batch = AsyncMock(return_value=True)
+        client.send = AsyncMock()
+        client.ga_id = 42
+        staff = SimpleNamespace(id=20, name="staff")
+        message = SimpleNamespace(
+            id=500, type=discord.MessageType.reply, guild=SimpleNamespace(id=1), channel=staff,
+            author=SimpleNamespace(id=42, bot=False, name="GA"), content="Përgjigje", attachments=[],
+            created_at=datetime(2026, 11, 20, 9, tzinfo=ZoneInfo("UTC")), edited_at=None,
+            jump_url="https://discord.com/channels/1/20/500", reference=SimpleNamespace(message_id=490),
+        )
+        asyncio.run(client.handle(message))
+        client.send.assert_not_awaited()
+        endpoint, body = client.post_batch.await_args.args
+        self.assertEqual(endpoint, "/channel-messages")
+        self.assertEqual(body["messages"][0]["reply_to_message_id"], "490")
+
+        client.post_batch.reset_mock()
+        message.channel = SimpleNamespace(id=21, name="other")
+        asyncio.run(client.handle(message))
+        client.post_batch.assert_not_awaited()
 
     def test_read_reactions(self) -> None:
         import asyncio

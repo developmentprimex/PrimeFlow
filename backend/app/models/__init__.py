@@ -254,3 +254,6 @@ from app.models.ga_personal import (
 )
 from app.models.oauth import GaAssistantItemTime, OAuthAuthorizationRequest, OAuthClient, OAuthToken  # noqa: E402,F401
 from app.models.ga_discord_mention import GaDiscordMention  # noqa: E402,F401
+from app.models.ga_discord_channel_message import GaDiscordArchiveCheckpoint, GaDiscordChannelMessage  # noqa: E402,F401
+from app.models.ga_device_reaction import GaDeviceReaction  # noqa: E402,F401
+from app.models.ga_1h_comment_receipt import GaOneHCommentReceipt  # noqa: E402,F401

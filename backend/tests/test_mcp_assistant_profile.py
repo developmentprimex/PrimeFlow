@@ -162,6 +162,62 @@ class AssistantProfileTests(unittest.IsolatedAsyncioTestCase):
         with patch("httpx.AsyncClient.post", AsyncMock(return_value=Response())):
             self.assertIsNone(await verifier.verify_token("pfm_at_inactive"))
 
+    async def test_discord_artifact_feed_returns_structured_read_only_data(self) -> None:
+        tool_name = "ga_discord_mentions_feed"
+        tools = {tool.name: tool for tool in await self.server.mcp.list_tools()}
+        tool = tools[tool_name]
+        self.assertTrue(tool.annotations.readOnlyHint)
+        self.assertEqual(set(tool.inputSchema["properties"]), {"before", "limit"})
+        self.assertIn("items", tool.outputSchema["properties"])
+        data = {"channel_id": "20", "timezone": "Europe/Belgrade", "bot_configured": True,
+                "items": [], "next_before": None}
+        with patch.object(self.server, "_request", AsyncMock(return_value=data)) as request:
+            _, structured = await self.server.mcp.call_tool(tool_name, {"before": "1002", "limit": 10})
+            request.assert_awaited_once_with(
+                "GET", "/api/ga-assistant/discord/mentions/feed", params={"before": "1002", "limit": 10},
+            )
+        self.assertEqual(structured, data)
+
+    async def test_discord_attachment_links_are_structured_and_read_only(self) -> None:
+        tool_name = "ga_discord_mention_attachments"
+        tools = {tool.name: tool for tool in await self.server.mcp.list_tools()}
+        self.assertTrue(tools[tool_name].annotations.readOnlyHint)
+        self.assertIn("attachments", tools[tool_name].outputSchema["properties"])
+        data = {"id": "dc:1002", "attachments": [{
+            "name": "plan.pdf", "url": "https://cdn.discordapp.com/attachments/20/300/plan.pdf?ex=fresh",
+            "content_type": "application/pdf",
+        }]}
+        with patch.object(self.server, "_request", AsyncMock(return_value=data)) as request:
+            _, structured = await self.server.mcp.call_tool(tool_name, {"id": "dc:1002"})
+            request.assert_awaited_once_with("GET", "/api/ga-assistant/discord/mentions/feed/1002/attachments")
+        self.assertEqual(structured, data)
+
+    async def test_discord_actions_register_as_writes_and_return_confirmed_results(self) -> None:
+        tools = {tool.name: tool for tool in await self.server.mcp.list_tools()}
+        for name in ("ga_discord_reply", "ga_discord_react"):
+            self.assertFalse(tools[name].annotations.readOnlyHint)
+            self.assertTrue(tools[name].annotations.openWorldHint)
+        self.assertTrue(tools["ga_discord_react"].annotations.idempotentHint)
+
+        reply = {"id": "dc:300", "url": "https://discord.com/channels/10/20/300"}
+        with patch.object(self.server, "_request", AsyncMock(return_value=reply)) as request:
+            _, structured = await self.server.mcp.call_tool("ga_discord_reply", {"id": "dc:191", "text": " Mirë "})
+            self.assertEqual(structured, reply)
+            self.assertEqual(request.await_args.args, ("POST", "/api/ga-assistant/discord/mentions/feed/191/reply"))
+            body = request.await_args.kwargs["json"]
+            self.assertEqual(body["text"], "Mirë")
+            self.assertRegex(body["nonce"], r"^[0-9a-f]{24}$")
+
+        reaction = {"id": "dc:191", "emoji": "👍", "removed": True}
+        with patch.object(self.server, "_request", AsyncMock(return_value=reaction)) as request:
+            _, structured = await self.server.mcp.call_tool(
+                "ga_discord_react", {"id": "dc:191", "emoji": "👍", "remove": True},
+            )
+            self.assertEqual(structured, reaction)
+            request.assert_awaited_once_with(
+                "POST", "/api/ga-assistant/discord/mentions/feed/191/react", json={"emoji": "👍", "remove": True},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

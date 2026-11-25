@@ -17,12 +17,10 @@ from app.models.department import Department
 from app.services.task_plan_feedback import load_task_plan_feedback
 from app.models.enums import CommonCategory
 from app.models.meeting import Meeting
-from app.models.system_task_template import SystemTaskTemplate
-from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
-from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_symbol_comment_event import TaskSymbolCommentEvent
 from app.models.user import User
+from app.services.report_ga_task_bz import ga_task_bz_labels
 from app.services.after_break_report import (
     BLUE_NOTE_COLUMNS,
     NOTE_REFERENCES,
@@ -32,12 +30,14 @@ from app.services.after_break_report import (
     _personal_section,
     _task_covers_day,
     load_blue_notes,
+    order_blue_notes_table,
 )
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
 from app.services.discord_ga_replies import GA_REPLIES_SECTION_TITLE, GA_REPLIES_WINDOW_VERSION
 from app.services.discord_ga_replies import GA_REPLIES_CAPTURE_VERSION, GA_REPLIES_CAPTURE_VERSION_KEY
+from app.services.discord_ga_replies import _report_window, m1_report_cutoff
 from app.services.discord_ga_reactions import (
     GA_REACTIONS_SECTION_KEY,
     GA_REACTIONS_SECTION_TITLE,
@@ -98,6 +98,7 @@ GA_HV_DV_TASKS_TITLE = "GA/HV/DV TASKS"
 PHYSICAL_GA_TITLE = "FIZIKISHT ME GA?"
 KA_GENT_QUESTIONS_TITLE = "A KA PYTJE/SQARIME ME KA/GENTIN"
 GA_PF_COMMENTS_TITLE = "(GA) A KA KOMENTE NE PF?"
+NEW_EMAILS_SECTION_TITLE = "EMAILS TE REJA?"
 MARKER_TASK_SECTIONS = {
     PHYSICAL_GA_TITLE: ({"F"}, "DETYRAT ME F"),
     KA_GENT_QUESTIONS_TITLE: ({"KA", "GENT"}, "DETYRAT ME KA OSE GENT"),
@@ -131,6 +132,7 @@ DISPLAY_SECTION_TITLES = [
 ]
 SECTION_DISPLAY_TITLES = {
     GA_REACTIONS_SECTION_KEY: GA_REACTIONS_SECTION_TITLE,
+    SECTION_TITLES[1]: NEW_EMAILS_SECTION_TITLE,
     SECTION_TITLES[2]: "(GA) VONESA/MUNGESA/PV. A NDRYSHON PLANI PER SOT?",
     SECTION_TITLES[4]: "FESTA EXT/TAK EXT/TAK INT/BZ ME GA/BLLOK:",
 }
@@ -147,12 +149,8 @@ GA_TASK_COLUMNS = [*GA_HV_DV_TASK_COLUMNS[:8], ("BZ ME", 14), *GA_HV_DV_TASK_COL
 TASK_FEEDBACK_OVERRIDES = "task_feedback_overrides"
 TASK_FEEDBACK_ROWS = "task_feedback_rows"
 CONTINUATION_ICONS = {"PO": "✓", "JO": "X"}
-EMAIL_TASK_SOURCES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("EM: INFO PX", re.compile(r"^\s*EM\s*:\s*INFO\s+PX\b", re.I)),
-    ("EM: IT", re.compile(r"^\s*EM\s*:\s*IT\b", re.I)),
-    ("EM: HF", re.compile(r"^\s*EM\s*:\s*HF\b", re.I)),
-    ("EM: PX EU", re.compile(r"^\s*EM\s*:\s*PX\s+EU\b", re.I)),
-)
+RETIRED_EMAIL_TASK_CAPTION = re.compile(r"EM\s*:\s*(?:INFO PX|IT|HF|PX EU)\s*:\s*\d+\s*:?", re.I)
+RETIRED_EMAIL_TASK_PLACEHOLDER = "Email-source tasks load automatically when M1 is generated."
 LEGACY_NOTES_TITLE = (
     "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET "
     "DETYRE? EM: INFO PX (KO SPAM), EM:INFO HF, (KO SPAM) EM: PRIMEX EU (GMAIL-KO SPAM), "
@@ -160,6 +158,7 @@ LEGACY_NOTES_TITLE = (
 )
 SECTION_TITLE_ALIASES = {
     GA_REACTIONS_SECTION_TITLE: GA_REACTIONS_SECTION_KEY,
+    NEW_EMAILS_SECTION_TITLE: SECTION_TITLES[1],
     "(GA/KA/GENTI) KUSH KA DET PERSONALISHT?": SECTION_TITLES[7],
     "TASKS PERSONALISHT ME KA/GENTIN?": SECTION_TITLES[7],
     "WFC TASKS (KA/GENTI)": SECTION_TITLES[8],
@@ -181,10 +180,6 @@ def is_generated_subject(subject: str | None, day: date) -> bool:
     }
 
 
-def _emails_default_body() -> str:
-    return "Email-source tasks load automatically when M1 is generated."
-
-
 def _default_body(title: str) -> str:
     if title == GA_PF_COMMENTS_TITLE:
         return _symbol_comment_table([])
@@ -193,7 +188,7 @@ def _default_body(title: str) -> str:
     if title == GA_REACTIONS_SECTION_KEY:
         return REACTIONS_UNAVAILABLE
     if title == SECTION_TITLES[1]:
-        return _emails_default_body()
+        return ""
     if title == SECTION_TITLES[2]:
         return "\n".join(["VONESA: 0", "", "MUNGESA: 0", "", "NDRYSHON PLANI: (Ploteso manualisht)"])
     if title == SECTION_TITLES[3]:
@@ -232,6 +227,26 @@ def _without_retired_task_status_prompt(body: str) -> str:
     ).strip()
 
 
+def _without_retired_email_task_tables(body: str) -> str:
+    """Remove generated task tables from old M1 drafts, preserving mailbox content."""
+    lines = _without_retired_task_status_prompt(body).splitlines()
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        index += 1
+        if line == RETIRED_EMAIL_TASK_PLACEHOLDER:
+            continue
+        if RETIRED_EMAIL_TASK_CAPTION.fullmatch(line):
+            start = next((i for i in range(index, len(lines)) if lines[i].strip()), len(lines))
+            block = _ascii_table_block(lines, start)
+            if block:
+                index = block[1]
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
 def _split_notes_and_emails(body: str) -> tuple[str, str]:
     note_lines: list[str] = []
     email_lines: list[str] = []
@@ -242,7 +257,6 @@ def _split_notes_and_emails(body: str) -> tuple[str, str]:
             note_lines.append(line)
     notes_body = "\n".join(note_lines).strip() or "NOTES: 0"
     emails_body = _without_retired_task_status_prompt("\n\n".join(line for line in email_lines if line))
-    emails_body = emails_body or _emails_default_body()
     return notes_body, emails_body
 
 
@@ -332,11 +346,11 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
             notes_body, emails_body = _split_notes_and_emails(body)
             if SECTION_TITLES[3] not in by_title:
                 by_title[SECTION_TITLES[3]] = {
-                    "section_key": SECTION_TITLES[3], "title": SECTION_TITLES[3], "body": notes_body,
+                    "section_key": SECTION_TITLES[3], "title": SECTION_TITLES[3], "body": order_blue_notes_table(notes_body),
                 }
             if SECTION_TITLES[1] not in by_title:
                 by_title[SECTION_TITLES[1]] = {
-                    "section_key": SECTION_TITLES[1], "title": SECTION_TITLES[1], "body": emails_body,
+                    "section_key": SECTION_TITLES[1], "title": NEW_EMAILS_SECTION_TITLE, "body": emails_body,
                 }
             continue
         if title is None:
@@ -348,7 +362,9 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
                 })
             continue
         if title == SECTION_TITLES[1]:
-            body = _separate_keyed_prompt_lines(_without_retired_task_status_prompt(body)) or _emails_default_body()
+            body = _separate_keyed_prompt_lines(_without_retired_email_task_tables(body))
+        if title == SECTION_TITLES[3]:
+            body = order_blue_notes_table(body)
         if title == GA_PF_COMMENTS_TITLE and body.strip() in {"", "(Ploteso manualisht)"}:
             body = _default_body(title)
         if title not in by_title:
@@ -485,12 +501,6 @@ def _notes_section(note_rows: list[list[str]]) -> str:
     )
 
 
-def _email_task_source_label(task: Task) -> str | None:
-    """Return the standard email-source tag at the beginning of a task title."""
-    title = task.title or ""
-    return next((label for label, pattern in EMAIL_TASK_SOURCES if pattern.search(title)), None)
-
-
 def _gmail_report_cell(value: str) -> str:
     # Pipes and line breaks are structural characters in report tables.
     return " ".join(value.replace("|", "｜").split()) or "-"
@@ -511,12 +521,14 @@ def _replace_gmail_table(body: str, gmail_body: str) -> str:
 
 async def refresh_m1_gmail_section(
     sections: list[dict[str, str]], report_day: date, *, sent: bool = False,
+    generated_snapshot: dict | None = None, sent_at: datetime | None = None,
 ) -> list[dict[str, str]]:
     tz = report_timezone()
     if sent and report_day != datetime.now(tz).date():
         return sections
+    window = _report_window(report_day, "M1", m1_report_cutoff(generated_snapshot, sent_at if sent else None))
     try:
-        messages = await read_m1_gmail_messages(report_day, tz)
+        messages = await read_m1_gmail_messages(report_day, tz, window=window)
     except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError) as exc:
         logger.warning("m1_gmail_pilot_unavailable error_type=%s", type(exc).__name__)
         gmail_body = f"{GMAIL_PILOT_CAPTION}: Leximi nuk u krye"
@@ -546,48 +558,6 @@ async def refresh_m1_gmail_section(
         if section.get("section_key") == SECTION_TITLES[1] else section
         for section in sections
     ]
-
-
-def _emails_section(
-    tasks: list[Task],
-    names: dict[Any, str],
-    assignee_ids_by_task: dict[Any, set[Any]],
-    department_codes: dict[Any, str],
-    all_participant_ids: set[Any],
-) -> tuple[str, int]:
-    """Render open email-source tasks in one table per standard source tag."""
-    lines: list[str] = []
-    count = 0
-    for label, _ in EMAIL_TASK_SOURCES:
-        source_tasks = [
-            task
-            for task in tasks
-            if _is_open(task) and _email_task_source_label(task) == label
-        ]
-        count += len(source_tasks)
-        lines.extend(
-            _tomorrow_task_table(
-                f"{label}: {len(source_tasks)}",
-                _task_lines(
-                    source_tasks,
-                    names,
-                    assignee_ids_by_task,
-                    include_status=True,
-                    all_participant_ids=all_participant_ids,
-                ),
-                with_status=True,
-                task_metadata=_task_metadata_by_title(
-                    source_tasks,
-                    department_codes,
-                    names,
-                    assignee_ids_by_task,
-                    all_participant_ids,
-                ),
-                include_am_pm_times=True,
-            )
-        )
-        lines.append("")
-    return _normalize_section(lines), count
 
 
 def _ga_hv_dv_task_rows(
@@ -710,60 +680,6 @@ def _ga_hv_dv_tables_body(
     return _normalize_section(lines)
 
 
-async def _ga_task_bz_labels(
-    db: AsyncSession, tasks: list[Task], assignee_ids_by_task: dict[Any, set[Any]],
-) -> dict[Any, str]:
-    """Mirror the Admin Tasks BZ ME column for the tasks already selected for M1."""
-    if not tasks:
-        return {}
-
-    task_ids = [task.id for task in tasks]
-    task_alignment: dict[Any, set[Any]] = {}
-    for task_id, user_id in (await db.execute(
-        select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
-        .where(TaskAlignmentUser.task_id.in_(task_ids))
-    )).all():
-        task_alignment.setdefault(task_id, set()).add(user_id)
-
-    template_ids = {task.system_template_origin_id for task in tasks if task.system_template_origin_id}
-    template_assignees: dict[Any, list[Any]] = {}
-    template_alignment: dict[Any, set[Any]] = {}
-    if template_ids:
-        for template_id, default_id, assignee_ids, alignment_id in (await db.execute(
-            select(SystemTaskTemplate.id, SystemTaskTemplate.default_assignee_id,
-                   SystemTaskTemplate.assignee_ids, SystemTaskTemplateAlignmentUser.user_id)
-            .outerjoin(SystemTaskTemplateAlignmentUser,
-                       SystemTaskTemplateAlignmentUser.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskTemplate.id.in_(template_ids))
-        )).all():
-            template_assignees[template_id] = [default_id, *(assignee_ids or [])]
-            if alignment_id:
-                template_alignment.setdefault(template_id, set()).add(alignment_id)
-
-    executors_by_task = {}
-    for task in tasks:
-        template_id = task.system_template_origin_id
-        coordinators = task_alignment.get(task.id, set()) | template_alignment.get(template_id, set())
-        assigned = [task.assigned_to, *sorted(assignee_ids_by_task.get(task.id, ()), key=str),
-                    *template_assignees.get(template_id, [])]
-        executors_by_task[task.id] = [user_id for user_id in dict.fromkeys(assigned)
-                                      if user_id and user_id not in coordinators]
-
-    user_ids = {user_id for executors in executors_by_task.values() for user_id in executors}
-    if not user_ids:
-        return {}
-    initials = {
-        user_id: "".join(part[0].upper() for part in (full_name or username or "").split()[:2])
-        for user_id, full_name, username in (await db.execute(
-            select(User.id, User.full_name, User.username).where(User.id.in_(user_ids), User.work_staff_filter())
-        )).all()
-    }
-    return {
-        task_id: " / ".join(initials[user_id] for user_id in executors if initials.get(user_id)) or "-"
-        for task_id, executors in executors_by_task.items()
-    }
-
-
 async def _ga_hv_dv_task_section(
     db: AsyncSession,
     tasks: list[Task],
@@ -805,7 +721,7 @@ async def _ga_hv_dv_task_section(
         )
         rows_by_title[title] = rows
         feedback_rows[title] = []
-        bz_labels = await _ga_task_bz_labels(db, selected, assignee_ids_by_task) if title == GA_TASKS_TITLE else {}
+        bz_labels = await ga_task_bz_labels(db, selected, assignee_ids_by_task) if title == GA_TASKS_TITLE else {}
         for row, task in zip(rows, selected):
             responses = responses_by_task.get(task.id, [])
             actions = {action for _, action, _ in responses}
@@ -1179,13 +1095,6 @@ async def build_morning_report_sections(
     blue_notes = await load_blue_notes(db)
     note_rows = [values for _, values in blue_notes]
     all_participant_ids = await _all_participant_user_ids(db)
-    email_tasks, email_task_count = _emails_section(
-        tasks,
-        names,
-        assignee_ids_by_task,
-        department_codes,
-        all_participant_ids,
-    )
     task_tables, feedback_rows = await _ga_hv_dv_task_section(
         db, tasks, names, assignee_ids_by_task, report_day, department_codes, task_feedback_overrides or {},
     )
@@ -1282,7 +1191,6 @@ async def build_morning_report_sections(
          "body": await reaction_summary_for_day(db, report_day, report="M1", generated_at=generated_at)},
         {"title": GA_PF_COMMENTS_TITLE, "body": _symbol_comment_table(symbol_comments)},
         {"title": GA_HV_DV_TASKS_TITLE, "body": task_tables},
-        {"title": SECTION_TITLES[1], "body": email_tasks},
         {"title": SECTION_TITLES[2], "body": attendance},
         {"title": SECTION_TITLES[3], "body": _notes_section(note_rows)},
         {"title": SECTION_TITLES[4], "body": day_context},
@@ -1306,7 +1214,6 @@ async def build_morning_report_sections(
             SECTION_TITLES[0]: 0,
             GA_PF_COMMENTS_TITLE: len(symbol_comments),
             GA_HV_DV_TASKS_TITLE: sum(len(rows) for title, rows in feedback_rows.items() if title != "plan"),
-            SECTION_TITLES[1]: email_task_count,
             SECTION_TITLES[2]: pv_count + sum(
                 1
                 for entry in entries
@@ -1330,7 +1237,9 @@ async def build_morning_report_sections(
             "body": _marker_task_table(caption, marked_tasks, names, owners, department_codes),
         })
         snapshot["counts"][title] = len(marked_tasks)
-    ordered = await refresh_m1_gmail_section(normalize_morning_report_sections(sections), report_day)
+    ordered = await refresh_m1_gmail_section(
+        normalize_morning_report_sections(sections), report_day, generated_snapshot=snapshot,
+    )
     return await filter_report_sections(db, ordered, report_day), snapshot
 
 

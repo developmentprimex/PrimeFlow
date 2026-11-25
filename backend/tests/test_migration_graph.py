@@ -9,6 +9,9 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 import sqlalchemy as sa
+from alembic.util import CommandError
+
+from scripts.check_deploy_migrations import planned_head
 
 
 def migration_scripts() -> ScriptDirectory:
@@ -18,6 +21,40 @@ def migration_scripts() -> ScriptDirectory:
 
 
 class MigrationGraphTests(unittest.TestCase):
+    def test_production_preflight_accepts_known_revisions(self) -> None:
+        scripts = migration_scripts()
+        head = scripts.get_current_head()
+        for current in ((head,), ("0205_px_note_email_source",), ("0206_discord_ga_reaction_files",)):
+            with self.subTest(current=current):
+                self.assertEqual(planned_head(scripts, current), head)
+
+    def test_reaction_source_columns_are_added_after_both_versions_of_0206(self) -> None:
+        scripts = migration_scripts()
+        restore = "0206_discord_ga_reaction_files"
+        repair = "0212_ga_reaction_source"
+        steps = scripts._upgrade_revs("head", restore)
+        self.assertIn(repair, [step.revision.revision for step in steps])
+        self.assertNotIn(restore, [step.revision.revision for step in steps])
+
+        output = StringIO()
+        operations = Operations(MigrationContext.configure(
+            dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output},
+        ))
+        migration = scripts.get_revision(repair).module
+        with patch.object(migration, "op", operations):
+            migration.upgrade()
+        sql = output.getvalue()
+        self.assertIn("ADD COLUMN IF NOT EXISTS message_channel_id VARCHAR(32)", sql)
+        self.assertIn("ADD COLUMN IF NOT EXISTS message_author_id VARCHAR(32)", sql)
+        self.assertNotIn("attachment_count", sql)
+
+    def test_production_preflight_rejects_unknown_or_missing_revision(self) -> None:
+        scripts = migration_scripts()
+        with self.assertRaisesRegex(CommandError, "not_in_the_deployment"):
+            planned_head(scripts, ("not_in_the_deployment",))
+        with self.assertRaisesRegex(CommandError, "has no Alembic revision"):
+            planned_head(scripts, ())
+
     def test_deployed_pause_and_symbol_comment_merge_is_recognized(self) -> None:
         scripts = migration_scripts()
         deployed = "0204_merge_pause_symbol_heads"

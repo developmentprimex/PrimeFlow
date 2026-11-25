@@ -19,24 +19,24 @@ from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.enums import UserRole
 from app.models.user import User
 from app.services.after_break_report import (
-    MANUAL_SECTION_TITLES,
     SECTION_TITLES,
+    UNFINISHED_EXPLANATION_OVERRIDES,
     apply_1h_confirmation_questions,
     apply_unfinished_priority_task_table,
     apply_waiting_client_task_table,
     build_after_break_report_sections,
+    build_unfinished_priority_task_rows,
     normalize_after_break_report_sections,
     is_retired_after_break_question,
     after_break_automated_section_title,
     AUTOMATED_SECTION_TITLES,
     populate_pcm_projects_section,
+    refresh_after_break_discord_sections,
     render_html,
     render_plain_text,
     send_after_break_report,
     subject_for,
 )
-from app.services.discord_ga_replies import refresh_ga_reply_section
-from app.services.discord_ga_reactions import refresh_ga_reaction_section
 from app.services.meeting_point_manual_sync import (
     custom_manual_questions,
     merge_common_view_manual_sections,
@@ -44,7 +44,6 @@ from app.services.meeting_point_manual_sync import (
     removes_custom_manual_section,
     with_section_keys,
 )
-from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -65,10 +64,16 @@ class RecipientsPayload(BaseModel):
     bcc: list[str] = Field(default_factory=list)
 
 
+class TaskExplanationUpdate(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+    comment: str | None = Field(default=None, max_length=4000)
+
+
 class DraftUpdate(BaseModel):
     subject: str | None = Field(default=None, min_length=1, max_length=255)
     recipients: RecipientsPayload | None = None
     sections: list[SectionPayload] | None = None
+    unfinished_explanations: dict[uuid.UUID, TaskExplanationUpdate] | None = None
 
 
 class SettingsPayload(BaseModel):
@@ -170,19 +175,28 @@ def _draft(row: AfterBreakReportDraft, sections: list[dict[str, str]] | None = N
 async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) -> dict:
     sections = normalize_after_break_report_sections(row.sections)
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
-    sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", refresh_current=row.status != "SENT",
-                                             sent_at=row.sent_at, populate_missing=True, generated_snapshot=row.generated_snapshot)
-    sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M2",
-                                                 generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
+    sections = await refresh_after_break_discord_sections(
+        db, sections, row.report_date, generated_snapshot=row.generated_snapshot,
+        sent=row.status == "SENT", sent_at=row.sent_at,
+    )
     sections = await apply_1h_confirmation_questions(db, sections)
-    sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
         db, sections, "after_break", row.sections, settings.manual_questions
     )
-    draft = _draft(row, await filter_report_sections(db, sections, row.report_date))
+    sections = await filter_report_sections(db, sections, row.report_date)
+    explanation_rows: list[dict[str, str]] = []
+    # The task builder filters attendance before assigning row numbers. Keep
+    # these numbers paired with the task IDs used by the inline controls.
+    sections = await apply_unfinished_priority_task_table(
+        db, sections, row.report_date,
+        explanation_overrides=(row.generated_snapshot or {}).get(UNFINISHED_EXPLANATION_OVERRIDES),
+        explanation_rows=explanation_rows,
+    )
+    draft = _draft(row, sections)
+    draft["unfinished_task_explanations"] = explanation_rows
     draft.update(await section_note_controls(
         db, draft["sections"], SECTION_TITLES[9], row.generated_snapshot,
     ))
@@ -287,11 +301,9 @@ async def generate_draft(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Generate failed: {exc}") from exc
     row = (
-        await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_date))
+        await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_date).with_for_update())
     ).scalar_one_or_none()
     existing_sections = row.sections if row is not None else None
-    if row is not None:
-        sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
         db, sections, "after_break", existing_sections, settings.manual_questions
@@ -308,6 +320,11 @@ async def generate_draft(
         )
         db.add(row)
     else:
+        if overrides := (row.generated_snapshot or {}).get(UNFINISHED_EXPLANATION_OVERRIDES):
+            snapshot[UNFINISHED_EXPLANATION_OVERRIDES] = overrides
+            sections = await apply_unfinished_priority_task_table(
+                db, sections, report_date, explanation_overrides=overrides,
+            )
         row.subject = subject_for(report_date)
         if not normalize_recipients(row.recipients)["to"]:
             row.recipients = normalize_recipients(recipients)
@@ -328,9 +345,30 @@ async def update_draft(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_after_break_report_user),
 ) -> dict:
-    row = await db.get(AfterBreakReportDraft, draft_id)
+    row = await db.get(AfterBreakReportDraft, draft_id, with_for_update=True)
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
+    if payload.unfinished_explanations:
+        task_rows = await build_unfinished_priority_task_rows(db, row.report_date, include_task_id=True)
+        allowed = {task_row[-1] for task_row in task_rows}
+        updates = {str(task_id): fields for task_id, fields in payload.unfinished_explanations.items()}
+        if updates.keys() - allowed:
+            raise HTTPException(status_code=409, detail="Lista e detyrave ka ndryshuar. Rifresko raportin.")
+        snapshot = dict(row.generated_snapshot or {})
+        overrides = dict(snapshot.get(UNFINISHED_EXPLANATION_OVERRIDES) or {})
+        for task_id, fields in updates.items():
+            values = dict(overrides.get(task_id, {}))
+            for name, value in fields.model_dump(exclude_unset=True).items():
+                if value is None:
+                    values.pop(name, None)
+                else:
+                    values[name] = value.strip()
+            if values:
+                overrides[task_id] = values
+            else:
+                overrides.pop(task_id, None)
+        snapshot[UNFINISHED_EXPLANATION_OVERRIDES] = overrides
+        row.generated_snapshot = snapshot
     if payload.subject is not None:
         row.subject = payload.subject
     if payload.recipients is not None:
@@ -386,11 +424,13 @@ async def preview_draft(
         db, normalize_after_break_report_sections(row.sections)
     )
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
-    sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", refresh_current=row.status != "SENT",
-                                             sent_at=row.sent_at, populate_missing=True, generated_snapshot=row.generated_snapshot)
-    sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M2",
-                                                 generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
-    sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
+    sections = await refresh_after_break_discord_sections(
+        db, sections, row.report_date, generated_snapshot=row.generated_snapshot,
+        sent=row.status == "SENT", sent_at=row.sent_at,
+    )
+    sections = await apply_unfinished_priority_task_table(
+        db, sections, row.report_date, explanation_overrides=(row.generated_snapshot or {}).get(UNFINISHED_EXPLANATION_OVERRIDES),
+    )
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
     note_controls = await section_note_controls(db, sections, SECTION_TITLES[9], row.generated_snapshot)
@@ -417,11 +457,13 @@ async def send_draft(
         db, normalize_after_break_report_sections(row.sections)
     )
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
-    sections = await refresh_ga_reply_section(db, sections, row.report_date, report="M2", refresh_current=row.status != "SENT",
-                                             sent_at=row.sent_at, populate_missing=True, generated_snapshot=row.generated_snapshot)
-    sections = await refresh_ga_reaction_section(db, sections, row.report_date, report="M2",
-                                                 generated_snapshot=row.generated_snapshot, sent=row.status == "SENT")
-    sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
+    sections = await refresh_after_break_discord_sections(
+        db, sections, row.report_date, generated_snapshot=row.generated_snapshot,
+        sent=row.status == "SENT", sent_at=row.sent_at,
+    )
+    sections = await apply_unfinished_priority_task_table(
+        db, sections, row.report_date, explanation_overrides=(row.generated_snapshot or {}).get(UNFINISHED_EXPLANATION_OVERRIDES),
+    )
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await filter_report_sections(db, sections, row.report_date)
     row.sections = sections

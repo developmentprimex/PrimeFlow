@@ -28,11 +28,12 @@ from app.services.task_strike_events import (
     split_strike_timestamp,
 )
 from app.services.primeflow_report_delivery import (
-    _text_overrides_for_1h_interval,
+    _report_snapshot_with_fallback,
     _undiscussed_px_notes_statement,
     _optional_attachment,
     load_1h_reminder_questions,
     load_undiscussed_notes,
+    report_text_overrides,
     strike_interval_end,
     strike_interval_start,
 )
@@ -223,11 +224,10 @@ class PrimeFlowReportTests(unittest.TestCase):
             "app.services.primeflow_report_delivery.SessionLocal",
             return_value=FakeSession(),
         ):
-            title_overrides, _ = asyncio.run(_text_overrides_for_1h_interval(
-                stale_common_view,
-                interval_start=strike_interval_start(report_day, "11:00"),
-                interval_end=interval_end,
-            ))
+            snapshot = asyncio.run(_report_snapshot_with_fallback(stale_common_view, interval_end=interval_end))
+        title_overrides, _ = report_text_overrides(
+            snapshot, interval_start=strike_interval_start(report_day, "11:00"), interval_end=interval_end,
+        )
 
         plain, marked = title_overrides[str(task_id)]
         self.assertIn("1. Newly completed", plain)

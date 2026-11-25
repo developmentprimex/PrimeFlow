@@ -39,7 +39,6 @@ from app.services.morning_report import (
     TASK_FEEDBACK_ROWS,
     _attendance_section,
     _day_context_section,
-    _email_task_source_label,
     _ga_hv_dv_task_rows,
     _ga_hv_dv_task_section,
     _ga_hv_dv_tables_body,
@@ -811,7 +810,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([section["section_key"] for section in sections], DISPLAY_SECTION_TITLES)
         bodies = {section["section_key"]: section["body"] for section in sections}
         self.assertEqual(bodies[SECTION_TITLES[0]], "GA replied at 07:55")
-        self.assertIn("Email-source tasks load automatically", bodies[SECTION_TITLES[1]])
+        self.assertEqual(bodies[SECTION_TITLES[1]], "")
         self.assertIn("NDRYSHON PLANI", bodies[SECTION_TITLES[2]])
 
     def test_old_pv_table_moves_into_first_automatic_section_once(self) -> None:
@@ -847,13 +846,6 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         ]
         for output in rendered:
             self.assertLess(output.index("27.11.2026"), output.index("GA reply"))
-
-    def test_standard_email_task_source_tags_are_detected(self) -> None:
-        self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: INFO PX: Update catalogue")), "EM: INFO PX")
-        self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: IT: Reset account")), "EM: IT")
-        self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: HF: Invoice issue")), "EM: HF")
-        self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: PX EU: Customer request")), "EM: PX EU")
-        self.assertIsNone(_email_task_source_label(SimpleNamespace(title="EM: PX: General mail")))
 
     def test_normalization_renames_the_previous_notes_section(self) -> None:
         previous_title = (
@@ -1080,29 +1072,45 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("max-width:600px", html)
         self.assertIn("@media only screen and (max-width:600px)", html)
 
-    def test_email_html_renders_spaced_ascii_email_tables(self) -> None:
-        # Editable saved drafts can contain blank spacer lines between every
-        # ASCII table row.  The M1 email must still render it as an HTML table.
-        spaced_table = "\n\n".join(
-            [
-                "EM: INFO PX: 1:",
-                "+----+----------------------+-------+-------------+------------------------------------------------------------------+",
-                "| NR | KUSH                 | DEP   | AM/PM       | TITULLI                                                          |",
-                "+----+----------------------+-------+-------------+------------------------------------------------------------------+",
-                "| 1  | EF                   | DEV   | -           | EM: INFO PX: DET TEST [[st:WAITING_CONFIRMATION]]               |",
-                "+----+----------------------+-------+-------------+------------------------------------------------------------------+",
-            ]
-        )
-
-        html = render_html(
-            subject_for(date(2026, 8, 5)),
-            date(2026, 8, 5),
-            [{"title": SECTION_TITLES[1], "body": spaced_table}],
-        )
-
+    def test_saved_email_section_keeps_only_the_mailbox_table(self) -> None:
+        task_table = "\n\n".join([
+            "+----+------+",
+            "| NR | KUSH |",
+            "+----+------+",
+            "| 1  | EF   |",
+            "+----+------+",
+        ])
+        mailbox = "\n\n".join([
+            "EMAIL-E NGA GMAIL: 1",
+            "+----+------------------+",
+            "| NR | TITULLI          |",
+            "+----+------------------+",
+            "| 1  | Customer message |",
+            "+----+------------------+",
+        ])
+        body = "\n\n".join([
+            *(f"EM: {source}: 1:\n\n{task_table}" for source in ("INFO PX", "IT", "HF", "PX EU")),
+            mailbox,
+        ])
+        sections = normalize_morning_report_sections([{"title": SECTION_TITLES[1], "body": body}])
+        email_section = next(section for section in sections if section["section_key"] == SECTION_TITLES[1])
+        self.assertEqual(email_section["title"], "EMAILS TE REJA?")
+        self.assertEqual(email_section["body"], mailbox)
+        self.assertEqual(normalize_morning_report_sections(sections), sections)
+        report_day = date(2026, 8, 5)
+        html = render_html("M1", report_day, [email_section])
         self.assertIn('class="report-table"', html)
-        self.assertIn("EM: INFO PX: DET TEST", html)
         self.assertNotIn("<pre", html)
+        outputs = [
+            html,
+            render_plain_text("M1", report_day, sections),
+            Document(BytesIO(render_section_report_docx("M1", "M1", report_day, sections))).element.body.xml,
+        ]
+        for output in outputs:
+            self.assertIn("EMAILS TE REJA?", output)
+            self.assertIn("Customer message", output)
+            self.assertNotIn("DET NGA EMAILS TE REJA", output)
+            self.assertNotIn("EM: INFO PX:", output)
 
     def test_settings_routes_require_manager_or_admin(self) -> None:
         settings_routes = [route for route in router.routes if route.path == "/settings"]

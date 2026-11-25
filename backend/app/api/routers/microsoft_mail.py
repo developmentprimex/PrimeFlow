@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-import base64
 import hashlib
 import hmac
 import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from imaplib import IMAP4
-from typing import Literal
 
 import httpx
-from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
@@ -25,60 +20,39 @@ from app.api.deps import get_current_user, require_admin
 from app.auth.security import ALGORITHM
 from app.config import settings
 from app.db import get_db
-from app.integrations import gmail_mail, homeface_mail, microsoft_mail as graph
+from app.integrations import gmail_mail, microsoft_mail as graph
 from app.models.enums import UserRole
+from app.models.morning_report_draft import MorningReportDraft
 from app.models.microsoft_mail_token import MicrosoftMailToken
 from app.models.user import User
+from app.services.discord_ga_replies import _report_window, m1_report_cutoff
 from app.services.info_px_notes import save_mailbox_notes
-from app.services.primeflow_report import report_timezone
+from app.services.report_inboxes import (
+    MailSource,
+    OAuthMailSource,
+    _cipher as _cipher,
+    _configured,
+    _derive_key,
+    _mailbox,
+    _token_fields,
+    read_report_inbox,
+    report_inbox_statuses,
+    report_mailbox,
+)
 
 
 router = APIRouter()
 gmail_router = APIRouter()
 _CALLBACK_PATH = "/api/microsoft-mail/callback"
 _GMAIL_CALLBACK_PATH = "/api/gmail-mail/callback"
-OAuthMailSource = Literal["info-px", "it", "px-eu"]
-MailSource = Literal["info-px", "it", "px-eu", "hf"]
 
 
 def _cookie_name(source: OAuthMailSource) -> str:
     return f"primeflow_{source.replace('-', '_')}_oauth"
 
 
-def _mailbox(source: OAuthMailSource) -> graph.Mailbox:
-    return gmail_mail.mailbox_for_px_eu() if source == "px-eu" else graph.mailbox_for(source)
-
-
-def _configured(mailbox: graph.Mailbox) -> bool:
-    provider_config = settings.GMAIL_PX_EU_REDIRECT_URI if mailbox.note_origin == gmail_mail.PX_EU_NOTE_ORIGIN else (
-        mailbox.tenant_id and settings.MS_MAIL_REDIRECT_URI
-    )
-    return all((mailbox.client_id, mailbox.client_secret, provider_config)) and len(settings.MS_MAIL_SIGNING_KEY or "") >= 32
-
-
-def _derive_key(purpose: str) -> bytes:
-    digest = hmac.digest((settings.MS_MAIL_SIGNING_KEY or "").encode(), f"primeflow-info-px:{purpose}".encode(), "sha256")
-    return base64.urlsafe_b64encode(digest)
-
-
 def _verifier(nonce: str) -> str:
     return _derive_key("pkce:" + nonce).decode().rstrip("=")
-
-
-def _cipher(mailbox: graph.Mailbox) -> Fernet:
-    purpose = "token-encryption" if mailbox.token_id == 1 else f"token-encryption:{mailbox.token_id}"
-    return Fernet(_derive_key(purpose))
-
-
-def _token_fields(token: dict, mailbox: graph.Mailbox) -> dict:
-    cipher = _cipher(mailbox)
-    fields = {
-        "access_token": cipher.encrypt(token["access_token"].encode()).decode(),
-        "expires_at": datetime.now(timezone.utc) + timedelta(seconds=int(token.get("expires_in", 3600))),
-    }
-    if token.get("refresh_token"):
-        fields["refresh_token"] = cipher.encrypt(token["refresh_token"].encode()).decode()
-    return fields
 
 
 @router.post("/authorize-url")
@@ -167,62 +141,35 @@ async def _finish_authorization(
     return response
 
 
-async def _access_token(db: AsyncSession, client: httpx.AsyncClient, row: MicrosoftMailToken, mailbox: graph.Mailbox) -> str:
-    refresh_by = datetime.now(timezone.utc) + timedelta(seconds=45)
-    if row.expires_at <= refresh_by:
-        await db.refresh(row, with_for_update=True)
-        if row.expires_at <= refresh_by:
-            provider = gmail_mail if mailbox.note_origin == gmail_mail.PX_EU_NOTE_ORIGIN else graph
-            token = await provider.request_token(client, {
-                "grant_type": "refresh_token",
-                "refresh_token": _cipher(mailbox).decrypt(row.refresh_token.encode()).decode(),
-            }, mailbox)
-            for field, value in _token_fields(token, mailbox).items():
-                setattr(row, field, value)
-        access_token = row.access_token
-        await db.commit()
-    else:
-        access_token = row.access_token
-    return _cipher(mailbox).decrypt(access_token.encode()).decode()
+@router.get("/status")
+async def mailbox_status(
+    response: Response, _: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    return await report_inbox_statuses(db)
 
 
 @router.post("/sync")
 async def messages(
     report_date: date, response: Response, source: MailSource = "info-px", _: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), m1_draft_id: uuid.UUID | None = None,
 ) -> dict:
     response.headers["Cache-Control"] = "no-store"
-    app_password = settings.HOMEFACE_MAIL_APP_PASSWORD
-    mailbox = homeface_mail.MAILBOX if source == "hf" else _mailbox(source)
-    provider = gmail_mail if source == "px-eu" else graph
-    configured = bool(app_password) if source == "hf" else _configured(mailbox)
-    payload = {"configured": configured, "connected": False, "messages": []}
-    if not payload["configured"]:
+    mailbox = report_mailbox(source)
+    if m1_draft_id is not None:
+        draft = await db.get(MorningReportDraft, m1_draft_id)
+        if draft is None or draft.report_date != report_date:
+            raise HTTPException(status_code=404, detail="M1 draft not found")
+        cutoff = m1_report_cutoff(draft.generated_snapshot, draft.sent_at if draft.status == "SENT" else None)
+        payload = await read_report_inbox(db, source, report_date, window=_report_window(report_date, "M1", cutoff))
+    else:
+        payload = await read_report_inbox(db, source, report_date)
+    if not payload["connected"] or payload.get("error"):
         return payload
     try:
-        if source == "hf":
-            assert app_password is not None
-            inbox_messages = await asyncio.to_thread(
-                homeface_mail.read_inbox, app_password.get_secret_value(), report_date, report_timezone(),
-            )
-            payload["connected"] = True
-        else:
-            row = await db.get(MicrosoftMailToken, mailbox.token_id)
-            if row is None:
-                return payload
-            payload["connected"] = True
-            async with httpx.AsyncClient(timeout=12) as client:
-                access_token = await _access_token(db, client, row, mailbox)
-                inbox_messages = await provider.read_inbox(
-                    client, access_token, report_date, report_timezone(),
-                )
-        payload["messages"] = inbox_messages
-        if not await save_mailbox_notes(db, inbox_messages, mailbox):
+        if not await save_mailbox_notes(db, payload["messages"], mailbox):
             payload["notes_error"] = "Email-et u lexuan, por disa përmbledhje për PX Notes nuk u krijuan. Provo përsëri me Rifresko."
     except SQLAlchemyError:
         await db.rollback()
         payload["notes_error"] = "Email-et u lexuan, por shënimet nuk u ruajtën në PX Notes."
-    except (httpx.HTTPError, IMAP4.error, InvalidToken, KeyError, OSError, ValueError):
-        await db.rollback()
-        payload["error"] = f"Email-et e {mailbox.label} nuk mund të lexohen."
     return payload

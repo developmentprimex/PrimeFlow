@@ -55,7 +55,10 @@ async def main() -> None:
             )
             sections = await refresh_m1_section(db, sections, row.report_date, refresh_current=row.status != "SENT",
                                                 sent_at=row.sent_at, generated_snapshot=row.generated_snapshot)
-            sections = await refresh_m1_gmail_section(sections, row.report_date, sent=row.status == "SENT")
+            sections = await refresh_m1_gmail_section(
+                sections, row.report_date, sent=row.status == "SENT",
+                generated_snapshot=row.generated_snapshot, sent_at=row.sent_at,
+            )
             sections = await refresh_morning_leave_table(db, sections, row.report_date, row.generated_snapshot)
 
         plain_text = render_plain_text(row.subject, row.report_date, sections)

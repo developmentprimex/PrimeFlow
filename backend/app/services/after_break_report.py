@@ -6,6 +6,8 @@ from app.services.discord_ga_replies import (
     GA_REPLIES_CAPTURE_VERSION_KEY,
     GA_REPLIES_SECTION_TITLE,
     UNAVAILABLE,
+    _report_window,
+    refresh_ga_reply_section,
     summary_for_day,
 )
 from app.services.discord_ga_reactions import (
@@ -13,19 +15,23 @@ from app.services.discord_ga_reactions import (
     GA_REACTIONS_SECTION_TITLE,
     REACTIONS_UNAVAILABLE,
     reaction_summary_for_day,
+    refresh_ga_reaction_section,
 )
 
+import asyncio
 import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import or_, select
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import SessionLocal
 from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.audit_log import AuditLog
 from app.models.department import Department
+from app.models.discord_m2_question import DiscordM2Question
 from app.models.enums import CommonApprovalStatus, GaNoteStatus, TaskStatus
 from app.models.ga_note import GaNote
 from app.services.gmail_px_notes import sync_gmail_px_notes
@@ -43,9 +49,11 @@ from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
     _all_participant_user_ids,
+    _ascii_table_block,
     _assignee_names,
     apply_weekly_planner_task_order,
     _clean_task_title as _display_title,
+    _daily_rlz_values_by_task,
     _effective_task_assignee_ids,
     _initials,
     _is_open,
@@ -63,6 +71,7 @@ from app.services.meetings_report import (
     _normalize_report_status,
     _render_group_label_html,
     _render_section_block_html,
+    _section_report_table_rows,
     _task_owners,
     _wrap_fixed_width,
     _wrap_report_email_html,
@@ -70,10 +79,14 @@ from app.services.meetings_report import (
     send_section_report,
 )
 from app.services.task_title_rules import title_has_eight_am_indicator
+from app.services.primeflow_report import report_timezone
+from app.services.px_note_email import EMAIL_NOTE_ORIGINS, email_preview, email_preview_text, is_email_note_content
+from app.services.report_inboxes import MailSource, REPORT_INBOX_SOURCES, read_report_inbox, report_mailbox
 
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
 UNFINISHED_PRIORITY_TABLE_LABEL = "DET TE PAKRYERA, 08:00/DEADLINE"
+UNFINISHED_EXPLANATION_OVERRIDES = "unfinished_explanation_overrides"
 WAITING_CLIENT_TABLE_LABEL = "DT WFE"
 DONE_AM_TABLE_LABEL = "DET E KRYERA NE AM"
 UNHELD_MEETINGS_TABLE_LABEL = "TAK INT/EXT TE PAMBAJTURA"
@@ -82,9 +95,12 @@ PCM_PROJECT_CODES = ("VS", "VL", "MST", "TT")
 PCM_CODES_REQUIRING_PROJECT = {"MST", "TT"}
 PCM_PROJECT_CODE_PATTERN = re.compile(r"(?<![A-Z0-9])(?:VS|VL|MST|TT)(?![A-Z0-9])", re.IGNORECASE)
 PCM_PROJECT_SUMMARY_PATTERN = re.compile("\n".join(f"{code} - (?:PO|JO)" for code in PCM_PROJECT_CODES))
-AUTOMATED_SECTION_TITLES = {GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_KEY, PCM_PROJECTS_TITLE}
+NEW_EMAILS_TITLE = "(GA) EMAILS TE REJA?"
+NEW_EMAILS_SNAPSHOT_KEY = "new_email_mailboxes"
+NEW_EMAILS_NOT_GENERATED = "Gjenero raportin për të lexuar email-et e ardhura nga ora 08:00."
+AUTOMATED_SECTION_TITLES = {NEW_EMAILS_TITLE, GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_KEY, PCM_PROJECTS_TITLE}
 SECTION_TITLES = [
-    "DET NGA EMAIL/ PX INFO & ZHVILLIM",
+    NEW_EMAILS_TITLE,
     PCM_PROJECTS_TITLE,
     "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?",  # Retired, kept as a legacy key.
     "PIKAT E BORDIT/DISKUTO APLIKANTAT",  # Retired, kept as a legacy key.
@@ -100,7 +116,7 @@ SECTION_TITLES = [
     GA_REPLIES_SECTION_TITLE,
     GA_REACTIONS_SECTION_KEY,
 ]
-MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
+MANUAL_SECTION_TITLES: set[str] = set()
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],
     GA_REPLIES_SECTION_TITLE,
@@ -123,7 +139,10 @@ SECTION_TITLE_ALIASES = {
     # draft's stable auto-filled identity.
     "DET TE PAKRYERA AM, 08:00/DEADLINE": SECTION_TITLES[4],
 }
-RETIRED_MANUAL_KEYS = {re.sub(r"[^A-Z0-9]+", "", title) for title in SECTION_TITLES[2:4]}
+RETIRED_MANUAL_KEYS = {
+    re.sub(r"[^A-Z0-9]+", "", title)
+    for title in ("DET NGA EMAIL/ PX INFO & ZHVILLIM", *SECTION_TITLES[2:4])
+}
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
 PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56)]
@@ -131,6 +150,7 @@ SYSTEM_TASK_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE
 UNFINISHED_PRIORITY_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("STATUS", 12),
     ("LLOJI", 18), ("TIPI", 5), ("TITULLI", 45), ("DUE DATE", 12),
+    ("ARSYEJA", 24), ("KOMENT", 36),
 ]
 DONE_AM_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
@@ -178,7 +198,8 @@ def _ascii_table(
     no_wrap = {"NR", "WHO", "KUSH", "FROM", "PER", "DISK", "TIME", "ORA", "KOHA", "DATA", "DATE", "DUE DATE", "AFATI", "LATE"}
     if not rows_values:
         empty_values = ["-" for _ in columns]
-        empty_values[-2] = "(Asnje detyre)"
+        title_index = next(index for index, (name, _) in enumerate(columns) if name == "TITULLI")
+        empty_values[title_index] = "(Asnje detyre)"
         rows_values = [empty_values]
     for values in rows_values:
         wrapped = []
@@ -446,6 +467,7 @@ def _waiting_client_task_rows(
 
 async def build_unfinished_priority_task_rows(
     db: AsyncSession, report_day: date, *, include_task_id: bool = False,
+    explanation_overrides: dict | None = None, explanation_rows: list | None = None,
 ) -> list[list[str]]:
     """Load unfinished morning work at the configured M2 send cutoff."""
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
@@ -458,7 +480,7 @@ async def build_unfinished_priority_task_rows(
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
     cutoff, cutoff_timezone = await _after_break_cutoff(db, report_day)
-    return _unfinished_priority_task_rows(
+    rows = _unfinished_priority_task_rows(
         tasks,
         names,
         assignee_ids_by_task,
@@ -466,17 +488,85 @@ async def build_unfinished_priority_task_rows(
         cutoff,
         cutoff_timezone,
         department_codes,
-        include_task_id=include_task_id,
+        include_task_id=True,
     )
+    if include_task_id:
+        return rows
+    return await _append_unfinished_priority_explanations(
+        db, rows, tasks, report_day, names, assignee_ids_by_task,
+        overrides=explanation_overrides, explanation_rows=explanation_rows,
+    )
+
+
+async def _append_unfinished_priority_explanations(
+    db: AsyncSession,
+    rows: list[list[str]],
+    tasks: list[Task],
+    report_day: date,
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    *, overrides: dict | None = None, explanation_rows: list | None = None,
+) -> list[list[str]]:
+    row_ids = {row[-1] for row in rows}
+    selected = [task for task in tasks if str(task.id) in row_ids]
+    values = await _daily_rlz_values_by_task(db, selected, report_day, names, assignee_ids_by_task)
+    by_id = {str(task_id): fields for task_id, fields in values.items()}
+    discord_comments: dict[str, list[str]] = {}
+    if selected:
+        selected_ids = [task.id for task in selected]
+        continued_from_am = select(cast(DiscordM2Question.id, String)).where(
+            DiscordM2Question.day == report_day,
+            DiscordM2Question.task_id.in_(selected_ids),
+            DiscordM2Question.kind == "continuation",
+            DiscordM2Question.snapshot["continued_from_am"].astext == "true",
+        )
+        notes = (await db.execute(
+            select(AuditLog.entity_id, AuditLog.actor_user_id, AuditLog.after)
+            .where(
+                AuditLog.entity_type == "task",
+                AuditLog.entity_id.in_(selected_ids),
+                AuditLog.after["day"].astext == report_day.isoformat(),
+                or_(
+                    (AuditLog.action == "task.discord_m2_comment") & (AuditLog.after["kind"].astext == "unfinished"),
+                    AuditLog.action.in_(["task.discord_m2_comment", "task.discord_m2_answer"])
+                    & (AuditLog.after["kind"].astext == "continuation")
+                    & AuditLog.after["question_id"].astext.in_(continued_from_am),
+                ),
+            )
+            .order_by(AuditLog.created_at, AuditLog.id)
+        )).all()
+        for task_id, user_id, evidence in notes:
+            comment = (evidence.get("comment") or "").strip()
+            if comment:
+                initials = _initials(names.get(user_id))
+                discord_comments.setdefault(str(task_id), []).append(f"{initials}: {comment}" if initials != "-" else comment)
+    result = []
+    for row in rows:
+        task_id = row[-1]
+        reason, comment = by_id.get(task_id, ("-", "-"))
+        sources = ([comment] if comment != "-" else []) + discord_comments.get(task_id, [])
+        manual = (overrides or {}).get(task_id, {})
+        reason = manual.get("reason", reason) or "-"
+        comment = manual.get("comment", "; ".join(dict.fromkeys(sources))) or "-"
+        if explanation_rows is not None:
+            explanation_rows.append({
+                "row_number": row[0], "task_id": task_id, "title": row[7],
+                "assignees": row[1], "reason": reason, "comment": comment,
+            })
+        result.append([*row[:-1], reason.replace("|", "¦"), comment.replace("|", "¦")])
+    return result
 
 
 async def apply_unfinished_priority_task_table(
     db: AsyncSession,
     sections: list[dict[str, str]],
     report_day: date,
+    *, explanation_overrides: dict | None = None, explanation_rows: list | None = None,
 ) -> list[dict[str, str]]:
     """Refresh M2 section 7 from the task state at the configured send cutoff."""
-    rows = await build_unfinished_priority_task_rows(db, report_day)
+    rows = await build_unfinished_priority_task_rows(
+        db, report_day, explanation_overrides=explanation_overrides, explanation_rows=explanation_rows,
+    )
     body = _normalize_section(
         _ascii_table(
             UNFINISHED_PRIORITY_TABLE_LABEL,
@@ -815,6 +905,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             if title in by_title:
                 continue
         body = str(section.get("body") or "")
+        if title == SECTION_TITLES[9]:
+            body = order_blue_notes_table(body)
         if title == PCM_PROJECTS_TITLE and not PCM_PROJECT_SUMMARY_PATTERN.fullmatch(body):
             body = ""
         if title in SECTION_TITLES and title not in by_title:
@@ -854,8 +946,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
                 }
             normalized.append(section)
             continue
-        elif title in MANUAL_SECTION_TITLES:
-            body = "(Ploteso manualisht)"
+        elif title == NEW_EMAILS_TITLE:
+            body = NEW_EMAILS_NOT_GENERATED
         elif title == GA_REPLIES_SECTION_TITLE:
             body = UNAVAILABLE
         elif title == GA_REACTIONS_SECTION_KEY:
@@ -987,6 +1079,33 @@ BLUE_NOTE_COLUMNS = [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME",
 NOTE_REFERENCES = "px_note_references"
 
 
+def order_blue_note_references(references: list[tuple[str, list[str]]]) -> list[tuple[str, list[str]]]:
+    ordered = sorted(references, key=lambda entry: is_email_note_content(entry[1][2]))
+    if ordered == references:
+        return references
+    return [(note_id, [str(index), *values[1:]]) for index, (note_id, values) in enumerate(ordered, 1)]
+
+
+def order_blue_notes_table(body: str) -> str:
+    lines = body.splitlines()
+    caption_index = next((index for index, line in enumerate(lines) if line.strip() == "NOTES:"), None)
+    if caption_index is None:
+        return body
+    start = next((index for index in range(caption_index + 1, len(lines)) if lines[index].strip()), len(lines))
+    block = _ascii_table_block(lines, start)
+    if block is None:
+        return body
+    table, end = block
+    header, rows = _section_report_table_rows(table)
+    if header != [column for column, _ in BLUE_NOTE_COLUMNS] or not all(row[0].isdecimal() for row in rows):
+        return body
+    ordered = sorted(rows, key=lambda row: is_email_note_content(row[2]))
+    if ordered == rows:
+        return body
+    numbered = [[str(index), *row[1:]] for index, row in enumerate(ordered, 1)]
+    return "\n".join([*lines[:caption_index], *_ascii_table("NOTES", BLUE_NOTE_COLUMNS, numbered), *lines[end:]])
+
+
 async def load_blue_notes(
     db: AsyncSession, *, created_before: datetime | None = None, compact_email: bool = True,
 ) -> list[tuple[str, list[str]]]:
@@ -1031,9 +1150,10 @@ async def load_blue_notes(
         users = (await db.execute(select(User).where(User.work_staff_filter()).where(User.id.in_(author_ids)))).scalars().all()
         names = {user.id: user.full_name or user.username or user.email for user in users}
 
-    from app.services.px_note_email import email_preview, email_preview_text
-
-    ordered = sorted(open_notes, key=lambda note: note.created_at or note.updated_at)
+    ordered = sorted(open_notes, key=lambda note: (
+        getattr(note, "knowledge_type", None) in EMAIL_NOTE_ORIGINS or is_email_note_content(note.content),
+        note.created_at or note.updated_at,
+    ))
     return [
         (str(note.id), [
             str(index),
@@ -1046,8 +1166,92 @@ async def load_blue_notes(
     ]
 
 
+async def refresh_after_break_discord_sections(
+    db: AsyncSession, sections: list[dict[str, str]], report_day: date, *,
+    generated_snapshot: dict | None, sent: bool, sent_at: datetime | None,
+) -> list[dict[str, str]]:
+    snapshot = generated_snapshot or {}
+    if not snapshot.get("ga_replies_generated_at") and not sent:
+        # Older drafts have no saved generation time. Read both points as of
+        # the same instant, just as a newly generated M2 does.
+        cutoff = datetime.now(timezone.utc)
+        sections = [
+            {**section, "body": await summary_for_day(db, report_day, report="M2", generated_at=cutoff)}
+            if (section.get("section_key") or section.get("title")) == GA_REPLIES_SECTION_TITLE else section
+            for section in sections
+        ]
+        snapshot = {**snapshot, "ga_replies_generated_at": cutoff.isoformat()}
+    else:
+        sections = await refresh_ga_reply_section(
+            db, sections, report_day, report="M2", refresh_current=not sent,
+            sent_at=sent_at, populate_missing=True, generated_snapshot=snapshot,
+        )
+        if sent and sent_at and not snapshot.get("ga_replies_generated_at"):
+            snapshot = {**snapshot, "ga_replies_generated_at": sent_at.isoformat()}
+    return await refresh_ga_reaction_section(
+        db, sections, report_day, report="M2", generated_snapshot=snapshot, sent=sent,
+    )
+
+
+async def load_new_email_mailboxes(
+    report_day: date, generated_at: datetime,
+) -> dict[MailSource, dict]:
+    window = _report_window(report_day, "M2", generated_at)
+    start, end = window
+    if end < start:
+        return {}
+
+    async def load(source: MailSource) -> tuple[MailSource, dict]:
+        # Token refresh can commit. Keep each connection outside the report
+        # transaction, which owns the automatic send's advisory lock.
+        async with SessionLocal() as mail_db:
+            try:
+                async with asyncio.timeout(30):
+                    inbox = await read_report_inbox(mail_db, source, report_day, window=window)
+            except TimeoutError:
+                inbox = {
+                    "configured": True, "connected": False, "messages": [],
+                    "error": f"Leximi i email-eve nga {report_mailbox(source).label} mori shumë kohë.",
+                }
+        selected = [
+            message for message in inbox["messages"]
+            if start <= datetime.fromisoformat(message["received_datetime"]) <= end
+        ]
+        return source, {**inbox, "messages": selected}
+
+    return dict(await asyncio.gather(*(load(source) for source in REPORT_INBOX_SOURCES)))
+
+
+def _new_emails_report_body(mailboxes: dict[MailSource, dict], report_day: date, generated_at: datetime) -> str:
+    start, end = _report_window(report_day, "M2", generated_at)
+    if end < start:
+        return f"Intervali i email-eve për këtë datë fillon në {start:%H:%M}."
+    end_label = end.astimezone(start.tzinfo).strftime("%H:%M")
+    blocks = [f"Email-et e pranuara nga {start:%H:%M} deri në {end_label}."]
+    for source, inbox in mailboxes.items():
+        label = report_mailbox(source).label
+        if not inbox["configured"]:
+            continue
+        if inbox.get("error"):
+            blocks.append(inbox["error"])
+        elif not inbox["connected"]:
+            blocks.append(f"{label}: Kutia e email-it ende nuk është lidhur.")
+        else:
+            rows = [
+                [mail[key].replace("|", "¦") for key in ("sender", "subject", "received_at")]
+                for mail in inbox["messages"]
+            ]
+            blocks.append(_normalize_section(_ascii_table(
+                label, [("DËRGUESI", 38), ("SUBJEKTI", 66), ("ORA", 5)], rows,
+            )) if rows else f"{label}: Asnjë email në këtë interval.")
+    if len(blocks) == 1:
+        blocks.append("Asnjë kuti email-i e konfiguruar.")
+    return "\n\n".join(blocks)
+
+
 async def build_after_break_report_sections(db: AsyncSession, report_day: date) -> tuple[list[dict[str, str]], dict[str, Any]]:
     generated_at = datetime.now(timezone.utc)
+    mailboxes = await load_new_email_mailboxes(report_day, generated_at)
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
@@ -1068,6 +1272,10 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         cutoff,
         cutoff_timezone,
         department_codes,
+        include_task_id=True,
+    )
+    unfinished_priority_rows = await _append_unfinished_priority_explanations(
+        db, unfinished_priority_rows, tasks, report_day, names, assignee_ids_by_task,
     )
     done_am_rows = _done_am_task_rows(
         tasks,
@@ -1123,10 +1331,11 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     )
     blue_notes = await load_blue_notes(db)
     section_3 = _ascii_table("NOTES", BLUE_NOTE_COLUMNS, [values for _, values in blue_notes])
-    ga_section, hv_section = await _m3_finance_ga_sections(db, tasks, names, report_day)
+    ga_section, hv_section = await _m3_finance_ga_sections(db, tasks, names, report_day, include_ga_bz=True)
 
     sections = [
-        {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
+        {"section_key": NEW_EMAILS_TITLE, "title": NEW_EMAILS_TITLE,
+         "body": _new_emails_report_body(mailboxes, report_day, generated_at)},
         {"section_key": PCM_PROJECTS_TITLE, "title": PCM_PROJECTS_TITLE, "body": await _load_pcm_projects_summary(db, report_day)},
         {"section_key": GA_REPLIES_SECTION_TITLE, "title": GA_REPLIES_SECTION_TITLE,
          "body": await summary_for_day(db, report_day, report="M2", generated_at=generated_at)},
@@ -1173,11 +1382,12 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     sections = [sections_by_title[title] for title in DISPLAY_SECTION_TITLES]
     snapshot = {
         "report_day": report_day.isoformat(),
+        NEW_EMAILS_SNAPSHOT_KEY: mailboxes,
         NOTE_REFERENCES: blue_notes,
         "ga_replies_generated_at": generated_at.isoformat(),
         GA_REPLIES_CAPTURE_VERSION_KEY: GA_REPLIES_CAPTURE_VERSION,
         "counts": {
-            SECTION_TITLES[0]: 0,
+            NEW_EMAILS_TITLE: sum(len(inbox["messages"]) for inbox in mailboxes.values()),
             SECTION_TITLES[4]: len(unfinished_priority_rows),
             SECTION_TITLES[5]: len(done_am_rows),
             SECTION_TITLES[12]: len(waiting_client_rows),

@@ -16,7 +16,7 @@ from app.models.department import Department
 from app.models.enums import CommonCategory, GaNoteStatus
 from app.models.ga_note import GaNote
 from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN, sync_gmail_px_notes
-from app.services.px_note_email import email_preview, email_preview_text
+from app.services.px_note_email import email_preview, email_preview_text, is_email_note_content
 from app.models.plan_note import PlanNote
 from app.models.m1_reporting_points import M1ReportingPointsReport
 from app.models.task import Task
@@ -82,6 +82,7 @@ def _px_notes_only(rows: list[dict]) -> list[dict]:
 
 def _newest_notes_first(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: (
+        not (row.get("email_preview") or is_email_note_content(row.get("content"))),
         _local(datetime.fromisoformat(row["created_at"])).timestamp() if row.get("created_at") else float("-inf"),
         str(row.get("id") or "")), reverse=True)
 

@@ -3,15 +3,17 @@ from datetime import datetime
 from uuid import UUID
 
 from bs4 import BeautifulSoup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import noload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ga_note_attachment import GaNoteAttachment
 from app.models.ga_note import GaNote
-from app.services.after_break_report import BLUE_NOTE_COLUMNS, NOTE_REFERENCES, load_blue_notes
+from app.services.after_break_report import BLUE_NOTE_COLUMNS, NOTE_REFERENCES, load_blue_notes, order_blue_note_references
 from app.services.meetings_report import _section_report_table_rows
-from app.services.px_note_email import EMAIL_NOTE_ORIGINS, email_preview, email_preview_text
+from app.services.px_note_email import (
+    EMAIL_NOTE_ORIGINS, email_preview, email_preview_text, email_title_from_content, manual_original_email_url,
+)
 
 
 def _row_key(values: list[str]) -> tuple[str, ...]:
@@ -54,6 +56,8 @@ async def match_note_rows(
         references = await load_blue_notes(
             db, created_before=datetime.fromisoformat(generated_at) if generated_at else None, compact_email=False,
         )
+    else:
+        references = order_blue_note_references(references)
     candidates: dict[tuple[str, ...], set[str]] = defaultdict(set)
     for note_id, values in references:
         candidates[_row_key(values[1:] if legacy else values)].add(note_id)
@@ -80,10 +84,35 @@ async def mail_previews_by_row(db: AsyncSession, note_ids: dict[str, str]) -> di
     return {number: previews[note_id] for number, note_id in note_ids.items() if previews.get(note_id)}
 
 
-async def note_controls_by_row(db: AsyncSession, note_ids: dict[str, str]) -> dict:
+async def note_controls_by_row(db: AsyncSession, note_ids: dict[str, str], *, include_manual_emails=False) -> dict:
+    attachments = await note_attachments_by_row(db, note_ids)
+    emails = await mail_previews_by_row(db, note_ids)
+    controls = {"note_attachments": attachments, "note_emails": emails}
+    if include_manual_emails:
+        controls["note_email_headings"] = await manual_email_headings(
+            db, {number: note_id for number, note_id in note_ids.items() if number not in emails},
+        )
+    return controls
+
+
+def manual_email_heading(content: str) -> dict[str, str] | None:
+    heading = " ".join(content.lstrip().partition("\n")[0].split())
+    if title := email_title_from_content(heading):
+        url = manual_original_email_url(content)
+        return {"original": heading, "title": title, **({"original_email_url": url} if url else {})}
+    return None
+
+
+async def manual_email_headings(db: AsyncSession, note_ids: dict[str, str]) -> dict[str, dict[str, str]]:
+    if not note_ids:
+        return {}
+    notes = dict((await db.execute(select(GaNote.id, GaNote.content).where(
+        GaNote.id.in_({UUID(note_id) for note_id in note_ids.values()}),
+        func.ltrim(GaNote.content).ilike("em %"),
+    ))).all())
     return {
-        "note_attachments": await note_attachments_by_row(db, note_ids),
-        "note_emails": await mail_previews_by_row(db, note_ids),
+        number: heading for number, note_id in note_ids.items()
+        if (heading := manual_email_heading(notes.get(UUID(note_id), "")))
     }
 
 
@@ -123,7 +152,16 @@ def _section_note_rows(sections: list[dict], title: str) -> list[list[str]]:
 async def section_note_controls(
     db: AsyncSession, sections: list[dict], title: str, snapshot: dict | None,
 ) -> dict:
-    return await note_controls_by_row(db, await match_note_rows(db, _section_note_rows(sections, title), snapshot))
+    rows = _section_note_rows(sections, title)
+    note_ids = await match_note_rows(db, rows, snapshot)
+    controls = await note_controls_by_row(db, note_ids)
+    manual_ids = {
+        row[0]: note_ids[row[0]] for row in rows
+        if row[0] in note_ids and row[0] not in controls["note_emails"] and email_title_from_content(row[2])
+    }
+    if manual_ids:
+        controls["note_email_headings"] = await manual_email_headings(db, manual_ids)
+    return controls
 
 
 async def section_note_attachments(

@@ -317,7 +317,7 @@ async def preview(
         **(await note_controls_by_row(db, {
             str(index): note.note_id
             for index, note in enumerate(document.undiscussed_notes, 1) if note.note_id is not None
-        })),
+        }, include_manual_emails=True)),
         "warning": "No tasks found" if document.task_count == 0 and not payload.notes_only else None,
     }
 

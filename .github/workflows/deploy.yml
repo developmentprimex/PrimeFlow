@@ -182,6 +182,14 @@ jobs:
           "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           # A failed marker lookup above must not fail the step.
           exit 0
+
+      - name: Check production database migration path
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        working-directory: backend
+        run: |
+          & 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe' -m scripts.check_deploy_migrations
+          if ($LASTEXITCODE -ne 0) { throw 'Production migration preflight failed before build.' }
  
   build_frontend:
     needs: plan
@@ -475,6 +483,9 @@ jobs:
           $ErrorActionPreference = "Stop"
           Set-Location backend
           $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+
+          & $python -m scripts.check_deploy_migrations
+          if ($LASTEXITCODE -ne 0) { throw 'Production migration path changed after planning.' }
 
           $headOutput = @(& $python -m alembic heads)
           if ($LASTEXITCODE -ne 0) {

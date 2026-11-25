@@ -11,18 +11,19 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
 from app.models.common_entry import CommonEntry
 from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.models.department import Department
-from app.models.enums import CommonApprovalStatus, CommonCategory
+from app.models.enums import CommonApprovalStatus, CommonCategory, TaskStatus
 from app.models.meeting import Meeting
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.project import Project
 from app.models.system_task_template import SystemTaskTemplate
+from app.services.report_ga_task_bz import ga_task_bz_labels
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
@@ -38,16 +39,16 @@ from app.services.meeting_palette import MEETING_TONE_COLORS, meeting_report_ton
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.personal_task_owner import personal_task_owner
 from app.services.primeflow_report import GmailService, one_h_marker_symbol, report_timezone
-from app.services.std_feedback_tickets import std_tickets_report_section
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.task_marker import active_one_h_marker
 from app.services.task_product_counts import task_product_counts
 
 REPORT_TYPE = "meetings_report"
+HV_DONE_TITLE = "DET DONE TE HV"
 SECTION_TITLES = [
     "A JEMI BRENDA MESATARES ME PROJEKTE?",  # Retired, kept as a legacy key.
-    "(GA) ZHV: TIKETAT E STD?",
+    "(GA) ZHV: TIKETAT E STD?",  # Retired, kept as a legacy key.
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "N- (GA) PV/FESTE?",
@@ -62,14 +63,15 @@ SECTION_TITLES = [
     "N- DET PERSONALISHT ME KA/GENTIN?",
     "N- WFC ME KA/GENTIN?",
     "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
+    HV_DONE_TITLE,
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[15],  # Tomorrow's marked tasks first among auto-filled sections
-    SECTION_TITLES[1],  # STD tickets first among auto-filled
     SECTION_TITLES[2],
     SECTION_TITLES[3],
     SECTION_TITLES[11],
     SECTION_TITLES[10],
+    HV_DONE_TITLE,
     SECTION_TITLES[12],
     SECTION_TITLES[7],
     SECTION_TITLES[4],
@@ -106,6 +108,8 @@ SECTION_TITLE_ALIASES = {
 }
 RETIRED_CLOSING_SECTION_TITLES = {
     SECTION_TITLES[0],
+    SECTION_TITLES[1],
+    *(alias for alias, canonical in SECTION_TITLE_ALIASES.items() if canonical == SECTION_TITLES[1]),
     "PIKAT E DITES",
     "PIKAT E DITËS",
     "GA MBYLLJA E DET",
@@ -119,8 +123,8 @@ RETIRED_CLOSING_SECTION_KEYS = {
 
 
 def is_retired_meetings_section_title(title: str | None, section_key: str | None = None) -> bool:
-    return any(re.sub(r"^(?:MANUAL)?\d*", "", _compact_section_title(value)) in RETIRED_CLOSING_SECTION_KEYS
-               for value in (title, section_key))
+    keys = (re.sub(r"^(?:MANUAL)?\d*", "", _compact_section_title(value)) for value in (title, section_key))
+    return any(key in RETIRED_CLOSING_SECTION_KEYS or ("TIKETATESTD" in key and "RAPORTOHENNEM3" in key) for key in keys)
 
 
 def without_retired_meetings_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -515,6 +519,55 @@ def _completed_tasks_for_report_day(tasks: list[Task], report_day: date) -> list
         and _local_date(task.completed_at) == report_day
         and _normalize_report_status(task.status) == "DONE"
     ]
+
+
+async def _hv_done_section(db: AsyncSession, report_day: date) -> tuple[str, int]:
+    from app.services.after_break_report import _ascii_table
+
+    tz = report_timezone()
+    start = datetime.combine(report_day, time.min, tzinfo=tz)
+    end = start + timedelta(days=1)
+    before = func.coalesce(AuditLog.before["value"].astext, AuditLog.before["status"].astext, "")
+    after = func.coalesce(AuditLog.after["value"].astext, AuditLog.after["status"].astext)
+    # Choose the latest transition into DONE before restricting the actor.
+    # An edit made after completion must not be counted as a new completion.
+    completions = (
+        select(AuditLog.entity_id, AuditLog.actor_user_id, AuditLog.created_at)
+        .where(
+            AuditLog.entity_type == "task",
+            AuditLog.action.in_(("task.status_changed", "created", "updated")),
+            AuditLog.created_at >= start,
+            AuditLog.created_at < end,
+            func.upper(after).in_(("DONE", "COMPLETED")),
+            func.upper(before).not_in(("DONE", "COMPLETED")),
+        )
+        .distinct(AuditLog.entity_id)
+        .order_by(AuditLog.entity_id, AuditLog.created_at.desc(), AuditLog.id.desc())
+        .subquery("task_completions")
+    )
+    tasks = (await db.execute(
+        select(Task, completions.c.created_at)
+        .join(completions, completions.c.entity_id == Task.id)
+        .join(User, User.id == completions.c.actor_user_id)
+        .where(
+            Task.work_staff_filter(),
+            Task.status == TaskStatus.DONE,
+            func.lower(func.trim(User.full_name)) == "haxhere spahiu",
+        )
+        .order_by(completions.c.created_at, Task.id)
+    )).all()
+    rows = [
+        [
+            str(index),
+            _m3_task_type_label(task),
+            _clean_task_title(task.title, is_system_task=_is_system_task(task)).replace("|", "¦") or "-",
+            completed_at.astimezone(tz).strftime("%H:%M"),
+        ]
+        for index, (task, completed_at) in enumerate(tasks, 1)
+    ]
+    return _normalize_section(_ascii_table(
+        HV_DONE_TITLE, [("NR", 3), ("LLOJI", 7), ("TITULLI", 64), ("ORA", 5)], rows, show_empty_table=True,
+    )), len(rows)
 
 
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
@@ -1012,6 +1065,7 @@ def _m3_status_table(
     project_titles_by_id: dict[Any, str] | None = None,
     include_priority_tone: bool = False,
     show_all_assignees: bool = False,
+    bz_labels_by_task: dict[Any, str] | None = None,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -1031,6 +1085,8 @@ def _m3_status_table(
     if include_late_days:
         columns.append(("T/Y/O", 5))
     columns.append(("TITULLI", 64))
+    if bz_labels_by_task is not None:
+        columns.append(("BZ ME", 14))
     if daily_rlz_by_task is not None:
         columns.extend((("ARSYEJA", 24), ("KOMENT", 36)))
 
@@ -1067,6 +1123,8 @@ def _m3_status_table(
         if include_late_days:
             values.append("-")
         values.append(empty_title)
+        if bz_labels_by_task is not None:
+            values.append("-")
         if daily_rlz_by_task is not None:
             values.extend(("-", "-"))
         rows.append(table_row(values))
@@ -1150,6 +1208,8 @@ def _m3_status_table(
         if include_late_days:
             values.append(_late_days_tyo_label(_late_days(task)))
         values.append(padded_titles[0])
+        if bz_labels_by_task is not None:
+            values.append(bz_labels_by_task.get(task.id, "-"))
         if daily_rlz_by_task is not None:
             values.extend((reason_lines[0], comment_lines[0]))
         rows.append(table_row(values))
@@ -1177,6 +1237,8 @@ def _m3_status_table(
             if include_late_days:
                 continuation.append("")
             continuation.append(padded_titles[line_index] if line_index < len(padded_titles) else "")
+            if bz_labels_by_task is not None:
+                continuation.append("")
             if daily_rlz_by_task is not None:
                 continuation.extend((
                     reason_lines[line_index] if line_index < len(reason_lines) else "",
@@ -1333,7 +1395,6 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     names = await _assignee_names(db, report_tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, report_tasks)
     all_participant_ids = await _all_participant_user_ids(db)
-    std_tickets_section = await std_tickets_report_section(db, report_day)
 
     system_tasks = [task for task in tasks if task.system_template_origin_id and _is_open(task)]
     system_late = _dedupe_system_task_rows([task for task in system_tasks if _late_days(task) > 0])
@@ -1354,6 +1415,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         db, [*today_todo, *system_late], report_day, names, assignee_ids_by_task
     )
     done_today = _completed_tasks_for_report_day(completed_tasks, report_day)
+    hv_done_body, hv_done_count = await _hv_done_section(db, report_day)
     postponed_today, postponed_date_ranges, postponed_both_today, postponed_both_date_ranges = await _postponed_tasks_for_m3_day(
         db, report_day, tasks
     )
@@ -1509,6 +1571,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             "DET 08:00",
             at_0800,
             names,
+            with_status=True,
             include_department=True,
             include_am_pm=True,
             department_codes=department_codes,
@@ -1529,7 +1592,6 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
 
     by_title = {
         TOMORROW_SYMBOLS_TITLE: symbols_body,
-        SECTION_TITLES[1]: std_tickets_section,
         SECTION_TITLES[2]: _normalize_section(section_1),
         SECTION_TITLES[3]: _normalize_section(
             _m3_status_table(
@@ -1590,6 +1652,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 **table_kwargs,
             )
         ),
+        HV_DONE_TITLE: hv_done_body,
         SECTION_TITLES[12]: _normalize_section(
             _m3_status_table(
                 "PRODUKTE +/-",
@@ -1694,6 +1757,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         "tomorrow_symbols_html": symbols_html,
         "counts": {section["title"]: section["body"].count("\n- ") + (1 if section["body"].startswith("- ") else 0) for section in sections},
     }
+    snapshot["counts"][HV_DONE_TITLE] = hv_done_count
     return tomorrow, await filter_report_sections(db, sections, report_day, tomorrow=tomorrow), snapshot
 
 
@@ -1825,6 +1889,7 @@ def _status_group_section(
     *,
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     all_participant_ids: set[Any] | None = None,
+    bz_labels_by_task: dict[Any, str] | None = None,
 ) -> list[str]:
     today_tasks = [task for task in tasks if _task_day(task) == report_day]
     todo = [task for task in today_tasks if str(task.status or "").upper() == "TODO" and _is_open(task)]
@@ -1840,6 +1905,7 @@ def _status_group_section(
         "assignee_ids_by_task": assignee_ids_by_task,
         "all_participant_ids": all_participant_ids,
         "include_type": True,
+        "bz_labels_by_task": bz_labels_by_task,
     }
     return [
         *([f"{title}:"] if title else []),
@@ -1855,7 +1921,8 @@ def _status_group_section(
 
 
 async def _m3_finance_ga_sections(
-    db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date
+    db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date, *,
+    include_ga_bz: bool = False,
 ) -> tuple[str, str]:
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     tasks, names, assignee_ids_by_task = await filter_task_context(db, report_day, tasks, names, assignee_ids_by_task)
@@ -1894,6 +1961,7 @@ async def _m3_finance_ga_sections(
             report_day,
             assignee_ids_by_task=assignee_ids_by_task,
             all_participant_ids=all_participant_ids,
+            bz_labels_by_task=await ga_task_bz_labels(db, ga_tasks, assignee_ids_by_task) if include_ga_bz else None,
         )),
         _normalize_section(_status_group_section(
             None,

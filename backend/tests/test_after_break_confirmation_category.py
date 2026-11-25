@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 import unittest
 from datetime import date, datetime
 from types import SimpleNamespace
@@ -7,11 +8,14 @@ from zoneinfo import ZoneInfo
 
 from app.services.after_break_report import (
     DISPLAY_SECTION_TITLES,
+    NEW_EMAILS_TITLE,
     PCM_PROJECTS_TITLE,
     SECTION_TITLES,
     UNFINISHED_PRIORITY_COLUMNS,
     UNFINISHED_PRIORITY_TABLE_LABEL,
     _ascii_table,
+    _append_unfinished_priority_explanations,
+    _new_emails_report_body,
     load_blue_notes,
     _format_confirmation_questions,
     _done_am_task_rows,
@@ -23,6 +27,7 @@ from app.services.after_break_report import (
     _waiting_client_entry_dates,
     normalize_after_break_report_sections,
     render_html,
+    render_plain_text,
 )
 from app.services.meetings_report import _render_ascii_table_html, _table_tone_from_label
 from app.services.meeting_point_manual_sync import is_known_report_title, merge_common_view_manual_sections, section_group_label, with_section_keys
@@ -31,6 +36,54 @@ from app.services.discord_ga_reactions import GA_REACTIONS_SECTION_TITLE
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
+    def test_m2_replaces_the_old_manual_email_point_in_saved_drafts(self) -> None:
+        old_title = "DET NGA EMAIL/ PX INFO & ZHVILLIM"
+        sections = normalize_after_break_report_sections([
+            {"title": old_title, "body": "Old email answer"},
+            {"title": "PIKAT TEK GR. PX RLZ DITOR & JAVOR", "body": "Keep this answer"},
+        ])
+        self.assertNotIn(old_title, [section["title"] for section in sections])
+        self.assertEqual(sections[0]["body"], "Keep this answer")
+        self.assertEqual(sections[1]["title"], "(GA) EMAILS TE REJA?")
+        self.assertEqual(section_group_label("after_break", sections[1]["title"]), "AUTO-FILLED FROM PRIMEFLOW")
+
+    def test_m2_email_window_uses_exact_received_timestamp(self) -> None:
+        from app.services.after_break_report import load_new_email_mailboxes
+
+        def message(subject, received):
+            return {"subject": subject, "received_datetime": received}
+
+        messages = [
+            message("Before 08:00", "2026-11-24T06:59:59+00:00"),
+            message("At 08:00", "2026-11-24T08:00:00+01:00"),
+            message("At generation", "2026-11-24T10:23:45.123+01:00"),
+            message("After generation", "2026-11-24T10:23:45.124+01:00"),
+            message("Previous day", "2026-11-23T11:00:00+01:00"),
+        ]
+        with patch("app.services.after_break_report.read_report_inbox", AsyncMock(return_value={
+            "configured": True, "connected": True, "messages": messages,
+        })):
+            mailboxes = asyncio.run(load_new_email_mailboxes(
+                date(2026, 11, 24), datetime.fromisoformat("2026-11-24T09:23:45.123+00:00"),
+            ))
+        self.assertEqual(set(mailboxes), {"info-px", "it", "hf", "px-eu"})
+        for mailbox in mailboxes.values():
+            self.assertEqual([item["subject"] for item in mailbox["messages"]], ["At 08:00", "At generation"])
+
+    def test_m2_email_table_is_preserved_in_report_outputs(self) -> None:
+        generated = datetime.fromisoformat("2026-11-24T10:23:45+01:00")
+        body = _new_emails_report_body({"info-px": {"configured": True, "connected": True, "messages": [
+            {"subject": "New invoice", "sender": "Finance", "received_at": "09:15", "body": "Private message body"},
+        ]}}, generated.date(), generated)
+        sections = normalize_after_break_report_sections([{
+            "title": NEW_EMAILS_TITLE, "section_key": NEW_EMAILS_TITLE, "body": body,
+        }])
+        for output in (render_html("M2", generated.date(), sections), render_plain_text("M2", generated.date(), sections)):
+            self.assertIn(NEW_EMAILS_TITLE, output)
+            self.assertIn("New invoice", output)
+            self.assertIn("09:15", output)
+            self.assertNotIn("Private message body", output)
+
     def test_dt_wfe_draft_duplicates_and_manual_keys_stay_in_one_automatic_section(self) -> None:
         saved = [
             {"title": "DT WFE", "body": "Original table"},
@@ -70,10 +123,10 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
         )
         automatic = [section["title"] for section in sections
                      if section_group_label("after_break", section["title"], section["section_key"]) == "AUTO-FILLED FROM PRIMEFLOW"]
-        self.assertEqual(automatic[:3], [GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_TITLE, PCM_PROJECTS_TITLE])
-        self.assertEqual(automatic[3:8], ["NOTES TE REJA ( NOT DISSCUSED)", "TAK INT/EXT TE PAMBAJTURA",
+        self.assertEqual(automatic[:4], [NEW_EMAILS_TITLE, GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_TITLE, PCM_PROJECTS_TITLE])
+        self.assertEqual(automatic[4:9], ["NOTES TE REJA ( NOT DISSCUSED)", "TAK INT/EXT TE PAMBAJTURA",
                                         "DET TE PAKRYERA, 08:00/DEADLINE", "DT WFE", "DET E KRYERA NE AM"])
-        self.assertEqual(automatic[10:12], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
+        self.assertEqual(automatic[-2:], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
 
     def test_pcm_projects_use_title_codes_on_tasks_covering_the_report_day(self) -> None:
         def task(title, start, due, project_id=None):
@@ -121,7 +174,7 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
                    AsyncMock(return_value=[plan_title, board_title, "Another question"])):
             merged = asyncio.run(merge_common_view_manual_sections(None, sections, "after_break", retired, retired))
         expected_titles = [section["title"] for section in sections]
-        self.assertEqual([section["title"] for section in merged], [expected_titles[0], "Another question", *expected_titles[1:]])
+        self.assertEqual([section["title"] for section in merged], ["Another question", *expected_titles])
         html = render_html("M2", date(2026, 11, 18), merged)
         for removed in (plan_title, board_title, "Old plan answer", "Old board answer"):
             self.assertNotIn(removed, html)
@@ -309,7 +362,55 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
             "Personal": "P", "Project": "PRJK", "Regular fast": "FT",
         })
         self.assertTrue(all(row[5] == "DUE SOT" for row in rows))
-        self.assertTrue(all(len(row) == len(UNFINISHED_PRIORITY_COLUMNS) for row in rows))
+        self.assertTrue(all(len(row) == len(UNFINISHED_PRIORITY_COLUMNS) - 2 for row in rows))
+
+    def test_unfinished_priority_explanations_match_task_id_and_report_date(self) -> None:
+        day = date(2026, 8, 24)
+        first = SimpleNamespace(id="first")
+        second = SimpleNamespace(id="second")
+        columns = ["1", "EF", "DEV", "AM", "TODO", "DUE SOT", "FT", "Same title", "SOT"]
+        rows = [[*columns, first.id], [*columns, second.id]]
+        states = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [
+                SimpleNamespace(task_id=second.id, user_id="ef", reason_code="OTHER", comment="Check | details"),
+            ]),
+        )
+        notes = SimpleNamespace(all=lambda: [(first.id, "ef", {"comment": "Discord note"})])
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[states, notes]))
+        result = asyncio.run(_append_unfinished_priority_explanations(
+            db, rows, [first, second], day, {"ef": "Eva First"}, {},
+            overrides={first.id: {"reason": "Manual reason"}},
+        ))
+        self.assertEqual(result[0], [*columns, "Manual reason", "EF: Discord note"])
+        self.assertEqual(result[1], [*columns, "Tjetër", "Check ¦ details"])
+        self.assertIn(day, db.execute.await_args_list[0].args[0].compile().params.values())
+        self.assertIn(day.isoformat(), db.execute.await_args_list[1].args[0].compile().params.values())
+
+    def test_m2_manual_explanation_patch_preserves_other_saved_fields(self) -> None:
+        from app.api.routers import after_break_report as api
+        from app.services.after_break_report import UNFINISHED_EXPLANATION_OVERRIDES
+
+        task_id = uuid.uuid4()
+        row = SimpleNamespace(
+            report_date=date(2026, 8, 24), status="DRAFT",
+            generated_snapshot={"existing": True, UNFINISHED_EXPLANATION_OVERRIDES: {
+                str(task_id): {"comment": "Saved comment"},
+            }},
+        )
+        db = SimpleNamespace(get=AsyncMock(return_value=row), commit=AsyncMock(), refresh=AsyncMock())
+        with patch.object(api, "build_unfinished_priority_task_rows", AsyncMock(return_value=[[str(task_id)]])), \
+             patch.object(api, "_draft_with_questions", AsyncMock(return_value={})):
+            asyncio.run(api.update_draft(
+                uuid.uuid4(),
+                api.DraftUpdate(unfinished_explanations={task_id: api.TaskExplanationUpdate(reason="Manual reason")}),
+                db, SimpleNamespace(id=uuid.uuid4()),
+            ))
+        self.assertEqual(row.generated_snapshot, {
+            "existing": True, UNFINISHED_EXPLANATION_OVERRIDES: {
+                str(task_id): {"comment": "Saved comment", "reason": "Manual reason"},
+            },
+        })
+        db.commit.assert_awaited_once()
 
     def test_empty_unfinished_priority_section_keeps_the_full_table(self) -> None:
         rows = _ascii_table(
@@ -321,7 +422,9 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
 
         self.assertIn("DUE DATE", rows[2])
         self.assertIn("TIPI", rows[2])
-        self.assertTrue(any("(Asnje detyre)" in row for row in rows))
+        self.assertIn("ARSYEJA", rows[2])
+        self.assertIn("KOMENT", rows[2])
+        self.assertEqual(rows[4].split("|")[8].strip(), "(Asnje detyre)")
 
     def test_08_rows_use_a_border_while_deadlines_keep_the_red_fill(self) -> None:
         html = _render_ascii_table_html(

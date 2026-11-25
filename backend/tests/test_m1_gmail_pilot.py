@@ -14,7 +14,7 @@ def test_m1_gmail_rows_are_refreshed_without_duplication_and_rendered(monkeypatc
         datetime(2026, 11, 23, 9, 50, tzinfo=timezone.utc), body="The email body belongs in M1.",
     )]
     monkeypatch.setattr(morning_report, "read_m1_gmail_messages", AsyncMock(return_value=entries))
-    sections = [{"section_key": title, "title": title, "body": "EM: INFO PX: 0"}]
+    sections = [{"section_key": title, "title": title, "body": ""}]
 
     sections = asyncio.run(morning_report.refresh_m1_gmail_section(sections, day))
     sections = morning_report.normalize_morning_report_sections(sections)
@@ -23,7 +23,6 @@ def test_m1_gmail_rows_are_refreshed_without_duplication_and_rendered(monkeypatc
     plain = morning_report.render_plain_text("M1", day, sections)
 
     assert plain.count("PrimeFlow M1 TEST") == 1
-    assert "EM: INFO PX: 0" in plain
     assert "sender@example.com" in rendered
     assert "PrimeFlow M1 TEST" in rendered
     assert "PËRMBAJTJA" in rendered

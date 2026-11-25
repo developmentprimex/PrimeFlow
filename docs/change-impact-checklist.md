@@ -103,12 +103,22 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   si edhe përjashtimin nga API-ja publike. Tabela e Outlook-ut në pikën 5
   lexohet veç përmbajtjes së draftit.
 
-- EM PX EU lexon Inbox-in e Gmail për datën e M1 me `gmail.readonly`. Një
+- EM PX EU lexon Inbox-in e Gmail për intervalin e M1 me `gmail.readonly`. Një
   administrator autorizon llogarinë `primex.eu@gmail.com`. Hapja ose rifreskimi
   i tabelës në pikën 5 ruan një PX Note për çdo mesazh me prefiksin `EM PX EU:`.
   Verifiko filtrin Email në PX Notes, shënimet
   në M1, M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow, Excel të PX Notes
   dhe përjashtimin nga API-ja publike. Tabela burimore shfaqet në ekranin e M1.
+
+- M1 dhe M2 Post-Break përdorin të njëjtin lexim të Inbox-it për Gmail dhe
+  Yandex. Për Gmail, kontrollo që rezultati bosh të vijë si JSON dhe të
+  shfaqet si interval pa email. Për të dy ofruesit, kontrollo riprovën pas
+  ndërprerjes dhe që një gabim i vazhdueshëm të mbetet i dukshëm.
+
+- Pika 5 e M1 shfaq tabelat e kutive postare. Normalizimi heq tabelat e
+  vjetra të detyrave EM nga draftet e ruajtura, pamja paraprake dhe
+  përmbajtja e email-it dhe e eksporteve të M1. Kontrollo që tabela e
+  mesazheve Gmail të mbetet e dukshme kur është e disponueshme.
 
 - Tabelat e inbox-it INFO PX, IT, HF dhe PX EU në pikën 5 të M1 përdorin
   të njëjtin komponent. Rreshti shfaq prefiksin me orën, dërguesin dhe
@@ -121,9 +131,24 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow. Importet ekzistuese ruhen
   me ID-në e tyre; vetëm përmbledhjet që dështojnë riprovohen me Rifresko.
   Listat e PX Notes, M1/M2, M1 PIKAT dhe preview-të e 1H Reports e SHTYPI
-  Tomorrow shfaqin vetëm titullin, subjektin dhe dërguesin për shënimet nga
-  email-et. Butoni `+` lexon emailin përmes API-së së autentikuar. Për
-  importet e vjetra, API-ja lexon kopjen burimore nga shënimi ose nga
+  Tomorrow shfaqin titullin për shënimet nga email-et. Butoni `+` hap
+  përmbledhjen dhe hapat e ruajtur, ose detajet e shënimit manual. Lidhja
+  «Hap emailin origjinal» hap email-in te ofruesi kur URL-ja është ruajtur.
+  Importet e vjetra që kanë vetëm kopje të email-it shfaqin statusin se
+  përmbledhja nuk është ruajtur. Hapja e tekstit te
+  kutitë e M1 dhe te shënimet përdor scroll brenda një kutie me lartësi të
+  kufizuar. Për
+  titullin përdoret formati `EM INFO PX: 08:00 PURIS – HOME24`. Kur një
+  shënim i tillë kthehet në detyrë, `08:00` është shenja e prioritetit dhe
+  sloti i detyrës 1H është `10:00`. Ora e pranimit ruhet te koha e importit.
+  Pika 9 e M1 thekson edhe kryerreshtin e shënimeve me titull EM të shkruar manualisht.
+  M1, M2, M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow rendisin shënimet
+  e email-eve pas shënimeve të tjera, me të njëjtin rend brenda secilit grup.
+  Kontrollo numrat e rreshtave dhe lidhjet e email-it e të bashkëngjitjeve kur
+  hapen draftet e ruajtura me renditjen e vjetër.
+  Kur një import i vjetër do të shfaqte vetëm prefiksin dhe orën, titulli merr edhe
+  subjektin me shkronja të mëdha. Ruhet veçmas subjekti origjinal.
+  Për importet e vjetra, API-ja lexon kopjen burimore nga shënimi ose nga
   metadata e plotësuar në sinkronizimin pasues. Daljet statike të gjeneruara
   nga shënimet përdorin rreshtin e shkurtuar.
 
@@ -136,7 +161,27 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   daljet e M1 përdorin tabelën e ruajtur, si edhe renditjen e pyetjeve të
   shtuara nga M1 ose Common View.
 
-- Pika «DET NGA EMAILS TE REJA» në M1 Start of Day ka edhe një pilot lokal për leximin e subjektit,
+- Leximi i kutive postare të M1 dhe M2 ndan intervalin me përgjigjet e GA.
+  M1 nis në 16:30 të ditës paraardhëse, ose të ditës së fundit të punës
+  kur raporti është i së hënës. M2 nis në 08:00 të datës së raportit.
+  Përdor orën e gjenerimit të ruajtur me përgjigjet e GA. Verifiko
+  rifreskimin e M1 dhe pilotin Gmail, gjenerimin e M2, preview, email-in
+  dhe eksportet kur përmbajnë tabela email-esh. Tabelat e inbox-it në M1
+  dhe M2 hapin edhe lidhjen origjinale kur ajo vjen nga ofruesi.
+
+- Pika «(GA) EMAILS TE REJA?» në M2 Post-Break përdor të njëjtat katër
+  inbox-e si M1. Gjenerimi ruan email-et e mbërritura në datën e raportit
+  nga 08:00 deri në çastin e gjenerimit, në zonën kohore të raporteve.
+  Ekrani i M2 lejon hapjen e tekstit të plotë. Preview-ja, teksti dhe
+  dërgimi manual/automatik me bashkëngjitje marrin dërguesin, subjektin
+  dhe orën nga po ai gjenerim. Leximi i M2 nuk krijon PX Notes.
+  Ekrani shfaq statusin e të katër kutive edhe para gjenerimit, përmes
+  `/microsoft-mail/status`. Statusi lexon konfigurimin dhe autorizimet
+  e ruajtura, ndërsa HOMEFACE verifikohet kur lexohet inbox-i.
+  Kontrollo kufijtë e orarit dhe që pyetja e vjetër manuale të mos
+  rikthehet përmes drafteve të ruajtura ose sinkronizimit me Common View.
+
+- Pika «EMAILS TE REJA?» në M1 Start of Day ka edhe një pilot lokal për leximin e subjektit,
   dërguesit, orës dhe përmbajtjes
   nga etiketa `PrimeFlow-M1-Test` në Gmail. Tabela e pilotit hyn në ekranin
   M1, preview, dërgimin manual dhe automatik, tekstin dhe bashkëngjitjet e M1.
@@ -149,7 +194,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 - Pika 5 e M1 Start of Day lexon inbox-in HOMEFACE (`info@homeface.de`)
   nga Yandex me IMAP në modalitet leximi. Vendos fjalëkalimin e aplikacionit
-  te sekreti i deploy-it `HOMEFACE_MAIL_APP_PASSWORD`. Mesazhet e datës së
+  te sekreti i deploy-it `HOMEFACE_MAIL_APP_PASSWORD`. Mesazhet e intervalit të
   raportit importohen në PX Notes si `HF_MAIL`, me ID të qëndrueshme nga
   UIDVALIDITY dhe UID. Kontrollo filtrin Email, PX Notes Excel, pikën 9 të
   M1, M2 Post-Break, M1 PIKAT, 1H Reports dhe 1H SHTYPI Tomorrow. API-ja
@@ -226,6 +271,38 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
   kufirit të gjenerimit. Kontrollo faqet, preview dhe emailin për të dy raportet.
 
+- Claude Artifact lexon përmendjet direkte të GA-së përmes `ga_discord_mentions_feed`
+  dhe `/api/ga-assistant/discord/mentions/feed`. Burimi është `ga_discord_mentions`,
+  të cilin e lexojnë edhe agjenda e GA-së dhe mjeti ekzistues `ga_discord_mentions`.
+  Filtri i listës së Artifact-it përdor `DISCORD_GA_REPLIES_CHANNEL_ID`, të njëjtin
+  konfigurim kanali që përdorin rrjedhat e përgjigjeve dhe reagimeve të GA në M1/M2.
+  Kur ndryshon ID-ja e kanalit, kontrollo burimin në të tria paraqitjet. Për listën
+  e Artifact-it kontrollo mention-et direkte, përjashtimin e kanaleve të tjera,
+  faqëzimin dhe rifreskimin pas shtimit ose heqjes së një reagimi.
+  Lista shfaq emrat e bashkëngjitjeve nga `ga_discord_mentions`. Hapja nga
+  Artifact-i përdor `ga_discord_mention_attachments` dhe botin e përmendjeve
+  për të kërkuar linket e përkohshme nga Discord. Kontrollo hapjen nga një
+  përmendje direkte dhe refuzimin për burimet jashtë listës së kanalit.
+  Arkivi `ga_discord_channel_messages` furnizon `context` në të dy mjetet e
+  përmendjeve. Kontrollo kanalin dhe thread-et publike, dritaren dyminutëshe
+  për autorin, reply-n origjinal, reagimet dhe skedarët për çdo ID të lidhur.
+  Agjenda e GA-së vazhdon të lexojë tabelën e përmendjeve dhe M1/M2 përdorin
+  evidencën e tyre për përgjigjet dhe reagimet.
+  Shkrimet nga Artifact-i kalojnë te `ga_discord_reply` / `ga_discord_react`
+  dhe përdorin identitetin e botit të përmendjeve. Kontrollo autorizimin si GA,
+  ID-të e kontekstit, lidhjen e reply-t te përmendja, heqjen e reagimit të
+  botit dhe që ai reagim të mos numërohet si aprovim i një kolegu.
+  Në feed-in e ASIST GA – DET GA, `ga_replied` lexon përgjigjet e arkivuara të
+  GA-së në kanal ose në thread-et publike të lidhura dhe përgjigjet nga
+  veprimi i audituar i PrimeFlow.
+  `ga_reacted` lexon reagimet aktive të GA-së dhe botit të përmendjeve.
+  Emrat te `others_reacted_before_ga` kërkojnë që shtimi i reagimit aktiv të
+  kolegut të jetë parë para reagimit të parë aktiv të GA-së ose botit në të
+  njëjtin sesion të botit. Kontrollo shtimin, heqjen, pastrimin dhe lidhjen
+  pas ndërprerjes. `others_reacted_before_ga_known` është false kur mungon
+  evidenca për renditjen, përfshirë reagimet historike të lexuara vetëm me REST
+  dhe mesazhet që kanë reagime të stafit por presin një reagim të GA-së.
+
 - M2: **DT WFE** është një tabelë automatike. Kontrollo që draftet e vjetra dhe
   importi nga Common View të mos krijojnë kopje në grupin manual të M2.
 
@@ -234,7 +311,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   për datën e raportit. Kontrollo titujt me tekst para dhe pas fjalës.
   Kontrollo faqen, pamjen paraprake, emailin dhe bashkëngjitjet HTML, Word dhe PNG.
 
-- M3: **A JEMI BRENDA MESATARES ME PROJEKTE?** dhe **PIKAT E DITES** përjashtohen nga draftet e
+- M3: **DET DONE TE HV** përdor kalimin në DONE të regjistruar nga Haxhere
+  Spahiu gjatë datës së raportit. Përfshin detyrat sistemore dhe të zakonshme.
+  Kontrollo gjenerimin e M3, pamjen paraprake, email-in dhe eksportet Word/PNG.
+
+- M3: Tabela **DET 08:00** te pika e detyrave të nesërme ngjyros rreshtat
+  sipas statusit në ekran, preview, email dhe bashkëngjitjet Word/PNG.
+
+- M3: **A JEMI BRENDA MESATARES ME PROJEKTE?**, **PIKAT E DITES** dhe
+  **(GA) ZHV: TIKETAT E STD?** përjashtohen nga draftet e
   ruajtura, rigjenerimi dhe importi i pyetjeve manuale. Kontrollo gjithashtu
   faqen M3, preview, emailin dhe bashkëngjitjet.
 
@@ -278,10 +363,19 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   përdor të njëjtin kanal Discord, të njëjtin interval dhe të njëjtën kohë
   gjenerimi si komentet e raportit përkatës. Boti ruan kohën kur merr
   reagimin e GA ndaj një mesazhi nga stafi me lidhje aktive Discord.
+  AUTORI shfaq inicialet. Kolona SKEDARËT hap miniaturat dhe pamjen e plotë
+  në M1/M2 përmes mesazhit të reaguar, edhe në thread publik. Preview dhe
+  emaili HTML lidhin mesazhin në Discord, ndërsa Word/PNG tregojnë numrin.
+  Reagimet e vjetra marrin lidhjen kur snapshot-i i Discord-it ruan mesazhin
+  dhe të dhënat e bashkëngjitjeve. API-ja pranon vetëm mesazhe me reagim
+  brenda intervalit të atij raporti.
   Kontrollo reagimet ndaj mesazheve ekzistuese, kufirin e së premtes për M1
   të së hënës, kufirin 08:00 për M2, preview, emailin dhe Word/PNG.
   Hapja e draftit, preview dhe dërgimi manual rilexojnë reagimet e draftit
   deri në orën fillestare të gjenerimit, edhe kur boti i ka ruajtur me vonesë.
+  Për draftet e vjetra të M2 pa orë gjenerimi, përgjigjet dhe reagimet
+  rilexohen me të njëjtën orë kontrolli. Raportet e dërguara pa orë
+  gjenerimi përdorin orën e dërgimit kur rikuperojnë reagimet.
   Një server raportimi pa ID të serverit Discord lexon evidencën e ruajtur
   nga kanali i konfiguruar. Raportet e dërguara me evidencë të padisponueshme
   mund ta shfaqin tabelën e rikuperuar me kufirin e gjenerimit të ruajtur.
@@ -308,6 +402,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   dhe të shabllonit sistemor, duke përjashtuar personat e caktuar për koordinim.
   Kontrollo që inicialet të përdoren edhe në preview, email, tekst dhe Word/PNG.
   Tabela **BZ ME GA** te pika e takimeve përdor rrjedhën e saj.
+  Në M2, **GA MBYLLJA E DET** përdor të njëjtin burim për kolonën **BZ ME**
+  në çdo tabelë statusi. Kontrollo gjenerimin, preview, emailin dhe Word/PNG.
+  Tabela HV dhe bashkëngjitja e 1H Reports përdorin paraqitjen e tyre.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
 
@@ -401,6 +498,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   mes dy javëve gjatë qëndrimit në faqe. Eksporti Excel dhe raportet e veçanta
   1H SHTYPI Today/Tomorrow nuk përdorin këtë gjendje minimizimi.
 
+- Common View Short filtron detyrat e tabelës javore për This Week dhe Next
+  Week para grupimit të kartave. Kontrollo kolonat e hënë–e premte, përfshirjen
+  sipas secilit kriter dhe printimin e së njëjtës tabelë. API-ja Common View,
+  eksporti Excel dhe raportet e veçanta SHTYPI nuk përdorin filtrin Short.
+
 - Eksporti `/exports/checklists.xlsx` përdoret nga checklistat e Product Content
   dhe kontrollon edhe shabllonet globale sipas `group_key`: MST, TT dhe
   shabllonet e takimeve eksportohen nga ADMIN dhe MANAGER; STAFF mbetet i
@@ -427,8 +529,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   SHTYPI Tomorrow nuk ka këta filtra. Filtrat veprojnë në preview; shkarkimet
   dhe email-et e gjeneruara në server ndjekin raportin e plotë, si për Strikes.
 
-- Strikes te 1H Reports llogariten nga 08:00 deri në fund të slotit të
-  zgjedhur, edhe në SHTYPI të integruar në raportin e GA. Pikat e ditës nga
+- Totali dhe filtri i strikes te 1H Reports llogariten nga 08:00 deri në fund të
+  slotit të zgjedhur, edhe në SHTYPI të integruar në raportin e GA. Ngjyra e
+  pikave në 1H Reports (përfshirë BLL) ndjek intervalin e slotit: kaltër për
+  pikën e kryer në interval, gjelbër për pikën e kryer më herët po atë ditë,
+  gri për ditët e mëparshme ose pa datë. Pikat e ditës nga
   detyrat që mungojnë në seksionet e slotit shfaqen te “STRIKES TË DITËS”.
   Kontrollo preview, filtrin Strikes, email, Word/PNG/Text dhe raportet
   historike. SHTYPI Today më vete dhe Mira Host përdorin dritaret e slotit.
@@ -612,6 +717,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 - Taskat përdoren edhe nga M1/M2/M3 dhe PIKAT PËR RAP. Mos i përjashto këto
   vetëm sepse ndryshimi fillon në My View ose Common View. Përfshirja e taskut
   varet nga kategoria, data, personi dhe filtrat e raportit.
+- M2 Post-Break shfaq **ARSYEJA** dhe **KOMENT** te **DET TE PAKRYERA,
+  08:00/DEADLINE** nga Daily Report i My View për datën e raportit. Vlerat
+  lidhen sipas ID-së së detyrës. Gjenerimi, preview-ja dhe daljet e dërgimit
+  përdorin të njëjtën tabelë. M2 PIKAT ndan përzgjedhjen e detyrave dhe ka
+  rrjedhën e vet për shpjegimet dhe komentet manuale.
+  M2 Post-Break përfshin edhe shënimet e veçanta nga Discord dhe komentet e
+  vazhdimit AM → PM. Ndryshimet manuale ruhen për secilën fushë në draftin
+  e M2 Post-Break dhe kanë përparësi gjatë rifreskimit dhe rigjenerimit.
+  Në ekran, Arsyeja ruhet nga lista brenda qelizës dhe Komenti kur fusha
+  humb fokusin. Numri i rreshtit lidhet me ID-në e detyrës pas filtrit të
+  mungesave. Preview-ja dhe dërgimi përdorin tekstin e ruajtur.
 - M2 në Discord lidh kartën AM të pambyllur me përgjigjen PM për të njëjtën
   detyrë/person/ditë. Vazhdimi AM→PM nuk ndryshon periudhën apo datat e taskut;
   ruhet në pyetjen PM dhe shfaqet edhe në M2 PIKAT/email/eksport. Mbyllja kalon
@@ -638,6 +754,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   PX Notes lidh te “Të gjitha”; shiritat e njoftimeve dhe dialogu i përbashkët
   i komenteve përdorin gjendjen dhe datën e përditësimit të listës bazë.
   Raportet dhe eksportet lexojnë simbolin dhe tekstin nga të dhënat e detyrës.
+- PrimeFlow MCP liston komentet personale dhe versionin aktual të komenteve
+  te simbolet për detyrat 1H. Gjendja `new` ose `seen` ruhet për llogarinë
+  e asistentit dhe për versionin e komentit. Kontrollo Task Details dhe
+  Simbolet dhe komentet për të njëjtin tekst, si edhe njohjen e komenteve
+  të redaktuara si të reja. Njoftimet dhe konfirmimet e përgjegjësve përdorin
+  `task_marker_comment_inbox`. M1 «A KA KOMENTE NE PF?» përdor historikun
+  `task_symbol_comment_events`. SHTYPI lexon komentin e detyrës.
 - SHTYPI Today dhe Tomorrow ndajnë komponentin dhe gjeneruesin bazë, por kanë
   dallime në data, gjenerim dhe historik. 1H Reports ka gjenerues tjetër.
   Mungesa ose PV tërëditore (08:00–16:00) përjashton detyrat nga gjenerimi i ri
@@ -950,6 +1073,19 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
 
+- ASIST GA – DET GA lidh M1 Start of Day, After Break, Meetings Report,
+  M1/M2/M3 PIKAT dhe 1H SHTYPI Sot/Nesër me `?date=YYYY-MM-DD`.
+  Për datat e arkivuara SHTYPI përdor snapshot-in e datës, edhe te Nesër.
+  Ruajtja MCP e pikës «A duhet riorganizim?» përdor përgjigjen manuale të
+  M1 PIKAT. Kontrollo edhe preview, email dhe eksportet e M1 PIKAT. Lista
+  PX e afateve përdor përgjegjësin ose konfirmuesin GA si lista GA Tasks.
+  Agjenda MCP lexon simbolet e ruajtura që përdorin Common View, 1H
+  dhe raportet M1/M2/M3. Takimet lexojnë të njëjtën ditë dhe status si GA
+  Time Table dhe shënimet e Takimeve. Shënimi «reacted» te GA Devices është
+  gjendje e listës MCP. Përfundimi i detyrës kalon nga shërbimi ekzistues
+  dhe pasqyrohet në Task Details, Common View, My View, Development,
+  Graphic Design, Product Content, Finance dhe në raportet e lidhura.
+
 - Tema Light / Dark / System: `frontend/src/lib/theme.ts` vendos klasën `dark`
   para renderimit dhe ruan `primex-theme` në localStorage; System ndjek ndryshimet
   e pajisjes dhe zgjedhja sinkronizohet mes skedave. `theme-switcher.tsx` në
@@ -1016,6 +1152,14 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
   Përfundimi njoftohet pas kontrolleve të deployment-it, dështimi veçmas;
   `/push` manual mbetet i ndarë. Nuk bllokon redaktimin në faqet e aplikacionit.
   Shih [njoftimet e deployment-it](discord-deployment-notices.md).
+
+- Apliko migrimet në prodhim nga workflow `Primex Auto Deploy`, pasi skedari
+  i migrimit të jetë në `main`. Për ndryshime të backend-it, `plan` lexon
+  revizionet nga konfigurimi i databazës në runner dhe kontrollon rrugën e
+  përditësimit për commit-in që publikohet. Kontrolli përsëritet me
+  konfigurimin e deployment-it para `upgrade head`. Nëse revizioni aktiv
+  mungon në Git, rikthe migrimin dhe verifiko skemën përpara një deployment-i
+  të ri. Workflow i pull request-it kontrollon grafin pa lidhje me prodhimin.
 
 - Integrimi i jashtëm NEWS-PX merr GA Time Table nga printimi ditor i Admin
   Tasks dhe `/api/exports/ga-time.xlsx` për email-et 07:00/21:00

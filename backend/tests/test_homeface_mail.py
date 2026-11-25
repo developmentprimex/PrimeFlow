@@ -70,4 +70,20 @@ def test_homeface_does_not_report_connected_when_yandex_rejects_login(monkeypatc
     assert result["configured"]
     assert not result["connected"]
     assert "EM HF" in result["error"]
+    homeface_mail.read_inbox.assert_called_once()
     save_notes.assert_not_awaited()
+
+
+def test_homeface_retries_a_disconnected_session_and_accepts_an_empty_inbox(monkeypatch):
+    monkeypatch.setattr(microsoft_mail.settings, "HOMEFACE_MAIL_APP_PASSWORD", SecretStr("app-password"))
+    read = MagicMock(side_effect=[IMAP4.abort("connection closed"), []])
+    monkeypatch.setattr(homeface_mail, "read_inbox", read)
+    save_notes = AsyncMock(return_value=True)
+    monkeypatch.setattr(microsoft_mail, "save_mailbox_notes", save_notes)
+    db = AsyncMock()
+
+    result = asyncio.run(microsoft_mail.messages(date(2026, 11, 25), Response(), "hf", None, db))
+
+    assert result == {"configured": True, "connected": True, "messages": []}
+    assert read.call_count == 2
+    save_notes.assert_awaited_once_with(db, [], homeface_mail.MAILBOX)

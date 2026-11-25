@@ -580,6 +580,7 @@ export function ReportSectionPreview({
   filterCreatedWeek = false,
   filterWfeAge = false,
   projectColumnWidth,
+  compactBzColumn = false,
   largerTableText = false,
   emphasizeOwnerSeparator = false,
   discordReplyReport,
@@ -590,6 +591,7 @@ export function ReportSectionPreview({
   filterCreatedWeek?: boolean
   filterWfeAge?: boolean
   projectColumnWidth?: string
+  compactBzColumn?: boolean
   largerTableText?: boolean
   emphasizeOwnerSeparator?: boolean
   discordReplyReport?: DiscordReplyReport
@@ -760,6 +762,37 @@ export function ReportSectionPreview({
 
   const renderDataTable = (rows: TablePreviewItem[], key: string) => {
     const headers = withoutStatusColumn(rows[0].headers, rows[0].cells).headers
+    const bzIndex = compactBzColumn ? headers.indexOf("BZ ME") : -1
+    const typeIndex = headers.indexOf("TYPE")
+    const columnOrder = headers.map((_, index) => index)
+    if (bzIndex >= 0 && typeIndex >= 0) {
+      columnOrder.splice(bzIndex, 1)
+      columnOrder.splice(columnOrder.indexOf(typeIndex) + 1, 0, bzIndex)
+    }
+    const displayCells = (row: TablePreviewItem) => {
+      const visible = withoutStatusColumn(row.headers, row.cells)
+      return bzIndex >= 0 && typeIndex >= 0
+        ? {
+            headers: columnOrder.map((index) => visible.headers[index]),
+            cells: columnOrder.map((index) => visible.cells[index] ?? ""),
+          }
+        : visible
+    }
+    const columnStyle = (header: string): React.CSSProperties | undefined => {
+      if (header === "PRJK") {
+        return {
+          width: projectColumnWidth || "1%",
+          minWidth: projectColumnWidth,
+          maxWidth: projectColumnWidth || "140px",
+          whiteSpace: "normal",
+          overflowWrap: "break-word",
+          wordBreak: "normal",
+        }
+      }
+      if (header === "BZ ME" && compactBzColumn) {
+        return { width: 56, minWidth: 56, maxWidth: 56, overflowWrap: "anywhere" }
+      }
+    }
     const createdColumnIndex = headers.findIndex((header) => normalizeHeader(header) === "ADDED")
     const canFilterCreatedWeek = filterCreatedWeek && createdColumnIndex >= 0
     const canFilterWfeAge = filterWfeAge && createdColumnIndex >= 0
@@ -800,26 +833,16 @@ export function ReportSectionPreview({
             {rows
               .filter((row) => row.isHeader)
               .map((row) => {
-                const visible = withoutStatusColumn(row.headers, row.cells)
+                const visible = displayCells(row)
                 return (
                   <tr key={row.key} className="bg-slate-200 font-semibold">
                     {visible.cells.map((cell, cellIndex) => {
                       const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
                       const narrow = isNarrowTableHeader(header)
-                      const projectColumnStyle = header === "PRJK"
-                        ? {
-                            width: projectColumnWidth || "1%",
-                            minWidth: projectColumnWidth,
-                            maxWidth: projectColumnWidth || "140px",
-                            whiteSpace: "normal" as const,
-                            overflowWrap: "break-word" as const,
-                            wordBreak: "normal" as const,
-                          }
-                        : undefined
                       return (
                         <th
                           key={cellIndex}
-                          style={projectColumnStyle}
+                          style={columnStyle(header)}
                           className={`border-b border-r border-slate-300 py-1.5 align-top last:border-r-0 ${
                             header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
                               ? "px-1 text-center"
@@ -874,7 +897,7 @@ export function ReportSectionPreview({
           </thead>
           <tbody>
             {visibleDataRows.map((row, rowIndex) => {
-                const visible = withoutStatusColumn(row.headers, row.cells)
+                const visible = displayCells(row)
                 const tone = meetingRowTone(row.headers, row.cells) || rowTone(row.label, row.cells, row.headers)
                 const eightAmTask = isEightAmTaskRow(row.headers, row.cells, row.label)
                 const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)
@@ -885,16 +908,6 @@ export function ReportSectionPreview({
                     {visible.cells.map((cell, cellIndex) => {
                       const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
                       const narrow = isNarrowTableHeader(header)
-                      const projectColumnStyle = header === "PRJK"
-                        ? {
-                            width: projectColumnWidth || "1%",
-                            minWidth: projectColumnWidth,
-                            maxWidth: projectColumnWidth || "140px",
-                            whiteSpace: "normal" as const,
-                            overflowWrap: "break-word" as const,
-                            wordBreak: "normal" as const,
-                          }
-                        : undefined
                       const displayedCell = previewTableCell(cell, header)
                       const customCell = renderCell?.(row.label, visible.cells[0]?.trim() ?? "", header, displayedCell)
                       const stackedDate = displayedCell.includes("\n")
@@ -907,7 +920,7 @@ export function ReportSectionPreview({
                       return (
                         <td
                           key={cellIndex}
-                          style={projectColumnStyle}
+                          style={columnStyle(header)}
                           className={`border-b border-r border-slate-200 py-1.5 align-top last:border-r-0 ${
                             stackedDate
                               ? "px-0"

@@ -5,17 +5,17 @@ import * as React from "react"
 import { CalendarDays, CheckCircle2, Clock3, Eye, History, Mail, Pencil, RefreshCw, Save, Send } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
-import { useNoteEmailLoader } from "@/components/note-email-preview"
 import { installReportNoteControls } from "@/components/report-note-attachments"
-import type { NoteEmailPreviews } from "@/lib/types"
+import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { clearSavedManualDraft, readManualDraft, shouldAdvanceReportDay, writeManualDraft } from "@/lib/m1-reporting-points-draft"
+import { changedManualAnswers, clearSavedManualDraft, readManualDraft, shouldAdvanceReportDay, writeManualDraft } from "@/lib/m1-reporting-points-draft"
 import { shouldRegenerateTaskData } from "@/lib/m1-reporting-points-data"
 import { reportResponseJson as responseJson } from "@/lib/report-response"
+import { useReportDate } from "@/lib/report-link-date"
 import { ReportingPointsManagement } from "@/components/reporting-points-management"
 import { M1ReportingPointsView, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m1-reporting-points-view"
 
@@ -33,9 +33,10 @@ function draftStorage() {
 
 export default function M1ReportingPointsPage() {
   const { user, loading: authLoading, apiFetch } = useAuth()
-  const loadNoteEmail = useNoteEmailLoader()
-  const [day, setDay] = React.useState(today)
+  const [day, setDay, linkedDay] = useReportDate(today)
   const [report, setReport] = React.useState<ReportingPointsReport | null>(null)
+  const activeReportId = React.useRef<string | undefined>(undefined)
+  React.useEffect(() => { activeReportId.current = report?.id }, [report?.id])
   const [answers, setAnswers] = React.useState<ManualAnswers>({})
   const [recipients, setRecipients] = React.useState<Recipients | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
@@ -43,6 +44,7 @@ export default function M1ReportingPointsPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [previewHtml, setPreviewHtml] = React.useState<string | null>(null)
   const [previewEmails, setPreviewEmails] = React.useState<NoteEmailPreviews>()
+  const [previewEmailHeadings, setPreviewEmailHeadings] = React.useState<NoteEmailHeadings>()
   const [history, setHistory] = React.useState<HistoryRow[] | null>(null)
   const [sendOpen, setSendOpen] = React.useState(false)
   const [tab, setTab] = React.useState("report")
@@ -51,7 +53,7 @@ export default function M1ReportingPointsPage() {
   const previousToday = React.useRef(today())
   const canAccess = !!user
   const canManage = !!user && (["ADMIN", "MANAGER"].includes(user.role) || (user.full_name || "").trim().toLowerCase() === "laurent hoxha")
-  const dirty = !!report && (Array.from(new Set([...Object.keys(answers), ...Object.keys(report.manual_answers)])) as ManualKey[]).some((key) => (answers[key] || "") !== (report.manual_answers[key] || ""))
+  const dirty = !!report && Object.keys(changedManualAnswers(report.manual_answers, answers)).length > 0
 
   const acceptReport = React.useCallback((value: ReportingPointsReport) => {
     setReport(value)
@@ -94,6 +96,7 @@ export default function M1ReportingPointsPage() {
   }, [apiFetch, day, canAccess, acceptReport])
 
   React.useEffect(() => {
+    if (linkedDay === day) return
     const advanceDay = () => {
       const next = today()
       const previous = previousToday.current
@@ -113,7 +116,7 @@ export default function M1ReportingPointsPage() {
       window.removeEventListener("focus", advanceDay)
       document.removeEventListener("visibilitychange", advanceDay)
     }
-  }, [day, dirty, savingAnswers, busy])
+  }, [day, linkedDay, setDay, dirty, savingAnswers, busy])
 
   React.useEffect(() => {
     if (!canAccess) return
@@ -143,7 +146,7 @@ export default function M1ReportingPointsPage() {
   React.useEffect(() => {
     if (!report || !dirty || !canAccess || savingAnswers || busy || saveError) return
     const reportId = report.id
-    const savedAnswers = { ...answers }
+    const savedAnswers = changedManualAnswers(report.manual_answers, answers)
     const savedDay = report.report_date
     const timer = window.setTimeout(async () => {
       setSavingAnswers(true)
@@ -152,7 +155,10 @@ export default function M1ReportingPointsPage() {
           method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: savedAnswers }),
         }))
         // Preserve newer edits; the next save starts after this one finishes.
-        setReport((previous) => previous?.id === reportId ? value : previous)
+        if (activeReportId.current === reportId) {
+          setReport(value)
+          setAnswers((latest) => ({ ...value.manual_answers, ...changedManualAnswers(answers, latest) }))
+        }
         if (user?.id) clearSavedManualDraft(draftStorage(), user.id, savedDay, savedAnswers)
       } catch (error) {
         setSaveError(error instanceof Error ? error.message : "Përgjigjet nuk u ruajtën.")
@@ -182,18 +188,20 @@ export default function M1ReportingPointsPage() {
 
   const save = () => action("save", async () => {
     if (!report) return
+    const changes = changedManualAnswers(report.manual_answers, answers)
     const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${report.id}/answers`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: answers }),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: changes }),
     }))
-    if (user?.id) clearSavedManualDraft(draftStorage(), user.id, day, answers)
+    if (user?.id) clearSavedManualDraft(draftStorage(), user.id, day, changes)
     acceptReport(value)
     toast.success("Përgjigjet u ruajtën.")
   })
 
   const preview = () => action("preview", async () => {
     if (!report) return
-    const value = await responseJson<{ html: string; note_emails?: NoteEmailPreviews }>(await apiFetch(`${API}/${report.id}/preview`))
+    const value = await responseJson<{ html: string; note_emails?: NoteEmailPreviews; note_email_headings?: NoteEmailHeadings }>(await apiFetch(`${API}/${report.id}/preview`))
     setPreviewEmails(value.note_emails)
+    setPreviewEmailHeadings(value.note_email_headings)
     setPreviewHtml(value.html)
   })
 
@@ -213,7 +221,7 @@ export default function M1ReportingPointsPage() {
 
   const changeAnswer = (key: ManualKey, value: string) => {
     const next = { ...answers, [key]: value }
-    if (user?.id) writeManualDraft(draftStorage(), user.id, day, next)
+    if (user?.id && report) writeManualDraft(draftStorage(), user.id, day, changedManualAnswers(report.manual_answers, next))
     setSaveError(null)
     setAnswers(next)
   }
@@ -289,8 +297,8 @@ export default function M1ReportingPointsPage() {
       </TabsContent>
     </Tabs>
 
-    <Dialog open={previewHtml !== null} onOpenChange={(open) => { if (!open) setPreviewHtml(null) }}><DialogContent className="max-w-[95vw] sm:max-w-[95vw]"><DialogHeader><DialogTitle>Pamja e raportit në email</DialogTitle></DialogHeader><iframe title="Pikat për raportim M1" sandbox="allow-same-origin" srcDoc={previewHtml || ""} className="h-[75vh] w-full rounded border bg-white"
-      onLoad={event => installReportNoteControls(event.currentTarget.contentDocument, undefined, () => {}, previewEmails, loadNoteEmail)}
+    <Dialog open={previewHtml !== null} onOpenChange={(open) => { if (!open) setPreviewHtml(null) }}><DialogContent className="max-w-[95vw] sm:max-w-[95vw]"><DialogHeader><DialogTitle>Pamja e raportit në email</DialogTitle></DialogHeader><iframe title="Pikat për raportim M1" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={previewHtml || ""} className="h-[75vh] w-full rounded border bg-white"
+      onLoad={event => installReportNoteControls(event.currentTarget.contentDocument, undefined, () => {}, previewEmails, previewEmailHeadings)}
     /></DialogContent></Dialog>
     <Dialog open={sendOpen} onOpenChange={(open) => { if (!busy) setSendOpen(open) }}><DialogContent><DialogHeader><DialogTitle>Dërgo raportin M1</DialogTitle></DialogHeader><p className="text-sm">Raporti i datës {reportDate(day)} dërgohet te marrësit aktualë të M1. Pikat automatike të raportit të sotëm përditësohen në momentin e dërgimit; përgjigjet ruhen. Çdo dërgim krijon një email të ri.</p><div className="space-y-2 rounded-lg bg-muted p-3 text-sm">{recipients ? (Object.entries(recipients) as [string, string[]][]).filter(([, values]) => values.length).map(([key, values]) => <p key={key}><strong>{key.toUpperCase()}:</strong> {values.join(", ")}</p>) : null}</div><Button onClick={send} disabled={!!busy}><Send className="mr-2 h-4 w-4" />{busy === "send" ? "Duke dërguar…" : "Dërgo raportin"}</Button></DialogContent></Dialog>
   </div>

@@ -5,7 +5,7 @@ import { Paperclip } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useAuth } from "@/lib/auth"
 
-export type DiscordReplyReport = { report: "M1" | "M2"; date: string }
+export type DiscordReplyReport = { report: "M1" | "M2"; date: string; source?: "reaction" }
 type DiscordFile = { url: string; filename: string; image: boolean }
 
 export function DiscordReplyFiles({ value, report }: { value: string; report: DiscordReplyReport }) {
@@ -26,6 +26,7 @@ export function DiscordReplyFiles({ value, report }: { value: string; report: Di
     setLoading(true)
     try {
       const query = new URLSearchParams({ report: report.report, report_date: report.date, message_id: messageId })
+      if (report.source) query.set("source", report.source)
       const response = await apiFetch(`/discord/ga-replies/attachments?${query}`)
       if (!response.ok) {
         const payload = await response.json().catch(() => null)

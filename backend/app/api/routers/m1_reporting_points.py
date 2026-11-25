@@ -86,15 +86,21 @@ async def _current_payload(db: AsyncSession, row: M1ReportingPointsReport) -> di
 
     report = await filter_points_payload(db, report_payload(row, excluded_note_ids=await excluded_note_ids(db, row)))
     notes = report["data"].get("notes", [])
-    legacy_ids = {
+    missing_details = {
         note["id"]: note["id"] for note in notes
-        if not note.get("email_preview") and legacy_email(note.get("content") or "")
+        if (not email.get("summary") if (email := note.get("email_preview")) else legacy_email(note.get("content") or ""))
     }
-    previews = await mail_previews_by_row(db, legacy_ids)
-    report["data"]["notes"] = [
-        {**note, "email_preview": email, "content": email_preview_text(email)}
-        if (email := previews.get(note["id"])) else note for note in notes
-    ]
+    previews = await mail_previews_by_row(db, missing_details)
+    visible_notes = []
+    for note in notes:
+        current = previews.get(note["id"])
+        saved = note.get("email_preview")
+        if current and saved:
+            note = {**note, "email_preview": {**current, **saved}}
+        elif current:
+            note = {**note, "email_preview": current, "content": email_preview_text(current)}
+        visible_notes.append(note)
+    report["data"]["notes"] = visible_notes
     return report
 
 
@@ -144,24 +150,37 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     existing = await _by_id(db, report_id)
     row = await locked_report(db, existing.report_date)
     await db.refresh(row)
+    await save_locked_manual_answers(db, row, payload.manual_answers, user)
+    return await _current_payload(db, row)
+
+
+async def save_locked_manual_answers(
+    db: AsyncSession, row: M1ReportingPointsReport, answers: dict[str, str], user: User
+) -> None:
     before = dict(row.manual_answers or {})
-    row.manual_answers = {**before, **payload.manual_answers}
+    row.manual_answers = {**before, **answers}
     row.status, row.last_error, row.updated_by = "DRAFT", None, user.id
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m1_reporting_points", entity_id=row.id,
                   action="SAVE_ANSWERS", before=before, after=row.manual_answers)
     await db.commit()
-    return await _current_payload(db, row)
 
 
 @router.get("/{report_id}/preview")
 async def preview(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                   _: User = Depends(get_current_user)) -> dict:
+    from app.services.report_note_attachments import manual_email_heading
+
     report = await _current_payload(db, await _by_id(db, report_id))
+    notes = report["data"].get("notes", [])
     return {
         "html": render_html(report), "plain_text": render_plain_text(report),
         "note_emails": {
             str(index): note["email_preview"]
-            for index, note in enumerate(report["data"].get("notes", []), 1) if note.get("email_preview")
+            for index, note in enumerate(notes, 1) if note.get("email_preview")
+        },
+        "note_email_headings": {
+            str(index): heading for index, note in enumerate(notes, 1)
+            if not note.get("email_preview") and (heading := manual_email_heading(note.get("content") or ""))
         },
     }
 

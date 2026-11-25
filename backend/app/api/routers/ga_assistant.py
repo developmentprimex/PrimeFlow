@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,17 @@ from app.models.task import Task
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
+from app.schemas.ga_discord_mentions import (
+    DISCORD_FEED_DEFAULT_LIMIT,
+    DISCORD_FEED_MAX_LIMIT,
+    DISCORD_MESSAGE_ID_PATTERN,
+    DiscordMentionAttachments,
+    DiscordMentionsFeed,
+    DiscordReactIn,
+    DiscordReactResult,
+    DiscordReplyIn,
+    DiscordReplyResult,
+)
 from app.services import ga_assistant as svc
 from app.services.audit import add_audit_log
 from app.services.ga_identity import is_ga_user
@@ -40,6 +51,12 @@ def ensure_assistant_user(user: User) -> None:
     if is_ga_user(user) or user.role == UserRole.ADMIN:
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the GA account or an admin can use the GA assistant")
+
+
+def require_ga_discord_author(user: User = Depends(get_current_user)) -> User:
+    if not is_ga_user(user):
+        raise HTTPException(403, "Vetëm llogaria e GA-së mund të dërgojë përgjigje dhe reagime në Discord.")
+    return user
 
 
 def _parse_moment(value: str | None, *, default: datetime) -> datetime:
@@ -217,6 +234,7 @@ async def agenda(
     start: str = Query(..., description="ISO 8601 start (inclusive)"),
     end: str = Query(..., description="ISO 8601 end (exclusive)"),
     include_untimed: bool = False,
+    include_live_microsoft: bool = True,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
@@ -228,7 +246,8 @@ async def agenda(
         raise HTTPException(status_code=422, detail="end must be after start and the window at most 31 days")
     last_day = (window_end - timedelta(microseconds=1)).date()
     items, warnings = await svc.collect_items(
-        db, user, window_start.date(), last_day, include_microsoft=is_ga_user(user), now=now
+        db, user, window_start.date(), last_day, include_microsoft=is_ga_user(user),
+        include_live_microsoft=include_live_microsoft, now=now,
     )
     selected = svc.select_agenda(items, window_start, window_end, include_untimed=include_untimed)
     return {
@@ -719,7 +738,7 @@ async def discord_mentions(
     if end <= start:
         raise HTTPException(status_code=422, detail="until must be after since")
     rows = await mentions.list_mentions(db, since=start, until=end, statuses=mentions.OPEN_STATUSES if only_open else None)
-    items = await mentions.render(db, rows, svc.ga_tz())
+    items = await mentions.render_with_context(db, rows, svc.ga_tz())
     if only_ready:
         items = [item for item in items if item["ready_for_ga"]]
     last = await mentions.last_message_at(db)
@@ -747,3 +766,78 @@ async def discord_mark(item_id: str, payload: DiscordMarkIn, db: AsyncSession = 
         raise HTTPException(status_code=422, detail="Discord mention ids look like dc:<message id>")
     row = await _set_discord_status(db, user, raw, payload.status)
     return (await mentions.render(db, [row], svc.ga_tz()))[0]
+
+
+@router.get("/discord/mentions/feed", response_model=DiscordMentionsFeed)
+async def discord_mentions_feed(
+    before: str | None = Query(default=None, pattern=DISCORD_MESSAGE_ID_PATTERN),
+    limit: int = Query(default=DISCORD_FEED_DEFAULT_LIMIT, ge=1, le=DISCORD_FEED_MAX_LIMIT),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Direct GA mentions in the configured staff channel with their current reactions."""
+    from app.services import ga_discord_mentions as mentions
+
+    ensure_assistant_user(user)
+    try:
+        rows = await mentions.list_staff_channel_mentions(db, before=before, limit=limit + 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    page = rows[:limit]
+    tz = svc.ga_tz()
+    items = await mentions.render_feed(db, page, tz)
+    return {
+        "channel_id": settings.DISCORD_GA_REPLIES_CHANNEL_ID,
+        "timezone": settings.GA_TIMEZONE,
+        "bot_configured": bool(settings.DISCORD_GUILD_ID and settings.DISCORD_GA_REPLIES_CHANNEL_ID
+                               and settings.GA_DISCORD_MENTIONS_BOT_TOKEN),
+        "items": items,
+        "next_before": page[-1].id if len(rows) > limit else None,
+    }
+
+
+@router.get("/discord/mentions/feed/{message_id}/attachments")
+async def discord_mention_attachments(
+    message_id: str = Path(pattern=DISCORD_MESSAGE_ID_PATTERN),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DiscordMentionAttachments:
+    from app.services import ga_discord_mentions as mentions
+
+    ensure_assistant_user(user)
+    links = await mentions.staff_mention_attachment_links(db, message_id)
+    return DiscordMentionAttachments(id=f"dc:{message_id}", attachments=links)
+
+
+@router.post("/discord/mentions/feed/{message_id}/reply")
+async def discord_mention_reply(
+    payload: DiscordReplyIn,
+    message_id: str = Path(pattern=DISCORD_MESSAGE_ID_PATTERN),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_ga_discord_author),
+) -> DiscordReplyResult:
+    from app.services import ga_discord_actions as actions, ga_discord_channel_archive as archive
+
+    target = await actions.target_message(db, message_id)
+    result, archived_reply = await actions.create_reply(db, target, payload)
+    _audit(db, user, _audit_id(result.id), "GA_ASSISTANT_DISCORD_REPLY",
+           {"discord_id": result.id, "target_id": f"dc:{message_id}"})
+    await archive.store_messages(db, [archived_reply])
+    return result
+
+
+@router.post("/discord/mentions/feed/{message_id}/react")
+async def discord_mention_react(
+    payload: DiscordReactIn,
+    message_id: str = Path(pattern=DISCORD_MESSAGE_ID_PATTERN),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_ga_discord_author),
+) -> DiscordReactResult:
+    from app.services import ga_discord_actions as actions
+
+    target = await actions.target_message(db, message_id)
+    result = await actions.react(db, target, payload)
+    _audit(db, user, _audit_id(result.id), "GA_ASSISTANT_DISCORD_REACT", result.model_dump())
+    await db.commit()
+    return result

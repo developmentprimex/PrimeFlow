@@ -4,10 +4,11 @@ import * as React from "react"
 import { Paperclip } from "lucide-react"
 import { toast } from "sonner"
 
+import { emailNoteTextWithoutLink, NO_EMAIL_SUMMARY, originalEmailUrl, ORIGINAL_EMAIL_LABEL } from "@/components/note-email-preview"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useAuth } from "@/lib/auth"
-import type { NoteEmailPreviews } from "@/lib/types"
+import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 
 export type ReportNoteAttachment = { id: string; original_filename: string }
 export type ReportNoteAttachments = Record<string, ReportNoteAttachment[]>
@@ -41,12 +42,12 @@ export function installReportNoteControls(
   attachments: ReportNoteAttachments | undefined,
   onOpen: (files: ReportNoteAttachment[]) => void,
   emails?: NoteEmailPreviews,
-  loadEmail?: (id: string) => Promise<string>,
+  headings?: NoteEmailHeadings,
 ) {
   if (!document) return
   const className = "px-note-attachment-view"
   document.querySelectorAll(`.${className}`).forEach((button) => button.remove())
-  if (!Object.keys(attachments ?? {}).length && !Object.keys(emails ?? {}).length) return
+  if (!Object.keys(attachments ?? {}).length && !Object.keys(emails ?? {}).length && !Object.keys(headings ?? {}).length) return
   if (!document.getElementById("px-note-attachment-styles")) {
     const style = document.createElement("style")
     style.id = "px-note-attachment-styles"
@@ -56,11 +57,14 @@ export function installReportNoteControls(
       .${className}:hover { background:#eff6ff; }
       .px-note-email summary { display:flex; justify-content:space-between; gap:8px; cursor:pointer; overflow-wrap:anywhere; text-align:left; }
       .px-note-email summary::-webkit-details-marker { display:none; }
-      .px-note-email-symbol { font-weight:bold; min-width:1em; }
+      .px-note-email-symbol { display:inline-flex; align-items:center; justify-content:center; flex:none; width:24px; height:24px;
+        border-radius:4px; color:#fff; background:#1e40af; font:bold 16px Arial; }
       .px-note-email-symbol::before { content:"+"; }
       .px-note-email[open] .px-note-email-symbol::before { content:"−"; }
-      .px-note-email-body { margin-top:6px; padding:6px; border:1px solid #cbd5e1; max-height:18em; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; text-align:left; }
-      @media print { .${className}, .px-note-email-symbol, .px-note-email-body { display:none; } }
+      .px-note-email-link { display:inline-flex; align-items:center; min-height:26px; margin-top:6px; padding:0 8px;
+        border:1px solid #93c5fd; border-radius:4px; background:#fff; color:#1e40af; font-weight:600; text-decoration:underline; }
+      .px-note-email-body { margin-top:6px; padding:6px; border:1px solid #cbd5e1; max-height:18em; overflow-y:auto; overscroll-behavior:contain; white-space:pre-wrap; overflow-wrap:anywhere; text-align:left; }
+      @media print { .${className}, .px-note-email-symbol, .px-note-email-link, .px-note-email-body { display:none; } }
     `
     document.head.append(style)
   }
@@ -80,33 +84,44 @@ export function installReportNoteControls(
     const cell = row.cells[noteColumn]
     if (!cell) continue
     const email = emails?.[number]
-    if (email && loadEmail && !cell.querySelector(".px-note-email")) {
+    const heading = headings?.[number]
+    const existingText = cell.innerText.trim().replace(/\s+/g, " ")
+    const manual = heading && (existingText === heading.original || existingText.startsWith(`${heading.original} `)) ? heading : undefined
+    if ((email || manual) && !cell.querySelector(".px-note-email")) {
       const details = document.createElement("details")
       details.className = "px-note-email"
       const summary = document.createElement("summary")
-      const text = document.createElement("span")
       const title = document.createElement("strong")
-      title.textContent = email.title
-      text.append(title, [email.subject, email.sender].filter(Boolean).map(value => ` · ${value}`).join(""))
+      title.textContent = email?.title ?? manual?.title ?? ""
       const symbol = document.createElement("span")
       symbol.className = "px-note-email-symbol"
-      symbol.setAttribute("aria-label", "Hap emailin")
-      summary.append(text, symbol)
+      symbol.setAttribute("aria-label", "Hap detajet e shënimit")
+      summary.append(title, symbol)
       const body = document.createElement("div")
       body.className = "px-note-email-body"
-      let loaded = false
-      let loading = false
+      body.tabIndex = 0
+      body.setAttribute("aria-label", "Detajet e shënimit")
+      if (email) {
+        body.textContent = email.summary || NO_EMAIL_SUMMARY
+      } else if (manual) {
+        const text = existingText.slice(manual.original.length).trim()
+        body.textContent = emailNoteTextWithoutLink(text, manual.original_email_url) || "Ky shënim nuk ka detaje."
+      }
       details.addEventListener("toggle", () => {
-        symbol.setAttribute("aria-label", details.open ? "Mbyll emailin" : "Hap emailin")
-        if (!details.open || loaded || loading) return
-        loading = true
-        body.textContent = "Duke hapur emailin…"
-        void loadEmail(email.id).then(value => {
-          loaded = true
-          body.textContent = value || "Ky email nuk ka tekst."
-        }, () => { body.textContent = "Emaili origjinal nuk është i disponueshëm." }).finally(() => { loading = false })
+        symbol.setAttribute("aria-label", details.open ? "Mbyll detajet e shënimit" : "Hap detajet e shënimit")
       })
-      details.append(summary, body)
+      details.append(summary)
+      const href = originalEmailUrl(email?.original_email_url ?? manual?.original_email_url)
+      if (href) {
+        const link = document.createElement("a")
+        link.href = href
+        link.target = "_blank"
+        link.rel = "noopener noreferrer"
+        link.className = "px-note-email-link"
+        link.textContent = ORIGINAL_EMAIL_LABEL
+        details.append(link)
+      }
+      details.append(body)
       cell.replaceChildren(details)
     }
     if (!files?.length) continue

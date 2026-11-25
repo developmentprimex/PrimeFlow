@@ -110,13 +110,21 @@ async def _collection(client: httpx.AsyncClient, url: str, token: str, params: d
 
 
 async def read_inbox(
-    client: httpx.AsyncClient, token: str, report_day: date, tz: ZoneInfo,
+    client: httpx.AsyncClient, token: str, report_day: date, tz: ZoneInfo, *,
+    window: tuple[datetime, datetime] | None = None,
 ) -> list[dict]:
-    start = datetime.combine(report_day, time.min, tz).astimezone(timezone.utc)
-    end = datetime.combine(report_day + timedelta(days=1), time.min, tz).astimezone(timezone.utc)
-    filter_by_date = f"receivedDateTime ge {start:%Y-%m-%dT%H:%M:%SZ} and receivedDateTime lt {end:%Y-%m-%dT%H:%M:%SZ}"
+    start, end = window or (
+        datetime.combine(report_day, time.min, tz),
+        datetime.combine(report_day + timedelta(days=1), time.min, tz),
+    )
+    start, end = start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+    if end < start:
+        return []
+    start_query, end_query = (limit.isoformat().replace("+00:00", "Z") for limit in (start, end))
+    end_operator = "le" if window is not None else "lt"
+    filter_by_date = f"receivedDateTime ge {start_query} and receivedDateTime {end_operator} {end_query}"
     params = {
-        "$select": "id,subject,from,receivedDateTime,body",
+        "$select": "id,subject,from,receivedDateTime,body,webLink",
         "$filter": filter_by_date,
         "$orderby": "receivedDateTime desc",
         "$top": "50",
@@ -127,6 +135,8 @@ async def read_inbox(
         sender = (message.get("from") or {}).get("emailAddress") or {}
         sender_name, sender_address = sender.get("name"), sender.get("address")
         received_at = datetime.fromisoformat(message["receivedDateTime"]).astimezone(tz)
+        if not start <= received_at <= end or (window is None and received_at == end):
+            continue
         body = message.get("body") or {}
         content = body.get("content") or ""
         if (body.get("contentType") or "").casefold() == "html":
@@ -143,5 +153,6 @@ async def read_inbox(
             "received_at": received_at.strftime("%H:%M"),
             "received_datetime": received_at.isoformat(),
             "body": content,
+            **({"original_email_url": message["webLink"]} if message.get("webLink") else {}),
         })
     return rows

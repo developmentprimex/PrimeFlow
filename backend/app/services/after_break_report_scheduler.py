@@ -11,7 +11,8 @@ from app.db import SessionLocal
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.services.after_break_report import (
-    MANUAL_SECTION_TITLES,
+    UNFINISHED_EXPLANATION_OVERRIDES,
+    apply_unfinished_priority_task_table,
     build_after_break_report_sections,
     is_generated_subject,
     render_html,
@@ -19,7 +20,6 @@ from app.services.after_break_report import (
     send_after_break_report,
     subject_for,
 )
-from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ async def run_after_break_report_scheduler_once(now: datetime | None = None) -> 
             return False
 
         row = (
-            await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_day))
+            await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_day).with_for_update())
         ).scalar_one_or_none()
         if row and row.status == "SENT":
             return False
@@ -78,9 +78,10 @@ async def run_after_break_report_scheduler_once(now: datetime | None = None) -> 
         # Always rebuild from live data at send time so auto-filled sections stay current.
         # Keep any manual answers already saved on today's draft.
         sections, snapshot = await build_after_break_report_sections(db, report_day)
+        if row and (overrides := (row.generated_snapshot or {}).get(UNFINISHED_EXPLANATION_OVERRIDES)):
+            snapshot[UNFINISHED_EXPLANATION_OVERRIDES] = overrides
+            sections = await apply_unfinished_priority_task_table(db, sections, report_day, explanation_overrides=overrides)
         existing_sections = row.sections if row is not None else None
-        if row is not None:
-            sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
         from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
 
         sections = await merge_common_view_manual_sections(

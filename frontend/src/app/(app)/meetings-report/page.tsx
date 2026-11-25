@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useReportDate } from "@/lib/report-link-date"
 import { ReportTaskSymbolsPanel } from "@/components/report-task-symbols-panel"
 import { M3TomorrowSymbolsTable } from "@/components/m3-tomorrow-symbols-table"
 import { CalendarDays, CheckCircle2, Clock3, Eye, History, Mail, Pencil, RefreshCw, Save, Send, Settings, ShieldCheck } from "lucide-react"
@@ -28,6 +29,7 @@ type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 const TOMORROW_SYMBOLS_TITLE = "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER"
+const HV_DONE_TITLE = "DET DONE TE HV"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -59,9 +61,6 @@ function canonicalMeetingsSectionTitle(title: string) {
   const key = compactSectionTitle(title)
   if (key.replace(/^(?:MANUAL)?\d*/, "") === compactSectionTitle(TOMORROW_SYMBOLS_TITLE)) {
     return TOMORROW_SYMBOLS_TITLE
-  }
-  if (key.includes("TIKETATESTD")) {
-    return "(GA) ZHV: TIKETAT E STD?"
   }
   if (key === compactSectionTitle("DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?")) {
     return "SYSTEM TASK LATE"
@@ -123,11 +122,11 @@ function canonicalMeetingsSectionTitle(title: string) {
 function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
     TOMORROW_SYMBOLS_TITLE,
-    "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "DET TE SHTYERA",
     "DET E KRYERA SOT (AM/PM)",
+    HV_DONE_TITLE,
     "PRODUKTE +/- SOT (PCM)",
     "TAK STATUSI?",
     "N- (GA) PV/FESTE?",
@@ -152,9 +151,12 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
   }
 
   for (const section of sections) {
-    if ([section.title, section.section_key || ""].some((value) =>
-      compactSectionTitle(value).replace(/^(?:MANUAL)?\d*/, "") === "AJEMIBRENDAMESATARESMEPROJEKTE"
-    )) continue
+    if ([section.title, section.section_key || ""].some((value) => {
+      const key = compactSectionTitle(value).replace(/^(?:MANUAL)?\d*/, "")
+      return key === "AJEMIBRENDAMESATARESMEPROJEKTE" ||
+        key === "GAZHVTIKETATESTD" ||
+        (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3"))
+    })) continue
     const title = canonicalMeetingsSectionTitle((section.section_key || section.title).trim())
     if (!title) continue
     if (displayOrder.includes(title)) {
@@ -185,16 +187,13 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
 
 function sectionGroupLabel(section: Section) {
   const key = compactSectionTitle(section.section_key || section.title)
-  if (key.includes("TIKETATESTD")) {
-    return "Auto-filled from PrimeFlow"
-  }
   const knownAuto = [
     TOMORROW_SYMBOLS_TITLE,
-    "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "DET TE SHTYERA",
     "DET E KRYERA SOT (AM/PM)",
+    HV_DONE_TITLE,
     "PRODUKTE +/- SOT (PCM)",
     "N- (GA) PV/FESTE?",
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
@@ -305,7 +304,7 @@ export default function MeetingsReportPage() {
   const { apiFetch, loading: authLoading, user } = useAuth()
   const canAccess = !authLoading && Boolean(user)
   const canManageDelivery = user?.role === "ADMIN" || user?.role === "MANAGER"
-  const [reportDate, setReportDate] = React.useState(todayIso())
+  const [reportDate, setReportDate] = useReportDate(todayIso)
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
@@ -580,47 +579,57 @@ export default function MeetingsReportPage() {
         </TabsList>
 
         <TabsContent value="report" className="space-y-5">
-          <ReportTaskSymbolsPanel key={reportDate} reportDate={reportDate} />
-          <div className="grid gap-4 border-y bg-slate-50/70 px-4 py-4 lg:grid-cols-[190px_minmax(320px,1fr)_auto]">
-            <div>
-              <Label>Report date</Label>
-              <Input className="mt-1 bg-white" type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
+          <details className="group rounded-lg border bg-white">
+            <summary className="flex cursor-pointer list-none items-center gap-3 rounded-lg bg-slate-50 px-4 py-3 text-sm font-semibold group-open:rounded-b-none [&::-webkit-details-marker]:hidden">
+              <span aria-hidden="true" className="w-4 text-center text-xl leading-none group-open:hidden">+</span>
+              <span aria-hidden="true" className="hidden w-4 text-center text-xl leading-none group-open:inline">−</span>
+              Menaxhimi i raportit dhe email-it
+            </summary>
+            <div className="space-y-5 border-t p-4">
+              <ReportTaskSymbolsPanel key={reportDate} reportDate={reportDate} />
+              <div className="grid gap-4 border-y bg-slate-50/70 px-4 py-4 lg:grid-cols-[190px_minmax(320px,1fr)_auto]">
+                <div>
+                  <Label>Report date</Label>
+                  <Input className="mt-1 bg-white" type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
+                </div>
+                <div>
+                  <Label>Email subject</Label>
+                  <Input
+                    className="mt-1 bg-white"
+                    value={draft?.subject || ""}
+                    onChange={(event) => draft && setDraft({ ...draft, subject: event.target.value })}
+                    placeholder="Generate a draft first"
+                  />
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
+                  <Button variant="outline" onClick={() => void save()} disabled={!draft || saving}><Save /> Save</Button>
+                  <Button variant="outline" onClick={() => void previewDraft()} disabled={!draft || saving}><Eye /> Email preview</Button>
+                  {canManageDelivery ? <Button onClick={() => void sendDraft()} disabled={!draft || sending}><Send /> Send now</Button> : null}
+                </div>
+              </div>
+              {draft ? (
+                <div className="grid border md:grid-cols-4">
+                  {[
+                    [CalendarDays, "Report date", draft.report_date],
+                    [CalendarDays, "Tomorrow", draft.tomorrow_date],
+                    [CheckCircle2, "Status", draft.status],
+                    [Clock3, "Last update", formatDateTimeInTimezone(draft.updated_at, "Europe/Tirane")],
+                  ].map(([Icon, label, value], index) => {
+                    const MetaIcon = Icon as typeof CalendarDays
+                    return (
+                      <div key={String(label)} className={index < 3 ? "border-b p-4 md:border-b-0 md:border-r" : "p-4"}>
+                        <div className="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground"><MetaIcon className="size-4" />{String(label)}</div>
+                        <div className="mt-1.5 text-sm font-semibold">{String(value || "-")}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : null}
             </div>
-            <div>
-              <Label>Email subject</Label>
-              <Input
-                className="mt-1 bg-white"
-                value={draft?.subject || ""}
-                onChange={(event) => draft && setDraft({ ...draft, subject: event.target.value })}
-                placeholder="Generate a draft first"
-              />
-            </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <Button variant="outline" onClick={() => void save()} disabled={!draft || saving}><Save /> Save</Button>
-              <Button variant="outline" onClick={() => void previewDraft()} disabled={!draft || saving}><Eye /> Email preview</Button>
-              {canManageDelivery ? <Button onClick={() => void sendDraft()} disabled={!draft || sending}><Send /> Send now</Button> : null}
-            </div>
-          </div>
+          </details>
 
           {draft ? (
             <>
-              <div className="grid border md:grid-cols-4">
-                {[
-                  [CalendarDays, "Report date", draft.report_date],
-                  [CalendarDays, "Tomorrow", draft.tomorrow_date],
-                  [CheckCircle2, "Status", draft.status],
-                  [Clock3, "Last update", formatDateTimeInTimezone(draft.updated_at, "Europe/Tirane")],
-                ].map(([Icon, label, value], index) => {
-                  const MetaIcon = Icon as typeof CalendarDays
-                  return (
-                    <div key={String(label)} className={index < 3 ? "border-b p-4 md:border-b-0 md:border-r" : "p-4"}>
-                      <div className="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground"><MetaIcon className="size-4" />{String(label)}</div>
-                      <div className="mt-1.5 text-sm font-semibold">{String(value || "-")}</div>
-                    </div>
-                  )
-                })}
-              </div>
-
               <div className="space-y-4">
                 {!draft.sections.some((section) => sectionGroupLabel(section) === "Manual questions") && (
                   <div className="flex justify-end">

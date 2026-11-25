@@ -345,13 +345,10 @@ async def report_task_snapshot(data: dict, *, interval_end: datetime, db=None) -
     return {"titles": titles, "descriptions": descriptions, "events": by_task}
 
 
-async def _text_overrides_for_1h_interval(
-    data: dict, *, interval_start: datetime, interval_end: datetime,
-) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
+async def _report_snapshot_with_fallback(data: dict, *, interval_end: datetime) -> dict:
     if data.get("tasks"):
         data = {**data, "items": {"fallback_tasks": data["tasks"], **(data.get("items") or {})}}
-    snapshot = await report_task_snapshot(data, interval_end=interval_end)
-    return report_text_overrides(snapshot, interval_start=interval_start, interval_end=interval_end)
+    return await report_task_snapshot(data, interval_end=interval_end)
 
 
 def report_text_overrides(snapshot, *, interval_start, interval_end):
@@ -399,10 +396,15 @@ async def generate_fresh(
     reminders = await load_1h_reminder_questions(slot, day)
     undiscussed_notes = await load_undiscussed_notes(show_full_mira_notes=show_full_mira_notes)
     strike_window_start = strike_interval_start(day, "10:00")
+    slot_start = strike_interval_start(day, slot)
     window_end = strike_interval_end(day, slot)
-    title_overrides, description_overrides = await _text_overrides_for_1h_interval(
-        data, interval_start=strike_window_start, interval_end=window_end,
+    snapshot = await _report_snapshot_with_fallback(data, interval_end=window_end)
+    title_overrides, description_overrides = report_text_overrides(
+        snapshot, interval_start=slot_start, interval_end=window_end,
     )
+    daily_overrides = (title_overrides, description_overrides)
+    if slot_start != strike_window_start:
+        daily_overrides = report_text_overrides(snapshot, interval_start=strike_window_start, interval_end=window_end)
     return build_report_document(
         data,
         day,
@@ -412,9 +414,10 @@ async def generate_fresh(
         undiscussed_notes=undiscussed_notes,
         title_overrides=title_overrides,
         description_overrides=description_overrides,
-        completion_window_start=strike_interval_start(day, slot),
+        completion_window_start=slot_start,
         completion_window_end=window_end,
         strike_window_start=strike_window_start,
+        daily_strike_overrides=daily_overrides,
     )
 
 
