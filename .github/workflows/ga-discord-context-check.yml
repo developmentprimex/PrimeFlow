@@ -93,17 +93,37 @@ jobs:
               updated = (await render_with_context(db, [anchor], ga_tz()))[0]
               result['reply_visible'] = any(item['id'] == 'dc:' + sent['id'] for item in updated['context'][REPLIES])
 
+          async def set_reaction(db, target, emoji, remove):
+              for delay in (0, 3, 7, 15, 30):
+                  if delay:
+                      await asyncio.sleep(delay)
+                  try:
+                      return await actions.react(db, target, DiscordReactIn(emoji=emoji, remove=remove))
+                  except HTTPException as exc:
+                      if exc.status_code != 429 or delay == 30:
+                          raise
+
           async def reaction_check(db, client, target, result):
               before = await source(client, target)
+              previously_owned = [candidate for candidate in EMOJIS if owned(before, candidate)]
+              result['owned_before'] = previously_owned
+              # The preceding probe confirmed one removal was rate-limited. Only
+              # clean up that prior trial if there is exactly one candidate.
+              if len(previously_owned) == 1:
+                  trial = previously_owned[0]
+                  await set_reaction(db, target, trial, True)
+                  result['previous_trial_removed'] = await has_reaction(client, target, trial, False)
+                  before = await source(client, target)
               emoji = next((candidate for candidate in EMOJIS if not owned(before, candidate)), None)
               if emoji is None:
                   result['reaction_error'] = 'all_test_reactions_already_present'
                   return
               try:
-                  await actions.react(db, target, DiscordReactIn(emoji=emoji))
+                  result['test_emoji'] = emoji
+                  await set_reaction(db, target, emoji, False)
                   result['reaction_added'] = await has_reaction(client, target, emoji, True)
               finally:
-                  await actions.react(db, target, DiscordReactIn(emoji=emoji, remove=True))
+                  await set_reaction(db, target, emoji, True)
                   result['reaction_removed'] = await has_reaction(client, target, emoji, False)
 
           async def main():
@@ -119,6 +139,8 @@ jobs:
                                       and row.get('content') == 'GA: ' + label_for(kind)), None)
                            for kind in ('mention', 'context')}
                   print('Existing test replies: ' + json.dumps({k: bool(v) for k, v in prior.items()}))
+                  if not all(prior.values()):
+                      raise SystemExit('The already verified test replies could not be read back.')
                   await db.execute(text("SET LOCAL statement_timeout = '12s'"))
                   anchors = await list_staff_channel_mentions(db, before=None, limit=30)
                   items = await render_with_context(db, anchors, ga_tz())
@@ -153,6 +175,8 @@ jobs:
                   results = {}
                   anchor = pair[0]
                   for kind, target in zip(('mention', 'context'), pair, strict=True):
+                      if kind != 'context':
+                          continue
                       print(f'Testing {kind}')
                       result = {'discord_reply': False, 'reply_visible': False,
                                 'reaction_added': False, 'reaction_removed': False}
