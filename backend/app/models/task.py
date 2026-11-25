@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, event, false, func, and_, or_, select
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from app.db import Base
@@ -83,6 +83,7 @@ class Task(Base):
         String(50), nullable=False, server_default="TODO"
     )
     resumed_from_pause: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    pause_periods: Mapped[list[dict[str, str]] | None] = mapped_column(JSONB(none_as_null=True))
     priority: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="NORMAL"
     )

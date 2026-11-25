@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.task_pause import pause_until_on_day
+
 from app.services.report_attendance import LEAVE_TABLE_COLUMNS, filter_task_context, filter_report_sections
 from app.services.ga_identity import is_ga_username
 
@@ -1901,6 +1903,10 @@ def _status_group_section(
     todo = [task for task in today_tasks if str(task.status or "").upper() == "TODO" and _is_open(task)]
     in_progress = [task for task in today_tasks if str(task.status or "").upper() == "IN_PROGRESS" and _is_open(task)]
     paused = [task for task in today_tasks if _normalize_report_status(task.status) == "PAUSED" and _is_open(task)]
+    dated_pauses = [
+        task for task in today_tasks
+        if pause_until_on_day(getattr(task, "pause_periods", None), report_day)
+    ]
     done = [
         task for task in tasks
         if str(task.status or "").upper() in {"DONE", "COMPLETED"}
@@ -1920,6 +1926,7 @@ def _status_group_section(
         *_m3_status_table("IN PROGRESS", in_progress, names, **table_kwargs),
         "",
         *(_m3_status_table("STOPPED", paused, names, **table_kwargs) + [""] if paused else []),
+        *(_m3_status_table("PAUZË", dated_pauses, names, **table_kwargs) + [""] if dated_pauses else []),
         *_m3_status_table("DONE", done, names, **table_kwargs),
         "",
         *_m3_status_table("LATE", late, names, include_late_days=True, **table_kwargs),

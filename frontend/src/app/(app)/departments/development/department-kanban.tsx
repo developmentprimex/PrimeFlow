@@ -2,6 +2,8 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
+import { isTaskPausedOnDay } from "@/lib/task-pause"
 import { MyViewTaskColumns } from "@/components/my-view-task-columns"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { calendarMeetingTimeRange, meetingTimeColumns } from "@/lib/calendar-meeting-time"
@@ -32,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { DailyRlzCommentField, DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
 import { DailyReportMeetingsTable } from "@/components/daily-report-meetings-table"
-import { DevelopmentM1Answer, useDevelopmentM1Report } from "@/components/development-m1-report"
+import { DevelopmentMeetingAnswer, useDevelopmentMeetingReport } from "@/components/development-m1-report"
 import { MeetingCanceledBadge } from "@/components/meeting-canceled-badge"
 import { useCanceledMeetings } from "@/lib/use-canceled-meetings"
 import { PxJavPlanningBriefView } from "@/components/px-jav-planning-brief-view"
@@ -246,7 +248,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
-const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
+const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
@@ -315,9 +317,11 @@ const INTERNAL_MEETING = {
       tabLabel: "M2",
       label: "M2 PER ZHVILLIM (11:45-12:00 MAX)",
       items: [
-        "A ka shenime GA/KA ne grupe/Trello?",
+        "A ka email-e të reja IT/STD?",
+        "A ka shënime të reja PX Notes / AI Agents Teams?",
         "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
         "Cka mbetet per PM?",
+        "A ka diçka që duhet t’i dorëzohet GA para pauzës?",
       ],
     },
     M3: {
@@ -1477,6 +1481,7 @@ export default function DepartmentKanban() {
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
   const [editTaskType, setEditTaskType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [editTaskStatus, setEditTaskStatus] = React.useState<string>("TODO")
+  const [editTaskPauseDays, setEditTaskPauseDays] = React.useState<number | null>()
   const [editTaskConfirmationAssigneeId, setEditTaskConfirmationAssigneeId] = React.useState("")
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
@@ -1496,6 +1501,7 @@ export default function DepartmentKanban() {
   const [allTodayEditDescription, setAllTodayEditDescription] = React.useState("")
   const [allTodayEditType, setAllTodayEditType] = React.useState<AllTodayEditTypeId>("normal")
   const [allTodayEditStatus, setAllTodayEditStatus] = React.useState<string>("TODO")
+  const [allTodayPauseDays, setAllTodayPauseDays] = React.useState<number | null>()
   const [allTodayEditConfirmationAssigneeId, setAllTodayEditConfirmationAssigneeId] = React.useState("")
   const [allTodayEditStartDate, setAllTodayEditStartDate] = React.useState("")
   const [allTodayEditDueDate, setAllTodayEditDueDate] = React.useState("")
@@ -1547,7 +1553,11 @@ export default function DepartmentKanban() {
   const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
   const [internalMeetingChecklistId, setInternalMeetingChecklistId] = React.useState<string | null>(null)
   const [internalMeetingItems, setInternalMeetingItems] = React.useState<ChecklistItem[]>([])
-  const m1 = useDevelopmentM1Report(activeTab === "meetings" && internalSlot === "M1" && internalMeetingItems.length > 0)
+  const hasChecklist = activeTab === "meetings" && internalMeetingItems.length > 0
+  const m1 = useDevelopmentMeetingReport("M1", hasChecklist && internalSlot === "M1")
+  const m2 = useDevelopmentMeetingReport("M2", hasChecklist && internalSlot === "M2")
+  const checklistReport = internalSlot === "M1" ? m1 : internalSlot === "M2" ? m2 : null
+  const showMeetingLists = checklistReport === null
   const hiddenM1Items = new Set(m1.report?.hidden_item_ids)
   const [newInternalMeetingItem, setNewInternalMeetingItem] = React.useState("")
   const [addingInternalMeetingItem, setAddingInternalMeetingItem] = React.useState(false)
@@ -2335,12 +2345,13 @@ export default function DepartmentKanban() {
           return <>
             {systemTitleOnly ? null : <TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />}
             {title}
+            {selectedAllHighlightDate && isTaskPausedOnDay(task, formatDateInput(selectedAllHighlightDate)) && <TaskPauseBadge />}
             {task.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(task.mira_dictation_source)}</span>}
           </>
         }}
       />
     ),
-    [completeTaskTitle, isTaskStartingOnSelectedAllDate, viewMode]
+    [completeTaskTitle, isTaskStartingOnSelectedAllDate, viewMode, selectedAllHighlightDate]
   )
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const isTaskAssignedToUser = React.useCallback(
@@ -5908,6 +5919,7 @@ export default function DepartmentKanban() {
     }
     const plainTitle = getPlainMarkedText(task.title)
     setEditingTaskId(task.id)
+    setEditTaskPauseDays(undefined)
     setEditTaskTitle(plainTitle)
     setEditTaskDescription(task.description || "")
     setEditTaskType(
@@ -5991,6 +6003,7 @@ export default function DepartmentKanban() {
       const payload: Record<string, unknown> = (editingTask?.ga_note_origin_id || editingTask?.plan_note_origin_id)
         ? {
             status: editTaskStatus,
+            pause_days: editTaskStatus === "DONE" ? undefined : editTaskPauseDays,
             start_date: startDateValue,
             due_date: dueDateValue,
             finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
@@ -6012,6 +6025,7 @@ export default function DepartmentKanban() {
             is_r1: editTaskType === "r1",
             is_personal: editTaskType === "personal",
             status: editTaskStatus,
+            pause_days: editTaskStatus === "DONE" ? undefined : editTaskPauseDays,
             start_date: startDateValue,
             due_date: dueDateValue,
             finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
@@ -6091,6 +6105,7 @@ export default function DepartmentKanban() {
     }
     const plainTitle = getPlainMarkedText(task.title)
     setAllTodayEditingTaskId(task.id)
+    setAllTodayPauseDays(undefined)
     setAllTodayPlanningDetail({
       taskId: task.id,
       brief: task.planning_brief ?? null,
@@ -6207,6 +6222,7 @@ export default function DepartmentKanban() {
           ...(isNoteOriginTask
             ? {
                 status: allTodayEditStatus,
+                pause_days: allTodayEditStatus === "DONE" ? undefined : allTodayPauseDays,
                 start_date: startDateValue,
                 due_date: dueDateValue,
                 finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
@@ -6238,6 +6254,7 @@ export default function DepartmentKanban() {
                       is_personal: allTodayEditType === "personal",
                     }),
                 status: allTodayEditStatus,
+                pause_days: allTodayEditStatus === "DONE" ? undefined : allTodayPauseDays,
                 start_date: startDateValue,
                 due_date: dueDateValue,
                 finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
@@ -6724,7 +6741,7 @@ export default function DepartmentKanban() {
       }
       const created = (await res.json()) as ChecklistItem
       setInternalMeetingItems((prev) => [...prev, created])
-      if (internalSlot === "M1") m1.reload()
+      checklistReport?.reload()
       setNewInternalMeetingItem("")
       toast.success("Internal meeting item added")
     } finally {
@@ -6799,7 +6816,7 @@ export default function DepartmentKanban() {
         setInternalMeetingItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       }
       cancelEditInternalMeetingItem()
-      if (internalSlot === "M1") m1.reload()
+      checklistReport?.reload()
       toast.success("Checklist item updated")
     } finally {
       setSavingInternalMeetingItem(false)
@@ -6879,9 +6896,9 @@ export default function DepartmentKanban() {
   }, [apiFetch, msConnected])
 
   React.useEffect(() => {
-    if (activeTab !== "meetings" || internalSlot === "M1") return
+    if (activeTab !== "meetings" || !showMeetingLists) return
     void loadMicrosoftStatus()
-  }, [activeTab, internalSlot, loadMicrosoftStatus])
+  }, [activeTab, showMeetingLists, loadMicrosoftStatus])
 
   React.useEffect(() => {
     if (msParam === "connected") {
@@ -6891,9 +6908,9 @@ export default function DepartmentKanban() {
   }, [msParam, loadMicrosoftStatus])
 
   React.useEffect(() => {
-    if (!msConnected || activeTab !== "meetings" || internalSlot === "M1") return
+    if (!msConnected || activeTab !== "meetings" || !showMeetingLists) return
     void loadMicrosoftEvents()
-  }, [msConnected, activeTab, internalSlot, loadMicrosoftEvents])
+  }, [msConnected, activeTab, showMeetingLists, loadMicrosoftEvents])
 
   const submitInternalNote = async () => {
     const title = internalNoteTitle.trim()
@@ -8794,6 +8811,7 @@ export default function DepartmentKanban() {
                           </SelectContent>
                         </Select>
                       </div>
+                      {!allTodayEditingTask?.question_origin_id && allTodayEditStatus !== "DONE" && <TaskPauseField value={allTodayPauseDays} onChange={setAllTodayPauseDays} until={allTodayEditingTask?.pause_until} />}
 
                       {isWaitingConfirmation(allTodayEditStatus) ? (
                         <div className="space-y-2">
@@ -9484,6 +9502,9 @@ export default function DepartmentKanban() {
                             </SelectContent>
                           </Select>
                         </div>
+                        {noProjectTasks.filter((task) => task.id === editingTaskId && !task.question_origin_id).map((task) => (
+                          editTaskStatus !== "DONE" && <TaskPauseField key={task.id} value={editTaskPauseDays} onChange={setEditTaskPauseDays} until={task.pause_until} />
+                        ))}
 
                         {isWaitingConfirmation(editTaskStatus) ? (
                           <div className="space-y-2">
@@ -10346,8 +10367,8 @@ export default function DepartmentKanban() {
         {activeTab === "meetings" ? (
           <div className="space-y-4 sm:space-y-6">
             <div className="text-lg sm:text-xl font-semibold">Meetings</div>
-            <div className={cn("grid grid-cols-1 gap-4", internalSlot !== "M1" && "lg:grid-cols-2")}>
-              <Card hidden={internalSlot === "M1"} className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
+            <div className={cn("grid grid-cols-1 gap-4", showMeetingLists && "lg:grid-cols-2")}>
+              <Card hidden={!showMeetingLists} className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-sm font-semibold">External Meetings</div>
                   <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
@@ -10991,7 +11012,7 @@ export default function DepartmentKanban() {
                     {exportingInternalMeetings ? "Exporting..." : "Export Excel"}
                   </Button>
                 </div>
-                {internalSlot !== "M1" && todayInternalMeetings.length ? (
+                {showMeetingLists && todayInternalMeetings.length ? (
                   <div className="rounded-md border border-slate-200">
                     <Table>
                       <TableHeader>
@@ -11038,19 +11059,20 @@ export default function DepartmentKanban() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-sm font-semibold">
                       {INTERNAL_MEETING.slots[internalSlot].label}
-                      {internalSlot === "M1" && m1.report ? ` · ${formatDateDMY(m1.report.date)}` : ""}
+                      {checklistReport?.report ? ` · ${formatDateDMY(checklistReport.report.date)}` : ""}
+                      {checklistReport?.report?.cutoff ? ` · Email-et dhe Notes deri në ${checklistReport.report.cutoff}` : ""}
                     </div>
-                    {internalSlot === "M1" && internalMeetingItems.length ? (
-                      <Button type="button" variant="outline" size="sm" onClick={m1.reload}
-                        disabled={m1.loading || m1.savingNote !== null || m1.cancelingMeeting !== null}>
+                    {checklistReport && internalMeetingItems.length ? (
+                      <Button type="button" variant="outline" size="sm" onClick={checklistReport.reload}
+                        disabled={checklistReport.loading || checklistReport.savingNote !== null || checklistReport.cancelingMeeting !== null}>
                         Rifresko
                       </Button>
                     ) : null}
                   </div>
-                  {internalSlot === "M1" && m1.loading && !m1.report ? (
+                  {checklistReport?.loading && !checklistReport.report ? (
                     <p role="status" className="text-sm text-muted-foreground">Po ngarkohen përgjigjet…</p>
                   ) : null}
-                  {internalSlot === "M1" && m1.failed ? (
+                  {checklistReport?.failed ? (
                     <p role="alert" className="text-sm text-destructive">Përgjigjet nuk u ngarkuan. Provo Rifresko.</p>
                   ) : null}
                   {!isReadOnly ? (
@@ -11078,9 +11100,8 @@ export default function DepartmentKanban() {
                         (internalSlot === "M1" ? a.id.localeCompare(b.id) : 0))
                       .map((item, idx) => {
                         const isEditing = editingInternalMeetingItemId === item.id
-                        const answer = internalSlot === "M1"
-                          ? m1.report?.sections.find((section) => section.key === m1.report?.item_sections[item.id])
-                          : undefined
+                        const report = checklistReport?.report
+                        const answer = report?.sections.find((section) => section.key === report.item_sections[item.id])
                         const displayTitle = answer?.key === "ka_gent" ? answer.title : (internalSlot === "M2" || internalSlot === "M3")
                           ? (item.title || "").toUpperCase()
                           : (item.title || "")
@@ -11112,16 +11133,17 @@ export default function DepartmentKanban() {
                                     placeholder="Checklist item"
                                   />
                                 </div>
-                              ) : answer ? (
+                              ) : answer && checklistReport ? (
                                 <details className="group">
                                   <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
                                     <span>{idx + 1}. {displayTitle}</span>
                                     <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
                                   </summary>
-                                  <DevelopmentM1Answer section={answer} readOnly={isReadOnly}
-                                    pending={m1.loading || m1.failed} savingNote={m1.savingNote}
-                                    markDiscussed={m1.markDiscussed} cancelingMeeting={m1.cancelingMeeting}
-                                    cancelMeeting={m1.cancelMeeting} />
+                                  <DevelopmentMeetingAnswer section={answer} readOnly={isReadOnly}
+                                    canMarkDiscussed={!isReadOnly || internalSlot === "M2"}
+                                    pending={checklistReport.loading || checklistReport.failed} savingNote={checklistReport.savingNote}
+                                    markDiscussed={checklistReport.markDiscussed} cancelingMeeting={checklistReport.cancelingMeeting}
+                                    cancelMeeting={checklistReport.cancelMeeting} />
                                 </details>
                               ) : (
                                 <div className="text-sm text-muted-foreground">

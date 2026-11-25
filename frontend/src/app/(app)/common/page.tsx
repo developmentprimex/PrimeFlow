@@ -3,6 +3,8 @@
 import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
+import { TaskPauseBadge } from "@/components/task-pause-field"
+import { isTaskPausedOnDay } from "@/lib/task-pause"
 import { calendarMeetingTimeRange, formatTimeLabel, parseTimeValue } from "@/lib/calendar-meeting-time"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
@@ -446,6 +448,7 @@ type MeetingAvailability = {
   suggested_slot?: { starts_at: string; ends_at: string } | null
 }
 type FastTaskItemMeta = {
+  isPaused?: boolean
   taskId?: string
   userId?: string
   departmentId?: string
@@ -941,6 +944,7 @@ const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
 }
 
 type SwimlaneCell = {
+  isPaused?: boolean
   title: string
   meetingTimeLabel?: string
   meetingRelation?: "PARA" | "PAS"
@@ -3291,6 +3295,7 @@ export default function CommonViewPage() {
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
           oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
           oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
+          isPaused: item.is_paused === true,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3318,6 +3323,7 @@ export default function CommonViewPage() {
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
           oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
           oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
+          isPaused: item.is_paused === true,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3345,6 +3351,7 @@ export default function CommonViewPage() {
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
           oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
           oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
+          isPaused: item.is_paused === true,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3377,6 +3384,7 @@ export default function CommonViewPage() {
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
           oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
           oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
+          isPaused: item.is_paused === true,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -4010,6 +4018,7 @@ export default function CommonViewPage() {
                   userId: assigneeId || undefined,
                   date: taskDate,
                   note: t.description || undefined,
+                  isPaused: isTaskPausedOnDay(t, taskDate),
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
@@ -4035,6 +4044,7 @@ export default function CommonViewPage() {
                   date: taskDate,
                   note: t.description || undefined,
                   departmentId,
+                  isPaused: isTaskPausedOnDay(t, taskDate),
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
@@ -4059,6 +4069,7 @@ export default function CommonViewPage() {
                   date: taskDate,
                   note: t.description || undefined,
                   departmentId,
+                  isPaused: isTaskPausedOnDay(t, taskDate),
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
@@ -4084,6 +4095,7 @@ export default function CommonViewPage() {
                   userId: assigneeId || undefined,
                   note: t.description || undefined,
                   departmentId,
+                  isPaused: isTaskPausedOnDay(t, taskDate),
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
@@ -4108,6 +4120,7 @@ export default function CommonViewPage() {
                   date: taskDate,
                   note: t.description || undefined,
                   departmentId,
+                  isPaused: isTaskPausedOnDay(t, taskDate),
                   status: normalizedTaskStatus,
                   isDone: false,
                   fastTaskOrder: t.fast_task_order ?? undefined,
@@ -5503,6 +5516,7 @@ export default function CommonViewPage() {
                       : null,
                 oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
                 oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
+                isPaused: item.is_paused === true,
                 isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
                 startDate:
                   typeof item.startDate === "string" ? item.startDate : typeof item.start_date === "string" ? item.start_date : undefined,
@@ -8378,6 +8392,7 @@ export default function CommonViewPage() {
       oneHReportSlot: x.oneHReportSlot,
       oneHMarker: x.oneHMarker,
       entryDate: x.date,
+      isPaused: x.isPaused,
       isDeadlineImportant: x.isDeadlineImportant,
       mira_dictation_source: x.mira_dictation_source,
       dueDate: x.dueDate,
@@ -8406,6 +8421,7 @@ export default function CommonViewPage() {
       oneHReportSlot: x.oneHReportSlot,
       oneHMarker: x.oneHMarker,
       entryDate: x.date,
+      isPaused: x.isPaused,
       isDeadlineImportant: x.isDeadlineImportant,
       mira_dictation_source: x.mira_dictation_source,
       dueDate: x.dueDate,
@@ -8436,6 +8452,7 @@ export default function CommonViewPage() {
         finishPeriod: x.finishPeriod,
         oneHMarker: x.oneHMarker,
         entryDate: x.date,
+        isPaused: x.isPaused,
         isDeadlineImportant: x.isDeadlineImportant,
         mira_dictation_source: x.mira_dictation_source,
         dueDate: x.dueDate,
@@ -8541,6 +8558,7 @@ export default function CommonViewPage() {
       oneHReportSlot: x.oneHReportSlot,
       oneHMarker: x.oneHMarker,
       entryDate: x.date,
+      isPaused: x.isPaused,
       isDeadlineImportant: x.isDeadlineImportant,
       mira_dictation_source: x.mira_dictation_source,
       dueDate: x.dueDate,
@@ -8624,6 +8642,7 @@ export default function CommonViewPage() {
       oneHMarkerByGa: entry.oneHMarkerByGa,
       oneHMarkerComment: entry.oneHMarkerComment,
       entryDate: entry.date,
+      isPaused: entry.isPaused,
       isDeadlineImportant: entry.isDeadlineImportant,
       mira_dictation_source: entry.mira_dictation_source,
       dueDate: entry.dueDate,
@@ -16752,6 +16771,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
+                                  {e.isPaused && <TaskPauseBadge />}
                                   {renderCommonTaskStatusIndicator(e)}
                                   <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintTaskTitle(e))}{e.mira_dictation_source && <span className="text-xs text-muted-foreground">{miraDictationLabel(e.mira_dictation_source)}</span>}</span>
                                 </span>
@@ -16818,6 +16838,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
+                                  {e.isPaused && <TaskPauseBadge />}
                                   {renderCommonTaskStatusIndicator(e)}
                                   <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintTitleLine(e.title))}</span>
                                 </span>
@@ -16866,6 +16887,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
+                                  {e.isPaused && <TaskPauseBadge />}
                                   {renderCommonTaskStatusIndicator(e, true)}
                                   <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintPersonalTaskTitle(e))}</span>
                                 </span>
@@ -17596,6 +17618,7 @@ export default function CommonViewPage() {
                                     ) : null}
                                     <div className="swimlane-title">
                                       {cell.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(cell.mira_dictation_source)}</span>}
+                                      {cell.isPaused && <TaskPauseBadge />}
                                       {!cell.assignees?.length && !cell.assigneeLabels?.length ? taskStatusIndicator : null}
                                       {isFastTaskRowId(row.id) ? <TaskMarkerComment comment={cell.oneHMarkerComment} taskId={cell.taskId} /> : null}
                                       <span className="swimlane-print-title">

@@ -18,6 +18,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
+from app.services.task_pause import pause_until_on_day
 from app.services.ga_identity import is_ga_username
 from app.api.deps import get_current_user
 from app.config import settings
@@ -943,6 +944,7 @@ async def _build_common_view(
                 continue
 
             for task_date in task_dates:
+                is_paused = bool(pause_until_on_day(t.pause_periods, task_date))
                 one_h_slot_date = (
                     task_date if freeze_one_h_slots else effective_slot_date(task_date, slot_effective_now)
                 )
@@ -967,6 +969,7 @@ async def _build_common_view(
                             "note": t.description or None,
                             "description": t.description,
                             "status": task_status,
+                            "is_paused": is_paused,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
@@ -996,6 +999,7 @@ async def _build_common_view(
                             "description": t.description,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
+                            "is_paused": is_paused,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
@@ -1026,6 +1030,7 @@ async def _build_common_view(
                             "description": t.description,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
+                            "is_paused": is_paused,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
@@ -1056,6 +1061,7 @@ async def _build_common_view(
                             "description": t.description,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
+                            "is_paused": is_paused,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
@@ -1092,6 +1098,7 @@ async def _build_common_view(
                             "description": t.description,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
+                            "is_paused": is_paused,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
@@ -1121,6 +1128,7 @@ async def _build_common_view(
                         "description": t.description,
                         "department_id": str(dept_id) if dept_id else None,
                         "status": "WAITING_CONFIRMATION",
+                        "is_paused": is_paused,
                         "isDone": False,
                         "fast_task_order": t.fast_task_order,
                         "finish_period": t.finish_period,

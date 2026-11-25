@@ -53,6 +53,7 @@ from app.schemas.task import (
 from app.schemas.plan_note import PxJavPlanningBrief
 from pydantic import BaseModel, Field
 from app.services.audit import add_audit_log
+from app.services.task_pause import pause_until_on_day, update_pause_periods
 from app.services.notifications import add_notification, notification_task_preview, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import (
@@ -989,6 +990,8 @@ def _task_to_out(
         meeting_occurrence_date=task.meeting_occurrence_date,
         meeting_system_task_kind=task.meeting_system_task_kind,
         status=status_override or task.status,
+        pause_until=_active_task_pause(task),
+        pause_periods=task.pause_periods or [],
         priority=task.priority,
         finish_period=task.finish_period,
         phase=task.phase,
@@ -1018,6 +1021,17 @@ def _task_to_out(
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
+
+
+def _active_task_pause(task: Task) -> date | None:
+    if not task.pause_periods or task.status == TaskStatus.DONE:
+        return None
+    return pause_until_on_day(task.pause_periods, _realization_today())
+
+
+def _check_task_pause(days: int | None, task_status: str | TaskStatus) -> None:
+    if days is not None and task_status == TaskStatus.DONE:
+        raise HTTPException(status_code=422, detail="Detyra e përfunduar nuk mund të vendoset në pauzë.")
 
 
 def _enum_value(value) -> str | None:
@@ -1750,6 +1764,7 @@ async def list_task_summaries_by_ga_notes(
             Task.ga_note_origin_id,
             Task.plan_note_origin_id,
             Task.status,
+            Task.pause_periods,
             Task.priority,
             Task.finish_period,
             Task.start_date,
@@ -1783,6 +1798,7 @@ async def list_task_summaries_by_ga_notes(
             ga_note_origin_id=task.ga_note_origin_id,
             plan_note_origin_id=task.plan_note_origin_id,
             status=task.status,
+            pause_until=_active_task_pause(task),
             priority=task.priority,
             finish_period=task.finish_period,
             start_date=task.start_date,
@@ -2168,7 +2184,8 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
         actor=user,
     )
 
-    status_value = payload.status or TaskStatus.TODO
+    legacy_pause = payload.status == TaskStatus.PAUSED
+    status_value = TaskStatus.TODO if legacy_pause else payload.status or TaskStatus.TODO
     if payload.ga_note_origin_id is not None or payload.plan_note_origin_id is not None:
         status_value = _normalize_ga_note_task_status(status_value)
     if status_value == TaskStatus.DONE and department_id is not None:
@@ -2239,13 +2256,16 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 actor=user,
             )
 
-    if status_value != TaskStatus.PAUSED and _should_auto_status_from_product_counts(project, phase_value):
+    if _should_auto_status_from_product_counts(project, phase_value):
         total, completed = _extract_total_and_completed(payload.daily_products, payload.internal_notes)
         auto_status = _compute_status_from_completed(total, completed)
         if auto_status is not None:
             status_value = auto_status
 
     completed_at = payload.completed_at
+    pause_days = payload.pause_days or (1 if legacy_pause else None)
+    _check_task_pause(pause_days, status_value)
+    pause_periods = update_pause_periods(None, _realization_today(), pause_days) if pause_days is not None else None
     if status_value == TaskStatus.DONE:
         completed_at = completed_at or datetime.now(timezone.utc)
     else:
@@ -2301,6 +2321,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                     plan_note_origin_id=payload.plan_note_origin_id,
                     fast_task_group_id=None,
                     status=status_value,
+                    pause_periods=pause_periods,
                     priority=priority_value,
                     finish_period=payload.finish_period,
                     phase=phase_value,
@@ -2438,6 +2459,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                             plan_note_origin_id=payload.plan_note_origin_id,
                             fast_task_group_id=None,
                             status=status_value,
+                            pause_periods=pause_periods,
                             priority=priority_value,
                             finish_period=payload.finish_period,
                             phase=phase_value,
@@ -2558,6 +2580,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 plan_note_origin_id=payload.plan_note_origin_id,
                 fast_task_group_id=None,
                 status=status_value,
+                pause_periods=pause_periods,
                 priority=priority_value,
                 finish_period=payload.finish_period,
                 phase=phase_value,
@@ -2667,6 +2690,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 plan_note_origin_id=payload.plan_note_origin_id,
                 fast_task_group_id=fast_task_group_id,
                 status=status_value,
+                pause_periods=pause_periods,
                 priority=priority_value,
                 finish_period=payload.finish_period,
                 phase=phase_value,
@@ -2773,6 +2797,7 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
         plan_note_origin_id=payload.plan_note_origin_id,
         fast_task_group_id=fast_task_group_id,
         status=status_value,
+        pause_periods=pause_periods,
         priority=priority_value,
         finish_period=payload.finish_period,
         phase=phase_value,
@@ -2812,7 +2837,6 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 new_completed=completed,
                 total=total,
                 finish_period=_daily_progress_finish_period_value(task.finish_period),
-                explicit_status=TaskStatus.PAUSED if status_value == TaskStatus.PAUSED else None,
             )
 
     # Optional: store alignment users for this task (fast-task alignment).
@@ -2951,6 +2975,11 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     is_assigned_to_task = await _is_user_assigned_to_task(db, task, user.id)
 
     ensure_task_editor(user, task)
+    legacy_pause = payload.status == TaskStatus.PAUSED
+    if legacy_pause:
+        pause_days = payload.pause_days if _payload_has_field(payload, "pause_days") else 1
+        payload = payload.model_copy(update={"status": None, "pause_days": pause_days})
+    pause_changed = _payload_has_field(payload, "pause_days")
 
     postponement = await check_task_postponement_explanation(
         db,
@@ -2966,6 +2995,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     product_phases = {ProjectPhaseStatus.PRODUCT, ProjectPhaseStatus.CONTROL}
     if (
         any(_payload_has_field(payload, field) for field in ("start_date", "due_date"))
+        or pause_changed
         or payload.status is not None
         or task.phase in product_phases
         or payload.phase in product_phases
@@ -3033,7 +3063,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Each assignee must update their own question task status",
         )
-    if question_status_requested == TaskStatus.PAUSED:
+    if pause_changed and task.question_origin_id is not None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Question tasks use per-assignee completion and cannot be paused",
@@ -3067,7 +3097,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     # Department access check removed since can_edit above already verified
     # that user is admin, manager, creator, assignee, or same-department member
 
-    if payload.status is not None and (task.system_template_origin_id is not None or task.system_task_slot_id is not None):
+    if (payload.status is not None or pause_changed) and (task.system_template_origin_id is not None or task.system_task_slot_id is not None):
         if is_assigned_to_task:
             pass
         elif user.role in (UserRole.ADMIN, UserRole.MANAGER):
@@ -3091,6 +3121,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         "internal_notes": task.internal_notes,
         "dependency_task_id": str(task.dependency_task_id) if task.dependency_task_id else None,
         "status": _enum_value(task.status),
+        "pause_periods": task.pause_periods,
         "priority": _enum_value(task.priority),
         "finish_period": _enum_value(task.finish_period),
         "phase": _enum_value(task.phase),
@@ -3655,7 +3686,7 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         preserve_status = task.status == TaskStatus.PAUSED or (
             task.status == TaskStatus.IN_PROGRESS and task.resumed_from_pause
         )
-        if not status_was_explicitly_set and not preserve_status:
+        if not status_was_explicitly_set and not preserve_status and (not pause_changed or values_changed):
             auto_status = _compute_status_from_completed(total, completed)
             if auto_status is not None:
                 task.status = auto_status
@@ -3918,12 +3949,17 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         if source_plan_note is not None:
             source_plan_note.is_converted_to_task = True
 
+    if pause_changed or (task.pause_periods and task.status == TaskStatus.DONE and before["status"] != TaskStatus.DONE):
+        _check_task_pause(payload.pause_days, task.status)
+        task.pause_periods = update_pause_periods(task.pause_periods, _realization_today(), payload.pause_days)
+
     after = {
         "title": task.title,
         "description": task.description,
         "internal_notes": task.internal_notes,
         "dependency_task_id": str(task.dependency_task_id) if task.dependency_task_id else None,
         "status": _enum_value(task.status),
+        "pause_periods": task.pause_periods,
         "priority": _enum_value(task.priority),
         "finish_period": _enum_value(task.finish_period),
         "phase": _enum_value(task.phase),

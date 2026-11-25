@@ -660,10 +660,14 @@ def _is_system_task_item(item: dict[str, Any]) -> bool:
 
 def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = _report_text(_first_line(item.get("title")))
-    status_label = " [STOPPED]" if _task_status(item) == "PAUSED" else ""
+    status_label = ""
+    if item.get("is_paused"):
+        status_label = " [Pauzë]"
+    elif _task_status(item) == "PAUSED":
+        status_label = " [STOPPED]"
     if "confirmation_assignee_initials" in item:
         initials = _report_text(item.get("confirmation_assignee_initials") or "")
-        status_label = f" [CON: {initials}]" if initials else " [Pa konfirmues]"
+        status_label += f" [CON: {initials}]" if initials else " [Pa konfirmues]"
     if personal:
         return normalize_email_task_title(title, is_system_task=_is_system_task_item(item)) + status_label
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)

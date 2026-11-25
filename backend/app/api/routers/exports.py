@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from app.services.report_attendance import filter_export_tasks, filter_export_rows, load_report_attendance
 from app.config import settings
+from app.services.task_pause import pause_until_on_day, task_title_with_pause
+from zoneinfo import ZoneInfo
 
 import csv
 import html
@@ -70,6 +72,7 @@ from app.services.daily_report_logic import (
 )
 from app.services.ga_time_table import get_ga_time_table_rows
 from app.services.development_m1 import DEVELOPMENT_CHECKLIST_KEY, build_development_m1
+from app.services.development_m2 import build_development_m2
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.task_marker import one_h_marker_label
 from app.services.note_markup import parse_marked_note_content
@@ -2872,6 +2875,7 @@ async def export_open_tasks_xlsx(
     user_id: uuid.UUID | None = Query(default=None),
     filter: str = Query(default="all"),
     status_filter: str = Query(default="all"),
+    paused_only: bool = False,
     type_filter: list[str] | None = Query(default=None),
     search: str | None = Query(default=None),
     this_week_start: date | None = Query(default=None),
@@ -3018,6 +3022,7 @@ async def export_open_tasks_xlsx(
 
     normalized_filter = (filter or "all").strip().lower()
     normalized_status_filter = (status_filter or "all").strip().lower()
+    pause_day = datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
     normalized_type_filters = [
         value.strip().lower() for value in (type_filter or []) if value and value.strip()
     ]
@@ -3047,7 +3052,9 @@ async def export_open_tasks_xlsx(
             continue
         if normalized_status_filter == "in_progress" and task_status != TaskStatusEnum.IN_PROGRESS.value:
             continue
-        if normalized_status_filter == "paused" and task_status != TaskStatusEnum.PAUSED.value:
+        if (paused_only or normalized_status_filter == "paused") and not pause_until_on_day(
+            getattr(task, "pause_periods", None), pause_day,
+        ):
             continue
         if normalized_filter == "ga" and not (task.ga_note_origin_id or task.plan_note_origin_id):
             continue
@@ -3162,7 +3169,9 @@ async def export_open_tasks_xlsx(
             _open_task_type_label(task),
             bz_me_label(task),
             other_assignees_label(task),
-            _open_task_title_rich_text(task.title),
+            _open_task_title_rich_text(
+                task_title_with_pause(task.title, getattr(task, "pause_periods", None), pause_day)
+            ),
             project.title if project else "",
             baseline.when_value if baseline else "",
             baseline.status_value if baseline else "",
@@ -3813,8 +3822,11 @@ async def export_department_internal_meetings_xlsx(
         await build_development_m1(db, user, checklist_items=all_items)
         if group_key == DEVELOPMENT_CHECKLIST_KEY else None
     )
-    m1_sections = {section["key"]: section for section in development_m1["sections"]} if development_m1 else {}
-    item_sections = development_m1["item_sections"] if development_m1 else {}
+    development_m2 = (
+        await build_development_m2(db, user, checklist_items=all_items)
+        if group_key == DEVELOPMENT_CHECKLIST_KEY and any(item.day == "M2" for item in all_items) else None
+    )
+    development_reports = {"M1": development_m1, "M2": development_m2}
 
     wb = Workbook()
     ws = wb.active
@@ -3839,6 +3851,9 @@ async def export_department_internal_meetings_xlsx(
 
     row_idx = 3
     for slot_key, slot_label in slot_specs:
+        report = development_reports.get(slot_key)
+        sections = {section["key"]: section for section in report["sections"]} if report else {}
+        item_sections = report["item_sections"] if report else {}
         slot_items = sorted(
             [
                 item for item in all_items if (item.day or "M1") == slot_key
@@ -3847,8 +3862,10 @@ async def export_department_internal_meetings_xlsx(
             key=lambda item: (item.position if item.position is not None else 0, str(item.id)),
         )
 
-        if slot_key == "M1" and development_m1:
-            slot_label += f" · {development_m1['date']}"
+        if report:
+            slot_label += f" · {report['date']}"
+            if cutoff := report.get("cutoff"):
+                slot_label += f" · Email-et dhe Notes deri në {cutoff}"
         ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=last_col)
         section_cell = ws.cell(row=row_idx, column=1, value=slot_label)
         section_cell.font = Font(bold=True, size=12)
@@ -3879,7 +3896,7 @@ async def export_department_internal_meetings_xlsx(
 
         rows = slot_items or [None]
         for item_index, item in enumerate(rows, start=1):
-            answer = m1_sections.get(item_sections.get(str(item.id))) if slot_key == "M1" and item else None
+            answer = sections.get(item_sections.get(str(item.id))) if item else None
             values = (
                 [item_index, answer["title"] if answer and answer["key"] == "ka_gent" else item.title or "",
                  "\u2713" if item.is_checked else ""]

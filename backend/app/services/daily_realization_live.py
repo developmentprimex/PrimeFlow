@@ -32,6 +32,7 @@ from app.services.daily_realization_classifier import (
 )
 from app.services.daily_realization_metrics import calculate_daily_metrics, multi_day_share
 from app.services.daily_realization_quantities import daily_task_quantity
+from app.services.task_pause import pause_until_on_day
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
 from app.services.daily_realization_close_state import resolve_daily_close_state
@@ -606,6 +607,7 @@ async def build_live_daily_realization(
                 "baseline_due_date": original_due.isoformat() if original_due else None,
                 "current_due_date": current_due.isoformat() if current_due else None,
                 "current_status": status_on_day if task else "DELETED",
+                "is_paused": bool(task and pause_until_on_day(task.pause_periods, day)),
                 "wfe": bool(task) and not completion_credited and status_on_day == "WAITING_CLIENT",
                 "classification": classification, "in_original_plan": bool(original),
                 "created_date": created_day.isoformat() if created_day else None,

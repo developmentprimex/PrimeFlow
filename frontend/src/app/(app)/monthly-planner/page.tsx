@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { TaskPauseBadge } from "@/components/task-pause-field"
+import { isTaskPausedOnDay } from "@/lib/task-pause"
 import Link from "next/link"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -245,9 +247,7 @@ export default function MonthlyPlannerPage() {
                             <span className="flex items-start gap-1.5">
                               <TaskOneHMarkerEditor taskId={t.id} marker={t.one_h_marker} markerByGa={t.one_h_marker_by_ga} markerComment={t.one_h_marker_comment} />
                               <span className="min-w-0"><TaskMarkerComment comment={t.one_h_marker_comment} taskId={t.id} />{t.title}</span>
-                              {t.status === "PAUSED" && (
-                                <span className="rounded bg-slate-200 px-1.5 text-xs font-medium text-slate-800">Stopped</span>
-                              )}
+                              {isTaskPausedOnDay(t, d) && <TaskPauseBadge />}
                             </span>
                           </Link>
                         ))}

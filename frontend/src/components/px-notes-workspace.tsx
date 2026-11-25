@@ -5,6 +5,7 @@ import { EmailNoteDisclosure, NoteEmailPreview, splitManualEmailNote } from "@/c
 import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
+import { TaskPauseField } from "@/components/task-pause-field"
 import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerSelect } from "@/components/task-marker-select"
 import { flushSync } from "react-dom"
@@ -156,13 +157,15 @@ type ParsedMarkedNoteContent = {
   doneRanges: TextMarkRange[]
   addedRanges: TextMarkRange[]
 }
-type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "PAUSED" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE"
+type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE"
 type GaAssigneeTaskType = "NORMAL" | "HIGH" | "1H" | "R1" | "PERSONAL" | "BLLOK"
 type GaNotesTableNote = GaNote & { source?: "GA_KA" | "PX_JAV" }
 type GaAssigneeTaskState = {
   taskId: string | null
   type: GaAssigneeTaskType
   status: GaAssigneeTaskStatus
+  pauseDays?: number | null
+  pauseUntil?: string | null
   confirmationAssigneeId: string
   startDate: string
   dueDate: string
@@ -298,6 +301,7 @@ function sameGaAssigneeTaskState(
   return (
     left.type === right.type &&
     left.status === right.status &&
+    (left.status === "DONE" || left.pauseDays === right.pauseDays) &&
     (isWaitingConfirmation(left.status) ? left.confirmationAssigneeId : "") ===
       (isWaitingConfirmation(right.status) ? right.confirmationAssigneeId : "") &&
     left.startDate === right.startDate &&
@@ -317,6 +321,7 @@ function serializeGaAssigneeTaskState(
   return {
     assignee_id: assigneeId,
     status: state.status,
+    pause_days: state.status === "DONE" ? undefined : state.pauseDays,
     confirmation_assignee_id: isWaitingConfirmation(state.status) ? state.confirmationAssigneeId : null,
     priority: state.type === "HIGH" ? "HIGH" : "NORMAL",
     is_bllok: state.type === "BLLOK",
@@ -1784,9 +1789,10 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
             [t.assigned_to]: {
               taskId: t.id,
               type: gaAssigneeTaskType(t),
-              status: normalizedStatus === "IN_PROGRESS" || normalizedStatus === "PAUSED" || normalizedStatus === "WAITING_CLIENT" || normalizedStatus === "WAITING_CONFIRMATION" || normalizedStatus === "DONE"
+              status: normalizedStatus === "IN_PROGRESS" || normalizedStatus === "WAITING_CLIENT" || normalizedStatus === "WAITING_CONFIRMATION" || normalizedStatus === "DONE"
                 ? normalizedStatus
                 : "TODO",
+              pauseUntil: t.pause_until,
               confirmationAssigneeId: t.confirmation_assignee_id || "",
               startDate: taskDateKey(t.start_date) || "",
               dueDate: taskDateKey(t.due_date) || "",
@@ -3769,13 +3775,16 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                 <SelectContent>
                                   <SelectItem value="TODO">To do</SelectItem>
                                   <SelectItem value="IN_PROGRESS">In progress</SelectItem>
-                                  <SelectItem value="PAUSED">Stopped</SelectItem>
                                   <SelectItem value="WAITING_CLIENT">WFE</SelectItem>
                                   <SelectItem value="WAITING_CONFIRMATION">WFC INT</SelectItem>
                                   <SelectItem value="DONE">Done</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
+                            {state.status !== "DONE" && (
+                              <TaskPauseField value={state.pauseDays} until={state.pauseUntil}
+                                onChange={(pauseDays) => updateEditTaskAssigneeState(assigneeId, { pauseDays })} />
+                            )}
                             {isWaitingConfirmation(state.status) ? (
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Confirm by</Label>

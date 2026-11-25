@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.task_pause import task_title_with_pause
+
 from app.services.report_attendance import filter_task_context, filter_report_sections
 from app.services.discord_ga_replies import (
     GA_REPLIES_CAPTURE_VERSION,
@@ -331,7 +333,7 @@ def _unfinished_priority_task_rows(
             status,
             task_type,
             _m3_task_type_label(task),
-            _display_title(task.title),
+            task_title_with_pause(_display_title(task.title), getattr(task, "pause_periods", None), report_day),
             "SOT",
         ] + ([str(task.id)] if include_task_id else [])
         for index, (task, due_at, task_type, status) in enumerate(selected, start=1)
@@ -1109,7 +1111,8 @@ def order_blue_notes_table(body: str) -> str:
 
 
 async def load_blue_notes(
-    db: AsyncSession, *, created_before: datetime | None = None, compact_email: bool = True,
+    db: AsyncSession, *, created_before: datetime | None = None, created_from: datetime | None = None,
+    compact_email: bool = True,
 ) -> list[tuple[str, list[str]]]:
     """All eligible PX Notes that have not yet been discussed."""
     statement = (
@@ -1123,6 +1126,8 @@ async def load_blue_notes(
         statement = statement.where(GaNote.created_at <= created_before)
     else:
         await sync_gmail_px_notes()
+    if created_from is not None:
+        statement = statement.where(GaNote.created_at >= created_from)
     notes = (await db.execute(statement)).scalars().all()
     if not notes:
         return []
@@ -1196,7 +1201,7 @@ async def refresh_after_break_discord_sections(
 
 
 async def load_new_email_mailboxes(
-    report_day: date, generated_at: datetime,
+    report_day: date, generated_at: datetime, *, sources: tuple[MailSource, ...] = REPORT_INBOX_SOURCES,
 ) -> dict[MailSource, dict]:
     window = _report_window(report_day, "M2", generated_at)
     start, end = window
@@ -1221,7 +1226,7 @@ async def load_new_email_mailboxes(
         ]
         return source, {**inbox, "messages": selected}
 
-    return dict(await asyncio.gather(*(load(source) for source in REPORT_INBOX_SOURCES)))
+    return dict(await asyncio.gather(*(load(source) for source in sources)))
 
 
 def _new_emails_report_body(mailboxes: dict[MailSource, dict], report_day: date, generated_at: datetime) -> str:

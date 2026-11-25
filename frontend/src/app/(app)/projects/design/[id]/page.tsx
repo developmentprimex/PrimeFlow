@@ -3,6 +3,8 @@
 import { ProjectActivityControl } from "@/components/project-activity"
 
 import * as React from "react"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
+import { currentTaskPauseDay, isTaskPausedOnDay } from "@/lib/task-pause"
 import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
 import { useParams, useRouter } from "next/navigation"
 
@@ -438,6 +440,7 @@ export default function DesignProjectPage() {
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
+  const [newPauseDays, setNewPauseDays] = React.useState<number | null>()
   const [newTaskType, setNewTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [newAssignees, setNewAssignees] = React.useState<string[]>([])
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
@@ -649,6 +652,7 @@ export default function DesignProjectPage() {
         department_id: project.department_id,
         assignees: newAssignees,
         status: newStatus,
+        pause_days: newStatus === "DONE" ? undefined : newPauseDays,
         priority: newTaskType === "HIGH" ? "HIGH" : "NORMAL",
         is_1h_report: newTaskType === "1H",
         phase: newTaskPhase || activePhase,
@@ -687,6 +691,7 @@ export default function DesignProjectPage() {
       setNewTitle("")
       setNewDescription("")
       setNewStatus("TODO")
+      setNewPauseDays(undefined)
       setNewTaskType("NORMAL")
       setNewAssignees([])
       setNewTaskPhase("")
@@ -3842,12 +3847,13 @@ export default function DesignProjectPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {TASK_STATUSES.map((s) => (
+                            {TASK_STATUSES.filter((status) => status !== "PAUSED").map((s) => (
                               <SelectItem key={s} value={s}>{statusLabel(s)}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                       </div>
+                      {newStatus !== "DONE" && <TaskPauseField value={newPauseDays} onChange={setNewPauseDays} />}
                       <div>
                         <Label>Type</Label>
                         <Select value={newTaskType} onValueChange={(v) => setNewTaskType(v as typeof newTaskType)}>
@@ -4007,6 +4013,7 @@ export default function DesignProjectPage() {
                         <Badge variant={task.priority === "HIGH" ? "destructive" : "secondary"}>
                           {task.priority}
                         </Badge>
+                        {isTaskPausedOnDay(task, currentTaskPauseDay()) && <TaskPauseBadge />}
                         <Select
                           value={task.status}
                           onValueChange={(value) => void updateTaskStatus(task.id, value as Task["status"])}
@@ -4016,7 +4023,7 @@ export default function DesignProjectPage() {
                             <SelectValue placeholder="Status" />
                           </SelectTrigger>
                           <SelectContent>
-                            {TASK_STATUSES.map((status) => {
+                            {TASK_STATUSES.filter((status) => status !== "PAUSED").map((status) => {
                               // Disable DONE option if can't mark done, or disable all non-DONE options if task is DONE and user is not admin
                               const isDisabled =
                                 ((status === "DONE" || status === "WAITING_CONFIRMATION") && !canMarkDone) ||

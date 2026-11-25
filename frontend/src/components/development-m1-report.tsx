@@ -32,8 +32,9 @@ type M1Meeting = InternalMeetingToneInput & {
   occurrenceStatus?: string
 }
 
-type M1Report = {
+type DevelopmentMeetingReport = {
   date: string
+  cutoff?: string
   item_sections: Record<string, string>
   hidden_item_ids?: string[]
   sections: {
@@ -62,10 +63,10 @@ type M1Report = {
   }[]
 }
 
-export function useDevelopmentM1Report(enabled: boolean) {
+export function useDevelopmentMeetingReport(slot: "M1" | "M2", enabled: boolean) {
   const { apiFetch } = useAuth()
   const confirm = useConfirm()
-  const [report, setReport] = useState<M1Report | null>(null)
+  const [report, setReport] = useState<DevelopmentMeetingReport | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -79,9 +80,11 @@ export function useDevelopmentM1Report(enabled: boolean) {
       setLoading(true)
       setFailed(false)
       try {
-        const response = await apiFetch("/departments/development/m1", { signal: controller.signal, cache: "no-store" })
-        if (!response.ok) throw new Error("M1 report request failed")
-        const data: M1Report = await response.json()
+        const response = await apiFetch(`/departments/development/${slot.toLowerCase()}`, {
+          signal: controller.signal, cache: "no-store",
+        })
+        if (!response.ok) throw new Error(`${slot} report request failed`)
+        const data: DevelopmentMeetingReport = await response.json()
         if (!controller.signal.aborted) setReport(data)
       } catch {
         if (!controller.signal.aborted) setFailed(true)
@@ -91,7 +94,7 @@ export function useDevelopmentM1Report(enabled: boolean) {
     }
     void load()
     return () => controller.abort()
-  }, [apiFetch, enabled, refresh])
+  }, [apiFetch, enabled, refresh, slot])
 
   async function markDiscussed(id: string) {
     setSavingNote(id)
@@ -176,11 +179,12 @@ function meetingAppearance(meeting: M1Meeting) {
   }
 }
 
-export function DevelopmentM1Answer({
-  section, readOnly, pending, savingNote, markDiscussed, cancelingMeeting, cancelMeeting,
+export function DevelopmentMeetingAnswer({
+  section, readOnly, canMarkDiscussed, pending, savingNote, markDiscussed, cancelingMeeting, cancelMeeting,
 }: {
-  section: M1Report["sections"][number]
+  section: DevelopmentMeetingReport["sections"][number]
   readOnly: boolean
+  canMarkDiscussed: boolean
   pending: boolean
   savingNote: string | null
   markDiscussed: (id: string) => void
@@ -250,7 +254,11 @@ export function DevelopmentM1Answer({
                   <span className="block max-w-[80ch] truncate" title={row.email_heading}>{row.email_heading}</span>
                 ) : (
                   <span className={row.canceled ? "line-through decoration-red-600 decoration-2" : undefined}>
-                    {row.href ? <Link href={row.href} className="font-medium underline-offset-4 hover:underline">{row.title}</Link> : row.title}
+                    {row.href?.startsWith("http") ? (
+                      <a href={row.href} target="_blank" rel="noreferrer" className="font-medium underline-offset-4 hover:underline">{row.title}</a>
+                    ) : row.href ? (
+                      <Link href={row.href} className="font-medium underline-offset-4 hover:underline">{row.title}</Link>
+                    ) : row.title}
                   </span>
                 )}
               </div>
@@ -270,7 +278,7 @@ export function DevelopmentM1Answer({
                 </a>
               ) : null}
             </div>
-            {section.key === "notes" && !readOnly ? (
+            {section.key === "notes" && canMarkDiscussed ? (
               <Button type="button" size="sm" variant="outline" disabled={pending || savingNote !== null}
                 onClick={() => markDiscussed(row.id)}>
                 {savingNote === row.id ? "Po ruhet…" : "Shëno si të diskutuar"}

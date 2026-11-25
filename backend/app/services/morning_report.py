@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.task_pause import task_title_with_pause
+
 from app.services.report_attendance import LEAVE_TABLE_COLUMNS, filter_task_context, filter_report_sections
 
 import logging
@@ -658,7 +660,7 @@ def _ga_hv_dv_task_rows(
                 due_day=planned_end,
                 mode=tyo_mode,
             ),
-            _display_title(task.title),
+            task_title_with_pause(_display_title(task.title), getattr(task, "pause_periods", None), report_day),
         ])
     return rows
 
