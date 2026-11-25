@@ -1,8 +1,10 @@
+import { MIRA_DEVELOPMENT_NAME } from "./mira-note-groups"
+
 export type MiraTab = "takimet" | "knowledge" | "kujtesa" | "cilesimet"
 
 export function miraDictationLabel(source?: string | null): string | null {
   if (source === "1h") return "Nga Mira 1H"
-  if (source === "ai_agent") return "Nga Mira AI Agent"
+  if (source === "ai_agent") return `Nga ${MIRA_DEVELOPMENT_NAME}`
   return null
 }
 

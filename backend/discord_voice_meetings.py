@@ -10,6 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 from app.config import settings
+from app.services.mira_development_name import NAME
 from discord_voice_client import VoiceCaptureClient, VOICE_DIR
 from discord_voice_ui import meeting_view, result_message, send_durable
 
@@ -81,9 +82,12 @@ class MeetingCaptureCoordinator:
                 raise ValueError('Mira ka nevojë për View Channel, Connect dhe Send Messages.')
             await self.preflight()
             worker={'capture_token':secrets.token_urlsafe(32),'instance_id':str(uuid.uuid4())}
+            recorder = getattr(self.bot, 'voice_recorder', 'primary')
+            recorder_label = NAME if recorder == 'ai_agent' else 'Mira'
+            channel_label = recorder_label if recorder == 'ai_agent' else channel.name
             row=await self.bot.bridge(PREFIX+'/start',{**actor,**worker,
-                'recorder':getattr(self.bot,'voice_recorder','primary'),
-                'request_id':request_id,'title':(title or f'{channel.name} · {datetime.now().strftime("%d.%m.%Y %H:%M")}')[:200],
+                'recorder':recorder,
+                'request_id':request_id,'title':(title or f'{channel_label} · {datetime.now().strftime("%d.%m.%Y %H:%M")}')[:200],
                 'department_id':department_id})
             active={'id':row['id'],'worker':worker,'actor':actor,'capture':None,
                 'partial':False,'heartbeat':None,'finishing':False,'voice_channel':channel,
@@ -91,7 +95,7 @@ class MeetingCaptureCoordinator:
             self.active=active
             try:
                 # A visible notice is a prerequisite, never a best-effort afterthought.
-                await channel.send('Mira po merr shënime për këtë takim. Nuk do të flasë.',allowed_mentions=discord.AllowedMentions.none())
+                await channel.send(f'{recorder_label} po merr shënime për këtë takim. Nuk do të flasë.',allowed_mentions=discord.AllowedMentions.none())
                 if active['finishing'] or self.active is not active:raise ValueError('Nisja e takimit u anulua.')
                 active['heartbeat']=asyncio.create_task(self.heartbeat(active))
                 async def upload(message):await self.upload(active,message)
@@ -359,10 +363,11 @@ class MeetingCaptureCoordinator:
         if self.active and self.active.get('capture'):await self.active['capture'].close()
 
 
-def register_meeting_commands(bot,guild,*,name='takimi'):
+def register_meeting_commands(bot,guild,*,name='takimi',label='Mira'):
     if not settings.DISCORD_MEETING_NOTES_ENABLED:return
-    group=app_commands.Group(name=name,description='Mira dëgjon takimin dhe merr shënime')
-    @group.command(name='fillo',description='Fto Mira-n të dëgjojë pa folur')
+    group=app_commands.Group(name=name,description=f'{label} dëgjon takimin dhe merr shënime')
+    invite = 'Fto Mira-n të dëgjojë pa folur' if label == 'Mira' else f'Fto {label} të dëgjojë pa folur'
+    @group.command(name='fillo',description=invite)
     async def start(interaction:discord.Interaction,titulli:str|None=None,departamenti:str|None=None):
         await interaction.response.defer(thinking=True)
         try:

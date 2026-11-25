@@ -190,7 +190,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(items['save'].disabled,status!='READY')
                 self.assertEqual(items['stop'].disabled,status!='LISTENING')
                 self.assertTrue(items['save'].custom_id.endswith(sid))
-                self.assertIn('AI Agent',embed.description)
+                self.assertIn('Mira Zhvillim',embed.description)
 
 
 class SharedDatabaseTests(PostgresMeetingTests):

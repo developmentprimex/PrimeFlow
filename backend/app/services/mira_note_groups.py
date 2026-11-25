@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.models.discord_voice_meeting import DiscordVoiceMeeting
 from app.services import mira_host
+from app.services.mira_development_name import LEGACY_NAME_PREFIX, NAME_PREFIX
 
 
 def note_group(note, voice_channel_id=None):
@@ -17,7 +18,7 @@ def note_group(note, voice_channel_id=None):
     if voice_channel_id and settings.DISCORD_1H_VOICE_CHANNEL_ID and voice_channel_id == settings.DISCORD_1H_VOICE_CHANNEL_ID:
         return '1H'
     title = note.get('title', '').strip()
-    if re.match(r'^AI[\s_-]*AGENT\b', title, re.I):
+    if LEGACY_NAME_PREFIX.match(title) or NAME_PREFIX.match(title):
         return 'AI_AGENT'
     if re.match(r'^1H\b', title, re.I):
         return '1H'

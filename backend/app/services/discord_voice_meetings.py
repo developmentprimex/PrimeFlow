@@ -21,6 +21,7 @@ from app.schemas.ga_note import GaNoteCreate
 from app.services import mira_memory
 from app.services.discord_voice_note_format import meeting_url
 from app.services.ga_note_creation import build_ga_note
+from app.services.mira_development_name import COMMAND, NAME, meeting_note_heading, meeting_title
 
 log = logging.getLogger(__name__)
 QUICK_SUMMARY_LEASE = timedelta(minutes=10)
@@ -35,12 +36,16 @@ def token_hash(token):
 
 
 def view(row):
-    return dict(id=str(row.id), status=row.status, title=row.title, partial=bool(row.partial),
+    recorder = getattr(row, 'recorder', None) or 'primary'
+    development = recorder == 'ai_agent'
+    return dict(id=str(row.id), status=row.status,
+        title=meeting_title(row.title) if development else row.title, partial=bool(row.partial),
         stop_authorized=bool(getattr(row,'stop_authorized',False)),
-        recorder=getattr(row, 'recorder', None) or 'primary',
+        recorder=recorder,
         created_at=row.created_at.isoformat() if row.created_at else None,
         organizer_user_id=str(row.user_id), voice_channel_id=row.voice_channel_id,
-        private_channel_id=row.private_channel_id, error=row.error, draft_text=row.draft_text,
+        private_channel_id=row.private_channel_id, error=row.error,
+        draft_text=meeting_note_heading(row.draft_text) if development else row.draft_text,
         quick_summary=getattr(row, 'quick_summary', None),
         started_at=(getattr(row, 'started_at', None) or row.created_at).isoformat() if row.created_at else None,
         saved_note_id=str(row.saved_note_id) if row.saved_note_id else None,
@@ -94,9 +99,9 @@ async def start_session(db, actor):
     recorder = actor.recorder
     if recorder == 'ai_agent' and (not settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID
             or actor.voice_channel_id != settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID):
-        raise HTTPException(403, 'Mira AI Agent regjistron vetëm kanalin AI Agent.')
+        raise HTTPException(403, f'{NAME} regjistron vetëm kanalin zanor Zhvillim.')
     if recorder == 'primary' and settings.DISCORD_AI_AGENT_VOICE_CHANNEL_ID == actor.voice_channel_id:
-        raise HTTPException(409, 'Në kanalin AI Agent përdor /ai-agent fillo.')
+        raise HTTPException(409, f'Në kanalin zanor Zhvillim përdor /{COMMAND} fillo.')
     # Each recorder has its own reservation, worker secret and session ID.
     lock_key = int.from_bytes(hashlib.sha256(('voice:' + actor.guild_id + ':' + recorder).encode()).digest()[:8], 'big', signed=True)
     await db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': lock_key})
@@ -117,7 +122,8 @@ async def start_session(db, actor):
     row = Meeting(id=uuid.uuid4(), link_id=link.id, user_id=user.id, department_id=department,
         guild_id=actor.guild_id, recorder=recorder, voice_channel_id=actor.voice_channel_id, private_channel_id=actor.channel_id,
         request_id=actor.request_id, instance_id=actor.instance_id, capture_token_hash=token_hash(actor.capture_token),
-        title=actor.title.strip(), status='STARTING', partial=False, stop_authorized=False, heartbeat_at=now())
+        title=meeting_title(actor.title.strip())[:200] if recorder == 'ai_agent' else actor.title.strip(),
+        status='STARTING', partial=False, stop_authorized=False, heartbeat_at=now())
     db.add(row)
     if shared:
         audit(db, row, user, actor, 'START')
@@ -185,13 +191,14 @@ async def save_notes(db, actor, session_id):
 
 
 def is_scheduled(row):
-    """A scheduled 1H or AI Agent meeting saves its notes automatically."""
+    """A scheduled 1H or Mira Zhvillim meeting saves its notes automatically."""
     return row.request_id.startswith('auto1h-') or (
         row.recorder == 'ai_agent' and row.request_id.startswith('autoai-'))
 
 
 async def store_note(db, row, user):
-    note = await build_ga_note(db, user, GaNoteCreate(content=row.draft_text, department_id=row.department_id,
+    note = await build_ga_note(db, user, GaNoteCreate(
+        content=meeting_note_heading(row.draft_text) if row.recorder == 'ai_agent' else row.draft_text, department_id=row.department_id,
         created_by=user.id))
     await db.flush()
     row.saved_note_id, row.saved_at, row.status = note.id, now(), 'SAVED'
@@ -337,9 +344,10 @@ async def generate_saved_quick_summary(session_id, lease, *, sessions=None):
 
 async def list_meeting_records(db, limit, offset, follow_up_query=None):
     rows = (await db.execute(meeting_record_query()
-        .with_only_columns(Meeting.id, Meeting.title, Meeting.started_at, Meeting.created_at, Meeting.partial)
+        .with_only_columns(Meeting.id, Meeting.title, Meeting.started_at, Meeting.created_at, Meeting.partial, Meeting.recorder)
         .order_by(Meeting.created_at.desc(), Meeting.id).limit(limit).offset(offset))).all()
-    return {'items': [{'id': str(row.id), 'title': row.title, 'started_at': (row.started_at or row.created_at).isoformat(),
+    return {'items': [{'id': str(row.id), 'title': meeting_title(row.title) if row.recorder == 'ai_agent' else row.title,
+        'started_at': (row.started_at or row.created_at).isoformat(),
         'partial': row.partial} for row in rows],
         'follow_up': await mira_memory.upcoming_points(db, follow_up_query) if offset == 0 else []}
 
@@ -351,8 +359,10 @@ async def meeting_record(db, session_id):
     segments = (await db.scalars(select(Segment).where(Segment.session_id == row.id, Segment.status == 'DONE',
         Segment.transcript.is_not(None)).order_by(Segment.start_ms, Segment.sequence))).all()
     speakers = {speaker_id: index for index, speaker_id in enumerate(dict.fromkeys(s.speaker_id for s in segments))}
-    return {'id': str(row.id), 'title': row.title, 'started_at': (row.started_at or row.created_at).isoformat(),
-        'partial': row.partial, 'quick_summary': row.quick_summary, 'full_notes': row.draft_text, 'error': row.error,
+    return {'id': str(row.id), 'title': meeting_title(row.title) if row.recorder == 'ai_agent' else row.title,
+        'started_at': (row.started_at or row.created_at).isoformat(),
+        'partial': row.partial, 'quick_summary': row.quick_summary, 'full_notes': meeting_note_heading(row.draft_text) if row.recorder == 'ai_agent' else row.draft_text,
+        'error': row.error,
         'quick_summary_pending': bool(row.quick_summary is None and row.lease_until and row.lease_until > now()),
         'memory': await mira_memory.meeting_points(db, row, segments),
         'transcript': [{'id': str(segment.id), 'speaker': segment.speaker_name,

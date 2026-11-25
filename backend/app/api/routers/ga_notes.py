@@ -46,6 +46,7 @@ from app.services.daily_realization_events import record_task_semantic_events, t
 from app.services.task_postponement import check_note_postponement_explanations, save_postponement_daily_explanation
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
 from app.services.task_marker import active_one_h_marker, current_effective_marker_date, marker_is_by_ga, normalize_marker_comment, note_bundle_marker_update, sync_note_task_marker, sync_note_assignee_markers
+from app.services.mira_development_name import meeting_note_heading
 from app.services.marker_comments import record_initial_marker_comments
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.task_daily_progress import sync_task_daily_finish_period, upsert_explicit_task_daily_status
@@ -112,7 +113,7 @@ def _attachment_out(attachment: GaNoteAttachment) -> GaNoteAttachmentOut:
 def _note_out(note: GaNote) -> GaNoteOut:
     return GaNoteOut(
         id=note.id,
-        content=note.content,
+        content=meeting_note_heading(note.content) if note.from_mira and not note.from_mira_desktop else note.content,
         email_preview=email_preview(note),
         created_by=note.created_by,
         note_type=note.note_type,

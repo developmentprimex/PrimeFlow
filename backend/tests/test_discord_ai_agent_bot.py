@@ -109,14 +109,14 @@ class AIAgentBotTests(unittest.IsolatedAsyncioTestCase):
             bot = worker.AIAgentBot()
             try:
                 await bot.setup_hook()
-                group = bot.tree.get_command('ai-agent', guild=discord.Object(id=123))
+                group = bot.tree.get_command('mira-zhvillim', guild=discord.Object(id=123))
                 self.assertEqual({command.name for command in group.commands}, {'fillo', 'mbaro', 'statusi'})
                 self.assertIsNone(bot.tree.get_command('mira', guild=discord.Object(id=123)))
                 self.assertIsNone(bot.tree.get_command('takimi', guild=discord.Object(id=123)))
                 interaction = SimpleNamespace(
                     guild_id=123, channel_id=44,
                     user=SimpleNamespace(voice=SimpleNamespace(channel=SimpleNamespace(id=999))))
-                with self.assertRaisesRegex(ValueError, 'AI Agent'), patch.object(bot.meeting_capture, 'begin', AsyncMock()) as begin:
+                with self.assertRaisesRegex(ValueError, 'Zhvillim'), patch.object(bot.meeting_capture, 'begin', AsyncMock()) as begin:
                     await bot.meeting_capture.start(interaction, None, None)
                 begin.assert_not_awaited()
             finally:
@@ -138,15 +138,24 @@ class AIAgentBotTests(unittest.IsolatedAsyncioTestCase):
         channel = Mock(spec=discord.VoiceChannel)
         channel.id, channel.name = 456, 'AI Agent'
         channel.permissions_for.return_value = SimpleNamespace(view_channel=True, connect=True, send_messages=True)
-        guild = SimpleNamespace(id=123, me=Mock(), get_channel=Mock(return_value=channel))
+        control = Mock(spec=discord.TextChannel)
+        control.id = 77
+        control.topic = 'PrimeFlow shared meeting controls: 1H and AI Agent'
+        guild = SimpleNamespace(id=123, me=SimpleNamespace(display_name='Mira AI Agent', edit=AsyncMock()),
+                                get_channel=Mock(side_effect={456: channel, 77: control}.get))
         bot._connection.user = SimpleNamespace(id=789)
         try:
             with tempfile.TemporaryDirectory() as directory, \
                  patch.object(worker, 'STATUS_FILE', Path(directory) / 'status.json'), \
                  patch.object(worker.settings, 'DISCORD_GUILD_ID', '123'), \
                  patch.object(worker.settings, 'DISCORD_AI_AGENT_VOICE_CHANNEL_ID', '456'), \
-                 patch.object(bot, 'get_guild', return_value=guild):
+                 patch.object(worker.settings, 'DISCORD_MEETING_CONTROL_CHANNEL_ID', '77'), \
+                 patch.object(bot, 'get_guild', return_value=guild), \
+                 patch.object(bot.admin_http, 'patch', AsyncMock(return_value=Mock())) as update_topic:
                 await bot.on_ready()
+                guild.me.edit.assert_awaited_once_with(nick='Mira Zhvillim')
+                update_topic.assert_awaited_once_with('/channels/77', json={
+                    'topic': 'PrimeFlow shared meeting controls: 1H and Mira Zhvillim'})
                 status = json.loads(worker.STATUS_FILE.read_text(encoding='utf-8'))
                 self.assertTrue(status['ready'])
                 self.assertEqual(status['bot_user_id'], '789')

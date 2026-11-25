@@ -112,7 +112,9 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
     full_notes: "Shënime\n\n**Transkripti fjalë për fjalë**\n\nGA: Teksti i ruajtur.\n\n**Përmbledhje e shkurtër**\n\nU diskutua oferta.",
     transcript: [
       { ...source, speaker_key: 0, text: "Kontrollojeni ofertën deri nesër." },
+      { id: "empty", speaker: "Ana", speaker_key: 1, start_ms: 328000, end_ms: 330000, text: "" },
       { id: "continuation", speaker: "GA", speaker_key: 0, start_ms: 330000, end_ms: 334000, text: "Pastaj na njoftoni." },
+      { id: "whitespace", speaker: "GA", speaker_key: 0, start_ms: 332000, end_ms: 340000, text: " \n " },
       { id: "answer", speaker: "Ana", speaker_key: 1, start_ms: 334000, end_ms: 336000, text: "Në rregull." },
       { id: "return", speaker: "GA", speaker_key: 0, start_ms: 337000, end_ms: 339000, text: "Faleminderit." },
     ],
@@ -136,13 +138,15 @@ test("Notetaker shows a clarification and links its evidence to the transcript",
   })
   await page.goto(`/mira?tab=notetaker&meeting=${meeting}&view=quick`)
   await expect(page.getByRole("link", { name: "Dërgo ofertën" })).toHaveAttribute("href", "/tasks/created-task")
-  const tasks = page.getByRole("table", { name: "Detyrat e krijuara nga takimi" })
-  await expect(tasks.getByRole("columnheader")).toHaveText(["Detyra", "Përgjegjësi", "Data e fillimit", "Afati"])
-  await expect(tasks.getByRole("cell")).toHaveText(["Dërgo ofertën", "AA, AK", "19/11/2026", "—"])
-  await expect(tasks.getByRole("cell", { name: "AA, AK" })).toHaveAttribute("title", "Arta Aliu, Ana Krasniqi")
+  const entries = page.getByRole("table", { name: "Detyra dhe shënime nga takimi" })
+  await expect(entries.getByRole("columnheader")).toHaveText(["Lloji", "Përmbajtja", "Përgjegjësi", "Data e fillimit", "Afati"])
+  await expect(entries.getByRole("row").nth(1).getByRole("cell")).toHaveText(["Detyrë", "Dërgo ofertën", "AA, AK", "19/11/2026", "—"])
+  await expect(entries.getByRole("row").nth(2).getByRole("cell")).toHaveText(["Shënim", "Kontrolli i dokumenteve", "—", "—", "—"])
+  await expect(entries.getByRole("cell", { name: "AA, AK" })).toHaveAttribute("title", "Arta Aliu, Ana Krasniqi")
   await page.getByRole("link", { name: "Kontrolli i dokumenteve" }).click()
   await expect(page.locator("#note-created-note")).toContainText("Kontrolli i dokumenteve")
   const transcript = page.locator("#transkripti")
+  await expect(transcript.locator("#segment-empty, #segment-whitespace")).toHaveCount(0)
   await expect(transcript.getByRole("listitem")).toHaveCount(3)
   await expect(transcript.getByRole("listitem").first()).toContainText("05:16–05:34")
   await expect(transcript.getByRole("listitem").first()).toContainText("Kontrollojeni ofertën deri nesër. Pastaj na njoftoni.")

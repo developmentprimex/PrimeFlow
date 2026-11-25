@@ -35,6 +35,7 @@ from app.models.mira_host import (Mira1HEvent, Mira1HMeeting, Mira1HMention, Mir
 from app.models.task import Task
 from app.models.task_strike_event import TaskStrikeEvent
 from app.models.user import User
+from app.services.mira_development_name import meeting_note_heading, meeting_title
 from app.services.mira_host_speech import speech_text as albanian_speech
 from app.services.discord_task_status import is_wfe, settled_for_questions
 
@@ -1739,7 +1740,8 @@ async def note_transcript(db: AsyncSession, note_id: uuid.UUID) -> dict:
         "speaker_name": s.speaker_name, "start_ms": s.start_ms, "end_ms": s.end_ms, "transcript": s.transcript}
         for s in segments if s.transcript])
     started = voice.started_at or voice.created_at
-    return {"note_id": str(note_id), "title": voice.title, "status": voice.status, "partial": voice.partial,
+    return {"note_id": str(note_id), "title": meeting_title(voice.title) if voice.recorder == "ai_agent" else voice.title,
+            "status": voice.status, "partial": voice.partial,
             "started_at": started.isoformat() if started else None,
             "stopped_at": voice.stopped_at.isoformat() if voice.stopped_at else None,
             "passages": [{"speaker": p["speaker"], "time": p["time"], "text": p["text"]} for p in passages]}
@@ -1779,8 +1781,9 @@ async def mira_notes(db: AsyncSession, limit: int, offset: int = 0) -> list[dict
         .where(or_(GaNote.from_mira, GaNote.from_mira_desktop),
                ~exists().where(Mira1HEvent.note_id == GaNote.id, Mira1HEvent.kind == "SUMMARY_NOTE"))
         .order_by(GaNote.created_at.desc(), GaNote.id.desc()).limit(fetch_limit))).all()
-    notes += [{"id": str(n.id), "kind": "PX_NOTE", "title": title or n.content.split("\n\n", 1)[0] or "Shënim nga Mira",
-               "content": n.content, "status": n.status.value if hasattr(n.status, "value") else str(n.status),
+    notes += [{"id": str(n.id), "kind": "PX_NOTE", "title": (meeting_title(title) if title and not n.from_mira_desktop else title)
+                        or n.content.split("\n\n", 1)[0] or "Shënim nga Mira",
+               "content": meeting_note_heading(n.content) if not n.from_mira_desktop else n.content, "status": n.status.value if hasattr(n.status, "value") else str(n.status),
                "created_at": n.created_at.isoformat() if n.created_at else None,
                "url": "/ga-ka-notes", "meeting_id": None, "note_id": str(n.id),
                "source": "DESKTOP" if n.from_mira_desktop else "DISCORD" if title else "1H",

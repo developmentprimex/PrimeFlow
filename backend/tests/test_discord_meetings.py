@@ -94,7 +94,7 @@ class MeetingMessageTests(unittest.IsolatedAsyncioTestCase):
             content, embed, view = ui.meeting_alert(self.job("start"), "https://discord.com/channels/1/99")
         self.assertTrue(content.startswith("<@3> 🔴 **Takimi po fillon tani**"))
         self.assertIn("Anisa Ternava", embed.description)
-        self.assertEqual([item.label for item in view.children], ["🔗 Hap takimin", "🎧 Hyr në 1H", "🎧 Hyr në AI Agent"])
+        self.assertEqual([item.label for item in view.children], ["🔗 Hap takimin", "🎧 Hyr në 1H", "🎧 Hyr në Mira Zhvillim"])
         self.assertEqual([item.url for item in view.children[1:]],
                          ['https://discord.com/channels/1/9', 'https://discord.com/channels/1/10'])
 

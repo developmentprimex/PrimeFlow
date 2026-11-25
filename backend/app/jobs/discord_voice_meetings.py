@@ -10,6 +10,7 @@ from app.services import discord_voice_meetings as service
 from app.services.discord_voice_meetings import now
 from app.services import discord_voice_openai as provider
 from app.services import mira_memory
+from app.services.mira_development_name import meeting_title
 from app.services import mira_voice_dictation
 from app.config import settings
 
@@ -55,7 +56,8 @@ async def process_voice_meetings():
                 if service.is_scheduled(row):row.delivered_at=now()
                 await db.commit();stats['failed']+=1;continue
             lease=uuid.uuid4();row.lease_token=lease;row.lease_until=now()+FINALIZE_LEASE
-            title,cache,meeting_date=row.title,row.summary_progress or {},row.started_at or row.created_at
+            title = meeting_title(row.title) if row.recorder == 'ai_agent' else row.title
+            cache, meeting_date = row.summary_progress or {}, row.started_at or row.created_at
             stopped=row.stopped_at or row.created_at
             verbatim = row.recorder == 'ai_agent' or (
                 row.recorder == 'primary' and (service.is_scheduled(row)

@@ -16,6 +16,7 @@ from app.models.mira_host import Mira1HEvent as HostEvent, Mira1HMeeting as Host
 from app.models.mira_memory import MiraMemoryEvent as MemoryEvent, MiraMemoryItem as MemoryItem
 from app.models.task import Task
 from app.services import discord_one_h, discord_voice_meetings, mira_desktop, mira_host, mira_memory
+from app.services.mira_development_name import meeting_note_heading, meeting_title
 from app.services.mira_note_groups import note_group
 
 HOST_NOTE_KINDS = ("PX_NOTE", "SUMMARY_NOTE")
@@ -76,7 +77,8 @@ def unlinked_notes():
 
 
 def archived_note(note):
-    return saved_note(note, note.content.split("\n\n", 1)[0].strip() or "Shënim nga Mira")
+    content = meeting_note_heading(note.content) if note.from_mira and not note.from_mira_desktop else note.content
+    return {**saved_note(note, content.split("\n\n", 1)[0].strip() or "Shënim nga Mira"), "content": content}
 
 
 async def list_unlinked_notes(db, limit, offset, query):
@@ -140,7 +142,9 @@ async def list_meetings(db, user, *, limit, offset, group, query, follow_up_quer
         host_matches.update(host_id for host_id, voice_id in links.items() if voice_id in voice_matches)
         matches = {"discord": voice_matches, "host": host_matches, "desktop": desktop_matches}
         needle = query.casefold()
-        rows = [row for row in rows if needle in row[3].casefold() or row[2] in matches[row[1]]]
+        rows = [row for row in rows if needle in row[3].casefold()
+                or (row[4] == "AI_AGENT" and needle in meeting_title(row[3]).casefold())
+                or row[2] in matches[row[1]]]
     ordered = sorted(rows, key=lambda row: (row[0], row[1], row[2]), reverse=True)
     page = ordered[offset:offset + limit]
     ids = [row[2] for row in page if row[1] == "discord"]
@@ -156,7 +160,7 @@ async def list_meetings(db, user, *, limit, offset, group, query, follow_up_quer
     })
     recorders = {voice.id: voice.recorder for voice in voices if voice.id in page_ids}
     return {"total": len(ordered), "items": [
-        {"id": str(id_), "source": source, "title": title, "group": group_, "status": status,
+        {"id": str(id_), "source": source, "title": meeting_title(title) if group_ == "AI_AGENT" else title, "group": group_, "status": status,
          "started_at": when.isoformat(), "partial": partial, "open_count": counts.get(id_, 0),
          "recorder": recorders.get(id_), **artifacts.get(id_, {})}
         for when, source, id_, title, group_, status, partial in page
@@ -268,6 +272,8 @@ async def discord_detail(db, meeting_id):
             hosts.append(host_for_slot)
     note = await db.get(GaNote, voice.saved_note_id) if voice.saved_note_id else None
     notes = [saved_note(note, "Shënimet e regjistrimit")] if note else []
+    if notes and voice.recorder == "ai_agent":
+        notes[0]["content"] = meeting_note_heading(notes[0]["content"])
     dictation = (voice.dictation_progress or {}).get("created", [])
     note_ids = dictated_artifact_ids(dictation, "note")
     if note_ids:
