@@ -1,3 +1,5 @@
+import { dailyRlzReasonRequiresComment } from "@/lib/daily-rlz-ui"
+
 export type PostponementExplanation = {
   postponement_reason_code: string
   postponement_comment: string
@@ -8,6 +10,11 @@ export type PostponementDetails = {
   task_title: string
   assignee_name?: string | null
   changes: { field: "start_date" | "due_date"; from: string; to: string }[]
+}
+
+function hasExplanation(explanation: PostponementExplanation | null): explanation is PostponementExplanation {
+  const reason = explanation?.postponement_reason_code?.trim()
+  return Boolean(reason && (!dailyRlzReasonRequiresComment(reason) || explanation?.postponement_comment?.trim()))
 }
 
 export async function withPostponementExplanation(
@@ -28,7 +35,7 @@ export async function withPostponementExplanation(
     for (const task of detail.postponements as PostponementDetails[]) {
       if (init.signal?.aborted) return canceledPostponement()
       const explanation = await explain(task, init.signal)
-      if (init.signal?.aborted || !explanation?.postponement_reason_code?.trim() || !explanation.postponement_comment?.trim()) return canceledPostponement()
+      if (init.signal?.aborted || !hasExplanation(explanation)) return canceledPostponement()
       explanations[task.task_id] = {
         postponement_reason_code: explanation.postponement_reason_code.trim(),
         postponement_comment: explanation.postponement_comment.trim(),
@@ -37,7 +44,7 @@ export async function withPostponementExplanation(
     return send({ ...init, body: JSON.stringify({ ...body, postponement_explanations: explanations }) })
   }
   const explanation = await explain(detail, init.signal)
-  if (init.signal?.aborted || !explanation?.postponement_reason_code?.trim() || !explanation.postponement_comment?.trim()) {
+  if (init.signal?.aborted || !hasExplanation(explanation)) {
     return canceledPostponement()
   }
   // The first write was rejected before mutation. A lost successful write is never retried here.

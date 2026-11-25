@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import type { DailyReportResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
+import { DAILY_RLZ_REASONS, dailyRlzReasonRequiresComment } from "@/lib/daily-rlz-ui"
 
 export { DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
 
@@ -157,10 +157,12 @@ export function DailyRlzCommentField({ taskId, day, state, subjectUserId, onSave
     } finally { setSaving(false) }
   }
 
-  if (!state?.comment_required) return <span className="text-slate-400">{state?.comment || "—"}</span>
+  if (!state || (!state.comment_required && dailyRlzReasonRequiresComment(state.reason_code))) {
+    return <span className="text-slate-400">{state?.comment || "—"}</span>
+  }
   return <div className={cn("flex items-center gap-2 rounded px-1", state.comment_missing && "bg-amber-50", failed && "border border-red-400 bg-red-50 ring-1 ring-red-200")}>
     {state.comment_missing ? <span className="text-[10px] text-amber-700" title="Kërkon sqarim">!</span> : null}
-    <input type="text" aria-label="Koment" className="h-4 w-full border-b border-slate-300 bg-transparent"
+    <input type="text" aria-label="Koment" placeholder={state.comment_required ? undefined : "Opsional"} className="h-4 w-full border-b border-slate-300 bg-transparent"
       value={value} disabled={!state?.is_editable || saving}
       onChange={e => setValue(e.target.value)}
       onBlur={() => void trackDailyRlzSave(save())} />

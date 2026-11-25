@@ -6,9 +6,16 @@ import ts from "typescript"
 
 const source = readFileSync(new URL("../src/lib/task-postponement.ts", import.meta.url), "utf8")
 const module = { exports: {} }
+const reasons = { exports: {} }
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../src/lib/daily-rlz-ui.ts", import.meta.url), "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: reasons.exports })
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: {
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
-} }).outputText, { module, exports: module.exports, Response, DOMException })
+} }).outputText, { module, exports: module.exports, require: name => {
+  assert.equal(name, "@/lib/daily-rlz-ui")
+  return reasons.exports
+}, Response, DOMException })
 const { withPostponementExplanation } = module.exports
 const detail = { code: "TASK_POSTPONEMENT_EXPLANATION_REQUIRED", task_title: "Task", changes: [{ field: "due_date", from: "2026-10-20", to: "2026-10-21" }] }
 const conflict = () => Response.json({ detail }, { status: 409 })

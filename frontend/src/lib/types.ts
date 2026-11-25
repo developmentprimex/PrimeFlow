@@ -336,6 +336,7 @@ export interface Task {
   assigned_to?: string | null
   confirmation_assignee_id?: string | null
   assignees?: TaskAssignee[] | null
+  shared_assignee_ids?: string[] | null
   created_by?: string | null
   ga_note_origin_id?: string | null
   question_origin_id?: string | null

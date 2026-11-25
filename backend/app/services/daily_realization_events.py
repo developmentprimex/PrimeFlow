@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from app.config import settings
 from app.models.daily_plan_adjustment import DailyPlanAdjustment
 from app.services.audit import add_audit_log
+from app.services.daily_realization_explanation import reason_requires_comment
 
 
 SEMANTIC_FIELDS = {
@@ -62,14 +63,14 @@ def task_semantic_state(task) -> dict[str, Any]:
 
 def postponement_explanation_from_events(events) -> dict:
     """Read the last explained forward date move, leaving legacy daily input intact."""
-    explained = [event for event in events if (event.after or {}).get("reason") and (event.after or {}).get("comment")]
-    for event in sorted(explained, key=lambda item: (item.created_at, str(item.id)), reverse=True):
+    for event in sorted(events, key=lambda item: (item.created_at, str(item.id)), reverse=True):
         if event.action not in {"task.start_date_changed", "task.due_date_changed"}:
             continue
         before, after = event.before or {}, event.after or {}
         old, new = semantic_local_day(before.get("value")), semantic_local_day(after.get("value"))
-        if old and new and new > old and after.get("reason") and after.get("comment"):
-            return {"reason": after["reason"], "comment": after["comment"], "postponement_explanation": True}
+        if (old and new and new > old and after.get("reason")
+                and (after.get("comment") or not reason_requires_comment(after.get("reason_code")))):
+            return {"reason": after["reason"], "comment": after.get("comment") or "-", "postponement_explanation": True}
     return {}
 
 

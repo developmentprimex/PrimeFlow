@@ -76,6 +76,7 @@ from app.services.ga_identity import resolve_ga_user
 from app.services.mira_development_name import meeting_note_heading
 from app.services.report_note_visibility import append_mira_dictation_label
 from app.services.px_note_email import email_preview, email_preview_text
+from app.services.task_reporting_choices import shared_task_assignee_ids
 
 
 router = APIRouter()
@@ -2317,7 +2318,7 @@ async def export_all_tasks_report_xlsx(
         "LL": 6,
         "NLL": 7,
         "DITA": 12,
-        "BZ ME": 14,
+        "BZ ME": 10 if payload.title == "ALL FINANCE TASK REPORT" else 14,
         "KOHA BZ": 12,
         "DEP": 8,
         "AM/PM": 7,
@@ -2512,6 +2513,7 @@ OPEN_TASK_EXPORT_HEADERS = [
     "PRIORITY",
     "LLOJI 1H/P/BLL/R1",
     "BZ ME",
+    "ASSIGNEES TË TJERË",
     "TITLE",
     "PROJECT",
     "WHEN MANUAL",
@@ -2981,17 +2983,15 @@ async def export_open_tasks_xlsx(
         return ", ".join(labels) if labels else "Unassigned"
 
     def bz_me_label(task: Task) -> str:
-        alignment_ids = task_alignment_map.get(task.id) or []
-        if not alignment_ids and task.system_template_origin_id:
-            alignment_ids = template_alignment_map.get(task.system_template_origin_id) or []
-        labels: list[str] = []
-        for alignment_user_id in alignment_ids:
-            alignment_user = user_map.get(alignment_user_id)
-            if alignment_user:
-                labels.append(_initials(alignment_user.full_name or alignment_user.username or ""))
-            else:
-                labels.append(str(alignment_user_id))
-        return ", ".join([label for label in labels if label])
+        alignment_ids = dict.fromkeys([
+            *task_alignment_map.get(task.id, []),
+            *template_alignment_map.get(task.system_template_origin_id, []),
+        ])
+        return ", ".join(
+            label for alignment_user_id in alignment_ids
+            if (person := user_map.get(alignment_user_id))
+            and (label := _initials(person.full_name or person.username or ""))
+        )
 
     normalized_filter = (filter or "all").strip().lower()
     normalized_status_filter = (status_filter or "all").strip().lower()
@@ -3057,6 +3057,20 @@ async def export_open_tasks_xlsx(
                 continue
         filtered_tasks.append(task)
 
+    shared_assignees = await shared_task_assignee_ids(db, filtered_tasks)
+    missing_user_ids = {person_id for ids in shared_assignees.values() for person_id in ids} - user_map.keys()
+    if missing_user_ids:
+        extra_users = (await db.scalars(select(User).where(User.work_staff_filter(), User.id.in_(missing_user_ids)))).all()
+        user_map.update((person.id, person) for person in extra_users)
+
+    def other_assignees_label(task: Task) -> str:
+        assigned_ids = assignee_ids_for(task)
+        primary_id = user_id or next(iter(assigned_ids), None)
+        other_ids = dict.fromkeys([*assigned_ids, *shared_assignees.get(task.id, [])])
+        names = [person.full_name or person.username for person_id in other_ids
+                 if person_id != primary_id and (person := user_map.get(person_id))]
+        return ", ".join(sorted((name for name in names if name), key=str.casefold))
+
     group_order = {"OVERDUE": 0, "THIS WEEK": 1, "NEXT WEEK": 2, "FUTURE": 3, "NO DATE": 4}
     export_rows: list[tuple[str, Task]] = []
     for task in filtered_tasks:
@@ -3071,6 +3085,7 @@ async def export_open_tasks_xlsx(
     )
 
     headers = OPEN_TASK_EXPORT_HEADERS
+    column_numbers = {header: index for index, header in enumerate(headers, start=1)}
 
     wb = Workbook()
     ws = wb.active
@@ -3123,6 +3138,7 @@ async def export_open_tasks_xlsx(
             (task.priority or "").upper(),
             _open_task_type_label(task),
             bz_me_label(task),
+            other_assignees_label(task),
             _open_task_title_rich_text(task.title),
             project.title if project else "",
             baseline.when_value if baseline else "",
@@ -3138,14 +3154,16 @@ async def export_open_tasks_xlsx(
                 cell.font = Font(bold=True)
         if baseline:
             if not _open_task_values_match(baseline.when_value, planned_when):
-                ws.cell(row=data_row, column=19).fill = mismatch_fill
-                ws.cell(row=data_row, column=19).font = mismatch_font
+                cell = ws.cell(row=data_row, column=column_numbers["WHEN PF"])
+                cell.fill = mismatch_fill
+                cell.font = mismatch_font
             if (
                 _open_task_should_compare_status(baseline.when_value)
                 and not _open_task_values_match(baseline.status_value, planned_status)
             ):
-                ws.cell(row=data_row, column=20).fill = mismatch_fill
-                ws.cell(row=data_row, column=20).font = mismatch_font
+                cell = ws.cell(row=data_row, column=column_numbers["STATUS PF"])
+                cell.fill = mismatch_fill
+                cell.font = mismatch_font
         data_row += 1
 
     last_row = max(header_row, data_row - 1)
@@ -3164,13 +3182,14 @@ async def export_open_tasks_xlsx(
         12: 10,
         13: 18,
         14: 14,
-        15: 44,
-        16: 34,
-        17: 16,
+        15: 24,
+        16: 44,
+        17: 34,
         18: 16,
         19: 16,
         20: 16,
-        21: 34,
+        21: 16,
+        22: 34,
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
@@ -3180,8 +3199,10 @@ async def export_open_tasks_xlsx(
         status_validation = DataValidation(type="list", formula1='"PERSONAL,1H,BLLOK,R1"', allow_blank=True)
         ws.add_data_validation(when_validation)
         ws.add_data_validation(status_validation)
-        when_validation.add(f"{get_column_letter(17)}5:{get_column_letter(17)}{data_row - 1}")
-        status_validation.add(f"{get_column_letter(18)}5:{get_column_letter(18)}{data_row - 1}")
+        when_column = get_column_letter(column_numbers["WHEN MANUAL"])
+        status_column = get_column_letter(column_numbers["STATUS MANUAL"])
+        when_validation.add(f"{when_column}5:{when_column}{data_row - 1}")
+        status_validation.add(f"{status_column}5:{status_column}{data_row - 1}")
 
     metadata = wb.create_sheet("_PRIMEFLOW")
     metadata.sheet_state = "veryHidden"

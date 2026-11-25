@@ -3,6 +3,7 @@ import io
 import uuid
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from openpyxl import Workbook, load_workbook
@@ -29,6 +30,10 @@ from app.api.routers.exports import (
     reset_open_tasks_baseline,
 )
 from app.models.enums import UserRole
+
+
+LEGACY_OPEN_TASK_PREFIX = [header for header in OPEN_TASK_EXPORT_HEADERS[:OPEN_TASK_EXPORT_HEADERS.index("PROJECT") + 1]
+                           if header != "ASSIGNEES TË TJERË"]
 
 
 class TestOpenTasksExportLayout(unittest.TestCase):
@@ -72,20 +77,20 @@ class TestOpenTasksExportLayout(unittest.TestCase):
 
     def test_comparison_columns_are_paired_in_requested_order(self) -> None:
         self.assertEqual(
-            OPEN_TASK_EXPORT_HEADERS[16:21],
+            OPEN_TASK_EXPORT_HEADERS[-5:],
             ["WHEN MANUAL", "STATUS MANUAL", "WHEN PF", "STATUS PF", "KOMENT"],
         )
 
     def test_baseline_columns_are_found_in_legacy_and_current_layouts(self) -> None:
         legacy_tail = ["WHEN", "WHEN PLANNED", "STATUS", "STATUS PLANNED", "KOMENT"]
         legacy_headers = [
-            header for header in OPEN_TASK_EXPORT_HEADERS[:16] if header != "TASK ID"
+            header for header in LEGACY_OPEN_TASK_PREFIX if header != "TASK ID"
         ] + legacy_tail
-        previous_headers = OPEN_TASK_EXPORT_HEADERS[:16] + legacy_tail
+        previous_headers = LEGACY_OPEN_TASK_PREFIX + legacy_tail
         for headers, expected in (
             (legacy_headers, (16, 18, 20)),
             (previous_headers, (17, 19, 21)),
-            (OPEN_TASK_EXPORT_HEADERS, (17, 18, 21)),
+            (OPEN_TASK_EXPORT_HEADERS, (18, 19, 22)),
         ):
             workbook = Workbook()
             worksheet = workbook.active
@@ -214,13 +219,13 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         # Visible rows were reordered in Excel. IDs move with their manual
         # values, while the legacy hidden row map remains in export order.
         ws.cell(5, 2, str(second_task_id))
-        ws.cell(5, 15, "Second task with an edited title")
-        ws.cell(5, 17, "this week")
-        ws.cell(5, 18, "1h")
+        ws.cell(5, 16, "Second task with an edited title")
+        ws.cell(5, 18, "this week")
+        ws.cell(5, 19, "1h")
         ws.cell(6, 2, str(first_task_id))
-        ws.cell(6, 15, "First task renamed")
-        ws.cell(6, 17, "next week")
-        ws.cell(6, 18, "personal")
+        ws.cell(6, 16, "First task renamed")
+        ws.cell(6, 18, "next week")
+        ws.cell(6, 19, "personal")
 
         metadata = workbook.create_sheet("_PRIMEFLOW")
         metadata.sheet_state = "veryHidden"
@@ -279,7 +284,7 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         ws = workbook.active
         ws.title = "OPEN TASKS"
         legacy_headers = [
-            header for header in OPEN_TASK_EXPORT_HEADERS[:16] if header != "TASK ID"
+            header for header in LEGACY_OPEN_TASK_PREFIX if header != "TASK ID"
         ] + ["WHEN", "WHEN PLANNED", "STATUS", "STATUS PLANNED", "KOMENT"]
         for column, header in enumerate(legacy_headers, start=1):
             ws.cell(4, column, header)
@@ -320,17 +325,19 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
 
     async def test_workbook_includes_system_tasks_and_keeps_task_metadata(self) -> None:
         task_id = uuid.uuid4()
+        haxhere, gane, diellza = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         task = SimpleNamespace(
             id=task_id,
             title="Plan [[done]]customer[[/done]] report",
             description=None,
             project_id=None,
             department_id=None,
-            assigned_to=None,
+            assigned_to=haxhere,
             assignees=[],
             ga_note_origin_id=None,
             plan_note_origin_id=None,
             system_template_origin_id=None,
+            mira_dictation_source=None,
             status="TODO",
             priority="NORMAL",
             finish_period="AM",
@@ -356,7 +363,15 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
             system_template_origin_id=uuid.uuid4(),
         )
         system_task = SimpleNamespace(**system_task_values)
-        db = _FakeSession([[task, system_task], [], [], [baseline]])
+        db = _FakeSession([
+            [task, system_task],
+            [(system_task_id, gane)],
+            [(system_task.system_template_origin_id, gane), (system_task.system_template_origin_id, diellza)],
+            [SimpleNamespace(id=person_id, full_name=name, username=None) for person_id, name in (
+                (haxhere, "Haxhere Spahiu"), (gane, "Gane Arifaj"), (diellza, "Diellza Veliu"),
+            )],
+            [baseline],
+        ])
         user = SimpleNamespace(
             id=uuid.uuid4(),
             role=UserRole.ADMIN,
@@ -365,25 +380,28 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
             username="tester",
         )
 
-        response = await export_open_tasks_xlsx(
-            department_id=None,
-            user_id=None,
-            filter="all",
-            status_filter="all",
-            type_filter=None,
-            search=None,
-            this_week_start=date(2026, 9, 7),
-            db=db,
-            user=user,
-        )
+        with patch("app.api.routers.exports.shared_task_assignee_ids", new=AsyncMock(
+            return_value={task_id: [haxhere, gane]},
+        )):
+            response = await export_open_tasks_xlsx(
+                department_id=None,
+                user_id=haxhere,
+                filter="all",
+                status_filter="all",
+                type_filter=None,
+                search=None,
+                this_week_start=date(2026, 9, 7),
+                db=db,
+                user=user,
+            )
         content = b"".join([chunk async for chunk in response.body_iterator])
         workbook = load_workbook(io.BytesIO(content), data_only=False, rich_text=True)
         ws = workbook["OPEN TASKS"]
 
-        self.assertEqual([ws.cell(4, column).value for column in range(17, 22)], OPEN_TASK_EXPORT_HEADERS[16:21])
+        self.assertEqual([ws.cell(4, column).value for column in range(18, 23)], OPEN_TASK_EXPORT_HEADERS[-5:])
         self.assertEqual(ws.cell(4, 2).value, "TASK ID")
         self.assertEqual(ws.cell(5, 2).value, str(task_id))
-        title_value = ws.cell(5, 15).value
+        title_value = ws.cell(5, 16).value
         self.assertIsInstance(title_value, CellRichText)
         self.assertEqual(str(title_value), "Plan customer report")
         self.assertEqual([part.text for part in title_value if part.font.strike], ["customer"])
@@ -391,16 +409,23 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(ws.cell(5, 4).value, "SYSTEM")
         self.assertEqual(ws.cell(6, 2).value, str(system_task_id))
         self.assertEqual(ws.cell(6, 4).value, "SYSTEM")
-        self.assertEqual(ws.cell(6, 15).value, system_task.title)
+        self.assertEqual(ws.cell(6, 16).value, system_task.title)
+        self.assertEqual(ws["G5"].value, "Haxhere Spahiu")
+        self.assertEqual(ws["N4"].value, "BZ ME")
+        self.assertEqual(ws["O4"].value, "ASSIGNEES TË TJERË")
+        self.assertEqual(ws["O5"].value, "Gane Arifaj")
+        self.assertIsNone(ws["O6"].value)
+        self.assertEqual(ws["N6"].value, "GA, DV")
         self.assertNotIn("tasks.system_template_origin_id IS NULL", str(db.statements[0]))
         self.assertEqual(
-            [ws.cell(5, column).value for column in range(17, 22)],
+            [ws.cell(5, column).value for column in range(18, 23)],
             ["THIS WEEK", "1H", "NEXT WEEK", "1H", "Before planning"],
         )
-        self.assertEqual(ws.cell(5, 19).fill.fgColor.rgb, "00FF0000")
-        self.assertEqual(ws.cell(5, 19).font.color.rgb, "00FFFFFF")
-        self.assertTrue(ws.cell(5, 19).font.bold)
-        self.assertEqual(ws.cell(5, 20).fill.fill_type, None)
+        self.assertEqual(ws["T5"].fill.fgColor.rgb, "00FF0000")
+        self.assertEqual(ws["T5"].font.color.rgb, "00FFFFFF")
+        self.assertTrue(ws["T5"].font.bold)
+        self.assertIsNone(ws["U5"].fill.fill_type)
+        self.assertEqual([str(rule.sqref) for rule in ws.data_validations.dataValidation], ["R5:R6", "S5:S6"])
         self.assertEqual(ws.freeze_panes, "C5")
         self.assertEqual(workbook["_PRIMEFLOW"].sheet_state, "veryHidden")
         self.assertEqual(workbook["_PRIMEFLOW"]["B1"].value, "2026-09-14")

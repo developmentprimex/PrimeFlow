@@ -14,6 +14,7 @@ from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.user import User
 from app.services.primeflow_report import report_timezone
 from app.services.daily_realization_events import semantic_local_day
+from app.services.daily_realization_explanation import reason_requires_comment
 from app.services.discord_task_status import is_wfe
 
 MODELS = {'m2': DiscordM2Question, 'meeting': DiscordMeetingAlert}
@@ -75,8 +76,10 @@ async def m2_payload(db, question, link):
             state = (await db.execute(select(TaskDailyRlzState).where(TaskDailyRlzState.task_id == task.id,
                 TaskDailyRlzState.user_id == link.user_id, TaskDailyRlzState.day_date == question.day))).scalar_one_or_none()
             stamp = max(value for value in (question.sent_at, question.answered_at) if value) if question.sent_at else question.answered_at
-            if state and state.reason_code and (state.comment or '').strip() and (not stamp or state.updated_at > stamp):
-                status = 'Arsyeja dhe komenti u plotësuan në PrimeFlow.'
+            if (state and state.reason_code and (not reason_requires_comment(state.reason_code) or (state.comment or '').strip())
+                    and (not stamp or state.updated_at > stamp)):
+                status = ('Arsyeja dhe komenti u plotësuan në PrimeFlow.' if (state.comment or '').strip()
+                          else 'Arsyeja u plotësua në PrimeFlow.')
             if question.kind == 'postponed' and any(
                 question.snapshot.get(field) and str(semantic_local_day(getattr(task, field))) != question.snapshot[field]
                 for field in ('start_date', 'due_date')):

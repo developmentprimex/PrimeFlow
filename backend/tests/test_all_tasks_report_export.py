@@ -3,12 +3,26 @@ import unittest
 from types import SimpleNamespace
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from app.api.routers.exports import AllTasksReportExportIn, export_all_tasks_report_xlsx
 from app.models.enums import UserRole
 
 
 class TestAllTasksReportExport(unittest.IsolatedAsyncioTestCase):
+    async def test_bz_column_is_compact_only_for_finance(self):
+        for title, width in (("ALL FINANCE TASK REPORT", 10), ("ALL TASKS REPORT", 14)):
+            with self.subTest(title=title):
+                response = await export_all_tasks_report_xlsx(
+                    AllTasksReportExportIn(title=title, rows=[{"bzMe": "GA, HS", "kohaBz": "13:30"}]),
+                    user=SimpleNamespace(role=UserRole.ADMIN, full_name="HS", username="hs"),
+                )
+                sheet = load_workbook(io.BytesIO(b"".join([chunk async for chunk in response.body_iterator]))).active
+                column = next(cell.column for cell in sheet[4] if cell.value == "BZ ME")
+                self.assertEqual(sheet.column_dimensions[get_column_letter(column)].width, width)
+                self.assertEqual(sheet.cell(5, column).value, "GA, HS")
+                self.assertEqual(sheet.cell(5, column + 1).value, "13:30")
+
     async def test_finance_export_removes_markup_and_preserves_text_and_breaks(self):
         for frequency in (None, "3M"):
             with self.subTest(frequency=frequency):

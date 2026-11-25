@@ -228,6 +228,7 @@ const navGroups: NavGroup[] = [
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
       { href: "/reports/rlz-daily-control", label: "Kontrolli ditor RLZ", icon: Activity },
+      { href: "/reports/discord-task-deliveries", label: "Dorëzimet në Discord", icon: ClipboardCheck },
       {
         href: "/reports/weekly-planning-audit",
         label: "Weekly Planning Check",

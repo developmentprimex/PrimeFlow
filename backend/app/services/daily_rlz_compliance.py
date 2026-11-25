@@ -43,6 +43,7 @@ REASON_DEFINITIONS = (
     ("REQUEST_CHANGE", "Ndryshim kërkese"),
     ("NEW_REQUESTS", "Kerkesa te reja"),
     ("ABSENCE", "Mungesë"),
+    ("PV", "PV"),
     ("OTHER", "Tjetër"),
 )
 REASON_LABELS = dict(REASON_DEFINITIONS)
@@ -93,13 +94,11 @@ def task_issue_codes(*, status: str, due_date: date | None, requires_one_h_slot:
     issues: list[str] = []
     requirement = requires_daily_explanation(
         status=status, selected_day=day, deadline=due_date,
-        deadline_was_today=deadline_was_today, postponed_today=postponed_today,
+        deadline_was_today=deadline_was_today, postponed_today=postponed_today, reason_code=reason_code,
     )
     if requirement.reason_required and not reason_code:
         issues.append("REASON_MISSING")
     if requirement.comment_required and not (comment or "").strip():
-        issues.append("COMMENT_MISSING")
-    if requirement.comment_required and reason_code == "OTHER" and not (comment or "").strip() and "COMMENT_MISSING" not in issues:
         issues.append("COMMENT_MISSING")
     if not is_system_task and (due_date is None or due_date <= day):
         issues.append("DUE_DATE_NOT_MOVED")
@@ -274,7 +273,7 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
                                        postponed_today=postponed_today)
         requirement = requires_daily_explanation(
             status=status, selected_day=day, deadline=due,
-            deadline_was_today=deadline_was_today, postponed_today=postponed_today,
+            deadline_was_today=deadline_was_today, postponed_today=postponed_today, reason_code=reason,
         )
         item = {
             "task_id": str(task.id), "title": task.title, "status": status,

@@ -48,7 +48,9 @@
     ".next-recorder-test/mira-browser/types/**/*.ts",
     ".next-recorder-test/mira-browser/dev/types/**/*.ts",
     ".next-recorder-test/one-h-toolbar/types/**/*.ts",
-    ".next-recorder-test/one-h-toolbar/dev/types/**/*.ts"
+    ".next-recorder-test/one-h-toolbar/dev/types/**/*.ts",
+    ".next-recorder-test/finance-local/types/**/*.ts",
+    ".next-recorder-test/finance-local/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

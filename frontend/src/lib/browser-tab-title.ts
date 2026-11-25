@@ -30,6 +30,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/reviews": "Reviews",
   "/reports": "Reports & Exports",
   "/reports/rlz-daily-control": "Kontrolli ditor RLZ",
+  "/reports/discord-task-deliveries": "Dorëzimet në Discord",
   "/reports/weekly-planning-audit": "Weekly Planning Check",
   "/reports/px-jav-weekly": "PX JAV · Kontrolli",
   "/end-week-bz-report": "PIKAT E BZ FIN JAV",
