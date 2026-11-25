@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 from app.config import settings
-from app.services.mira_development_name import NAME
+from app.services.mira_development_name import MEETING_NAME, NAME
 from discord_voice_client import VoiceCaptureClient, VOICE_DIR
 from discord_voice_ui import meeting_view, result_message, send_durable
 
@@ -84,7 +84,7 @@ class MeetingCaptureCoordinator:
             worker={'capture_token':secrets.token_urlsafe(32),'instance_id':str(uuid.uuid4())}
             recorder = getattr(self.bot, 'voice_recorder', 'primary')
             recorder_label = NAME if recorder == 'ai_agent' else 'Mira'
-            channel_label = recorder_label if recorder == 'ai_agent' else channel.name
+            channel_label = MEETING_NAME if recorder == 'ai_agent' else channel.name
             row=await self.bot.bridge(PREFIX+'/start',{**actor,**worker,
                 'recorder':recorder,
                 'request_id':request_id,'title':(title or f'{channel_label} · {datetime.now().strftime("%d.%m.%Y %H:%M")}')[:200],

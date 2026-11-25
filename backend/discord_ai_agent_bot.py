@@ -25,7 +25,7 @@ if private_env.exists():
                        value or (key in {'DISCORD_AI_AGENT_AUTO_JOIN_TIMES', 'DISCORD_AI_AGENT_AUTO_OWNER_DISCORD_ID'} and value is not None)):
             os.environ.setdefault(key, value)
 from app.config import settings
-from app.services.mira_development_name import COMMAND, NAME
+from app.services.mira_development_name import COMMAND, MEETING_NAME, NAME
 from discord_logging import worker_logging
 import discord_voice_meetings as voice
 
@@ -267,7 +267,7 @@ class AIAgentCapture(voice.MeetingCaptureCoordinator):
         # Separate request IDs let the finalizer auto-save scheduled AI Agent notes.
         request_id = f"autoai-{slot.strftime('%Y%m%d%H%M')}" + (f'-{attempt}' if attempt > 1 else '')
         await self.begin(actor=actor, guild=guild, voice=target, request_id=request_id,
-                         title=f'{NAME} · {slot.strftime("%d.%m.%Y %H:%M")}', department_id=None, notify=channel.send)
+                         title=f'{MEETING_NAME} · {slot.strftime("%d.%m.%Y %H:%M")}', department_id=None, notify=channel.send)
 
     async def start(self, interaction, title, department_id):
         from discord_meeting_control import in_control

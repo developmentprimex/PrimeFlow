@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY } from "@/lib/dates"
 import { dayLabel, groupTranscriptBySpeaker, json, STATUS_LABELS, transcriptTime as timestamp, type MeetingDetail as HostDetail } from "@/lib/mira"
 import { memoryKindLabels, type MemoryListItem } from "@/lib/mira-memory"
-import { MIRA_DEVELOPMENT_NAME } from "@/lib/mira-note-groups"
+import { DEVELOPMENT_MEETING_NAME, developmentMeetingTitle } from "@/lib/mira-note-groups"
 import { cn } from "@/lib/utils"
 
 const sections = {
@@ -77,7 +77,7 @@ const base = "/mira?tab=takimet"
 const endpoint = "/mira/notetaker/meetings"
 const catalog = "/mira/meeting-catalog"
 const pageSize = 30
-const groups = { "1H": "1H", AI_AGENT: MIRA_DEVELOPMENT_NAME, OTHER: "Të tjera" } as const
+const groups = { "1H": "1H", AI_AGENT: DEVELOPMENT_MEETING_NAME, OTHER: "Të tjera" } as const
 const groupColors = {
   "1H": "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200",
   AI_AGENT: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
@@ -405,6 +405,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
         <ul className="divide-y overflow-hidden rounded-lg border text-sm">
           {list.items.map((item) => {
             const aiAgent = item.recorder === "ai_agent" || item.group === "AI_AGENT"
+            const title = meetingListTitle(item)
             const tasks = item.created_task_count ?? 0
             const notes = item.created_note_count ?? 0
             return (
@@ -418,7 +419,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
                   <Image src={aiAgent ? "/mira-ai-agent-avatar.png" : "/mira-avatar.png"} alt="" width={34} height={34}
                     className={cn("shrink-0 rounded-full border", aiAgent ? "border-emerald-400" : "border-blue-400")} />
                   <span className="min-w-0">
-                    <span className="block break-words">{meetingListTitle(item)}</span>
+                    <span className="block break-words">{aiAgent ? developmentMeetingTitle(title) : title}</span>
                     {(tasks > 0 || notes > 0) && <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
                       {tasks > 0 && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-900 dark:bg-blue-950 dark:text-blue-200">
                         {tasks} {tasks === 1 ? "detyrë e krijuar" : "detyra të krijuara"}
@@ -466,7 +467,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
     <section className="mt-5 space-y-4">
       <Link href={base} className="text-sm underline">Kthehu te takimet</Link>
       <header>
-        <h2 className="text-lg font-semibold">{detail.title}</h2>
+        <h2 className="text-lg font-semibold">{detail.source === "discord" ? developmentMeetingTitle(detail.title) : detail.title}</h2>
         <p className="text-sm text-muted-foreground">
           {detail.started_at ? dateTime.format(new Date(detail.started_at)) : detail.host && dayLabel(detail.host.date)}
           {" · "}{sources[detail.source]}
