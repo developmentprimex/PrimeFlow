@@ -61,7 +61,14 @@ jobs:
               return '[TEST PrimeFlow MCP] Verifikim teknik (' + kind + '). Nuk kerkon veprim.'
 
           async def source(client, target):
-              return (await actions.request_discord(client, 'GET', actions.message_path(target))).json()
+              for delay in (0, 3, 7, 15, 30):
+                  if delay:
+                      await asyncio.sleep(delay)
+                  try:
+                      return (await actions.request_discord(client, 'GET', actions.message_path(target))).json()
+                  except HTTPException as exc:
+                      if exc.status_code != 429 or delay == 30:
+                          raise
 
           def owned(message, emoji):
               return any(r.get('me') and r.get('emoji', {}).get('name') == emoji
@@ -104,27 +111,16 @@ jobs:
                           raise
 
           async def reaction_check(db, client, target, result):
+              # The previous run logged an added eye reaction and a throttled
+              # readback. Check it after cooldown without starting another trial.
               before = await source(client, target)
-              previously_owned = [candidate for candidate in EMOJIS if owned(before, candidate)]
-              result['owned_before'] = previously_owned
-              # The preceding probe confirmed one removal was rate-limited. Only
-              # clean up that prior trial if there is exactly one candidate.
-              if len(previously_owned) == 1:
-                  trial = previously_owned[0]
-                  await set_reaction(db, target, trial, True)
-                  result['previous_trial_removed'] = await has_reaction(client, target, trial, False)
-                  before = await source(client, target)
-              emoji = next((candidate for candidate in EMOJIS if not owned(before, candidate)), None)
-              if emoji is None:
-                  result['reaction_error'] = 'all_test_reactions_already_present'
-                  return
-              try:
-                  result['test_emoji'] = emoji
-                  await set_reaction(db, target, emoji, False)
-                  result['reaction_added'] = await has_reaction(client, target, emoji, True)
-              finally:
+              emoji = EMOJIS[0]
+              result['test_emoji'] = emoji
+              result['present_before_readback'] = owned(before, emoji)
+              if result['present_before_readback']:
                   await set_reaction(db, target, emoji, True)
-                  result['reaction_removed'] = await has_reaction(client, target, emoji, False)
+                  await asyncio.sleep(6)
+              result['reaction_removed'] = await has_reaction(client, target, emoji, False)
 
           async def main():
               from app.config import settings
