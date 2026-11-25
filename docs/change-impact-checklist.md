@@ -413,6 +413,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
 
+- Në tabelën **Finance Tasks**, filtri i datave përfshin çdo detyrë që
+  mbivendoset me intervalin e zgjedhur, përfshirë kufijtë. Një datë e vetme
+  kontrollon atë ditë. Filtri **People** përfshin përgjegjësit dhe personat
+  e BZ. Për detyrat sistemore, personat dhe ora e BZ lexohen edhe nga
+  shablloni. Kontrollo detyrat e një departamenti tjetër ku një punonjës
+  Finance merr pjesë vetëm në BZ. Excel përdor rreshtat e filtruar dhe
+  kolonat BZ ME, KOHA BZ dhe përgjegjësit, me rregullin e pranisë së eksportit.
+
 - Pamja **Nesër** te **Finance** për HV dhe **Admin Tasks** për GA përdor
   një buton të veçantë. Admin mund të redaktojë planin e HV kur zgjedh
   Haxhere Spahiun te **People**. Auditimi regjistron Admin-in si autor.

@@ -26,7 +26,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, toDateInputValue } from "@/lib/dates"
 import { renderMarkedNoteContent } from "@/lib/note-markup"
-import type { DailyReportResponse, Department, SystemTaskOut, Task, User } from "@/lib/types"
+import { financeTaskAlignment, financeTaskMatchesDates, financeTaskMatchesPerson } from "@/lib/finance-task-rows"
+import type { DailyReportResponse, Department, SystemTaskOut, SystemTaskTemplate, Task, User } from "@/lib/types"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 
 const ALL_USERS_VALUE = "__all__"
@@ -49,6 +50,7 @@ type RowView = {
   assigneeIds: string[]
   assigneeLabel: string
   assigneeInitials: string
+  alignment: ReturnType<typeof financeTaskAlignment>
   systemFrequency: string
   systemFrequencyLabel: string
   systemFrequencyDisplayLabel: string
@@ -248,33 +250,6 @@ function isOpenStatus(status: string) {
   return status === "TODO" || status === "IN_PROGRESS" || status === "PAUSED" || status === "WAITING_CONFIRMATION"
 }
 
-function rowMatchesToday(row: RowView, todayIso: string) {
-  if (row.startDateIso && row.dueDateIso) {
-    const start = row.startDateIso <= row.dueDateIso ? row.startDateIso : row.dueDateIso
-    const end = row.startDateIso <= row.dueDateIso ? row.dueDateIso : row.startDateIso
-    return start <= todayIso && todayIso <= end
-  }
-  return [row.startDateIso, row.dueDateIso].filter(Boolean).includes(todayIso)
-}
-
-function isIsoWithinInclusiveRange(value: string, from: string, to: string) {
-  if (!value) return false
-  if (from && value < from) return false
-  if (to && value > to) return false
-  return true
-}
-
-function rowMatchesDateFilter(row: RowView, dateFrom: string, dateTo: string) {
-  const candidateDates = [row.startDateIso, row.dueDateIso].filter(Boolean)
-  if (!candidateDates.length) return false
-  if (!dateFrom && !dateTo) return true
-  if (dateFrom && !dateTo) return candidateDates.includes(dateFrom)
-  if (!dateFrom && dateTo) return candidateDates.includes(dateTo)
-  const start = dateFrom <= dateTo ? dateFrom : dateTo
-  const end = dateFrom <= dateTo ? dateTo : dateFrom
-  return candidateDates.some((value) => isIsoWithinInclusiveRange(value, start, end))
-}
-
 function rowSortDate(row: RowView) {
   return row.dueDateIso || row.startDateIso || ""
 }
@@ -315,7 +290,7 @@ export default function DepartmentKanban() {
   const [editingTask, setEditingTask] = React.useState<Task | null>(null)
   const [viewingDescriptionTask, setViewingDescriptionTask] = React.useState<Task | null>(null)
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
-  const [systemTaskFrequencyByTemplateId, setSystemTaskFrequencyByTemplateId] = React.useState<Record<string, string>>({})
+  const [systemTasksByTemplateId, setSystemTasksByTemplateId] = React.useState<Map<string, SystemTaskOut | SystemTaskTemplate>>(new Map())
   const todayIso = React.useMemo(() => toDateInputValue(new Date()), [])
   const currentWeekEndIso = React.useMemo(() => endOfCurrentWeekIso(new Date()), [])
 
@@ -339,29 +314,41 @@ export default function DepartmentKanban() {
         throw new Error("Finance department was not found.")
       }
 
-      const [tasksRes, systemTasksRes] = await Promise.all([
+      const financeUsers = nextUsers.filter((entry) => entry.is_active && entry.department_id === financeDepartment.id)
+      const [tasksRes, systemTasksRes, templatesRes, ...relatedResponses] = await Promise.all([
         apiFetch(`/tasks?department_id=${encodeURIComponent(financeDepartment.id)}&include_done=true&include_all_done=true`),
         apiFetch(`/system-tasks?department_id=${encodeURIComponent(financeDepartment.id)}`),
+        apiFetch("/system-tasks/templates"),
+        ...financeUsers.map(({ id }) => apiFetch(`/tasks?related_user_id=${encodeURIComponent(id)}&include_done=true&include_all_done=true`)),
       ])
 
-      if (!tasksRes.ok) {
+      if (!tasksRes.ok || !templatesRes.ok || relatedResponses.some((response) => !response.ok)) {
         throw new Error("Unable to load Finance tasks.")
       }
 
       const nextTasks = (await tasksRes.json()) as Task[]
       const systemTasks = systemTasksRes.ok ? ((await systemTasksRes.json()) as SystemTaskOut[]) : []
-      const nextSystemTaskFrequencyByTemplateId = systemTasks.reduce<Record<string, string>>((acc, item) => {
-        if (item.template_id && item.frequency) acc[item.template_id] = item.frequency
-        return acc
-      }, {})
-      const financeUsers = nextUsers.filter(
-        (entry) => entry.is_active && entry.department_id === financeDepartment.id
-      )
+      const templates = (await templatesRes.json()) as SystemTaskTemplate[]
+      const relatedTasks = await Promise.all(relatedResponses.map(async (response) => (await response.json()) as Task[]))
+      const nextSystemTasks = new Map<string, SystemTaskOut | SystemTaskTemplate>(templates.map((item) => [item.id, item]))
+      for (const item of systemTasks) nextSystemTasks.set(item.template_id, item)
+
+      const nextTasksById = new Map(nextTasks.map((task) => [task.id, task]))
+      relatedTasks.forEach((matches, index) => {
+        const personId = financeUsers[index].id
+        for (const task of matches) {
+          const template = nextSystemTasks.get(task.system_template_origin_id ?? "")
+          if (task.assigned_to === personId || task.assignees?.some((assignee) => assignee.id === personId)
+            || task.alignment_user_ids?.includes(personId) || template?.alignment_user_ids?.includes(personId)) {
+            nextTasksById.set(task.id, task)
+          }
+        }
+      })
 
       setDepartment(financeDepartment)
       setUsers(nextUsers)
-      setTasks(nextTasks)
-      setSystemTaskFrequencyByTemplateId(nextSystemTaskFrequencyByTemplateId)
+      setTasks([...nextTasksById.values()])
+      setSystemTasksByTemplateId(nextSystemTasks)
       setSelectedUserId((prev) => {
         if (prev !== ALL_USERS_VALUE && nextUsers.some((entry) => entry.id === prev)) return prev
         if (financeUsers.length === 1) return financeUsers[0]!.id
@@ -453,6 +440,7 @@ export default function DepartmentKanban() {
   }, [users])
 
   const rows = React.useMemo<RowView[]>(() => {
+    const userLabels = new Map(users.map((entry) => [entry.id, userLabel(entry)]))
     return [...tasks]
       .map((task) => {
         const assigneeInfo = taskAssigneeInfo(task, usersById)
@@ -460,9 +448,8 @@ export default function DepartmentKanban() {
         const isManagerView = user?.role === "ADMIN" || user?.role === "MANAGER"
         const isAssignedToCurrentUser = Boolean(user?.id && assigneeInfo.ids.includes(user.id))
         const canEdit = Boolean((isManagerView || isAssignedToCurrentUser) && statusValue !== "DONE")
-        const systemFrequency = task.system_template_origin_id
-          ? systemTaskFrequencyByTemplateId[task.system_template_origin_id] || ""
-          : ""
+        const systemTask = systemTasksByTemplateId.get(task.system_template_origin_id ?? "")
+        const systemFrequency = systemTask?.frequency || ""
 
         return {
           task,
@@ -474,6 +461,7 @@ export default function DepartmentKanban() {
           assigneeIds: assigneeInfo.ids,
           assigneeLabel: assigneeInfo.label,
           assigneeInitials: assigneeInfo.initials,
+          alignment: financeTaskAlignment(task.alignment_user_ids, systemTask, userLabels),
           systemFrequency,
           systemFrequencyLabel: systemFrequencyShortLabel(systemFrequency),
           systemFrequencyDisplayLabel: systemFrequencyDisplayLabel(systemFrequency),
@@ -503,12 +491,13 @@ export default function DepartmentKanban() {
 
         return a.title.localeCompare(b.title)
       })
-  }, [systemTaskFrequencyByTemplateId, tasks, user?.id, user?.role, usersById])
+  }, [systemTasksByTemplateId, tasks, user?.id, user?.role, users, usersById])
 
   const selectableUsers = React.useMemo(() => {
     const ids = new Set<string>()
     for (const row of rows) {
       for (const id of row.assigneeIds) ids.add(id)
+      for (const id of row.alignment.userIds) ids.add(id)
     }
 
     return users
@@ -525,22 +514,22 @@ export default function DepartmentKanban() {
   const filteredRows = React.useMemo(() => {
     const visibleRows = rows.filter((row) => {
       if (
-        row.task.system_template_origin_id &&
+        !dateFrom && !dateTo && row.task.system_template_origin_id &&
         row.occurrenceDateIso &&
         row.occurrenceDateIso > currentWeekEndIso
       ) {
         return false
       }
 
-      if (selectedUserId !== ALL_USERS_VALUE && !row.assigneeIds.includes(selectedUserId)) {
+      if (selectedUserId !== ALL_USERS_VALUE && !financeTaskMatchesPerson(row, selectedUserId)) {
         return false
       }
 
-      return rowMatchesDateFilter(row, dateFrom, dateTo)
+      return financeTaskMatchesDates(row, dateFrom, dateTo)
     })
 
     if (viewFilter === VIEW_TODAY) {
-      return visibleRows.filter((row) => row.status !== "DONE" && rowMatchesToday(row, todayIso))
+      return visibleRows.filter((row) => row.status !== "DONE" && financeTaskMatchesDates(row, todayIso, todayIso))
     }
     if (viewFilter === VIEW_OVERDUE) {
       return visibleRows.filter((row) => row.status !== "DONE" && (row.lateDays ?? 0) > 0)
@@ -548,7 +537,7 @@ export default function DepartmentKanban() {
     if (viewFilter === VIEW_TODAY_OVERDUE) {
       return visibleRows.filter(
         (row) =>
-          row.status !== "DONE" && (rowMatchesToday(row, todayIso) || (row.lateDays ?? 0) > 0)
+          row.status !== "DONE" && (financeTaskMatchesDates(row, todayIso, todayIso) || (row.lateDays ?? 0) > 0)
       )
     }
 
@@ -568,41 +557,23 @@ export default function DepartmentKanban() {
     const departmentLabel = department?.code || department?.name || "FIN"
     return filteredRows.map((row) => {
       const task = row.task
-      const alignmentInitials = (task.alignment_user_ids || [])
-        .map((id) => {
-          const entry = usersById.get(id)
-          return entry ? initials(userLabel(entry)) : ""
-        })
-        .filter(Boolean)
-        .join(", ")
-
-      const assigneeInitials = Array.from(new Set(row.assigneeIds))
-        .map((id) => {
-          const entry = usersById.get(id)
-          if (entry) return initials(userLabel(entry))
-          const fallback = task.assignees?.find((assignee) => assignee.id === id)
-          return fallback ? initials(fallback.full_name || fallback.username || fallback.email || "") : ""
-        })
-        .filter(Boolean)
-        .join(", ")
-
       return {
         typeLabel: task.system_template_origin_id ? "SYS" : task.project_id ? "PRJK" : "FT",
         subtype: task.system_template_origin_id ? "SYS" : task.project_id ? "-" : fastReportSubtypeShort(task),
         frequency: row.systemFrequencyLabel,
         dateLabel: row.dueDateIso ? formatDateDMY(row.dueDateIso) : row.startDateIso ? formatDateDMY(row.startDateIso) : "-",
-        bzMe: alignmentInitials,
-        kohaBz: "-",
+        bzMe: row.alignment.withLabel,
+        kohaBz: row.alignment.time || "-",
         department: departmentLabel,
         period: resolvePeriod(task.finish_period),
         title: [task.title || "-", miraDictationLabel(task.mira_dictation_source)].filter(Boolean).join("\n"),
         description: task.description || "",
         details: formatInternalDetails(task.internal_notes),
         status: row.status,
-        userInitials: assigneeInitials,
+        userInitials: row.assigneeInitials === "-" ? "" : row.assigneeInitials,
       }
     })
-  }, [department?.code, department?.name, filteredRows, usersById])
+  }, [department?.code, department?.name, filteredRows])
 
   const handleTaskUpdated = React.useCallback((updatedTask: Task) => {
     setTasks((prev) => prev.map((task) => (task.id === updatedTask.id ? updatedTask : task)))
@@ -809,12 +780,12 @@ export default function DepartmentKanban() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Date from</Label>
-              <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+              <Label htmlFor="finance-date-from">Date from</Label>
+              <Input id="finance-date-from" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Date to</Label>
-              <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+              <Label htmlFor="finance-date-to">Date to</Label>
+              <Input id="finance-date-to" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
             </div>
           </div>
         </CardContent>}
@@ -879,8 +850,8 @@ export default function DepartmentKanban() {
           ) : (
             <div className="@container space-y-4">
               <Table
-                className="min-w-[1340px] table-fixed"
-                containerClassName="max-h-[75dvh] overflow-auto rounded-lg border border-slate-200 bg-white @[1342px]:max-h-none @[1342px]:overflow-visible print:max-h-none print:overflow-visible"
+                className="min-w-[1600px] table-fixed"
+                containerClassName="max-h-[75dvh] overflow-auto rounded-lg border border-slate-200 bg-white @[1602px]:max-h-none @[1602px]:overflow-visible print:max-h-none print:overflow-visible"
               >
                 <colgroup>
                   <col className="w-[36px]" />{/* NR */}
@@ -888,13 +859,15 @@ export default function DepartmentKanban() {
                   <col className="w-16" />{/* Freq. */}
                   <col className="w-[54px]" />{/* Type */}
                   <col className="w-20" />{/* Slot */}
-                  <col className="w-10" />{/* Asg */}
-                  <col className="w-[82px]" />{/* Created */}
+                  <col className="w-14" />{/* Asg */}
+                  <col className="w-32" />{/* BZ ME */}
+                  <col className="w-[76px]" />{/* KOHA BZ */}
+                  <col className="w-[76px]" />{/* Created */}
                   <col className="w-[88px]" />{/* Start Date */}
                   <col className="w-[88px]" />{/* Due Date */}
                   <col className="w-[46px]" />{/* Late */}
-                  <col className="w-[100px]" />{/* Symbol */}
-                  <col className="w-[108px]" />{/* Status */}
+                  <col className="w-[88px]" />{/* Symbol */}
+                  <col className="w-[88px]" />{/* Status */}
                   <col className="w-[170px]" />{/* Arsyeja */}
                   <col className="w-[150px]" />{/* Koment */}
                   <col className="w-28" />{/* Actions */}
@@ -909,6 +882,8 @@ export default function DepartmentKanban() {
                       Slot
                     </TableHead>
                     <TableHead className="px-1 text-center" title="Assignee">Asg</TableHead>
+                    <TableHead>BZ ME</TableHead>
+                    <TableHead>KOHA BZ</TableHead>
                     <TableHead className="text-xs font-normal text-slate-400">Created</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
@@ -993,6 +968,8 @@ export default function DepartmentKanban() {
                         <TableCell className="px-1 text-center whitespace-normal" title={row.assigneeLabel}>
                           <span className="text-xs font-semibold text-slate-700">{row.assigneeInitials}</span>
                         </TableCell>
+                        <TableCell className="whitespace-normal break-words">{row.alignment.withLabel || "—"}</TableCell>
+                        <TableCell>{row.alignment.time || "—"}</TableCell>
                         <TableCell className="text-xs font-normal text-slate-400">
                           {formatDateDMY(row.createdDateIso)}
                         </TableCell>
@@ -1068,7 +1045,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={15} className="py-8 text-center text-sm text-slate-500">
+                      <TableCell colSpan={17} className="py-8 text-center text-sm text-slate-500">
                         No Finance tasks match the selected filters.
                       </TableCell>
                     </TableRow>
