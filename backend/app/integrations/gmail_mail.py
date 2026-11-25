@@ -1,5 +1,6 @@
 """Read-only Gmail OAuth and inbox access for EM PX EU."""
 
+import asyncio
 import base64
 import hashlib
 from datetime import date, datetime, time, timezone
@@ -57,7 +58,17 @@ async def request_token(client: httpx.AsyncClient, grant: dict[str, str], mailbo
 
 
 async def _get(client: httpx.AsyncClient, token: str, path: str, **params) -> dict:
-    response = await client.get(f"{API_URL}/{path}", headers={"Authorization": f"Bearer {token}"}, params=params)
+    url = f"{API_URL}/{path}"
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = await client.get(url, headers=headers, params=params)
+    except httpx.TransportError:
+        await asyncio.sleep(0.25)
+        response = await client.get(url, headers=headers, params=params)
+    else:
+        if response.status_code in {500, 502, 503, 504}:
+            await asyncio.sleep(0.25)
+            response = await client.get(url, headers=headers, params=params)
     response.raise_for_status()
     return response.json()
 
@@ -85,7 +96,8 @@ async def read_inbox(
         "labelIds": "INBOX",
         "q": f"after:{int(start.timestamp()) - 1} before:{int(end.timestamp()) + 1}",
         "maxResults": 50,
-        "fields": "messages(id),nextPageToken",
+        # Keep a field returned for an empty search so Gmail sends JSON instead of HTTP 204.
+        "fields": "messages(id),nextPageToken,resultSizeEstimate",
     }
     rows: list[dict] = []
     seen: set[str] = set()

@@ -109,6 +109,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   në M1, M2 Post-Break, M1 PIKAT, 1H Reports, SHTYPI Tomorrow, Excel të PX Notes
   dhe përjashtimin nga API-ja publike. Tabela burimore shfaqet në ekranin e M1.
 
+- M1 dhe M2 Post-Break përdorin të njëjtin lexim të Inbox-it për Gmail dhe
+  Yandex. Për Gmail, kontrollo që rezultati bosh të vijë si JSON dhe të
+  shfaqet si interval pa email. Për të dy ofruesit, kontrollo riprovën pas
+  ndërprerjes dhe që një gabim i vazhdueshëm të mbetet i dukshëm.
+
 - Pika 5 e M1 shfaq tabelat e kutive postare. Normalizimi heq tabelat e
   vjetra të detyrave EM nga draftet e ruajtura, pamja paraprake dhe
   përmbajtja e email-it dhe e eksporteve të M1. Kontrollo që tabela e
