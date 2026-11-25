@@ -663,7 +663,8 @@ async def update_ga_note_task_bundle(
 
     if payload.assignee_states is not None:
         try:
-            from app.api.routers.tasks import _validate_waiting_confirmation_assignee
+            from app.api.routers.tasks import _check_task_pause, _validate_waiting_confirmation_assignee
+            from app.services.task_pause import update_pause_periods
 
             status_before_by_task_id = {
                 task.id: task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
@@ -673,7 +674,20 @@ async def update_ga_note_task_bundle(
                 task.id: getattr(task.finish_period, "value", task.finish_period)
                 for task in active_tasks
             }
+            tasks_by_assignee = {
+                task.assigned_to: task for task in active_tasks
+                if task.is_active and task.assigned_to is not None
+            }
+            execution_items = []
             for item in payload.assignee_states:
+                if item.status == TaskStatus.PAUSED:
+                    task = tasks_by_assignee.get(item.assignee_id)
+                    item = item.model_copy(update={
+                        "status": TaskStatus(task.status) if task else TaskStatus.TODO,
+                        "pause_days": item.pause_days or 1,
+                    })
+                _check_task_pause(item.pause_days, item.status)
+                execution_items.append(item)
                 if item.status == TaskStatus.WAITING_CONFIRMATION:
                     await _validate_waiting_confirmation_assignee(db, item.confirmation_assignee_id)
             updated_count += apply_ga_note_assignee_execution_states(
@@ -697,7 +711,7 @@ async def update_ga_note_task_bundle(
                         is_r1=item.is_r1,
                         is_personal=item.is_personal,
                     )
-                    for item in payload.assignee_states
+                    for item in execution_items
                 ],
             )
             await sync_ga_note_assignee_report_slots(
@@ -709,16 +723,18 @@ async def update_ga_note_task_bundle(
                     if "one_h_report_slot" in item.model_fields_set
                 ],
             )
-            tasks_by_assignee = {
-                task.assigned_to: task
-                for task in active_tasks
-                if task.is_active and task.assigned_to is not None
-            }
             today = datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
-            for item in payload.assignee_states:
+            for item in execution_items:
                 matching_task = tasks_by_assignee.get(item.assignee_id)
                 if matching_task is None:
                     continue
+                if "pause_days" in item.model_fields_set or (
+                    item.status == TaskStatus.DONE and status_before_by_task_id.get(matching_task.id) != TaskStatus.DONE
+                ):
+                    periods = update_pause_periods(matching_task.pause_periods, today, item.pause_days)
+                    if periods != (matching_task.pause_periods or []):
+                        matching_task.pause_periods = periods
+                        updated_count += 1
                 if status_before_by_task_id.get(matching_task.id) == item.status.value:
                     next_period = item.finish_period.value if item.finish_period else None
                     if period_before_by_task_id.get(matching_task.id) != next_period:
@@ -836,6 +852,7 @@ async def update_ga_note_task_bundle(
                 {
                     "assignee_id": str(item.assignee_id),
                     "status": item.status.value,
+                    **({"pause_days": item.pause_days} if "pause_days" in item.model_fields_set else {}),
                     "start_date": item.start_date.isoformat() if item.start_date else None,
                     "due_date": item.due_date.isoformat() if item.due_date else None,
                     "finish_period": item.finish_period.value if item.finish_period else None,

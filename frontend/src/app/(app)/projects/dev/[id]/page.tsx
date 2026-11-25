@@ -3,6 +3,8 @@
 import { ProjectActivityControl } from "@/components/project-activity"
 
 import * as React from "react"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
+import { currentTaskPauseDay, isTaskPausedOnDay } from "@/lib/task-pause"
 import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
 import { useParams, useRouter } from "next/navigation"
 
@@ -242,6 +244,7 @@ export default function DevelopmentProjectPage() {
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
+  const [newPauseDays, setNewPauseDays] = React.useState<number | null>()
   const [newTaskType, setNewTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [newAssignees, setNewAssignees] = React.useState<string[]>([])
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
@@ -253,12 +256,14 @@ export default function DevelopmentProjectPage() {
   )
   const [editOpen, setEditOpen] = React.useState(false)
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
+  const editingTask = tasks.find((task) => task.id === editingTaskId)
   const [editTitle, setEditTitle] = React.useState("")
   const [editDescription, setEditDescription] = React.useState("")
   const [viewDescriptionOpen, setViewDescriptionOpen] = React.useState(false)
   const [viewingTaskTitle, setViewingTaskTitle] = React.useState("")
   const [viewingTaskDescription, setViewingTaskDescription] = React.useState("")
   const [editStatus, setEditStatus] = React.useState<Task["status"]>("TODO")
+  const [editPauseDays, setEditPauseDays] = React.useState<number | null>()
   const [editTaskType, setEditTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [editAssignees, setEditAssignees] = React.useState<string[]>([])
   const [editPhase, setEditPhase] = React.useState<string>("")
@@ -614,6 +619,7 @@ export default function DevelopmentProjectPage() {
         department_id: project.department_id,
         assignees: newAssignees,
         status: newStatus,
+        pause_days: newStatus === "DONE" ? undefined : newPauseDays,
         priority: newTaskType === "HIGH" ? "HIGH" : "NORMAL",
         is_1h_report: newTaskType === "1H",
         is_r1: newTaskType === "R1",
@@ -656,6 +662,7 @@ export default function DevelopmentProjectPage() {
       setNewTitle("")
       setNewDescription("")
       setNewStatus("TODO")
+      setNewPauseDays(undefined)
       setNewTaskType("NORMAL")
       setNewAssignees([])
       setNewTaskPhase("")
@@ -707,6 +714,7 @@ export default function DevelopmentProjectPage() {
     setEditTitle(task.title || "")
     setEditDescription(task.description || "")
     setEditStatus(task.status || "TODO")
+    setEditPauseDays(undefined)
     setEditTaskType(getProjectTaskType(task))
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
     const assigneeIds = task.assignees && task.assignees.length > 0
@@ -747,6 +755,7 @@ export default function DevelopmentProjectPage() {
         title: editTitle.trim(),
         description: editDescription.trim() || null,
         status: editStatus,
+        pause_days: editStatus === "DONE" ? undefined : editPauseDays,
         priority: editTaskType === "HIGH" ? "HIGH" : "NORMAL",
         is_1h_report: editTaskType === "1H",
         is_r1: editTaskType === "R1",
@@ -1851,7 +1860,7 @@ export default function DevelopmentProjectPage() {
                               <SelectValue placeholder="Status" />
                             </SelectTrigger>
                             <SelectContent>
-                              {TASK_STATUSES.map((s) => (
+                              {TASK_STATUSES.filter((status) => status !== "PAUSED").map((s) => (
                                 <SelectItem key={s} value={s}>
                                   {statusLabel(s)}
                                 </SelectItem>
@@ -1859,6 +1868,7 @@ export default function DevelopmentProjectPage() {
                             </SelectContent>
                           </Select>
                         </div>
+                        {newStatus !== "DONE" && <TaskPauseField value={newPauseDays} onChange={setNewPauseDays} />}
                         <div className="space-y-2">
                           <Label className="text-slate-700">Type</Label>
                           <Select value={newTaskType} onValueChange={(v) => setNewTaskType(v as typeof newTaskType)}>
@@ -2038,7 +2048,7 @@ export default function DevelopmentProjectPage() {
                               <SelectValue placeholder="Status" />
                             </SelectTrigger>
                             <SelectContent>
-                              {TASK_STATUSES.map((s) => (
+                              {TASK_STATUSES.filter((status) => status !== "PAUSED").map((s) => (
                                 <SelectItem key={s} value={s}>
                                   {statusLabel(s)}
                                 </SelectItem>
@@ -2046,6 +2056,7 @@ export default function DevelopmentProjectPage() {
                             </SelectContent>
                           </Select>
                         </div>
+                        {!editingTask?.question_origin_id && editStatus !== "DONE" && <TaskPauseField value={editPauseDays} onChange={setEditPauseDays} until={editingTask?.pause_until} />}
                         <div className="space-y-2">
                           <Label className="text-slate-700">Type</Label>
                           <Select value={editTaskType} onValueChange={(v) => setEditTaskType(v as typeof editTaskType)}>
@@ -2372,7 +2383,7 @@ export default function DevelopmentProjectPage() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {TASK_STATUSES.map((status) => {
+                                {TASK_STATUSES.filter((status) => status !== "PAUSED").map((status) => {
                                   // Disable all non-DONE options if task is DONE and user is not admin
                                   const isDisabled = task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN"
                                   return (
@@ -2383,6 +2394,7 @@ export default function DevelopmentProjectPage() {
                                 })}
                               </SelectContent>
                             </Select>
+                            {isTaskPausedOnDay(task, currentTaskPauseDay()) && <TaskPauseBadge />}
                           </div>
                           <div className="flex items-center gap-2 text-slate-500">
                             <span className={overdue ? "text-red-600 font-semibold" : undefined}>

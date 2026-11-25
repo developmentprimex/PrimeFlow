@@ -2,6 +2,8 @@
 
 import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage-notices"
 import * as React from "react"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
+import { isTaskPausedOnDay } from "@/lib/task-pause"
 import { MyViewTaskColumns } from "@/components/my-view-task-columns"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
@@ -258,7 +260,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
-const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
+const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
@@ -1491,6 +1493,7 @@ export default function DepartmentKanban() {
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
   const [editTaskType, setEditTaskType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [editTaskStatus, setEditTaskStatus] = React.useState<string>("TODO")
+  const [editTaskPauseDays, setEditTaskPauseDays] = React.useState<number | null>()
   const [editTaskConfirmationAssigneeId, setEditTaskConfirmationAssigneeId] = React.useState("")
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
@@ -1510,6 +1513,7 @@ export default function DepartmentKanban() {
   const [allTodayEditDescription, setAllTodayEditDescription] = React.useState("")
   const [allTodayEditType, setAllTodayEditType] = React.useState<AllTodayEditTypeId>("normal")
   const [allTodayEditStatus, setAllTodayEditStatus] = React.useState<string>("TODO")
+  const [allTodayPauseDays, setAllTodayPauseDays] = React.useState<number | null>()
   const [allTodayEditConfirmationAssigneeId, setAllTodayEditConfirmationAssigneeId] = React.useState("")
   const [allTodayEditStartDate, setAllTodayEditStartDate] = React.useState("")
   const [allTodayEditDueDate, setAllTodayEditDueDate] = React.useState("")
@@ -2250,12 +2254,13 @@ export default function DepartmentKanban() {
           return <>
             {systemTitleOnly ? null : <TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />}
             {title}
+            {selectedAllHighlightDate && isTaskPausedOnDay(task, formatDateInput(selectedAllHighlightDate)) && <TaskPauseBadge />}
             {task.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(task.mira_dictation_source)}</span>}
           </>
         }}
       />
     ),
-    [isTaskStartingOnSelectedAllDate, viewMode]
+    [isTaskStartingOnSelectedAllDate, selectedAllHighlightDate, viewMode]
   )
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const isTaskAssignedToUser = React.useCallback(
@@ -5658,6 +5663,7 @@ export default function DepartmentKanban() {
     }
     const plainTitle = getPlainMarkedText(task.title)
     setEditingTaskId(task.id)
+    setEditTaskPauseDays(undefined)
     setEditTaskTitle(plainTitle)
     setEditTaskDescription(task.description || "")
     setEditTaskType(
@@ -5741,6 +5747,7 @@ export default function DepartmentKanban() {
       const payload: Record<string, unknown> = (editingTask?.ga_note_origin_id || editingTask?.plan_note_origin_id)
         ? {
             status: editTaskStatus,
+            pause_days: editTaskStatus === "DONE" ? undefined : editTaskPauseDays,
             start_date: startDateValue,
             due_date: dueDateValue,
             finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
@@ -5762,6 +5769,7 @@ export default function DepartmentKanban() {
             is_r1: editTaskType === "r1",
             is_personal: editTaskType === "personal",
             status: editTaskStatus,
+            pause_days: editTaskStatus === "DONE" ? undefined : editTaskPauseDays,
             start_date: startDateValue,
             due_date: dueDateValue,
             finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
@@ -5841,6 +5849,7 @@ export default function DepartmentKanban() {
     }
     const plainTitle = getPlainMarkedText(task.title)
     setAllTodayEditingTaskId(task.id)
+    setAllTodayPauseDays(undefined)
     setAllTodayPlanningDetail({
       taskId: task.id,
       brief: task.planning_brief ?? null,
@@ -5918,6 +5927,7 @@ export default function DepartmentKanban() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(isNoteOriginTask ? {
           status: allTodayEditStatus,
+          pause_days: allTodayEditStatus === "DONE" ? undefined : allTodayPauseDays,
           start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
@@ -5948,6 +5958,7 @@ export default function DepartmentKanban() {
                 is_personal: allTodayEditType === "personal",
               }),
           status: allTodayEditStatus,
+          pause_days: allTodayEditStatus === "DONE" ? undefined : allTodayPauseDays,
           start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
@@ -8141,6 +8152,7 @@ export default function DepartmentKanban() {
                           </SelectContent>
                         </Select>
                       </div>
+                      {!allTodayEditingTask?.question_origin_id && allTodayEditStatus !== "DONE" && <TaskPauseField value={allTodayPauseDays} onChange={setAllTodayPauseDays} until={allTodayEditingTask?.pause_until} />}
 
                         {isWaitingConfirmation(allTodayEditStatus) ? (
                           <div className="space-y-2">
@@ -8830,6 +8842,9 @@ export default function DepartmentKanban() {
                           </SelectContent>
                         </Select>
                       </div>
+                      {noProjectTasks.filter((task) => task.id === editingTaskId && !task.question_origin_id).map((task) => (
+                          editTaskStatus !== "DONE" && <TaskPauseField key={task.id} value={editTaskPauseDays} onChange={setEditTaskPauseDays} until={task.pause_until} />
+                        ))}
                       <div className="space-y-2">
                         <Label className="text-slate-700">Start date</Label>
                         <Input

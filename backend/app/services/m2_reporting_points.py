@@ -45,6 +45,15 @@ def subject_for(day: date) -> str:
     return f"{TITLE} - {day:%d.%m.%Y}"
 
 
+def is_m2_delivery_task(task, day: date) -> bool:
+    if active_one_h_marker(task, day) not in DELIVERY_MARKERS:
+        return False
+    start, due, created = (
+        semantic_local_day(getattr(task, field, None)) for field in ("start_date", "due_date", "created_at")
+    )
+    return bool(start and due and start <= day <= due and (created is None or created <= day))
+
+
 def select_task_sections(tasks, events, day: date, *, personal_titles: dict | None = None) -> dict:
     # M2 reports outstanding postponements; completed tasks no longer need follow-up.
     sections = {"postponed": [row for row in m3.select_task_sections(tasks, events, day)["ga_postponed"]
@@ -72,7 +81,8 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
         pm_continuation = status != 'DONE' and (am_pm in {'PM', 'AM/PM'} or all_day) and bool(due and (start or due) <= day <= due)
         pm_due_today = due == day and am_pm in {"PM", "AM/PM"}
         ga_progress = planned and am_pm in {"AM", "AM/PM"} and (marker in {"F", "FLAG"} or personal_ga)
-        if not pm_due_today and not ga_progress and not (planned and marker in DELIVERY_MARKERS) and not pm_continuation:
+        delivery = is_m2_delivery_task(task, day)
+        if not pm_due_today and not ga_progress and not delivery and not pm_continuation:
             continue
         status = str(getattr(task.status, "value", task.status)).upper()
         # PM due-date membership does not require a start date or an open status.
@@ -89,7 +99,7 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
         }
         if ga_progress:
             sections["ga_progress"].append(dict(row, title=personal_title if personal_ga else parse_marked_note_content(title).text))
-        if planned and marker in DELIVERY_MARKERS:
+        if delivery:
             sections["delivery"].append(row)
         if pm_due_today:
             sections["pm_due_today"].append(dict(row))

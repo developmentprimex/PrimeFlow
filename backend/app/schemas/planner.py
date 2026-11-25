@@ -37,6 +37,7 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     status: TaskStatus = TaskStatus.TODO
     # Optional per-day status override (driven by task_daily_progress).
     daily_status: TaskStatus | None = None
+    is_paused: bool = False
     created_at: datetime | None = None
     completed_at: datetime | None = None
     daily_products: int | None = None
@@ -77,6 +78,7 @@ class WeeklyTableTaskEntry(BaseModel):
     status: TaskStatus = TaskStatus.TODO
     # Optional per-day status override (driven by task_daily_progress).
     daily_status: TaskStatus | None = None
+    is_paused: bool = False
     created_at: datetime | None = None
     completed_at: datetime | None = None
     daily_products: int | None = None

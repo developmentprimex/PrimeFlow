@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import and_, or_, select, update
+from sqlalchemy.orm import load_only
 
 from app.api.access import ensure_reports_access
 from app.api.routers.common_view import _build_common_view, _ka_genti_confirmation_owner
@@ -57,6 +58,28 @@ TASK_STYLES = {
 }
 
 
+def select_development_report_tasks(department_id, team_ids):
+    return select(Task).options(load_only(
+        Task.id, Task.title, Task.description, Task.project_id, Task.assigned_to, Task.created_by,
+        Task.ga_note_origin_id, Task.plan_note_origin_id, Task.fast_task_group_id,
+        Task.system_template_origin_id, Task.system_task_slot_id, Task.origin_run_at,
+        Task.meeting_origin_id, Task.meeting_occurrence_date, Task.meeting_system_task_kind,
+        Task.status, Task.phase, Task.finish_period, Task.start_date, Task.due_date,
+        Task.completed_at, Task.created_at, Task.is_deadline_important, Task.is_bllok,
+        Task.is_r1, Task.is_personal, Task.one_h_marker, Task.one_h_marker_by_ga, Task.one_h_marker_comment,
+        raiseload=True,
+    )).where(
+        Task.work_staff_filter(),
+        Task.is_active.is_(True),
+        or_(
+            Task.department_id == department_id,
+            Task.project_id.in_(select(Project.id).where(Project.department_id == department_id)),
+            Task.assigned_to.in_(team_ids),
+            Task.id.in_(select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(team_ids))),
+        ),
+    )
+
+
 def _task_answer(group, assignees, people_by_id, day):
     task = next((copy for copy in group if not _is_done(copy)), group[0])
     owners = sorted({
@@ -106,6 +129,15 @@ def _task_answer(group, assignees, people_by_id, day):
         "marker": ",".join(markers) or None, "marker_by_ga": bool(markers) and all(markers.values()),
         "marker_comment": "\n".join(comments) or None,
     }
+
+
+def development_note_answer(note_id, values):
+    _, _, content, author, created = values
+    note = {"id": note_id, "title": content, "detail": " · ".join(filter(None, (author, created))), "color": "#E0F2FE"}
+    if is_email_note_content(content):
+        # The report preview appends the subject and sender after the saved title.
+        note["email_heading"] = content.partition(" · ")[0].partition(" Dërguesi:")[0]
+    return note
 
 
 def development_m1_item_sections(items):
@@ -263,18 +295,10 @@ async def build_development_m1(db, user, *, checklist_items=None):
         if not is_external and is_development and involves_ka:
             internal_with_ka.append(item)
 
-    tasks = (await db.scalars(select(Task).where(
-        Task.work_staff_filter(),
-        Task.is_active.is_(True),
+    tasks = (await db.scalars(select_development_report_tasks(department.id, team_ids).where(
         or_(
             common_view_task_date_window_filter(day - timedelta(days=1), day + timedelta(days=1)),
             and_(Task.completed_at >= day_start, Task.completed_at < day_start + timedelta(days=1)),
-        ),
-        or_(
-            Task.department_id == department.id,
-            Task.project_id.in_(select(Project.id).where(Project.department_id == department.id)),
-            Task.assigned_to.in_(team_ids),
-            Task.id.in_(select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(team_ids))),
         ),
     ).order_by(Task.title, Task.id))).all()
     planned_ids = {task.id for task in tasks if _belongs_to_day(task, day)}
@@ -294,13 +318,7 @@ async def build_development_m1(db, user, *, checklist_items=None):
         if is_physical:
             physical.setdefault(identity, []).append(task)
 
-    notes = []
-    for note_id, (_, _, content, author, created) in await load_blue_notes(db, created_before=now):
-        note = {"id": note_id, "title": content, "detail": " · ".join(filter(None, (author, created))), "color": "#E0F2FE"}
-        if is_email_note_content(content):
-            # The report preview appends the original subject and sender after the saved title.
-            note["email_heading"] = content.partition(" · ")[0].partition(" Dërguesi:")[0]
-        notes.append(note)
+    notes = [development_note_answer(note_id, values) for note_id, values in await load_blue_notes(db, created_before=now)]
     sections = [
         ("attendance", "Vonesa, mungesa dhe pushime", attendance, "Ndryshimet e planit diskutohen në takim."),
         ("external", "Takime externe", external, None),

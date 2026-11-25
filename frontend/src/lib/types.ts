@@ -314,6 +314,8 @@ export interface PxJavPlanningBrief {
 }
 
 export interface Task {
+  pause_until?: string | null
+  pause_periods?: import("./task-pause").TaskPausePeriod[]
   id: string
   is_active?: boolean
   skill_category?: SkillCategory | null
@@ -1052,6 +1054,7 @@ export interface DailyRealizationTask {
   baseline_due_date?: string | null
   current_due_date?: string | null
   current_status: string
+  is_paused?: boolean
   classification: string
   in_original_plan: boolean
   progress_today: number

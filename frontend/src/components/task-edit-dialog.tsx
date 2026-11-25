@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { TaskPauseField } from "@/components/task-pause-field"
 import { PromptLinkButton } from "@/components/knowledge/prompt-link"
 import { toast } from "sonner"
 
@@ -28,7 +29,6 @@ import { fetchUsersLookupCached } from "@/lib/users-cache"
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
-  { value: "PAUSED", label: "Stopped" },
   { value: "WAITING_CLIENT", label: "WFE" },
   { value: "WAITING_CONFIRMATION", label: "Waiting for Confirmation" },
   { value: "DONE", label: "Done" },
@@ -134,6 +134,7 @@ export function TaskEditDialog({
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<TaskStatusValue>("TODO")
+  const [pauseDays, setPauseDays] = React.useState<number | null>()
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskTypeValue>("N")
   const [projectTaskType, setProjectTaskType] = React.useState<ProjectTaskTypeValue>("NORMAL")
   const [startDate, setStartDate] = React.useState("")
@@ -148,6 +149,7 @@ export function TaskEditDialog({
 
   React.useEffect(() => {
     if (!task) return
+    setPauseDays(undefined)
     setTitle(task.title || "")
     setDescription(task.description || "")
     setStatusValue((task.status as TaskStatusValue | undefined) || "TODO")
@@ -187,7 +189,6 @@ export function TaskEditDialog({
   const statusOptions = React.useMemo(() => {
     if (!task) return TASK_STATUS_OPTIONS
     return TASK_STATUS_OPTIONS.filter((option) => {
-      if (option.value === "PAUSED" && task.question_origin_id) return false
       if (isNoteOriginTask) return true
       if (option.value !== "WAITING_CONFIRMATION") return true
       return supportsWaitingConfirmation
@@ -250,6 +251,7 @@ export function TaskEditDialog({
         ...(showDescriptionField && description !== (task.description || "")
           ? { description: nextDescription }
           : {}),
+        ...(statusValue !== "DONE" && pauseDays !== undefined ? { pause_days: pauseDays } : {}),
         ...(statusValue !== task.status ? { status: statusValue } : {}),
         ...(waitingNeedsConfirmer ? { confirmation_assignee_id: confirmationAssigneeId } : {}),
         ...(nextStartDate !== currentStartDate ? { start_date: nextStartDate } : {}),
@@ -321,6 +323,7 @@ export function TaskEditDialog({
     oneHReportSlot,
     onOpenChange,
     onUpdated,
+    pauseDays,
     projectTaskType,
     showDescriptionField,
     skillCategory,
@@ -435,6 +438,7 @@ export function TaskEditDialog({
                   </SelectContent>
                 </Select>
               </div>
+              {!task?.question_origin_id && statusValue !== "DONE" && <TaskPauseField value={pauseDays} onChange={setPauseDays} until={task?.pause_until} />}
 
               {waitingNeedsConfirmer ? (
                 <div className="space-y-2">

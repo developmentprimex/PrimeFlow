@@ -44,6 +44,8 @@ class TaskOut(BaseModel):
     meeting_occurrence_date: date | None = None
     meeting_system_task_kind: str | None = None
     status: TaskStatus
+    pause_until: date | None = None
+    pause_periods: list[dict[str, str]] = Field(default_factory=list)
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus
@@ -88,6 +90,7 @@ class GaNoteTaskSummaryOut(BaseModel):
     ga_note_origin_id: uuid.UUID | None = None
     plan_note_origin_id: uuid.UUID | None = None
     status: TaskStatus
+    pause_until: date | None = None
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None
     start_date: datetime | None = None
@@ -120,6 +123,7 @@ class TaskCreate(BaseModel):
     ga_note_origin_id: uuid.UUID | None = None
     plan_note_origin_id: uuid.UUID | None = None
     status: TaskStatus | None = None
+    pause_days: int | None = Field(default=None, strict=True, ge=1, le=365, exclude=True)
     priority: TaskPriority | None = None
     finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus | None = None
@@ -163,6 +167,7 @@ class TaskUpdate(BaseModel):
     confirmation_assignee_id: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
     status: TaskStatus | None = None
+    pause_days: int | None = Field(default=None, strict=True, ge=1, le=365, exclude=True)
     priority: TaskPriority | None = None
     finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus | None = None

@@ -99,6 +99,7 @@ class GaNoteTaskAssigneeStateUpdate(BaseModel):
 
     assignee_id: uuid.UUID
     status: TaskStatus
+    pause_days: int | None = Field(default=None, strict=True, ge=1, le=365)
     confirmation_assignee_id: uuid.UUID | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None

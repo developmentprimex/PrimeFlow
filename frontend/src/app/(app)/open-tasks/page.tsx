@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
+import { currentTaskPauseDay, isTaskPausedOnDay } from "@/lib/task-pause"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -33,7 +35,7 @@ import { fetchUsersLookupCached } from "@/lib/users-cache"
 import type { Department, GaNote, Project, SkillCategory, Task, UserLookup } from "@/lib/types"
 
 type OpenTaskDateFilter = "all" | OpenTaskDateBucket
-type OpenTaskStatusFilter = "all" | "todo" | "in_progress" | "paused"
+type OpenTaskStatusFilter = "all" | "todo" | "in_progress"
 type OpenTaskTypeFilter = "project" | "system" | "personal" | "hourly" | "normal" | "high" | "r1" | "blocked" | "plan" | "fast"
 type PlannerTaskDialogMode = "plan" | "edit"
 type OpenTaskEditType = "normal" | "high" | "hourly" | "r1" | "personal" | "blocked"
@@ -125,7 +127,6 @@ function bucketBadgeClass(bucket: OpenTaskDateBucket) {
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To Do" },
   { value: "IN_PROGRESS", label: "In Progress" },
-  { value: "PAUSED", label: "Stopped" },
   { value: "WAITING_CLIENT", label: "WFE" },
   { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
   { value: "DONE", label: "Done" },
@@ -153,7 +154,6 @@ const OPEN_TASK_STATUS_FILTER_OPTIONS: Array<{ value: OpenTaskStatusFilter; labe
   { value: "all", label: "All statuses" },
   { value: "todo", label: "To Do" },
   { value: "in_progress", label: "In Progress" },
-  { value: "paused", label: "Stopped" },
 ]
 
 const OPEN_TASK_TYPE_FILTER_OPTIONS: Array<{ value: OpenTaskTypeFilter; label: string }> = [
@@ -235,6 +235,8 @@ export default function OpenTasksPage() {
   const [departmentId, setDepartmentId] = React.useState(ALL_VALUE)
   const [dateFilter, setDateFilter] = React.useState<OpenTaskDateFilter>("all")
   const [statusFilter, setStatusFilter] = React.useState<OpenTaskStatusFilter>("all")
+  const [pausedOnly, setPausedOnly] = React.useState(false)
+  const pauseDay = currentTaskPauseDay()
   const [skillFilter, setSkillFilter] = React.useState<SkillCategory | typeof ALL_VALUE>(ALL_VALUE)
   const [typeFilters, setTypeFilters] = React.useState<OpenTaskTypeFilter[]>([])
   const [userId, setUserId] = React.useState(ALL_VALUE)
@@ -247,6 +249,7 @@ export default function OpenTasksPage() {
   const [taskDescription, setTaskDescription] = React.useState("")
   const [taskType, setTaskType] = React.useState<OpenTaskEditType>("normal")
   const [taskStatus, setTaskStatus] = React.useState("TODO")
+  const [pauseDays, setPauseDays] = React.useState<number | null>()
   const [taskDepartmentId, setTaskDepartmentId] = React.useState(ALL_VALUE)
   const [taskProjectId, setTaskProjectId] = React.useState(PROJECT_NONE_VALUE)
   const [deadlineImportant, setDeadlineImportant] = React.useState(false)
@@ -402,7 +405,7 @@ export default function OpenTasksPage() {
       if (dateFilter !== "all" && dateBucket !== dateFilter) return false
       if (statusFilter === "todo" && (task.status || "TODO").toUpperCase() !== "TODO") return false
       if (statusFilter === "in_progress" && (task.status || "").toUpperCase() !== "IN_PROGRESS") return false
-      if (statusFilter === "paused" && (task.status || "").toUpperCase() !== "PAUSED") return false
+      if (pausedOnly && !isTaskPausedOnDay(task, pauseDay)) return false
       if (skillFilter !== ALL_VALUE && task.skill_category !== skillFilter) return false
       if (typeFilters.length && !typeFilters.some((value) => taskMatchesTypeFilter(task, value))) return false
       if (query) {
@@ -429,7 +432,7 @@ export default function OpenTasksPage() {
       }
       return true
     })
-  }, [assigneeInitialsLabel, assigneeLabel, dateFilter, departmentById, nextWeekEnd, nextWeekStart, noteById, projectById, search, skillFilter, sourceLabel, statusFilter, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, typeFilters, userId])
+  }, [assigneeInitialsLabel, assigneeLabel, dateFilter, departmentById, nextWeekEnd, nextWeekStart, noteById, pauseDay, pausedOnly, projectById, search, skillFilter, sourceLabel, statusFilter, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, typeFilters, userId])
 
   const bucketCounts = React.useMemo(() => {
     const counts: Record<OpenTaskDateBucket, number> = {
@@ -466,6 +469,7 @@ export default function OpenTasksPage() {
     setTaskDescription(task.description || "")
     setTaskType(taskEditType(task))
     setTaskStatus(task.status || "TODO")
+    setPauseDays(undefined)
     setTaskDepartmentId(task.department_id || ALL_VALUE)
     setTaskProjectId(task.project_id || PROJECT_NONE_VALUE)
     setDeadlineImportant(Boolean(task.is_deadline_important))
@@ -491,6 +495,7 @@ export default function OpenTasksPage() {
       qs.set("this_week_start", thisWeekStart)
       qs.set("filter", dateFilter)
       if (statusFilter !== "all") qs.set("status_filter", statusFilter)
+      if (pausedOnly) qs.set("paused_only", "true")
       for (const value of typeFilters) qs.append("type_filter", value)
       if (departmentId !== ALL_VALUE) qs.set("department_id", departmentId)
       if (userId !== ALL_VALUE) qs.set("user_id", userId)
@@ -611,7 +616,8 @@ export default function OpenTasksPage() {
         ? {
             // Shared note definition and membership are controlled from GA Notes / PX JAV.
             // Execution status and scheduling belong to this person's copy.
-            status: taskStatus,
+            status: taskStatus !== selectedTask.status ? taskStatus : undefined,
+            pause_days: taskStatus === "DONE" ? undefined : pauseDays,
             start_date: startDate ? new Date(startDate).toISOString() : null,
             due_date: dueDate ? new Date(dueDate).toISOString() : null,
             finish_period: finishPeriod === NONE_VALUE ? null : finishPeriod,
@@ -625,7 +631,8 @@ export default function OpenTasksPage() {
         : {
             title: nextTitle,
             description: taskDescription,
-            status: taskStatus,
+            status: taskStatus !== selectedTask.status ? taskStatus : undefined,
+            pause_days: taskStatus === "DONE" ? undefined : pauseDays,
             priority: taskType === "high" ? "HIGH" : "NORMAL",
             is_bllok: taskType === "blocked",
             is_1h_report: taskType === "hourly",
@@ -726,6 +733,9 @@ export default function OpenTasksPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Button type="button" variant={pausedOnly ? "secondary" : "outline"} aria-pressed={pausedOnly} onClick={() => setPausedOnly(!pausedOnly)}>
+              Vetëm në pauzë
+            </Button>
             <Select value={skillFilter} onValueChange={(value) => setSkillFilter(value as SkillCategory | typeof ALL_VALUE)}>
               <SelectTrigger><SelectValue placeholder="Lloji i punës" /></SelectTrigger>
               <SelectContent>
@@ -873,6 +883,7 @@ export default function OpenTasksPage() {
                           </TableCell>
                           <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle text-[13px] uppercase leading-snug text-slate-700">
                             {statusLabel(task.status)}
+                            {isTaskPausedOnDay(task, pauseDay) && <TaskPauseBadge />}
                           </TableCell>
                           <TableCell className="px-1.5 py-2 align-middle text-[13px] text-slate-700" title={assigneeLabel(task)}>
                             {assigneeInitialsLabel(task)}
@@ -957,15 +968,13 @@ export default function OpenTasksPage() {
                   <Select value={taskStatus} disabled={saving} onValueChange={setTaskStatus}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {TASK_STATUS_OPTIONS.filter((option) =>
-                        (option.value !== "PAUSED" || !selectedTask.question_origin_id) &&
-                        (!(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id) || ["TODO", "IN_PROGRESS", "PAUSED", "DONE"].includes(option.value))
-                      ).map((option) => (
+                      {TASK_STATUS_OPTIONS.map((option) => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
+                {!selectedTask?.question_origin_id && taskStatus !== "DONE" && <TaskPauseField value={pauseDays} onChange={setPauseDays} until={selectedTask?.pause_until} />}
                 <div className="space-y-2">
                   <Label>Finish by</Label>
                   <Select value={finishPeriod} disabled={saving} onValueChange={(value) => setFinishPeriod(value as "AM" | "PM" | typeof NONE_VALUE)}>

@@ -120,12 +120,15 @@ class ReportTask(BaseModel):
     department: str = "-"
     status: str
     marker: str
+    is_paused: bool = False
     one_h_marker: str = ""
     strike_count: int | None = None
 
     def display_title(self) -> tuple[str, list[str]]:
         heading, details = split_task_display(self.title)
-        if self.status == "PAUSED":
+        if self.is_paused:
+            heading = f"{heading} [Pauzë]".strip()
+        elif self.status == "PAUSED":
             heading = f"{heading} [STOPPED]".strip()
         return heading, details
 
@@ -534,6 +537,8 @@ def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
         for task_index, task in enumerate(ordered, 1):
             status = str(task.get("status")).upper()
             title_value = clean_title(str(task.get("task_title") or task.get("title") or task.get("task")))
+            if task.get("is_paused"):
+                title_value += " [Pauzë]"
             description = clean_description(task.get("description") if "description" in task else task.get("note"))
             lines.extend([f"{employee_index}.{task_index} {STATUS_MARKERS[status]} {title_value}", "Përshkrimi:", description])
     if not employee_groups:
@@ -599,6 +604,7 @@ def _document_section(
                 department=str(department).strip() or "-",
                 status=str(task.get("status")).upper(),
                 marker=STATUS_MARKERS[str(task.get("status")).upper()],
+                is_paused=bool(task.get("is_paused")),
                 one_h_marker=one_h_marker_symbol(task.get("one_h_marker") or task.get("oneHMarker")),
                 strike_count=strike_count,
             ))

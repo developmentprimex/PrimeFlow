@@ -1823,9 +1823,12 @@ async def update_checklist_item(
     if payload.title is not None:
         if checklist and checklist.group_key == "development_internal_meetings" and not item.keyword:
             from app.services.development_m1 import development_m1_item_sections
+            from app.services.development_m2 import development_m2_item_sections
 
             if section := development_m1_item_sections([item]).get(str(item.id)):
                 item.keyword = f"development-m1:{section}"
+            elif section := development_m2_item_sections([item]).get(str(item.id)):
+                item.keyword = f"development-m2:{section}"
         item.title = payload.title
     if payload.comment is not None:
         item.comment = payload.comment

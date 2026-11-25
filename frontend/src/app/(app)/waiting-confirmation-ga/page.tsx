@@ -300,7 +300,6 @@ export default function WaitingConfirmationGaPage() {
                             <SelectContent>
                               <SelectItem value="TODO">To do</SelectItem>
                               <SelectItem value="IN_PROGRESS">In progress</SelectItem>
-                              <SelectItem value="PAUSED">Stopped</SelectItem>
                             </SelectContent>
                           </Select>
                           <Button
@@ -382,7 +381,6 @@ export default function WaitingConfirmationGaPage() {
                           <SelectContent>
                             <SelectItem value="TODO">To do</SelectItem>
                             <SelectItem value="IN_PROGRESS">In progress</SelectItem>
-                              <SelectItem value="PAUSED">Stopped</SelectItem>
                           </SelectContent>
                         </Select>
                         <Button

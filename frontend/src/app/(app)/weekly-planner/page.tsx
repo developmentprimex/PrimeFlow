@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
@@ -58,6 +59,7 @@ type WeeklyTableProjectTaskEntry = {
   phase?: string | null
   status?: string | null
   daily_status?: string | null
+  is_paused?: boolean
   created_at?: string | null
   completed_at?: string | null
   daily_products: number | null
@@ -95,6 +97,7 @@ type WeeklyTableTaskEntry = {
   title: string
   status?: string | null
   daily_status?: string | null
+  is_paused?: boolean
   created_at?: string | null
   completed_at?: string | null
   daily_products: number | null
@@ -397,6 +400,7 @@ export default function WeeklyPlannerPage() {
   const [plannerTaskDialogOpen, setPlannerTaskDialogOpen] = React.useState(false)
   const [plannerTaskDialogMode, setPlannerTaskDialogMode] = React.useState<PlannerTaskDialogMode>("plan")
   const [plannerTask, setPlannerTask] = React.useState<Task | null>(null)
+  const [plannerTaskPauseDays, setPlannerTaskPauseDays] = React.useState<number | null>()
   const [plannerTaskStartDate, setPlannerTaskStartDate] = React.useState("")
   const [plannerTaskDueDate, setPlannerTaskDueDate] = React.useState("")
   const [plannerTaskFinishPeriod, setPlannerTaskFinishPeriod] = React.useState<"AM" | "PM" | "__none__">("AM")
@@ -1189,6 +1193,7 @@ export default function WeeklyPlannerPage() {
     (task: Task, mode: PlannerTaskDialogMode) => {
       const defaultDay = nextWeekDefaultDay(data?.week_start)
       setPlannerTask(task)
+      setPlannerTaskPauseDays(undefined)
       setPlannerTaskDialogMode(mode)
       setPlannerTaskStartDate(toDateInputValue(task.start_date) || defaultDay)
       setPlannerTaskDueDate(toDateInputValue(task.due_date) || defaultDay)
@@ -1216,6 +1221,7 @@ export default function WeeklyPlannerPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          pause_days: plannerTaskPauseDays,
           start_date: plannerTaskStartDate ? new Date(plannerTaskStartDate).toISOString() : null,
           due_date: new Date(plannerTaskDueDate).toISOString(),
           finish_period: plannerTaskFinishPeriod === "__none__" ? null : plannerTaskFinishPeriod,
@@ -1261,6 +1267,7 @@ export default function WeeklyPlannerPage() {
     plannerTaskDialogMode,
     plannerTaskDueDate,
     plannerTaskFinishPeriod,
+    plannerTaskPauseDays,
     plannerTaskStartDate,
   ])
 
@@ -2794,6 +2801,7 @@ export default function WeeklyPlannerPage() {
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
               }
+              if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
               html += buildPrintNewBadge(task.created_at)
               html += `</div>`
             })
@@ -2852,6 +2860,7 @@ export default function WeeklyPlannerPage() {
                 if (badge) {
                   html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
                 }
+                if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
                 html += buildPrintNewBadge(task.created_at)
                 html += `</div>`
               })
@@ -2891,6 +2900,7 @@ export default function WeeklyPlannerPage() {
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
             }
+            if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
             html += buildPrintNewBadge(task.created_at)
             html += `</div>`
           })
@@ -2961,6 +2971,7 @@ export default function WeeklyPlannerPage() {
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
               }
+              if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
               html += buildPrintNewBadge(task.created_at)
               html += `</div>`
             })
@@ -3012,6 +3023,7 @@ export default function WeeklyPlannerPage() {
                 if (badge) {
                   html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
                 }
+                if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
                 html += buildPrintNewBadge(task.created_at)
                 html += `</div>`
               })
@@ -3051,6 +3063,7 @@ export default function WeeklyPlannerPage() {
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
             }
+            if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
             html += buildPrintNewBadge(task.created_at)
             html += `</div>`
           })
@@ -4363,6 +4376,9 @@ export default function WeeklyPlannerPage() {
               </Select>
             </div>
 
+            {plannerTask && plannerTask.status !== "DONE" && !plannerTask.question_origin_id && (
+              <TaskPauseField value={plannerTaskPauseDays} onChange={setPlannerTaskPauseDays} until={plannerTask.pause_until} disabled={plannerTaskSaving} />
+            )}
             {!(plannerTask?.ga_note_origin_id || plannerTask?.plan_note_origin_id) ? <div className="space-y-2">
               <Label>Members</Label>
               <DropdownMenu>
@@ -4829,6 +4845,7 @@ export default function WeeklyPlannerPage() {
                                                     </button>
                                                   </span>
                                                 <div className="flex shrink-0 items-center gap-1">
+                                                  {task.is_paused && <TaskPauseBadge />}
                                                   {isNewTask && (
                                                     <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
                                                       NEW
@@ -4926,6 +4943,7 @@ export default function WeeklyPlannerPage() {
                                               </button>
                                             </span>
                                           <div className="flex shrink-0 items-center gap-1">
+                                            {task.is_paused && <TaskPauseBadge />}
                                             {isNewTask && (
                                               <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
                                                 NEW
@@ -5005,6 +5023,7 @@ export default function WeeklyPlannerPage() {
                                           </button>
                                         </span>
                                           <div className="flex shrink-0 items-center gap-1">
+                                            {task.is_paused && <TaskPauseBadge />}
                                             {isNewTask && (
                                               <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
                                                 NEW

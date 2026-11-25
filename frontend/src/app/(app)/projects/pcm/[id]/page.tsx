@@ -3,6 +3,7 @@
 import { ProjectActivityControl } from "@/components/project-activity"
 
 import * as React from "react"
+import { TaskPauseField } from "@/components/task-pause-field"
 import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
 import { useParams, useRouter } from "next/navigation"
 
@@ -522,7 +523,7 @@ const MEETING_TABS = [
 
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
-const PCM_SELECTABLE_STATUSES = ["TODO", "IN_PROGRESS", "PAUSED", "DONE"] as const
+const PCM_SELECTABLE_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
 const LEGACY_WAITING_STATUS = "WAITING_CONFIRMATION"
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
@@ -1283,6 +1284,7 @@ export default function PcmProjectPage() {
   const [vsVlTaskDeadlineImportant, setVsVlTaskDeadlineImportant] = React.useState(false)
   const [vsVlTaskPriority, setVsVlTaskPriority] = React.useState<TaskPriority>("NORMAL")
   const [vsVlTaskStatus, setVsVlTaskStatus] = React.useState<Task["status"]>("TODO")
+  const [vsVlTaskPauseDays, setVsVlTaskPauseDays] = React.useState<number | null>()
   const [vsVlTaskAssignees, setVsVlTaskAssignees] = React.useState<string[]>([])
   const [vsVlTaskDependencyId, setVsVlTaskDependencyId] = React.useState("__none__")
   const [vsVlTaskChecklist, setVsVlTaskChecklist] = React.useState("")
@@ -4804,6 +4806,7 @@ export default function PcmProjectPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                      {vsVlTaskStatus !== "DONE" && <TaskPauseField value={vsVlTaskPauseDays} onChange={setVsVlTaskPauseDays} />}
                       <Button
                         size="sm"
                         className="h-8 px-3 text-xs"
@@ -4836,6 +4839,7 @@ export default function PcmProjectPage() {
                                 dependency_task_id:
                                   vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
                                 status: vsVlTaskStatus || "TODO",
+                                pause_days: vsVlTaskStatus === "DONE" ? undefined : vsVlTaskPauseDays,
                                 priority: vsVlTaskPriority,
                                 phase: vsVlPhase,
                                 due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
@@ -4856,6 +4860,7 @@ export default function PcmProjectPage() {
                             setVsVlTaskDeadlineImportant(false)
                             setVsVlTaskPriority("NORMAL")
                             setVsVlTaskStatus("TODO")
+                            setVsVlTaskPauseDays(undefined)
                             setVsVlTaskAssignees([])
                             setVsVlTaskDependencyId("__none__")
                             setVsVlTaskChecklist("")

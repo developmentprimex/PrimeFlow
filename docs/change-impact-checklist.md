@@ -135,6 +135,18 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   fillimisht të mbyllur. Rreshtat e hapur shfaqin vetëm titullin e shkurtër dhe
   veprimin e diskutimit. Excel përdor tekstin e raportit.
 
+- Development → Meetings → M2 përdor të njëjtën checklistë në Department
+  View, My View dhe Excel-in e takimeve të brendshme. Hapja dhe rifreskimi i
+  pikave lexojnë email-et nga kutia IT dhe PX Notes të padiskutuara nga
+  08:00 deri në momentin e kontrollit, me kufi në 12:00. Leximi i email-eve
+  ripërdor lidhjen e After Break Report. Dorëzimet GA përdorin rregullin
+  M2/M2_M3 të M2 PIKAT, të filtruar për Development. Pikat për punën e
+  paradites, planin PM dhe pjesa e Teams plotësohen në takim. Veprimi
+  “Shëno si të diskutuar” ofrohet edhe në My View të M2 dhe përdor
+  statusin e përbashkët të PX Notes. Email-et e importuara si PX Notes
+  grupohen nën “Email-et” me titujt e shkurtër, si në M1. Excel përdor
+  tekstin e plotë të raportit.
+
 - Arsyeja `PV` pranohet pa koment në raportin ditor RLZ, te shtyrjet e
   detyrave dhe në përgjigjet M2 që përdorin listën e arsyeve. Kontrollo
   Development, Graphic Design, Product Content (edhe My View), Finance,
@@ -318,11 +330,19 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   `WAITING_CONFIRMATION`, që të dyja statuset të ruhen gjatë kalimit.
   Për taskat me sasi produktesh, kontrollo rillogaritjen e statusit në `tasks.py`
   si gjatë ruajtjes, ashtu edhe gjatë leximit, dhe përparësinë e statusit ditor
-  ndaj sasive në `planners.py`. `PAUSED` shfaqet si **Stopped** dhe mban
-  taskun të hapur me afatin dhe progresin e ruajtur. Kalimi në **In Progress**
-  rifillon taskun. Te taskat me sasi, rifillimi ka përparësi deri te ndryshimi
-  i radhës i sasive. Kontrollo etiketën në SHTYPI Today/Tomorrow, 1H Reports,
+  ndaj sasive në `planners.py`. Migrimi i `PAUSED` të vjetër rikthen statusin
+  e punës nga auditi kur është i disponueshëm dhe mban datat e regjistruara
+  të pauzës. Kontrollo etiketën në SHTYPI Today/Tomorrow, 1H Reports,
   M1/M2/M3, PIKAT, eksportin Open Tasks dhe klasifikimin ditor në Realization.
+  Pauzat e reja ruhen te `tasks.pause_periods`, me datën e fillimit dhe të
+  fundit të përfshirë. Formularët ruajnë `pause_days` veç statusit. Weekly
+  Planner, Common View, 1H Reports dhe 1H SHTYPI Today/Tomorrow e lexojnë pauzën për
+  datën e rreshtit. Monthly Planner, pamjet ditore të departamenteve dhe
+  Realization përdorin të njëjtin interval. Open Tasks dhe eksporti i tij
+  kontrollojnë datën aktuale. Tabelat ditore M1, M2 dhe M3 përdorin datën e
+  raportit për treguesin e pauzës.
+  Kontrollo një ditë, disa ditë, heqjen para
+  kohe dhe një pauzë të dytë, që ditët e pauzës së parë të mbeten të dukshme.
 
 - Përmbledhja e shpejtë përdoret si në Notetaker, ashtu edhe në Discord. Për
   takimet normale numërohen të pesë seksionet së bashku, me kufi 250 fjalë dhe

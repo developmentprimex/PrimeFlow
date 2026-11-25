@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { TaskPauseBadge } from "@/components/task-pause-field"
+import { isTaskPausedOnDay } from "@/lib/task-pause"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
@@ -992,6 +994,7 @@ export default function DepartmentKanban() {
                           <span className={`inline-block max-w-full rounded px-2 py-1 text-xs font-medium uppercase whitespace-normal [overflow-wrap:anywhere] ${row.statusClassName}`}>
                             {row.status === "PAUSED" ? "Stopped" : row.status}
                           </span>
+                          {isTaskPausedOnDay(row.task, todayIso) && <TaskPauseBadge />}
                         </TableCell>
                         <TableCell className="whitespace-normal [overflow-wrap:anywhere] [&_[data-slot=select-trigger]]:w-full [&_[data-slot=select-trigger]]:px-2">
                           <DailyRlzReasonCell

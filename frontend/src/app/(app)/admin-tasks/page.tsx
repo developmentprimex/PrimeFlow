@@ -3,6 +3,7 @@
 import { NextWorkdayTaskFeedback } from "@/components/next-workday-task-feedback"
 
 import * as React from "react"
+import { TaskPauseField } from "@/components/task-pause-field"
 import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
@@ -2228,11 +2229,13 @@ export default function AdminTasksPage() {
   const [systemStatusOverrides, setSystemStatusOverrides] = React.useState<Record<string, string>>({})
   const [fastEditOpen, setFastEditOpen] = React.useState(false)
   const [fastEditTaskId, setFastEditTaskId] = React.useState<string | null>(null)
+  const fastEditTask = tasks.find((task) => task.id === fastEditTaskId)
   const [fastEditTitle, setFastEditTitle] = React.useState("")
   const [fastEditStartDate, setFastEditStartDate] = React.useState("")
   const [fastEditDueDate, setFastEditDueDate] = React.useState("")
   const [fastEditPriority, setFastEditPriority] = React.useState<TaskPriority>("NORMAL")
   const [fastEditStatus, setFastEditStatus] = React.useState("TODO")
+  const [fastEditPauseDays, setFastEditPauseDays] = React.useState<number | null>()
   const [fastEditConfirmationAssigneeId, setFastEditConfirmationAssigneeId] = React.useState("")
   const [fastEditOriginalIsBllok, setFastEditOriginalIsBllok] = React.useState(false)
   const [fastEditSaving, setFastEditSaving] = React.useState(false)
@@ -4064,6 +4067,7 @@ export default function AdminTasksPage() {
     setFastEditDueDate(toDateInputValue(task.due_date))
     setFastEditPriority((task.is_bllok ? "BLLOK" : (task.priority || "NORMAL")) as TaskPriority)
     setFastEditStatus(task.status || "TODO")
+    setFastEditPauseDays(undefined)
     setFastEditConfirmationAssigneeId(task.confirmation_assignee_id || "")
     setFastEditOriginalIsBllok(Boolean(task.is_bllok))
     setFastEditOpen(true)
@@ -4088,6 +4092,7 @@ export default function AdminTasksPage() {
         due_date: dueDateValue,
         priority: actualPriority,
         status: fastEditStatus,
+        pause_days: fastEditStatus === "DONE" ? undefined : fastEditPauseDays,
       }
       if (isWaitingConfirmation(fastEditStatus)) {
         payload.confirmation_assignee_id = fastEditConfirmationAssigneeId
@@ -8982,7 +8987,7 @@ export default function AdminTasksPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {TASK_STATUS_OPTIONS.map((value) => (
+                  {TASK_STATUS_OPTIONS.filter((value) => value !== "PAUSED").map((value) => (
                     <SelectItem key={value} value={value}>
                       {reportStatusLabel(value)}
                     </SelectItem>
@@ -8990,6 +8995,7 @@ export default function AdminTasksPage() {
                 </SelectContent>
               </Select>
             </div>
+            {!fastEditTask?.question_origin_id && fastEditStatus !== "DONE" && <TaskPauseField value={fastEditPauseDays} onChange={setFastEditPauseDays} until={fastEditTask?.pause_until} />}
             {isWaitingConfirmation(fastEditStatus) ? (
               <div className="space-y-2">
                 <Label>Confirm by (Manager/Admin)</Label>

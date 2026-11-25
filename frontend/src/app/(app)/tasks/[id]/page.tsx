@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { TaskPauseField } from "@/components/task-pause-field"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 
@@ -29,7 +30,6 @@ import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In Progress" },
-  { value: "PAUSED", label: "Stopped" },
   { value: "WAITING_CLIENT", label: "WFE" },
   { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
   { value: "DONE", label: "Done" },
@@ -171,6 +171,7 @@ export default function TaskDetailsPage() {
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<Task["status"] | "">("")
+  const [pauseDays, setPauseDays] = React.useState<number | null>()
   const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
   const [deadlineImportant, setDeadlineImportant] = React.useState(false)
@@ -211,13 +212,10 @@ export default function TaskDetailsPage() {
 
   React.useEffect(() => {
     if (!task) return
+    setPauseDays(undefined)
     setTitle(getPlainMarkedText(task.title))
     setDescription(task.description || "")
-    setStatusValue(
-      (task.ga_note_origin_id || task.plan_note_origin_id) && !["TODO", "IN_PROGRESS", "PAUSED", "DONE"].includes(task.status || "")
-        ? "TODO"
-        : (task.status || "")
-    )
+    setStatusValue(task.status || "")
     setStartDate(toDateInputValue(task.start_date))
     setDueDate(toDateInputValue(task.due_date))
     setDeadlineImportant(Boolean(task.is_deadline_important))
@@ -366,7 +364,8 @@ export default function TaskDetailsPage() {
           }
       let gaMembershipChanged = false
       let removedCurrentCopy = false
-      if (statusValue) payload.status = statusValue
+      if (statusValue !== "DONE" && pauseDays !== undefined) payload.pause_days = pauseDays
+      if (statusValue && statusValue !== task.status) payload.status = statusValue
       if (isNoteOriginTask && statusValue && !["TODO", "IN_PROGRESS", "PAUSED", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"].includes(statusValue)) {
         toast.error("Note task status must be To Do, In Progress, WFE, Waiting Confirmation, or Done")
         return
@@ -628,10 +627,7 @@ export default function TaskDetailsPage() {
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    {TASK_STATUS_OPTIONS.filter((option) =>
-                      (option.value !== "PAUSED" || !task.question_origin_id) &&
-                      (!isNoteOriginTask || ["TODO", "IN_PROGRESS", "PAUSED", "DONE"].includes(option.value))
-                    ).map((option) => (
+                    {TASK_STATUS_OPTIONS.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -639,6 +635,7 @@ export default function TaskDetailsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {!task?.question_origin_id && statusValue !== "DONE" && <TaskPauseField value={pauseDays} onChange={setPauseDays} until={task?.pause_until} />}
               {requiresConfirmer ? (
                 <div className="space-y-2">
                   <Label>Confirm by (Manager/Admin)</Label>

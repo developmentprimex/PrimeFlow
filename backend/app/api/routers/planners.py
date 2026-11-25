@@ -42,6 +42,7 @@ from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.department import Department
 from app.services.task_classification import is_fast_task as is_fast_task_model
 from app.services.task_marker import historical_marker_for_day
+from app.services.task_pause import pause_until_on_day
 from app.services.system_task_schedule import matches_template_date
 from app.services.project_display_title import build_project_display_title_map
 from app.services.project_classification import (
@@ -393,6 +394,7 @@ def _task_to_out(t: Task, assignees: list[TaskAssigneeOut] | None = None) -> Tas
         plan_note_origin_id=t.plan_note_origin_id,
         system_template_origin_id=t.system_template_origin_id,
         status=status_enum,
+        pause_periods=t.pause_periods or [],
         priority=priority_enum,
         finish_period=finish_period_enum,
         phase=phase_enum,
@@ -2794,6 +2796,7 @@ async def weekly_table_planner(
                         task_id=system_task.id,
                         title=tmpl.title,
                         status=task_status,
+                        is_paused=bool(pause_until_on_day(system_task.pause_periods, day_date)),
                         daily_status=None,
                         created_at=system_task.created_at,
                         completed_at=completed_at,
@@ -2849,6 +2852,7 @@ async def weekly_table_planner(
                             task_id=task.id,
                             title=task.title,
                             status=TaskStatus(task.status) if task.status else TaskStatus.TODO,
+                            is_paused=bool(pause_until_on_day(task.pause_periods, day_date)),
                             daily_status=daily_status_value,
                             created_at=task.created_at,
                             completed_at=task.completed_at,
@@ -2960,6 +2964,7 @@ async def weekly_table_planner(
                         task_entries.append(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
+                                is_paused=bool(pause_until_on_day(t.pause_periods, day_date)),
                                 task_title=t.title,
                                 phase=t.phase,
                                 status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
@@ -3031,6 +3036,7 @@ async def weekly_table_planner(
                         task_entries.append(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
+                                is_paused=bool(pause_until_on_day(t.pause_periods, day_date)),
                                 task_title=t.title,
                                 phase=t.phase,
                                 status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
