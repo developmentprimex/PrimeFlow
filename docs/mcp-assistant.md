@@ -103,14 +103,16 @@ sinkronizuara, iPhone Sync dhe Discord vazhdojnë të lexohen nga PrimeFlow.
 - Ora merret nga “R: HH:MM”. “R: 00:00” = pa orë → untimed për ditën e kolonës.
   Reminder pa datë (iPhone Sync e vendos në ditën e parë të dritares) del si untimed **çdo ditë**
   derisa të kryhet.
-- Sinkronizimi është vetëm iPhone → PrimeFlow, prandaj `can_complete=false` dhe
-  `ga_item_done/postpone/set_time/add_comment` kthejnë 409 me shpjegim. Kryhet në iPhone;
-  sinkronizimi i radhës e heq. `ga_item_remove_from_day` lejohet (fshehje për një ditë).
+- Pas një importi që sjell titullin dhe datën e origjinës, `ga_item_done` për një
+  `tt:…` kthen `pending_complete`. Agjenda shfaq «✓ në pritje për iPhone» derisa
+  Shortcut-i ta kryejë në telefon dhe ta konfirmojë. Ndryshimi i orës dhe i tekstit
+  bëhen në iPhone. `ga_item_remove_from_day` mund ta fshehë për një ditë.
 - Të pakryerat e ditëve të kaluara dalin te `ga_leftovers` me `days_late`, vetëm brenda dritares
   së fundit të sinkronizimit (sot − 7 ditë); më të vjetrat s'rifreskohen më nga telefoni.
   Kur sinkronizimi i fundit është më i vjetër se 24 orë, del një warning.
-- I njëjti reminder në To Do dhe në iPhone Sync (titull + ditë) kthehet një herë: si element To Do,
-  me `linked_ids: ["tt:…"]`.
+- I njëjti reminder në To Do dhe në iPhone Sync (titull + ditë) kthehet një herë.
+  Agjenda përdor elementin To Do zakonisht dhe elementin e iPhone-it gjatë pritjes
+  për konfirmim. `linked_ids` përmban ID-në tjetër.
 
 ## Microsoft To Do: rregulla shtesë
 

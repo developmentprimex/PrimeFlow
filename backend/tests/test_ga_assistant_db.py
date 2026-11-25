@@ -133,6 +133,90 @@ class GaAssistantDbTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.status_code, expect, res.text)
         return res.json()
 
+    async def test_iphone_reminder_completion_waits_for_paired_shortcut(self) -> None:
+        from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
+        from app.services.ga_icloud_sync import generate_connection_token
+
+        connection_id = uuid.uuid4()
+        token, token_hash = generate_connection_token(connection_id)
+        async with self.SessionLocal() as db:
+            db.add(GaIcloudSyncConnection(
+                id=connection_id, ga_user_id=self.ga.id, created_by_id=self.ga.id,
+                device_name="Test iPhone", calendar_name="Work calendar",
+                reminder_list_name="REMINDER", token_hash=token_hash,
+                created_at=self.at(self.today - timedelta(days=1)),
+            ))
+            unrelated_id = uuid.uuid4()
+            _, unrelated_hash = generate_connection_token(unrelated_id)
+            db.add(GaIcloudSyncConnection(
+                id=unrelated_id, ga_user_id=self.ga.id, created_by_id=self.ga.id,
+                device_name="Another iPhone", calendar_name="Other calendar",
+                reminder_list_name="OTHER", token_hash=unrelated_hash,
+                created_at=self.at(self.today),
+            ))
+            await db.commit()
+
+        day = self.today
+        while day.weekday() > 4:
+            day += timedelta(days=1)
+        # Preserve the original offset, seconds, spacing, and punctuation.
+        due_at = self.at(day, 10, 15).astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:37Z")
+        title = "  Kujtesë · me  shënim  "
+        reminder = {"id": "phone-reminder-1", "title": title, "due_at": due_at, "notes": "dytësore"}
+        base = "/api/ga-time-slots/icloud-sync"
+        headers = {"X-PrimeFlow-Sync-Token": token}
+        import_payload = {
+            "sync_window_start": day.isoformat(), "sync_window_end": day.isoformat(), "timezone": str(TZ),
+            "calendar_name": "Work calendar", "reminder_list_name": "REMINDER",
+            "reminders": [reminder, {"title": "Pa datë"}],
+        }
+
+        async def sync(payload):
+            response = await self.client.post(f"{base}/import", headers=headers, json=payload)
+            self.assertEqual(response.status_code, 200, response.text)
+
+        async def agenda():
+            payload = await self.get("/agenda", start=self.at(day).isoformat(),
+                                     end=self.at(day + timedelta(days=1)).isoformat(), include_untimed="true")
+            return {entry["id"]: entry for entry in payload["items"] if entry["source"] == "iphone_sync"}
+
+        async def completed():
+            response = await self.client.get(f"{base}/completed", headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn("no-store", response.headers["Cache-Control"])
+            return response.json()
+
+        await sync(import_payload)
+        entries = await agenda()
+        timed = next(entry for entry in entries.values() if entry["start"])
+        untimed = next(entry for entry in entries.values() if not entry["start"])
+        self.assertTrue(timed["can_complete"])
+        self.assertTrue(untimed["can_complete"])
+        for row in (timed, untimed):
+            result = await self.post("/items/done", {"item_id": row["id"]})
+            self.assertEqual(result["status"], "pending_complete")
+        await self.post("/items/done", {"item_id": timed["id"]})
+        self.assertEqual((await self.client.get(f"{base}/completed", headers=self.h())).status_code, 401)
+        queue = {item["id"]: item for item in await completed()}
+        self.assertEqual(queue[timed["id"]], {"id": timed["id"], "title": title, "due_at": due_at})
+        self.assertIsNone(queue[untimed["id"]]["due_at"])
+
+        # Keep a pending row even when the next import omits the reminder.
+        await sync({**import_payload, "reminders": []})
+        for row in (await agenda()).values():
+            self.assertEqual(row["status"], "pending_complete")
+            self.assertEqual(row["status_label"], "✓ në pritje për iPhone")
+            self.assertFalse(row["is_open"])
+        self.assertEqual(len(await completed()), 2)
+        ack_payload = {"ids": [timed["id"], untimed["id"], timed["id"]]}
+        for expected in (2, 0):
+            ack = await self.client.post(f"{base}/completed/ack", headers=headers, json=ack_payload)
+            self.assertEqual((ack.status_code, ack.json()), (200, {"acknowledged": expected}))
+        self.assertEqual(await completed(), [])
+        await sync(import_payload)
+        self.assertEqual(await agenda(), {})
+        self.assertEqual((await self.post("/items/done", {"item_id": timed["id"]}))["result"], "already_done")
+
     async def test_asist_ga_report_reads_and_actions(self) -> None:
         from time import perf_counter
         from sqlalchemy import select

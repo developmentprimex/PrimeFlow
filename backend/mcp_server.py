@@ -3146,7 +3146,7 @@ async def ga_agenda(start: str, end: str, include_untimed: bool = False,
     GA's agenda for the window [start, end): GA TASKS, BZ ME GA TASKS (koha_bz, bz_with),
     tasks with GA and F symbols, PrimeFlow meetings (TAK INT/EXT), Outlook events and
     Microsoft To Do reminders of info@ (not "Flagged Emails"), GA's iPhone reminders from the
-    GA Time Table "R:" rows (source iphone_sync, id tt:..., read-only) and Discord messages
+    GA Time Table "R:" rows (source iphone_sync, id tt:...) and Discord messages
     that mention GA (kind DISCORD, id dc:..., untimed on the day written), each with a
     source-prefixed id. A reminder in both To Do and iPhone Sync is listed once (the To Do
     item, with the tt: id in linked_ids). To Do/iPhone reminders without a date are untimed
@@ -3243,8 +3243,8 @@ async def ga_item_done(item_id: str, comment: str | None = None, override_reason
     is only for an explicit exception.
     BZ where GA is not an assignee -> records "BZ u mbajt" (comment + audit) without closing
     the colleague's task. Meeting -> "Mbajtur". To Do -> completed. Discord mention (dc:) -> done.
-    Outlook events and iPhone reminders (tt:, can_complete=false: the iPhone Sync is one-way)
-    are read-only: GA completes those on the iPhone.
+    An iPhone reminder (tt:) returns pending_complete until the paired Shortcut
+    completes and acknowledges it. Outlook calendar events are read-only.
     """
     return await _request(
         "POST",

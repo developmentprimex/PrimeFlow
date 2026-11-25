@@ -25,6 +25,8 @@ from app.schemas.ga_time_slot import (
     GaIcloudSyncImport,
     GaIcloudSyncImportOut,
     GaIcloudSyncPairingOut,
+    GaIcloudReminderCompletion,
+    GaIcloudReminderCompletionAck,
     GaTimeTableCommentToSlotMove,
     GaTimeTableCrossCellMoveOut,
     GaTimeTableEntryToCommentMove,
@@ -932,7 +934,7 @@ async def pair_icloud_sync_device(
             select(GaIcloudSyncConnection).where(
                 GaIcloudSyncConnection.ga_user_id == ga_user.id,
                 GaIcloudSyncConnection.revoked_at.is_(None),
-            )
+            ).with_for_update()
         )
     ).scalars().all()
     for active in active_connections:
@@ -983,7 +985,7 @@ async def revoke_icloud_sync_connection(
                 GaIcloudSyncConnection.id == connection_id,
                 GaIcloudSyncConnection.ga_user_id == ga_user.id,
                 GaIcloudSyncConnection.revoked_at.is_(None),
-            )
+            ).with_for_update()
         )
     ).scalar_one_or_none()
     if connection is None:
@@ -1085,6 +1087,7 @@ async def import_icloud_timetable_data(
             zone=zone,
             rows=time_rows,
             is_completed=reminder.is_completed,
+            original_due_at=reminder.original_due_at,
         )
         if not payload.sync_window_start <= item.day_date <= payload.sync_window_end or item.day_date.weekday() > 4:
             skipped += 1
@@ -1093,11 +1096,28 @@ async def import_icloud_timetable_data(
 
     unique_items = {(item.source_type, item.source_external_id): item for item in prepared}
     skipped += len(prepared) - len(unique_items)
+    # Completion requests live outside the replaceable import snapshot. Keep
+    # their rows when reminders vanish from an open-only Shortcut import, and
+    # protect acknowledged rows from stale imports that still say "open".
+    saved_completions = (await db.execute(
+        select(GaTimeSlotEntry.source_external_id, GaTimeSlotEntry.reminder_source).where(
+            GaTimeSlotEntry.sync_connection_id == connection.id,
+            GaTimeSlotEntry.completion_requested_at.is_not(None),
+        )
+    )).all()
+    saved_keys = {key for key, _ in saved_completions}
+    saved_phone_ids = {source["id"] for _, source in saved_completions if source and source.get("id")}
+    retained_reminders = {
+        key for key, item in unique_items.items()
+        if item.source_type == "reminder"
+        and (item.source_external_id in saved_keys or (item.reminder_source or {}).get("id") in saved_phone_ids)
+    }
     await db.execute(
         delete(GaTimeSlotEntry).where(
             GaTimeSlotEntry.sync_connection_id == connection.id,
             GaTimeSlotEntry.day_date >= payload.sync_window_start,
             GaTimeSlotEntry.day_date <= payload.sync_window_end,
+            GaTimeSlotEntry.completion_requested_at.is_(None),
         )
     )
     entries = [
@@ -1112,23 +1132,68 @@ async def import_icloud_timetable_data(
             source_external_id=item.source_external_id,
             source_name=item.source_name,
             is_completed=item.is_completed,
+            reminder_source=item.reminder_source,
         )
-        for item in unique_items.values()
+        for key, item in unique_items.items() if key not in retained_reminders
     ]
     db.add_all(entries)
     synced_at = datetime.now(timezone.utc)
     connection.last_synced_at = synced_at
-    connection.last_imported_count = len(entries)
+    imported_count = len(unique_items)
+    connection.last_imported_count = imported_count
     await db.commit()
     calendar_count = sum(item.source_type == "calendar" for item in unique_items.values())
     reminder_count = sum(item.source_type == "reminder" for item in unique_items.values())
     return GaIcloudSyncImportOut(
-        imported=len(entries),
+        imported=imported_count,
         calendar_imported=calendar_count,
         reminders_imported=reminder_count,
         skipped=skipped,
         synced_at=synced_at,
     )
+
+
+@router.get("/icloud-sync/completed", response_model=list[GaIcloudReminderCompletion])
+async def list_icloud_reminder_completions(
+    response: Response,
+    x_primeflow_sync_token: str | None = Header(default=None, alias="X-PrimeFlow-Sync-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> list[GaIcloudReminderCompletion]:
+    connection = await _connection_from_sync_token(db, x_primeflow_sync_token)
+    response.headers["Cache-Control"] = "private, no-store"
+    rows = (await db.scalars(select(GaTimeSlotEntry).where(
+        GaTimeSlotEntry.sync_connection_id == connection.id,
+        GaTimeSlotEntry.source_type == "reminder",
+        GaTimeSlotEntry.completion_requested_at.is_not(None),
+        GaTimeSlotEntry.is_completed.is_(False),
+    ).order_by(GaTimeSlotEntry.completion_requested_at, GaTimeSlotEntry.id))).all()
+    return [
+        GaIcloudReminderCompletion(
+            id=f"tt:{entry.source_external_id}", title=entry.reminder_source["title"],
+            due_at=entry.reminder_source["due_at"],
+        )
+        for entry in rows
+    ]
+
+
+@router.post("/icloud-sync/completed/ack")
+async def acknowledge_icloud_reminder_completions(
+    payload: GaIcloudReminderCompletionAck,
+    x_primeflow_sync_token: str | None = Header(default=None, alias="X-PrimeFlow-Sync-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    connection = await _connection_from_sync_token(db, x_primeflow_sync_token, lock=True)
+    keys = {value.removeprefix("tt:") for value in payload.ids}
+    rows = await db.scalars(update(GaTimeSlotEntry).where(
+        GaTimeSlotEntry.sync_connection_id == connection.id,
+        GaTimeSlotEntry.source_type == "reminder",
+        GaTimeSlotEntry.source_external_id.in_(keys),
+        GaTimeSlotEntry.completion_requested_at.is_not(None),
+        GaTimeSlotEntry.is_completed.is_(False),
+    ).values(is_completed=True).returning(GaTimeSlotEntry.id))
+    acknowledged = len(rows.all())
+    await db.commit()
+    return {"acknowledged": acknowledged}
 
 
 async def load_ga_calendar_sources(

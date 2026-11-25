@@ -1,9 +1,9 @@
 import uuid
 import re
 from datetime import date, datetime, time
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 
 class GaTimeSlotFormatting(BaseModel):
@@ -207,6 +207,19 @@ class GaIcloudReminderItem(BaseModel):
     is_completed: bool = False
     reminder_list_name: str | None = Field(default=None, max_length=320)
     notes: str | None = Field(default=None, max_length=2000)
+    _original_due_at: str | None = PrivateAttr(default=None)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def preserve_due_at(cls, data, handler):
+        item = handler(data)
+        if isinstance(data, dict) and isinstance(data.get("due_at"), str):
+            item._original_due_at = data["due_at"]
+        return item
+
+    @property
+    def original_due_at(self) -> str | None:
+        return self._original_due_at
 
 
 class GaIcloudSyncImport(BaseModel):
@@ -225,3 +238,13 @@ class GaIcloudSyncImportOut(BaseModel):
     reminders_imported: int
     skipped: int
     synced_at: datetime
+
+
+class GaIcloudReminderCompletion(BaseModel):
+    id: str
+    title: str
+    due_at: str | None
+
+
+class GaIcloudReminderCompletionAck(BaseModel):
+    ids: list[Annotated[str, Field(pattern=r"^tt:[0-9a-f]{64}$")]] = Field(max_length=500)

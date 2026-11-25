@@ -1,7 +1,7 @@
 # GA Time Table — iPhone Calendar dhe Reminders
 
-Ky integrim është vetëm në drejtimin **iPhone → PrimeFlow**. PrimeFlow nuk krijon,
-ndryshon ose fshin evente/reminders në telefon.
+Calendar dhe Reminders importohen nga iPhone. Për kryerjen e një reminder-i,
+PrimeFlow ruan kërkesën derisa Shortcut-i ta kryejë në iPhone dhe ta konfirmojë.
 
 ## Burimet e lejuara
 
@@ -106,6 +106,26 @@ Një përgjigje e suksesshme ka këtë formë:
   "synced_at": "2026-09-03T10:00:00Z"
 }
 ```
+
+### E. Kryerja e kërkesave nga PrimeFlow
+
+1. Para importit, bëj **GET** te `/api/ga-time-slots/icloud-sync/completed`
+   me të njëjtin host dhe header `X-PrimeFlow-Sync-Token` si importi.
+2. Për çdo element, kërko në listën e çiftuar reminder-in me titullin `title`
+   dhe datën `due_at`. Krahaso orët si data, përfshirë zonën kohore.
+   Një vlerë `YYYY-MM-DD` vlen për reminder me vetëm datë. `null` vlen
+   për reminder pa datë. Vazhdo kur përputhet saktësisht një reminder,
+   edhe kur ai tashmë rezulton i kryer në telefon.
+3. Përdor **Edit Reminder** për ta shënuar si të kryer dhe mblidh `id`
+   e kërkesës pasi Reminder-i të rezultojë i kryer. Lëri të pakonfirmuara
+   kërkesat që dështuan ose patën më shumë se një përputhje.
+4. Bëj **POST** te `/api/ga-time-slots/icloud-sync/completed/ack`
+   me të njëjtin header dhe JSON `{"ids": [...]}`. Dërgo më pas importin
+   si zakonisht. Kërkesat e konfirmuara largohen nga radha, edhe pas një importi
+   që ende i raporton si të hapura.
+
+Për reminder-at e importuar para këtij përditësimi, ekzekuto importin një herë
+që PrimeFlow të ketë titullin dhe datën e origjinës.
 
 ## 3. Lejet dhe testi
 

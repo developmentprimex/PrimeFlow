@@ -266,6 +266,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   që përdor PDF-ja e NEWS-PX shfaqin `✓ Done`. Eksporti `ga-time.xlsx`,
   bashkëngjitjet GA të 1H dhe agjenda e Asistentes GA i përjashtojnë hyrjet e
   kryera. Verifiko të dyja gjendjet pas një sinkronizimi të përsëritur.
+  `ga_item_done` vendos kërkesën e kryerjes së një `tt:` në pritje deri te
+  konfirmimi i Shortcut-it. Verifiko që `ga_agenda` e shfaq në pritje dhe
+  listat e punës së hapur e përjashtojnë. Hyrjet në pritje dhe të konfirmuara
+  ruhen gjatë një importi të përsëritur. Pas konfirmimit, tabela ditore
+  dhe eksportet lexojnë `is_completed` si për kryerjet nga iPhone.
 
 - M1 dhe M2: kur leximi i Discord vonohet, shfaq mesazhet e verifikuara me orën
   e leximit të fundit. Një lexim i mëvonshëm mund të plotësojë tabelën brenda
