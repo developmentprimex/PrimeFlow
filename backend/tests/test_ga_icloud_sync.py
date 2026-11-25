@@ -126,7 +126,7 @@ class TestGaIcloudReminderImport(unittest.IsolatedAsyncioTestCase):
         connection = SimpleNamespace(
             id=uuid.uuid4(), ga_user_id=uuid.uuid4(), calendar_name="Calendar", reminder_list_name="REMINDER"
         )
-        db = SimpleNamespace(execute=AsyncMock(), add_all=Mock(), commit=AsyncMock())
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(all=Mock(return_value=[]))), add_all=Mock(), commit=AsyncMock())
         day = date(2026, 9, 7)
         with (
             patch.object(ga_time_slots, "_connection_from_sync_token", AsyncMock(return_value=connection)),
