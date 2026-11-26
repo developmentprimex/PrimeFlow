@@ -2,12 +2,13 @@ import asyncio
 import uuid
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from pydantic import ValidationError
 
 from app.services import m1_reporting_points as service
+from app.services.morning_report import preserve_removed_task_feedback
 from app.models.enums import CommonCategory, GaNoteStatus
 from app.api.routers.m1_reporting_points import ManualAnswersPayload
 
@@ -39,25 +40,57 @@ def test_saved_email_preview_loads_the_missing_summary(monkeypatch):
     assert "summary" not in saved_email
 
 
-def test_morning_task_feedback_reads_saved_answers_for_the_report_date():
+def test_morning_task_feedback_keeps_groups_and_closed_tasks_after_regeneration():
+    from io import BytesIO
+    from docx import Document
+    from openpyxl import load_workbook
+
+    closed_id, open_id, removed_open_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     plan = {"key": "plan:HV", "title": "A prishet plani për sot?", "owners": "HV",
             "continuation": "PO", "comment": ""}
-    task = {"key": "GA TASKS:task", "title": "Detyra <GA>", "owners": "GA",
+    task = {"key": f"GA TASKS:{closed_id}", "title": "Detyra <GA>", "owners": "GA",
             "continuation": "", "comment": "Takimi në 10:15"}
-    unanswered = {**task, "key": "GA TASKS:unanswered", "title": "Pa përgjigje për detyrën", "comment": ""}
-    db = SimpleNamespace(scalar=AsyncMock(return_value={"plan": [plan], "GA TASKS": [task, unanswered]}))
+    unanswered = {**task, "key": f"GA TASKS:{open_id}", "title": "Detyrë pa përgjigje", "comment": ""}
+    removed = {**unanswered, "key": f"GA TASKS:{removed_open_id}", "title": "E zhvendosur"}
+    current = {service.TASK_FEEDBACK_ROWS: {"plan": [plan], "GA TASKS": [unanswered]}}
+    previous = {service.TASK_FEEDBACK_ROWS: {"plan": [plan], "GA TASKS": [task, unanswered, removed]}}
+    snapshot = preserve_removed_task_feedback(current, previous)
+    snapshot = preserve_removed_task_feedback(current, snapshot)
+    assert snapshot[service.REMOVED_TASK_FEEDBACK_ROWS] == {"GA TASKS": [task, removed]}
+    db = SimpleNamespace(
+        scalar=AsyncMock(return_value=snapshot),
+        execute=AsyncMock(return_value=Mock(**{"all.return_value": [
+            (closed_id, "DONE", at(DAY, 10, 15), True),
+            (open_id, "TODO", None, True),
+            (removed_open_id, "TODO", None, True),
+        ]})),
+    )
     report = {"report_date": DAY.isoformat(), "data": {}}
 
     payload = asyncio.run(service.with_morning_task_feedback(db, report))
 
     statement, = db.scalar.await_args.args
     assert DAY in statement.compile().params.values()
-    assert payload["data"]["morning_task_feedback"] == [{**plan, "group": "HV"}, {**task, "group": "GA"}]
-    assert "morning_task_feedback" not in report["data"]
+    hv, dv, ga = payload["data"]["morning_task_groups"]
+    assert (hv["title"], dv["title"], ga["title"]) == ("HV TASKS", "DV TASKS", "GA TASKS")
+    assert hv["plan"] == plan
+    assert dv["tasks"] == []
+    assert ga["tasks"] == [
+        {**unanswered, "closed": False, "status": "Për t’u bërë"},
+        {**task, "closed": True, "status": "Mbyllur · 13.10.2026 10:15"},
+    ]
+    assert "morning_task_groups" not in report["data"]
     html = service.render_html(payload)
     assert "Detyra &lt;GA&gt;" in html and "Takimi në 10:15" in html
-    assert "Pa përgjigje për detyrën" not in html
+    assert "Detyrë pa përgjigje" in html and "Mbyllur · 13.10.2026 10:15" in html
+    assert "E zhvendosur" not in html
     assert html.index("6. DET ME GA") < html.index(service.MORNING_FEEDBACK_TITLE) < html.index("7. SA PER DOREZIM")
+    docx, png, xlsx = service.report_attachments(payload)
+    closed_label = ga["tasks"][-1]["status"]
+    assert closed_label in Document(BytesIO(docx[1])).element.body.xml
+    assert png[1].startswith(b"\x89PNG")
+    workbook = load_workbook(BytesIO(xlsx[1]))
+    assert any(closed_label in row for row in workbook.active.values)
 
 
 def ga_task(**changes):
