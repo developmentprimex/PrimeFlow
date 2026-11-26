@@ -190,11 +190,10 @@ function meetingAppearance(meeting: M1Meeting) {
 }
 
 export function DevelopmentMeetingAnswer({
-  section, canUpdateMeetingStatus, canCloseNote, pending, savingNote, updateNote, savingMeeting, updateMeetingStatus,
+  section, canUpdateMeetingStatus, pending, savingNote, updateNote, savingMeeting, updateMeetingStatus,
 }: {
   section: DevelopmentMeetingReport["sections"][number]
   canUpdateMeetingStatus: boolean
-  canCloseNote: boolean
   pending: boolean
   savingNote: NoteUpdate | null
   updateNote: (id: string, action: NoteAction) => void
@@ -210,7 +209,7 @@ export function DevelopmentMeetingAnswer({
     if (previous?.horizontal === horizontal) previous.rows.push(row)
     else groups.push({ horizontal, rows: [row] })
   }
-  const noteNumbers = section.key === "notes" && canCloseNote
+  const noteNumbers = section.key === "notes"
     ? new Map([...groups.flatMap((group) => group.rows), ...emailRows].map((row, index) => [row.id, index + 1]))
     : undefined
 
@@ -336,20 +335,18 @@ export function DevelopmentMeetingAnswer({
               ) : null}
             </div>
             {section.key === "notes" ? (
-              <div className={`flex flex-wrap items-center gap-2 ${canCloseNote ? "print:hidden" : ""}`} aria-busy={Boolean(savingNoteAction)}>
+              <div className="flex flex-wrap items-center gap-2 print:hidden" aria-busy={Boolean(savingNoteAction)}>
                 <Button type="button" size="sm" variant="outline" disabled={pending || savingNote !== null}
-                  className={canCloseNote ? "h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700" : undefined}
-                  title={canCloseNote ? "Shëno si të diskutuar" : undefined}
+                  className="h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
+                  title="Shëno si të diskutuar"
                   onClick={() => updateNote(row.id, "discuss")}>
-                  {canCloseNote ? "YES" : savingNoteAction === "discuss" ? "Po ruhet…" : "Shëno si të diskutuar"}
+                  YES
                 </Button>
-                {canCloseNote ? (
-                  <Button type="button" size="sm" variant="outline" disabled={pending || savingNote !== null}
-                    className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                    onClick={() => updateNote(row.id, "close")}>
-                    Close
-                  </Button>
-                ) : null}
+                <Button type="button" size="sm" variant="outline" disabled={pending || savingNote !== null}
+                  className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                  onClick={() => updateNote(row.id, "close")}>
+                  Close
+                </Button>
               </div>
             ) : null}
           </li>

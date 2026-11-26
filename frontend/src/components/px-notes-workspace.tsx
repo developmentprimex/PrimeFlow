@@ -31,6 +31,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { miraDictationLabel } from "@/lib/mira"
+import { getPlainMarkedText } from "@/lib/note-markup"
 import { TeamMarkerCommentsButton } from "@/components/team-marker-comments-button"
 import { KNOWLEDGE_CONFIG, knowledgeText, type KnowledgeType } from "@/components/knowledge/knowledge-config"
 import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/prompt-link"
@@ -1204,7 +1205,7 @@ function normalizeNoteTextareaInput(textarea: HTMLTextAreaElement): string {
 }
 
 function noteToTaskTitle(content: string, fromGmail = false) {
-  const cleaned = content
+  const cleaned = getPlainMarkedText(content)
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .split("\n")

@@ -216,11 +216,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Excel përdor subjektin, dërguesin dhe orën për pikën e inbox-it.
   Dorëzimet GA përdorin rregullin M2/M2_M3 të M2 PIKAT, të filtruar për
   Development. Pikat për punën e
-  paradites, planin PM dhe pjesa e Teams plotësohen në takim. Veprimi
-  “Shëno si të diskutuar” ofrohet edhe në My View të M2 dhe përdor
-  statusin e përbashkët të PX Notes. Email-et e importuara si PX Notes
-  grupohen nën “Email-et” me titujt e shkurtër, si në M1. Excel përdor
-  tekstin e plotë të raportit.
+  paradites, planin PM dhe pjesa e Teams plotësohen në takim. Si në M1,
+  “YES” dhe “Close” ofrohen për çdo PX Note në Department dhe My View
+  dhe përdorin statusin e përbashkët të PX Notes. Email-et e importuara
+  si PX Notes grupohen nën “Email-et” me titujt e shkurtër dhe të njëjtat
+  veprime. Excel përdor tekstin e plotë të raportit.
 
 - Development → Meetings → M3 dhe Export Excel përdorin raportin ditor të
   Development M3. Pika e punës së përfunduar dhe planit të nesërm plotësohet
@@ -1400,6 +1400,11 @@ kontrollit të commit-it të ri përditësohet shënuesi `frontend.sha`. Prova l
 e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
+
+- Knowledge PX → Prompts hap formularin Create Task të PX Notes përmes
+  `taskFor`. Titulli i marrë nga shënimi kalon në tekst të thjeshtë para
+  numërimit të karaktereve dhe ruajtjes përmes `POST /tasks`. PX JAV ka
+  formularin e vet Create Task dhe duhet kontrolluar veçmas.
 
 - ASIST GA – DET GA lidh M1 Start of Day, After Break, Meetings Report,
   M1/M2/M3 PIKAT dhe 1H SHTYPI Sot/Nesër me `?date=YYYY-MM-DD`.
