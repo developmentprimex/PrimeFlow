@@ -133,10 +133,12 @@ class VoiceJobTests(PostgresMeetingTests):
 
             initials = "EFA" if recorder == "ai_agent" else "E. F."
             ending = "Fund detyra" if recorder == "ai_agent" else "Fund detyrës"
+            title = "KONTROLLO OFERTËN" if recorder == "ai_agent" else "Kontrollo ofertën primary"
+            continuation = "Kontrollo ofertën. Fundtitullë. Krahaso çmimet." if recorder == "ai_agent" else f"{title}."
             spoken = [
                 ("12", f"Mira, detyrë për {initials}"),
                 ("99", "Mira detyrë EF, Detyrë e paautorizuar. Fund detyre."),
-                ("12", f"Kontrollo ofertën {recorder}. {ending}."),
+                ("12", f"{continuation} {ending}."),
                 ("12", "Mira, detyrë AD, Inicialet nuk janë unike. Fund detyre."),
                 ("12", "Mira, detyrë ZZ, Nuk ka punonjës. Fund detyre."),
             ]
@@ -168,7 +170,7 @@ class VoiceJobTests(PostgresMeetingTests):
                 meeting.status = "READY"
                 await db.commit()
                 detail = await mira_meeting_catalog.discord_detail(db, session_id)
-                self.assertEqual([task["title"] for task in detail["created_tasks"]], [f"Kontrollo ofertën {recorder}"])
+                self.assertEqual([task["title"] for task in detail["created_tasks"]], [title])
                 self.assertEqual(detail["created_tasks"][0]["assignees"], ["Elsa Ferati"])
                 self.assertIsNotNone(detail["created_tasks"][0]["start_date"])
                 self.assertIsNone(detail["created_tasks"][0]["due_date"])
@@ -177,7 +179,7 @@ class VoiceJobTests(PostgresMeetingTests):
 
         async with self.sessions() as db:
             records = (await db.scalars(select(Task).order_by(Task.title))).all()
-            self.assertEqual([task.title for task in records], ["Kontrollo ofertën ai_agent", "Kontrollo ofertën primary"])
+            self.assertEqual({task.title for task in records}, {"KONTROLLO OFERTËN", "Kontrollo ofertën primary"})
             for task in records:
                 self.assertEqual((task.assigned_to, task.created_by, task.department_id), (employee_id, self.uid, self.did))
                 self.assertTrue(task.is_1h_report)
@@ -185,9 +187,11 @@ class VoiceJobTests(PostgresMeetingTests):
                 self.assertIsNone(task.due_date)
                 self.assertIsNone(task.project_id)
                 note = await db.get(GaNote, task.ga_note_origin_id)
-                self.assertEqual((note.content, note.created_by, note.department_id), (task.title, self.uid, self.did))
+                from_development = task.title == "KONTROLLO OFERTËN"
+                expected_note = f"{task.title}\nKrahaso çmimet." if from_development else task.title
+                self.assertEqual((note.content, note.created_by, note.department_id), (expected_note, self.uid, self.did))
                 self.assertTrue(note.is_converted_to_task)
-                self.assertEqual(note.mira_dictation_source, "ai_agent" if task.title.endswith("ai_agent") else "1h")
+                self.assertEqual(note.mira_dictation_source, "ai_agent" if from_development else "1h")
                 self.assertEqual(task.mira_dictation_source, note.mira_dictation_source)
             self.assertEqual(len((await db.scalars(select(GaNote))).all()), 2)
             self.assertEqual((await db.scalars(select(Notification.user_id))).all(), [employee_id, employee_id])
@@ -200,7 +204,7 @@ class VoiceJobTests(PostgresMeetingTests):
             workbook = load_workbook(BytesIO(data))
             self.assertEqual(
                 {workbook.active[f"B{row}"].value for row in (5, 6)},
-                {"Kontrollo ofertën ai_agent\nNga Mira Zhvillim", "Kontrollo ofertën primary\nNga Mira 1H"},
+                {"KONTROLLO OFERTËN\nKrahaso çmimet.\nNga Mira Zhvillim", "Kontrollo ofertën primary\nNga Mira 1H"},
             )
             workbook.close()
 
@@ -208,8 +212,14 @@ class VoiceJobTests(PostgresMeetingTests):
         from sqlalchemy import select
         from app.api.routers.ga_notes import _note_out
         from app.models.ga_note import GaNote
+        from app.models.plan_note import PlanNote
+        from app.models.plan_note_attachment import PlanNoteAttachment
         from app.services import mira_meeting_catalog
         from app.services.report_note_visibility import is_mira_note
+
+        async with self.engine.begin() as conn:
+            await conn.run_sync(PlanNote.__table__.create, checkfirst=True)
+            await conn.run_sync(PlanNoteAttachment.__table__.create, checkfirst=True)
 
         for recorder, channel_setting, source in (
             ('primary', 'DISCORD_1H_VOICE_CHANNEL_ID', '1h'),
@@ -235,16 +245,23 @@ class VoiceJobTests(PostgresMeetingTests):
                  patch.object(service.settings, channel_setting, '55'):
                 await upload(3, '12', 'Fund shënime.' if recorder == 'ai_agent' else 'Fund shënimi.')
                 start = 'Mirashënë,' if recorder == 'ai_agent' else 'Mirëa shëno.'
-                await upload(0, '12', f'{start} Po, po, e kam dërgu.')
+                await upload(0, '12', f'{start} Oferta e dërguar. Fund')
                 await upload(1, '99', 'Fund shënimi. Mira shëno, Mos e ruaj. Fund shënimi.')
-                await upload(2, '12', 'Kontrolloje edhe një herë.')
+                await upload(2, '12', 'Titullë. Kontrolloje edhe një herë.')
                 await upload(3, '12', 'Nuk duhet të transkriptohet përsëri.')
+                plan_command = f'Mira, planifiko. Oferta {source}. Fundtitulli. Krahaso çmimet. Fund shënimi.'
+                await upload(4, '12', plan_command)
+                await upload(4, '12', plan_command)
             async with self.sessions() as db:
                 saved = (await db.execute(select(GaNote).where(GaNote.mira_dictation_source == source))).scalars().one()
+                plan_content = f'OFERTA {source.upper()}\nKrahaso çmimet.'
+                plan_note = (await db.scalars(select(PlanNote).where(PlanNote.content == plan_content))).one()
+                self.assertEqual(plan_note.created_by, self.uid)
+                self.assertFalse(plan_note.is_converted_to_task)
                 row = await db.get(Meeting, sid)
                 self.assertEqual(row.status, 'LISTENING')
                 self.assertIsNone(row.saved_note_id)
-                self.assertEqual(saved.content, 'Po, po, e kam dërgu. Kontrolloje edhe një herë.')
+                self.assertEqual(saved.content, 'OFERTA E DËRGUAR\nKontrolloje edhe një herë.')
                 self.assertEqual(saved.created_by, self.uid)
                 view = _note_out(saved)
                 self.assertEqual(view.mira_dictation_source, source)

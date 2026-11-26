@@ -25,6 +25,54 @@ class DictationCommandTests(unittest.TestCase):
         self.assertEqual(notes, [("note", "A."), ("note", "B.")])
         self.assertIsNone(pending)
 
+    def test_note_title_markers_uppercase_only_the_first_line(self):
+        for marker in ("Fund titulli", "fund titullit", "fund titull", "fund titulle", "fund titullë", "Fund, titulli",
+                       "fundtitull", "fundtitulli", "fundtitullë"):
+            with self.subTest(marker=marker):
+                self.assertEqual(
+                    consume(f"Mira, shëno. Çështja e re. {marker}. Presim përgjigjen. Fund shënimi.", 0, 1000, None),
+                    (None, [("note", "ÇËSHTJA E RE\nPresim përgjigjen.")]),
+                )
+
+    def test_note_title_marker_split_across_segments_is_used_only_once(self):
+        pending, commands = consume("Mira, shëno. Oferta e re. Fund.", 0, 1000, None)
+        self.assertEqual(commands, [])
+        self.assertEqual(
+            consume("Titulli. Thuaj fund titulli edhe një herë. Fund shënimi.", 1000, 2000, pending),
+            (None, [("note", "OFERTA E RE\nThuaj fund titulli edhe një herë.")]),
+        )
+
+    def test_plan_note_uses_a_distinct_start_and_the_same_title_and_end_markers(self):
+        pending, commands = consume("Mira,", 0, 1000, None)
+        self.assertEqual(commands, [])
+        self.assertEqual(
+            consume("planifiko. Çështja e re. Fundtitullë. Kontrollo ofertën. Fund shënime.", 1000, 2000, pending),
+            (None, [("plan_note", "ÇËSHTJA E RE\nKontrollo ofertën.")]),
+        )
+        self.assertEqual(
+            consume("Mira, planifiko. Oferta e re. Fund tit. Presim përgjigjen. Fund shënimi.", 0, 1000, None),
+            (None, [("plan_note", "Oferta e re. Fund tit. Presim përgjigjen.")]),
+        )
+
+    def test_plan_note_accepts_transcribed_start_variants(self):
+        for command in ("planifikoë", "planifikoe", "planfiko", "planfikoë", "planfikoe",
+                        "planifko", "planifkoë", "planifkoe"):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    consume(f"Mira, {command}. Kontrollo ofertën. Fund shënimi.", 0, 1000, None),
+                    (None, [("plan_note", "Kontrollo ofertën.")]),
+                )
+
+    def test_note_is_saved_whole_without_a_recognized_title_marker(self):
+        for body in ("Oferta e re. Presim përgjigjen.", "Oferta e re. Fund tit. Presim përgjigjen.",
+                     "Kontrollo fjalën në fund të titullit.", "Projekti Fundtitullar.",
+                     "Fund titulli. Pa titull të diktuar."):
+            with self.subTest(body=body):
+                self.assertEqual(
+                    consume(f"Mira, shëno. {body} Fund shënimi.", 0, 1000, None),
+                    (None, [("note", body)]),
+                )
+
     def test_abandoned_dictation_does_not_close_later(self):
         pending, _ = consume("Mira shëno. Teksti i vjetër.", 0, 1000, None)
         pending, notes = consume("Fund shënimi.", 30_000, 31_000, pending)
@@ -46,6 +94,18 @@ class DictationCommandTests(unittest.TestCase):
                 self.assertEqual(task_fields(body), ("EF", body[body.lower().index("kontrollo"):].rstrip(".")))
         for body in ("EF", "Për EF.", "Kontrollo ofertën."):
             self.assertIsNone(task_fields(body))
+
+    def test_task_title_uses_the_note_title_marker_variants(self):
+        for marker in ("Fund titulli", "fundtitull", "fundtitulli", "fundtitullë"):
+            with self.subTest(marker=marker):
+                self.assertEqual(
+                    task_fields(f"Për EFA. Çështja e re. {marker}. Kontrollo edhe ofertën."),
+                    ("EFA", "ÇËSHTJA E RE\nKontrollo edhe ofertën."),
+                )
+        self.assertEqual(
+            task_fields("Për EFA. Çështja e re. Fund tit. Kontrollo edhe ofertën."),
+            ("EFA", "Çështja e re. Fund tit. Kontrollo edhe ofertën"),
+        )
 
     def test_transcribed_variants_from_discord(self):
         pending, commands = consume(

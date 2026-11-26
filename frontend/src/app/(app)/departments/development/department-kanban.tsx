@@ -1557,7 +1557,25 @@ export default function DepartmentKanban() {
   const m1 = useDevelopmentMeetingReport("M1", hasChecklist && internalSlot === "M1")
   const m2 = useDevelopmentMeetingReport("M2", hasChecklist && internalSlot === "M2")
   const checklistReport = internalSlot === "M1" ? m1 : internalSlot === "M2" ? m2 : null
-  const showMeetingLists = checklistReport === null
+  const checklistDate = checklistReport?.report?.date
+  const openPointsKey = user?.id && checklistReport ? `development-${internalSlot.toLowerCase()}-open-points:${user.id}` : null
+  const [openPointIds, setOpenPointIds] = React.useState<string[]>([])
+  const pendingInternalMeetingChecks = React.useRef(new Set<string>())
+  React.useEffect(() => {
+    if (!openPointsKey || !checklistDate) return
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(openPointsKey) ?? "null")
+      setOpenPointIds(saved?.date === checklistDate && Array.isArray(saved.itemIds)
+        ? saved.itemIds.filter((id: unknown) => typeof id === "string")
+        : [])
+    } catch {
+      setOpenPointIds([])
+    }
+  }, [checklistDate, openPointsKey])
+  const hasKaGentContent = m1.report?.sections.some(
+    (section) => (section.key === "internal" || section.key === "questions") && section.rows.length > 0,
+  )
+  const showMeetingLists = internalSlot === "TESTIMI_I_AGENT"
   const hiddenM1Items = new Set(m1.report?.hidden_item_ids)
   const [newInternalMeetingItem, setNewInternalMeetingItem] = React.useState("")
   const [addingInternalMeetingItem, setAddingInternalMeetingItem] = React.useState(false)
@@ -6707,20 +6725,40 @@ export default function DepartmentKanban() {
 
   const toggleInternalMeetingItem = async (itemId: string, next: boolean) => {
     const previous = internalMeetingItems.find((item) => item.id === itemId)?.is_checked ?? false
+    if (next === previous || pendingInternalMeetingChecks.current.has(itemId)) return
+    pendingInternalMeetingChecks.current.add(itemId)
     setInternalMeetingItems((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, is_checked: next } : item))
     )
-    const res = await apiFetch(`/checklist-items/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_checked: next }),
-    })
-    if (!res.ok) {
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_checked: next }),
+      })
+      if (!res.ok) throw new Error("Checklist update failed")
+    } catch {
       setInternalMeetingItems((prev) =>
         prev.map((item) => (item.id === itemId ? { ...item, is_checked: previous } : item))
       )
       toast.error("Failed to update internal meeting item")
+    } finally {
+      pendingInternalMeetingChecks.current.delete(itemId)
     }
+  }
+
+  const toggleReportPoint = (item: ChecklistItem) => {
+    const opening = !openPointIds.includes(item.id)
+    const itemIds = opening ? [...openPointIds, item.id] : openPointIds.filter((id) => id !== item.id)
+    setOpenPointIds(itemIds)
+    if (openPointsKey && checklistDate) {
+      try {
+        sessionStorage.setItem(openPointsKey, JSON.stringify({ date: checklistDate, itemIds }))
+      } catch {
+        // Keep the open points in memory if browser storage is unavailable.
+      }
+    }
+    if (opening && !item.is_checked) void toggleInternalMeetingItem(item.id, true)
   }
 
   const addInternalMeetingItem = async () => {
@@ -11075,7 +11113,7 @@ export default function DepartmentKanban() {
                     </div>
                     {checklistReport && internalMeetingItems.length ? (
                       <Button type="button" variant="outline" size="sm" onClick={checklistReport.reload}
-                        disabled={checklistReport.loading || checklistReport.savingNote !== null || checklistReport.cancelingMeeting !== null}>
+                        disabled={checklistReport.loading || checklistReport.savingNote !== null || checklistReport.savingMeeting !== null}>
                         Rifresko
                       </Button>
                     ) : null}
@@ -11113,12 +11151,22 @@ export default function DepartmentKanban() {
                         const isEditing = editingInternalMeetingItemId === item.id
                         const report = checklistReport?.report
                         const answer = report?.sections.find((section) => section.key === report.item_sections[item.id])
+                        const discussionOnly = internalSlot === "M1" && (answer?.key === "visitors" || answer?.key === "plan")
+                        const emptyKaGent = answer?.key === "ka_gent" && hasKaGentContent === false
+                        const emptyDelivery = internalSlot === "M2" && answer?.key === "delivery" && answer.rows.length === 0
+                        const inlineAnswer = emptyKaGent ? "Nuk ka për sot." : emptyDelivery ? "Jo" : null
+                        const expandable = answer && checklistReport && !discussionOnly && !inlineAnswer
+                        const rowChecksOnClick = !showMeetingLists && !isEditing && !expandable
+                        const checkboxId = rowChecksOnClick ? `development-meeting-check-${item.id}` : undefined
+                        const PlainPoint = rowChecksOnClick ? "label" : "div"
                         const displayTitle = answer?.key === "ka_gent" ? answer.title : (internalSlot === "M2" || internalSlot === "M3")
                           ? (item.title || "").toUpperCase()
                           : (item.title || "")
                         return (
-                          <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <div key={item.id} className="relative flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
                             <Checkbox
+                              id={checkboxId}
+                              className={rowChecksOnClick ? "relative z-10 cursor-pointer" : undefined}
                               aria-label={displayTitle}
                               checked={Boolean(item.is_checked)}
                               onCheckedChange={(checked) => toggleInternalMeetingItem(item.id, Boolean(checked))}
@@ -11144,26 +11192,32 @@ export default function DepartmentKanban() {
                                     placeholder="Checklist item"
                                   />
                                 </div>
-                              ) : answer && checklistReport ? (
-                                <details className="group">
-                                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                              ) : expandable ? (
+                                <details className="group" open={openPointIds.includes(item.id)}>
+                                  <summary
+                                    className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden"
+                                    onClick={(event) => {
+                                      event.preventDefault()
+                                      toggleReportPoint(item)
+                                    }}>
                                     <span>{idx + 1}. {displayTitle}</span>
                                     <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
                                   </summary>
-                                  <DevelopmentMeetingAnswer section={answer} readOnly={isReadOnly}
-                                    canMarkDiscussed={!isReadOnly || internalSlot === "M2"}
+                                  <DevelopmentMeetingAnswer section={answer} canUpdateMeetingStatus={internalSlot === "M1"}
+                                    canCloseNote={internalSlot === "M1"}
                                     pending={checklistReport.loading || checklistReport.failed} savingNote={checklistReport.savingNote}
-                                    markDiscussed={checklistReport.markDiscussed} cancelingMeeting={checklistReport.cancelingMeeting}
-                                    cancelMeeting={checklistReport.cancelMeeting} />
+                                    updateNote={checklistReport.updateNote} savingMeeting={checklistReport.savingMeeting}
+                                    updateMeetingStatus={checklistReport.updateMeetingStatus} />
                                 </details>
                               ) : (
-                                <div className="text-sm text-muted-foreground">
+                                <PlainPoint htmlFor={checkboxId} className={`block text-sm text-muted-foreground ${rowChecksOnClick ? "cursor-pointer after:absolute after:inset-0 after:rounded-xl" : ""}`}>
                                   {idx + 1}. {displayTitle}
-                                </div>
+                                  {inlineAnswer ? <span className="ml-2 font-medium text-foreground">{inlineAnswer}</span> : null}
+                                </PlainPoint>
                               )}
                             </div>
                             {!isReadOnly ? (
-                              <div className="flex items-center gap-2">
+                              <div className={`flex items-center gap-2 ${rowChecksOnClick ? "relative z-10" : ""}`}>
                                 {isEditing ? (
                                   <>
                                     <Button

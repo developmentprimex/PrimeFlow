@@ -129,11 +129,10 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
         <Created rows={rows} kind="task" />
       </div>)}
     </Point>
-    {manual("reorganization", "6. A DUHET RIORGANIZIM?")}
-    {(["ga_progress", "delivery"] as const).map((key) => key === "delivery" && report.discord_delivery_slot ? <Point key={key} id="m1-delivery" title="8. SA PER DOREZIM M2?">
+    {(["ga_progress", "delivery"] as const).map((key) => key === "delivery" && report.discord_delivery_slot ? <Point key={key} id="m1-delivery" title="7. SA PER DOREZIM M2?">
       <DiscordDeliveryTable rows={report.data.delivery || []} slot={report.discord_delivery_slot} />
     </Point> : <Point key={key} id={`m1-${key}`}
-      title={key === "ga_progress" ? "7. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA" : "8. SA PER DOREZIM M2?"}
+      title={key === "ga_progress" ? "6. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA" : "7. SA PER DOREZIM M2?"}
       count={(report.data[key] || []).length}
       description={key === "ga_progress" ? "Detyrat AM dhe AM/PM personale me GA ose me simbolet F/GA, brenda intervalit start–due." : "Detyrat me simbolet M2 dhe M2/3, AM dhe PM, brenda intervalit start–due, si te M2."}>
       <Grid name={key === "ga_progress" ? "Detyrat me GA" : "Detyrat për dorëzim M2"} labels={["NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "SIMBOLI", "TITULLI"]}
@@ -145,5 +144,6 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
             .map((cell, column) => <span key={column} style={{ color: row.is_paused ? "inherit" : row.deadline_important ? "white" : "black" }}>{cell}</span>),
         }))} />
     </Point>)}
+    {manual("reorganization", "8. A DUHET RIORGANIZIM?")}
   </div>
 }

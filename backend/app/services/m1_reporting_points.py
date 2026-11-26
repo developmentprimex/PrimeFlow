@@ -42,9 +42,9 @@ POINTS = (
     ("plan_changes", "3. A KA NDRYSHIM TË PLANIT / PRIORITETEVE?"),
     ("notes", "4. NOTES TË REJA?"),
     ("tasks", "5. DETYRA TË REJA TË KRIJUARA SOT?"),
-    ("reorganization", "6. A DUHET RIORGANIZIM?"),
-    ("ga_progress", "7. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA"),
-    ("delivery", "8. SA PER DOREZIM M2?"),
+    ("ga_progress", "6. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA"),
+    ("delivery", "7. SA PER DOREZIM M2?"),
+    ("reorganization", "8. A DUHET RIORGANIZIM?"),
 )
 MANUAL_POINTS = {key: title for key, title in POINTS if key in {"plan_changes", "reorganization"}}
 

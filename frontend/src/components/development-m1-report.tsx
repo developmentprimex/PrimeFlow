@@ -32,6 +32,10 @@ type M1Meeting = InternalMeetingToneInput & {
   occurrenceStatus?: string
 }
 
+type MeetingStatus = "" | "held" | "canceled"
+type NoteAction = "close" | "discuss"
+type NoteUpdate = { id: string; action: NoteAction }
+
 type DevelopmentMeetingReport = {
   date: string
   cutoff?: string
@@ -70,8 +74,8 @@ export function useDevelopmentMeetingReport(slot: "M1" | "M2", enabled: boolean)
   const [refresh, setRefresh] = useState(0)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [savingNote, setSavingNote] = useState<string | null>(null)
-  const [cancelingMeeting, setCancelingMeeting] = useState<string | null>(null)
+  const [savingNote, setSavingNote] = useState<NoteUpdate | null>(null)
+  const [savingMeeting, setSavingMeeting] = useState<{ id: string; date: string } | null>(null)
 
   useEffect(() => {
     if (!enabled) return
@@ -96,68 +100,72 @@ export function useDevelopmentMeetingReport(slot: "M1" | "M2", enabled: boolean)
     return () => controller.abort()
   }, [apiFetch, enabled, refresh, slot])
 
-  async function markDiscussed(id: string) {
-    setSavingNote(id)
+  async function updateNote(id: string, action: NoteAction) {
+    if (savingNote) return
+    setSavingNote({ id, action })
     try {
       const response = await apiFetch(`/ga-notes/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_discussed: true }),
+        body: JSON.stringify(action === "close" ? { status: "CLOSED" } : { is_discussed: true }),
       })
       if (!response.ok) throw new Error("PX Note update failed")
       setRefresh((previous) => previous + 1)
     } catch {
-      toast.error("Shënimi nuk u shënua si i diskutuar.")
+      toast.error(action === "close" ? "Shënimi nuk u mbyll." : "Shënimi nuk u shënua si i diskutuar.")
     } finally {
       setSavingNote(null)
     }
   }
 
-  async function cancelMeeting(meeting: M1Meeting, title: string) {
-    if (cancelingMeeting) return
-    setCancelingMeeting(meeting.id)
+  async function updateMeetingStatus(meeting: M1Meeting, title: string, status: MeetingStatus) {
+    if (savingMeeting) return
+    setSavingMeeting({ id: meeting.id, date: meeting.date })
     try {
-      const effects = meeting.type === "external"
-        ? "Takimet interne të lidhura dhe detyrat e gjeneruara për këto takime fshihen, nëse ekzistojnë."
-        : "Detyrat e gjeneruara nga ky takim fshihen, nëse ekzistojnë."
-      const confirmed = await confirm({
-        title: "Ta anulosh takimin?",
-        description: `${title} · ${formatDateDMY(meeting.date)}\n\n${effects}`,
-        confirmLabel: "Anulo takimin",
-        cancelLabel: "Kthehu",
-        variant: "destructive",
-      })
-      if (!confirmed) return
+      const canceled = status === "canceled"
+      if (canceled) {
+        const effects = meeting.type === "external"
+          ? "Takimet interne të lidhura dhe detyrat e gjeneruara për këto takime fshihen, nëse ekzistojnë."
+          : "Detyrat e gjeneruara nga ky takim fshihen, nëse ekzistojnë."
+        const confirmed = await confirm({
+          title: "Ta anulosh takimin?",
+          description: `${title} · ${formatDateDMY(meeting.date)}\n\n${effects}`,
+          confirmLabel: "Anulo takimin",
+          cancelLabel: "Kthehu",
+          variant: "destructive",
+        })
+        if (!confirmed) return
+      }
 
       const response = await apiFetch(`/meetings/${meeting.id}/occurrence-status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ occurrence_date: meeting.date, status: "canceled" }),
+        body: JSON.stringify({ occurrence_date: meeting.date, status }),
       })
-      if (!response.ok) throw new Error("Meeting cancellation failed")
+      if (!response.ok) throw new Error("Meeting status update failed")
       setReport((previous) => previous && {
         ...previous,
         sections: previous.sections.map((section) => ({
           ...section,
           rows: section.rows
-            .filter((row) => meeting.type !== "external" || (
+            .filter((row) => !canceled || meeting.type !== "external" || (
               row.meeting?.preExternalMeetingId !== meeting.id && row.meeting?.pairedExternalMeetingId !== meeting.id
             ))
             .map((row) => row.meeting?.id === meeting.id && row.meeting.date === meeting.date
-              ? { ...row, canceled: true, meeting: { ...row.meeting, occurrenceStatus: "canceled" } }
+              ? { ...row, canceled, meeting: { ...row.meeting, occurrenceStatus: status } }
               : row),
         })),
       })
       setRefresh((previous) => previous + 1)
     } catch {
-      toast.error("Takimi nuk u anulua. Rifresko raportin dhe provo përsëri.")
+      toast.error("Statusi i takimit nuk u ruajt. Rifresko raportin dhe provo përsëri.")
     } finally {
-      setCancelingMeeting(null)
+      setSavingMeeting(null)
     }
   }
 
   return {
-    report, loading, failed, savingNote, markDiscussed, cancelingMeeting, cancelMeeting,
+    report, loading, failed, savingNote, updateNote, savingMeeting, updateMeetingStatus,
     reload: () => setRefresh((previous) => previous + 1),
   }
 }
@@ -175,21 +183,20 @@ function meetingAppearance(meeting: M1Meeting) {
     calendar: isInternal ? isCalendarLinkedInternalMeeting(meeting) : meeting.calendarImported,
     manual: isInternal && isManualInternalMeeting(meeting),
     relation: isInternal ? internalMeetingRelation(meeting) : undefined,
-    held: meeting.occurrenceStatus === "held",
   }
 }
 
 export function DevelopmentMeetingAnswer({
-  section, readOnly, canMarkDiscussed, pending, savingNote, markDiscussed, cancelingMeeting, cancelMeeting,
+  section, canUpdateMeetingStatus, canCloseNote, pending, savingNote, updateNote, savingMeeting, updateMeetingStatus,
 }: {
   section: DevelopmentMeetingReport["sections"][number]
-  readOnly: boolean
-  canMarkDiscussed: boolean
+  canUpdateMeetingStatus: boolean
+  canCloseNote: boolean
   pending: boolean
-  savingNote: string | null
-  markDiscussed: (id: string) => void
-  cancelingMeeting: string | null
-  cancelMeeting: (meeting: M1Meeting, title: string) => void
+  savingNote: NoteUpdate | null
+  updateNote: (id: string, action: NoteAction) => void
+  savingMeeting: { id: string; date: string } | null
+  updateMeetingStatus: (meeting: M1Meeting, title: string, status: MeetingStatus) => void
 }) {
   const emailRows = section.rows.filter((row) => row.email_heading)
   const groups: { horizontal: boolean; rows: typeof section.rows }[] = []
@@ -200,6 +207,9 @@ export function DevelopmentMeetingAnswer({
     if (previous?.horizontal === horizontal) previous.rows.push(row)
     else groups.push({ horizontal, rows: [row] })
   }
+  const noteNumbers = section.key === "notes" && canCloseNote
+    ? new Map([...groups.flatMap((group) => group.rows), ...emailRows].map((row, index) => [row.id, index + 1]))
+    : undefined
 
   const renderRows = (rows: typeof section.rows, horizontal = false) => (
     <ul key={rows[0].id}
@@ -212,17 +222,46 @@ export function DevelopmentMeetingAnswer({
         if (row.heading) return <li key={row.id} className="pt-1 text-sm font-semibold">{row.title}</li>
         const occurrence = row.meeting
         const meeting = occurrence ? meetingAppearance(occurrence) : undefined
+        const meetingStatus: MeetingStatus = row.canceled ? "canceled" : occurrence?.occurrenceStatus === "held" ? "held" : ""
+        const showStatusSelect = Boolean(occurrence?.id && canUpdateMeetingStatus)
+        const savingStatus = Boolean(savingMeeting && savingMeeting.id === occurrence?.id && savingMeeting.date === occurrence.date)
+        const savingNoteAction = savingNote?.id === row.id ? savingNote.action : undefined
+        const noteNumber = noteNumbers?.get(row.id)
         const labels = meeting ? undefined : row.labels?.filter((label) => !row.task_status_labels?.includes(label))
         return (
           <li key={row.id} className={`flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2 text-sm ${horizontal ? "flex-col" : "flex-wrap"} ${meeting?.tone ?? ""}`}
             style={row.color ? { backgroundColor: meeting ? undefined : row.color, borderColor: row.border, color: "#0f172a" } : undefined}>
+            {noteNumber !== undefined ? (
+              <span className="min-w-6 shrink-0 text-right text-xs font-semibold leading-5 tabular-nums text-slate-600">{noteNumber}.</span>
+            ) : null}
             <div className={horizontal ? "w-full flex-1 [overflow-wrap:anywhere]" : "min-w-0 flex-1 break-words"}>
-              {meeting && (meeting.time || meeting.calendar || meeting.manual || meeting.held) ? (
+              {occurrence && meeting && (showStatusSelect || meeting.time || meeting.calendar || meeting.manual || meetingStatus) ? (
                 <div className="mb-1 flex flex-wrap items-center gap-1">
+                  {showStatusSelect ? (
+                    <select
+                      className="h-[22px] max-w-[92px] rounded-md border border-slate-300 bg-white px-1 py-px text-[11px] font-bold text-slate-700 data-[status=held]:border-green-300 data-[status=held]:bg-green-100 data-[status=held]:text-green-800 data-[status=canceled]:border-red-300 data-[status=canceled]:bg-red-100 data-[status=canceled]:text-red-800 print:hidden"
+                      data-status={meetingStatus}
+                      value={meetingStatus}
+                      disabled={pending || savingMeeting !== null}
+                      aria-label={`Statusi i takimit: ${row.title}`}
+                      aria-busy={savingStatus}
+                      onChange={(event) => updateMeetingStatus(occurrence, row.title, event.currentTarget.value as MeetingStatus)}
+                    >
+                      <option value="" aria-label="Pa status" />
+                      <option value="held">Mbajtur</option>
+                      <option value="canceled">Anuluar</option>
+                    </select>
+                  ) : null}
                   {meeting.time ? <span className="meeting-time-chip">{meeting.time}</span> : null}
                   {meeting.calendar ? <span className="calendar-meeting-badge">CAL</span> : null}
                   {meeting.manual ? <span className="manual-meeting-badge">MANUAL</span> : null}
-                  {meeting.held ? <span className="rounded border border-green-300 bg-green-100 px-1.5 py-0.5 text-xs text-green-800">Mbajtur</span> : null}
+                  {meetingStatus ? (
+                    <span className={`rounded border px-1.5 py-0.5 text-xs ${showStatusSelect ? "hidden print:inline" : ""} ${
+                      meetingStatus === "held" ? "border-green-300 bg-green-100 text-green-800" : "border-red-300 bg-red-100 text-red-800"
+                    }`}>
+                      {meetingStatus === "held" ? "Mbajtur" : "Anuluar"}
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
               {labels?.length || row.marker ? (
@@ -246,7 +285,6 @@ export function DevelopmentMeetingAnswer({
                     {meeting.relation}
                   </span>
                 ) : null}
-                {row.canceled ? <span className="sr-only">Anuluar. </span> : null}
                 {row.task_status_labels?.length ? (
                   <span className="sr-only">{row.task_status_labels.join(", ")}. </span>
                 ) : null}
@@ -278,19 +316,22 @@ export function DevelopmentMeetingAnswer({
                 </a>
               ) : null}
             </div>
-            {section.key === "notes" && canMarkDiscussed ? (
-              <Button type="button" size="sm" variant="outline" disabled={pending || savingNote !== null}
-                onClick={() => markDiscussed(row.id)}>
-                {savingNote === row.id ? "Po ruhet…" : "Shëno si të diskutuar"}
-              </Button>
-            ) : null}
-            {occurrence?.id && !row.canceled && !readOnly ? (
-              <Button type="button" size="sm" variant="outline"
-                disabled={pending || cancelingMeeting !== null}
-                aria-label={`Anulo takimin ${row.title}`}
-                onClick={() => cancelMeeting(occurrence, row.title)}>
-                {cancelingMeeting === occurrence.id ? "Po anulohet…" : "Anulo takimin"}
-              </Button>
+            {section.key === "notes" ? (
+              <div className={`flex flex-wrap items-center gap-2 ${canCloseNote ? "print:hidden" : ""}`} aria-busy={Boolean(savingNoteAction)}>
+                <Button type="button" size="sm" variant="outline" disabled={pending || savingNote !== null}
+                  className={canCloseNote ? "h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700" : undefined}
+                  title={canCloseNote ? "Shëno si të diskutuar" : undefined}
+                  onClick={() => updateNote(row.id, "discuss")}>
+                  {canCloseNote ? "YES" : savingNoteAction === "discuss" ? "Po ruhet…" : "Shëno si të diskutuar"}
+                </Button>
+                {canCloseNote ? (
+                  <Button type="button" size="sm" variant="outline" disabled={pending || savingNote !== null}
+                    className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                    onClick={() => updateNote(row.id, "close")}>
+                    Close
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
           </li>
         )
