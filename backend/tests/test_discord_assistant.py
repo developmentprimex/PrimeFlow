@@ -264,7 +264,8 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
             await api.command(payload, None)
         self.assertEqual(error.exception.status_code, 422)
 
-    async def run_command(self, parsed_plan, *, fail_comment=False, changed=False, displayed_changed=False, require_comment=False, direct=False):
+    async def run_command(self, parsed_plan, *, fail_comment=False, changed=False, displayed_changed=False,
+                          require_comment=False, direct=False, confirmed_slot=None):
         self.link = SimpleNamespace(id=uuid.uuid4(), selected_task_id=uuid.UUID(TASK_ID), pending_instruction=None, selected_at=None, selected_fingerprint=None)
         user = SimpleNamespace(id=uuid.UUID(USER_ID))
         self.action = None
@@ -299,8 +300,20 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(api, "daily_tasks", new_callable=AsyncMock, return_value=[task]), \
              patch.object(api, "owned_task", new_callable=AsyncMock, side_effect=owned), \
              patch.object(tools, "user_api", side_effect=request), \
-             patch.object(tools, "interpret", new_callable=AsyncMock, return_value=parsed_plan) as interpret:
+             patch.object(tools, "interpret", new_callable=AsyncMock, return_value=parsed_plan) as interpret, \
+             patch.object(api, "has_pm_block", new=AsyncMock(return_value=bool(confirmed_slot))):
             result = await api.command(payload, db)
+            if confirmed_slot:
+                self.assertEqual(result["status"], "SLOT_CONFIRMATION")
+                self.assertFalse(any(method != "GET" for method, _, _ in self.requests))
+                pending = self.action
+                db.get.side_effect = lambda _model, key: pending if key == "999" else None
+                result = await api.command(api.Command(
+                    discord_user_id="12", guild_id="123", channel_id="44", request_id="1000",
+                    instruction=f"Ruaj slotin {confirmed_slot}", continue_slot_request_id="999",
+                    replacement_slot=confirmed_slot,
+                ), db)
+                self.assertEqual(pending.status, "SLOT_CONFIRMATION_USED")
             if direct:
                 interpret.assert_not_called()
             return result
@@ -309,6 +322,18 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_command(plan(("update_task", {"status": "WAITING_CLIENT"})), direct=True)
         self.assertEqual(result["status"], "DONE")
         self.assertEqual(self.action.result["operations"][0]["body"]["status"], "WAITING_CLIENT")
+
+    async def test_slot_reminder_defers_discord_writes_until_slot_is_chosen(self):
+        for slot in ("16:00", "14:20"):
+            with self.subTest(slot=slot):
+                result = await self.run_command(
+                    plan(("slot", {"one_h_report_slot": "16:00", "report_date": "2026-11-26"})),
+                    direct=True, confirmed_slot=slot,
+                )
+                self.assertEqual(result["status"], "DONE")
+                writes = [request for request in self.requests if request[0] == "PATCH"]
+                self.assertEqual(len(writes), 1)
+                self.assertEqual(writes[0][2]["body"]["one_h_report_slot"], slot)
 
     async def test_direct_points_still_reject_changed_task(self):
         result = await self.run_command(plan(("set_points", {"field": "description", "numbers": [1, 2], "done": True})), direct=True, changed=True)

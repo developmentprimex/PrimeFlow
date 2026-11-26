@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse
+from app.services.one_h_slot_reminder import SlotReminderHeader, confirm_pm_block_slot, note_slot_owners
+from app.services.one_h_slots import current_effective_slot_date
 from sqlalchemy import insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -509,6 +511,7 @@ async def update_ga_note_task_bundle(
     payload: GaNoteTaskBundleUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
+    slot_reminder: SlotReminderHeader = None,
 ) -> GaNoteTaskBundleResponse:
     """Atomically update a GA note and its independent per-assignee tasks.
 
@@ -569,6 +572,10 @@ async def update_ga_note_task_bundle(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
+    already_at_16 = {
+        task.id for task in existing_tasks
+        if task.is_active and task.is_1h_report and task.one_h_report_slot == "16:00"
+    }
 
     if (
         payload.expected_updated_at is not None
@@ -885,6 +892,12 @@ async def update_ga_note_task_bundle(
                 )
             )
 
+    if slot_reminder == "ask":
+        requested = {item.assignee_id for item in payload.assignee_states or [] if item.one_h_report_slot == "16:00"}
+        await confirm_pm_block_slot(
+            slot_reminder, db, current_effective_slot_date(), note_slot_owners(active_tasks, requested, already_at_16),
+            per_assignee=True,
+        )
     await db.commit()
     for notification in created_notifications:
         try:

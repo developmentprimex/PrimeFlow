@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
+from app.services.one_h_slot_reminder import SlotReminderHeader
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,7 +131,7 @@ async def request_citation_times(recording_id: uuid.UUID, db: AsyncSession = Dep
 
 @router.post('/{recording_id}/actions/{action_id}/task')
 async def confirm_task(recording_id: uuid.UUID, action_id: uuid.UUID, payload: TaskConfirmation,
-        db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+        db: AsyncSession = Depends(get_db), user=Depends(get_current_user), slot_reminder: SlotReminderHeader = None):
     row = await load_recording(db, recording_id, user, write=True)
     proposal = (await db.execute(select(Action).where(Action.id == action_id, Action.recording_id == row.id).with_for_update())).scalar_one_or_none()
     if not proposal:
@@ -182,5 +183,6 @@ async def confirm_task(recording_id: uuid.UUID, action_id: uuid.UUID, payload: T
         proposal.confirmed_at = datetime.now(timezone.utc)
         audit(db, user, row, 'recording_task_confirmed', action_id=str(proposal.id), task_id=str(task.id))
     result = await create_task_in_session(TaskCreate(**payload.model_dump(exclude={'description', 'title'}),
-        title=title, description=payload.description.strip() or None, ga_note_origin_id=note.id), db, user, before_commit=attach)
+        title=title, description=payload.description.strip() or None, ga_note_origin_id=note.id),
+        db, user, before_commit=attach, slot_reminder=slot_reminder)
     return {'task_id': result.id, 'ga_note_id': note.id, 'duplicate': False}

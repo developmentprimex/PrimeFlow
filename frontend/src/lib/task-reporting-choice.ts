@@ -8,6 +8,52 @@ export type ReportingChoiceDetails = {
   peers: { owner_id: string; person: string; label: string }[]
 }
 
+export type SlotReminderDetails = { message: string; slots: string[] }
+
+export function slotReminderRequest(
+  send: (init: RequestInit) => Promise<Response>,
+  confirm: (details: SlotReminderDetails, signal?: AbortSignal | null) => Promise<string | null>,
+) {
+  let choice: string | null = null
+  let affectedAssignees: Set<string> | null = null
+
+  function confirmedRequest(init: RequestInit, headers: Headers) {
+    headers.set("X-PrimeFlow-One-H-Slot-Reminder", "continue")
+    if (choice === "continue") return { ...init, headers }
+    const body = JSON.parse(init.body as string)
+    if (body.one_h_report_slot === "16:00") body.one_h_report_slot = choice
+    if (Array.isArray(body.assignee_states) && affectedAssignees) {
+      for (const state of body.assignee_states) {
+        if (state.one_h_report_slot === "16:00" && affectedAssignees.has(state.assignee_id)) {
+          state.one_h_report_slot = choice
+          state.finish_period = choice === "14:20" ? "PM" : "AM"
+        }
+      }
+    }
+    return { ...init, headers, body: JSON.stringify(body) }
+  }
+
+  return async (init: RequestInit): Promise<Response> => {
+    if (typeof init.body !== "string" || !/"one_h_report_slot"\s*:\s*"16:00"/.test(init.body)) return send(init)
+    const headers = new Headers(init.headers)
+    if (choice) return send(confirmedRequest(init, headers))
+    headers.set("X-PrimeFlow-One-H-Slot-Reminder", "ask")
+    const response = await send({ ...init, headers })
+    if (response.status !== 409 || init.signal?.aborted) return response
+    let detail
+    try { detail = (await response.clone().json()).detail } catch { return response }
+    if (detail?.code !== "ONE_H_PM_BLOCK_REMINDER") return response
+    const slots = Array.isArray(detail.slots) ? detail.slots : []
+    const answer = await confirm({ message: detail.message, slots }, init.signal)
+    if (!answer || (answer !== "continue" && !slots.includes(answer)) || init.signal?.aborted) {
+      return Response.json({ detail: "Sloti nuk u ndryshua." }, { status: 409 })
+    }
+    choice = answer
+    affectedAssignees = Array.isArray(detail.assignee_ids) ? new Set(detail.assignee_ids) : null
+    return send(confirmedRequest(init, headers))
+  }
+}
+
 export async function withTaskReportingChoice(
   path: string,
   init: RequestInit,

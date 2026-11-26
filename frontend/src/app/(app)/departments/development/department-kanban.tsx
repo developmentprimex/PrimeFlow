@@ -5539,7 +5539,8 @@ export default function DepartmentKanban() {
           toast.error(data?.detail || "Failed to save 1H time")
           return
         }
-        updateTaskOneHReportSlotState(taskId, nextSlot)
+        const saved = (await res.json()) as Task
+        updateTaskOneHReportSlotState(taskId, normalizeOneHReportSlot(saved.one_h_report_slot))
       } catch (error) {
         console.error("Failed to save 1H time", error)
         toast.error("Failed to save 1H time")

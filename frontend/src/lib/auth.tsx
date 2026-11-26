@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { useTaskPostponement } from "@/components/task-postponement-dialog"
 import { withPostponementExplanation } from "@/lib/task-postponement"
 import { useTaskReportingChoice } from "@/components/task-reporting-choice-dialog"
-import { withTaskReportingChoice } from "@/lib/task-reporting-choice"
+import { slotReminderRequest, withTaskReportingChoice } from "@/lib/task-reporting-choice"
 
 import { API_HTTP_URL, API_HTTP_FALLBACK_URL, API_WS_URL } from "@/lib/config"
 import { clearDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
@@ -581,7 +581,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const isReadRequest = (init.method || "GET").toUpperCase() === "GET"
       const doFetch = async (requestInit: RequestInit, overrideToken?: string | null, overrideUrl?: string) => {
-        const h = new Headers(headers)
+        const h = new Headers(requestInit.headers)
+        if (currentToken) h.set("Authorization", `Bearer ${currentToken}`)
         if (overrideToken) h.set("Authorization", `Bearer ${overrideToken}`)
         const fetchOnce = () => fetch(overrideUrl || url, { ...requestInit, headers: h, credentials: "include" })
         // Writes are never repeated: a lost response does not prove the server
@@ -672,9 +673,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearSessionCaches()
       }
       const canShareRequest = method === "GET" && init.body == null && init.signal == null
-      if (!canShareRequest) return withPostponementExplanation(
-        path, init, (request) => withTaskReportingChoice(path, request, executeRequest, requestChoiceExplanation), requestExplanation,
-      )
+      if (!canShareRequest) {
+        const send = slotReminderRequest(executeRequest, requestChoiceExplanation)
+        return withPostponementExplanation(
+          path, init, (request) => withTaskReportingChoice(path, request, send, requestChoiceExplanation), requestExplanation,
+        )
+      }
 
       const requestKey = createRequestKey(url, headers, init)
       const prefetched = prefetchedResponseCache.get(requestKey)
