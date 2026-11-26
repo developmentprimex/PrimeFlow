@@ -78,7 +78,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "25"
+COMMON_VIEW_CACHE_VERSION = "26"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -1174,6 +1174,7 @@ async def _build_common_view(
                     entry = {
                         "project": project_name,
                         "assignees_by_date": {},
+                        "open_assignees_by_date": {},
                         "task_assignees_by_date_period": {},
                         "dates": set(),
                     }
@@ -1182,6 +1183,8 @@ async def _build_common_view(
                     entry["dates"].add(task_date)
                     date_key = task_date.isoformat()
                     entry["assignees_by_date"].setdefault(date_key, set()).update(assignee_names)
+                    if not is_done:
+                        entry["open_assignees_by_date"].setdefault(date_key, set()).update(assignee_names)
                     project_department = departments_map.get(project.department_id)
                     if project_department and is_project_coverage_department(project_department.code, project_department.name):
                         for period in project_task_periods(t.finish_period):
@@ -1230,6 +1233,7 @@ async def _build_common_view(
             for d in dates_to_use:
                 date_key = d.isoformat()
                 assignees = sorted(entry["assignees_by_date"].get(date_key, set()))
+                open_assignees = entry["open_assignees_by_date"].get(date_key)
                 dept_id = project.department_id
                 dept_name = departments_map.get(dept_id).name if dept_id and dept_id in departments_map else "Other"
                 expanded_priority.append(
@@ -1238,6 +1242,7 @@ async def _build_common_view(
                         "project": entry["project"],
                         "date": date_key,
                         "assignees": assignees,
+                        "openAssignees": sorted(open_assignees) if open_assignees is not None else None,
                         "projectTaskAssigneesByPeriod": {
                             period: sorted(user_ids)
                             for period, user_ids in entry["task_assignees_by_date_period"].get(date_key, {}).items()

@@ -806,6 +806,23 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   API-ja Common View, eksporti Excel dhe raportet e veçanta SHTYPI nuk përdorin
   filtrin Short.
 
+- **Planning → Weekly Planner Short** përdor tekstin dhe rendin e 18 pikave të
+  checklistës “PLNF JAV SHORT- E ENJTE”. Ruajtja e vendimeve dhe komenteve
+  bazohet te numri i pikës dhe e hëna e javës. Çdo përdorues i autentikuar mund të
+  komentojë. Pika 1 lexon PV/festat nga kalendari Microsoft dhe përdor PV/FEST
+  të PrimeFlow kur Microsoft nuk përgjigjet. Pika 2 lexon PRJK nga Common View
+  për të hënën deri të premten dhe bashkon projektet e përsëritura sipas ID-së.
+  PRJK në Common View dhe pika 2 shfaqin projektin për ditët me të paktën një
+  detyrë të hapur. API-ja shënon emrat e detyrave të hapura me `openAssignees`
+  dhe përdor `null` për ditët pa detyrë të hapur. Mbulimi 1H dhe Admin Tasks
+  përdorin të dhënat e plota të PRJK.
+  Pikat 4 dhe 12 lexojnë Weekly Planner dhe Projects. Pika 6 lexon vetëm
+  takimet externe të javës pasuese. Pikat 8 dhe 9 lexojnë PX JAV dhe detyrat
+  Waiting Client.
+  Butoni “Rifresko gjetjet” i rilexon burimet. Kur ndryshojnë fushat
+  ose rregullat e këtyre burimeve, kontrollo edhe gjetjet te Weekly Planner
+  Short. Komentet dhe vendimet ruhen përmes API-së së vet.
+
 - Eksporti `/exports/checklists.xlsx` përdoret nga checklistat e Product Content
   dhe kontrollon edhe shabllonet globale sipas `group_key`: MST, TT dhe
   shabllonet e takimeve eksportohen nga ADMIN dhe MANAGER; STAFF mbetet i

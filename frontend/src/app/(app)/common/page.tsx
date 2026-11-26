@@ -613,6 +613,7 @@ type FeedbackItem = {
   createdDate?: string
 }
 type PriorityItem = ProjectTaskCoverage & {
+  openAssignees?: string[] | null
   project: string
   date: string
   assignees: string[]
@@ -3934,6 +3935,7 @@ export default function CommonViewPage() {
           const priorityMap = new Map<string, { 
             project: string; 
             assigneesByDate: Map<string, Set<string>>; // Track assignees per date
+            openAssigneesByDate: Map<string, Set<string>>;
             dates: Set<string>;
             taskAssigneesByDatePeriod: Map<string, Partial<Record<"AM" | "PM", Set<string>>>>;
           }>()
@@ -4176,6 +4178,7 @@ export default function CommonViewPage() {
                 priorityMap.set(projectKey, {
                   project: projectName,
                   assigneesByDate: new Map<string, Set<string>>(),
+                  openAssigneesByDate: new Map<string, Set<string>>(),
                   dates: new Set<string>(),
                   taskAssigneesByDatePeriod: new Map(),
                 })
@@ -4186,6 +4189,11 @@ export default function CommonViewPage() {
               // Add all task dates to the project's dates
               for (const taskDate of taskDates) {
                 entry.dates.add(taskDate)
+                if (!isDone) {
+                  const openAssignees = entry.openAssigneesByDate.get(taskDate) ?? new Set<string>()
+                  assigneeNames.forEach((name) => openAssignees.add(name))
+                  entry.openAssigneesByDate.set(taskDate, openAssignees)
+                }
                 
                 // Track assignees for this specific date
                 if (!entry.assigneesByDate.has(taskDate)) {
@@ -4296,6 +4304,9 @@ export default function CommonViewPage() {
                 project: entry.project,
                 date: date,
                 assignees: Array.from(dateAssignees),
+                openAssignees: entry.openAssigneesByDate.has(date)
+                  ? Array.from(entry.openAssigneesByDate.get(date) ?? [])
+                  : null,
                 projectTaskAssigneesByPeriod: Object.fromEntries(
                   Object.entries(entry.taskAssigneesByDatePeriod.get(date) || {}).map(([period, ids]) => [period, Array.from(ids)])
                 ),
@@ -5038,6 +5049,8 @@ export default function CommonViewPage() {
     )
 
     const filteredPriority = priority
+      .filter((p) => p.openAssignees !== null)
+      .map((p) => p.openAssignees ? { ...p, assignees: p.openAssignees } : p)
       .filter((p) => !fullyCoveredDates.has(p.date))
       .filter((p) => matchesSelectedUserEntry(p))
       .flatMap((p) => {

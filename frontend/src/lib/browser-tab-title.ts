@@ -19,6 +19,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/system-tasks": "System Tasks",
   "/open-tasks": "Open Tasks",
   "/weekly-planner": "Weekly Planner",
+  "/weekly-planner-short": "Weekly Planner Short",
   "/monthly-planner": "Monthly Planner",
   "/meeting-scheduler": "Meeting Scheduler",
   "/realization": "Realization",
