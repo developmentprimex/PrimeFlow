@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.task_pause import pause_until_on_day
+from app.services.task_pause import TASK_PAUSE_BACKGROUND, TASK_PAUSE_LABEL, pause_until_on_day
 
 from app.services.report_attendance import LEAVE_TABLE_COLUMNS, filter_task_context, filter_report_sections
 from app.services.ga_identity import is_ga_username
@@ -1074,6 +1074,7 @@ def _m3_status_table(
     include_priority_tone: bool = False,
     show_all_assignees: bool = False,
     bz_labels_by_task: dict[Any, str] | None = None,
+    pause_day: date | None = None,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -1185,6 +1186,8 @@ def _m3_status_table(
         comment_lines = _wrap_fixed_width(comment or "-", 36) if daily_rlz_by_task is not None else []
         status = _normalize_report_status(task.status) if with_status else None
         padded_titles = _append_status_marker_to_lines(title_lines, status, 64)
+        if pause_day and pause_until_on_day(getattr(task, "pause_periods", None), pause_day):
+            padded_titles[-1] = f"{padded_titles[-1].rstrip()} {TASK_PAUSE_LABEL}"
         if include_priority_tone:
             priority_tone = (
                 "eight_am"
@@ -1918,6 +1921,7 @@ def _status_group_section(
         "all_participant_ids": all_participant_ids,
         "include_type": True,
         "bz_labels_by_task": bz_labels_by_task,
+        "pause_day": report_day,
     }
     return [
         *([f"{title}:"] if title else []),
@@ -2896,7 +2900,7 @@ h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700;border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table td{{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table .gmail-sender{{max-width:140px;overflow-wrap:anywhere;word-wrap:break-word}}
-.report-table .n{{white-space:nowrap}}.report-table .prjk{{max-width:110px;white-space:normal;overflow-wrap:break-word;word-break:normal}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.paused td{{background:#CBD5E1;color:#1E293B}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ccfbf1;color:#134e4a}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
+.report-table .n{{white-space:nowrap}}.report-table .prjk{{max-width:110px;white-space:normal;overflow-wrap:break-word;word-break:normal}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.paused td{{background:{TASK_PAUSE_BACKGROUND};color:#334155}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ccfbf1;color:#134e4a}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
 @media only screen and (max-width:600px){{
 body{{padding:8px!important}}
 h1{{font-size:18px!important;line-height:1.2!important}}
@@ -3004,7 +3008,7 @@ def _table_tone_from_label(label: str) -> str:
         or "DET TE REJA" in normalized
     ):
         return "todo"
-    if normalized in {"PAUSED", "STOPPED"}:
+    if normalized in {"PAUSED", "STOPPED", "PAUZË"}:
         return "paused"
     if "IN PROGRESS" in normalized:
         return "in-progress"
@@ -3078,7 +3082,7 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
     if tone == "todo":
         return "#fbcfe8", "#111827"
     if tone == "paused":
-        return "#CBD5E1", "#1E293B"
+        return TASK_PAUSE_BACKGROUND, "#334155"
     if tone == "in-progress":
         return "#fef3c7", "#111827"
     if tone == "waiting":
@@ -3247,6 +3251,8 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         # ordinary task statuses must not replace their red treatment/frame.
         if tone in {"deadline", "eight-am"} and type_index is None:
             row_tone = tone
+        if title_index is not None and len(row) > title_index and TASK_PAUSE_LABEL in row[title_index]:
+            row_tone = "paused"
         row_tones.append(row_tone)
         highlighted_meeting_rows.append(is_highlighted_meeting)
         cleaned_body_rows.append(row)
@@ -3782,6 +3788,8 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
             row_tone = "product-negative"
         if tone in {"deadline", "eight-am"} and type_index is None:
             row_tone = tone
+        if title_index is not None and TASK_PAUSE_LABEL in row[title_index]:
+            row_tone = "paused"
         if status_index is not None:
             row = [cell for index, cell in enumerate(row) if index != status_index]
         cleaned_rows.append(row)

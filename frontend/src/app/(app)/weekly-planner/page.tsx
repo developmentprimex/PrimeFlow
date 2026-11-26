@@ -2219,7 +2219,7 @@ export default function WeeklyPlannerPage() {
             .task-marker { color: #dc2626; font-weight: 900; margin-right: 2px; }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
-            .task-status-paused { background-color: #CBD5E1; }
+            .task-status-paused { background-color: #f1f3f5; color: #334155; print-color-adjust: exact; }
             .task-status-waiting { background-color: #CCFBF1; border-color: #0F766E; color: #134E4A; }
             .task-status-waiting-client { background-color: #E2C15B; border-color: #B8860B; color: #4F3A00; }
             .task-status-done { background-color: #C4FDC4; }
@@ -2685,9 +2685,10 @@ export default function WeeklyPlannerPage() {
     }
 
     const getPrintTaskStatusClass = (
-      task: Pick<WeeklyTableTaskEntry, "status" | "completed_at" | "daily_status" | "created_at" | "is_deadline_important">,
+      task: Pick<WeeklyTableTaskEntry, "status" | "completed_at" | "daily_status" | "created_at" | "is_deadline_important" | "is_paused">,
       dayIso: string
     ) => {
+      if (task.is_paused) return "task-status-paused"
       const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
       if (task.is_deadline_important) {
         if (statusValue === "DONE") return "task-status-done"
@@ -2709,6 +2710,8 @@ export default function WeeklyPlannerPage() {
       if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
       return "task-status-todo"
     }
+
+    const buildPrintPauseBadge = (paused?: boolean) => paused ? ` <span class="badge">Pauzë</span>` : ""
 
     const buildPrintNewBadge = (createdAt?: string | null) => {
       if (!isTaskNewForWeek(createdAt, data.week_start)) return ""
@@ -2766,7 +2769,7 @@ export default function WeeklyPlannerPage() {
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
               const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
-              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintPauseBadge(task.is_paused)}${buildPrintNewBadge(task.created_at)}</div>`
             })
             html += `</div>`
           } else {
@@ -2801,7 +2804,7 @@ export default function WeeklyPlannerPage() {
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
               }
-              if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
+              html += buildPrintPauseBadge(task.is_paused)
               html += buildPrintNewBadge(task.created_at)
               html += `</div>`
             })
@@ -2860,7 +2863,7 @@ export default function WeeklyPlannerPage() {
                 if (badge) {
                   html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
                 }
-                if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
+                html += buildPrintPauseBadge(task.is_paused)
                 html += buildPrintNewBadge(task.created_at)
                 html += `</div>`
               })
@@ -2900,7 +2903,7 @@ export default function WeeklyPlannerPage() {
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
             }
-            if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
+            html += buildPrintPauseBadge(task.is_paused)
             html += buildPrintNewBadge(task.created_at)
             html += `</div>`
           })
@@ -2936,7 +2939,7 @@ export default function WeeklyPlannerPage() {
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
               const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
-              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintPauseBadge(task.is_paused)}${buildPrintNewBadge(task.created_at)}</div>`
             })
             html += `</div>`
           } else {
@@ -2971,7 +2974,7 @@ export default function WeeklyPlannerPage() {
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
               }
-              if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
+              html += buildPrintPauseBadge(task.is_paused)
               html += buildPrintNewBadge(task.created_at)
               html += `</div>`
             })
@@ -3023,7 +3026,7 @@ export default function WeeklyPlannerPage() {
                 if (badge) {
                   html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
                 }
-                if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
+                html += buildPrintPauseBadge(task.is_paused)
                 html += buildPrintNewBadge(task.created_at)
                 html += `</div>`
               })
@@ -3063,7 +3066,7 @@ export default function WeeklyPlannerPage() {
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
             }
-            if (task.is_paused) html += " <span class=\'badge\'>Pauzë</span>"
+            html += buildPrintPauseBadge(task.is_paused)
             html += buildPrintNewBadge(task.created_at)
             html += `</div>`
           })
@@ -4817,7 +4820,7 @@ export default function WeeklyPlannerPage() {
                                                 <div
                                                   key={task.task_id}
                                                 className={[
-                                                  "text-[11px] flex items-center gap-1 rounded border pl-1.5 pr-0.5 py-0.5 group/task",
+                                                  "text-[11px] flex items-center gap-1 rounded border pl-1.5 pr-0.5 py-0.5 group/task task-pause-surface",
                                                   getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
                                                   repeatedTaskCardClassName(task),
                                                 ].join(" ")}
@@ -4915,7 +4918,7 @@ export default function WeeklyPlannerPage() {
                                           <div
                                             key={task.task_id || idx}
                                           className={[
-                                            "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task",
+                                            "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task task-pause-surface",
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
                                             repeatedTaskCardClassName(task),
                                           ].join(" ")}
@@ -4995,7 +4998,7 @@ export default function WeeklyPlannerPage() {
                                       <div
                                         key={task.task_id || idx}
                                           className={[
-                                            "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task",
+                                            "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task task-pause-surface",
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
                                             repeatedTaskCardClassName(task),
                                           ].join(" ")}

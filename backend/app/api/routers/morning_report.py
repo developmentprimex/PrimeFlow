@@ -145,6 +145,7 @@ async def get_next_workday_feedback(
             "id": row["task_id"], "title": row["title"], "continuation": continuation, "comment": comment,
             "start_date": row["start_date"], "due_date": row["due_date"], "status": row["status"],
             "slot": row["slot"], "is_system_task": row["is_system_task"], "is_1h": row["is_1h"],
+            "is_paused": row.get("is_paused", False),
         })
     return {"target_date": target_date, "tasks": tasks}
 

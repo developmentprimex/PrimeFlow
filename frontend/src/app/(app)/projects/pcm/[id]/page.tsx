@@ -3,7 +3,8 @@
 import { ProjectActivityControl } from "@/components/project-activity"
 
 import * as React from "react"
-import { TaskPauseField } from "@/components/task-pause-field"
+import { currentTaskPauseDay, isTaskPausedOnDay } from "@/lib/task-pause"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
 import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
 import { useParams, useRouter } from "next/navigation"
 
@@ -6695,6 +6696,7 @@ export default function PcmProjectPage() {
                               ) : (
                                 <span className="font-medium text-slate-700">
                                   {index + 1}. {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                                  {isTaskPausedOnDay(task, currentTaskPauseDay()) && <TaskPauseBadge />}
                                 </span>
                               )}
                             </div>
@@ -7690,6 +7692,7 @@ export default function PcmProjectPage() {
                               ) : (
                                 <span className="font-medium text-slate-700">
                                   {index + 1}. {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                                  {isTaskPausedOnDay(task, currentTaskPauseDay()) && <TaskPauseBadge />}
                                 </span>
                               )}
                             </div>

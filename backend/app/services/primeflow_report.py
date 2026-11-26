@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.task_pause import TASK_PAUSE_ACCENT, TASK_PAUSE_BACKGROUND, TASK_PAUSE_LABEL
 from app.services.compact_report_questions import question_parts, questions_html, layout_question_parts
 from app.config import settings
 from app.services.one_h_ga_summary import GaTaskCounts, build_ga_summary, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
@@ -58,7 +59,7 @@ NUMBERED_ITEM = re.compile(r"(?<!\S)(\d+)\.\s*")
 TRANSIENT_CODES = {429, 500, 502, 503, 504}
 STATUS_COLORS = {
     "TODO": ("#fbcfe8", "#111827", "#ec4899"),
-    "PAUSED": ("#e2e8f0", "#1e293b", "#64748b"),
+    "PAUSED": (TASK_PAUSE_BACKGROUND, "#334155", TASK_PAUSE_ACCENT),
     "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
     "WAITING_CLIENT": ("#e2c15b", "#4f3a00", "#b8860b"),
     "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
@@ -127,7 +128,7 @@ class ReportTask(BaseModel):
     def display_title(self) -> tuple[str, list[str]]:
         heading, details = split_task_display(self.title)
         if self.is_paused:
-            heading = f"{heading} [Pauzë]".strip()
+            heading = f"{heading} {TASK_PAUSE_LABEL}".strip()
         elif self.status == "PAUSED":
             heading = f"{heading} [STOPPED]".strip()
         return heading, details
@@ -538,7 +539,7 @@ def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
             status = str(task.get("status")).upper()
             title_value = clean_title(str(task.get("task_title") or task.get("title") or task.get("task")))
             if task.get("is_paused"):
-                title_value += " [Pauzë]"
+                title_value += f" {TASK_PAUSE_LABEL}"
             description = clean_description(task.get("description") if "description" in task else task.get("note"))
             lines.extend([f"{employee_index}.{task_index} {STATUS_MARKERS[status]} {title_value}", "Përshkrimi:", description])
     if not employee_groups:
@@ -949,7 +950,7 @@ def render_html(
         for employee in section.employees:
             for task in employee.tasks:
                 number += 1
-                background, _, accent = STATUS_COLORS[task.status]
+                background, _, accent = STATUS_COLORS["PAUSED" if task.is_paused else task.status]
                 heading, detail_lines = task.display_title()
                 details = "".join(
                     detail_row(marked_html(item, task.marked_title)) for item in detail_lines
@@ -1181,7 +1182,7 @@ def render_html(
                 f"color:#0f172a;margin:12px 0 6px;\">{html.escape(employee.name)}</div>"
             )
             for task in employee.tasks:
-                background, _, accent = STATUS_COLORS[task.status]
+                background, _, accent = STATUS_COLORS["PAUSED" if task.is_paused else task.status]
                 heading, detail_lines = task.display_title()
                 detail_html = "".join(
                     detail_row(marked_html(item, task.marked_title)) for item in detail_lines
@@ -1434,7 +1435,7 @@ def render_docx(document: ReportDocument) -> bytes:
             employee_run.bold = True
             employee_run.font.size = Pt(11)
             for task in employee.tasks:
-                background, _, _ = STATUS_COLORS[task.status]
+                background, _, _ = STATUS_COLORS["PAUSED" if task.is_paused else task.status]
                 card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
                 shade(card_cell, background)
                 heading, detail_lines = task.display_title()
@@ -1699,7 +1700,7 @@ def render_png(document: ReportDocument) -> bytes:
             draw.text((margin + 5, y), employee.name, fill="#0f172a", font=bold)
             y += 38
             for task in employee.tasks:
-                background, _, accent = STATUS_COLORS[task.status]
+                background, _, accent = STATUS_COLORS["PAUSED" if task.is_paused else task.status]
                 task_heading, detail_items = task.display_title()
                 title_lines = textwrap.wrap(task_heading or task.title, 95) or [""]
                 detail_lines = [

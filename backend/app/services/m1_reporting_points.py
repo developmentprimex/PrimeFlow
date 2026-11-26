@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services.task_pause import TASK_PAUSE_BACKGROUND, TASK_PAUSE_LABEL, pause_until_on_day
 from app.services.report_attendance import filter_points_payload, load_report_attendance
 
 import asyncio
@@ -149,6 +150,7 @@ def select_sections(entries, ga_notes, _plan_notes, tasks, day: date, *, now: da
         if task_start <= _local(task.created_at) <= cutoff:
             data["tasks"].append({"id": str(task.id), "title": task.title,
                                   "status": str(getattr(task.status, "value", task.status)),
+                                  "is_paused": bool(pause_until_on_day(getattr(task, "pause_periods", None), day)),
                                   "created_at": _local(task.created_at).isoformat(),
                                   "assignees": _task_owners(task, names, assignees) if hasattr(task, "assigned_to") else "-",
                                   "department": _m3_department_label(task, departments),
@@ -427,6 +429,9 @@ def _table_rows(report: dict, key: str) -> list[list[dict]]:
                       row.get("planned_for") or "-",
                       _created_label(row.get("created_at"))]
             fill = TASK_FILLS.get(str(row.get("status") or "").upper(), "#ffffff")
+            if row.get("is_paused"):
+                values[5] = f"{values[5]} {TASK_PAUSE_LABEL}"
+                fill = TASK_PAUSE_BACKGROUND
         rendered.append([{"text": str(value), "fill": fill, "color": "#000000",
                           "bold": column == (1 if key in {"absences", "delays", "notes"} else 5 if key == "tasks" else -1), "divider": False}
                          for column, value in enumerate(values)])

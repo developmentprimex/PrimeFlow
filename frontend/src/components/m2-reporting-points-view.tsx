@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { TaskPauseBadge } from "@/components/task-pause-field"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { DiscordDeliveryTable, reportDate, type DeliverySlot, type TaskRow } from "@/components/m3-reporting-points-view"
@@ -16,7 +17,7 @@ export type UnfinishedPriorityRow = {
   task_id?: string; reason?: string; comment?: string
   assignees: string; department: string; am_pm: string; status: string
   priority: string; task_type: string; title: string; due_label: string
-  deadline_important: boolean; eight_am: boolean
+  deadline_important: boolean; eight_am: boolean; is_paused?: boolean
 }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
@@ -64,7 +65,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
           {common.map(([field]) => <td key={field} className="w-px whitespace-nowrap border p-2 align-top">{text(row, field)}</td>)}
           {!delivery ? <><td className="w-px whitespace-pre border p-2 align-top">{dateChange(row, true)}</td><td className="w-px whitespace-pre border p-2 align-top">{dateChange(row, false)}</td></> : null}
           {delivery ? <td className="w-px whitespace-nowrap border px-1 py-2 align-top font-bold">{row.marker || "—"}</td> : null}
-          <td className="min-w-[280px] border p-2 align-top">{!delivery ? <strong className="mr-1">{row.marker}</strong> : null}{row.title}</td>
+          <td className="min-w-[280px] border p-2 align-top">{!delivery ? <strong className="mr-1">{row.marker}</strong> : null}{row.title}{row.is_paused && <TaskPauseBadge />}</td>
           {delivery ? <><td className="w-px whitespace-nowrap border px-1 py-2 align-top">
             <select aria-label={`PO/JO për ${row.title}`} value={answers[choiceKey] || ""} disabled={disabled}
               className={`w-14 rounded border px-1 py-2 ${answers[choiceKey] === "PO" ? "border-green-700 bg-green-600 font-bold text-white" : answers[choiceKey] === "JO" ? "border-red-800 bg-red-600 font-bold text-white" : "bg-white text-black"}`} onChange={(event) => onAnswerChange(choiceKey, event.target.value)}>
@@ -98,6 +99,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
                 value={answers[commentKey] ?? (row.comment && !["-", "—"].includes(row.comment) ? row.comment : "")}
                 disabled={disabled} maxLength={10000} rows={1} autoResize
                 className="min-h-9 min-w-[180px] bg-white text-black" placeholder="Shëno komentin." onChange={(event) => onAnswerChange(commentKey, event.target.value)} />
+                : field === "title" && row.is_paused ? <>{row.title} <TaskPauseBadge /></>
                 : field === "reason" ? dailyRlzReasonLabel(answers[`unfinished_reason:${row.task_id}`]) || row.reason || "—" : String(row[field] || "—"))]
             return <tr key={row.task_id || index} style={{ background: row.deadline_important ? "#dc2626" : row.status === "PAUSED" ? "#CBD5E1" : row.status === "IN_PROGRESS" ? "#FFFF00" : "#FFC4ED", color: row.deadline_important ? "white" : "black" }}>
               {cells.map((value, columnIndex) => <td key={columnIndex} className={`border p-2 align-top ${columnIndex === 6 ? "min-w-[280px]" : columnIndex >= 8 ? "min-w-[160px] whitespace-pre-wrap break-words" : "w-px whitespace-nowrap"}`} style={row.eight_am ? {
@@ -128,7 +130,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
             <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
             {common.map(([field]) => <td key={field} className="w-px whitespace-nowrap border p-2 align-top">{text(row, field)}</td>)}
             <td className="w-px whitespace-nowrap border p-2 align-top font-bold">{row.marker || "—"}</td>
-            <td className="min-w-[280px] border p-2 align-top">{row.title}</td>
+            <td className="min-w-[280px] border p-2 align-top">{row.title}{row.is_paused && <TaskPauseBadge />}</td>
             <td className="min-w-[180px] border p-2 align-top">
               <select aria-label={`Arsyeja për ${row.title}`} disabled={disabled}
                 value={answers[`progress_reason:${row.task_id}`] || ""}
@@ -159,7 +161,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
             <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
             {common.map(([field]) => <td key={field} className="w-px whitespace-nowrap border p-2 align-top">{text(row, field)}</td>)}
             <td className="w-px whitespace-nowrap border p-2 align-top font-bold">{row.marker || "—"}</td>
-            <td className="min-w-[280px] border p-2 align-top">{row.title}</td>
+            <td className="min-w-[280px] border p-2 align-top">{row.title}{row.is_paused && <TaskPauseBadge />}</td>
             <td className="w-px whitespace-nowrap border p-2 align-top">{reportDate(row.due_date)}</td>
           </tr>)}</tbody>
         </table>

@@ -1,6 +1,11 @@
 from datetime import date, timedelta
 
 
+TASK_PAUSE_BACKGROUND = "#F1F3F5"
+TASK_PAUSE_ACCENT = "#64748B"
+TASK_PAUSE_LABEL = "[Pauzë]"
+
+
 def pause_until_on_day(periods: list[dict[str, str]] | None, day: date) -> date | None:
     day_key = day.isoformat()
     return next(
@@ -11,7 +16,7 @@ def pause_until_on_day(periods: list[dict[str, str]] | None, day: date) -> date 
 
 
 def task_title_with_pause(title: str, periods: list[dict[str, str]] | None, day: date) -> str:
-    return f"{title} [Pauzë]" if pause_until_on_day(periods, day) else title
+    return f"{title} {TASK_PAUSE_LABEL}" if pause_until_on_day(periods, day) else title
 
 
 def update_pause_periods(

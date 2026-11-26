@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
+import { TaskPauseBadge } from "@/components/task-pause-field"
 import { Textarea } from "@/components/ui/textarea"
 
 export const MANUAL_POINTS = {
@@ -35,6 +36,7 @@ export type TaskRow = {
   am_pm?: string
   task_type?: string
   is_system_task?: boolean
+  is_paused?: boolean
   deadline_important?: boolean
   eight_am?: boolean
   marker?: string
@@ -166,7 +168,7 @@ function TaskGrid({ rows, kind, movement, manualComments }: { rows: TaskRow[]; k
         disabled={manualComments.disabled} maxLength={10000} rows={1} autoResize className="min-h-9 bg-white text-black" placeholder="Shëno komentin."
         onChange={(event) => manualComments.onAnswerChange(key, event.target.value)} />
     }
-    if (column.key === "title") return <div className="w-full whitespace-normal break-words font-medium">{row.marker ? <strong className={`mr-1 text-sm font-black ${row.deadline_important || row.category?.includes("Deadline Important") ? "text-white" : "text-red-600"}`} data-task-symbol="true">{row.marker}</strong> : null}{taskTitle(row.title)}</div>
+    if (column.key === "title") return <div className="w-full whitespace-normal break-words font-medium">{row.marker ? <strong className={`mr-1 text-sm font-black ${!row.is_paused && (row.deadline_important || row.category?.includes("Deadline Important")) ? "text-white" : "text-red-600"}`} data-task-symbol="true">{row.marker}</strong> : null}{taskTitle(row.title)}{row.is_paused && <TaskPauseBadge />}</div>
     if (column.key === "from" || column.key === "to") return dateRange(row, column.key === "to", movement)
     if (column.key.endsWith("_date")) return reportDate(row[column.key as "created_date" | "start_date" | "due_date"])
     return String(row[column.key] || "—")
@@ -277,7 +279,7 @@ export function DiscordDeliveryTable({ rows, slot, notes, onNoteChange, disabled
         const style = { background: row.deadline_important ? "#dc2626" : STATUS_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }
         return <tr key={row.id || row.task_id} className={row.eight_am ? "border-y-2 border-y-red-600" : undefined}>
           <td style={style} className="border p-2 align-top">{index + 1}</td>
-          {fields.map((field) => <td key={field} style={style} className={`border p-2 align-top ${field === "title" ? "w-full min-w-[14rem]" : "whitespace-nowrap"} ${field === "marker" ? "font-bold" : ""}`}>{row[field] || "—"}</td>)}
+          {fields.map((field) => <td key={field} style={style} className={`border p-2 align-top ${field === "title" ? "w-full min-w-[14rem]" : "whitespace-nowrap"} ${field === "marker" ? "font-bold" : ""}`}>{row[field] || "—"}{field === "title" && row.is_paused && <TaskPauseBadge />}</td>)}
           <td className="whitespace-nowrap border p-2 align-top">
             <span className={`rounded px-2 py-1 ${tone}`}>{label}</span>
             {delivery?.url && delivery.verified_at ? <a className="mt-2 block underline" href={delivery.url} target="_blank" rel="noreferrer" aria-label={`Hap postimin në Discord për ${row.title}`}>{reportTime(delivery.verified_at)}</a> : null}
@@ -315,7 +317,7 @@ function DeliveryPoint({ rows, answers, disabled, onAnswerChange, slot }: TaskMa
         return <tr key={row.task_id} style={{ background: row.deadline_important ? "#dc2626" : STATUS_COLORS[row.status] || "white", color: row.deadline_important ? "white" : "black" }}>
           <td className="w-px whitespace-nowrap border p-2 align-top">{index + 1}</td>
           {columns.map(([field]) => <td key={field} className={`w-px whitespace-nowrap border p-2 align-top${field === "marker" ? " font-bold" : ""}`}>{String(row[field] || "—")}</td>)}
-          <td className="min-w-[280px] border p-2 align-top">{row.title}</td>
+          <td className="min-w-[280px] border p-2 align-top">{row.title}{row.is_paused && <TaskPauseBadge />}</td>
           <td className="w-px whitespace-nowrap border px-1 py-2 align-top"><select aria-label={`PO/JO për ${row.title}`} value={choice} disabled={disabled}
             className={`w-14 rounded border px-1 py-2 ${choice === "PO" ? "border-green-700 bg-green-600 font-bold text-white" : choice === "JO" ? "border-red-800 bg-red-600 font-bold text-white" : "bg-white text-black"}`} onChange={(event) => onAnswerChange(choiceKey, event.target.value)}>
             <option value="">—</option><option value="PO">PO</option><option value="JO">JO</option>

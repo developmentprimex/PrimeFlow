@@ -5,6 +5,7 @@ import hashlib
 import json
 from collections import defaultdict
 from datetime import date, datetime, time
+from app.services.task_pause import pause_until_on_day
 from app.services.one_h_slots import _next_working_day
 from app.services.primeflow_report import report_timezone
 from app.services.m3_reporting_points import REALIZATION_CAPTURE_TIME, semantic_local_day
@@ -83,6 +84,7 @@ def tomorrow_rows(tasks, target: date, overrides: dict) -> list[dict]:
             'start_date': start.isoformat() if start else None, 'due_date': due.isoformat() if due else None,
             'due_tomorrow': due == target, 'deadline_important': bool(task.is_deadline_important),
             'is_system_task': system, 'is_1h': bool(task.is_1h_report or task.is_r1),
+            'is_paused': bool(pause_until_on_day(getattr(task, 'pause_periods', None), target)),
             'slot': overrides.get(task.id, task.one_h_report_slot), 'group': group})
     return sorted(rows, key=lambda row: (not row['due_tomorrow'], row['slot'] or '', row['title'], row['task_id']))
 

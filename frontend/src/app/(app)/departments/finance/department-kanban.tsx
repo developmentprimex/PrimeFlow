@@ -807,6 +807,7 @@ export default function DepartmentKanban() {
               <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
               <TableCell className="min-w-72 whitespace-normal font-medium text-slate-800">
                 <CollapsibleTaskTitle title={row?.title ?? task.title} renderTitle={renderMarkedNoteContent} />
+                {task.is_paused && <TaskPauseBadge />}
                 {row?.task.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(row.task.mira_dictation_source)}</span>}
               </TableCell>
               <TableCell>{row?.systemFrequencyDisplayLabel || "–"}</TableCell>

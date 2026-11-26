@@ -3,7 +3,8 @@
 import { NextWorkdayTaskFeedback } from "@/components/next-workday-task-feedback"
 
 import * as React from "react"
-import { TaskPauseField } from "@/components/task-pause-field"
+import { isTaskPausedOnDay } from "@/lib/task-pause"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
 import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
@@ -7220,6 +7221,7 @@ export default function AdminTasksPage() {
                       ) : null}
                       <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} markerComment={row.oneHMarkerComment} />
                       <span>{renderCommonMarkedTitle(row.title)}</span>
+                      {rowTask && isTaskPausedOnDay(rowTask, todayIso) && <TaskPauseBadge />}
                     </div>
                   </TableCell>
                   <TableCell className="w-[76px] border-r border-slate-200 px-1 py-1 text-center align-middle last:border-r-0">
@@ -7497,6 +7499,7 @@ export default function AdminTasksPage() {
                     <TableCell className={cellClass}>{row?.period || "–"}</TableCell>
                     <TableCell className={`${cellClass} min-w-[160px] whitespace-normal break-words font-medium sm:min-w-[220px]`}>
                       {renderCommonMarkedTitle(row?.title ?? task.title)}
+                      {task.is_paused && <TaskPauseBadge />}
                     </TableCell>
                     <TableCell className={cellClass}>{row?.systemFrequencyDisplayLabel || "–"}</TableCell>
                     <TableCell className={cellClass}>{row?.kohaBz || "–"}</TableCell>

@@ -3,6 +3,8 @@
 import { type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
+import { TaskPauseBadge } from "@/components/task-pause-field"
+import { currentTaskPauseDay } from "@/lib/task-pause"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { TaskMarkerSelect } from "@/components/task-marker-select"
 import Link from "next/link"
@@ -128,6 +130,7 @@ type NoteTaskInfo = {
   taskProjectId: string | null
   taskStatus: string | null
   taskStatuses: string[]
+  taskPauseUntilDates: (string | null)[]
   taskTypeLabels: string[]
   dueDate?: string | null
   startDate?: string | null
@@ -1290,6 +1293,7 @@ export default function NextWeekPlanPage() {
         taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
         taskStatus: existing?.taskStatus ?? t.status ?? null,
         taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
+        taskPauseUntilDates: [...(existing?.taskPauseUntilDates ?? []), t.pause_until ?? null],
         taskTypeLabels: mergeTaskTypeLabels(existing?.taskTypeLabels, getTaskTypeLabels(t)),
         dueDate: existing?.dueDate ?? t.due_date ?? null,
         startDate: existing?.startDate ?? t.start_date ?? null,
@@ -2007,6 +2011,7 @@ export default function NextWeekPlanPage() {
                   taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
                   taskStatus: existing?.taskStatus ?? t.status ?? null,
                   taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
+                  taskPauseUntilDates: [...(existing?.taskPauseUntilDates ?? []), t.pause_until ?? null],
                   taskTypeLabels: mergeTaskTypeLabels(existing?.taskTypeLabels, getTaskTypeLabels(t)),
                   isRepetitive: existing?.isRepetitive === undefined
                     ? Boolean(t.is_repetitive)
@@ -2295,6 +2300,7 @@ export default function NextWeekPlanPage() {
           taskProjectId: createdTask.project_id ?? null,
           taskStatus: createdTask.status ?? null,
           taskStatuses: [createdTask.status ?? ""],
+          taskPauseUntilDates: [createdTask.pause_until ?? null],
           taskTypeLabels: getTaskTypeLabels(createdTask),
           dueDate: createdTask.due_date ?? null,
           startDate: createdTask.start_date ?? null,
@@ -3460,6 +3466,9 @@ export default function NextWeekPlanPage() {
                           : "bg-slate-200 text-slate-700"
                     const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
                     const taskInfo = noteTaskInfo.get(note.id)
+                    const pauseDates = taskInfo?.taskPauseUntilDates ?? []
+                    const pauseDay = currentTaskPauseDay()
+                    const pausedCount = pauseDates.filter((until) => until && until >= pauseDay).length
                     const taskDepartment = taskInfo?.taskDepartmentId
                       ? departmentMap.get(taskInfo.taskDepartmentId)
                       : null
@@ -3541,6 +3550,12 @@ export default function NextWeekPlanPage() {
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0 flex-1 flex flex-col gap-1">
                                 <div className="flex flex-wrap items-center gap-1">
+                                  {pausedCount > 0 && (
+                                    <TaskPauseBadge
+                                      highlightTask={pausedCount === pauseDates.length}
+                                      label={pausedCount === pauseDates.length ? "Pauzë" : `Pauzë (${pausedCount}/${pauseDates.length})`}
+                                    />
+                                  )}
                                   {showMobileDeptBadge || assignees.length > 0 ? (
                                     <span className="sm:hidden inline-flex items-center gap-1 mr-1">
                                       {showMobileDeptBadge ? (

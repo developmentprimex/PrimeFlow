@@ -364,6 +364,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Realization përdorin të njëjtin interval. Open Tasks dhe eksporti i tij
   kontrollojnë datën aktuale. Tabelat ditore M1, M2 dhe M3 përdorin datën e
   raportit për treguesin e pauzës.
+  Sfondi gri dhe etiketa `Pauzë` përdoren në My View dhe Department View
+  (Development, Graphic Design, Product Content), Finance, Common View,
+  Weekly/Monthly Planner, Realization, Open Tasks, Admin Tasks dhe faqet e
+  projekteve. Daily Report merr intervalet nga `reports.py`. Kontrollo ekranin,
+  printimin dhe Excel-in për datën e raportit, si edhe pamjen e ditës
+  së ardhshme në Finance dhe Admin Tasks. Në PX Notes dhe PX JAV, një shënim
+  me disa detyra shfaq numrin e detyrave në pauzë kur pauza vlen vetëm për
+  një pjesë të tyre. Raportet 1H, M1/M2/M3 dhe M1/M2/M3 PIKAT, si edhe eksportet,
+  përdorin paletën e printimit dhe e mbajnë etiketën në formatin tekst.
   Kontrollo një ditë, disa ditë, heqjen para
   kohe dhe një pauzë të dytë, që ditët e pauzës së parë të mbeten të dukshme.
 

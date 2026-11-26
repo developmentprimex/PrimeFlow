@@ -203,6 +203,7 @@ def _task_to_out(
         ga_note_origin_id=t.ga_note_origin_id,
         system_template_origin_id=t.system_template_origin_id,
         status="DONE" if t.completed_at else t.status,
+        pause_periods=t.pause_periods or [],
         priority=t.priority,
         finish_period=t.finish_period,
         phase=t.phase,

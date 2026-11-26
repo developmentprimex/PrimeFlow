@@ -5,7 +5,8 @@ import { EmailNoteDisclosure, NoteEmailPreview, splitManualEmailNote } from "@/c
 import { taskMarkerLabel, splitTaskMarkers, type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
-import { TaskPauseField } from "@/components/task-pause-field"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
+import { currentTaskPauseDay } from "@/lib/task-pause"
 import { updateTaskMarkersInTree, useTaskMarkerUpdates } from "@/lib/task-marker-updates"
 import { TaskMarkerSelect } from "@/components/task-marker-select"
 import { flushSync } from "react-dom"
@@ -4709,6 +4710,9 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     const noteProject = note.project_id ? projectMap.get(note.project_id) : null
                     const taskInfo = noteTaskInfo.get(note.id)
                     const displayMarkers = noteDisplayMarkers(note, taskInfo)
+                    const taskStates = Object.values(taskInfo?.assigneeStates ?? {})
+                    const pauseDay = currentTaskPauseDay()
+                    const pausedCount = taskStates.filter((state) => state.pauseUntil && state.pauseUntil >= pauseDay).length
                     const taskDepartment = taskInfo?.taskDepartmentId
                       ? departmentMap.get(taskInfo.taskDepartmentId)
                       : null
@@ -4789,6 +4793,12 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                           <div className="flex flex-col gap-1">
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0 flex flex-wrap items-center gap-1">
+                                {pausedCount > 0 && (
+                                  <TaskPauseBadge
+                                    highlightTask={pausedCount === taskStates.length}
+                                    label={pausedCount === taskStates.length ? "Pauzë" : `Pauzë (${pausedCount}/${taskStates.length})`}
+                                  />
+                                )}
                                 {note.from_mira ? (
                                   <button
                                     type="button"
