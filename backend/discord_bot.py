@@ -983,7 +983,7 @@ class PrimeFlowBot(discord.Client):
                                 text, view = one_h_client.card(data['one_h'], user_id=job['discord_user_id'],
                                     join_url=self.one_h_url(job['bucket'], job['guild_id']))
                                 cards = [(text, view)]
-                                if job['bucket'] != '11:50':
+                                if job['bucket'] not in {'11:50', '16:00'}:
                                     cards.append(one_h_client.continuation_card(data['one_h']))
                             else:
                                 text, view = ui.report_intro(job["bucket"], data["tasks"], job["id"], job["discord_user_id"],

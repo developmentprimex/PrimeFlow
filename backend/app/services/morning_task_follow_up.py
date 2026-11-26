@@ -13,6 +13,33 @@ from app.models.user import User
 from app.services.task_title_rules import title_has_eight_am_indicator
 
 FOLLOW_UP_BY_SLOT = {"11:00": "08:00", "11:50": "DL AM"}
+CARRIED_FOLLOW_UPS = {
+    "11:50": ("08:00",),
+    "14:10": ("08:00", "DL AM"),
+    "14:20": ("08:00", "DL AM"),
+    "16:00": ("08:00", "DL AM"),
+}
+
+
+def report_follow_up_groups(slot):
+    primary = FOLLOW_UP_BY_SLOT.get(slot)
+    return ((primary,) if primary else ()) + CARRIED_FOLLOW_UPS.get(slot, ())
+
+
+def is_open_follow_up(row):
+    status = str(row.get("status") or "").strip().upper()
+    return not row.get("completed_at") and status not in {"DONE", "COMPLETED", "COMPLETED_LATE"}
+
+
+def discord_follow_up_groups(row, day, slot):
+    primary = FOLLOW_UP_BY_SLOT.get(slot)
+    groups = []
+    if is_open_follow_up(row):
+        due_groups = task_row_groups(row, day)
+        groups.extend(group for group in CARRIED_FOLLOW_UPS.get(slot, ()) if group in due_groups)
+    if primary and primary in task_row_groups(row, day, include_planned_days=True):
+        groups.append(primary)
+    return groups
 
 
 def local_task_day(value):
@@ -100,8 +127,8 @@ async def load_morning_task_rows(db, day, *, frozen_task_ids=()):
     return rows
 
 
-async def load_follow_up_comments(db, day, slots):
-    """Return task IDs from the saved plan, with an empty comment until someone answers."""
+async def load_follow_up_comments(db, day, slots, *, group=None, include_regular_answers=False):
+    """Return saved follow-up answers and, when requested, ordinary 1H answers."""
     rows = (await db.execute(
         select(DiscordReminder.bucket, DiscordReminder.one_h_report, User.full_name, User.username)
         .join(DiscordLink, DiscordLink.id == DiscordReminder.link_id)
@@ -113,7 +140,12 @@ async def load_follow_up_comments(db, day, slots):
     comments = {}
     for slot, report, name, username in rows:
         for item in (report or {}).get("tasks", []):
-            if item.get("follow_up") != FOLLOW_UP_BY_SLOT[slot]:
+            groups = (item.get("follow_up") or "").split(" / ")
+            eligible = {*CARRIED_FOLLOW_UPS.get(slot, ()), FOLLOW_UP_BY_SLOT.get(slot)}
+            tracked = bool(eligible.intersection(groups))
+            if group is not None and group not in groups:
+                continue
+            if not tracked and not (include_regular_answers and item.get("answer")):
                 continue
             answers = comments.setdefault(slot, {}).setdefault(item["id"], [])
             if item.get("answer"):

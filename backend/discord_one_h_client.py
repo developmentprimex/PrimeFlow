@@ -73,7 +73,7 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
         text += '\nPërgjigjet i gjen te Mira → Takimet 1H.'
         for done in [t for t in data['tasks'] if t['status'] == 'DONE'][:5]:
             text += '\n✅ ' + discord.utils.escape_markdown(ui.heading(done)) + ' · E kryer'
-        if data['bucket'] != '11:50':
+        if data['bucket'] not in {'11:50', '16:00'}:
             view.add_item(discord.ui.Button(label='💬 Koment', custom_id=f'pf:1h:{rid}:next:answer',
                                            style=discord.ButtonStyle.primary, row=0))
     if join_url:

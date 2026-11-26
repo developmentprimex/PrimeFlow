@@ -42,6 +42,25 @@ def display(report):
 
 
 class QuestionTests(unittest.TestCase):
+    def test_due_today_priority_questions_follow_the_next_slots_until_done(self):
+        day = AT.date().isoformat()
+        early = task('TODO', None, title='08:00 Oferta', due_date=day)
+        both = task('IN_PROGRESS', None, title='08:00 Plani', due_date=day,
+                    is_deadline_important=True, finish_period='AM')
+        later = task('IN_PROGRESS', None, title='08:00 Nesër', start_date=day, due_date='2026-10-28')
+        done = task('DONE', None, title='08:00 Kryer', due_date=day)
+        candidates = [early, both, later, done]
+        for slot in ('11:50', '14:20', '16:00'):
+            with self.subTest(slot=slot):
+                tasks = service.planned_tasks(candidates, AT.date(), slot)
+                self.assertEqual(tasks, [early, both])
+                report = service.snapshot(tasks, AT, slot=slot)
+                reminder = SimpleNamespace(id=uuid.uuid4(), day=AT.date(), bucket=slot, one_h_report=report)
+                questions = [item for item in service.presentation(reminder)['questions'] if item['id'] != 'next']
+                self.assertEqual([item['follow_up'] for item in questions], ['08:00', '08:00 / DL AM'])
+                self.assertTrue(all('pse nuk është kryer' in item['question'] for item in questions))
+        self.assertEqual(service.planned_tasks([done, later], AT.date(), '16:00'), [])
+
     def test_morning_follow_ups_ask_daily_progress_and_add_the_due_date_question(self):
         for slot, title, flags in (
             ('11:00', '08:00 Oferta', {}),
@@ -228,7 +247,7 @@ class QuestionTests(unittest.TestCase):
 
     def test_empty_later_slots_offer_earlier_ongoing_work_until_finished(self):
         ongoing = task('IN_PROGRESS', '10:00')
-        for slot in ('11:00', '14:20', '16:00'):
+        for slot in ('11:00', '14:20'):
             with self.subTest(slot=slot):
                 report = service.refresh(service.snapshot([], AT, slot=slot), [ongoing])
                 self.assertEqual(report['tasks'], [])

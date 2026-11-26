@@ -35,6 +35,7 @@ type TaskFeedback = { continuation: "" | "PO" | "JO"; comment: string }
 type TaskFeedbackRow = TaskFeedback & { key: string; title: string; owners: string }
 type TaskFeedbackEdits = Record<string, Partial<TaskFeedback>>
 const TASK_FEEDBACK_SECTION = "GA/HV/DV TASKS"
+const MORNING_FOLLOW_UP_SECTION = "DET 08:00/DL AM"
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 const NOTES_SECTION = "(GA) NOTES TE REJA ( NOT DISSCUSED)?"
 const MARKER_TASK_SECTIONS = new Set(["FIZIKISHT ME GA?", "A KA PYTJE/SQARIME ME KA/GENTIN"])
@@ -94,7 +95,8 @@ function sectionGroupLabel(section: Section) {
     GA_REACTIONS_SECTION,
     GA_PF_COMMENTS_SECTION,
     TASK_FEEDBACK_SECTION,
-    "DET 08:00/DL AM",
+    MORNING_FOLLOW_UP_SECTION,
+    "DET 08:00/DL AM/DUE SOT",
     "GA TASKS",
     "HV TASKS",
     "DV TASKS",
@@ -433,7 +435,8 @@ export default function MorningReportPage() {
           // General saves return the stored sections, while loading M1 refreshes these tables.
           const liveTaskSections = new Map(current.sections.flatMap((section) => {
             const key = section.section_key || section.title
-            return key === TASK_FEEDBACK_SECTION || MARKER_TASK_SECTIONS.has(key) ? [[key, section] as const] : []
+            return key === TASK_FEEDBACK_SECTION || key === MORNING_FOLLOW_UP_SECTION || MARKER_TASK_SECTIONS.has(key)
+              ? [[key, section] as const] : []
           }))
           return {
             ...data,
@@ -883,6 +886,8 @@ export default function MorningReportPage() {
                     ) : showSectionBody ? (
                       <ReportSectionPreview
                         body={reportSectionPreviewText(section.body)}
+                        filterDueDate={sectionKey === MORNING_FOLLOW_UP_SECTION}
+                        colorEightAmByStatus={sectionKey === MORNING_FOLLOW_UP_SECTION}
                         compactBzColumn={isTaskFeedbackSection || sectionKey === "GA TASKS"}
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         discordReplyReport={sectionKey === GA_REPLIES_SECTION

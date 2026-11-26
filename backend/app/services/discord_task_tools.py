@@ -17,6 +17,7 @@ REMINDERS = (
     ("11:50", time(11, 50)),
     # M2/M3 cover the remaining midday and end-of-day reporting separately.
     ("14:20", time(14, 20)),
+    ("16:00", time(16, 0)),
 )
 
 
@@ -26,7 +27,7 @@ def due_buckets(now: datetime) -> list[str]:
     buckets = []
     for bucket, at in REMINDERS:
         # Regular cards also invite staff to join. DL AM asks for status at the slot itself.
-        starts_at = datetime.combine(now.date(), at, now.tzinfo) - timedelta(minutes=0 if bucket == "11:50" else 1)
+        starts_at = datetime.combine(now.date(), at, now.tzinfo) - timedelta(minutes=0 if bucket in {"11:50", "16:00"} else 1)
         if timedelta(0) <= now - starts_at < timedelta(minutes=5):
             buckets.append(bucket)
     return buckets

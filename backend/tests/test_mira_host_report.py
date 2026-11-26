@@ -32,7 +32,10 @@ class ReportParity(unittest.IsolatedAsyncioTestCase):
         source = payload([])
         source['morning_follow_up_tasks'] = [early, am]
         data = host.SlotData(source, DAY)
-        for initials, slot, group, row in (('EF', '11:00', '08:00', early), ('DV', '11:50', 'DL AM', am)):
+        for initials, slot, group, row in (
+            ('EF', '11:00', '08:00', early), ('DV', '11:50', 'DL AM', am),
+            ('EF', '14:20', '08:00', early), ('DV', '16:00', 'DL AM', am),
+        ):
             self.assertIn(IDS[initials], data.participants(slot))
             brief = host.person_brief(data, slot, IDS[initials])
             self.assertEqual(brief['current'][0]['task_id'], row['task_id'])

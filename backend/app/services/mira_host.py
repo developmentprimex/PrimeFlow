@@ -244,17 +244,23 @@ class SlotData:
         return order
 
     def current_tasks(self, slot: str) -> list[dict]:
-        from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT
+        from app.services.morning_task_follow_up import report_follow_up_groups
         from app.services.primeflow_report import morning_follow_up_rows
 
         tasks = list(self.slots.get(slot, []))
-        follow_up = morning_follow_up_rows(self.payload, self.day, slot)
+        follow_up = {}
+        for group in report_follow_up_groups(slot):
+            for item in morning_follow_up_rows(self.payload, self.day, slot, group=group):
+                task_id = str(item.get("task_id") or item.get("id"))
+                if task_id in follow_up:
+                    follow_up[task_id]["morning_follow_up"] += f" / {group}"
+                else:
+                    follow_up[task_id] = {**item, "morning_follow_up": group}
         if not follow_up:
             return tasks
-        ids = {str(item.get("task_id") or item.get("id")) for item in follow_up}
         return [
-            *({**item, "morning_follow_up": FOLLOW_UP_BY_SLOT[slot]} for item in follow_up),
-            *(item for item in tasks if str(item.get("task_id") or item.get("id")) not in ids),
+            *follow_up.values(),
+            *(item for item in tasks if str(item.get("task_id") or item.get("id")) not in follow_up),
         ]
 
     def user_tasks(self, slot: str | None, user_id: str, *, open_only: bool = False) -> list[dict]:

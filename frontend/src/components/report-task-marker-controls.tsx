@@ -49,7 +49,9 @@ export function ReportTaskMarkerControls({ frame, html, onSaved }: {
             toast.error("Could not load task symbols")
           } finally { button.disabled = false }
         }
-        const host = card.matches("table, tr") ? card.querySelector("td:last-child") : card
+        const host = card.matches("table, tr")
+          ? card.querySelector("[data-report-marker-host]") ?? card.querySelector("td:last-child")
+          : card
         host?.append(button)
       })
     }

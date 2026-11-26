@@ -22,9 +22,10 @@ from app.models.task_user_comment import TaskUserComment
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.discord_task_tools import plain_text
 from app.services.discord_task_status import settled_for_questions
-from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, local_task_day, task_row_groups
+from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, discord_follow_up_groups, is_open_follow_up, local_task_day
 
 SLOTS = ('10:00', '11:00', '11:50', '14:20', '16:00')
+FOLLOW_UP_ONLY_SLOTS = frozenset({'11:50', '16:00'})
 NEXT_QUESTION = 'Me çka ke me vazhdu në slotin tjetër?'
 
 
@@ -60,9 +61,8 @@ def question(status, title, due_date=None, day=None):
 
 
 def planned_tasks(tasks, day, slot):
-    follow_up = FOLLOW_UP_BY_SLOT.get(slot)
-    priority = [t for t in tasks if follow_up and follow_up in task_row_groups(t, day, include_planned_days=True)]
-    if slot == '11:50':
+    priority = [t for t in tasks if discord_follow_up_groups(t, day, slot)]
+    if slot in FOLLOW_UP_ONLY_SLOTS:
         return priority
     priority_ids = {t['id'] for t in priority}
     return priority + [t for t in tasks if t.get('one_h_report_slot') == slot and t['id'] not in priority_ids]
@@ -72,6 +72,8 @@ def item_question(item, day):
     if not item.get('available'):
         return None
     if item.get('follow_up'):
+        if item.get('carried_only') and not is_open_follow_up(item):
+            return None
         if item['status'] == 'DONE':
             return 'Detyra figuron e përfunduar. Çfarë u përfundua dhe a ke ndonjë koment?'
         prompt = ('Pse nuk është punuar ende në këtë detyrë?' if item['status'] == 'TODO'
@@ -115,14 +117,15 @@ def next_options_key(report):
 
 def snapshot(tasks, at, *, slot='10:00'):
     report = {'created_at': at.isoformat(), 'slot': slot,
-              'next_options': [] if slot == '11:50' else next_options(tasks, slot), 'tasks': [
+              'next_options': [] if slot in FOLLOW_UP_ONLY_SLOTS else next_options(tasks, slot), 'tasks': [
         {'id': str(t['id']), 'title': plain_text(t.get('title') or 'Detyrë'),
          'planned_status': t['status'], 'status': t['status'], 'available': True,
          'due_date': t.get('due_date'),
          'start_date': t.get('start_date'),
+         'completed_at': t.get('completed_at'),
          'task_type': task_type(t),
-         **({'follow_up': FOLLOW_UP_BY_SLOT[slot]}
-            if slot in FOLLOW_UP_BY_SLOT and FOLLOW_UP_BY_SLOT[slot] in task_row_groups(t, at.date(), include_planned_days=True) else {}),
+         **({'follow_up': ' / '.join(groups), 'carried_only': FOLLOW_UP_BY_SLOT.get(slot) not in groups}
+            if (groups := discord_follow_up_groups(t, at.date(), slot)) else {}),
          'progress_percentage': t.get('progress_percentage'), 'comment': t.get('user_comment'),
          'answer': None, 'expected_at': None, 'skipped': False, 'history': []}
         for t in tasks], 'next': {'answer': None, 'expected_at': None, 'selected_tasks': [], 'selection_kind': None, 'history': []}}
@@ -134,7 +137,7 @@ def snapshot(tasks, at, *, slot='10:00'):
 def refresh(report, tasks, *, slot=None):
     result = deepcopy(report)
     result['slot'] = slot or result.get('slot', '10:00')
-    result['next_options'] = [] if result['slot'] == '11:50' else next_options(tasks, result['slot'])
+    result['next_options'] = [] if result['slot'] in FOLLOW_UP_ONLY_SLOTS else next_options(tasks, result['slot'])
     current = {str(t['id']): t for t in tasks}
     for entry in result['tasks']:
         task = current.get(entry['id'])
@@ -145,6 +148,7 @@ def refresh(report, tasks, *, slot=None):
             entry['status'] = task['status']
             entry['due_date'] = task.get('due_date')
             entry['start_date'] = task.get('start_date')
+            entry['completed_at'] = task.get('completed_at')
             entry['task_type'] = task_type(task)
             entry['progress_percentage'] = task.get('progress_percentage')
             entry['comment'] = task.get('user_comment')
@@ -211,7 +215,7 @@ def report_state(report):
     day = report_day(report)
     eligible = [t for t in report['tasks'] if item_question(t, day)]
     outstanding = [t for t in eligible if not t['answer']]
-    needs_next = report.get('slot') != '11:50' and not report['next']['answer']
+    needs_next = report.get('slot') not in FOLLOW_UP_ONLY_SLOTS and not report['next']['answer']
     if not outstanding and not needs_next:
         return 'DONE'
     if any(t['answer'] or t['history'] for t in report['tasks']) or report['next']['answer']:
@@ -228,7 +232,7 @@ def presentation(reminder, requested=None):
     selected = selected or next((t for t in candidates if not t.get('answer') and not t.get('skipped')), None)
     return {'id': str(reminder.id), 'date': reminder.day.isoformat(), 'bucket': reminder.bucket,
             'state': report_state(report), 'tasks': report['tasks'],
-            'questions': candidates if reminder.bucket == '11:50' else [*candidates, next_question],
+            'questions': candidates if reminder.bucket in FOLLOW_UP_ONLY_SLOTS else [*candidates, next_question],
             'current': selected, 'next': report['next'], 'next_options': report.get('next_options', []),
             'next_options_key': next_options_key(report), 'message_ids': getattr(reminder, 'message_ids', None) or []}
 
