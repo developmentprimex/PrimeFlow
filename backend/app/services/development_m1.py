@@ -185,63 +185,13 @@ async def ensure_development_m1_internal_item(db, checklist_id) -> bool:
     return True
 
 
-async def build_development_m1(db, user, *, checklist_items=None):
-    ensure_reports_access(user)
-    department = await db.scalar(select(Department).where(Department.code == "DEV"))
-    if department is None:
-        return None
-    if checklist_items is None:
-        checklist_items = (await db.scalars(
-            select(ChecklistItem).join(Checklist).where(Checklist.group_key == DEVELOPMENT_CHECKLIST_KEY)
-        )).all()
-
-    now = datetime.now(timezone.utc)
-    local_now = now.astimezone(ZoneInfo(settings.APP_TIMEZONE))
-    day = local_now.date()
-    day_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-    date_key = day.isoformat()
-    people = (await db.scalars(select(User).where(User.work_staff_filter()))).all()
-    people_by_id = {person.id: person for person in people}
-    team_ids = {person.id for person in people if person.department_id == department.id}
-    team = {str(user_id) for user_id in team_ids}
-    ka_ids = {str(person.id) for person in people if _ka_genti_confirmation_owner(person) == "KA"}
-
-    common = await _build_common_view(db, week_start=day, include="entries,meetings",
-                                      include_all_departments=True, max_items_per_bucket=5000)
-    if any(common.guardrails.truncated.values()):
-        raise HTTPException(status_code=503, detail="Common View data is incomplete")
-    buckets = common.items
-
-    attendance = []
-    for bucket, rows, start, end, color, border in (
-        ("Mungesë", buckets.absent, "from", "to", "#FFE9E9", "#EF4444"),
-        ("Vonesë", buckets.late, "start", "until", "#FFF4E6", "#F59E0B"),
-        ("Pushim", buckets.leave, "from", "to", "#E9F9EF", "#22C55E"),
-    ):
-        for row in rows:
-            applies = (
-                row["startDate"] <= date_key <= row["endDate"]
-                if bucket == "Pushim" else row["date"] == date_key
-            )
-            if applies and (row.get("userId") in team or row.get("isAllUsers")):
-                hours = "08:00–16:30 · Gjithë ditën" if row.get("fullDay") else "–".join(
-                    value for key in (start, end) if (value := row.get(key))
-                )
-                attendance.append({
-                    "id": row["id"],
-                    "title": "Të gjithë" if row.get("isAllUsers") else row["person"],
-                    "detail": row.get("note") or "",
-                    "labels": list(filter(None, (bucket, hours))),
-                    "color": color,
-                    "border": border,
-                })
-
-    external, internal, internal_with_ka = [], [], []
-    today_meetings = [
+async def development_meeting_rows(db, buckets, date_key, *, department_name=None, team=frozenset(), contact_ids=frozenset()):
+    external, internal, matching_internal = [], [], []
+    meetings = [
         row for row in [*buckets.external, *buckets.internal]
         if row["id"].startswith("meeting:") and row["date"] == date_key
     ]
-    meeting_ids = {row["id"]: UUID(row["id"].split(":")[1]) for row in today_meetings}
+    meeting_ids = {row["id"]: UUID(row["id"].split(":")[1]) for row in meetings}
     meeting_meta = {
         meeting_id: (owner, url)
         for meeting_id, owner, url in (await db.execute(
@@ -249,14 +199,9 @@ async def build_development_m1(db, user, *, checklist_items=None):
         )).all()
     } if meeting_ids else {}
     external_ids = {row["id"] for row in buckets.external}
-    for row in sorted(today_meetings, key=lambda row: row.get("time") or ""):
+    for row in sorted(meetings, key=lambda row: row.get("time") or ""):
         owner_id, url = meeting_meta.get(meeting_ids[row["id"]], (None, None))
-        owner = str(owner_id)
-        participants = set(row.get("assigneeUserIds") or [])
         is_external = row["id"] in external_ids
-        if not is_external:
-            is_development = row.get("department") == department.name or owner in team or team.intersection(participants)
-            involves_ka = owner in ka_ids or ka_ids.intersection(participants)
         status = {"held": "Mbajtur", "canceled": "Anuluar"}.get(row.get("occurrenceStatus"))
         relation = "PARA" if row.get("preExternalMeetingId") else "PAS" if row.get("pairedExternalMeetingId") else None
         calendar = row.get("calendarImported") if is_external else row.get("linkedExternalCalendarImported")
@@ -292,8 +237,73 @@ async def build_development_m1(db, user, *, checklist_items=None):
         if url and url.lower().startswith(("https://", "http://")):
             item["meeting_url"] = url
         (external if is_external else internal).append(item)
-        if not is_external and is_development and involves_ka:
-            internal_with_ka.append(item)
+        if not is_external and contact_ids:
+            owner = str(owner_id)
+            participants = set(row.get("assigneeUserIds") or [])
+            is_development = row.get("department") == department_name or owner in team or team.intersection(participants)
+            if is_development and (owner in contact_ids or contact_ids.intersection(participants)):
+                matching_internal.append(item)
+    return external, internal, matching_internal
+
+
+async def load_development_common_view(db, day):
+    common = await _build_common_view(db, week_start=day, include="entries,meetings",
+                                      include_all_departments=True, max_items_per_bucket=5000)
+    if any(common.guardrails.truncated.values()):
+        raise HTTPException(status_code=503, detail="Common View data is incomplete")
+    return common.items
+
+
+async def build_development_m1(db, user, *, checklist_items=None):
+    ensure_reports_access(user)
+    department = await db.scalar(select(Department).where(Department.code == "DEV"))
+    if department is None:
+        return None
+    if checklist_items is None:
+        checklist_items = (await db.scalars(
+            select(ChecklistItem).join(Checklist).where(Checklist.group_key == DEVELOPMENT_CHECKLIST_KEY)
+        )).all()
+
+    now = datetime.now(timezone.utc)
+    local_now = now.astimezone(ZoneInfo(settings.APP_TIMEZONE))
+    day = local_now.date()
+    day_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    date_key = day.isoformat()
+    people = (await db.scalars(select(User).where(User.work_staff_filter()))).all()
+    people_by_id = {person.id: person for person in people}
+    team_ids = {person.id for person in people if person.department_id == department.id}
+    team = {str(user_id) for user_id in team_ids}
+    ka_ids = {str(person.id) for person in people if _ka_genti_confirmation_owner(person) == "KA"}
+
+    buckets = await load_development_common_view(db, day)
+
+    attendance = []
+    for bucket, rows, start, end, color, border in (
+        ("Mungesë", buckets.absent, "from", "to", "#FFE9E9", "#EF4444"),
+        ("Vonesë", buckets.late, "start", "until", "#FFF4E6", "#F59E0B"),
+        ("Pushim", buckets.leave, "from", "to", "#E9F9EF", "#22C55E"),
+    ):
+        for row in rows:
+            applies = (
+                row["startDate"] <= date_key <= row["endDate"]
+                if bucket == "Pushim" else row["date"] == date_key
+            )
+            if applies and (row.get("userId") in team or row.get("isAllUsers")):
+                hours = "08:00–16:30 · Gjithë ditën" if row.get("fullDay") else "–".join(
+                    value for key in (start, end) if (value := row.get(key))
+                )
+                attendance.append({
+                    "id": row["id"],
+                    "title": "Të gjithë" if row.get("isAllUsers") else row["person"],
+                    "detail": row.get("note") or "",
+                    "labels": list(filter(None, (bucket, hours))),
+                    "color": color,
+                    "border": border,
+                })
+
+    external, internal, internal_with_ka = await development_meeting_rows(
+        db, buckets, date_key, department_name=department.name, team=team, contact_ids=ka_ids,
+    )
 
     tasks = (await db.scalars(select_development_report_tasks(department.id, team_ids).where(
         or_(

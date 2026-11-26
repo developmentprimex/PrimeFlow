@@ -56,6 +56,8 @@ def test_development_m2_uses_existing_questions_for_live_answers_and_excel():
         read_mail.return_value = {"it": {"connected": True, "messages": [{
             "id": "mail", "subject": "Email për projektin", "sender": "Klienti",
             "received_at": "10:30", "received_datetime": received.isoformat(),
+            "body": "Teksti i plotë\nRreshti i dytë",
+            "original_email_url": "https://outlook.office.com/mail/inbox/id/test",
         }]}}
         read_notes.return_value = [
             ("note", ["1", "NO", "Shënim i ri", "DP", "10:35"]),
@@ -73,6 +75,9 @@ def test_development_m2_uses_existing_questions_for_live_answers_and_excel():
     assert report["item_sections"] == {
         str(items[0].id): "emails", str(items[1].id): "notes", str(items[4].id): "delivery",
     }
+    email, = next(section["rows"] for section in report["sections"] if section["key"] == "emails")
+    assert email["email_body"] == "Teksti i plotë\nRreshti i dytë"
+    assert email["href"] == "https://outlook.office.com/mail/inbox/id/test"
     note_rows = next(section["rows"] for section in report["sections"] if section["key"] == "notes")
     assert "email_heading" not in note_rows[0]
     assert note_rows[1]["email_heading"] == "EM IT: 08:00 PROJEKTI"

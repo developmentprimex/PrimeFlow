@@ -328,9 +328,12 @@ const INTERNAL_MEETING = {
       tabLabel: "M3",
       label: "M3 (ME TRELLO) PER ZHVILLIM (15:45-16:00 MAX)",
       items: [
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
-        "Cka kemi me punu neser?",
+        "A ka shënime të reja në PX Notes / Zhvillim Teams?",
+        "Çka u përfundua dhe çka mbetet për nesër?",
+        "PV nesër dhe pasnesër",
+        "A ka doc për t’i dërguar KA/GA? Simbolet Common View?",
+        "A ka takime interne për nesër?",
+        "Takime externe për nesër",
       ],
     },
     TESTIMI_I_AGENT: {
@@ -342,6 +345,20 @@ const INTERNAL_MEETING = {
 } as const
 
 const INTERNAL_MEETING_GROUP_KEY = "development_internal_meetings"
+const meetingHourFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Budapest",
+  hour: "2-digit",
+  hourCycle: "h23",
+})
+
+function scheduledMeetingSlot(now: Date) {
+  const hour = Number(meetingHourFormatter.format(now))
+  if (hour < 11) return "M1"
+  if (hour < 14) return "M2"
+  if (hour < 18) return "M3"
+  return null
+}
+
 const INTERNAL_MEETING_ARCHIVED_CHECKLIST_TITLES = new Set(["testimi i agent-ave"])
 const INTERNAL_MEETING_ARCHIVED_MEETING_TITLES = new Set([
   "testimi i agent-ave (m1)",
@@ -1551,12 +1568,18 @@ export default function DepartmentKanban() {
   const [showParticipantDialog, setShowParticipantDialog] = React.useState(false)
   const [showEditParticipantDialog, setShowEditParticipantDialog] = React.useState(false)
   const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
+  React.useEffect(() => {
+    if (activeTab !== "meetings") return
+    const slot = scheduledMeetingSlot(new Date())
+    if (slot) setInternalSlot(slot)
+  }, [activeTab])
   const [internalMeetingChecklistId, setInternalMeetingChecklistId] = React.useState<string | null>(null)
   const [internalMeetingItems, setInternalMeetingItems] = React.useState<ChecklistItem[]>([])
   const hasChecklist = activeTab === "meetings" && internalMeetingItems.length > 0
   const m1 = useDevelopmentMeetingReport("M1", hasChecklist && internalSlot === "M1")
   const m2 = useDevelopmentMeetingReport("M2", hasChecklist && internalSlot === "M2")
-  const checklistReport = internalSlot === "M1" ? m1 : internalSlot === "M2" ? m2 : null
+  const m3 = useDevelopmentMeetingReport("M3", hasChecklist && internalSlot === "M3")
+  const checklistReport = internalSlot === "M1" ? m1 : internalSlot === "M2" ? m2 : internalSlot === "M3" ? m3 : null
   const checklistDate = checklistReport?.report?.date
   const openPointsKey = user?.id && checklistReport ? `development-${internalSlot.toLowerCase()}-open-points:${user.id}` : null
   const [openPointIds, setOpenPointIds] = React.useState<string[]>([])
@@ -4665,14 +4688,12 @@ export default function DepartmentKanban() {
       system: visibleSystemTemplates.length,
       "no-project": selectedDateNoProjectTasks.length,
       "internal-notes": groupedInternalNotes.length,
-      meetings: meetingTabMeetings.length,
     }),
     [
       filteredProjects.length,
       visibleSystemTemplates.length,
       selectedDateNoProjectTasks.length,
       visibleInternalNotes.length,
-      meetingTabMeetings,
       projectTasks.length,
       todayProjectTasks.length,
       todayNoProjectTasks.length,
@@ -7345,7 +7366,7 @@ export default function DepartmentKanban() {
                     onClick={() => setActiveTab(tab.id)}
                     className={`chip ${isActive ? "active" : ""}`}
                   >
-                    {tab.label} ({counts[tab.id]})
+                    {tab.id === "meetings" ? tab.label : `${tab.label} (${counts[tab.id]})`}
                   </button>
                 )
               })}
@@ -11154,14 +11175,15 @@ export default function DepartmentKanban() {
                         const discussionOnly = internalSlot === "M1" && (answer?.key === "visitors" || answer?.key === "plan")
                         const emptyKaGent = answer?.key === "ka_gent" && hasKaGentContent === false
                         const emptyDelivery = internalSlot === "M2" && answer?.key === "delivery" && answer.rows.length === 0
-                        const inlineAnswer = emptyKaGent ? "Nuk ka për sot." : emptyDelivery ? "Jo" : null
+                        const emptyM3 = internalSlot === "M3" && answer?.rows.length === 0
+                        const inlineAnswer = emptyKaGent ? "Nuk ka për sot." : emptyDelivery ? "Jo" : emptyM3 ? answer.message : null
                         const expandable = answer && checklistReport && !discussionOnly && !inlineAnswer
                         const rowChecksOnClick = !showMeetingLists && !isEditing && !expandable
                         const checkboxId = rowChecksOnClick ? `development-meeting-check-${item.id}` : undefined
                         const PlainPoint = rowChecksOnClick ? "label" : "div"
-                        const displayTitle = answer?.key === "ka_gent" ? answer.title : (internalSlot === "M2" || internalSlot === "M3")
-                          ? (item.title || "").toUpperCase()
-                          : (item.title || "")
+                        const reportTitle = answer?.key === "ka_gent" ? answer.title : report?.item_titles?.[item.id]
+                        const itemTitle = reportTitle ?? item.title ?? ""
+                        const displayTitle = internalSlot === "M2" || internalSlot === "M3" ? itemTitle.toUpperCase() : itemTitle
                         return (
                           <div key={item.id} className="relative flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
                             <Checkbox
@@ -11203,8 +11225,8 @@ export default function DepartmentKanban() {
                                     <span>{idx + 1}. {displayTitle}</span>
                                     <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
                                   </summary>
-                                  <DevelopmentMeetingAnswer section={answer} canUpdateMeetingStatus={internalSlot === "M1"}
-                                    canCloseNote={internalSlot === "M1"}
+                                  <DevelopmentMeetingAnswer section={answer} canUpdateMeetingStatus={internalSlot !== "M2"}
+                                    canCloseNote={internalSlot !== "M2"}
                                     pending={checklistReport.loading || checklistReport.failed} savingNote={checklistReport.savingNote}
                                     updateNote={checklistReport.updateNote} savingMeeting={checklistReport.savingMeeting}
                                     updateMeetingStatus={checklistReport.updateMeetingStatus} />
@@ -11245,7 +11267,7 @@ export default function DepartmentKanban() {
                                       size="icon"
                                       variant="outline"
                                       onClick={() => startEditInternalMeetingItem(
-                                        answer?.key === "ka_gent" ? { ...item, title: displayTitle } : item, idx + 1,
+                                        reportTitle ? { ...item, title: reportTitle } : item, idx + 1,
                                       )}
                                       aria-label="Edit internal meeting item"
                                       title="Edit"
