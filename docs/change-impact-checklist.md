@@ -147,6 +147,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Pika “Takimet interne” lexon takimet e ditës nga të gjitha departamentet.
   M1, M2 dhe M3 e shfaqin checklistën në gjithë gjerësinë; tabelat e takimeve
   dhe paneli Microsoft Calendar shfaqen te Testimi i Agent.
+  Në hyrje te Meetings në Development, ora e PrimeFlow zgjedh M1 para 11:00,
+  M2 nga 11:00 deri para 14:00 dhe M3 nga 14:00 deri para 18:00. Pas 18:00
+  ruhet skeda e zgjedhur dhe brenda Meetings zgjedhja manuale mbetet aktive.
   Kartat e takimeve në M1 përdorin të njëjtin renderim në Department dhe My View
   të Development. Kartat marrin ngjyrat, orën dhe shenjat CAL/MANUAL/PARA/PAS
   nga të dhënat dhe stilet e Common View. Takimet e anuluara kanë titull të
@@ -207,17 +210,31 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   shënohet direkt në rresht. Hapja dhe rifreskimi i
   pikave lexojnë email-et nga kutia IT dhe PX Notes të padiskutuara nga
   08:00 deri në momentin e kontrollit, me kufi në 12:00. Leximi i email-eve
-  ripërdor lidhjen e After Break Report. Dorëzimet GA përdorin rregullin
-  M2/M2_M3 të M2 PIKAT, të filtruar për Development. Pikat për punën e
+  ripërdor lidhjen e After Break Report. Subjekti i emailit hap tekstin
+  brenda pikës në Department dhe My View.
+  Nëse Outlook kthen URL-në, aty mund të hapet edhe emaili origjinal.
+  Excel përdor subjektin, dërguesin dhe orën për pikën e inbox-it.
+  Dorëzimet GA përdorin rregullin M2/M2_M3 të M2 PIKAT, të filtruar për
+  Development. Pikat për punën e
   paradites, planin PM dhe pjesa e Teams plotësohen në takim. Veprimi
   “Shëno si të diskutuar” ofrohet edhe në My View të M2 dhe përdor
   statusin e përbashkët të PX Notes. Email-et e importuara si PX Notes
   grupohen nën “Email-et” me titujt e shkurtër, si në M1. Excel përdor
   tekstin e plotë të raportit.
 
-- Development → Meetings → M3 shfaq pikat manuale në Department dhe My View.
-  Klikimi në gjithë rreshtin ndryshon ✓ dhe përdor checklistën që lexohet nga
-  Export Excel. Meetings Report dhe M3 PIKAT përdorin rrjedhat e tyre.
+- Development → Meetings → M3 dhe Export Excel përdorin raportin ditor të
+  Development M3. Pika e punës së përfunduar dhe planit të nesërm plotësohet
+  manualisht. PX Notes përdorin filtrin e shënimeve të padiskutuara të M1
+  dhe në ekran kanë “YES” dhe “Close”. PV lexon Common View për dy ditët e
+  ardhshme të punës, për ekipin Development dhe pushimet për të gjithë.
+  Dorëzimet lexojnë detyrat e Development që mbulojnë ditën e raportit me
+  `M3` ose `M2_M3`. Takimet për ditën e ardhshme të punës përdorin kartat e
+  M1 dhe statusin sipas datës së takimit. Takimet interne dhe externe janë
+  nga të gjitha departamentet. Titulli i vjetër i pikës 5 me GA/KA/Gent
+  shfaqet si “A ka takime interne për nesër?” edhe në Excel. Kur nuk ka të
+  dhëna, përgjigjja shfaqet pranë pyetjes dhe klikimi
+  në rresht ndryshon ✓ në Department dhe My View. Meetings Report dhe
+  M3 PIKAT përdorin rrjedhat e tyre.
 
 - Arsyeja `PV` pranohet pa koment në raportin ditor RLZ, te shtyrjet e
   detyrave dhe në përgjigjet M2 që përdorin listën e arsyeve. Kontrollo
@@ -635,6 +652,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tabela HV dhe bashkëngjitja e 1H Reports përdorin paraqitjen e tyre.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
+  Te pika 6 e M1 PIKAT PËR RAP shfaqen rreshtat me PO/JO ose koment
+  nga përgjigjet GA/HV/DV të ruajtura në draftin M1 Start of Day të së
+  njëjtës datë. Preview, email dhe Word/PNG/Excel përdorin të njëjtën
+  përmbledhje. Lidhja në ekran hap draftin e datës për redaktim.
 
 - Në tabelën **Finance Tasks**, filtri i datave përfshin çdo detyrë që
   mbivendoset me intervalin e zgjedhur, përfshirë kufijtë. Një datë e vetme

@@ -61,7 +61,7 @@ async def _email_section(day, cutoff):
     messages = sorted(inbox["messages"], key=lambda message: message["received_datetime"], reverse=True)
     for message in messages:
         row = {"id": message["id"], "title": message["subject"], "detail": message["sender"],
-               "labels": [message["received_at"]]}
+               "labels": [message["received_at"]], "email_body": message.get("body") or ""}
         if url := message.get("original_email_url"):
             try:
                 parsed = urlsplit(url)

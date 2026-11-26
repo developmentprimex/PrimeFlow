@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Minus, Plus } from "lucide-react"
+import { ChevronDown, Minus, Plus } from "lucide-react"
 import { toast } from "sonner"
 
+import { OriginalEmailLink } from "@/components/note-email-preview"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { TaskMarkerDisplay } from "@/components/task-marker-display"
@@ -40,6 +41,7 @@ type DevelopmentMeetingReport = {
   date: string
   cutoff?: string
   item_sections: Record<string, string>
+  item_titles?: Record<string, string>
   hidden_item_ids?: string[]
   sections: {
     key: string
@@ -50,6 +52,7 @@ type DevelopmentMeetingReport = {
       title: string
       detail: string
       email_heading?: string
+      email_body?: string
       heading?: boolean
       href?: string
       meeting_url?: string
@@ -67,7 +70,7 @@ type DevelopmentMeetingReport = {
   }[]
 }
 
-export function useDevelopmentMeetingReport(slot: "M1" | "M2", enabled: boolean) {
+export function useDevelopmentMeetingReport(slot: "M1" | "M2" | "M3", enabled: boolean) {
   const { apiFetch } = useAuth()
   const confirm = useConfirm()
   const [report, setReport] = useState<DevelopmentMeetingReport | null>(null)
@@ -228,6 +231,7 @@ export function DevelopmentMeetingAnswer({
         const savingNoteAction = savingNote?.id === row.id ? savingNote.action : undefined
         const noteNumber = noteNumbers?.get(row.id)
         const labels = meeting ? undefined : row.labels?.filter((label) => !row.task_status_labels?.includes(label))
+        const isEmailMessage = section.key === "emails" && row.email_body !== undefined
         return (
           <li key={row.id} className={`flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2 text-sm ${horizontal ? "flex-col" : "flex-wrap"} ${meeting?.tone ?? ""}`}
             style={row.color ? { backgroundColor: meeting ? undefined : row.color, borderColor: row.border, color: "#0f172a" } : undefined}>
@@ -290,6 +294,21 @@ export function DevelopmentMeetingAnswer({
                 ) : null}
                 {row.email_heading ? (
                   <span className="block max-w-[80ch] truncate" title={row.email_heading}>{row.email_heading}</span>
+                ) : isEmailMessage ? (
+                  <details className="group/email-message">
+                    <summary className="group/subject flex cursor-pointer list-none items-start justify-between gap-2 rounded [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
+                      <span>
+                        <span className="font-medium group-hover/subject:underline">{row.title}</span>
+                        {row.detail ? <span className="block text-xs">{row.detail}</span> : null}
+                      </span>
+                      <ChevronDown aria-hidden="true" className="size-4 shrink-0 group-open/email-message:rotate-180 print:hidden" />
+                    </summary>
+                    <OriginalEmailLink sourceUrl={row.href} />
+                    <div className="mt-2 max-h-72 overflow-y-auto overscroll-contain whitespace-pre-wrap rounded border bg-background p-3 [overflow-wrap:anywhere] print:hidden"
+                      tabIndex={0} aria-label="Emaili i plotë">
+                      {row.email_body || "Ky email nuk ka tekst."}
+                    </div>
+                  </details>
                 ) : (
                   <span className={row.canceled ? "line-through decoration-red-600 decoration-2" : undefined}>
                     {row.href?.startsWith("http") ? (
@@ -309,7 +328,7 @@ export function DevelopmentMeetingAnswer({
                   ))}
                 </div>
               ) : null}
-              {row.detail && !row.email_heading ? <p className="whitespace-pre-line text-xs">{row.detail}</p> : null}
+              {row.detail && !row.email_heading && !isEmailMessage ? <p className="whitespace-pre-line text-xs">{row.detail}</p> : null}
               {row.meeting_url && !row.canceled ? (
                 <a href={row.meeting_url} target="_blank" rel="noreferrer" className="text-xs font-medium underline">
                   Hap takimin

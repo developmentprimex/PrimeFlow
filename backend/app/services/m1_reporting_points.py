@@ -20,6 +20,7 @@ from app.services.gmail_px_notes import GMAIL_NOTE_ORIGIN, sync_gmail_px_notes
 from app.services.px_note_email import email_preview, email_preview_text, is_email_note_content
 from app.models.plan_note import PlanNote
 from app.models.m1_reporting_points import M1ReportingPointsReport
+from app.models.morning_report_draft import MorningReportDraft
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
@@ -28,6 +29,7 @@ from app.services.meetings_report import (
     apply_weekly_planner_task_order, common_view_task_sort_key,
 )
 from app.services.meetings_report_scheduler import normalize_recipients
+from app.services.morning_report import DV_TASKS_TITLE, GA_TASKS_TITLE, HV_TASKS_TITLE, TASK_FEEDBACK_ROWS
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.report_rich_text import marked_note_runs, runs_html
 from app.services.report_note_visibility import is_mira_note, mira_note_expression
@@ -374,6 +376,22 @@ def report_payload(row: M1ReportingPointsReport, *, excluded_note_ids: set[str] 
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
 
 
+async def with_morning_task_feedback(db: AsyncSession, report: dict) -> dict:
+    feedback = await db.scalar(select(MorningReportDraft.generated_snapshot[TASK_FEEDBACK_ROWS]).where(
+        MorningReportDraft.report_date == date.fromisoformat(report["report_date"]),
+    ))
+    if not feedback:
+        return report
+    rows = []
+    for group, title in (("HV", HV_TASKS_TITLE), ("DV", DV_TASKS_TITLE), ("GA", GA_TASKS_TITLE)):
+        plan_rows = [row for row in feedback.get("plan", []) if row["owners"] == group]
+        for row in [*plan_rows, *feedback.get(title, [])]:
+            if not (row["continuation"] or row["comment"].strip()):
+                continue
+            rows.append({**row, "group": group})
+    return {**report, "data": {**report["data"], "morning_task_feedback": rows}}
+
+
 TABLE_COLUMNS = {
     "absences": [("nr", "NR", 32), ("person", "PERSONI", 120), ("hours", "ORA", 120)],
     "delays": [("nr", "NR", 32), ("person", "PERSONI", 120), ("hours", "ORA", 120)],
@@ -384,6 +402,11 @@ TABLE_COLUMNS = {
               ("title", "DETYRA", 490), ("marker", "SIMBOLI", 60),
               ("planned_for", "PËR KUR", 100), ("created", "KRIJUAR", 135)],
 }
+MORNING_FEEDBACK_TITLE = "PËRGJIGJET GA/HV/DV NGA M1 START OF DAY"
+MORNING_FEEDBACK_COLUMNS = [
+    ("group", "GRUPI", 52), ("owners", "KUSH", 70), ("title", "PYETJA / DETYRA", 300),
+    ("continuation", "PO / JO", 64), ("comment", "KOMENT", 290),
+]
 TASK_FILLS = {"TODO": "#ffc4ed", "IN_PROGRESS": "#ffff00", "PAUSED": "#cbd5e1", "DONE": "#c4fdc4",
               "WAITING_CLIENT": "#e2c15b", "WAITING_CONFIRMATION": "#ccfbf1"}
 
@@ -494,6 +517,14 @@ def export_blocks(report: dict) -> list[dict]:
                              for column, _, _ in columns])
             blocks.append({"kind": "table", "columns": columns, "rows": rows} if rows else
                           {"kind": "text", "text": "Asnjë detyrë.", "level": 0})
+            if key == "ga_progress" and (feedback := report.get("data", {}).get("morning_task_feedback")):
+                blocks.append({"kind": "text", "text": MORNING_FEEDBACK_TITLE, "level": 3})
+                blocks.append({"kind": "table", "columns": MORNING_FEEDBACK_COLUMNS, "rows": [
+                    [{"text": row[column] or "—", "fill": "#ffffff", "color": "#000000",
+                      "bold": column in {"title", "continuation"}, "divider": False}
+                     for column, _, _ in MORNING_FEEDBACK_COLUMNS]
+                    for row in feedback
+                ]})
         else:
             rows = _table_rows(report, key)
             blocks.append({"kind": "table", "compact": key in {"absences", "delays"}, "columns": TABLE_COLUMNS[key], "rows": rows} if rows else
@@ -552,6 +583,7 @@ async def send_report(db, row, recipients, *, automatic: bool = False):
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To ne konfigurimin e M1.")
     report = await filter_points_payload(db, report_payload(row, excluded_note_ids=await excluded_note_ids(db, row)))
+    report = await with_morning_task_feedback(db, report)
     report = await with_discord_delivery(db, report, "M2")
     try:
         gmail = GmailService()

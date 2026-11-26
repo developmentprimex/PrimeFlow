@@ -73,6 +73,7 @@ from app.services.daily_report_logic import (
 from app.services.ga_time_table import get_ga_time_table_rows
 from app.services.development_m1 import DEVELOPMENT_CHECKLIST_KEY, build_development_m1
 from app.services.development_m2 import build_development_m2
+from app.services.development_m3 import build_development_m3
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.task_marker import one_h_marker_label
 from app.services.note_markup import parse_marked_note_content
@@ -3831,7 +3832,11 @@ async def export_department_internal_meetings_xlsx(
         await build_development_m2(db, user, checklist_items=all_items)
         if group_key == DEVELOPMENT_CHECKLIST_KEY and any(item.day == "M2" for item in all_items) else None
     )
-    development_reports = {"M1": development_m1, "M2": development_m2}
+    development_m3 = (
+        await build_development_m3(db, user, checklist_items=all_items)
+        if group_key == DEVELOPMENT_CHECKLIST_KEY and any(item.day == "M3" for item in all_items) else None
+    )
+    development_reports = {"M1": development_m1, "M2": development_m2, "M3": development_m3}
 
     wb = Workbook()
     ws = wb.active
@@ -3859,6 +3864,7 @@ async def export_department_internal_meetings_xlsx(
         report = development_reports.get(slot_key)
         sections = {section["key"]: section for section in report["sections"]} if report else {}
         item_sections = report["item_sections"] if report else {}
+        item_titles = report.get("item_titles", {}) if report else {}
         slot_items = sorted(
             [
                 item for item in all_items if (item.day or "M1") == slot_key
@@ -3903,7 +3909,7 @@ async def export_department_internal_meetings_xlsx(
         for item_index, item in enumerate(rows, start=1):
             answer = sections.get(item_sections.get(str(item.id))) if item else None
             values = (
-                [item_index, answer["title"] if answer and answer["key"] == "ka_gent" else item.title or "",
+                [item_index, answer["title"] if answer and answer["key"] == "ka_gent" else item_titles.get(str(item.id), item.title or ""),
                  "\u2713" if item.is_checked else ""]
                 if item is not None
                 else ["", "No checklist items", ""]

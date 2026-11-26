@@ -18,6 +18,7 @@ from app.schemas.department import DepartmentOut, DepartmentRealizationModeUpdat
 from app.services.audit import add_audit_log
 from app.services.development_m1 import build_development_m1
 from app.services.development_m2 import build_development_m2
+from app.services.development_m3 import build_development_m3
 
 
 router = APIRouter()
@@ -34,6 +35,15 @@ async def get_development_m1(db: AsyncSession = Depends(get_db), user=Depends(ge
 @router.get("/development/m2")
 async def get_development_m2(response: Response, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     report = await build_development_m2(db, user)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Development department not found")
+    response.headers["Cache-Control"] = "no-store"
+    return report
+
+
+@router.get("/development/m3")
+async def get_development_m3(response: Response, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    report = await build_development_m3(db, user)
     if report is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Development department not found")
     response.headers["Cache-Control"] = "no-store"

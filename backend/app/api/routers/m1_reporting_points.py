@@ -23,7 +23,7 @@ from app.services.m1_reporting_points import (
     MANUAL_POINTS, backfill_saved_note_authors, backfill_saved_task_planning, needs_saved_task_planning,
     excluded_note_ids, get_settings, locked_report, refresh_report,
     reorder_saved_report_tasks, render_html,
-    render_plain_text, report_payload, send_report, report_attachments,
+    render_plain_text, report_payload, send_report, report_attachments, with_morning_task_feedback,
 )
 
 router = APIRouter()
@@ -102,6 +102,7 @@ async def _current_payload(db: AsyncSession, row: M1ReportingPointsReport) -> di
             note = {**note, "email_preview": current, "content": email_preview_text(current)}
         visible_notes.append(note)
     report["data"]["notes"] = visible_notes
+    report = await with_morning_task_feedback(db, report)
     return await with_discord_delivery(db, report, "M2")
 
 
