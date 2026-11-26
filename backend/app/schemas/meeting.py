@@ -63,6 +63,7 @@ class MeetingOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     participant_ids: list[uuid.UUID] = Field(default_factory=list)
+    all_participants: bool = False
     paired_external_meeting_id: uuid.UUID | None = None
     pre_external_meeting_id: uuid.UUID | None = None
 
@@ -84,6 +85,7 @@ class MeetingCreate(MeetingClientIdentification):
     department_id: uuid.UUID
     project_id: uuid.UUID | None = None
     participant_ids: list[uuid.UUID] = Field(default_factory=list)
+    all_participants: bool = False
     create_internal_meeting: bool | None = None
     internal_starts_at: datetime | None = None
     paired_external_meeting_id: uuid.UUID | None = None

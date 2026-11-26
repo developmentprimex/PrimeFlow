@@ -4,7 +4,7 @@ import uuid
 from collections import Counter
 from datetime import datetime
 
-from app.services.primeflow_report import build_report_document
+from app.services.primeflow_report import _completed_in_report_window, build_report_document
 from app.services.primeflow_report_delivery import report_task_snapshot, report_text_overrides, strike_interval_start, strike_interval_end
 from app.services.task_strike_events import struck_points_for_interval
 
@@ -41,16 +41,22 @@ async def progress(db, meeting, data, user_ids=None, *, for_brief=False):
                 items[tid] = {**previous, "assignees": list(dict.fromkeys(
                     [*(previous.get("assignees") or []), *(row.get("assignees") or [])]))}
         source["items"][bucket] = rows
-    snapshot = await report_task_snapshot(source, interval_end=end, db=db)
+    supplemental = source.get("morning_follow_up_tasks") or []
+    for row in supplemental:
+        items.setdefault(str(row["task_id"]), row)
+    snapshot_source = {**source, "items": {"morning_follow_up_tasks": supplemental, **source["items"]}}
+    snapshot = await report_task_snapshot(snapshot_source, interval_end=end, db=db)
     titles, descriptions = report_text_overrides(snapshot, interval_start=start, interval_end=end)
     document = build_report_document(source, meeting.meeting_date, meeting.slot,
         title_overrides=titles, description_overrides=descriptions,
         completion_window_start=start, completion_window_end=end)
-    selected, report_owners = {}, {}
+    selected, report_owners, regular_task_ids = {}, {}, set()
     for section in document.sections:
         for person in section.employees:
             for task in person.tasks:
                 selected.setdefault(task.task_id, task)
+                if not section.morning_follow_up:
+                    regular_task_ids.add(task.task_id)
                 report_owners.setdefault(task.task_id, [])
                 if person.name not in report_owners[task.task_id]:
                     report_owners[task.task_id].append(person.name)
@@ -89,7 +95,8 @@ async def progress(db, meeting, data, user_ids=None, *, for_brief=False):
         line.update(owners=[host.initials(data.name(uid)) for uid in owners] or report_owners.get(tid, []),
                     people=[data.name(uid) for uid in owners] or report_owners.get(tid, []), slot=meeting.slot)
         completed = completion_time(row, end.tzinfo)
-        if line["status"] in ("DONE", "COMPLETED"):
+        if (line["status"] in ("DONE", "COMPLETED") and (completed is not None or tid in regular_task_ids)
+                and _completed_in_report_window(row, window_start=start, window_end=end)):
             line.update(completed_at=completed.isoformat() if completed else None,
                         at=completed.strftime("%H:%M") if completed else None, time_unknown=completed is None)
             done.append(dict(line))

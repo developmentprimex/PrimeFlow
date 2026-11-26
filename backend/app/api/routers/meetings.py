@@ -260,6 +260,8 @@ async def create_meeting(
 ) -> MeetingCreateOut:
     ensure_department_access(user, payload.department_id)
     requested_meeting_type = payload.meeting_type or "external"
+    if payload.all_participants and requested_meeting_type != "internal":
+        raise HTTPException(status_code=400, detail="ALL participants is available for internal meetings")
     paired_external: Meeting | None = None
     if payload.paired_external_meeting_id is not None:
         if requested_meeting_type != "internal":
@@ -309,6 +311,11 @@ async def create_meeting(
 
     # Every meeting must belong to at least one person's view.
     participant_ids = payload.participant_ids or []
+    if payload.all_participants:
+        active_users = (await db.execute(
+            select(User).where(User.work_staff_filter(), User.is_active.is_(True)).order_by(User.id)
+        )).scalars().all()
+        participant_ids = [participant.id for participant in active_users]
     if paired_external is not None:
         external_participant_ids = (
             await manual_participant_ids(db, [paired_external.id])
@@ -319,15 +326,16 @@ async def create_meeting(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Select at least one person for the meeting",
         )
-    users_stmt = select(User).where(User.work_staff_filter()).where(User.id.in_(participant_ids))
-    existing_users = (await db.execute(users_stmt)).scalars().all()
-    existing_user_ids = {u.id for u in existing_users}
-    invalid_ids = set(participant_ids) - existing_user_ids
-    if invalid_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid user IDs: {list(invalid_ids)}"
-        )
+    if not payload.all_participants:
+        users_stmt = select(User).where(User.work_staff_filter()).where(User.id.in_(participant_ids))
+        existing_users = (await db.execute(users_stmt)).scalars().all()
+        existing_user_ids = {u.id for u in existing_users}
+        invalid_ids = set(participant_ids) - existing_user_ids
+        if invalid_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid user IDs: {list(invalid_ids)}"
+            )
 
     one_h_conflicts = []
     if payload.starts_at is not None:
@@ -369,6 +377,7 @@ async def create_meeting(
         ends_at=payload.ends_at,
         meeting_url=payload.meeting_url,
         meeting_type=requested_meeting_type,
+        all_participants=payload.all_participants,
         recurrence_type=payload.recurrence_type,
         recurrence_days_of_week=payload.recurrence_days_of_week,
         recurrence_days_of_month=payload.recurrence_days_of_month,
@@ -465,6 +474,8 @@ async def update_meeting_reminder_settings(
         actor_user_id=user.id,
     )
     before_id_set = set(before_ids)
+    if before_id_set != set(participant_ids):
+        meeting.all_participants = False
     added_participant_ids = [
         participant_id for participant_id in participant_ids if participant_id not in before_id_set
     ]
@@ -562,6 +573,8 @@ async def update_meeting(
         meeting.meeting_url = payload.meeting_url
     if "meeting_type" in payload_dict and payload.meeting_type is not None:
         meeting.meeting_type = payload.meeting_type
+        if meeting.meeting_type != "internal":
+            meeting.all_participants = False
     if "recurrence_type" in payload_dict:
         # If recurrence_type is None/null, clear all recurrence fields
         meeting.recurrence_type = payload.recurrence_type
@@ -601,8 +614,10 @@ async def update_meeting(
             participant_ids=participant_ids,
             actor_user_id=user.id,
         )
+        before_participant_id_set = set(before_participant_ids)
+        if before_participant_id_set != set(updated_participant_ids):
+            meeting.all_participants = False
         if meeting.meeting_type == "external":
-            before_participant_id_set = set(before_participant_ids)
             added_participant_ids = [
                 participant_id
                 for participant_id in updated_participant_ids

@@ -138,7 +138,7 @@ def _meeting_rows(
         if recurrence not in {"DAILY", "WEEKLY", "MONTHLY"}:
             title = f"{title} [[mt:non_daily_weekly]]"
         rows.append([
-            str(index), " ".join(owners) or "-", _local_time(meeting.starts_at),
+            str(index), "ALL" if getattr(meeting, "all_participants", False) else " ".join(owners) or "-", _local_time(meeting.starts_at),
             title, recurrence,
             str(status_by_meeting.get(meeting.id) or "PLANNED").upper(),
         ])

@@ -349,7 +349,9 @@ async def update_draft(
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     if payload.unfinished_explanations:
-        task_rows = await build_unfinished_priority_task_rows(db, row.report_date, include_task_id=True)
+        task_rows = await build_unfinished_priority_task_rows(
+            db, row.report_date, include_task_id=True, include_morning_progress=True,
+        )
         allowed = {task_row[-1] for task_row in task_rows}
         updates = {str(task_id): fields for task_id, fields in payload.unfinished_explanations.items()}
         if updates.keys() - allowed:

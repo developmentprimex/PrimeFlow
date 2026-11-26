@@ -165,6 +165,7 @@ def meeting_to_out(
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
         participant_ids=participant_ids or [],
+        all_participants=bool(getattr(meeting, "all_participants", False)),
         paired_external_meeting_id=meeting.paired_external_meeting_id,
         pre_external_meeting_id=meeting.pre_external_meeting_id,
     )

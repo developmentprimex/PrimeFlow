@@ -39,15 +39,20 @@ test("Admin Tasks weekly EXT/INT cards show each occurrence status, keep avatars
 })
 
 test("weekly Excel export includes held/canceled labels and leaves unmarked meetings blank", () => {
-  const start = source.indexOf("    const exportPayload = React.useMemo(")
-  const payload = evaluate(source.slice(start, source.indexOf("    const repeatedTaskFirstDateByRow =", start)), {
+  const start = source.indexOf("  const exportPayload = React.useMemo(")
+  const payload = evaluate(source.slice(start, source.indexOf("  const repeatedTaskFirstDateByRow =", start)), {
     ...baseArgs, React: { useMemo: fn => fn() },
+    tableDataByDay: {
+      ...tableDataByDay,
+      [dates[0]]: { ...tableDataByDay[dates[0]], internal: [{ ...meetings[0], allParticipants: true }] },
+    },
     commonWeekISOs: dates, weekTitleRange: "test week",
     fromISODate: value => value, getDayCode: value => value, formatDateHuman: value => value,
     weekTableRows: [{ id: "external", label: "TAK EXT" }, { id: "internal", label: "TAK INT" }],
   }, "exportPayload")
+  assert.equal(payload.rows[0][2], "1. [Mbajtur] Weekly meeting 08:30 (RA)")
+  assert.equal(payload.rows[1][2], "1. [Mbajtur] Weekly meeting 08:30 (ALL)")
   for (const row of payload.rows) {
-    assert.match(row[2], /\[Mbajtur\] Weekly meeting 08:30 \(RA\)/)
     assert.match(row[3], /\[Anuluar X\] Weekly meeting 08:30 \(RA\)/)
     assert.equal(row[4], "1. Weekly meeting 08:30 (RA)")
   }

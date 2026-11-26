@@ -120,8 +120,8 @@ export default function MeetingsPage() {
               <div className="mt-0.5 text-xs text-muted-foreground">{frequency(row)}</div>
             </td>
             <td className={`${td} whitespace-nowrap tabular-nums`}>{meetingOverviewDateTime(row)}</td>
-            <td className={td}>{participants.length ? <span title={participants.map((id) => userName(users, id)).join(", ")}>
-              {participants.map((id) => userInitials(users, id)).join(", ")}
+            <td className={td}>{row.meeting.all_participants || participants.length ? <span title={participants.map((id) => userName(users, id)).join(", ")}>
+              {row.meeting.all_participants ? "ALL" : participants.map((id) => userInitials(users, id)).join(", ")}
             </span> : <span className="text-neutral-400">—</span>}</td>
             <td className={`${td} text-center tabular-nums`}><Link href={`/meetings/${row.meeting.id}`} aria-label={`${t("SHËNIME TË HAPURA")}: ${row.counts.open_notes}`} className="underline underline-offset-2">{row.counts.open_notes}</Link></td>
             <td className={td}>{KIND_LABEL[row.kind]}</td>

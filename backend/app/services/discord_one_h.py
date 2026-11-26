@@ -4,7 +4,7 @@ Task writes still pass through the existing actor-scoped Discord command API.
 The frozen plan survives later date/slot edits; a new slot never inherits all TODOs.
 """
 from copy import deepcopy
-from datetime import date, datetime
+from datetime import datetime
 from hashlib import sha256
 import json
 import uuid
@@ -22,6 +22,7 @@ from app.models.task_user_comment import TaskUserComment
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.discord_task_tools import plain_text
 from app.services.discord_task_status import settled_for_questions
+from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, local_task_day, task_row_groups
 
 SLOTS = ('10:00', '11:00', '11:50', '14:20', '16:00')
 NEXT_QUESTION = 'Me çka ke me vazhdu në slotin tjetër?'
@@ -41,16 +42,7 @@ def matches_period(task, slot):
 
 
 def due_today(due_date, day):
-    if not due_date or day is None:
-        return False
-    try:
-        if isinstance(due_date, str) and len(due_date) == 10:
-            return date.fromisoformat(due_date) == day
-        value = datetime.fromisoformat(due_date.replace('Z', '+00:00')) if isinstance(due_date, str) else due_date
-        local = ZoneInfo(settings.APP_TIMEZONE)
-        return (value if value.tzinfo else value.replace(tzinfo=local)).astimezone(local).date() == day
-    except (ValueError, TypeError, AttributeError):
-        return False
+    return day is not None and local_task_day(due_date) == day
 
 
 def report_day(report):
@@ -65,6 +57,33 @@ def question(status, title, due_date=None, day=None):
     if status == 'TODO':
         return f'Pse s’ke vazhdu me {title}? Kur vazhdon?'
     return None
+
+
+def planned_tasks(tasks, day, slot):
+    follow_up = FOLLOW_UP_BY_SLOT.get(slot)
+    priority = [t for t in tasks if follow_up and follow_up in task_row_groups(t, day, include_planned_days=True)]
+    if slot == '11:50':
+        return priority
+    priority_ids = {t['id'] for t in priority}
+    return priority + [t for t in tasks if t.get('one_h_report_slot') == slot and t['id'] not in priority_ids]
+
+
+def item_question(item, day):
+    if not item.get('available'):
+        return None
+    if item.get('follow_up'):
+        if item['status'] == 'DONE':
+            return 'Detyra figuron e përfunduar. Çfarë u përfundua dhe a ke ndonjë koment?'
+        prompt = ('Pse nuk është punuar ende në këtë detyrë?' if item['status'] == 'TODO'
+                  else 'Çfarë progresi ka sot në këtë detyrë?')
+        if due_today(item.get('due_date'), day):
+            prompt += ' Meqë sot është afati, pse nuk është kryer?'
+        return prompt
+    return question(item['status'], item['title'], item.get('due_date'), day)
+
+
+def item_asks_completion(item, day):
+    return not item.get('follow_up') and due_today(item.get('due_date'), day)
 
 
 def next_options(tasks, slot):
@@ -95,22 +114,27 @@ def next_options_key(report):
 
 
 def snapshot(tasks, at, *, slot='10:00'):
-    return {'created_at': at.isoformat(), 'slot': slot, 'next_options': next_options(tasks, slot), 'tasks': [
+    report = {'created_at': at.isoformat(), 'slot': slot,
+              'next_options': [] if slot == '11:50' else next_options(tasks, slot), 'tasks': [
         {'id': str(t['id']), 'title': plain_text(t.get('title') or 'Detyrë'),
          'planned_status': t['status'], 'status': t['status'], 'available': True,
          'due_date': t.get('due_date'),
          'start_date': t.get('start_date'),
          'task_type': task_type(t),
-         'question': question(t['status'], plain_text(t.get('title') or 'Detyrë'), t.get('due_date'), at.date()),
+         **({'follow_up': FOLLOW_UP_BY_SLOT[slot]}
+            if slot in FOLLOW_UP_BY_SLOT and FOLLOW_UP_BY_SLOT[slot] in task_row_groups(t, at.date(), include_planned_days=True) else {}),
          'progress_percentage': t.get('progress_percentage'), 'comment': t.get('user_comment'),
          'answer': None, 'expected_at': None, 'skipped': False, 'history': []}
         for t in tasks], 'next': {'answer': None, 'expected_at': None, 'selected_tasks': [], 'selection_kind': None, 'history': []}}
+    for item in report['tasks']:
+        item['question'] = item_question(item, at.date())
+    return report
 
 
 def refresh(report, tasks, *, slot=None):
     result = deepcopy(report)
     result['slot'] = slot or result.get('slot', '10:00')
-    result['next_options'] = next_options(tasks, result['slot'])
+    result['next_options'] = [] if result['slot'] == '11:50' else next_options(tasks, result['slot'])
     current = {str(t['id']): t for t in tasks}
     for entry in result['tasks']:
         task = current.get(entry['id'])
@@ -184,9 +208,10 @@ def all_done(report):
 
 
 def report_state(report):
-    eligible = [t for t in report['tasks'] if t['available'] and question(t['status'], t['title'])]
+    day = report_day(report)
+    eligible = [t for t in report['tasks'] if item_question(t, day)]
     outstanding = [t for t in eligible if not t['answer']]
-    needs_next = not report['next']['answer']
+    needs_next = report.get('slot') != '11:50' and not report['next']['answer']
     if not outstanding and not needs_next:
         return 'DONE'
     if any(t['answer'] or t['history'] for t in report['tasks']) or report['next']['answer']:
@@ -196,14 +221,14 @@ def report_state(report):
 
 def presentation(reminder, requested=None):
     report = reminder.one_h_report
-    candidates = [{**t, 'question': question(t['status'], t['title'], t.get('due_date'), reminder.day),
-                   'asks_completion': due_today(t.get('due_date'), reminder.day)} for t in report['tasks']
-                  if t['available'] and question(t['status'], t['title'])]
+    candidates = [{**t, 'question': prompt, 'asks_completion': item_asks_completion(t, reminder.day)}
+                  for t in report['tasks'] if (prompt := item_question(t, reminder.day))]
     next_question = {'id': 'next', 'title': 'Slotin tjetër', 'status': 'DONE', 'question': NEXT_QUESTION, **report['next']}
     selected = next((t for t in candidates if t['id'] == requested), None) if requested else None
     selected = selected or next((t for t in candidates if not t.get('answer') and not t.get('skipped')), None)
     return {'id': str(reminder.id), 'date': reminder.day.isoformat(), 'bucket': reminder.bucket,
-            'state': report_state(report), 'tasks': report['tasks'], 'questions': [*candidates, next_question],
+            'state': report_state(report), 'tasks': report['tasks'],
+            'questions': candidates if reminder.bucket == '11:50' else [*candidates, next_question],
             'current': selected, 'next': report['next'], 'next_options': report.get('next_options', []),
             'next_options_key': next_options_key(report), 'message_ids': getattr(reminder, 'message_ids', None) or []}
 
@@ -215,13 +240,12 @@ def save_answer(report, item_id, text, expected_at, request_id, at, *, skip=Fals
         raise HTTPException(404, 'Detyra nuk është pjesë e këtij raportimi.')
     if any(h.get('request_id') == request_id for t in [*result['tasks'], result['next']] for h in t['history']):
         return result
-    prompt = NEXT_QUESTION if item_id == 'next' else (
-        question(item.get('status'), item.get('title'), item.get('due_date'), report_day(result)) if item.get('available') else None)
+    prompt = NEXT_QUESTION if item_id == 'next' else item_question(item, report_day(result))
     if not prompt:
         raise HTTPException(409, 'Gjendja e detyrave ndryshoi. Rifresko raportimin.')
     if question_status and item_id != 'next' and question_status != item['status']:
         raise HTTPException(409, 'Gjendja e detyrës ndryshoi. Rifresko raportimin.')
-    if asks_completion is not None and item_id != 'next' and item['status'] == 'IN_PROGRESS' and asks_completion != due_today(item.get('due_date'), report_day(result)):
+    if asks_completion is not None and item_id != 'next' and item['status'] == 'IN_PROGRESS' and asks_completion != item_asks_completion(item, report_day(result)):
         raise HTTPException(409, 'Afati i detyrës ndryshoi. Rifresko raportimin.')
     if not skip and not text.strip():
         raise HTTPException(422, 'Shkruaj përgjigjen.')
@@ -250,6 +274,8 @@ def save_continue(report, item_id, request_id, at, *, question_status=None, asks
     item = next((t for t in report['tasks'] if t['id'] == item_id), None)
     if item is None:
         raise HTTPException(404, 'Detyra nuk është pjesë e këtij raportimi.')
+    if item.get('follow_up'):
+        raise HTTPException(409, 'Përdor Koment për t’iu përgjigjur pyetjes së detyrës.')
     if any(t['id'] == item_id for t in report['next'].get('continued_tasks', [])):
         return report
     result = save_answer(report, item_id, 'Po, vazhdoj.', item.get('expected_at') or '', request_id, at,

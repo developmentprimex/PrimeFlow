@@ -36,9 +36,7 @@ def order_custom_manual_sections(kind: ReportKind, sections: list[dict[str, str]
     in_template_order: list[dict[str, str]] = []
     for section in sections:
         title, key = section.get("title"), section.get(SECTION_KEY_FIELD)
-        if is_manual_section_title(kind, title, key) and (
-            kind != "morning" or canonical_report_section_key(kind, key or title) is None
-        ):
+        if is_manual_section_title(kind, title, key):
             manual.append(section)
         else:
             in_template_order.append(section)

@@ -55,8 +55,9 @@ export function MeetingDetailsDialog({
   }, [meeting])
 
   const originalIds = meeting?.participant_ids || []
+  const participantsChanged = [...participantIds].sort().join(",") !== [...originalIds].sort().join(",")
   const isDirty = Boolean(meeting) && (
-    [...participantIds].sort().join(",") !== [...originalIds].sort().join(",")
+    participantsChanged
     || reminderMinutes !== (meeting?.reminder_minutes_before === undefined ? 15 : meeting.reminder_minutes_before)
   )
 
@@ -141,7 +142,10 @@ export function MeetingDetailsDialog({
         </div>
 
         <div style={{ marginTop: "22px", borderTop: "1px solid #e2e8f0", paddingTop: "18px" }}>
-          <div style={{ fontSize: "14px", fontWeight: 800, color: "#0f172a" }}>PrimeFlow Participants</div>
+          <div style={{ fontSize: "14px", fontWeight: 800, color: "#0f172a" }}>
+            PrimeFlow Participants
+            {meeting.all_participants && !participantsChanged ? " · ALL" : null}
+          </div>
           <div style={{ marginTop: "4px", fontSize: "12px", color: "#64748b" }}>
             Only users selected here receive PrimeFlow reminders. Calendar attendees are never added automatically.
           </div>

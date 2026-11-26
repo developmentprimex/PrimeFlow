@@ -348,8 +348,12 @@ async def report_task_snapshot(data: dict, *, interval_end: datetime, db=None) -
 
 
 async def _report_snapshot_with_fallback(data: dict, *, interval_end: datetime) -> dict:
-    if data.get("tasks"):
-        data = {**data, "items": {"fallback_tasks": data["tasks"], **(data.get("items") or {})}}
+    if data.get("tasks") or data.get("morning_follow_up_tasks"):
+        data = {**data, "items": {
+            "fallback_tasks": data.get("tasks") or [],
+            "morning_follow_up_tasks": data.get("morning_follow_up_tasks") or [],
+            **(data.get("items") or {}),
+        }}
     return await report_task_snapshot(data, interval_end=interval_end)
 
 
@@ -395,7 +399,15 @@ async def generate_fresh(
     data: dict | None = None,
     show_full_mira_notes: bool = False,
 ) -> ReportDocument:
+    from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, load_follow_up_comments, load_morning_task_rows
+
     data = data or await load_common_view(day)
+    follow_up_comments = {}
+    if slot in FOLLOW_UP_BY_SLOT:
+        async with SessionLocal() as db:
+            follow_up_comments = (await load_follow_up_comments(db, day, [slot])).get(slot, {})
+            rows = await load_morning_task_rows(db, day, frozen_task_ids=follow_up_comments)
+        data = {**data, "morning_follow_up_tasks": rows}
     reminders = await load_1h_reminder_questions(slot, day)
     undiscussed_notes = await load_undiscussed_notes(show_full_mira_notes=show_full_mira_notes)
     strike_window_start = strike_interval_start(day, "10:00")
@@ -420,6 +432,7 @@ async def generate_fresh(
         completion_window_start=slot_start,
         completion_window_end=window_end,
         strike_window_start=strike_window_start,
+        morning_follow_up_comments=follow_up_comments,
         daily_strike_overrides=daily_overrides,
     )
 

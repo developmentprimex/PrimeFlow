@@ -42,6 +42,47 @@ def display(report):
 
 
 class QuestionTests(unittest.TestCase):
+    def test_morning_follow_ups_ask_daily_progress_and_add_the_due_date_question(self):
+        for slot, title, flags in (
+            ('11:00', '08:00 Oferta', {}),
+            ('11:50', 'Oferta AM', {'finish_period': 'AM', 'is_deadline_important': True}),
+        ):
+            with self.subTest(slot=slot):
+                tracked = task('TODO', None, title=title, start_date='2026-10-27', due_date='2026-10-29', **flags)
+                for offset in (-1, 0, 1, 2, 3):
+                    at = AT + timedelta(days=offset)
+                    planned = service.planned_tasks([tracked], at.date(), slot)
+                    self.assertEqual(planned, [tracked] if 0 <= offset <= 2 else [])
+                    if not planned:
+                        continue
+                    report = service.snapshot(planned, at, slot=slot)
+                    reminder = SimpleNamespace(id=uuid.uuid4(), day=at.date(), bucket=slot, one_h_report=report)
+                    prompt = service.presentation(reminder)['current']['question']
+                    self.assertIn('Pse nuk është punuar', prompt)
+                    self.assertEqual('pse nuk është kryer' in prompt, offset == 2)
+                    reminder.one_h_report = service.refresh(report, [{**tracked, 'status': 'IN_PROGRESS'}])
+                    prompt = service.presentation(reminder)['current']['question']
+                    self.assertIn('Çfarë progresi', prompt)
+                    self.assertEqual('pse nuk është kryer' in prompt, offset == 2)
+
+    def test_morning_follow_up_keeps_completed_and_unslotted_tasks(self):
+        day = AT.date().isoformat()
+        early = task('DONE', None, title='08:00 Oferta', due_date=day)
+        am = task('TODO', None, due_date=day, finish_period='AM', is_deadline_important=True)
+        pm = task('TODO', '11:50', due_date=day, finish_period='PM', is_deadline_important=True)
+        actual = service.planned_tasks([early, am, pm], AT.date(), '11:00')
+        self.assertEqual(actual, [early])
+        actual = service.planned_tasks([early, am, pm], AT.date(), '11:50')
+        self.assertEqual(actual, [am])
+        deadline_report = service.refresh(service.snapshot(actual, AT, slot='11:50'), [early, am, pm])
+        self.assertEqual(deadline_report['next_options'], [])
+        report = service.snapshot([early], AT, slot='11:00')
+        result = service.presentation(SimpleNamespace(id=uuid.uuid4(), day=AT.date(), bucket='11:00', one_h_report=report))
+        self.assertEqual(result['current']['follow_up'], '08:00')
+        self.assertIn('përfunduar', result['current']['question'])
+        saved = service.save_answer(report, early['id'], 'Po, oferta u dërgua.', '', '123', AT)
+        self.assertEqual(saved['tasks'][0]['answer'], 'Po, oferta u dërgua.')
+
     def test_continue_yes_only_asks_for_other_open_work_in_the_same_period(self):
         for slot, period, other_period in [('10:00', 'AM', 'PM'), ('11:00', 'AM', 'PM'), ('14:20', 'PM', 'AM')]:
             with self.subTest(slot=slot):
@@ -187,7 +228,7 @@ class QuestionTests(unittest.TestCase):
 
     def test_empty_later_slots_offer_earlier_ongoing_work_until_finished(self):
         ongoing = task('IN_PROGRESS', '10:00')
-        for slot in service.SLOTS[1:]:
+        for slot in ('11:00', '14:20', '16:00'):
             with self.subTest(slot=slot):
                 report = service.refresh(service.snapshot([], AT, slot=slot), [ongoing])
                 self.assertEqual(report['tasks'], [])

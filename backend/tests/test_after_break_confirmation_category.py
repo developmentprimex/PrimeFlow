@@ -13,6 +13,7 @@ from app.services.after_break_report import (
     SECTION_TITLES,
     UNFINISHED_PRIORITY_COLUMNS,
     UNFINISHED_PRIORITY_TABLE_LABEL,
+    M2_PRIORITY_PROGRESS_TITLE,
     _ascii_table,
     _append_unfinished_priority_explanations,
     _new_emails_report_body,
@@ -97,7 +98,7 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
         waiting = [section for section in sections if "DT WFE" in section["title"]]
         self.assertEqual(waiting, [{"title": "DT WFE", "section_key": "DT WFE", "body": "Original table"}])
         self.assertEqual(section_group_label("after_break", "DT WFE", "manual:DTWFE"), "AUTO-FILLED FROM PRIMEFLOW")
-        self.assertEqual(sections[sections.index(waiting[0]) - 1]["title"], UNFINISHED_PRIORITY_TABLE_LABEL)
+        self.assertEqual(sections[sections.index(waiting[0]) - 1]["title"], M2_PRIORITY_PROGRESS_TITLE)
         self.assertIn("Other manual point", [section["title"] for section in sections])
 
     def test_edited_auto_title_keeps_its_original_m2_identity_and_position(self) -> None:
@@ -125,7 +126,7 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
                      if section_group_label("after_break", section["title"], section["section_key"]) == "AUTO-FILLED FROM PRIMEFLOW"]
         self.assertEqual(automatic[:4], [NEW_EMAILS_TITLE, GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_TITLE, PCM_PROJECTS_TITLE])
         self.assertEqual(automatic[4:9], ["NOTES TE REJA ( NOT DISSCUSED)", "TAK INT/EXT TE PAMBAJTURA",
-                                        "DET TE PAKRYERA, 08:00/DEADLINE", "DT WFE", "DET E KRYERA NE AM"])
+                                        M2_PRIORITY_PROGRESS_TITLE, "DT WFE", "DET E KRYERA NE AM"])
         self.assertEqual(automatic[-2:], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
 
     def test_pcm_projects_use_title_codes_on_tasks_covering_the_report_day(self) -> None:
@@ -340,6 +341,35 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
             ["08:00", "08:00", "08:00", "DEADLINE / 08:00", "DEADLINE", "DEADLINE", "DUE SOT", "DUE SOT", "DUE SOT"],
         )
 
+    def test_m2_priority_progress_covers_the_planned_range_and_keeps_due_today_work(self) -> None:
+        timezone = ZoneInfo("Europe/Tirane")
+        day = date(2026, 8, 24)
+        cutoff = datetime(2026, 8, 24, 13, 20, tzinfo=timezone)
+        due = datetime(2026, 8, 26, 9, 0, tzinfo=timezone)
+        start = datetime(2026, 8, 23, 9, 0, tzinfo=timezone)
+        tasks = [
+            self._task("08:00 Active", 9, start_date=start, due_date=due, status="IN_PROGRESS", progress_percentage=45),
+            self._task("Important AM", 9, start_date=start, due_date=due, is_deadline_important=True),
+            self._task("Important PM", 9, start_date=start, due_date=due, is_deadline_important=True, finish_period="PM"),
+            self._task("08:00 Done", 9, start_date=start, status="DONE", completed_at=cutoff),
+            self._task("08:00 Later", 9, start_date=due, due_date=due),
+            self._task("Ordinary due today", 9),
+        ]
+        rows = _unfinished_priority_task_rows(tasks, {}, {}, day, cutoff, timezone, include_morning_progress=True)
+        by_title = {row[7]: row for row in rows}
+        self.assertEqual(set(by_title), {"08:00 Active", "Important AM", "08:00 Done", "Ordinary due today"})
+        self.assertEqual(by_title["08:00 Active"][8:], ["26.08.2026", "IN PROGRESS"])
+        self.assertEqual(by_title["08:00 Done"][9], "DONE")
+        self.assertEqual(by_title["Ordinary due today"][8:], ["SOT", "TODO"])
+
+    def test_m2_priority_table_renames_old_draft_labels_and_keeps_its_key(self) -> None:
+        legacy = UNFINISHED_PRIORITY_TABLE_LABEL
+        sections = normalize_after_break_report_sections([{"title": legacy, "body": f"{legacy}: 0"}])
+        section = next(item for item in sections if item["section_key"] == legacy)
+        self.assertEqual(section["title"], M2_PRIORITY_PROGRESS_TITLE)
+        self.assertTrue(section["body"].startswith(f"{M2_PRIORITY_PROGRESS_TITLE}:"))
+        self.assertIn(M2_PRIORITY_PROGRESS_TITLE, render_html("M2", date(2026, 8, 24), [section]))
+
     def test_unfinished_rows_show_task_kind_separately_from_due_priority(self) -> None:
         timezone = ZoneInfo("Europe/Tirane")
         tasks = [
@@ -385,6 +415,35 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
         self.assertEqual(result[1], [*columns, "Tjetër", "Check ¦ details"])
         self.assertIn(day, db.execute.await_args_list[0].args[0].compile().params.values())
         self.assertIn(day.isoformat(), db.execute.await_args_list[1].args[0].compile().params.values())
+
+    def test_m2_keeps_manual_and_discord_1h_comments_in_separate_cells(self) -> None:
+        day = date(2026, 8, 24)
+        first = SimpleNamespace(id="first")
+        second = SimpleNamespace(id="second")
+        columns = ["1", "EF", "DEV", "AM", "IN_PROGRESS", "08:00", "FT", "Same title", "SOT", "IN PROGRESS"]
+        rows = [[*columns, first.id], [*columns, second.id]]
+        db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [])))
+        from app.services import after_break_report as service
+
+        with patch.object(service, "_daily_rlz_values_by_task", AsyncMock(return_value={})), \
+             patch.object(service, "load_follow_up_comments", AsyncMock(return_value={
+                 "11:50": {first.id: "EF: Afati | mbetet hapur"},
+                 "11:00": {first.id: "EF: Sot 45%"},
+             })) as load_comments:
+            result = asyncio.run(_append_unfinished_priority_explanations(
+                db, rows, [first, second], day, {"ef": "Eva First"}, {},
+                overrides={first.id: {"comment": "Manual M2"}}, include_morning_progress=True,
+            ))
+        self.assertEqual(result[0][-3:], ["-", "Manual M2", "11:00: EF: Sot 45% / 11:50: EF: Afati ¦ mbetet hapur"])
+        self.assertEqual(result[1][-1], "-")
+        load_comments.assert_awaited_once_with(db, day, service.FOLLOW_UP_BY_SLOT)
+        body = "\n".join(service._ascii_table(
+            service.UNFINISHED_PRIORITY_TABLE_LABEL, service.M2_PRIORITY_PROGRESS_COLUMNS, result,
+        ))
+        rendered = service.render_html("M2", day, [{"title": service.UNFINISHED_PRIORITY_TABLE_LABEL, "body": body}])
+        for text in ("PROGRESI", "DISCORD 1H", "IN PROGRESS", "Manual M2", "EF: Sot 45%",
+                     'bgcolor="#fef3c7"', "border-top:3px solid #dc2626", 'bgcolor="#DC2626"'):
+            self.assertIn(text, rendered)
 
     def test_m2_manual_explanation_patch_preserves_other_saved_fields(self) -> None:
         from app.api.routers import after_break_report as api

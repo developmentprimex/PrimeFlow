@@ -39,6 +39,31 @@ def meeting_items():
 
 
 @pytest.mark.parametrize("tomorrow", [False, True])
+def test_meeting_with_all_participants_prints_all_in_the_user_column(tomorrow):
+    from docx import Document
+
+    day = date(2026, 10, 28)
+    items = {"internal": [{
+        "title": "Team sync", "date": day.isoformat(), "time": "09:00",
+        "allParticipants": True, "assignees": ["Dana Example", "Fiona Test"],
+        "assigneeUserIds": ["dana", "fiona"],
+    }]}
+    builder = build_tomorrow_print_report if tomorrow else build_today_print_report
+    report = asyncio.run(builder(date(2026, 10, 27) if tomorrow else day, payload={"items": items}))
+
+    assert re.search(r'<td data-meeting-users="true"[^>]*>ALL</td>', report["content_html"])
+    assert "[ALL]" in report["plain_text"]
+    rows = [(label, meetings, False) for label, meetings in _meeting_rows(items, day)]
+    sections = [(day, "SOT", rows)]
+    _, content, _ = _excel_table_attachment([], [], day, meeting_sections=sections)
+    assert "ALL" in {cell.value for row in load_workbook(BytesIO(content)).active for cell in row}
+    _, content, _ = _docx_table_attachment([], day, meeting_sections=sections)
+    assert "ALL" in {
+        cell.text for table in Document(BytesIO(content)).tables for row in table.rows for cell in row.cells
+    }
+
+
+@pytest.mark.parametrize("tomorrow", [False, True])
 def test_both_reports_show_status_and_only_canceled_meetings_move_last(tomorrow):
     builder = build_tomorrow_print_report if tomorrow else build_today_print_report
     report = asyncio.run(builder(
@@ -95,6 +120,7 @@ def test_common_view_captures_status_per_occurrence_for_recurring_and_one_off_me
         id=uuid.uuid4(), title="Recurring", meeting_type="internal",
         starts_at=datetime(2026, 10, 28, 8, tzinfo=timezone.utc),
         recurrence_type="weekly", recurrence_days_of_week=[2, 3, 4],
+        all_participants=True,
     )
     single = Meeting(
         id=uuid.uuid4(), title="One off", meeting_type="external", recurrence_type="none",
@@ -125,6 +151,8 @@ def test_common_view_captures_status_per_occurrence_for_recurring_and_one_off_me
         ("2026-10-28", "held"), ("2026-10-29", "canceled"), ("2026-10-30", ""),
     ]
     assert payload.items.external[0]["occurrenceStatus"] == "canceled"
+    assert all(item["allParticipants"] for item in payload.items.internal)
+    assert not payload.items.external[0]["allParticipants"]
 
 
 def test_status_changes_reset_and_deletion_invalidate_common_view_cache():

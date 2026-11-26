@@ -525,6 +525,8 @@ type InternalItem = {
   platform: string
   owner: string
   assignees?: string[]
+  assigneeUserIds?: string[]
+  allParticipants?: boolean
   department?: string
   recurrenceType?: string | null
   recurrence_type?: string | null
@@ -1782,6 +1784,8 @@ export default function CommonViewPage() {
         calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
         ...(meetingType === "internal"
           ? {
+              allParticipants: meeting.all_participants,
+              assigneeUserIds: meeting.participant_ids,
               pairedExternalMeetingId: meeting.paired_external_meeting_id || null,
               preExternalMeetingId: meeting.pre_external_meeting_id || null,
               linkedExternalCalendarCategories: linkedExternalMeeting?.calendar_categories || [],
@@ -1971,6 +1975,7 @@ export default function CommonViewPage() {
   const [internalMeetingRecurrenceDay, setInternalMeetingRecurrenceDay] = React.useState("1")
   const [internalMeetingDepartmentId, setInternalMeetingDepartmentId] = React.useState("")
   const [internalMeetingParticipantIds, setInternalMeetingParticipantIds] = React.useState<string[]>([])
+  const [internalMeetingSelectAll, setInternalMeetingSelectAll] = React.useState(false)
   const [internalMeetingPairExternalId, setInternalMeetingPairExternalId] = React.useState<string | null>(null)
   const [internalMeetingPairExternalTitle, setInternalMeetingPairExternalTitle] = React.useState("")
   const [internalMeetingPersonsOpen, setInternalMeetingPersonsOpen] = React.useState(false)
@@ -4370,6 +4375,8 @@ export default function CommonViewPage() {
               platform: meeting.platform?.trim() || "TBD",
               owner: ownerName,
               recurrenceType: meeting.recurrence_type || "none",
+              allParticipants: meeting.all_participants,
+              assigneeUserIds: meeting.participant_ids,
               pairedExternalMeetingId: meeting.paired_external_meeting_id || null,
               preExternalMeetingId: meeting.pre_external_meeting_id || null,
               linkedExternalCalendarCategories: linkedExternalMeeting?.calendar_categories || [],
@@ -5104,6 +5111,21 @@ export default function CommonViewPage() {
         return a.label.localeCompare(b.label)
       })
   }, [users])
+  const internalMeetingActivePersons = commonUserFilterOptions.filter((option) => option.isActive)
+  const internalMeetingAllSelected =
+    internalMeetingSelectAll
+    && internalMeetingActivePersons.length > 0
+    && internalMeetingActivePersons.every((option) => internalMeetingParticipantIds.includes(option.id))
+  const selectInternalMeetingDepartment = (departmentId: string) => {
+    if (departmentId === "__all__") {
+      setInternalMeetingSelectAll(true)
+      setInternalMeetingParticipantIds(internalMeetingActivePersons.map((option) => option.id))
+      return
+    }
+    if (internalMeetingAllSelected) setInternalMeetingParticipantIds([])
+    setInternalMeetingSelectAll(false)
+    setInternalMeetingDepartmentId(departmentId)
+  }
   const selectedCommonUserLabel = React.useMemo(() => {
     if (selectedCommonUserId === "__all__") return "All users"
     return commonUserFilterOptions.find((option) => option.id === selectedCommonUserId)?.label || "All users"
@@ -6001,7 +6023,8 @@ export default function CommonViewPage() {
       }
     })
 
-    const assigneesSuffix = (entry: { assignees?: string[]; person?: string; owner?: string }) => {
+    const assigneesSuffix = (entry: { assignees?: string[]; person?: string; owner?: string; allParticipants?: boolean }) => {
+      if (entry.allParticipants) return " (ALL)"
       const initialsList = entryAssignees(entry).map((name: string) => initials(name)).filter(Boolean)
       return initialsList.length ? ` (${initialsList.join(", ")})` : ""
     }
@@ -7073,6 +7096,7 @@ export default function CommonViewPage() {
     setInternalMeetingPlatform(meeting.platform || "")
     setInternalMeetingDepartmentId(meeting.department_id || "")
     setInternalMeetingParticipantIds(meeting.participant_ids || [])
+    setInternalMeetingSelectAll(false)
     setExternalMeetingsOpen(false)
     setInternalMeetingsOpen(true)
   }, [])
@@ -7721,6 +7745,7 @@ export default function CommonViewPage() {
         department_id: departmentId,
         project_id: null,
         participant_ids: internalMeetingParticipantIds,
+        all_participants: internalMeetingAllSelected,
         paired_external_meeting_id: internalMeetingPairExternalId,
         allow_one_h_conflict: allowOneHConflict,
       }
@@ -7760,6 +7785,7 @@ export default function CommonViewPage() {
       setInternalMeetingRecurrenceMonth("1")
       setInternalMeetingRecurrenceDay("1")
       setInternalMeetingParticipantIds([])
+      setInternalMeetingSelectAll(false)
       setInternalMeetingPairExternalId(null)
       setInternalMeetingPairExternalTitle("")
       setInternalMeetingPersonsOpen(false)
@@ -7781,6 +7807,7 @@ export default function CommonViewPage() {
     internalMeetingRecurrenceDay,
     internalMeetingDepartmentId,
     internalMeetingParticipantIds,
+    internalMeetingAllSelected,
     internalMeetingPairExternalId,
     confirm,
     externalMeetings,
@@ -8509,6 +8536,7 @@ export default function CommonViewPage() {
     const internalItems = internalSource.map((x): SwimlaneCell => ({
       title: x.title,
       meetingRelation: internalMeetingRelation(x),
+      assignees: x.allParticipants ? ["ALL"] : undefined,
       meetingTimeLabel: formatTimeLabel(x.time) || undefined,
       isManualInternalMeeting: isManualInternalMeeting(x),
       isCalendarMeeting: isCalendarLinkedInternalMeeting(x),
@@ -16027,8 +16055,8 @@ export default function CommonViewPage() {
                   <div className="external-meeting-field-stack">
                     <select
                       className="input"
-                      value={internalMeetingDepartmentId}
-                      onChange={(e) => setInternalMeetingDepartmentId(e.target.value)}
+                      value={internalMeetingAllSelected ? "__all__" : internalMeetingDepartmentId}
+                      onChange={(e) => selectInternalMeetingDepartment(e.target.value)}
                       disabled={!canSelectExternalDepartment}
                     >
                       {canSelectExternalDepartment ? (
@@ -16036,6 +16064,9 @@ export default function CommonViewPage() {
                       ) : (
                         <option value="">Department</option>
                       )}
+                      {canSelectExternalDepartment ? (
+                        <option value="__all__" disabled={!internalMeetingDepartmentId || !internalMeetingActivePersons.length}>ALL</option>
+                      ) : null}
                       {departments.map((dep) => (
                         <option key={dep.id} value={dep.id}>
                           {dep.name === "Project Content Manager" ? "Product Content" : dep.name}
@@ -16061,7 +16092,7 @@ export default function CommonViewPage() {
                       aria-haspopup="dialog"
                       aria-expanded={internalMeetingPersonsOpen}
                     >
-                      <span>{internalMeetingParticipantIds.length ? "Persons selected" : "Add persons (required)"}</span>
+                      <span>{internalMeetingAllSelected ? "ALL" : internalMeetingParticipantIds.length ? "Persons selected" : "Add persons (required)"}</span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
                         {internalMeetingParticipantIds.length ? (
                           <span className="external-person-picker-count">{internalMeetingParticipantIds.length}</span>
@@ -16129,7 +16160,7 @@ export default function CommonViewPage() {
                         </div>
                       </div>
                     ) : null}
-                    {internalMeetingParticipantIds.length ? (
+                    {!internalMeetingAllSelected && internalMeetingParticipantIds.length ? (
                       <div className="external-person-chips" aria-label="Selected internal meeting persons">
                         {internalMeetingParticipantIds.slice(0, 3).map((id) => {
                           const person = commonUserFilterOptions.find((option) => option.id === id)
@@ -16445,13 +16476,15 @@ export default function CommonViewPage() {
                                   <span>{department?.name || "Department TBD"}</span>
                                   <span>Owner: {ownerName}</span>
                                 </div>
-                                {participantNames.length ? (
+                                {meeting.all_participants || participantNames.length ? (
                                   <div className="external-meeting-person-summary" aria-label="Meeting persons">
-                                    <span className="external-meeting-person-count">
-                                      {participantNames.length} {participantNames.length === 1 ? "person" : "persons"}
-                                    </span>
+                                    {!meeting.all_participants ? (
+                                      <span className="external-meeting-person-count">
+                                        {participantNames.length} {participantNames.length === 1 ? "person" : "persons"}
+                                      </span>
+                                    ) : null}
                                     <span className="external-meeting-person-names" title={participantNames.join(", ")}>
-                                      {participantNames.join(", ")}
+                                      {meeting.all_participants ? "ALL" : participantNames.join(", ")}
                                     </span>
                                   </div>
                                 ) : null}
@@ -16972,7 +17005,9 @@ export default function CommonViewPage() {
                                   <span className="calendar-meeting-badge">CAL</span>
                                 ) : null}
                                 {renderWeekMeetingStatus(e, iso)}
-                                {!isCalendarLinkedInternalMeeting(e) ? (
+                                {e.allParticipants ? (
+                                  <span className="week-table-avatars"><span className="week-table-avatar">ALL</span></span>
+                                ) : !isCalendarLinkedInternalMeeting(e) ? (
                                   <span className="week-table-avatars">
                                     {entryAssignees(e).map((name: string) => (
                                       <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -17517,7 +17552,7 @@ export default function CommonViewPage() {
                                       <div className="swimlane-assignees">
                                         {cell.assignees.map((name) => (
                                           <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
-                                            {initials(name)}
+                                            {row.id === "internal" && name === "ALL" ? "ALL" : initials(name)}
                                           </span>
                                         ))}
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (

@@ -51,17 +51,20 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
         item_id = uuid.UUID(item['id']).hex
         text += f'{ui.icon(item["status"])} **{discord.utils.escape_markdown(ui.heading(item))}**\n'
         text += f'Start: {approvals.date_text(item.get("start_date"))} · Due: {approvals.date_text(item.get("due_date"))}\n'
+        if item.get('follow_up'):
+            text += f'\n🔴 **{item["follow_up"]}**'
         text += '\n' + discord.utils.escape_markdown(item['question'][:400])
         if item.get('answer'):
             text += '\n✅ ' + discord.utils.escape_markdown(item['answer'][:150])
             if item.get('expected_at'):
                 text += ' · ' + discord.utils.escape_markdown(item['expected_at'][:100])
-        view.add_item(discord.ui.Button(label='Po, vazhdon', style=discord.ButtonStyle.success,
-            custom_id=f'pf:1h:{rid}:{item_id}:continue', row=0,
-            disabled=any(t['id'] == item['id'] for t in data['next'].get('continued_tasks', []))))
-        for label, action in [('☑ Strike', 'task'),
-                               ('✅ U krye', 'done'), ('📅 Shtyje', 'postpone')]:
-            view.add_item(discord.ui.Button(label=label, custom_id=f'pf:1h:{rid}:{item_id}:{action}', row=0))
+        if not item.get('follow_up'):
+            view.add_item(discord.ui.Button(label='Po, vazhdon', style=discord.ButtonStyle.success,
+                custom_id=f'pf:1h:{rid}:{item_id}:continue', row=0,
+                disabled=any(t['id'] == item['id'] for t in data['next'].get('continued_tasks', []))))
+        if item['status'] != 'DONE':
+            for label, action in [('☑ Strike', 'task'), ('✅ U krye', 'done'), ('📅 Shtyje', 'postpone')]:
+                view.add_item(discord.ui.Button(label=label, custom_id=f'pf:1h:{rid}:{item_id}:{action}', row=0))
         view.add_item(discord.ui.Button(label='💬 Koment', custom_id=f'pf:1h:{rid}:{item_id}:answer',
                                        style=discord.ButtonStyle.primary, row=0))
     else:
@@ -70,8 +73,9 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
         text += '\nPërgjigjet i gjen te Mira → Takimet 1H.'
         for done in [t for t in data['tasks'] if t['status'] == 'DONE'][:5]:
             text += '\n✅ ' + discord.utils.escape_markdown(ui.heading(done)) + ' · E kryer'
-        view.add_item(discord.ui.Button(label='💬 Koment', custom_id=f'pf:1h:{rid}:next:answer',
-                                       style=discord.ButtonStyle.primary, row=0))
+        if data['bucket'] != '11:50':
+            view.add_item(discord.ui.Button(label='💬 Koment', custom_id=f'pf:1h:{rid}:next:answer',
+                                           style=discord.ButtonStyle.primary, row=0))
     if join_url:
         view.add_item(discord.ui.Button(label='🎧 Kyçu në 1H', url=join_url, row=2 if item else 0))
     text += '\n\n**Me çka ke me vazhdu në slotin tjetër?**'
@@ -148,7 +152,8 @@ class AnswerModal(discord.ui.Modal):
         self.bot, self.data, self.item, self.message = bot, data, item, message
         self.answer = discord.ui.TextInput(label='Vazhdimi' if item['id'] == 'next' else 'PËRGJIGJA për detyrën', style=discord.TextStyle.paragraph,
             default=(item.get('answer') or '')[:4000] or None, max_length=4000)
-        self.has_expected = item['id'] != 'next' and (item['status'] == 'TODO' or item.get('asks_completion', False))
+        self.has_expected = item['id'] != 'next' and not item.get('follow_up') and (
+            item['status'] == 'TODO' or item.get('asks_completion', False))
         self.expected = discord.ui.TextInput(label='Vazhdimi i planifikuar' if item['status'] == 'TODO' else 'Përfundimi i pritshëm', required=False,
             placeholder='p.sh. sot 14:30',
             default=item.get('expected_at') or None, max_length=200)
@@ -156,7 +161,7 @@ class AnswerModal(discord.ui.Modal):
         if self.has_expected:
             self.add_item(self.expected)
         self.continuation = None
-        if item['id'] != 'next':
+        if item['id'] != 'next' and not item.get('follow_up'):
             self.continuation = discord.ui.TextInput(label='Me çfarë vazhdon më pas? (opsionale)', required=False,
                 style=discord.TextStyle.paragraph, max_length=4000,
                 placeholder='Lëre bosh për të mbajtur vazhdimin e zgjedhur nga lista.',

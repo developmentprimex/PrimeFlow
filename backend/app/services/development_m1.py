@@ -266,7 +266,7 @@ async def build_development_m1(db, user, *, checklist_items=None):
         if recurrence and recurrence != "none":
             labels.append(recurrence)
         labels.extend(row.get("calendarCategories") or row.get("linkedExternalCalendarCategories") or [])
-        names = ", ".join(row.get("assignees") or [])
+        names = "ALL" if row.get("allParticipants") else ", ".join(row.get("assignees") or [])
         item = {
             "id": row["id"],
             "title": row["title"],
