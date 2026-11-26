@@ -34,6 +34,9 @@ from app.services.morning_report import (
     KA_GENT_QUESTIONS_TITLE,
     MARKER_TASK_SECTIONS,
     PHYSICAL_GA_TITLE,
+    REORGANIZATION_CAUSE_LABEL,
+    REORGANIZATION_PLAN_LABEL,
+    REORGANIZATION_TITLE,
     SECTION_TITLES,
     TASK_FEEDBACK_OVERRIDES,
     TASK_FEEDBACK_ROWS,
@@ -44,10 +47,13 @@ from app.services.morning_report import (
     _ga_hv_dv_tables_body,
     _group_marked_tasks,
     _marker_task_table,
+    _morning_delivery_sections,
     _marked_tasks_for_day,
     _load_symbol_comments,
     _symbol_comment_table,
     normalize_morning_report_sections,
+    morning_has_absence_or_delay,
+    preserve_morning_plan_note,
     render_html,
     render_plain_text,
     subject_for,
@@ -127,10 +133,11 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
     def test_requested_section_order_is_used_in_m1_and_email(self) -> None:
         comments = GA_PF_COMMENTS_TITLE
         expected = [
-            "A KA RIORGANIZIM?", SECTION_TITLES[2], GA_HV_DV_TASKS_TITLE, "DET 08:00/DL AM",
+            SECTION_TITLES[2], GA_HV_DV_TASKS_TITLE, "DET 08:00/DL AM",
             PHYSICAL_GA_TITLE, SECTION_TITLES[1],
             SECTION_TITLES[0], GA_REACTIONS_SECTION_KEY, comments, SECTION_TITLES[3],
             SECTION_TITLES[4], SECTION_TITLES[5], KA_GENT_QUESTIONS_TITLE, *SECTION_TITLES[7:9],
+            REORGANIZATION_TITLE,
         ]
         manual = {"title": "Pyetje manuale", "section_key": "manual:custom:1:test", "body": "Manual"}
         saved = [
@@ -739,7 +746,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         retained = {"title": "Another question", "section_key": "manual:custom:2:retained", "body": "Keep this answer"}
         sections = normalize_morning_report_sections([*retired, retained, {"title": "PIKAT E DITES SOT", "body": "Legacy"}])
         self.assertEqual([section["section_key"] for section in sections],
-                         [DISPLAY_SECTION_TITLES[0], retained["section_key"], *DISPLAY_SECTION_TITLES[1:]])
+                         [retained["section_key"], *DISPLAY_SECTION_TITLES])
         for question in retired:
             self.assertTrue(is_known_report_title("morning", question["title"]))
             self.assertFalse(is_known_report_title("after_break", question["title"]))
@@ -768,8 +775,8 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.services.meeting_point_manual_sync.load_common_view_extra_titles", new_callable=AsyncMock) as load:
             load.return_value = [question["title"] for question in legacy] + ["Another question"]
             merged = await merge_common_view_manual_sections(None, sections, "morning", legacy, legacy)
-        self.assertEqual(merged[1]["title"], "Another question")
-        self.assertEqual([section["section_key"] for section in [merged[0], *merged[2:]]], DISPLAY_SECTION_TITLES)
+        self.assertEqual(merged[0]["title"], "Another question")
+        self.assertEqual([section["section_key"] for section in merged[1:]], DISPLAY_SECTION_TITLES)
 
     def test_personal_and_wfc_sections_are_labeled_as_auto_filled(self) -> None:
         self.assertEqual(SECTION_TITLES[7], "DET PERSONALISHT ME KA/GENTIN?")
@@ -857,14 +864,14 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     def test_reorganization_answer_survives_m1_regeneration(self) -> None:
         from app.services.meeting_point_manual_sync import section_group_label
-        from app.services.morning_report import REORGANIZATION_QUESTION, preserve_morning_plan_note
+        from app.services.morning_report import preserve_morning_plan_note
 
         draft = normalize_morning_report_sections([])
         answered = [{**section, "body": "Po, plani ndryshoi."}
-                    if section["section_key"] == REORGANIZATION_QUESTION else section for section in draft]
+                    if section["section_key"] == REORGANIZATION_TITLE else section for section in draft]
         regenerated = preserve_morning_plan_note(draft, answered)
-        manual = next(section for section in regenerated if section["section_key"] == REORGANIZATION_QUESTION)
-        self.assertEqual(manual["body"], "Po, plani ndryshoi.")
+        manual = next(section for section in regenerated if section["section_key"] == REORGANIZATION_TITLE)
+        self.assertIn("KOMENT: Po, plani ndryshoi.", manual["body"])
         self.assertEqual(section_group_label("morning", manual["title"], manual["section_key"]), "MANUAL QUESTIONS")
 
     def test_normalization_renames_the_previous_notes_section(self) -> None:
@@ -960,6 +967,50 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("08:00-08:25", body)
         self.assertIn("08:00-12:00", body)
         self.assertIn("NDRYSHON PLANI: (Ploteso manualisht)", body)
+
+    def test_reorganization_follow_ups_follow_workload_and_report_date_attendance(self) -> None:
+        report_day = date(2026, 8, 5)
+        sections = normalize_morning_report_sections([])
+        question = sections[-1]
+        self.assertEqual(question["section_key"], REORGANIZATION_TITLE)
+        self.assertIn("BZ M1: JO", question["body"])
+        self.assertIn("NËNNGARKESË: JO\nMBINGARKESË: JO", question["body"])
+        self.assertNotIn(REORGANIZATION_PLAN_LABEL, render_plain_text("M1", report_day, sections))
+        question["body"] += "\nSI BËHET ORGANIZIMI?: Ndaj detyrat\n me ekipin"
+        normalized = normalize_morning_report_sections(sections)
+        self.assertIn("SI BËHET RIORGANIZIMI?: Ndaj detyrat\n me ekipin", normalized[-1]["body"])
+        self.assertNotIn("SI BËHET ORGANIZIMI?", normalized[-1]["body"])
+        question["body"] = normalized[-1]["body"]
+        self.assertNotIn("Ndaj detyrat", render_html("M1", report_day, sections))
+        checked = {**question, "body": question["body"].replace("BZ M1: JO", "BZ M1: PO")}
+        self.assertEqual(normalize_morning_report_sections([checked])[-1], checked)
+        previous = {**question, "body": "BZ M1: Shënim i ruajtur\nKOMENT: Koment ekzistues"}
+        self.assertIn("BZ M1: JO\nKOMENT: Koment ekzistues\n Shënim i ruajtur",
+                      normalize_morning_report_sections([previous])[-1]["body"])
+
+        for workload in ("NËNNGARKESË", "MBINGARKESË"):
+            with self.subTest(workload=workload):
+                selected = {**question, "body": question["body"].replace(f"{workload}: JO", f"{workload}: PO")}
+                regenerated = preserve_morning_plan_note(normalize_morning_report_sections([]), [selected])
+                self.assertEqual(regenerated[-1], selected)
+                self.assertIn("Ndaj detyrat", render_html("M1", report_day, regenerated))
+                self.assertNotIn(REORGANIZATION_CAUSE_LABEL, render_plain_text("M1", report_day, regenerated))
+
+        for category in (CommonCategory.delays, CommonCategory.absences):
+            with self.subTest(category=category):
+                attendance = _attendance_section(
+                    [CommonEntry(category=category, title="DV", entry_date=report_day)], {}, report_day,
+                )
+                regenerated = preserve_morning_plan_note(
+                    normalize_morning_report_sections([{"title": SECTION_TITLES[2], "body": attendance}]),
+                    [question],
+                )
+                self.assertTrue(morning_has_absence_or_delay(regenerated))
+                delivery = _morning_delivery_sections(regenerated)
+                self.assertIn(REORGANIZATION_PLAN_LABEL, delivery[-1]["body"])
+                self.assertIn(REORGANIZATION_CAUSE_LABEL, delivery[-1]["body"])
+                docx = Document(BytesIO(render_section_report_docx("M1", "M1", report_day, delivery)))
+                self.assertIn(REORGANIZATION_CAUSE_LABEL, docx.element.body.xml)
 
     async def test_day_context_renders_annual_leave_without_tuple_unpack_error(self) -> None:
         user_id = uuid.uuid4()

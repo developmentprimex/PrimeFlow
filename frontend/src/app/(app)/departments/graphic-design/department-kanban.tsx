@@ -1977,7 +1977,7 @@ export default function DepartmentKanban() {
           return <>
             {systemTitleOnly ? null : <TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />}
             {title}
-            {selectedAllHighlightDate && isTaskPausedOnDay(task, formatDateInput(selectedAllHighlightDate)) && <TaskPauseBadge />}
+            {isTaskPausedOnDay(task, selectedAllReportIso) && <TaskPauseBadge />}
             {task.mira_dictation_source && <span className="block text-xs text-muted-foreground">{miraDictationLabel(task.mira_dictation_source)}</span>}
           </>
         }}
@@ -2921,6 +2921,7 @@ export default function DepartmentKanban() {
       tyo: string
       comment?: string | null
       taskId?: string
+      pause_periods?: Task["pause_periods"]
       systemTemplateId?: string
       systemOccurrenceDate?: string
       systemStatus?: string
@@ -3057,6 +3058,7 @@ export default function DepartmentKanban() {
         tyo: getTyoLabel(baseDate, task.completed_at, selectedAllReportDate),
         comment: task.user_comment ?? null,
         taskId: task.id,
+        pause_periods: task.pause_periods,
         oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
       })
@@ -3093,6 +3095,7 @@ export default function DepartmentKanban() {
         tyo: "T",
         comment: task.user_comment ?? null,
         taskId: task.id,
+        pause_periods: task.pause_periods,
         oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
       })
@@ -3122,6 +3125,7 @@ export default function DepartmentKanban() {
           }),
           comment: task.user_comment ?? null,
           taskId: task.id,
+          pause_periods: task.pause_periods,
           oneHMarker: task.one_h_marker,
           sortDate: task.due_date || task.start_date || task.planned_for || task.created_at,
           oneHReportSlot: task.is_1h_report || task.is_r1
@@ -3160,6 +3164,7 @@ export default function DepartmentKanban() {
         }),
         comment: task.user_comment ?? null,
         taskId: task.id,
+        pause_periods: task.pause_periods,
         oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.created_at,
         oneHReportSlot: task.is_1h_report || task.is_r1
@@ -3390,6 +3395,7 @@ export default function DepartmentKanban() {
       tyo: string
       comment?: string | null
       taskId?: string
+      pause_periods?: Task["pause_periods"]
       systemTemplateId?: string
       systemOccurrenceDate?: string
       systemStatus?: string
@@ -3504,6 +3510,7 @@ export default function DepartmentKanban() {
           tyo: getTyoLabel(baseDate, task.completed_at, selectedAllReportDate),
           comment: task.user_comment ?? null,
           taskId: task.id,
+          pause_periods: task.pause_periods,
           oneHMarker: task.one_h_marker,
           sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
           startDate: task.start_date || null,
@@ -3550,6 +3557,7 @@ export default function DepartmentKanban() {
             }),
             comment: task.user_comment ?? null,
             taskId: task.id,
+            pause_periods: task.pause_periods,
             oneHMarker: task.one_h_marker,
             sortDate: task.due_date || task.start_date || task.created_at,
             startDate: task.start_date || null,
@@ -3581,6 +3589,7 @@ export default function DepartmentKanban() {
               }),
               comment: task.user_comment ?? null,
               taskId: task.id,
+              pause_periods: task.pause_periods,
               oneHMarker: task.one_h_marker,
               sortDate: task.due_date || task.start_date || task.created_at,
               startDate: task.start_date || null,
@@ -6747,6 +6756,7 @@ export default function DepartmentKanban() {
                                         </span>
                                       ) : null}
                                       <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                                    {isTaskPausedOnDay(row, selectedAllReportIso) && <TaskPauseBadge />}
                                     <TaskMarkerComment taskId={row.taskId} />
                                         {(() => {
                                           const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
@@ -8454,7 +8464,7 @@ export default function DepartmentKanban() {
                                   key={t.id}
                                   id={`task-${t.id}`}
                                   href={taskHref}
-                                  className={`block rounded-lg border border-slate-200 border-l-4 px-2 py-2 text-sm transition hover:bg-slate-50 ${dueOnSelectedDay
+                                  className={`task-pause-surface block rounded-lg border border-slate-200 border-l-4 px-2 py-2 text-sm transition hover:bg-slate-50 ${dueOnSelectedDay
                                     ? DUE_ON_SELECTED_DAY_TASK_CARD_CLASS
                                     : startsOnSelectedDay
                                     ? STARTS_ON_SELECTED_DAY_TASK_CARD_CLASS
@@ -8474,6 +8484,7 @@ export default function DepartmentKanban() {
                                           {typeof t.title === "string" && t.title.includes("[[")
                                             ? renderMarkedNoteContent(t.title, t.title)
                                             : t.title}
+                                            {isTaskPausedOnDay(t, selectedAllReportIso) && <TaskPauseBadge />}
                                         </div>
                                       </div>
                                     </div>
@@ -9206,6 +9217,7 @@ export default function DepartmentKanban() {
                   tyo: string
                   comment?: string | null
                   taskId?: string
+                  pause_periods?: Task["pause_periods"]
                   systemTemplateId?: string
                   systemOccurrenceDate?: string
                   systemStatus?: string
@@ -9387,6 +9399,7 @@ export default function DepartmentKanban() {
                                   </span>
                                 ) : null}
                                 <span className="whitespace-pre-wrap break-words">
+                                  {isTaskPausedOnDay(row, selectedAllReportIso) && <TaskPauseBadge />}
                                   <TaskMarkerComment taskId={row.taskId} />
                                   {(() => {
                                     const hasMarks = typeof row.title === "string" && row.title.includes("[[")
@@ -9515,6 +9528,7 @@ export default function DepartmentKanban() {
                                   </span>
                             ) : null}
                             <span className="whitespace-pre-wrap break-words">
+                                {isTaskPausedOnDay(row, selectedAllReportIso) && <TaskPauseBadge />}
                                 <TaskMarkerComment taskId={row.taskId} />
                               {(() => {
                                 const hasMarks = typeof row.title === "string" && row.title.includes("[[")

@@ -5,6 +5,7 @@ import { EmailNoteDisclosure, NoteEmailPreview, splitManualEmailNote } from "@/c
 import type { NoteEmailPreview as EmailPreview } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
+import { TaskPauseBadge } from "@/components/task-pause-field"
 import { Textarea } from "@/components/ui/textarea"
 import { TaskOneHMarkerFromLabel } from "@/components/task-one-h-marker"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
@@ -23,7 +24,7 @@ function PointNote({ note }: { note: NoteRow }) {
   return email ? <EmailNoteDisclosure title={email.title} sourceUrl={email.sourceUrl} kind={email.kind}>{renderMarkedNoteContent(email.body)}</EmailNoteDisclosure>
     : renderMarkedNoteContent(note.content)
 }
-type TaskRow = { id: string; title: string; status: string; created_at: string; start_date?: string | null; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
+type TaskRow = { id: string; is_paused?: boolean; title: string; status: string; created_at: string; start_date?: string | null; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
@@ -90,7 +91,7 @@ function Created({ rows, kind }: { rows: NoteRow[] | TaskRow[]; kind: "note" | "
     ] : [
       index + 1, (row as TaskRow).assignees || "—", (row as TaskRow).department || "—",
       (row as TaskRow).am_pm || "—", (row as TaskRow).task_type || "—",
-      <strong key="task">{taskTitle((row as TaskRow).title)}</strong>,
+      <strong key="task">{taskTitle((row as TaskRow).title)}{(row as TaskRow).is_paused && <TaskPauseBadge />}</strong>,
       <TaskOneHMarkerFromLabel key="marker" label={(row as TaskRow).marker} />,
       (row as TaskRow).planned_for || "—",
       `${reportDate(row.created_at)} ${reportTime(row.created_at)}`,
@@ -128,11 +129,10 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
         <Created rows={rows} kind="task" />
       </div>)}
     </Point>
-    {manual("reorganization", "6. A DUHET RIORGANIZIM?")}
-    {(["ga_progress", "delivery"] as const).map((key) => key === "delivery" && report.discord_delivery_slot ? <Point key={key} id="m1-delivery" title="8. SA PER DOREZIM M2?">
+    {(["ga_progress", "delivery"] as const).map((key) => key === "delivery" && report.discord_delivery_slot ? <Point key={key} id="m1-delivery" title="7. SA PER DOREZIM M2?">
       <DiscordDeliveryTable rows={report.data.delivery || []} slot={report.discord_delivery_slot} />
     </Point> : <Point key={key} id={`m1-${key}`}
-      title={key === "ga_progress" ? "7. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA" : "8. SA PER DOREZIM M2?"}
+      title={key === "ga_progress" ? "6. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA" : "7. SA PER DOREZIM M2?"}
       count={(report.data[key] || []).length}
       description={key === "ga_progress" ? "Detyrat AM dhe AM/PM personale me GA ose me simbolet F/GA, brenda intervalit start–due." : "Detyrat me simbolet M2 dhe M2/3, AM dhe PM, brenda intervalit start–due, si te M2."}>
       <Grid name={key === "ga_progress" ? "Detyrat me GA" : "Detyrat për dorëzim M2"} labels={["NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "SIMBOLI", "TITULLI"]}
@@ -140,9 +140,10 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
         rows={(report.data[key] || []).map((row, index) => ({ id: row.task_id,
           fill: row.deadline_important ? "#dc2626" : STATUS_COLORS[row.status] || "#ffffff",
           cells: [index + 1, row.assignees || "—", row.department || "—", row.project || "—", row.am_pm || "—",
-            row.task_type || "—", <TaskOneHMarkerFromLabel key="marker" label={row.marker} />, <strong key="title">{row.title}</strong>]
-            .map((cell, column) => <span key={column} style={{ color: row.deadline_important ? "white" : "black" }}>{cell}</span>),
+            row.task_type || "—", <TaskOneHMarkerFromLabel key="marker" label={row.marker} />, <strong key="title">{row.title}{row.is_paused && <TaskPauseBadge />}</strong>]
+            .map((cell, column) => <span key={column} style={{ color: row.is_paused ? "inherit" : row.deadline_important ? "white" : "black" }}>{cell}</span>),
         }))} />
     </Point>)}
+    {manual("reorganization", "8. A DUHET RIORGANIZIM?")}
   </div>
 }

@@ -126,8 +126,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   të njëjtin raport ditor. Mungesat, vonesat, pushimet dhe takimet lexohen nga
   Common View. Takimet externe të ditës përfshijnë të gjitha departamentet.
   Pika “Takimet interne” lexon takimet e ditës nga të gjitha departamentet.
-  M1 e shfaq checklistën në gjithë gjerësinë; tabelat e takimeve dhe paneli
-  Microsoft Calendar janë në pamjet e tjera të Meetings.
+  M1, M2 dhe M3 e shfaqin checklistën në gjithë gjerësinë; tabelat e takimeve
+  dhe paneli Microsoft Calendar shfaqen te Testimi i Agent.
   Kartat e takimeve në M1 përdorin të njëjtin renderim në Department dhe My View
   të Development. Kartat marrin ngjyrat, orën dhe shenjat CAL/MANUAL/PARA/PAS
   nga të dhënat dhe stilet e Common View. Takimet e anuluara kanë titull të
@@ -135,9 +135,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Në ekran, kartat e takimeve vendosen krah për krah dhe rreshti lëviz
   horizontalisht kur kartat nuk zënë vend. Takimet e anuluara dalin në fund
   të rreshtit, sipas renditjes së Common View ditore.
-  Anulimi nga Department → Meetings → M1 përdor statusin e takimit për datën
-  e kartës përmes API-së së Common View. Dialogu tregon efektin te taskat e
-  gjeneruara dhe takimet interne të lidhura. My View e shfaq statusin.
+  Në Development → Meetings → M1, Department dhe My View kanë një zgjedhës
+  pranë orës për takimet interne dhe externe, me vlerat bosh, “Mbajtur” dhe
+  “Anuluar”, si në Common View. Statusi ruhet për datën e kartës përmes API-së
+  që përdor edhe Common View. Në printim, statusi shfaqet si etiketë.
+  Dialogu i anulimit tregon efektin te taskat e gjeneruara dhe takimet interne
+  të lidhura. Statusi lexohet edhe në Excel, Common View, Admin Tasks,
+  1H SHTYPI Sot/Nesër dhe tabelat e statuseve në raportet M2 dhe M3.
+  Tabelat ditore në Development, Graphic Design dhe Product Content shfaqin
+  anulimin, përfshirë My View.
   Takimet interne me KA kufizohen te Zhvillimi. Detyrat ndjekin datat e
   planifikimit, caktimet dhe simbolet KA/GENT/F; detyrat personale përdorin
   prefikset KA/Genti të raporteve M1/M3.
@@ -147,24 +153,39 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   si Common View. Excel shfaq emrat e plotë.
   Kopjet me të njëjtin burim ose grup shfaqen në një rresht për pikë, me
   personat, simbolet dhe komentet e bashkuara edhe në Excel.
-  Tick-u ruhet në checklistën ekzistuese dhe klikimi te pyetja hap përgjigjen.
+  Hapja e një përgjigjeje në M1 e shënon automatikisht pikën në checklistën
+  ekzistuese, që lexohet edhe në Excel. Mbyllja e përgjigjes nuk e heq shenjën.
+  Pikat e hapura rikthehen për datën e raportit dhe përdoruesin në të njëjtën
+  skedë të shfletuesit, si në Department ashtu edhe në My View.
   Takimet interne me KA dhe pyetjet për KA/Gentin shfaqen nën të njëjtën
   pikë me një tick, edhe në Excel. Për checklistat ekzistuese përdoret
   tick-u i pikës së parë të çiftit sipas rendit të ruajtur.
+  Kur të dyja listat e KA/Gentit janë bosh, “Nuk ka për sot.” shfaqet pranë
+  pyetjes dhe pika shënohet direkt me ✓ në Department dhe My View.
   Excel vendos përgjigjen me ngjyra poshtë pyetjes përkatëse në të njëjtën
   checklistë. Ndryshimi i rendit dhe redaktimi i pyetjes ruajnë lidhjen me
-  përgjigjen. Diskutimi i detyrave AM/PM mbetet pikë manuale.
-  PX Notes të padiskutuara ndjekin filtrin e M1 dhe M2. Veprimi “Shëno si të
-  diskutuar” përdor statusin e përbashkët të PX Notes, që lexohet edhe nga
-  M1, M2, M1 PIKAT për importet Gmail dhe 1H Reports. Kontrollo Excel, My View
-  dhe checklistat manuale të Development e Product Content Manager. Chat-i i
-  Teams Personal mbetet pikë manuale.
+  përgjigjen. Pikat për vizitorët FRG dhe diskutimin e detyrave AM/PM në M1
+  shfaqen vetëm me titullin dhe kutinë e shënimit, në Department dhe My View.
+  Te pikat e M1 pa panel, klikimi në gjithë rreshtin ndryshon shenjën ✓.
+  Excel vazhdon të lexojë shenjën nga checklist-a dhe tekstin nga raporti.
+  Në M1, “YES” (Diskutuar) dhe “Close” përdorin pamjen e butonave të PX Notes
+  direkt te çdo shënim në Department dhe My View. Numërimi fillon te shënimet
+  e zakonshme dhe vazhdon te grupi “Email-et”. “Close” ruan `status: CLOSED`
+  dhe “YES” ruan `is_discussed: true` përmes API-së së PX Notes. Të dyja e heqin shënimin
+  nga lista e PX Notes të padiskutuara. Kontrollo filtrat në M1 dhe M2 të
+  Development, Export Excel, Morning Report, After Break Report, 1H Reports,
+  1H SHTYPI Tomorrow dhe M1 PIKAT për importet Gmail. Chat-i i Teams Personal
+  mbetet pikë manuale.
   Në Development M1, shënimet nga email-et mblidhen nën “Email-et” me grup
-  fillimisht të mbyllur. Rreshtat e hapur shfaqin vetëm titullin e shkurtër dhe
-  veprimin e diskutimit. Excel përdor tekstin e raportit.
+  fillimisht të mbyllur. Rreshtat e hapur shfaqin titullin e shkurtër dhe
+  veprimet “YES” dhe “Close”. Excel përdor tekstin e raportit.
 
 - Development → Meetings → M2 përdor të njëjtën checklistë në Department
-  View, My View dhe Excel-in e takimeve të brendshme. Hapja dhe rifreskimi i
+  View, My View dhe Excel-in e takimeve të brendshme. Hapja e një pike e shënon
+  automatikisht dhe paneli rikthehet për datën e raportit në të njëjtën skedë
+  të shfletuesit. Për pikat pa panel, klikimi në gjithë rreshtin ndryshon ✓.
+  Kur lista e dorëzimeve te GA është bosh, pika shfaq “Jo” pranë pyetjes dhe
+  shënohet direkt në rresht. Hapja dhe rifreskimi i
   pikave lexojnë email-et nga kutia IT dhe PX Notes të padiskutuara nga
   08:00 deri në momentin e kontrollit, me kufi në 12:00. Leximi i email-eve
   ripërdor lidhjen e After Break Report. Dorëzimet GA përdorin rregullin
@@ -174,6 +195,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   statusin e përbashkët të PX Notes. Email-et e importuara si PX Notes
   grupohen nën “Email-et” me titujt e shkurtër, si në M1. Excel përdor
   tekstin e plotë të raportit.
+
+- Development → Meetings → M3 shfaq pikat manuale në Department dhe My View.
+  Klikimi në gjithë rreshtin ndryshon ✓ dhe përdor checklistën që lexohet nga
+  Export Excel. Meetings Report dhe M3 PIKAT përdorin rrjedhat e tyre.
 
 - Arsyeja `PV` pranohet pa koment në raportin ditor RLZ, te shtyrjet e
   detyrave dhe në përgjigjet M2 që përdorin listën e arsyeve. Kontrollo
@@ -210,6 +235,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   shfaqin lidhjet e skedarëve kur vijnë nga leximi direkt. Excel dhe PNG
   shfaqin tekstin, emrat e skedarëve dhe adresën e postimit, me lidhje
   të klikueshme në Excel. Nga arkivi shfaqen emrat dhe lidhja e postimit.
+  Rreshtat e dorëzimeve përdorin datën e raportit për shenjën e pauzës.
+  Titulli që krahasohet me postimin e Discord-it ruhet pa etiketën e pauzës.
   Komentet ruhen sipas datës, detyrës
   dhe përgjegjësit në `discord_task_delivery_comments` (migrimi 0209).
   Pika 2 i shfaq dallimet në slote dhe simbole në dy tabela të ndara, me një
@@ -309,6 +336,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   vetëm i simbolit dhe komenti pa simbol nuk krijojnë rresht. Kontrollo që
   daljet e M1 përdorin tabelën e ruajtur, si edhe renditjen e pyetjeve të
   shtuara nga M1 ose Common View.
+  Pyetja e fundit «A KA RIORGANIZIM?» ruan BZ M1 si checkbox PO/JO, komentin dhe përgjigjet
+  PO/JO për nënngarkesë e mbingarkesë në draftin e datës. Një përgjigje PO
+  ose një mungesë/vonesë nga tabelat e M1 hap pyetjen «SI BËHET RIORGANIZIMI?».
+  Mungesa/vonesa hap edhe fushën e shkaktarit. Rigjenerimi ruan përgjigjet
+  e datës dhe paraqitja në preview, email, Word dhe PNG ndjek të njëjtat kushte.
+
+- Te M1 PIKAT PËR RAP, «8. A DUHET RIORGANIZIM?» është pika e fundit
+  në ekran, preview, email dhe eksportet Word, PNG e Excel.
 
 - Leximi i kutive postare të M1 dhe M2 ndan intervalin me përgjigjet e GA.
   M1 nis në 16:30 të ditës paraardhëse, ose të ditës së fundit të punës
@@ -391,6 +426,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Realization përdorin të njëjtin interval. Open Tasks dhe eksporti i tij
   kontrollojnë datën aktuale. Tabelat ditore M1, M2 dhe M3 përdorin datën e
   raportit për treguesin e pauzës.
+  Sfondi gri dhe etiketa `Pauzë` përdoren në My View dhe Department View
+  (Development, Graphic Design, Product Content), Finance, Common View,
+  Weekly/Monthly Planner, Realization, Open Tasks, Admin Tasks dhe faqet e
+  projekteve. Daily Report merr intervalet nga `reports.py`. Kontrollo ekranin,
+  printimin dhe Excel-in për datën e raportit, si edhe pamjen e ditës
+  së ardhshme në Finance dhe Admin Tasks. Në PX Notes dhe PX JAV, një shënim
+  me disa detyra shfaq numrin e detyrave në pauzë kur pauza vlen vetëm për
+  një pjesë të tyre. Raportet 1H, M1/M2/M3 dhe M1/M2/M3 PIKAT, si edhe eksportet,
+  përdorin paletën e printimit dhe e mbajnë etiketën në formatin tekst.
   Kontrollo një ditë, disa ditë, heqjen para
   kohe dhe një pauzë të dytë, që ditët e pauzës së parë të mbeten të dukshme.
 
@@ -1158,13 +1202,29 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   në segmente, folësit që ndërhyjnë dhe riprovimet. Në All Tasks/Notes burimi
   shfaqet me tekst të thjeshtë. Diktimet nuk shtohen në listën Mira → Shënimet
   ose në listat e shënimeve të raporteve që përjashtojnë shënimet e Mirës.
+- Për të dy regjistruesit, “fund titulli” ndan titullin me shkronja të mëdha
+  nga teksti në rreshtin pasues. Pranohen edhe “fund titullit”, “fund titull”,
+  “fund titulle”, “fund titullë” dhe format e bashkuara si “fundtitulli”.
+  Kur ndarësi mungon ose nuk njihet,
+  “fund shënimi” ruan gjithë tekstin e diktuar. Kontrollo rreshtat në PX Notes,
+  Excel dhe shënimin e lidhur te Mira → Takimet.
+- “Mira, planifiko … fund shënimi” krijon shënim direkt në PX JAV për të dy
+  regjistruesit. Pranohen edhe “planfiko” dhe “planifko”, me ose pa `ë` ose
+  `e` në fund, njësoj si “planifiko”.
+  Përdor të njëjtat variante të “fund titulli” dhe ruan gjithë
+  tekstin pa ndarës të njohur. Shënimi hyn në PX JAV dhe PX JAV Kontrolli
+  me rregullat ekzistuese të një shënimi të hapur pa detyrë të krijuar.
 - Të dy regjistruesit pranojnë edhe variantet e transkriptuara “Mira shëna”,
   “Mirëa shëno”, “Mirashënë”, “fund shënime”, “Mira detyr” dhe “fund detyra”.
   Në diktimin e detyrave, `EFA` përputhet
   edhe me profilin “Elsa Ferati”. Nëse përputhen dy profile aktive, detyra
   nuk krijohet.
 - Diktimi i një detyre nga 1H ose Mira Zhvillim ruan në të njëjtin transaksion
-  detyrën 1H dhe shënimin e lidhur në PX Notes. Kontrollo që “Task Created”
+  detyrën 1H dhe shënimin e lidhur në PX Notes. Pas inicialeve, “fund titulli”
+  dhe variantet e tij e ruajnë pjesën e parë me shkronja të mëdha si titull të
+  detyrës. Vazhdimi ruhet në rreshtin pasues të shënimit të lidhur. Pa ndarës
+  të njohur, i gjithë diktimi pas inicialeve përdoret si titull, si më parë.
+  Kontrollo që “Task Created”
   të hapë detyrën ekzistuese dhe që burimi të shfaqet te Task Details,
   Common View, My View, Development, Graphic Design, Product Content,
   Finance dhe eksportet përkatëse. Raportet që përjashtojnë shënimet e

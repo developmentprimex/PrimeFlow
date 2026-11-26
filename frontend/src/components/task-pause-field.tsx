@@ -60,6 +60,14 @@ export function TaskPauseField({ value, onChange, until, disabled }: {
   )
 }
 
-export function TaskPauseBadge() {
-  return <span className="shrink-0 rounded border border-slate-400 bg-white px-1 text-[10px] font-semibold text-slate-800">Pauzë</span>
+export function TaskPauseBadge({ label = "Pauzë", highlightTask = true }: {
+  label?: string
+  highlightTask?: boolean
+} = {}) {
+  return (
+    <span data-task-pause-badge={highlightTask || undefined} className="task-pause-badge">
+      <Pause size={10} aria-hidden="true" />
+      {label}
+    </span>
+  )
 }

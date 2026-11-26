@@ -13,6 +13,7 @@ from app.models.enums import UserRole
 from app.models.ga_note import GaNote
 from app.models.user import User
 from app.schemas.ga_note import GaNoteCreate
+from app.schemas.plan_note import PlanNoteCreate
 from app.schemas.task import TaskCreate
 from app.services.ga_note_creation import build_ga_note
 
@@ -20,10 +21,12 @@ from app.services.ga_note_creation import build_ga_note
 log = logging.getLogger(__name__)
 COMMAND = re.compile(
     r"(?<!\w)(?:(?P<note>mir[ëe]?a[\s,:.]*sh[ëe]n[oaëe])|(?P<task>mira[\s,:.]+detyr[ëe]?)"
+    r"|(?P<plan_note>mir[ëe]?a[\s,:.]+(?:planifiko|planfiko|planifko)[ëe]?)"
     r"|fund[\s,:.]+(?:(?P<end_note>sh[ëe]nim[ie])|(?P<end_task>detyr(?:[ëe]s?|a))))(?!\w)",
     re.IGNORECASE,
 )
 START_PREFIX = re.compile(r"(?<!\w)mir[ëe]?a[\s,:.]*$", re.IGNORECASE)
+TITLE_END = re.compile(r"\bfund[\s,:.]*titull(?:it?|[eë])?\b", re.IGNORECASE)
 ASSIGNEE_PREFIX = re.compile(r"^p[ëe]r[\s,:]+", re.IGNORECASE)
 TASK_BODY = re.compile(
     r"^(?P<initials>[a-zçë](?:[.\s]+[a-zçë]){1,3}|[a-zçë]{2,5})"
@@ -34,6 +37,17 @@ MAX_DICTATION_MS = 120_000
 MAX_DICTATION_CHARS = 8_000
 TASK_LIMIT_PER_TICK = 10
 DICTATED_ASSIGNEE_ALIASES = {"EFA": "elsa ferati"}
+
+
+def _format_titled_content(body):
+    marker = TITLE_END.search(body)
+    if marker is None:
+        return None
+    title = " ".join(body[:marker.start()].split()).rstrip(" ,:;.")
+    if not title:
+        return None
+    note = body[marker.end():].lstrip(" ,:;.\r\n\t")
+    return f"{title.upper()}\n{note}" if note else title.upper()
 
 
 def consume(text, start_ms, end_ms, pending):
@@ -53,13 +67,15 @@ def consume(text, start_ms, end_ms, pending):
     body_start = 0
     for marker in COMMAND.finditer(text):
         marker_kind = marker.lastgroup
-        if marker_kind in ("note", "task") and (kind is None or kind == marker_kind):
+        if marker_kind in ("note", "task", "plan_note") and (kind is None or kind == marker_kind):
             started = start_ms
             kind = marker_kind
             body_start = marker.end()
-        elif started is not None and marker_kind == f"end_{kind}":
+        elif started is not None and marker_kind == ("end_task" if kind == "task" else "end_note"):
             body = text[body_start:marker.start()].lstrip(" ,:.-–—\n\t").rstrip()
             if body and len(body) <= MAX_DICTATION_CHARS:
+                if kind != "task":
+                    body = _format_titled_content(body) or body
                 commands.append((kind, body))
             started = None
             kind = None
@@ -76,9 +92,12 @@ def task_fields(body):
     if not match:
         return None
     initials = re.sub(r"[.\s]", "", match["initials"]).upper()
-    title = " ".join(match["title"].split()).strip(" .,:;–—-")
+    content = _format_titled_content(match["title"])
+    if content is None:
+        content = " ".join(match["title"].split()).strip(" .,:;–—-")
+    title = content.partition("\n")[0]
     if len(title) >= 2 and any(character.isalnum() for character in title):
-        return initials, title
+        return initials, content
     return None
 
 
@@ -99,6 +118,15 @@ async def _save_note(db, user, source, content):
     note = await build_ga_note(db, user, GaNoteCreate(content=content, department_id=user.department_id))
     note.mira_dictation_source = source
     return note
+
+
+async def _save_plan_note(db, user, content):
+    from app.api.routers.plan_notes import build_plan_note
+
+    if user.department_id is None and user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        return
+    department_id = None if user.role in (UserRole.ADMIN, UserRole.MANAGER) else user.department_id
+    await build_plan_note(db, user, PlanNoteCreate(content=content, department_id=department_id))
 
 
 async def process(db, meeting, *, finished_segments=None):
@@ -148,10 +176,13 @@ async def process(db, meeting, *, finished_segments=None):
                     if note is not None:
                         await db.flush()
                         created.append({"kind": "note", "id": str(note.id)})
+                elif kind == "plan_note":
+                    await _save_plan_note(db, user, body)
                 elif fields := task_fields(body):
-                    code, title = fields
+                    code, content = fields
                     tasks.append({"command": f"{segment.sequence}:{index}", "speaker_id": segment.speaker_id,
-                                  "creator_id": str(user.id), "initials": code, "title": title})
+                                  "creator_id": str(user.id), "initials": code,
+                                  "title": content.partition("\n")[0], "note_content": content})
 
     progress = {"cursor": cursor, "pending": pending if finished_segments is None else {}}
     if tasks:
@@ -194,7 +225,7 @@ async def _create_task(db, meeting):
 
     assignee = assignees[0]
     note = GaNote(
-        content=command["title"],
+        content=command.get("note_content", command["title"]),
         created_by=creator.id,
         department_id=assignee.department_id,
         mira_dictation_source="ai_agent" if meeting.recorder == "ai_agent" else "1h",

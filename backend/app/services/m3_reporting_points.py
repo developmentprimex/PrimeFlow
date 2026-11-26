@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services.task_pause import TASK_PAUSE_BACKGROUND, TASK_PAUSE_LABEL, pause_until_on_day
 from app.services.report_attendance import filter_points_payload, load_report_attendance
 
 import html
@@ -148,6 +149,7 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date, *, post
         base = {"task_id": str(task.id), "title": _clean_task_title(task.title, is_system_task=is_system), "status": status,
                 "am_pm": _m3_am_pm_label(task), "task_type": _m3_task_type_label(task),
                 "progress": task.progress_percentage or 0,
+                "is_paused": bool(pause_until_on_day(getattr(task, "pause_periods", None), day)),
                 "created_date": semantic_local_day(task.created_at).isoformat() if task.created_at else None,
                 "start_date": current["start_date"].isoformat() if current["start_date"] else None,
                 "due_date": current["due_date"].isoformat() if current["due_date"] else None,
@@ -555,6 +557,8 @@ def is_system_row(row: dict) -> bool:
 def task_row_appearance(row: dict) -> tuple[str, str, bool]:
     deadline = bool(row.get("deadline_important") or "Deadline Important" in str(row.get("category") or ""))
     eight_am = bool(row.get("eight_am") or title_has_eight_am_indicator(row.get("title"), is_system_task=is_system_row(row)))
+    if row.get("is_paused"):
+        return TASK_PAUSE_BACKGROUND, "#334155", eight_am
     return ("#dc2626" if deadline else STATUS_COLORS.get(row.get("status"), "#ffffff"),
             "#ffffff" if deadline else "#000000", eight_am)
 
@@ -587,6 +591,11 @@ def effective_task_comment(row: dict, report: dict, prefix: str) -> str:
     key = f"{prefix}:{row.get('task_id')}"
     answers = report.get("manual_answers", {})
     return (answers[key] if key in answers else row.get("comment")) or "-"
+
+
+def _report_task_title(row: dict) -> str:
+    title = _clean_task_title(row.get("title"), is_system_task=True)
+    return f"{title} {TASK_PAUSE_LABEL}" if row.get("is_paused") else title
 
 
 def _delivery_detail_lines(delivery: dict) -> list[tuple[str, str | None]]:
@@ -637,7 +646,7 @@ def report_table_value(row: dict, column: str, index: int, kind: str, report: di
         if column == "answer":
             return (report or {}).get("manual_answers", {}).get(f"delivery:{row['task_id']}") or "Pa pergjigje"
         if column == "title":
-            return _clean_task_title(row.get("title"), is_system_task=True)
+            return _report_task_title(row)
     if column == "comment" and section == "untouched":
         return effective_task_comment(row, report or {}, "untouched_comment")
     def formatted(value):
@@ -646,7 +655,7 @@ def report_table_value(row: dict, column: str, index: int, kind: str, report: di
     if column == "nr":
         return index
     if column == "title":
-        title = _clean_task_title(row.get("title"), is_system_task=True)
+        title = _report_task_title(row)
         return f"{row['marker']} {title}" if row.get("marker") else title
     if column in {"from", "to"}:
         prefix = "old_" if column == "from" else ""
@@ -731,7 +740,7 @@ def render_html(report: dict) -> str:
                             value = _cell(report_table_value(row, column, index, kind, report, key))
                         elif row.get("marker"):
                             value = (f"<strong data-task-symbol='true' style='display:inline-block;margin-right:4px;color:{'#ffffff' if row_color == '#ffffff' else '#DC2626'};font-size:1.18em;font-weight:900'>"
-                                     f"{_cell(row['marker'])}</strong>{_cell(_clean_task_title(row.get('title'), is_system_task=True))}")
+                                     f"{_cell(row['marker'])}</strong>{_cell(_report_task_title(row))}")
                         else:
                             value = _render_table_cell_html("TITULLI", report_table_value(row, column, index, kind))
                         if row_color == "#ffffff":

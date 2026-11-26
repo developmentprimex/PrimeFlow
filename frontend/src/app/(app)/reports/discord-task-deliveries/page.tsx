@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ExternalLink, RefreshCw } from "lucide-react"
 import { DiscordDeliveryDetails, type DiscordDelivery } from "@/components/discord-delivery-details"
+import { TaskPauseBadge } from "@/components/task-pause-field"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -20,6 +21,7 @@ type Row = {
   am_pm: string
   task_type: string
   title: string
+  is_paused?: boolean
   symbol: string
   fill: string
   foreground: string
@@ -191,6 +193,7 @@ function DeliveryTable({ group, rows, deadlines, formatTime, commentsAvailable, 
                     <th scope="row" className={`${cell} min-w-48 break-words font-medium`}>
                       {row.eight_am && !/\b08:00\b/.test(title) && <strong className="mr-1.5">08:00</strong>}
                       {title}
+                      {row.is_paused && <TaskPauseBadge highlightTask={false} />}
                     </th>
                     {group.slots.map((slot) => <DeliveryCell key={slot} className={cell} delivery={row.deliveries[slot]}
                       formatTime={formatTime} label={`${slot} · ${row.title} · ${row.person}`} />)}

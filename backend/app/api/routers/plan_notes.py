@@ -288,12 +288,7 @@ async def list_plan_notes(
     ]
 
 
-@router.post("", response_model=PlanNoteOut, status_code=status.HTTP_201_CREATED)
-async def create_plan_note(
-    payload: PlanNoteCreate,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
-) -> PlanNoteOut:
+async def build_plan_note(db: AsyncSession, user: User, payload: PlanNoteCreate) -> PlanNote:
     if payload.project_id is None and payload.department_id is None:
         if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id or department_id required")
@@ -335,6 +330,16 @@ async def create_plan_note(
         planning_brief=(payload.planning_brief.model_dump(mode="json") if payload.planning_brief else None),
     )
     db.add(note)
+    return note
+
+
+@router.post("", response_model=PlanNoteOut, status_code=status.HTTP_201_CREATED)
+async def create_plan_note(
+    payload: PlanNoteCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> PlanNoteOut:
+    note = await build_plan_note(db, user, payload)
     await db.commit()
     await db.refresh(note)
     return _note_out(note)

@@ -10,6 +10,7 @@ import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-re
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -40,6 +41,15 @@ const MARKER_TASK_SECTIONS = new Set(["FIZIKISHT ME GA?", "A KA PYTJE/SQARIME ME
 const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
 const GA_REACTIONS_SECTION = "A KA REACTION TE GRUPI?"
 const GA_PF_COMMENTS_SECTION = "(GA) A KA KOMENTE NE PF?"
+const REORGANIZATION_SECTION = "A KA RIORGANIZIM?"
+const REORGANIZATION_FIELDS = {
+  discussion: "BZ M1",
+  comment: "KOMENT",
+  underload: "NËNNGARKESË",
+  overload: "MBINGARKESË",
+  plan: "SI BËHET RIORGANIZIMI?",
+  cause: "SHKAKTARI I MUNGESËS OSE VONESËS",
+} as const
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -54,6 +64,7 @@ type Draft = {
   subject: string
   recipients: Recipients
   sections: Section[]
+  has_absence_or_delay: boolean
   note_attachments?: ReportNoteAttachments
   note_emails?: NoteEmailPreviews
   note_email_headings?: NoteEmailHeadings
@@ -110,6 +121,78 @@ function sectionGroupLabel(section: Section) {
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
   return sectionGroupLabel(sections[index]) !== sectionGroupLabel(sections[index - 1])
+}
+
+function MorningReorganization({ body, hasAttendanceIssue, readOnly, saving, onChange, onSave }: {
+  body: string
+  hasAttendanceIssue: boolean
+  readOnly: boolean
+  saving: boolean
+  onChange: (body: string) => void
+  onSave: () => void
+}) {
+  const fields: Record<string, string> = Object.fromEntries(body.split(/\n(?=\S)/).flatMap((field) => {
+    const separator = field.indexOf(":")
+    return separator < 0 ? [] : [[field.slice(0, separator), field.slice(separator + 1)
+      .replace(/^ /, "").replace(/\n /g, "\n")]]
+  }))
+  const { discussion, comment, underload, overload, plan, cause } = REORGANIZATION_FIELDS
+  if (fields[plan] === undefined && fields["SI BËHET ORGANIZIMI?"] !== undefined) {
+    fields[plan] = fields["SI BËHET ORGANIZIMI?"]
+  }
+  const discussionChecked = fields[discussion] === "PO"
+  const needsPlan = hasAttendanceIssue || fields[underload] === "PO" || fields[overload] === "PO"
+  const update = (label: string, value: string) => {
+    const next: Record<string, string> = { [discussion]: "JO", [underload]: "JO", [overload]: "JO", ...fields, [label]: value }
+    onChange(Object.values(REORGANIZATION_FIELDS).flatMap((field) => {
+      const answer = next[field]
+      return answer === undefined ? [] : [answer ? `${field}: ${answer.replace(/\n/g, "\n ")}` : `${field}:`]
+    }).join("\n"))
+  }
+  const answerField = (label: string) => (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <Textarea value={fields[label] ?? ""} onChange={(event) => update(label, event.target.value)}
+        rows={2} readOnly={readOnly} />
+    </label>
+  )
+  return (
+    <fieldset disabled={saving} className="mt-4 space-y-4">
+      <div className="grid items-start gap-4 md:grid-cols-[7rem_minmax(0,1fr)]">
+        <label className="grid w-28 gap-2 text-sm font-medium">
+          {discussion}
+          <span className="flex h-9 items-center justify-between rounded-md border border-input bg-background px-3 has-[:enabled]:cursor-pointer">
+            <Checkbox checked={discussionChecked} disabled={readOnly}
+              onCheckedChange={(checked) => update(discussion, checked === true ? "PO" : "JO")} />
+            <span aria-hidden="true" className={discussionChecked ? "font-semibold text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}>
+              {discussionChecked ? "PO" : "JO"}
+            </span>
+          </span>
+        </label>
+        {answerField(comment)}
+      </div>
+      <div className="flex flex-wrap gap-4">
+        {[underload, overload].map((label) => (
+          <label key={label} className="grid gap-2 text-sm font-medium">
+            {label}
+            <select value={fields[label] === "PO" ? "PO" : "JO"}
+              onChange={(event) => update(label, event.target.value)} disabled={readOnly}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <option value="JO">JO</option>
+              <option value="PO">PO</option>
+            </select>
+          </label>
+        ))}
+      </div>
+      {needsPlan ? answerField(plan) : null}
+      {hasAttendanceIssue ? answerField(cause) : null}
+      {readOnly ? null : (
+        <Button variant="outline" size="sm" onClick={onSave}>
+          <Save className="h-4 w-4" /> Ruaj
+        </Button>
+      )}
+    </fieldset>
+  )
 }
 
 function InlineTaskComment({ row, onSave }: {
@@ -525,7 +608,9 @@ export default function MorningReportPage() {
           <p className="text-sm text-muted-foreground">Editable morning M1 summary for the start of the day.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {draft && canEdit && !draft.sections.some((section) => sectionGroupLabel(section) === "Manual questions") ? (
+          {draft && canEdit && !draft.sections.some((section) =>
+            section.section_key !== REORGANIZATION_SECTION && sectionGroupLabel(section) === "Manual questions"
+          ) ? (
             <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} />
           ) : null}
           <Button variant="outline" onClick={() => void loadDraft()} disabled={loading}>
@@ -723,10 +808,11 @@ export default function MorningReportPage() {
             {draft.sections.map((section, index) => {
               const isEditing = editingSection?.index === index
               const sectionKey = section.section_key || section.title
+              const isReorganization = sectionKey === REORGANIZATION_SECTION
               const isEmailSection = sectionKey === "(GA) DET NGA EMAILS TE REJA"
               const showSectionBody = !isEmailSection || Boolean(section.body.trim())
               const group = sectionGroupLabel(section)
-              const showAddPoint = group === "Manual questions" && canEdit &&
+              const showAddPoint = !isReorganization && group === "Manual questions" && canEdit &&
                 (index === 0 || sectionGroupLabel(draft.sections[0]) !== "Manual questions")
               const isMarkerTaskSection = MARKER_TASK_SECTIONS.has(sectionKey)
               const isTaskFeedbackSection = sectionKey === TASK_FEEDBACK_SECTION
@@ -758,13 +844,13 @@ export default function MorningReportPage() {
                         ) : (
                           <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
                         )}
-                        {!isEditing && showSectionBody ? (
+                        {!isEditing && showSectionBody && !isReorganization ? (
                           <div className="mt-1 text-xs text-muted-foreground">
                             {section.body.trim().split(/\s+/).filter(Boolean).length} words
                           </div>
                         ) : null}
                       </div>
-                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection &&
+                      {canEdit && !isEditing && !isMarkerTaskSection && !isTaskFeedbackSection && !isReorganization &&
                         sectionKey !== GA_REACTIONS_SECTION && sectionKey !== GA_PF_COMMENTS_SECTION ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
@@ -777,7 +863,16 @@ export default function MorningReportPage() {
                       ) : null}
                     </div>
 
-                    {isEditing ? (
+                    {isReorganization ? (
+                      <MorningReorganization
+                        body={section.body}
+                        hasAttendanceIssue={draft.has_absence_or_delay}
+                        readOnly={!canEdit}
+                        saving={saving}
+                        onChange={(body) => updateSection(index, body)}
+                        onSave={() => void save()}
+                      />
+                    ) : isEditing ? (
                       <ReportSectionFieldEditor
                         key={`edit-${index}`}
                         lines={editingSection.lines}

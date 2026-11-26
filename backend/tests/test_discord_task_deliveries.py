@@ -198,10 +198,11 @@ def test_report_files_export_the_discord_delivery_and_source_links():
 
     from app.services import m1_reporting_points as m1, m2_reporting_points as m2
     from app.services.m3_reporting_points_attachments import report_attachments as m3_attachments
+    from app.services.task_pause import TASK_PAUSE_BACKGROUND, TASK_PAUSE_LABEL
 
     source = "https://discord.com/channels/123/456/789"
     file_url = "https://cdn.discordapp.com/attachments/456/789/results.txt"
-    row = dict(task("M2", "M3"), task_id="task", assignees="OP", status="TODO", symbol="M2/3",
+    row = dict(task("M2", "M3"), task_id="task", assignees="OP", status="TODO", symbol="M2/3", is_paused=True,
                discord_delivery={"status": "on_time", "url": source, "details": {
                    "content": "Discord result\nSecond line",
                    "attachments": [{"name": "results.txt", "url": file_url}],
@@ -214,6 +215,9 @@ def test_report_files_export_the_discord_delivery_and_source_links():
                    for table in document.tables for row_cells in table.rows for cell in row_cells.cells)
         assert {source, file_url} <= {rel.target_ref for rel in document.part.rels.values() if rel.is_external}
         workbook = load_workbook(BytesIO(files["xlsx"]))
+        title_cell = next(cell for cells in workbook.active.iter_rows() for cell in cells
+                          if isinstance(cell.value, str) and TASK_PAUSE_LABEL in cell.value)
+        assert title_cell.fill.fgColor.rgb.endswith(TASK_PAUSE_BACKGROUND[1:])
         cell = next(cell for cells in workbook.active.iter_rows() for cell in cells
                     if isinstance(cell.value, str) and "Discord result" in cell.value)
         assert "results.txt" in cell.value and source in cell.value
@@ -298,17 +302,18 @@ def test_report_rows_use_planner_order_and_standard_task_appearance():
     dev = SimpleNamespace(id="dev", department_id="DEV", full_name="Endi Hyseni", weekly_planner_sort_order=2)
     gd = SimpleNamespace(id="gd", department_id="GD", full_name="Test Design", weekly_planner_sort_order=1)
 
-    def report_task(id, owner, title, *, deadline=False, system=False):
+    def report_task(id, owner, title, *, deadline=False, system=False, paused=False):
         return SimpleNamespace(
             id=id, assigned_to=owner.id, department_id=owner.department_id, title=title,
             is_deadline_important=deadline, status="IN_PROGRESS", due_date=local_time(16),
             created_at=local_time(9), fast_task_order=None, system_template_origin_id=system,
             system_task_slot_id=None,
+            pause_periods=[{"from": DAY.isoformat(), "until": DAY.isoformat()}] if paused else [],
         )
 
     results = iter((
         [
-            (report_task("regular", dev, "A e zakonshme"), None, "M3", False),
+            (report_task("regular", dev, "A e zakonshme", paused=True), None, "M3", False),
             (report_task("design", gd, "A e dizajnit"), None, "M3", False),
             (report_task("deadline", dev, "Z Deadline", deadline=True), None, "M2_M3", True),
             (report_task("em", dev, "EM: Porosia"), None, "M3", False),
@@ -341,3 +346,6 @@ def test_report_rows_use_planner_order_and_standard_task_appearance():
     assert rows[1]["fill"] == "#FFFF00"
     assert rows[1]["eight_am"] is True
     assert rows[1]["title"] == "08:00 EM: Porosia"
+    assert rows[2]["is_paused"] is True
+    assert rows[2]["fill"] == "#F1F3F5"
+    assert rows[2]["title"] == "A e zakonshme"

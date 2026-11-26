@@ -102,8 +102,12 @@ PHYSICAL_GA_TITLE = "FIZIKISHT ME GA?"
 KA_GENT_QUESTIONS_TITLE = "A KA PYTJE/SQARIME ME KA/GENTIN"
 GA_PF_COMMENTS_TITLE = "(GA) A KA KOMENTE NE PF?"
 NEW_EMAILS_SECTION_TITLE = "EMAILS TE REJA?"
-REORGANIZATION_QUESTION = "A KA RIORGANIZIM?"
 MORNING_FOLLOW_UP_TITLE = "DET 08:00/DL AM"
+REORGANIZATION_TITLE = "A KA RIORGANIZIM?"
+REORGANIZATION_PLAN_LABEL = "SI BËHET RIORGANIZIMI?"
+LEGACY_REORGANIZATION_PLAN_LABEL = "SI BËHET ORGANIZIMI?"
+REORGANIZATION_CAUSE_LABEL = "SHKAKTARI I MUNGESËS OSE VONESËS"
+REORGANIZATION_WORKLOAD_LABELS = ("NËNNGARKESË", "MBINGARKESË")
 MARKER_TASK_SECTIONS = {
     PHYSICAL_GA_TITLE: ({"F"}, "DETYRAT ME F"),
     KA_GENT_QUESTIONS_TITLE: ({"KA", "GENT"}, "DETYRAT ME KA OSE GENT"),
@@ -122,11 +126,10 @@ SECTION_TITLES = [
     *MARKER_TASK_SECTIONS,
     GA_REACTIONS_SECTION_KEY,
     GA_PF_COMMENTS_TITLE,
-    REORGANIZATION_QUESTION,
     MORNING_FOLLOW_UP_TITLE,
+    REORGANIZATION_TITLE,
 ]
 DISPLAY_SECTION_TITLES = [
-    REORGANIZATION_QUESTION,
     SECTION_TITLES[2],
     GA_HV_DV_TASKS_TITLE,
     MORNING_FOLLOW_UP_TITLE,
@@ -138,6 +141,7 @@ DISPLAY_SECTION_TITLES = [
     *SECTION_TITLES[3:6],
     KA_GENT_QUESTIONS_TITLE,
     *SECTION_TITLES[7:9],
+    REORGANIZATION_TITLE,
 ]
 SECTION_DISPLAY_TITLES = {
     GA_REACTIONS_SECTION_KEY: GA_REACTIONS_SECTION_TITLE,
@@ -145,7 +149,7 @@ SECTION_DISPLAY_TITLES = {
     SECTION_TITLES[2]: "(GA) VONESA/MUNGESA/PV. A NDRYSHON PLANI PER SOT?",
     SECTION_TITLES[4]: "FESTA EXT/TAK EXT/TAK INT/BZ ME GA/BLLOK:",
 }
-MANUAL_SECTION_TITLES = {REORGANIZATION_QUESTION}
+MANUAL_SECTION_TITLES = {REORGANIZATION_TITLE}
 SYMBOL_COMMENT_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7),
     ("STATUS", 18), ("SIMBOLI", 12), ("TITULLI", 52), ("KOMENT", 45), ("DATA / ORA", 16),
@@ -191,10 +195,10 @@ def is_generated_subject(subject: str | None, day: date) -> bool:
 
 
 def _default_body(title: str) -> str:
-    if title == REORGANIZATION_QUESTION:
-        return "(Ploteso manualisht)"
     if title == MORNING_FOLLOW_UP_TITLE:
         return _morning_follow_up_tables([], {}, {}, {}, None)[0]
+    if title == REORGANIZATION_TITLE:
+        return "\n".join(["BZ M1: JO", "KOMENT:", *(f"{label}: JO" for label in REORGANIZATION_WORKLOAD_LABELS)])
     if title == GA_PF_COMMENTS_TITLE:
         return _symbol_comment_table([])
     if title == SECTION_TITLES[0]:
@@ -353,8 +357,8 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         if is_removed_morning_manual_question(raw_title, section_key):
             continue
         title = _canonical_section_title(section_key or raw_title)
-        if _compact_section_title(raw_title) == _compact_section_title(REORGANIZATION_QUESTION):
-            title = REORGANIZATION_QUESTION
+        if _canonical_section_title(raw_title) == REORGANIZATION_TITLE:
+            title = REORGANIZATION_TITLE
         body = str(section.get("body") or "")
         if raw_title == LEGACY_NOTES_TITLE or (
             title == SECTION_TITLES[3] and any(_is_manual_email_line(line) for line in body.splitlines())
@@ -385,6 +389,8 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
             body = order_blue_notes_table(body)
         if title == GA_PF_COMMENTS_TITLE and body.strip() in {"", "(Ploteso manualisht)"}:
             body = _default_body(title)
+        if title == REORGANIZATION_TITLE:
+            body = _normalize_reorganization_body(body)
         if title not in by_title:
             visible_title = SECTION_DISPLAY_TITLES.get(title, title)
             if (section_key and raw_title != title
@@ -435,6 +441,78 @@ def _split_pv_table(body: str) -> tuple[str, str]:
     return "", body
 
 
+def _normalize_reorganization_body(body: str) -> str:
+    fields = dict(field.split(":", 1) for field in re.split(r"\n(?=\S)", body) if ":" in field)
+    if body.strip() not in {"", "(Ploteso manualisht)"} and not fields.keys() & {
+        "BZ M1", "KOMENT", *REORGANIZATION_WORKLOAD_LABELS, REORGANIZATION_PLAN_LABEL,
+        LEGACY_REORGANIZATION_PLAN_LABEL, REORGANIZATION_CAUSE_LABEL,
+    }:
+        fields["KOMENT"] = " " + "\n ".join(body.strip().splitlines())
+    if LEGACY_REORGANIZATION_PLAN_LABEL in fields:
+        fields.setdefault(REORGANIZATION_PLAN_LABEL, fields[LEGACY_REORGANIZATION_PLAN_LABEL])
+    previous_discussion = fields.get("BZ M1", "").strip()
+    if previous_discussion and previous_discussion not in {"PO", "JO"}:
+        # Preserve notes saved while BZ M1 was a text field.
+        comment = fields.get("KOMENT", "").strip()
+        fields["KOMENT"] = " " + "\n ".join(part for part in (comment, previous_discussion) if part)
+    return "\n".join([
+        f"BZ M1: {'PO' if previous_discussion == 'PO' else 'JO'}",
+        "KOMENT:" + fields.get("KOMENT", ""),
+        *(f"{label}: {'PO' if fields.get(label, '').strip() == 'PO' else 'JO'}"
+          for label in REORGANIZATION_WORKLOAD_LABELS),
+        *(label + ":" + fields[label] for label in (REORGANIZATION_PLAN_LABEL, REORGANIZATION_CAUSE_LABEL)
+          if label in fields),
+    ])
+
+
+def morning_has_absence_or_delay(sections: list[dict[str, str]]) -> bool:
+    attendance = next((
+        section.get("body") or "" for section in sections
+        if (section.get("section_key") or section.get("title")) == SECTION_TITLES[2]
+    ), "")
+    lines = attendance.splitlines()
+    for index, line in enumerate(lines):
+        heading = re.fullmatch(r"(?:VONESA|MUNGESA):\s*(\d*)", line.strip(), re.I)
+        if not heading:
+            continue
+        if heading[1]:
+            if int(heading[1]) > 0:
+                return True
+            continue
+        start = next((i for i in range(index + 1, len(lines)) if lines[i].strip()), len(lines))
+        block = _ascii_table_block(lines, start)
+        if block and any(row and row[0].isdigit() for row in _section_report_table_rows(block[0])[1]):
+            return True
+    return False
+
+
+def _morning_delivery_sections(sections: list[dict[str, str]]) -> list[dict[str, str]]:
+    has_attendance_issue = morning_has_absence_or_delay(sections)
+    result = []
+    for section in sections:
+        if (section.get("section_key") or section.get("title")) != REORGANIZATION_TITLE:
+            result.append(section)
+            continue
+        # Saved answers retain their values when a follow-up is temporarily hidden.
+        fields = re.split(r"\n(?=\S)", _normalize_reorganization_body(section.get("body") or ""))
+        fields_by_label = {field.partition(":")[0]: field for field in fields}
+        needs_plan = has_attendance_issue or any(
+            fields_by_label.get(label, "").partition(":")[2].strip() == "PO"
+            for label in REORGANIZATION_WORKLOAD_LABELS
+        )
+        for label, show in (
+            (REORGANIZATION_PLAN_LABEL, needs_plan),
+            (REORGANIZATION_CAUSE_LABEL, has_attendance_issue),
+        ):
+            saved = fields_by_label.get(label)
+            if not show and saved is not None:
+                fields.remove(saved)
+            elif show and saved is None:
+                fields.append(f"{label}:")
+        result.append({**section, "body": "\n".join(fields)})
+    return result
+
+
 def preserve_morning_plan_note(
     sections: list[dict[str, str]], existing: list[dict[str, Any]] | None,
 ) -> list[dict[str, str]]:
@@ -443,8 +521,8 @@ def preserve_morning_plan_note(
                   if _canonical_section_title(section.get("section_key") or section.get("title") or "") == title), None)
     saved_reorganization = next(
         (section.get("body") for section in existing or []
-         if _canonical_section_title(section.get("section_key") or "") == REORGANIZATION_QUESTION
-         or _canonical_section_title(section.get("title") or "") == REORGANIZATION_QUESTION),
+         if _canonical_section_title(section.get("section_key") or "") == REORGANIZATION_TITLE
+         or _canonical_section_title(section.get("title") or "") == REORGANIZATION_TITLE),
         None,
     )
     result = []
@@ -452,8 +530,8 @@ def preserve_morning_plan_note(
         key = _canonical_section_title(section.get("section_key") or section["title"])
         if key == title:
             section = {**section, "body": preserve_keyed_line(section["body"], saved, "NDRYSHON PLANI")}
-        elif key == REORGANIZATION_QUESTION and saved_reorganization is not None:
-            section = {**section, "body": saved_reorganization}
+        elif key == REORGANIZATION_TITLE and saved_reorganization is not None:
+            section = {**section, "body": _normalize_reorganization_body(saved_reorganization)}
         result.append(section)
     return result
 
@@ -1308,7 +1386,7 @@ def render_plain_text(subject: str, report_day: date, sections: list[dict[str, s
 
     blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", ""]
     current_group = ""
-    for index, section in enumerate(sections, 1):
+    for index, section in enumerate(_morning_delivery_sections(sections), 1):
         group = section_group_label("morning", section["title"], section.get("section_key"))
         if group != current_group:
             blocks.append(group)
@@ -1329,7 +1407,7 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
 
     section_chunks: list[str] = []
     current_group = ""
-    for index, section in enumerate(sections, 1):
+    for index, section in enumerate(_morning_delivery_sections(sections), 1):
         group = section_group_label("morning", section["title"], section.get("section_key"))
         if group != current_group:
             section_chunks.append(_render_group_label_html(group))
@@ -1353,5 +1431,5 @@ async def send_morning_report(
 ) -> dict[str, Any]:
     return await send_section_report(
         subject, recipients, plain_text, html_body,
-        report_code="M1", report_day=report_day, sections=sections,
+        report_code="M1", report_day=report_day, sections=_morning_delivery_sections(sections),
     )

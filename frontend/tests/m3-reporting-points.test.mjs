@@ -54,6 +54,7 @@ test("M1 plan changes show the explanation captured by each postponement", () =>
   }))
   assert.match(html, /M1 saved reason/)
   assert.match(html, /M1 saved comment/)
+  assert.match(html, /6\. DET ME GA:.*7\. SA PER DOREZIM M2\?.*8\. A DUHET RIORGANIZIM\?/s)
 })
 
 function render(overrides = {}, answers = {}, disabled = false) {
@@ -99,6 +100,9 @@ test("M1, M2 and M3 show Discord delivery per person instead of a shared manual 
     assert.ok(html.includes(`href="${url}"`))
     assert.match(html, />EF<\/td>.*?>Po<\/span>.*?>EH<\/td>.*?>Jo<\/span>/)
     assert.doesNotMatch(html, /aria-label="PO\/JO për Detyra"/)
+    if (View === M1ReportingPointsView) {
+      assert.match(html, /7\. SA PER DOREZIM M2\?.*8\. A DUHET RIORGANIZIM\?/s)
+    }
   }
 })
 

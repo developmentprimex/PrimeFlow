@@ -39,6 +39,7 @@ from app.services.meeting_point_manual_sync import (
 from app.services.morning_report import (
     GA_HV_DV_TASKS_TITLE,
     GA_PF_COMMENTS_TITLE,
+    morning_has_absence_or_delay,
     MARKER_TASK_SECTIONS,
     SECTION_TITLES,
     TASK_FEEDBACK_OVERRIDES,
@@ -145,6 +146,7 @@ async def get_next_workday_feedback(
             "id": row["task_id"], "title": row["title"], "continuation": continuation, "comment": comment,
             "start_date": row["start_date"], "due_date": row["due_date"], "status": row["status"],
             "slot": row["slot"], "is_system_task": row["is_system_task"], "is_1h": row["is_1h"],
+            "is_paused": row.get("is_paused", False),
         })
     return {"target_date": target_date, "tasks": tasks}
 
@@ -286,6 +288,7 @@ async def _draft(db: AsyncSession, row: MorningReportDraft, sections: list[dict[
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
         "sections": visible_sections,
+        "has_absence_or_delay": morning_has_absence_or_delay(visible_sections),
         **(await section_note_controls(db, visible_sections, SECTION_TITLES[3], snapshot)),
         TASK_FEEDBACK_ROWS: feedback_rows,
         "generated_snapshot": row.generated_snapshot,

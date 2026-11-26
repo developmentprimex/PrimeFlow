@@ -329,6 +329,9 @@ function rowTone(label: string, cells: string[], headers: string[], colorEightAm
   const statusIndex = headers.findIndex((header) => normalizeHeader(header) === "STATUS")
   const statusValue = statusIndex >= 0 ? cells[statusIndex]?.trim().toUpperCase().replace(/_/g, " ") : ""
   const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
+  if ((titleIndex >= 0 && cells[titleIndex]?.includes("[Pauzë]")) || normalizedLabel === "PAUZË") {
+    return "bg-[#f1f3f5] text-slate-700 dark:bg-[#303946] dark:text-slate-200"
+  }
   const titleStatus = titleIndex >= 0 ? splitStatusMarker(cells[titleIndex] || "").status : ""
   const priorityTone = titleIndex >= 0 ? splitPriorityToneMarker(cells[titleIndex] || "").tone : ""
   const resolvedStatus = (titleStatus || statusValue).toUpperCase().replace(/_/g, " ")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services.task_pause import TASK_PAUSE_LABEL, pause_until_on_day
 from app.services.report_attendance import filter_points_payload
 
 import asyncio
@@ -91,6 +92,7 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
         row = {
             "task_id": str(task.id), "title": title,
             "status": status, "progress": task.progress_percentage or 0,
+            "is_paused": bool(pause_until_on_day(getattr(task, "pause_periods", None), day)),
             "start_date": start.isoformat() if start else None, "due_date": due.isoformat(),
             "created_date": created.isoformat() if created else None, "completed_date": completed.isoformat() if completed else None,
             "am_pm": am_pm, "task_type": _m3_task_type_label(task),
@@ -118,7 +120,8 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
     rows = await build_unfinished_priority_task_rows(db, day, include_task_id=True)
     unfinished = [
         {"task_id": row[9], "assignees": row[1], "department": row[2], "am_pm": row[3], "status": row[4],
-         "priority": row[5], "task_type": row[6], "title": row[7], "due_label": row[8],
+         "priority": row[5], "task_type": row[6], "title": row[7].removesuffix(f" {TASK_PAUSE_LABEL}"), "due_label": row[8],
+         "is_paused": row[7].endswith(f" {TASK_PAUSE_LABEL}"),
          "deadline_important": "DEADLINE" in row[5], "eight_am": "08:00" in row[5]}
         for row in rows
     ]
@@ -248,7 +251,8 @@ def table_value(report, row, column, index, movement, section=""):
         prefix = 'pm_comment' if section == 'pm_continuation' else 'delivery'
         return report.get("manual_answers", {}).get(f"{prefix}:{row['task_id']}") or "Pa pergjigje"
     if not movement and column == "title":
-        return row.get("title") or "-"
+        title = row.get("title") or "-"
+        return f"{title} {TASK_PAUSE_LABEL}" if row.get("is_paused") else title
     if column == "marker":
         return row.get("marker") or "-"
     return m3.report_table_value(row, column, index, movement)

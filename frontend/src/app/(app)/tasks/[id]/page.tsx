@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { TaskPauseField } from "@/components/task-pause-field"
+import { currentTaskPauseDay, isTaskPausedOnDay } from "@/lib/task-pause"
+import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 
@@ -568,9 +569,10 @@ export default function TaskDetailsPage() {
                 >
                   Back
                 </Button>
-                <div className="flex items-start gap-2 text-2xl font-semibold text-slate-900">
+                <div className="task-pause-surface flex items-start gap-2 rounded-md text-2xl font-semibold text-slate-900">
                   <TaskOneHMarkerEditor taskId={task.id} marker={shownTaskMarker?.one_h_marker} markerByGa={shownTaskMarker?.one_h_marker_by_ga} markerComment={shownTaskMarker?.one_h_marker_comment} className="mt-1" />
                   <span className="min-w-0"><TaskMarkerComment comment={shownTaskMarker?.one_h_marker_comment} taskId={task.id} />{renderMarkedNoteContent(title || task.title, title || task.title)}</span>
+                  {isTaskPausedOnDay(task, currentTaskPauseDay()) && <TaskPauseBadge />}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>Status: {statusText}</span>

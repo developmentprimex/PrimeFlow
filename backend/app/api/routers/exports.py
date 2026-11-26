@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.services.report_attendance import filter_export_tasks, filter_export_rows, load_report_attendance
 from app.config import settings
-from app.services.task_pause import pause_until_on_day, task_title_with_pause
+from app.services.task_pause import TASK_PAUSE_BACKGROUND, TASK_PAUSE_LABEL, pause_until_on_day, task_title_with_pause
 from zoneinfo import ZoneInfo
 
 import csv
@@ -3144,6 +3144,7 @@ async def export_open_tasks_xlsx(
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         cell.number_format = "@"
 
+    pause_fill = PatternFill("solid", fgColor=TASK_PAUSE_BACKGROUND[1:])
     mismatch_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
     mismatch_font = Font(color="FFFFFF", bold=True)
     for idx, (group, task) in enumerate(export_rows, start=1):
@@ -3153,6 +3154,8 @@ async def export_open_tasks_xlsx(
         baseline = baseline_map.get(task.id)
         planned_when = _open_task_planning_when(task.due_date, monday) if baseline else ""
         planned_status = _open_task_planned_status(task) if baseline else ""
+        pause_periods = getattr(task, "pause_periods", None)
+        is_paused = pause_until_on_day(pause_periods, pause_day) is not None
         values = [
             idx,
             str(task.id),
@@ -3170,7 +3173,7 @@ async def export_open_tasks_xlsx(
             bz_me_label(task),
             other_assignees_label(task),
             _open_task_title_rich_text(
-                task_title_with_pause(task.title, getattr(task, "pause_periods", None), pause_day)
+                task_title_with_pause(task.title, pause_periods, pause_day)
             ),
             project.title if project else "",
             baseline.when_value if baseline else "",
@@ -3184,7 +3187,9 @@ async def export_open_tasks_xlsx(
             cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True, readingOrder=1)
             if col_idx == 1:
                 cell.font = Font(bold=True)
-            if col_idx == column_numbers["STATUS"]:
+            if is_paused:
+                cell.fill = pause_fill
+            elif col_idx == column_numbers["STATUS"]:
                 _color_waiting_status_cell(cell, task.status)
         if baseline:
             if not _open_task_values_match(baseline.when_value, planned_when):
@@ -4639,7 +4644,10 @@ async def _daily_report_rows_for_user(
                         _fast_subtype_short(task),
                         period,
                         department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
-                        append_mira_dictation_label(_strip_html(task.title) or "-", task.mira_dictation_source),
+                        task_title_with_pause(
+                            append_mira_dictation_label(_strip_html(task.title) or "-", task.mira_dictation_source),
+                            getattr(task, "pause_periods", None), day,
+                        ),
                         _strip_html_keep_breaks(task.description),
                         (status or "").upper(),
                         "-",
@@ -4667,7 +4675,12 @@ async def _daily_report_rows_for_user(
                     "-",
                     period,
                     department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
-                    append_mira_dictation_label(f"{project_label} - {_strip_html(task.title) or '-'}", task.mira_dictation_source),
+                    task_title_with_pause(
+                        append_mira_dictation_label(
+                            f"{project_label} - {_strip_html(task.title) or '-'}", task.mira_dictation_source,
+                        ),
+                        getattr(task, "pause_periods", None), day,
+                    ),
                     _strip_html_keep_breaks(task.description),
                     (status or "").upper(),
                     "-",
@@ -4705,7 +4718,9 @@ async def _daily_report_rows_for_user(
                 _system_frequency_short_label(tmpl.frequency),
                 period,
                 department_label(tmpl.department_id, tmpl.scope, False),
-                _strip_html(task.title or tmpl.title) or "-",
+                task_title_with_pause(
+                    _strip_html(task.title or tmpl.title) or "-", getattr(task, "pause_periods", None), day,
+                ),
                 _strip_html_keep_breaks(task.description or tmpl.description),
                 _format_system_status(_system_task_status(task)).upper(),
                 bz,
@@ -4920,7 +4935,9 @@ async def export_daily_report_xlsx(
     ws.row_dimensions[header_row].height = 28
 
     data_row = header_row + 1
+    pause_fill = PatternFill("solid", fgColor=TASK_PAUSE_BACKGROUND[1:])
     for idx, row in enumerate(rows, start=1):
+        is_paused = row[5].endswith(f" {TASK_PAUSE_LABEL}")
         row_values = row.copy()
         row_values[0] = idx
         status_value = row_values[7] if len(row_values) > 7 else ""
@@ -4935,7 +4952,9 @@ async def export_daily_report_xlsx(
             )
             if col_idx == 1:
                 cell.font = Font(bold=True)
-            if status_fill and col_idx == 8:
+            if is_paused:
+                cell.fill = pause_fill
+            elif status_fill and col_idx == 8:
                 cell.fill = status_fill
         data_row += 1
 

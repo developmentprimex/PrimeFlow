@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services.task_pause import TASK_PAUSE_BACKGROUND, TASK_PAUSE_LABEL
 from app.services.report_attendance import attendance_from_items
 
 import html
@@ -351,10 +352,12 @@ def _task_marker_legend_text() -> str:
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
-    """Done green wins; otherwise GA-personal purple wins over deadline red."""
+    """Use the dated pause color before applying work-status colors."""
     deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
     status = _task_status(item)
-    if status == "DONE":
+    if item.get("is_paused"):
+        color = TASK_PAUSE_BACKGROUND
+    elif status == "DONE":
         color = STATUS_COLORS["DONE"]
     elif personal and _is_personal_task_for_ga(item):
         color = PERSONAL_GA_COLOR
@@ -662,7 +665,7 @@ def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = _report_text(_first_line(item.get("title")))
     status_label = ""
     if item.get("is_paused"):
-        status_label = " [Pauzë]"
+        status_label = f" {TASK_PAUSE_LABEL}"
     elif _task_status(item) == "PAUSED":
         status_label = " [STOPPED]"
     if "confirmation_assignee_initials" in item:
@@ -2306,7 +2309,9 @@ def _excel_table_attachment(
                         )
                     cell = sheet.cell(row_number, item_index, cell_value)
                     if not meeting:
-                        if background == PERSONAL_GA_COLOR:
+                        if background == TASK_PAUSE_BACKGROUND:
+                            cell.fill = PatternFill("solid", fgColor=background[1:])
+                        elif background == PERSONAL_GA_COLOR:
                             cell.fill = ga_fill
                         elif background == DEADLINE_COLOR:
                             cell.fill = deadline_fill

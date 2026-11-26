@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { toast } from "sonner"
+import { TaskPauseBadge } from "@/components/task-pause-field"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -19,6 +20,7 @@ type Task = Response & {
   slot: string | null
   is_system_task: boolean
   is_1h: boolean
+  is_paused?: boolean
 }
 type Plan = { target_date: string; tasks: Task[] }
 
@@ -36,7 +38,7 @@ function FeedbackRow({ task, save, taskCells, readOnly }: {
   const title = getPlainMarkedText(task.title)
   return (
     <TableRow>
-      {taskCells ?? <TableCell>{renderMarkedNoteContent(task.title)}</TableCell>}
+      {taskCells ?? <TableCell>{renderMarkedNoteContent(task.title)} {task.is_paused && <TaskPauseBadge />}</TableCell>}
       <TableCell className={continuation === "PO" ? "bg-green-100 text-green-800" : continuation === "JO" ? "bg-red-100 text-red-800" : ""}>
         <select
           aria-label={`Vazhdon? ${title}`}

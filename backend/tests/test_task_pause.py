@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.task import TaskUpdate
-from app.services.task_pause import pause_until_on_day, update_pause_periods
+from app.services.task_pause import TASK_PAUSE_BACKGROUND, pause_until_on_day, update_pause_periods
 from app.services.tomorrow_print_report import render_marked_tomorrow_tasks
 
 
@@ -63,9 +63,11 @@ def test_print_marks_only_the_paused_day_and_keeps_the_work_status():
         {**common_task, "date": "2026-11-26", "is_paused": False},
     ]}}
 
-    paused, _ = render_marked_tomorrow_tasks(payload, date(2026, 11, 25))
-    resumed, _ = render_marked_tomorrow_tasks(payload, date(2026, 11, 26))
+    paused, paused_html = render_marked_tomorrow_tasks(payload, date(2026, 11, 25))
+    resumed, resumed_html = render_marked_tomorrow_tasks(payload, date(2026, 11, 26))
 
     assert "IN_PROGRESS" in paused and "IN_PROGRESS" in resumed
     assert "[Pauzë]" in paused
     assert "[Pauzë]" not in resumed
+    assert f"background-color:{TASK_PAUSE_BACKGROUND}" in paused_html
+    assert f"background-color:{TASK_PAUSE_BACKGROUND}" not in resumed_html

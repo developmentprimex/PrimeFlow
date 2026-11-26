@@ -378,15 +378,19 @@ def test_common_view_absences_and_delays_use_report_day_and_person():
     assert [(row["person"], row["start"], row["until"]) for row in data["delays"]] == [("Ada Test", "08:00", "09:00")]
 
 
-def test_render_includes_all_six_points_and_manual_comments_escaped():
+def test_render_includes_eight_points_and_reorganization_is_last():
     report = {"report_date": DAY.isoformat(), "manual_answers": {"plan_changes": "Po <sot>", "reorganization": "Jo"},
               "data": {"absences": [{"id": "absence", "person": "Ada", "from": "08:00", "to": "12:00", "note": "Sëmurë"}],
                        "delays": [], "notes": [{"id": "note", "source": "PX Notes", "content": "Shënim i ri", "created_at": at(DAY, 8).isoformat()}],
                        "tasks": [{"id": "task", "title": "Detyrë e re", "status": "TODO", "created_at": at(DAY, 8).isoformat()}]}}
     html = service.render_html(report)
-    assert all(f"{number}." in html for number in range(1, 7))
+    headings = [block["text"] for block in service.export_blocks(report)
+                if block["kind"] == "text" and block["level"] == 2]
+    assert [title.split(".", 1)[0] for title in headings] == list("12345678")
+    assert headings[-1] == "8. A DUHET RIORGANIZIM?"
+    assert html.index("7. SA PER DOREZIM M2?") < html.index(headings[-1])
     assert "Po &lt;sot&gt;" in html and "Po <sot>" not in html
-    assert "Jo" in service.render_plain_text(report)
+    assert service.render_plain_text(report).endswith("8. A DUHET RIORGANIZIM?\n\nJo")
 
 
 def test_only_the_two_manual_points_can_be_saved():
@@ -396,7 +400,7 @@ def test_only_the_two_manual_points_can_be_saved():
         ManualAnswersPayload(manual_answers={"notes": "Nuk lejohet"})
 
 
-def test_report_exports_include_the_six_points():
+def test_report_exports_create_all_three_attachments():
     report = {"report_date": DAY.isoformat(), "subject": service.subject_for(DAY),
               "manual_answers": {"plan_changes": "Po", "reorganization": "Jo"},
               "data": {"absences": [], "delays": [],

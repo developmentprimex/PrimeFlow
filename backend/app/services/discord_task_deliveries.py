@@ -29,6 +29,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_marker_history import TaskOneHMarkerHistory
 from app.models.user import User
 from app.services.m3_reporting_points import task_row_appearance
+from app.services.task_pause import pause_until_on_day
 from app.services.meetings_report import (
     WEEKLY_PLANNER_DEPARTMENT_ORDER,
     _clean_task_title,
@@ -133,11 +134,13 @@ async def _task_rows(db: AsyncSession, day: date, today: date, guild_id: str | N
         system = bool(task.system_template_origin_id or task.system_task_slot_id)
         title = _clean_task_title(task.title, is_system_task=system)
         status = str(getattr(task.status, "value", task.status)).upper()
+        is_paused = pause_until_on_day(task.pause_periods, day) is not None
         fill, foreground, eight_am = task_row_appearance({
             "title": title,
             "status": status,
             "deadline_important": task.is_deadline_important,
             "is_system_task": system,
+            "is_paused": is_paused,
             "eight_am": task.due_date is not None and _local_time(task.due_date) == "08:00",
         })
         assignees = [identities[user_id] for user_id in owners[task.id] if user_id in identities]
@@ -156,6 +159,7 @@ async def _task_rows(db: AsyncSession, day: date, today: date, guild_id: str | N
                 "id": f"{task.id}:{user_id}", "task_id": str(task.id),
                 "user_id": str(user_id) if user_id else None,
                 "status": status, "deadline_important": bool(task.is_deadline_important),
+                "is_paused": is_paused,
                 "person": person or "Pa përgjegjës", "initials": _initials(person),
                 "department": department, "project": project or "—",
                 "am_pm": _m3_am_pm_label(task), "task_type": _m3_task_type_label(task),
