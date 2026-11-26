@@ -44,6 +44,7 @@ async def task_strike_summary(
     now = now or datetime.now(report_timezone())
     slots = (report_slot,) if report_slot else ("10:00", "11:00", "11:50", "14:20", "16:00")
     windows = {slot: (strike_interval_start(day, slot), strike_interval_end(day, slot)) for slot in slots}
+    selected_window = windows[report_slot] if report_slot else None
     # The embedded table follows the selected 1H Report's cumulative window.
     # The standalone view uses the last finished interval.
     if report_slot:
@@ -60,6 +61,9 @@ async def task_strike_summary(
                       for slot, (start, end) in windows.items()},
         "tasks": {},
     }
+    slot_counts = {}
+    if selected_window:
+        summary["slot_counts"] = slot_counts
     if not task_ids or not completed:
         return summary
     cutoff = min(completed[active_slot][1], now)
@@ -82,12 +86,18 @@ async def task_strike_summary(
         if event is not None:
             events[task_id].append(event)
     for task_id, (title, description) in texts.items():
+        fields = ((title, "TITLE"), (description, "DESCRIPTION"))
         summary["tasks"][str(task_id)] = {
             slot: sum(count_struck_points_for_interval(
                 text, events[task_id], interval_start=start, interval_end=min(end, now), field_name=field,
-            ) for text, field in ((title, "TITLE"), (description, "DESCRIPTION")))
+            ) for text, field in fields)
             for slot, (start, end) in completed.items()
         }
+        if selected_window:
+            start, end = selected_window
+            slot_counts[str(task_id)] = sum(count_struck_points_for_interval(
+                text, events[task_id], interval_start=start, interval_end=min(end, now), field_name=field,
+            ) for text, field in fields)
     return summary
 
 
@@ -122,6 +132,7 @@ async def render_embedded_print_strikes(
         count = counts.get(task_id, 0)
         cell["data-report-task"] = "true"
         cell["data-strike-count"] = str(count)
+        cell["data-slot-strike-count"] = str(summary["slot_counts"].get(task_id, 0))
         for previous in cell.select("[data-task-strike-count]"):
             previous.decompose()
         badge = soup.new_tag("div")

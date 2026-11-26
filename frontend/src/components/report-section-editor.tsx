@@ -193,7 +193,7 @@ function splitLeadingTaskMarker(value: string) {
   return match ? { marker: match[1], text: match[2] } : null
 }
 
-function renderPreviewTableCell(value: string, header: string) {
+function renderPreviewTableCell(value: string, header: string, lightMarker = false) {
   if (normalizeHeader(header) !== "TITLE") return value || "-"
   const originMatch = value.match(/^\s*\[(MANUAL|CAL)\]\s*/i)
   const origin = originMatch?.[1]?.toUpperCase() || ""
@@ -214,7 +214,7 @@ function renderPreviewTableCell(value: string, header: string) {
       ) : null}
       {marked ? (
         <>
-          <strong className="mr-1 inline-block text-sm font-black leading-none text-red-600 [text-shadow:0_0_0_currentColor]">
+          <strong className={`mr-1 inline-block text-sm font-black leading-none [text-shadow:0_0_0_currentColor] ${lightMarker ? "text-white" : "text-red-600"}`}>
             {marked.marker}
           </strong>
           {marked.text}
@@ -340,6 +340,7 @@ function rowTone(label: string, cells: string[], headers: string[], colorEightAm
   // Priority report treatments are table/type semantics and must win over
   // ordinary task status colors.
   const eightAm = priorityTone === "EIGHT_AM" || typeValue.includes("08:00") || normalizedLabel.includes("08:00 TASKS")
+  if (colorEightAmByStatus && eightAm && typeValue.includes("DEADLINE")) return "bg-red-600 text-white"
   if (eightAm && !colorEightAmByStatus) return "bg-white text-slate-950"
   if (!eightAm && (priorityTone === "DEADLINE" || typeValue.includes("DEADLINE") || normalizedLabel.includes("TASKS WITH DEADLINE"))) return "bg-red-600 text-white"
   if (resolvedStatus === "LATE") return "bg-red-100"
@@ -812,11 +813,23 @@ export function ReportSectionPreview({
       ? [...new Set(dataRows.map((row) => row.cells[createdColumnIndex]?.trim()).filter((value) => /^\d{2}\.\d{2}$/.test(value || "")))]
       : []
     const hasPriorityTaskTypes = dataRows.some((row) => priorityTaskTypeRank(row.headers, row.cells) < 3)
+    const dueTodayFirst = canFilterDueDate && headers.includes("PROGRESI")
     const orderedDataRows = hasPriorityTaskTypes && !canFilterWfeAge
-      ? [...dataRows].sort(
-          (left, right) =>
-            priorityTaskTypeRank(left.headers, left.cells) - priorityTaskTypeRank(right.headers, right.cells),
-        )
+      ? [...dataRows].sort((left, right) => {
+          const leftRank = priorityTaskTypeRank(left.headers, left.cells)
+          const rightRank = priorityTaskTypeRank(right.headers, right.cells)
+          if (dueTodayFirst) {
+            // Both 08:00 labels belong to the same group.
+            const groupOrder = (leftRank < 2 ? 0 : leftRank) - (rightRank < 2 ? 0 : rightRank)
+            if (groupOrder !== 0) return groupOrder
+            if (leftRank < 3) {
+              const leftToday = left.cells[dueDateColumnIndex]?.trim().toUpperCase() === "SOT"
+              const rightToday = right.cells[dueDateColumnIndex]?.trim().toUpperCase() === "SOT"
+              if (leftToday !== rightToday) return leftToday ? -1 : 1
+            }
+          }
+          return leftRank - rightRank
+        })
       : dataRows
     const ageFilteredRows = canFilterWfeAge && wfeAgeFilter !== "all"
       ? orderedDataRows.filter((row) => row.cells[createdColumnIndex]?.trim().toUpperCase() === wfeAgeFilter)
@@ -1002,7 +1015,7 @@ export function ReportSectionPreview({
                           ) : (
                             header === "SKEDARËT" && discordReplyReport
                               ? <DiscordReplyFiles key={`${discordReplyReport.date}:${displayedCell}`} value={displayedCell} report={discordReplyReport} />
-                              : renderPreviewTableCell(displayedCell, header)
+                              : renderPreviewTableCell(displayedCell, header, eightAmTask && tone === "bg-red-600 text-white")
                           ))}
                         </td>
                       )

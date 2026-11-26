@@ -74,6 +74,7 @@ from app.services.meetings_report import (
     _render_group_label_html,
     _render_section_block_html,
     _section_report_table_rows,
+    _sort_priority_task_rows,
     _task_owners,
     _wrap_fixed_width,
     _wrap_report_email_html,
@@ -284,6 +285,7 @@ def _unfinished_priority_task_rows(
     timezone: ZoneInfo,
     department_codes: dict[Any, str] | None = None,
     *, include_task_id: bool = False, include_morning_progress: bool = False,
+    follow_up_task_ids: set[str] | None = None,
 ) -> list[list[str]]:
     """Due-today morning work, with planned priority progress in M2 Post-Break."""
     selected: list[tuple[Task, date, str, str, str]] = []
@@ -295,7 +297,10 @@ def _unfinished_priority_task_rows(
         due_day = due_at.date()
         finish_period = str(getattr(task, "finish_period", None) or "").strip().upper()
         morning_due_today = due_day == report_day and finish_period in {"AM", "AM/PM"}
-        tracked = include_morning_progress and bool(task_model_groups(task, report_day, include_planned_days=True))
+        tracked = include_morning_progress and (
+            str(task.id) in (follow_up_task_ids or ())
+            or bool(task_model_groups(task, report_day, include_planned_days=True))
+        )
         if not (morning_due_today or tracked):
             continue
 
@@ -335,7 +340,7 @@ def _unfinished_priority_task_rows(
             common_view_task_sort_key(item[0], names, assignee_ids_by_task),
         )
     )
-    return [
+    rows = [
         [
             str(index),
             _task_owners(task, names, assignee_ids_by_task),
@@ -349,6 +354,11 @@ def _unfinished_priority_task_rows(
         ] + ([progress] if include_morning_progress else []) + ([str(task.id)] if include_task_id else [])
         for index, (task, due_day, task_type, status, progress) in enumerate(selected, start=1)
     ]
+    if include_morning_progress:
+        rows = _sort_priority_task_rows([name for name, _ in M2_PRIORITY_PROGRESS_COLUMNS], rows)
+        for index, row in enumerate(rows, start=1):
+            row[0] = str(index)
+    return rows
 
 
 async def _after_break_cutoff(db: AsyncSession, report_day: date) -> tuple[datetime, ZoneInfo]:

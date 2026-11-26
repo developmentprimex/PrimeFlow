@@ -9,7 +9,10 @@ export function applyOneHReportFilter(document: Document, strikesOnly: boolean, 
   const strikesByTask = new Map<string, number>()
   tasks.forEach((task, index) => {
     const count = Number(task.dataset.strikeCount)
-    task.hidden = (strikesOnly && !(count > 0)) ||
+    const hasSlotStrike = Number(task.dataset.slotStrikeCount) > 0 ||
+      (task.dataset.slotStrikeCount === undefined &&
+        task.querySelector('span[style*="color:#2563eb;text-decoration:line-through"]') !== null)
+    task.hidden = (strikesOnly && !hasSlotStrike) ||
       (doneOnly && (task.closest("[data-report-daily-strikes]") !== null || !isReportTaskDone(task)))
     if (!task.hidden) visible += 1
     if (task.dataset.strikeCount !== undefined && Number.isFinite(count) && count >= 0) {

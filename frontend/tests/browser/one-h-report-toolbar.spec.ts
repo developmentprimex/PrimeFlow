@@ -265,7 +265,7 @@ test("M2 filters due dates, colors 08:00 by status and saves task explanations b
   await expect(today).toHaveClass(/bg-yellow-100/)
   await expect(today.getByRole("cell", { name: "SOT", exact: true })).toHaveClass(/bg-red-600/)
   await expect(thisWeek.getByRole("cell", { name: "27.11.2026", exact: true })).not.toHaveClass(/bg-red-600/)
-  await expect(thisWeek).toHaveClass(/bg-pink-200/)
+  await expect(thisWeek).toHaveClass(/bg-red-600/)
   await expect(nextWeek).toHaveClass(/bg-green-100/)
   await dueFilter.selectOption("today")
   await expect(today).toBeVisible()
@@ -316,7 +316,18 @@ test("M1 preserves edits and refreshed symbol tables when saving report details"
   }
   const draft = {
     id: "draft", status: "SENT", report_date: "2026-11-23", subject: "Morning report", recipients,
-    sections: [{ title: "First report point", body: "Report content" }, physicalSection, gaSection],
+    sections: [{ title: "First report point", body: "Report content" }, physicalSection, gaSection, {
+      section_key: "DET 08:00/DL AM",
+      title: "DET 08:00/DL AM/DUE SOT",
+      body: [
+        "DET 08:00/DL AM/DUE SOT:", "+---+",
+        "| NR | KUSH | LLOJI | STATUS | TITULLI | DUE DATE | PROGRESI | KOMENT |", "+---+",
+        "| 2 | GA | 08:00 | TODO | Later priority | 24.11.2026 | TODO | - |", "+---+",
+        "| 1 | GA | DEADLINE / 08:00 | IN_PROGRESS | Morning priority | SOT | IN PROGRESS | - |", "+---+",
+        "| 3 | GA | DEADLINE | TODO | Deadline next week | 24.11.2026 | TODO | - |", "+---+",
+        "| 4 | GA | DEADLINE | TODO | Deadline today | SOT | TODO | - |", "+---+",
+      ].join("\n"),
+    }],
   }
   await page.addInitScript((account) => {
     localStorage.setItem("primex_access_token", "test-only-browser-token")
@@ -342,6 +353,21 @@ test("M1 preserves edits and refreshed symbol tables when saving report details"
   const symbols = page.getByRole("button", { name: "Simbolet e detyrave" })
   const status = page.getByText("Sent to", { exact: true })
   await expect(point).toBeVisible()
+  const morningPriority = page.getByRole("row").filter({ hasText: "Morning priority" })
+  const laterPriority = page.getByRole("row").filter({ hasText: "Later priority" })
+  const dueFilter = page.getByRole("combobox", { name: "Filtro sipas datës së afatit" })
+  await expect(morningPriority).toHaveClass(/bg-red-600/)
+  await expect(page.getByRole("row").filter({ hasText: /Morning priority|Later priority|Deadline today|Deadline next week/ }))
+    .toHaveText([/Morning priority/, /Later priority/, /Deadline today/, /Deadline next week/])
+  await expect(laterPriority).toHaveClass(/bg-pink-200/)
+  await expect(morningPriority.getByRole("cell", { name: "SOT", exact: true })).toHaveClass(/bg-red-600/)
+  await expect(laterPriority.getByRole("cell", { name: "24.11.2026", exact: true })).not.toHaveClass(/bg-red-600/)
+  await dueFilter.selectOption("today")
+  await expect(laterPriority).toHaveCount(0)
+  await dueFilter.selectOption("other")
+  await expect(morningPriority).toHaveCount(0)
+  await expect(laterPriority).toBeVisible()
+  await dueFilter.selectOption("all")
   const bzHeader = page.getByRole("columnheader", { name: "BZ ME", exact: true })
   await expect(bzHeader).toBeVisible()
   expect(await bzHeader.evaluate(cell => cell.previousElementSibling?.textContent?.trim())).toBe("LLOJI")
@@ -643,10 +669,10 @@ import asyncio, uuid
 from unittest.mock import AsyncMock, patch
 from app.services.tomorrow_print_report import _html_table
 from app.services.today_print_strikes import render_embedded_print_strikes
-d,shared_id,_=fresh_document('${slot}')
+d,shared_id,_=fresh_document('${slot}',include_earlier_task=${slot === "11:50" ? "True" : "False"})
 d.board_reminders=[]
 ${slot === "14:10" ? "d.sections[-1].employees=d.sections[0].employees" : ""}
-${empty ? "for s in d.sections:\n for e in s.employees:\n  for t in e.tasks:t.strike_count=0" : ""}
+${empty ? "for s in d.sections:\n for e in s.employees:\n  for t in e.tasks:t.strike_count=t.slot_strike_count=0" : ""}
 ${done ? "d.sections[0].employees[0].tasks[0].status='DONE'" : ""}
 supplement='<p>Supplement</p>'
 ${embedded ? `
@@ -654,7 +680,8 @@ ids=[str(uuid.uuid4()) for _ in range(8)]
 ${shared ? "ids[6]=str(shared_id)" : ""}
 items=[dict(task_id=value,title='SHTYPI task '+str(index),start_date='2026-10-23',due_date='2026-10-26',status='DONE' if ${done ? 'True' : 'False'} and index==6 else 'TODO') for index,value in enumerate(ids)]
 table=_html_table([('1H 10:00',items[:7],False),('P: GA',items[7:],True)],report_date=d.report_date)
-summary={'active_interval':{'start':'10:00','end':'11:00'},'tasks':{value:{'${slot}':${empty ? "0" : "2 if index==6 else 0"}} for index,value in enumerate(ids)}}
+start,end=d.strike_interval.split(chr(8211))
+summary={'active_interval':{'start':start,'end':end},'tasks':{value:{'${slot}':2 if index==6 else 0} for index,value in enumerate(ids)},'slot_counts':{ids[6]:${empty ? "0" : "1"}}}
 with patch('app.services.today_print_strikes.task_strike_summary',new=AsyncMock(return_value=summary)):
  supplement=asyncio.run(render_embedded_print_strikes(AsyncMock(),table,d.report_date,'${slot}'))
 ` : ""}
@@ -675,8 +702,8 @@ async function openReport(page: Page, role: "ADMIN" | "STAFF", slot = "11:00", e
     if (pathname.includes("marker-comments")) return route.fulfill({ json: { items: [], unread_count: 0 } })
     if (pathname.endsWith("/primeflow-1h-reports/preview")) return route.fulfill({ json: {
       document: { subject: `Report ${slot}`, generated_at: "2026-10-23T11:00:00Z", recipients: { to: ["preview@example.com"] },
-        strike_interval: slot === "10:00" ? "08:00–10:00" : slot === "14:10" ? "11:50–14:20" : "10:00–11:00" },
-      html, task_count: slot === "10:00" ? 3 : slot === "14:10" ? 4 : 2,
+        strike_interval: `08:00–${slot === "14:10" ? "14:20" : slot}` },
+      html, task_count: slot === "10:00" || slot === "11:50" ? 3 : slot === "14:10" ? 4 : 2,
       notes_html: `<html><body><h2>NOTA PA DISKUTUARA</h2><table data-undiscussed-notes-table="true"><tr><th>NOTE</th></tr>${Array.from({ length: notes }, (_, i) => `<tr><td>PX note ${i + 1}</td></tr>`).join("")}</table></body></html>`,
       note_count: notes,
     } })
@@ -746,16 +773,16 @@ for (const role of ["ADMIN", "STAFF"] as const) {
     await expect(frame.getByRole("button", { name: "Vetëm me strikes > 0" })).toHaveCount(0)
     await expect(frame.locator('[data-task-strike-count]').first()).toHaveCSS("font-size", "14px")
     await expect(frame.locator('[data-report-strike-total]')).toHaveCSS("font-size", "16px")
-    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 2 · 10:00–11:00")
+    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 3 · 08:00–11:00")
     await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(2)
     await button.click()
     await expect(button).toHaveAttribute("aria-pressed", "true")
     await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(1)
-    await expect(frame.locator('[data-report-task="true"]:visible')).toHaveAttribute("data-strike-count", "2")
+    await expect(frame.locator('[data-report-task="true"]:visible')).toHaveAttribute("data-slot-strike-count", "2")
     await expect(frame.locator('[data-report-task-section]:visible')).toHaveCount(1)
     await expect(frame.locator('[data-report-supplement]')).toBeHidden()
     await expect(toolbar.getByRole("status")).toHaveText("Shfaqen 1 nga 2 detyra")
-    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 2 · 10:00–11:00")
+    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 3 · 08:00–11:00")
     await page.getByRole("button", { name: role === "ADMIN" ? "Preview fresh report" : "Generate report", exact: true }).click()
     await expect(button).toHaveAttribute("aria-pressed", "true")
     await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(1)
@@ -781,6 +808,20 @@ test("no matches hides empty groups and shows the message above the report", asy
   await expect(page.getByText("Nuk ka detyra me strikes > 0 në këtë interval.")).toHaveCount(0)
 })
 
+test("11:50 strikes filter keeps a blue strike and hides a strike from an earlier slot", async ({ page }) => {
+  const frame = await openReport(page, "STAFF", "11:50")
+  const toolbar = page.getByTestId("one-h-strikes-toolbar")
+  const earlier = frame.locator('[data-report-daily-strikes] [data-strike-count="1"][data-slot-strike-count="0"]')
+  await expect(earlier).toBeVisible()
+  await toolbar.getByRole("button", { name: "Vetëm me strikes > 0" }).click()
+  await expect(earlier).toBeHidden()
+  const visible = frame.locator('[data-report-task="true"]:visible')
+  await expect(visible).toHaveCount(1)
+  await expect(visible).toHaveAttribute("data-slot-strike-count", "2")
+  await expect(visible.locator('span[style*="color:#2563eb;text-decoration:line-through"]').first()).toBeVisible()
+  await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toContainText("Total strikes: 4")
+})
+
 test("the top filter also controls BLL table rows", async ({ page }) => {
   const frame = await openReport(page, "STAFF", "14:10")
   const button = page.getByTestId("one-h-strikes-toolbar").getByRole("button", { name: "Vet\u00ebm me strikes > 0" })
@@ -788,8 +829,8 @@ test("the top filter also controls BLL table rows", async ({ page }) => {
   await expect(frame.locator('[data-report-task="true"]:visible')).toHaveCount(2)
   const bll = frame.locator('[data-bll-task-table] tr[data-report-task="true"]:visible')
   await expect(bll).toHaveCount(1)
-  await expect(bll).toHaveAttribute("data-strike-count", "2")
-  await expect(page.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 2 · 11:50–14:20")
+  await expect(bll).toHaveAttribute("data-slot-strike-count", "2")
+  await expect(page.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 3 · 08:00–14:20")
   await button.click()
   await expect(bll).toHaveCount(2)
 })
@@ -804,9 +845,9 @@ for (const role of ["ADMIN", "STAFF"] as const) {
     const rows = print.locator('tr[data-task-card-row="content"]')
     await expect(print.locator('[data-task-strike-count]')).toHaveCount(8)
     await expect(print.locator('[data-task-strike-count]').first()).toHaveCSS("font-size", "14px")
-    await expect(print.locator('[data-print-strike-total]')).toHaveText("1H SHTYPI · Total strikes: 2 · 10:00–11:00")
+    await expect(print.locator('[data-print-strike-total]')).toHaveText("1H SHTYPI · Total strikes: 2 · 08:00–11:00")
     await expect(toolbar.getByRole("status")).toHaveText("Shfaqen 10 nga 10 detyra")
-    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 4 · 10:00–11:00")
+    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 5 · 08:00–11:00")
     await button.click()
     await expect(print).toBeVisible()
     await expect(frame.locator('[data-report-supplement]')).toBeVisible()
@@ -820,7 +861,7 @@ for (const role of ["ADMIN", "STAFF"] as const) {
     await expect(print.locator('tr[data-task-card-row="dates"]:visible')).toHaveCount(1)
     await expect(print.locator('tr[data-task-card-row="dates"]:visible > td:visible')).toHaveCount(1)
     await expect(toolbar.getByRole("status")).toHaveText("Shfaqen 2 nga 10 detyra")
-    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 4 · 10:00–11:00")
+    await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 5 · 08:00–11:00")
     await print.locator('[data-print-strike-total]').scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath("embedded-filtered.png"), fullPage: true })
     await button.click()
@@ -834,11 +875,14 @@ for (const role of ["ADMIN", "STAFF"] as const) {
   })
 }
 
-test("an embedded SHTYPI table without positive strikes is hidden and restores on toggle", async ({ page }) => {
+test("an embedded SHTYPI table with only earlier strikes is hidden and restores on toggle", async ({ page }) => {
   const frame = await openReport(page, "ADMIN", "11:00", true, true)
-  const button = page.getByTestId("one-h-strikes-toolbar").getByRole("button", { name: "Vet\u00ebm me strikes > 0" })
+  const toolbar = page.getByTestId("one-h-strikes-toolbar")
+  const button = toolbar.getByRole("button", { name: "Vet\u00ebm me strikes > 0" })
+  await expect(frame.locator('[data-report-print-section] [data-strike-count="2"][data-slot-strike-count="0"]')).toBeVisible()
   await button.click()
   await expect(frame.locator('[data-report-print-section]')).toBeHidden()
+  await expect(toolbar.getByTestId("one-h-toolbar-strike-total")).toHaveText("Total strikes: 2 · 08:00–11:00")
   await expect(page.getByText("Nuk ka detyra me strikes > 0 në këtë interval.")).toBeVisible()
   await button.click()
   await expect(frame.locator('[data-report-print-section]')).toBeVisible()
@@ -848,9 +892,9 @@ test("an embedded SHTYPI table without positive strikes is hidden and restores o
 test("the toolbar counts a task shared between SHTYPI and the hourly report only once", async ({ page }) => {
   await openReport(page, "ADMIN", "11:00", false, true, true)
   const total = page.getByTestId("one-h-toolbar-strike-total")
-  await expect(total).toHaveText("Total strikes: 2 · 10:00–11:00")
+  await expect(total).toHaveText("Total strikes: 3 · 08:00–11:00")
   await page.getByTestId("one-h-strikes-toolbar").getByRole("button", { name: "Vet\u00ebm me strikes > 0" }).click()
-  await expect(total).toHaveText("Total strikes: 2 · 10:00–11:00")
+  await expect(total).toHaveText("Total strikes: 3 · 08:00–11:00")
 })
 
 for (const role of ["ADMIN", "STAFF"] as const) {

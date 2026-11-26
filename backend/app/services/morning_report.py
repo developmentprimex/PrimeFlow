@@ -25,12 +25,14 @@ from app.models.user import User
 from app.services.report_ga_task_bz import ga_task_bz_labels
 from app.services.after_break_report import (
     BLUE_NOTE_COLUMNS,
+    M2_PRIORITY_PROGRESS_COLUMNS,
     NOTE_REFERENCES,
     _ascii_table,
     _belongs_to_day,
     _display_title,
     _personal_section,
     _task_covers_day,
+    _unfinished_priority_task_rows,
     load_blue_notes,
     order_blue_notes_table,
 )
@@ -87,8 +89,8 @@ from app.services.meetings_report import (
 )
 from app.services.report_section_merge import preserve_keyed_line
 from app.services.m1_gmail_pilot import read_m1_gmail_messages
-from app.services.primeflow_report import report_timezone
-from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, load_follow_up_comments, task_model_groups
+from app.services.primeflow_report import one_h_marker_symbol, report_timezone
+from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, load_follow_up_comments
 
 REPORT_TYPE = "morning_report"
 REPORT_LABEL = "Hapja e dites M1"
@@ -103,6 +105,8 @@ KA_GENT_QUESTIONS_TITLE = "A KA PYTJE/SQARIME ME KA/GENTIN"
 GA_PF_COMMENTS_TITLE = "(GA) A KA KOMENTE NE PF?"
 NEW_EMAILS_SECTION_TITLE = "EMAILS TE REJA?"
 MORNING_FOLLOW_UP_TITLE = "DET 08:00/DL AM"
+MORNING_FOLLOW_UP_DISPLAY_TITLE = "DET 08:00/DL AM/DUE SOT"
+MORNING_FOLLOW_UP_COLUMNS = [*M2_PRIORITY_PROGRESS_COLUMNS[:-3], ("KOMENT", 36)]
 REORGANIZATION_TITLE = "A KA RIORGANIZIM?"
 REORGANIZATION_PLAN_LABEL = "SI BËHET RIORGANIZIMI?"
 LEGACY_REORGANIZATION_PLAN_LABEL = "SI BËHET ORGANIZIMI?"
@@ -144,6 +148,7 @@ DISPLAY_SECTION_TITLES = [
     REORGANIZATION_TITLE,
 ]
 SECTION_DISPLAY_TITLES = {
+    MORNING_FOLLOW_UP_TITLE: MORNING_FOLLOW_UP_DISPLAY_TITLE,
     GA_REACTIONS_SECTION_KEY: GA_REACTIONS_SECTION_TITLE,
     SECTION_TITLES[1]: NEW_EMAILS_SECTION_TITLE,
     SECTION_TITLES[2]: "(GA) VONESA/MUNGESA/PV. A NDRYSHON PLANI PER SOT?",
@@ -170,6 +175,7 @@ LEGACY_NOTES_TITLE = (
     "VENDOS DET: STATUS (1H: EM(08:00),08:00,DL,AM,AM&PM,PM/P/R1)"
 )
 SECTION_TITLE_ALIASES = {
+    MORNING_FOLLOW_UP_DISPLAY_TITLE: MORNING_FOLLOW_UP_TITLE,
     GA_REACTIONS_SECTION_TITLE: GA_REACTIONS_SECTION_KEY,
     NEW_EMAILS_SECTION_TITLE: SECTION_TITLES[1],
     "(GA/KA/GENTI) KUSH KA DET PERSONALISHT?": SECTION_TITLES[7],
@@ -357,8 +363,9 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         if is_removed_morning_manual_question(raw_title, section_key):
             continue
         title = _canonical_section_title(section_key or raw_title)
-        if _canonical_section_title(raw_title) == REORGANIZATION_TITLE:
-            title = REORGANIZATION_TITLE
+        visible_key = _canonical_section_title(raw_title)
+        if visible_key in {REORGANIZATION_TITLE, MORNING_FOLLOW_UP_TITLE}:
+            title = visible_key
         body = str(section.get("body") or "")
         if raw_title == LEGACY_NOTES_TITLE or (
             title == SECTION_TITLES[3] and any(_is_manual_email_line(line) for line in body.splitlines())
@@ -394,7 +401,7 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         if title not in by_title:
             visible_title = SECTION_DISPLAY_TITLES.get(title, title)
             if (section_key and raw_title != title
-                    and title not in {GA_HV_DV_TASKS_TITLE, GA_REACTIONS_SECTION_KEY, GA_PF_COMMENTS_TITLE}
+                    and title not in {GA_HV_DV_TASKS_TITLE, GA_REACTIONS_SECTION_KEY, GA_PF_COMMENTS_TITLE, MORNING_FOLLOW_UP_TITLE}
                     and not (title == SECTION_TITLES[8] and _canonical_section_title(raw_title) == title)
                     and title not in MARKER_TASK_SECTIONS):
                 visible_title = raw_title
@@ -923,24 +930,28 @@ def _marker_task_table(
 
 
 def _morning_follow_up_tables(tasks, names, owners, department_codes, report_day, comments=None):
-    grouped = {group: [] for group in FOLLOW_UP_BY_SLOT.values()}
-    frozen = {group: (comments or {}).get(slot, {}) for slot, group in FOLLOW_UP_BY_SLOT.items()}
-    for task in tasks:
-        groups = task_model_groups(task, report_day)
-        for group in grouped:
-            if group in groups or str(task.id) in frozen[group]:
-                grouped[group].append(task)
-    tables = []
-    for slot, group in FOLLOW_UP_BY_SLOT.items():
-        answers = frozen[group]
-        tables.extend(_m3_status_table(
-            group, grouped[group], names, with_status=True, include_department=True,
-            include_am_pm=True, include_type=True, include_priority_tone=True,
-            department_codes=department_codes, assignee_ids_by_task=owners, show_all_assignees=True,
-            comments_by_task={task.id: answers[str(task.id)] for task in grouped[group] if str(task.id) in answers},
-        ))
-        tables.append("")
-    return _normalize_section(tables), sum(map(len, grouped.values()))
+    comments = comments or {}
+    rows = []
+    if report_day is not None:
+        zone = report_timezone()
+        cutoff = min(datetime.now(zone), datetime.combine(report_day, time.max, tzinfo=zone))
+        selected = _unfinished_priority_task_rows(
+            tasks, names, owners, report_day, cutoff, zone, department_codes,
+            include_task_id=True, include_morning_progress=True,
+            follow_up_task_ids={task_id for answers in comments.values() for task_id in answers},
+        )
+        markers = {str(task.id): one_h_marker_symbol(active_one_h_marker(task)) for task in tasks}
+        for *cells, task_id in selected:
+            answers = [
+                f"{slot}: {answer}" for slot in FOLLOW_UP_BY_SLOT
+                if (answer := comments.get(slot, {}).get(task_id))
+            ]
+            if marker := markers.get(task_id):
+                cells[7] = f"{marker} {cells[7]}"
+            rows.append([*cells, (" / ".join(answers) or "-").replace("|", "¦")])
+    return _normalize_section(_ascii_table(
+        MORNING_FOLLOW_UP_DISPLAY_TITLE, MORNING_FOLLOW_UP_COLUMNS, rows, show_empty_table=True,
+    )), len(rows)
 
 
 def _symbol_comment_table(rows: list[list[str]]) -> str:

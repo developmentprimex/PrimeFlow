@@ -94,17 +94,36 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
-- **M1 / DET 08:00/DL AM** dhe **1H Reports 11:00/11:50** përdorin të
-  njëjtën përzgjedhje sipas datës lokale të afatit, shenjës 08:00 dhe
-  kombinimit `Deadline Important` me periudhën `AM`. M1 ruan përgjigjen
-  manuale te **A KA RIORGANIZIM?** gjatë rigjenerimit. Kontrollo dy tabelat
-  e M1, statuset dhe komentet në pamjen e rifreskuar të 1H dhe eksportet.
+- **M1 / DET 08:00/DL AM/DUE SOT** përdor përzgjedhjen e M2 Post-Break:
+  detyrat 08:00 dhe Deadline Important AM nga fillimi deri te afati, si
+  dhe detyrat e hapura AM/AM-PM me afat sot. Kontrollo tabelën automatike,
+  statusin, afatin dhe komentet në ekran, preview, email dhe eksport.
+  Filtri DUE DATE ofron Të gjitha, Sot dhe Datat e tjera. Rreshtat 08:00
+  marrin ngjyrën e statusit dhe ruajnë kornizën e kuqe. Në ekran, preview,
+  email dhe eksport, vetëm qelizat DUE DATE me vlerën SOT marrin sfond të kuq.
+  Në M1 dhe M2 Post-Break, brenda grupeve 08:00 dhe DEADLINE, afatet SOT
+  renditen para datave të tjera. Rreshtat DEADLINE / 08:00 janë në grupin 08:00.
+  Në M1 dhe M2 Post-Break rreshtat me të dyja etiketat marrin ngjyrën e
+  DEADLINE në ekran, preview, email, Word dhe PNG. Pauza ruan ngjyrën gri.
+  M1 ruan përgjigjen manuale te **A KA RIORGANIZIM?** gjatë rigjenerimit.
+  Kontrollo statuset dhe komentet në pamjen e rifreskuar të 1H Reports
+  11:00/11:50 dhe eksportet e tyre.
   Burimi i tabelave 1H përfshin edhe detyrat e kryera pa slot dhe detyrat
   e raportuara që më pas u zhvendosën. Discord pyet çdo ditë pune nga data
   e fillimit deri te afati, për 08:00 në 11:00 dhe për DL AM në 11:50.
   Pyet pse nuk është punuar kur statusi është TODO dhe pse nuk është kryer
   kur detyra mbetet e hapur në datën e afatit. Raportet e rifreskuara i
   lexojnë përgjigjet e ruajtura sipas datës, slotit, punonjësit dhe detyrës.
+  Detyrat 08:00 me afat sot që mbeten të hapura barten edhe në 11:50.
+  Të dy grupet barten në raportet 14:10, 14:20 dhe 16:00 deri në DONE.
+  Discord ndjek të dy grupet në 14:20 dhe 16:00 me një pyetje për detyrë
+  edhe kur e njëjta detyrë ka të dyja etiketat. Raporti i rifreskuar shfaq
+  përgjigjet e ditës deri te sloti i vet. Orari 14:10 dhe 14:20 ndan kartën
+  Discord të 14:20. Radha e Mira Host përdor detyrat e bartura.
+  Tabelat 1H të progresit kanë kolona të ngushta NR, KUSH, DEP dhe STATUS.
+  KOMENT shfaq përgjigjet e ruajtura nga Discord për të njëjtën detyrë,
+  datë dhe slot, përfshirë përgjigjet e kartave të zakonshme 1H. Butoni
+  Simbolet shfaqet në kolonën TITULLI të preview-t.
   Mira Host lexon detyrat shtesë
   në slotin përkatës. Emaili ruan gjendjen e momentit të dërgimit.
 
@@ -786,8 +805,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   SHTYPI Tomorrow nuk ka këta filtra. Filtrat veprojnë në preview; shkarkimet
   dhe email-et e gjeneruara në server ndjekin raportin e plotë, si për Strikes.
 
-- Totali dhe filtri i strikes te 1H Reports llogariten nga 08:00 deri në fund të
-  slotit të zgjedhur, edhe në SHTYPI të integruar në raportin e GA. Ngjyra e
+- Totali i strikes te 1H Reports llogaritet nga 08:00 deri në fund të slotit.
+  Filtri shfaq vetëm detyrat me strike të reja në intervalin e slotit të
+  zgjedhur. Të dyja zbatohen edhe në SHTYPI të integruar në raportin e GA. Ngjyra e
   pikave në 1H Reports (përfshirë BLL) ndjek intervalin e slotit: kaltër për
   pikën e kryer në interval, gjelbër për pikën e kryer më herët po atë ditë,
   gri për ditët e mëparshme ose pa datë. Pikat e ditës nga

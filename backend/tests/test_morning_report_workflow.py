@@ -88,6 +88,44 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         values.update(overrides)
         return SimpleNamespace(**values)
 
+    def test_morning_priority_table_uses_the_m2_selection_and_keeps_discord_comments(self) -> None:
+        from app.services.morning_report import (
+            MORNING_FOLLOW_UP_DISPLAY_TITLE, MORNING_FOLLOW_UP_TITLE, _morning_follow_up_tables,
+        )
+
+        day = date(2026, 9, 1)
+        due = datetime(2026, 9, 3, 16, 0)
+        early = self._task("EM Offer", due_date=due, status="IN_PROGRESS")
+        early_today = self._task("08:00 Today", is_deadline_important=True)
+        deadline = self._task("Important AM", due_date=due, is_deadline_important=True)
+        deadline_today = self._task("Important today", is_deadline_important=True)
+        today = self._task("Ordinary due today")
+        unrelated = self._task("Ordinary future", due_date=due)
+        body, count = _morning_follow_up_tables(
+            [early, deadline, today, unrelated, early_today, deadline_today], {}, {}, {}, day,
+            {"11:00": {early.id: "EF: Started today"}},
+        )
+        self.assertEqual(count, 5)
+        for text in ("03.09.2026", "DUE SOT", "IN PROGRESS", "Important AM", "11:00: EF: Started today"):
+            self.assertIn(text, body)
+        self.assertNotIn(unrelated.title, body)
+        sections = normalize_morning_report_sections([{
+            "section_key": "manual:old-key", "title": MORNING_FOLLOW_UP_TITLE, "body": body,
+        }])
+        matching = [section for section in sections if section["section_key"] == MORNING_FOLLOW_UP_TITLE]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["title"], MORNING_FOLLOW_UP_DISPLAY_TITLE)
+        self.assertEqual(section_group_label("morning", matching[0]["title"], matching[0]["section_key"]),
+                         "AUTO-FILLED FROM PRIMEFLOW")
+        html = render_html("M1", day, matching)
+        expected_titles = [early_today.title, early.title, deadline_today.title, deadline.title, today.title]
+        for rendered in (body, html):
+            positions = [rendered.index(title) for title in expected_titles]
+            self.assertEqual(positions, sorted(positions))
+        self.assertIn('bgcolor="#fef3c7"', html)
+        self.assertRegex(html, r'<tr bgcolor="#dc2626"[^>]*>(?:(?!</tr>).)*08:00 Today')
+        self.assertIn('bgcolor="#DC2626" style="background-color:#DC2626!important;', html)
+
     def test_includes_today_open_tasks_plus_open_overdue_tasks(self) -> None:
         report_day = date(2026, 9, 1)
         tasks = [

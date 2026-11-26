@@ -170,6 +170,7 @@ def test_embedded_table_uses_selected_report_slot_instead_of_latest_finished(slo
     assert summary["active_slot"] == slot
     assert summary["active_interval"] == {"start": "08:00", "end": end.strftime("%H:%M")}
     assert summary["tasks"][str(task_id)] == {slot: 2 if slot == "10:00" else 3}
+    assert summary["slot_counts"] == {str(task_id): 2}
     assert end in db.execute.await_args.args[0].compile().params.values()
 
 
@@ -178,7 +179,8 @@ def test_embedded_badges_include_zero_and_deduplicate_total_across_repeated_card
     positive, empty = uuid.uuid4(), uuid.uuid4()
     source = f'<table><tr><td data-task-id="{positive}">Work &amp; details</td><td data-task-id="{empty}">Open</td></tr><tr><td data-task-id="{positive}">Repeated</td></tr></table>'
     summary = {"active_interval": {"start": "10:00", "end": "11:00"},
-               "tasks": {str(positive): {"11:00": 2}, str(empty): {"11:00": 0}}}
+               "tasks": {str(positive): {"11:00": 2}, str(empty): {"11:00": 0}},
+               "slot_counts": {str(positive): 1, str(empty): 0}}
     with patch("app.services.today_print_strikes.task_strike_summary", new=AsyncMock(return_value=summary)) as calculate:
         output = asyncio.run(render_embedded_print_strikes(AsyncMock(), source, DAY, "11:00"))
     assert calculate.await_args.kwargs == {"report_slot": "11:00"}
@@ -186,6 +188,7 @@ def test_embedded_badges_include_zero_and_deduplicate_total_across_repeated_card
     soup = BeautifulSoup(output, "html.parser")
     assert len(soup.select('[data-report-task="true"]')) == 3
     assert [cell["data-strike-count"] for cell in soup.select("td[data-task-id]")] == ["2", "0", "2"]
+    assert [cell["data-slot-strike-count"] for cell in soup.select("td[data-task-id]")] == ["1", "0", "1"]
     assert soup.select_one("[data-print-strike-total]").text == "1H SHTYPI · Total strikes: 2 · 10:00–11:00"
     assert all("14px" in badge["style"] for badge in soup.select("[data-task-strike-count]"))
     assert "Work &amp; details" in output

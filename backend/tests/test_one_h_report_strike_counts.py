@@ -72,7 +72,9 @@ def fresh_document(slot="11:00", *, include_earlier_task=False):
 
     with patch("app.services.primeflow_report_delivery.SessionLocal", return_value=Session()), \
          patch("app.services.primeflow_report_delivery.load_1h_reminder_questions", new=AsyncMock(return_value=[])), \
-         patch("app.services.primeflow_report_delivery.load_undiscussed_notes", new=AsyncMock(return_value=[])):
+         patch("app.services.primeflow_report_delivery.load_undiscussed_notes", new=AsyncMock(return_value=[])), \
+         patch("app.services.morning_task_follow_up.load_follow_up_comments", new=AsyncMock(return_value={})), \
+         patch("app.services.morning_task_follow_up.load_morning_task_rows", new=AsyncMock(return_value=[])):
         document = asyncio.run(generate_fresh(DAY, slot, {"to": ["preview@example.com"]}, data=data))
     expected = 2 if slot == "10:00" else 3
     return document, task_id, expected
@@ -91,6 +93,7 @@ def test_every_report_counts_from_morning_and_deduplicates_shared_tasks(slot):
     assert document.strike_interval == f"08:00–{strike_interval_end(DAY, slot):%H:%M}"
     assert ReportDocument.model_validate(document.model_dump(mode="json")).strike_total == expected
     shared_card = next(task for task in cards if task.task_id == str(shared_id))
+    assert shared_card.slot_strike_count == 2
     assert "[[done:green]]1. Earlier title[[/done]]" in shared_card.marked_title
     assert "[[done:blue]]2. Current title[[/done]]" in shared_card.marked_title
 
@@ -140,19 +143,20 @@ def test_bll_table_also_displays_its_strike_count():
     output = render_html(document).split('data-bll-task-table="true"', 1)[1]
     assert 'data-task-strike-count="true"' in output
     assert "Strikes: 3 · 08:00–14:20" in output
+    assert 'data-slot-strike-count="2"' in output
     assert 'color:#16a34a;text-decoration:line-through;text-decoration-thickness:2px;">1. Earlier title</span>' in output
 
 
 @pytest.mark.parametrize("slot", ("11:00", "16:00"))
 def test_earlier_strike_survives_the_done_window_and_slot_selection(slot):
     document, _, expected = fresh_document(slot, include_earlier_task=True)
-    section = document.sections[-1]
-    assert section.title == "STRIKES TË DITËS"
+    section = next(section for section in document.sections if section.title == "STRIKES TË DITËS")
     assert 'data-report-daily-strikes="true"' in render_html(document)
     assert document.task_count == 3
     assert document.strike_total == expected + 1
     tasks = [task for employee in section.employees for task in employee.tasks]
     assert [(task.title, task.strike_count) for task in tasks] == [("Morning task", 1)]
+    assert tasks[0].slot_strike_count == 0
     assert "[[done:green]]1. Morning point[[/done]]" in tasks[0].marked_description
 
 

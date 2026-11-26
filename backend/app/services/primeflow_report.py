@@ -26,7 +26,7 @@ from app.services.compact_report_questions import question_parts, questions_html
 from app.config import settings
 from app.services.one_h_ga_summary import GaTaskCounts, build_ga_summary, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
 from app.services.px_note_email import is_email_note_content
-from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, task_row_groups
+from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, is_open_follow_up, report_follow_up_groups, task_row_groups
 
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
@@ -128,6 +128,7 @@ class ReportTask(BaseModel):
     is_paused: bool = False
     one_h_marker: str = ""
     strike_count: int | None = None
+    slot_strike_count: int | None = None
     follow_up_comment: str = ""
 
     def display_title(self) -> tuple[str, list[str]]:
@@ -592,9 +593,8 @@ def _document_section(
             marked_title = title_override[1] if title_override else preserve_done_marks(raw_title)
             marked_description = description_override[1] if description_override else preserve_done_marks(raw_description)
             # Count both source fields, even when duplicate display text is hidden.
-            strike_count = (strike_counts or {}).get(task_id)
-            if strike_count is None:
-                strike_count = _count_blue_strikes(marked_title, marked_description)
+            slot_strike_count = _count_blue_strikes(marked_title, marked_description)
+            strike_count = (strike_counts or {}).get(task_id, slot_strike_count)
             description_duplicates_title = bool(raw_description) and (
                 clean_description(raw_description) == clean_title(raw_title)
             )
@@ -619,6 +619,7 @@ def _document_section(
                 is_paused=bool(task.get("is_paused")),
                 one_h_marker=one_h_marker_symbol(task.get("one_h_marker") or task.get("oneHMarker")),
                 strike_count=strike_count,
+                slot_strike_count=slot_strike_count,
                 follow_up_comment=(follow_up_comments or {}).get(task_id, ""),
             ))
         employees.append(ReportEmployee(
@@ -642,11 +643,14 @@ def _without_full_day_unavailable(data: dict[str, Any], day: date) -> dict[str, 
 
 
 def morning_follow_up_rows(
-    data: dict[str, Any], day: date, slot: str, *, frozen_task_ids: set[str] | None = None,
+    data: dict[str, Any], day: date, slot: str, *, group: str | None = None,
+    frozen_task_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    group = FOLLOW_UP_BY_SLOT.get(slot)
+    primary = FOLLOW_UP_BY_SLOT.get(slot)
+    group = group or primary
     if not group:
         return []
+    is_carried = group != primary
     items = data.get("items") or {}
     candidates = [task for bucket in ("oneH", "blocked", "important", "r1", "personal")
                   for task in items.get(bucket) or []] + (data.get("tasks") or []) + (data.get("morning_follow_up_tasks") or [])
@@ -654,9 +658,11 @@ def morning_follow_up_rows(
     scheduled = []
     rescheduled = []
     for task in candidates:
-        was_planned = str(task.get("task_id") or task.get("id") or "") in frozen
+        was_planned = not is_carried and str(task.get("task_id") or task.get("id") or "") in frozen
         if _task_date(task) == day:
-            if was_planned or group in task_row_groups(task, day):
+            if was_planned or (
+                group in task_row_groups(task, day) and (not is_carried or is_open_follow_up(task))
+            ):
                 scheduled.append(task)
         elif was_planned:
             rescheduled.append({**task, "date": day.isoformat()})
@@ -677,6 +683,7 @@ def build_report_document(
     strike_window_start: datetime | None = None,
     daily_strike_overrides: tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]] | None = None,
     morning_follow_up_comments: dict[str, str] | None = None,
+    morning_follow_up_task_ids: set[str] | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
@@ -775,10 +782,15 @@ def build_report_document(
                 f"{BLOCKED_SECTION_TITLE_PREFIX} {report_day:%d.%m.%Y}",
                 filter_tasks(items.get("blocked") or [], report_day),
             ))
-    follow_up = FOLLOW_UP_BY_SLOT.get(slot)
-    follow_up_tasks = morning_follow_up_rows(
-        data, report_day, slot, frozen_task_ids=set(morning_follow_up_comments or {}),
-    )
+    primary = FOLLOW_UP_BY_SLOT.get(slot)
+    follow_up_sections = []
+    for group in report_follow_up_groups(slot):
+        tasks = morning_follow_up_rows(
+            data, report_day, slot, group=group,
+            frozen_task_ids=morning_follow_up_task_ids,
+        )
+        if tasks or group == primary:
+            follow_up_sections.append((f"DET {group} · PROGRESI", tasks))
     strike_counts: dict[str, int] = {}
     if strike_window_start is not None:
         # Count from the daily window while the displayed marks follow the slot.
@@ -787,7 +799,7 @@ def build_report_document(
                 strike_counts[task_id] = strike_counts.get(task_id, 0) + _count_blue_strikes(marked)
         displayed_ids = {
             str(task.get("task_id") or task.get("id") or "")
-            for _, tasks in definitions for task in tasks
+            for _, tasks in [*definitions, *follow_up_sections] for task in tasks
         }
         strike_task_ids = {
             task_id for task_id, count in strike_counts.items() if count
@@ -827,10 +839,11 @@ def build_report_document(
                 strike_counts,
             )
             for title, tasks in definitions
-        ] + ([_document_section(
-            f"DET {follow_up} · PROGRESI", follow_up_tasks, title_overrides, description_overrides,
-            department_codes, strike_counts, follow_up_comments=morning_follow_up_comments or {},
-        )] if follow_up else []),
+        ] + [
+            _document_section(title, tasks, title_overrides, description_overrides,
+                              department_codes, strike_counts, follow_up_comments=morning_follow_up_comments or {})
+            for title, tasks in follow_up_sections
+        ],
         board_reminders=_board_reminder_questions(report_day),
         reminders=list(reminders or []),
         undiscussed_notes=list(undiscussed_notes or []),
@@ -954,12 +967,21 @@ def render_html(
             f'{html.escape(strike_count_label(task.strike_count, document))}</div>'
         )
 
-    def task_card(background: str, accent: str, title_html: str, body_html: str, strike_count: int | None, task_id: str, status: str) -> str:
+    def task_attributes(task: ReportTask) -> str:
+        count = task.strike_count if task.strike_count is not None else "unknown"
+        slot_count = task.slot_strike_count
+        if slot_count is None:
+            slot_count = _count_blue_strikes(task.marked_title, task.marked_description)
+        return (
+            f'data-report-task="true" data-strike-count="{count}" data-slot-strike-count="{slot_count}" '
+            f'data-task-id="{html.escape(task.task_id, quote=True)}" data-task-status="{html.escape(task.status, quote=True)}"'
+        )
+
+    def task_card(background: str, accent: str, title_html: str, body_html: str, task: ReportTask) -> str:
         # Left accent as its own cell — Outlook ignores CSS border-left reliably.
         return (
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
-            f'data-report-task="true" data-strike-count="{strike_count if strike_count is not None else "unknown"}" '
-            f'data-task-id="{html.escape(task_id, quote=True)}" data-task-status="{html.escape(status, quote=True)}" '
+            f'{task_attributes(task)} '
             "style=\"width:100%;border-collapse:collapse;margin:8px 0;\">"
             "<tr>"
             f"<td width=\"6\" bgcolor=\"{accent}\" style=\"width:6px;background-color:{accent};"
@@ -1019,15 +1041,16 @@ def render_html(
                     follow_up_cells = (
                         f'<td bgcolor="{background}" style="padding:9px;border:1px solid {accent};font-weight:700;">'
                         f'{html.escape(STATUS_MARKERS[task.status])}</td>'
-                        f'<td style="padding:9px;border:1px solid #cbd5e1;overflow-wrap:anywhere;">{comment}</td>'
+                        f'<td data-follow-up-comment="true" style="padding:9px;border:1px solid #cbd5e1;overflow-wrap:anywhere;vertical-align:top;">{comment}</td>'
                     )
+                title_cell = ' data-report-marker-host="true"' if follow_up else ""
+                wrap_title = "overflow-wrap:anywhere;vertical-align:top;" if follow_up else ""
                 rows.append(
-                    f'<tr data-report-task="true" data-strike-count="{task.strike_count if task.strike_count is not None else "unknown"}" '
-                    f'data-task-id="{html.escape(task.task_id, quote=True)}" data-task-status="{html.escape(task.status, quote=True)}">'
+                    f'<tr {task_attributes(task)}>'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;text-align:center;font-family:Arial,sans-serif;">{number}</td>'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-weight:700;">{html.escape(employee.name)}</td>'
                     f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;">{html.escape(task.department)}</td>'
-                    f'<td bgcolor="{background}" style="padding:9px;border:1px solid {accent};font-family:Arial,sans-serif;">'
+                    f'<td{title_cell} bgcolor="{background}" style="padding:9px;border:1px solid {accent};font-family:Arial,sans-serif;{wrap_title}">'
                     f'<div style="font-size:14px;font-weight:700;color:#050505;">{marker_badge(task.one_h_marker)}{marked_html(heading or task.title, task.marked_title)}</div>{details}'
                     f"</td>{follow_up_cells}</tr>"
                 )
@@ -1040,9 +1063,16 @@ def render_html(
             f'text-align:{"center" if label == "NR" else "left"};font-size:12px;">{label}</th>'
             for label in headers
         )
+        layout = "table-layout:fixed;" if follow_up else ""
+        columns = (
+            '<colgroup><col style="width:40px"><col style="width:60px"><col style="width:60px">'
+            '<col><col style="width:118px"><col style="width:24%"></colgroup>'
+            if follow_up else ""
+        )
         return (
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
-            f'{table_marker}="true" style="width:100%;border-collapse:collapse;margin:8px 0 4px;">'
+            f'{table_marker}="true" style="width:100%;{layout}border-collapse:collapse;margin:8px 0 4px;">'
+            f'{columns}'
             f'<tr bgcolor="#e2e8f0">{header}</tr>'
             f"{''.join(rows)}"
             "</table>"
@@ -1261,9 +1291,7 @@ def render_html(
                         accent,
                         marker_badge(task.one_h_marker) + marked_html(heading or task.title, task.marked_title),
                         detail_html,
-                        task.strike_count,
-                        task.task_id,
-                        task.status,
+                        task,
                     )
                 )
             body_chunks.append('</div>')
