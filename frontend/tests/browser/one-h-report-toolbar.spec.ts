@@ -4,6 +4,45 @@ import path from "node:path"
 
 const backend = path.resolve(__dirname, "../../../backend")
 
+test("Today compares the selected date with the saved Tomorrow plan", async ({ page }) => {
+  const user = { id: "comparison-test", email: "staff@example.test", full_name: "Comparison Test", role: "STAFF", is_active: true }
+  const day = "2026-10-23"
+  await page.addInitScript(account => {
+    localStorage.setItem("primex_access_token", "test-only-browser-token")
+    localStorage.setItem("primex_user", JSON.stringify(account))
+  }, user)
+  await page.route("**/api/**", route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === "/api/auth/me") return route.fulfill({ json: user })
+    if (url.pathname.endsWith("-print-report/snapshot")) {
+      return route.fulfill({ json: { report_date: day, target_date: day, is_frozen: true, html: "<p>Saved report</p>" } })
+    }
+    if (url.pathname === "/api/today-print-report/plan-comparison") {
+      expect(url.searchParams.get("report_date")).toBe(day)
+      return route.fulfill({ json: { report_date: day, status: "ready", is_frozen: true, saved_at: "2026-10-22T17:00:00+02:00",
+        changes: [{ task_id: "task1", kind: "changed",
+          before: { title: "Katalogu", slot: "10:00", period: "AM", assignees: ["Arta"], sections: ["1H 10:00"] },
+          after: { title: "Katalogu", slot: "14:20", period: "PM", assignees: ["Besnik"], sections: ["1H 14:20"] },
+        }],
+      } })
+    }
+    return route.fulfill({ json: [] })
+  })
+  await page.goto(`/today-print-report?date=${day}`)
+  await page.getByRole("button", { name: "Krahaso me planin e ruajtur" }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("columnheader")).toHaveText(["DETYRA", "PLANI NË 17:00", "SOT"])
+  const row = dialog.getByRole("row").filter({ hasText: "Katalogu" })
+  await expect(row.getByRole("rowheader")).toContainText("Sloti · AM/PM · Përgjegjësi")
+  await expect(row.getByRole("cell").nth(0)).toContainText("10:00 · AM")
+  await expect(row.getByRole("cell").nth(0)).toContainText("Arta")
+  await expect(row.getByRole("cell").nth(1)).toContainText("14:20 · PM")
+  await expect(row.getByRole("cell").nth(1)).toContainText("Besnik")
+  await page.goto(`/tomorrow-print-report?date=${day}`)
+  await expect(page.frameLocator('iframe[title*="generated email"]').getByText("Saved report")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Krahaso me planin e ruajtur" })).toHaveCount(0)
+})
+
 test("ASIST GA report links load the requested date on all eight PrimeFlow pages", async ({ page }) => {
   const account = { id: "ga-date-test", email: "ga@example.test", full_name: "GA Date Test", role: "ADMIN", is_active: true }
   const day = "2026-10-23"

@@ -79,6 +79,19 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('00:00', text)
         self.assertNotIn('Start:', client.continuation_card(data)[0])
 
+    async def test_morning_follow_up_question_has_a_dedicated_heading_and_highlight(self):
+        for groups, label in [('08:00', '08:00'), ('DL AM', 'DEADLINE AM'),
+                              ('08:00 / DL AM', '08:00 / DEADLINE AM')]:
+            with self.subTest(groups=groups):
+                data = data_of('IN_PROGRESS', count=2)
+                data['current'].update(follow_up=groups, question='Çfarë progresi ka sot?')
+                text, view = client.card(data)
+                self.assertIn(f'\n\n### 🔴 {label} · PYETJE PËR PROGRESIN\n> **Çfarë progresi ka sot?**', text)
+                self.assertIn('\n\nDetyra 1/2', text)
+                self.assertIn('💬 Koment', [getattr(control, 'label', None) for control in view.children])
+                self.assertNotIn('PYETJE PËR PROGRESIN', client.continuation_card(data)[0])
+        self.assertNotIn('PYETJE PËR PROGRESIN', client.card(data_of('IN_PROGRESS'))[0])
+
     async def test_stale_done_button_refreshes_instead_of_closing_again(self):
         data = data_of()
         click = interaction(data, 'done')

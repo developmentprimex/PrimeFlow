@@ -408,18 +408,16 @@ async def generate_fresh(
     frozen_ids = set()
     if report_follow_up_groups(slot):
         discord_slot = "14:20" if slot == "14:10" else slot
-        comment_slots = [value for value in ("10:00", "11:00", "11:50", "14:20", "16:00") if value <= discord_slot]
         async with SessionLocal() as db:
-            evidence = await load_follow_up_comments(db, day, comment_slots, include_regular_answers=True)
+            evidence = await load_follow_up_comments(db, day, [discord_slot], include_regular_answers=True)
             if primary := FOLLOW_UP_BY_SLOT.get(slot):
                 frozen_ids = set((await load_follow_up_comments(db, day, [slot], group=primary)).get(slot, {}))
             rows = await load_morning_task_rows(db, day, frozen_task_ids=frozen_ids)
-        answers_by_task = {}
-        for evidence_slot in comment_slots:
-            for task_id, answer in evidence.get(evidence_slot, {}).items():
-                if answer:
-                    answers_by_task.setdefault(task_id, []).append(f"{evidence_slot} · {answer}")
-        follow_up_comments = {task_id: "\n".join(answers) for task_id, answers in answers_by_task.items()}
+        follow_up_comments = {
+            task_id: f"{discord_slot} · {answer}"
+            for task_id, answer in evidence.get(discord_slot, {}).items()
+            if answer
+        }
         data = {**data, "morning_follow_up_tasks": rows}
     reminders = await load_1h_reminder_questions(slot, day)
     undiscussed_notes = await load_undiscussed_notes(show_full_mira_notes=show_full_mira_notes)
