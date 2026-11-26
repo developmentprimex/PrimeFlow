@@ -108,8 +108,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   M1 ruan përgjigjen manuale te **A KA RIORGANIZIM?** gjatë rigjenerimit.
   Kontrollo statuset dhe komentet në pamjen e rifreskuar të 1H Reports
   11:00/11:50 dhe eksportet e tyre.
-  Burimi i tabelave 1H përfshin edhe detyrat e kryera pa slot dhe detyrat
-  e raportuara që më pas u zhvendosën. Discord pyet çdo ditë pune nga data
+  Tabelat 1H marrin detyrat 08:00 dhe Deadline Important AM nga fillimi deri
+  në afat në slotin përkatës, edhe pa slot të caktuar ose kartë në Discord.
+  Përfshihen edhe detyrat e raportuara që më pas u zhvendosën.
+  Discord pyet çdo ditë pune nga data
   e fillimit deri te afati, për 08:00 në 11:00 dhe për DL AM në 11:50.
   Pyet pse nuk është punuar kur statusi është TODO dhe pse nuk është kryer
   kur detyra mbetet e hapur në datën e afatit. Raportet e rifreskuara i
@@ -121,6 +123,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   përgjigjet e ditës deri te sloti i vet. Orari 14:10 dhe 14:20 ndan kartën
   Discord të 14:20. Radha e Mira Host përdor detyrat e bartura.
   Tabelat 1H të progresit kanë kolona të ngushta NR, KUSH, DEP dhe STATUS.
+  DUE DATE shfaq datën e afatit të detyrës pas TITULLI në të dyja tabelat,
+  në preview, email dhe eksportet Word/PNG/Text, përfshirë detyrat e bartura.
   KOMENT shfaq përgjigjet e ruajtura nga Discord për të njëjtën detyrë,
   datë dhe slot, përfshirë përgjigjet e kartave të zakonshme 1H. Butoni
   Simbolet shfaqet në kolonën TITULLI të preview-t.
