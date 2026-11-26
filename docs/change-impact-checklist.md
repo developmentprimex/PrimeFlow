@@ -488,6 +488,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   rigjenerimi të ndryshojë vetëm përmbledhjen e shpejtë, të mos dërgojë njoftim
   tjetër në Discord dhe të mos krijojë kopje në PX Notes.
 
+- OAuth për MCP (asistentja e GA-së dhe Knowledge PX): kontrollo zbulimin OAuth,
+  regjistrimin, ekranin `/oauth/consent`, miratimin, lëshimin e token-it me PKCE,
+  rinovimin dhe revokimin. Testo ndarjen e scope-ve dhe të resource-ve, duke përfshirë
+  endpoint-et e brendshme të verifikimit dhe listat e qasjes. Knowledge PX përdor
+  vetëm identitetin dhe scope-in për lexim.
 - Asistentja e GA-së (MCP, `docs/mcp-assistant.md`): `app/services/ga_assistant.py` përsërit
   në Python rregullat e tabelës së parë të **Admin Tasks** (GA TASKS / BZ ME GA TASKS,
   `koha_bz`, dita e planifikuar), të **GA Time Table** për takimet (externe + interne manuale,

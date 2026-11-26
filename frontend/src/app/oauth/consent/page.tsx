@@ -35,6 +35,7 @@ function OAuthConsent() {
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
   const error = requestId ? loadError : "Kërkesa e autorizimit mungon."
+  const isKnowledge = request?.scope === "knowledge.read"
 
   React.useEffect(() => {
     if (loading || !requestId) return
@@ -48,7 +49,7 @@ function OAuthConsent() {
       const res = await apiFetch(`/oauth/requests/${encodeURIComponent(requestId)}`)
       if (cancelled) return
       if (!res.ok) {
-        setLoadError("Kërkesa e autorizimit ka skaduar ose nuk ekziston. Provo lidhjen përsëri nga Claude.")
+        setLoadError("Kërkesa e autorizimit ka skaduar ose nuk ekziston. Provo ta lidhësh përsëri.")
         return
       }
       setRequest((await res.json()) as AuthorizationRequest)
@@ -81,7 +82,7 @@ function OAuthConsent() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Lidh asistentin me PrimeFlow</CardTitle>
+          <CardTitle>{isKnowledge ? "Lidh Knowledge PX" : "Lidh asistentin me PrimeFlow"}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           {error ? <div className="text-destructive">{error}</div> : null}
@@ -89,9 +90,15 @@ function OAuthConsent() {
           {request ? (
             <>
               <p>
-                <strong>{request.client_name}</strong> ({request.redirect_host}) kërkon qasje në PrimeFlow në emrin
-                tënd: të lexojë agjendën dhe detyrat, dhe të shënojë detyra si të kryera, t&apos;i shtyjë ose t&apos;u
-                ndryshojë orën.
+                <strong>{request.client_name}</strong> ({request.redirect_host}){" "}
+                {isKnowledge ? (
+                  "kërkon qasje vetëm për lexim të dokumenteve të Knowledge PX që i lejon llogaria jote."
+                ) : (
+                  <>
+                    kërkon qasje në PrimeFlow në emrin tënd: të lexojë agjendën dhe detyrat, dhe të shënojë
+                    detyra si të kryera, t&apos;i shtyjë ose t&apos;u ndryshojë orën.
+                  </>
+                )}
               </p>
               <p className="text-muted-foreground">Llogaria: {request.user_email}</p>
               {request.allowed ? (
@@ -105,7 +112,9 @@ function OAuthConsent() {
                 </div>
               ) : (
                 <>
-                  <div className="text-destructive">Kjo llogari nuk lejohet të lidhë asistentin.</div>
+                  <div className="text-destructive">
+                    {isKnowledge ? "Kjo llogari nuk ka qasje në Knowledge PX." : "Kjo llogari nuk lejohet të lidhë asistentin."}
+                  </div>
                   <Button variant="outline" disabled={submitting} onClick={() => void decide("deny")}>
                     Kthehu
                   </Button>
