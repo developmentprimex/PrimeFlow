@@ -119,8 +119,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Detyrat 08:00 me afat sot që mbeten të hapura barten edhe në 11:50.
   Të dy grupet barten në raportet 14:10, 14:20 dhe 16:00 deri në DONE.
   Discord ndjek të dy grupet në 14:20 dhe 16:00 me një pyetje për detyrë
-  edhe kur e njëjta detyrë ka të dyja etiketat. Raporti i rifreskuar shfaq
-  përgjigjet e ditës deri te sloti i vet. Orari 14:10 dhe 14:20 ndan kartën
+  edhe kur e njëjta detyrë ka të dyja etiketat. Në kartën personale 1H,
+  pyetjet 08:00 dhe Deadline AM shfaqen në një bllok të theksuar me titull
+  dhe shenjë të kuqe, edhe pas rifreskimit të kartës. Raporti i rifreskuar shfaq
+  vetëm përgjigjet e slotit përkatës. Orari 14:10 dhe 14:20 ndan kartën
   Discord të 14:20. Radha e Mira Host përdor detyrat e bartura.
   Tabelat 1H të progresit kanë kolona të ngushta NR, KUSH, DEP dhe STATUS.
   DUE DATE shfaq datën e afatit të detyrës pas TITULLI në të dyja tabelat,
@@ -1246,6 +1248,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Realization, bazat e planit, numërimet dhe raportet, përveç paraqitjes së taskut.
 - Kopjet historike/snapshot-et nuk krahasohen si të dhëna live. SHTYPI Today
   ka kopje të ngrirë në 16:00; ruaj historikun dhe dallimin para/pas cutoff-it.
+- Krahasimi i planit te faqja 1H SHTYPI Today përdor kopjen e detyrave të
+  Tomorrow të ruajtur automatikisht në 17:00, sipas datës së planifikuar
+  (e premtja ruan të hënën). Kontrollo ruajtjen e vetme edhe me disa procese,
+  Regenerate dhe emailin e Tomorrow, gjendjen aktuale para 16:00 dhe krahasimin
+  e arkivuar pas 16:00. Mos rindërto një kopje të humbur me të dhënat e reja.
+  Kontrollo që butoni shfaqet vetëm te Today më vete, edhe pse Admin Tasks
+  ndan komponentin. M3 End of Day dhe 1H Reports për GA përdorin gjeneruesin
+  e SHTYPI. Verifiko që krahasimi mbetet jashtë raporteve, emailit dhe eksporteve.
 - Notes nga Mira kanë rregulla të veçanta dukshmërie në raporte. Mos supozo se
   çdo Note duhet të dalë në çdo raport; dallo regjistrimin nga tasku i krijuar.
 - Regjistruesit Discord 1H dhe Mira Zhvillim ruajnë fillimisht tekstin e transkriptuar

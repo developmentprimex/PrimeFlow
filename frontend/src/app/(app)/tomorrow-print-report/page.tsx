@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
 import { useMarkerComments } from "@/components/marker-comments-context"
+import { TodayPrintPlanComparison } from "@/components/today-print-plan-comparison"
 import { installReportNoteControls, ReportNoteAttachmentDialog, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
 import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 import { isReportTaskDone, reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
@@ -244,6 +245,7 @@ export function PrintReportPage({
   const currentReportDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Belgrade", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
   const [reportDateOverride, setSelectedReportDate] = React.useState<string | null>(null)
   const selectedReportDate = reportDateOverride ?? (!embedded && linkedReportDate !== currentReportDate ? linkedReportDate : "")
+  const comparisonDate = preview?.report_date ?? (selectedReportDate || currentReportDate)
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const [generatingAction, setGeneratingAction] = React.useState<"generate" | null>(null)
@@ -1160,6 +1162,9 @@ export function PrintReportPage({
         <div className="flex flex-wrap gap-2">
           {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}{strikesFilterControl}{strikeTotalControl}</> : null}
           <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading || Boolean(selectedReportDate) || (today && Boolean(preview?.is_frozen))}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
+          {today && user && !snapshotLoading ? (
+            <TodayPrintPlanComparison key={comparisonDate} reportDate={comparisonDate} isFrozen={Boolean(preview?.is_frozen)} />
+          ) : null}
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending || Boolean(selectedReportDate)}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
       </div>

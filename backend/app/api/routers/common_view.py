@@ -484,9 +484,12 @@ async def get_common_view(
     )
 
 
-async def load_report_common_view(db: AsyncSession, day: date) -> dict:
+async def load_report_common_view(db: AsyncSession, day: date, *, freeze_one_h_slots: bool = False) -> dict:
     """Read Common View for an already authorized internal company report."""
-    payload = await _build_common_view(db, week_start=day, include_all_departments=True, max_items_per_bucket=5000)
+    payload = await _build_common_view(
+        db, week_start=day, include_all_departments=True, max_items_per_bucket=5000,
+        freeze_one_h_slots=freeze_one_h_slots,
+    )
     report_data = payload.model_dump(mode="json")
     if any(((report_data.get("guardrails") or {}).get("truncated") or {}).values()):
         raise ValueError("Common View contains truncated buckets")

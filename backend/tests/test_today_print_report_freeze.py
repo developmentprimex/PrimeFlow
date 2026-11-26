@@ -120,6 +120,7 @@ class FreezeTests(unittest.IsolatedAsyncioTestCase):
              patch.object(freeze, "build_today_print_report", AsyncMock(return_value=report())) as render:
             self.assertTrue(await freeze.capture_today_print_report())
         self.assertEqual([call.args[1] for call in source.await_args_list], [DAY, date(2026, 10, 5)])
+        self.assertEqual(source.await_args_list[0].kwargs, {"freeze_one_h_slots": True})
         self.assertIn("REPEATABLE READ", str(db.execute.await_args_list[0].args[0]))
         self.assertIs(render.await_args.kwargs["payload"], payload)
         self.assertIs(render.await_args.kwargs["next_day_payload"], payload)

@@ -51,14 +51,19 @@ def card(data, *, user_id=None, join_url=None, requested=None, notice=None, next
         item_id = uuid.UUID(item['id']).hex
         text += f'{ui.icon(item["status"])} **{discord.utils.escape_markdown(ui.heading(item))}**\n'
         text += f'Start: {approvals.date_text(item.get("start_date"))} · Due: {approvals.date_text(item.get("due_date"))}\n'
-        if item.get('follow_up'):
-            text += f'\n🔴 **{item["follow_up"]}**'
-        text += '\n' + discord.utils.escape_markdown(item['question'][:400])
+        question = discord.utils.escape_markdown(item['question'][:400])
+        if follow_up := item.get('follow_up'):
+            label = discord.utils.escape_markdown(follow_up.replace('DL AM', 'DEADLINE AM'))
+            text += f'\n### 🔴 {label} · PYETJE PËR PROGRESIN\n> **{question}**'
+        else:
+            text += '\n' + question
         if item.get('answer'):
+            if follow_up:
+                text += '\n'
             text += '\n✅ ' + discord.utils.escape_markdown(item['answer'][:150])
             if item.get('expected_at'):
                 text += ' · ' + discord.utils.escape_markdown(item['expected_at'][:100])
-        if not item.get('follow_up'):
+        if not follow_up:
             view.add_item(discord.ui.Button(label='Po, vazhdon', style=discord.ButtonStyle.success,
                 custom_id=f'pf:1h:{rid}:{item_id}:continue', row=0,
                 disabled=any(t['id'] == item['id'] for t in data['next'].get('continued_tasks', []))))

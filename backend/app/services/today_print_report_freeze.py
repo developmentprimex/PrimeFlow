@@ -17,6 +17,7 @@ from app.db import SessionLocal
 from app.models.one_h_print_report_snapshot import OneHPrintReportSnapshot
 from app.services.one_h_print_report_snapshot import get_one_h_print_snapshot, serialize_one_h_print_snapshot
 from app.services.primeflow_report import previous_working_day, report_timezone
+from app.services.today_print_plan import PLAN_KIND, compare_plan
 from app.services.tomorrow_print_report import build_today_print_report, next_working_day
 from app.services.today_print_strikes import payload_task_ids, report_task_ids, task_strike_summary, with_report_strikes
 
@@ -74,6 +75,7 @@ async def frozen_report(db: AsyncSession, day: date, *, include_attachment: bool
     if (row.report_payload or {}).get("freeze_source"):
         row = await _finish_frozen_report(db, day)
     result = await serialize_one_h_print_snapshot(db, row)
+    result.pop("plan_comparison", None)
     artifacts = result.pop("frozen_attachments", [])
     if include_attachment:
         result["attachments"] = [
@@ -96,10 +98,10 @@ async def today_report(db: AsyncSession, day: date, *, include_attachment: bool 
     return {**report, **view_metadata(day)}
 
 
-async def _source_payload(db: AsyncSession, day: date) -> dict:
+async def _source_payload(db: AsyncSession, day: date, *, freeze_one_h_slots: bool = False) -> dict:
     from app.api.routers.common_view import load_report_common_view
 
-    return await load_report_common_view(db, day)
+    return await load_report_common_view(db, day, freeze_one_h_slots=freeze_one_h_slots)
 
 
 async def _finish_frozen_report(db: AsyncSession, day: date) -> OneHPrintReportSnapshot:
@@ -126,7 +128,8 @@ async def _finish_frozen_report(db: AsyncSession, day: date) -> OneHPrintReportS
             }}
         row.report_payload = {**pack_report(report), "is_frozen": True,
                               "frozen_at": stored["frozen_at"],
-                              "source_captured_at": stored["source_captured_at"]}
+                              "source_captured_at": stored["source_captured_at"],
+                              "plan_comparison": stored.get("plan_comparison")}
         await db.commit()
     return row
 
@@ -153,7 +156,8 @@ async def capture_today_print_report(now: datetime | None = None) -> bool:
             return False
         if await get_one_h_print_snapshot(db, FROZEN_KIND, day) is not None:
             return False
-        payload = await _source_payload(db, day)
+        # Time spent reading the database can cross 16:00. Keep today's slot mapping.
+        payload = await _source_payload(db, day, freeze_one_h_slots=True)
         if day.weekday() == 0:
             previous = await _source_payload(db, previous_working_day(day))
             for bucket, values in (previous.get("items") or {}).items():
@@ -167,8 +171,17 @@ async def capture_today_print_report(now: datetime | None = None) -> bool:
             db, day, payload_task_ids(payload), now=captured_at, completed_through=boundary,
         )
 
+        plan = await get_one_h_print_snapshot(db, PLAN_KIND, day)
+        comparison = None
+        if plan is not None:
+            try:
+                async with db.begin_nested():
+                    comparison = await compare_plan(db, day, plan, payload)
+            except Exception:
+                logger.exception("today_print_plan_comparison_failed day=%s", day)
         stored = {"target_date": day.isoformat(), "is_frozen": True,
                   "frozen_at": boundary.isoformat(), "source_captured_at": captured_at.isoformat(),
+                  "plan_comparison": comparison,
                   "freeze_source": {"payload": payload, "next_day_payload": next_payload}}
         db.add(OneHPrintReportSnapshot(report_kind=FROZEN_KIND, report_date=day, target_date=day,
                                      report_payload=stored, generated_by_user_id=None))

@@ -933,7 +933,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             self.assertIn("DUE DATE", [call.args[2] for call in draw.call_args_list])
             self.assertIn("28.07.2026", [call.args[2] for call in draw.call_args_list])
 
-    def test_fresh_1150_report_renders_the_saved_deadline_am_answer(self):
+    def test_fresh_report_renders_only_the_deadline_am_answer_for_its_discord_slot(self):
         from app.services import morning_task_follow_up as follow_up, primeflow_report_delivery as delivery
 
         day = date(2026, 7, 28)
@@ -943,6 +943,7 @@ class PrimeFlowReportTests(unittest.TestCase):
                 "is_deadline_important": True, "finish_period": "AM"}
         db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [
             ("11:50", {"tasks": [{"id": task_id, "follow_up": "DL AM", "answer": "Pres konfirmimin."}]}, "Anisa Test", "anisa"),
+            ("14:20", {"tasks": [{"id": task_id, "follow_up": "DL AM", "answer": "Po pres ofertën."}]}, "Anisa Test", "anisa"),
         ])))
         session = AsyncMock()
         session.__aenter__.return_value = db
@@ -953,12 +954,19 @@ class PrimeFlowReportTests(unittest.TestCase):
             load_undiscussed_notes=AsyncMock(return_value=[]),
             _report_snapshot_with_fallback=AsyncMock(return_value={"titles": {}, "descriptions": {}, "events": {}}),
         ), patch.object(follow_up, "load_morning_task_rows", AsyncMock(return_value=[task])):
-            document = asyncio.run(delivery.generate_fresh(day, "11:50", {"to": ["test@example.test"]}, data={"items": {}}))
-        section = next(section for section in document.sections if section.title == "DET DL AM · PROGRESI")
-        self.assertEqual(section.employees[0].tasks[0].follow_up_comment, "11:50 · Anisa Test: Pres konfirmimin.")
-        rendered = render_html(document)
-        self.assertIn('data-morning-follow-up-table="true" style="width:100%;table-layout:fixed;', rendered)
-        self.assertRegex(rendered, r'<td data-follow-up-comment="true"[^>]*>11:50 · Anisa Test: Pres konfirmimin\.</td>')
+            for slot, expected in (
+                ("11:50", "11:50 · Anisa Test: Pres konfirmimin."),
+                ("14:10", "14:20 · Anisa Test: Po pres ofertën."),
+                ("14:20", "14:20 · Anisa Test: Po pres ofertën."),
+                ("16:00", ""),
+            ):
+                with self.subTest(slot=slot):
+                    document = asyncio.run(delivery.generate_fresh(day, slot, {"to": ["test@example.test"]}, data={"items": {}}))
+                    section = next(section for section in document.sections if section.title == "DET DL AM · PROGRESI")
+                    self.assertEqual(section.employees[0].tasks[0].follow_up_comment, expected)
+                    rendered = render_html(document)
+                    self.assertIn('data-morning-follow-up-table="true" style="width:100%;table-layout:fixed;', rendered)
+                    self.assertIn(f'>{expected or "—"}</td>', rendered)
 
     def test_follow_up_reader_can_include_answers_from_regular_discord_cards(self):
         from app.services.morning_task_follow_up import load_follow_up_comments
