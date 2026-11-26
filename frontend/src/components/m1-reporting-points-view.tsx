@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
+import Link from "next/link"
 import { EmailNoteDisclosure, NoteEmailPreview, splitManualEmailNote } from "@/components/note-email-preview"
 import type { NoteEmailPreview as EmailPreview } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
@@ -25,11 +26,12 @@ function PointNote({ note }: { note: NoteRow }) {
     : renderMarkedNoteContent(note.content)
 }
 type TaskRow = { id: string; is_paused?: boolean; title: string; status: string; created_at: string; start_date?: string | null; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
+type MorningTaskFeedback = { key: string; group: string; owners: string; title: string; continuation: "" | "PO" | "JO"; comment: string }
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
   discord_delivery_slot?: DeliverySlot
-  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[]; postponed?: GaTaskRow[] }
+  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[]; postponed?: GaTaskRow[]; morning_task_feedback?: MorningTaskFeedback[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -143,6 +145,23 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
             row.task_type || "—", <TaskOneHMarkerFromLabel key="marker" label={row.marker} />, <strong key="title">{row.title}{row.is_paused && <TaskPauseBadge />}</strong>]
             .map((cell, column) => <span key={column} style={{ color: row.is_paused ? "inherit" : row.deadline_important ? "white" : "black" }}>{cell}</span>),
         }))} />
+      {key === "ga_progress" && !!report.data.morning_task_feedback?.length && (
+        <div className="border-t">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
+            <h4 className="text-sm font-semibold">PËRGJIGJET GA/HV/DV NGA M1 START OF DAY</h4>
+            <Link href={`/morning-report?date=${report.report_date}`} className="text-sm underline underline-offset-4">
+              Hap M1 Start of Day
+            </Link>
+          </div>
+          <Grid name="Përgjigjet GA/HV/DV" labels={["GRUPI", "KUSH", "PYETJA / DETYRA", "PO / JO", "KOMENT"]}
+            widths={[52, 70, 300, 64, 290]} empty="Asnjë përgjigje."
+            rows={report.data.morning_task_feedback.map((row) => ({
+              id: row.key,
+              fill: "#ffffff",
+              cells: [row.group, row.owners || "—", row.title, row.continuation || "—", row.comment || "—"],
+            }))} />
+        </div>
+      )}
     </Point>)}
     {manual("reorganization", "8. A DUHET RIORGANIZIM?")}
   </div>

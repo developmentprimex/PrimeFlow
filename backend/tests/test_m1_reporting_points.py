@@ -30,13 +30,34 @@ def test_saved_email_preview_loads_the_missing_summary(monkeypatch):
     load_previews = AsyncMock(return_value={note_id: current_email})
     monkeypatch.setattr(report_note_attachments, "mail_previews_by_row", load_previews)
 
-    db = object()
+    db = SimpleNamespace(scalar=AsyncMock(return_value=None))
     payload = asyncio.run(router._current_payload(db, row))
 
     load_previews.assert_awaited_once_with(db, {note_id: note_id})
     assert payload["data"]["notes"][0]["email_preview"] == {**current_email, **saved_email}
     assert payload["data"]["notes"][0]["content"] == saved_note["content"]
     assert "summary" not in saved_email
+
+
+def test_morning_task_feedback_reads_saved_answers_for_the_report_date():
+    plan = {"key": "plan:HV", "title": "A prishet plani për sot?", "owners": "HV",
+            "continuation": "PO", "comment": ""}
+    task = {"key": "GA TASKS:task", "title": "Detyra <GA>", "owners": "GA",
+            "continuation": "", "comment": "Takimi në 10:15"}
+    unanswered = {**task, "key": "GA TASKS:unanswered", "title": "Pa përgjigje për detyrën", "comment": ""}
+    db = SimpleNamespace(scalar=AsyncMock(return_value={"plan": [plan], "GA TASKS": [task, unanswered]}))
+    report = {"report_date": DAY.isoformat(), "data": {}}
+
+    payload = asyncio.run(service.with_morning_task_feedback(db, report))
+
+    statement, = db.scalar.await_args.args
+    assert DAY in statement.compile().params.values()
+    assert payload["data"]["morning_task_feedback"] == [{**plan, "group": "HV"}, {**task, "group": "GA"}]
+    assert "morning_task_feedback" not in report["data"]
+    html = service.render_html(payload)
+    assert "Detyra &lt;GA&gt;" in html and "Takimi në 10:15" in html
+    assert "Pa përgjigje për detyrën" not in html
+    assert html.index("6. DET ME GA") < html.index(service.MORNING_FEEDBACK_TITLE) < html.index("7. SA PER DOREZIM")
 
 
 def ga_task(**changes):
