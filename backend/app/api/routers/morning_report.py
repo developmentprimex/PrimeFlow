@@ -48,6 +48,7 @@ from app.services.morning_report import (
     is_removed_morning_manual_question,
     normalize_morning_report_sections,
     preserve_morning_plan_note,
+    preserve_removed_task_feedback,
     refresh_m1_gmail_section,
     refresh_morning_leave_table,
     refresh_morning_task_tables,
@@ -439,7 +440,7 @@ async def generate_draft(
         if not normalize_recipients(row.recipients)["to"]:
             row.recipients = normalize_recipients(recipients)
         row.sections = sections
-        row.generated_snapshot = snapshot
+        row.generated_snapshot = preserve_removed_task_feedback(snapshot, row.generated_snapshot)
         # Generating a report is draft-only. Keep SENT so the scheduler cannot
         # mistake this refresh for an unsent automatic delivery.
         row.last_error = None
@@ -513,7 +514,9 @@ async def update_draft(
         if payload.task_feedback.keys() - valid_keys:
             raise HTTPException(status_code=409, detail="Lista e detyrave ndryshoi. Rifresko raportin dhe provo përsëri.")
         row.sections = sections
-        row.generated_snapshot = {**snapshot, TASK_FEEDBACK_OVERRIDES: overrides, TASK_FEEDBACK_ROWS: feedback_rows}
+        row.generated_snapshot = preserve_removed_task_feedback(
+            {**snapshot, TASK_FEEDBACK_OVERRIDES: overrides, TASK_FEEDBACK_ROWS: feedback_rows}, snapshot,
+        )
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()

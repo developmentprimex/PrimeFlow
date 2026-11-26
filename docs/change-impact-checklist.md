@@ -652,10 +652,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tabela HV dhe bashkëngjitja e 1H Reports përdorin paraqitjen e tyre.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
-  Te pika 6 e M1 PIKAT PËR RAP shfaqen rreshtat me PO/JO ose koment
-  nga përgjigjet GA/HV/DV të ruajtura në draftin M1 Start of Day të së
-  njëjtës datë. Preview, email dhe Word/PNG/Excel përdorin të njëjtën
-  përmbledhje. Lidhja në ekran hap draftin e datës për redaktim.
+  Te pika 6 e M1 PIKAT PËR RAP shfaqen tabelat HV, DV dhe GA të draftit
+  M1 Start of Day të së njëjtës datë, edhe për detyrat pa përgjigje.
+  Statusi aktual lexohet me ID-në e detyrës. Rigjenerimi dhe ruajtja e
+  draftit mbajnë rreshtat e larguar që detyrat e mbyllura të shfaqen në
+  grupin e tyre, me kohën e mbylljes kur është ruajtur. Preview, email dhe
+  Word/PNG/Excel përdorin të njëjtat tabela. Lidhja në ekran hap draftin e datës.
 
 - Në tabelën **Finance Tasks**, filtri i datave përfshin çdo detyrë që
   mbivendoset me intervalin e zgjedhur, përfshirë kufijtë. Një datë e vetme

@@ -57,18 +57,22 @@ test("M1 plan changes show the explanation captured by each postponement", () =>
   assert.match(html, /6\. DET ME GA:.*7\. SA PER DOREZIM M2\?.*8\. A DUHET RIORGANIZIM\?/s)
 })
 
-test("M1 shows saved GA/HV/DV feedback and links to the same date in Start of Day", () => {
+test("M1 separates GA/HV/DV tasks, shows closure and links to Start of Day", () => {
   const { M1ReportingPointsView } = load("@/components/m1-reporting-points-view")
   const html = renderToStaticMarkup(React.createElement(M1ReportingPointsView, {
-    report: { ...report, data: { morning_task_feedback: [
-      { key: "plan:HV", group: "HV", owners: "HV", title: "A prishet plani për sot?", continuation: "PO", comment: "Takimi 10:15" },
-      { key: "GA TASKS:task", group: "GA", owners: "GA", title: "Detyrë GA", continuation: "JO", comment: "Presim përgjigje" },
+    report: { ...report, data: { morning_task_groups: [
+      { title: "HV TASKS", plan: { continuation: "PO", comment: "Takimi 10:15" }, tasks: [] },
+      { title: "DV TASKS", plan: null, tasks: [] },
+      { title: "GA TASKS", plan: null, tasks: [
+        { key: "GA TASKS:task", owners: "GA", title: "Detyrë GA", status: "Mbyllur · 13.10.2026 10:15", closed: true,
+          continuation: "JO", comment: "Presim përgjigje" },
+      ] },
     ] } },
     answers: {}, disabled: false, onAnswerChange: () => {},
   }))
-  assert.match(html, /PËRGJIGJET GA\/HV\/DV NGA M1 START OF DAY/)
+  assert.match(html, /GA\/HV\/DV TASKS NGA M1 START OF DAY/)
   assert.ok(html.includes(`href="/morning-report?date=${report.report_date}"`))
-  assert.match(html, /A prishet plani për sot\?.*PO.*Takimi 10:15.*Detyrë GA.*JO.*Presim përgjigje/s)
+  assert.match(html, /HV TASKS.*A prishet plani për sot\?.*PO.*Takimi 10:15.*DV TASKS.*GA TASKS.*Detyrë GA.*Mbyllur.*JO.*Presim përgjigje/s)
 })
 
 function render(overrides = {}, answers = {}, disabled = false) {

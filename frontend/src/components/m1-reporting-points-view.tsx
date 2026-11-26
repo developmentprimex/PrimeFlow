@@ -26,12 +26,17 @@ function PointNote({ note }: { note: NoteRow }) {
     : renderMarkedNoteContent(note.content)
 }
 type TaskRow = { id: string; is_paused?: boolean; title: string; status: string; created_at: string; start_date?: string | null; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
-type MorningTaskFeedback = { key: string; group: string; owners: string; title: string; continuation: "" | "PO" | "JO"; comment: string }
+type MorningAnswer = { continuation: "" | "PO" | "JO"; comment: string }
+type MorningTaskFeedback = {
+  title: string;
+  plan: MorningAnswer | null;
+  tasks: (MorningAnswer & { key: string; owners: string; title: string; status: string; closed: boolean })[]
+}
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
   discord_delivery_slot?: DeliverySlot
-  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[]; postponed?: GaTaskRow[]; morning_task_feedback?: MorningTaskFeedback[] }
+  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[]; postponed?: GaTaskRow[]; morning_task_groups?: MorningTaskFeedback[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -145,21 +150,32 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
             row.task_type || "—", <TaskOneHMarkerFromLabel key="marker" label={row.marker} />, <strong key="title">{row.title}{row.is_paused && <TaskPauseBadge />}</strong>]
             .map((cell, column) => <span key={column} style={{ color: row.is_paused ? "inherit" : row.deadline_important ? "white" : "black" }}>{cell}</span>),
         }))} />
-      {key === "ga_progress" && !!report.data.morning_task_feedback?.length && (
+      {key === "ga_progress" && !!report.data.morning_task_groups?.length && (
         <div className="border-t">
           <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
-            <h4 className="text-sm font-semibold">PËRGJIGJET GA/HV/DV NGA M1 START OF DAY</h4>
+            <h4 className="text-sm font-semibold">GA/HV/DV TASKS NGA M1 START OF DAY</h4>
             <Link href={`/morning-report?date=${report.report_date}`} className="text-sm underline underline-offset-4">
               Hap M1 Start of Day
             </Link>
           </div>
-          <Grid name="Përgjigjet GA/HV/DV" labels={["GRUPI", "KUSH", "PYETJA / DETYRA", "PO / JO", "KOMENT"]}
-            widths={[52, 70, 300, 64, 290]} empty="Asnjë përgjigje."
-            rows={report.data.morning_task_feedback.map((row) => ({
-              id: row.key,
-              fill: "#ffffff",
-              cells: [row.group, row.owners || "—", row.title, row.continuation || "—", row.comment || "—"],
-            }))} />
+          {report.data.morning_task_groups.map(({ title, plan, tasks }) => (
+            <section key={title} className="my-4 border-y">
+              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 bg-slate-50 px-5 py-2 text-sm">
+                <h5 className="font-semibold">{title}</h5>
+                <span className="whitespace-pre-line">
+                  A prishet plani për sot? <strong>{plan?.continuation || "—"}</strong>
+                  {plan?.comment ? ` · ${plan.comment}` : null}
+                </span>
+              </div>
+              <Grid name={title} labels={["KUSH", "DETYRA", "STATUSI AKTUAL", "VAZHDON?", "KOMENT"]}
+                widths={[65, 260, 160, 80, 220]} empty="Asnjë detyrë."
+                rows={tasks.map((row) => ({
+                  id: row.key,
+                  fill: row.closed ? "#c4fdc4" : "#ffffff",
+                  cells: [row.owners || "—", row.title, row.status || "—", row.continuation || "—", row.comment || "—"],
+                }))} />
+            </section>
+          ))}
         </div>
       )}
     </Point>)}

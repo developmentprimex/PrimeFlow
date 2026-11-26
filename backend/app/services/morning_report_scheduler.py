@@ -15,6 +15,7 @@ from app.services.morning_report import (
     build_morning_report_sections,
     is_generated_subject,
     preserve_morning_plan_note,
+    preserve_removed_task_feedback,
     render_html,
     render_plain_text,
     send_morning_report,
@@ -105,7 +106,7 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
                 row.subject = subject_for(report_day)
             row.recipients = recipients
             row.sections = sections
-            row.generated_snapshot = snapshot
+            row.generated_snapshot = preserve_removed_task_feedback(snapshot, row.generated_snapshot)
 
         plain_text = render_plain_text(row.subject, row.report_date, row.sections)
         html_body = render_html(row.subject, row.report_date, row.sections)

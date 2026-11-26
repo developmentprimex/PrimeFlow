@@ -166,7 +166,26 @@ GA_HV_DV_TASK_COLUMNS = [
 GA_TASK_COLUMNS = [*GA_HV_DV_TASK_COLUMNS[:8], ("BZ ME", 14), *GA_HV_DV_TASK_COLUMNS[8:]]
 TASK_FEEDBACK_OVERRIDES = "task_feedback_overrides"
 TASK_FEEDBACK_ROWS = "task_feedback_rows"
+REMOVED_TASK_FEEDBACK_ROWS = "removed_task_feedback_rows"
 CONTINUATION_ICONS = {"PO": "✓", "JO": "X"}
+
+
+def preserve_removed_task_feedback(snapshot: dict, previous: dict | None) -> dict:
+    """Keep tasks that were in this draft so PIKAT can report later closures."""
+    previous = previous or {}
+    current = snapshot.get(TASK_FEEDBACK_ROWS, {})
+    removed = {}
+    for title in (HV_TASKS_TITLE, DV_TASKS_TITLE, GA_TASKS_TITLE):
+        current_keys = {row["key"] for row in current.get(title, [])}
+        prior_rows = {
+            row["key"]: row
+            for key in (REMOVED_TASK_FEEDBACK_ROWS, TASK_FEEDBACK_ROWS)
+            for row in previous.get(key, {}).get(title, [])
+            if row["key"] not in current_keys
+        }
+        if prior_rows:
+            removed[title] = list(prior_rows.values())
+    return {**snapshot, REMOVED_TASK_FEEDBACK_ROWS: removed} if removed or REMOVED_TASK_FEEDBACK_ROWS in snapshot else snapshot
 RETIRED_EMAIL_TASK_CAPTION = re.compile(r"EM\s*:\s*(?:INFO PX|IT|HF|PX EU)\s*:\s*\d+\s*:?", re.I)
 RETIRED_EMAIL_TASK_PLACEHOLDER = "Email-source tasks load automatically when M1 is generated."
 LEGACY_NOTES_TITLE = (
