@@ -108,6 +108,7 @@ from app.models.task_template_run import TaskTemplateRun
 from app.models.user import User
 from app.models.user_task_preference import UserTaskPreference
 from app.models.weekly_plan import WeeklyPlan
+from app.models.weekly_planner_short import WeeklyPlannerShortComment, WeeklyPlannerShortPoint
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.weekly_planning_audit import (
@@ -226,6 +227,8 @@ __all__ = [
     "WeeklyPlanningAuditDelivery",
     "WeeklyPlanningAuditRun",
     "WeeklyPlanningAuditSettings",
+    "WeeklyPlannerShortComment",
+    "WeeklyPlannerShortPoint",
 ]
 
 

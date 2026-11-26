@@ -13,6 +13,7 @@ from app.api.routers.checklists import router as checklists_router
 from app.api.routers.departments import router as departments_router
 from app.api.routers.ga_notes import router as ga_notes_router
 from app.api.routers.plan_notes import router as plan_notes_router
+from app.api.routers.weekly_planner_short import router as weekly_planner_short_router
 from app.api.routers.ga_time_slots import router as ga_time_slots_router
 from app.api.routers.internal_meeting_sessions import router as internal_meeting_sessions_router
 from app.api.routers.internal_notes import router as internal_notes_router
@@ -109,6 +110,7 @@ api_router.include_router(meeting_scheduler_router, prefix="/meeting-scheduler",
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(marker_comments_router, prefix="/marker-comments", tags=["marker-comments"])
 api_router.include_router(planners_router, prefix="/planners", tags=["planners"])
+api_router.include_router(weekly_planner_short_router, prefix="/weekly-planner-short", tags=["weekly-planner-short"])
 api_router.include_router(reports_router, prefix="/reports", tags=["reports"])
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
 api_router.include_router(project_members_router, prefix="/project-members", tags=["project-members"])

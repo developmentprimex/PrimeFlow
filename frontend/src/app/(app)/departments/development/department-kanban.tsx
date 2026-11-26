@@ -4,6 +4,7 @@ import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage
 import * as React from "react"
 import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
 import { isTaskPausedOnDay } from "@/lib/task-pause"
+import { taskResponseError } from "@/lib/task-completion"
 import { MyViewTaskColumns } from "@/components/my-view-task-columns"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { calendarMeetingTimeRange, meetingTimeColumns } from "@/lib/calendar-meeting-time"
@@ -5323,7 +5324,7 @@ export default function DepartmentKanban() {
           body: JSON.stringify({ comment: closeComment }),
         })
         if (!commentRes.ok) {
-          toast.error("Failed to save the required result comment")
+          toast.error(await taskResponseError(commentRes, "Failed to save the required result comment"))
           return
         }
         const updateRes = await apiFetch(`/tasks/${taskToCloseId}`, {
@@ -5332,7 +5333,7 @@ export default function DepartmentKanban() {
           body: JSON.stringify({ status: "DONE" }),
         })
         if (!updateRes.ok) {
-          toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
+          toast.error(await taskResponseError(updateRes, "Failed to close system task"))
           return
         }
       } else {
@@ -5351,7 +5352,7 @@ export default function DepartmentKanban() {
           }),
         })
         if (!res.ok) {
-          toast.error("Failed to close system task")
+          toast.error(await taskResponseError(res, "Failed to close system task"))
           return
         }
       }
@@ -11071,8 +11072,14 @@ export default function DepartmentKanban() {
                 </div>
               </Card>
 
-              <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
-                <div className="flex flex-wrap items-center justify-end gap-2">
+              <Card className="gap-4 rounded-2xl border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {INTERNAL_MEETING.team.join(", ")}
+                    </div>
+                  </div>
                   <Button
                     type="button"
                     variant="outline"
@@ -11103,12 +11110,6 @@ export default function DepartmentKanban() {
                     </Table>
                   </div>
                 ) : null}
-                <div>
-                  <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    {INTERNAL_MEETING.team.join(", ")}
-                  </div>
-                </div>
                 <div data-slot="button-group" className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
                   {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
                     <button

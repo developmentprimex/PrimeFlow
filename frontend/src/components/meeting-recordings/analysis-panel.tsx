@@ -18,10 +18,10 @@ import { Label } from "@/components/ui/label"
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "@/components/ui/table"
 
 export type RecordingAction = { id: string; segment_index: number; title: string; description: string; evidence: string; assignee_text: string | null; deadline_text: string | null; suggested_assignee_id: string | null; suggested_due_date: string | null; created_task_id: string | null; confirmed_at: string | null; dismissed_at?: string | null; meeting_note_id?: string | null }
-type Segment = { index: number; start_seconds: number; duration_seconds: number; text: string }
+type Segment = { index: number; start_seconds: number; duration_seconds: number; text: string; corrected_text?: string | null }
 type CitationTime = { start: number | null; end: number | null; approximate: boolean }
 type Timing = { status: string; completed?: number; total?: number; error?: string | null; results?: Record<string, CitationTime> }
-type Analysis = { timing_configured?: boolean; timing?: Timing | null; configured: boolean; can_manage: boolean; can_start_analysis: boolean; analysis: null | { status: string; language: string; total_segments: number; segments_done: number; summary: string | null; error_message: string | null; decisions: string[] }; segments: Segment[]; actions: RecordingAction[]; meeting_id?: string | null }
+type Analysis = { timing_configured?: boolean; timing?: Timing | null; transcript_review?: { status: string; completed: number } | null; configured: boolean; can_manage: boolean; can_start_analysis: boolean; analysis: null | { status: string; language: string; total_segments: number; segments_done: number; summary: string | null; error_message: string | null; decisions: string[] }; segments: Segment[]; actions: RecordingAction[]; meeting_id?: string | null }
 export type RecordingPerson = { id: string; full_name: string; department_id: string | null; role?: "ADMIN" | "MANAGER" | "STAFF" }
 export type RecordingDepartment = { id: string; name: string }
 const STATUS: Record<string, string> = { QUEUED: "Në pritje të përpunimit", TRANSCRIBING: "Duke transkriptuar", SUMMARIZING: "Duke përgatitur përmbledhjen dhe propozimet", READY: "Përpunimi përfundoi", FAILED: "Përpunimi dështoi" }
@@ -116,6 +116,8 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
   const [language, setLanguage] = React.useState("sq")
   const [consent, setConsent] = React.useState(false)
   const [transcriptOpen, setTranscriptOpen] = React.useState(false)
+  const [showOriginal, setShowOriginal] = React.useState(false)
+  const [copiedVersion, setCopiedVersion] = React.useState<boolean | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState("")
   const [people, setPeople] = React.useState<RecordingPerson[]>([])
@@ -128,11 +130,15 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
   React.useEffect(() => { void Promise.resolve().then(load).catch(e => setError(String(e))) }, [load])
   const processing = Boolean(data?.analysis && ["QUEUED", "TRANSCRIBING", "SUMMARIZING"].includes(data.analysis.status))
   const timingProcessing = Boolean(data?.timing && ["QUEUED", "RUNNING"].includes(data.timing.status))
+  const review = data?.transcript_review
+  const reviewProcessing = review?.status === "QUEUED" || review?.status === "RUNNING"
+  const correctedReady = review?.status === "READY"
+  const showCorrected = correctedReady && !showOriginal
   React.useEffect(() => {
-    if (!processing && !timingProcessing) return
+    if (!processing && !timingProcessing && !reviewProcessing) return
     const timer = setInterval(() => { void load().then(() => setError("")).catch(e => setError(String(e))) }, 5000)
     return () => clearInterval(timer)
-  }, [processing, timingProcessing, load])
+  }, [processing, timingProcessing, reviewProcessing, load])
   const needLookups = Boolean(data?.can_manage && data.actions.length)
   React.useEffect(() => {
     if (!needLookups) return
@@ -159,33 +165,68 @@ export function RecordingAnalysisPanel({ recordingId, onSeek }: { recordingId: s
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
+  const requestReview = async () => {
+    if (busy || reviewProcessing) return
+    setBusy(true); setError("")
+    try {
+      await recordingJson(await apiFetch(`/meeting-recordings/${recordingId}/transcript-review`, { method: "POST" }))
+      await load()
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  const segmentTime = (segment: Segment) => `${recordingTime(segment.start_seconds)} – ${recordingTime(segment.start_seconds + segment.duration_seconds)}`
+  const segmentText = (segment: Segment) => (showCorrected ? segment.corrected_text ?? segment.text : segment.text)
+  const copyTranscript = async () => {
+    if (!data) return
+    try {
+      await navigator.clipboard.writeText(data.segments.map(segment =>
+        `${segmentTime(segment)}\n${segmentText(segment) || "Nuk u dallua të folur në këtë pjesë."}`).join("\n\n"))
+      setCopiedVersion(showCorrected)
+    } catch {
+      setError("Kopjimi nuk u krye. Mund ta përzgjedhësh dhe ta kopjosh tekstin nga transkripti.")
+    }
+  }
   return <Card><CardHeader><CardTitle>Transkripti, përmbledhja dhe detyrat</CardTitle></CardHeader><CardContent className="space-y-5">
     {!data && !error && <p role="status">Duke ngarkuar…</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {data && <>
       {!data.configured && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">Shërbimi AI nuk është konfiguruar. Administratori duhet të vendosë OPENAI_API_KEY në server dhe të nisë worker-in e përpunimit.</p>}
       {data.analysis && <div role="status" className="space-y-2">
-        <p>{STATUS[data.analysis.status]} · {data.analysis.segments_done}/{data.analysis.total_segments} pjesë</p>
+        <p>{reviewProcessing ? "Transkriptimi fillestar përfundoi" : STATUS[data.analysis.status]} · {data.analysis.segments_done}/{data.analysis.total_segments} pjesë</p>
         {processing && <progress className="w-full" max={data.analysis.total_segments} value={data.analysis.segments_done} aria-label="Progresi i transkriptimit" />}
         {processing && <p className="text-sm text-muted-foreground">Mund ta mbyllësh faqen. Përpunimi vazhdon në server; rifresko për të parë progresin.</p>}
         {data.analysis.error_message && <p role="alert" className="text-sm text-destructive">{data.analysis.error_message}</p>}
       </div>}
       {data.segments.length > 0 && <div className="space-y-3">
+        {reviewProcessing && <p role="status" className="text-sm text-muted-foreground">AI po ridëgjon audion dhe po korrigjon transkriptin · {review?.completed ?? 0}/{data.segments.length} pjesë</p>}
+        {review?.status === "FAILED" && <p role="status" className="text-sm text-destructive">Korrigjimi nuk përfundoi. Transkripti origjinal është i disponueshëm.</p>}
+        <div className="flex flex-wrap gap-2">
         <Button variant="outline" aria-expanded={transcriptOpen} aria-controls="recording-transcript" onClick={() => setTranscriptOpen(open => !open)}>
           <FileText aria-hidden="true" />{transcriptOpen ? "Fshih transkriptin" : "Shiko transkriptin"}<ChevronDown aria-hidden="true" className={transcriptOpen ? "rotate-180" : ""} />
         </Button>
+        {data.can_manage && data.configured && data.analysis?.status === "READY" && (!review || review.status === "FAILED") &&
+          <Button variant="outline" disabled={busy} onClick={() => void requestReview()}>
+            {review?.status === "FAILED" ? "Riprovo korrigjimin" : "Përmirëso transkriptin"}
+          </Button>}
+        {transcriptOpen && correctedReady && <Button variant="outline" onClick={() => { setShowOriginal(value => !value); setCopiedVersion(null) }}>
+          {showOriginal ? "Shfaq versionin e korrigjuar" : "Shfaq origjinalin"}
+        </Button>}
+        {transcriptOpen && <Button variant="outline" onClick={() => void copyTranscript()}>{copiedVersion === showCorrected ? "U kopjua" : "Kopjo transkriptin"}</Button>}
+        </div>
         {transcriptOpen && <section id="recording-transcript" aria-label="Transkripti" className="max-h-[32rem] space-y-4 overflow-y-auto rounded-md border bg-muted/20 p-4" tabIndex={0}>
-        <h3 className="font-semibold">Transkripti ({data.segments.length} pjesë)</h3>
+        <h3 className="font-semibold">{showCorrected ? "Transkripti i korrigjuar" : "Transkripti origjinal"} ({data.segments.length} pjesë)</h3>
         {data.segments.map(segment => <div key={segment.index} className="space-y-3">
-          <p className="text-xs text-muted-foreground">{recordingTime(segment.start_seconds)} – {recordingTime(segment.start_seconds + segment.duration_seconds)}</p>
-          {transcriptParagraphs(segment.text, data.actions.filter(action => action.segment_index === segment.index).map(action => action.evidence)).map((paragraph, i) => <p key={i} className="text-sm leading-relaxed">{paragraph}</p>)}
-          {!segment.text && <p className="text-sm text-muted-foreground">Nuk u dallua të folur në këtë pjesë.</p>}
+          {onSeek ? <button type="button" className="text-xs text-primary underline" onClick={() => onSeek(segment.start_seconds)}>{segmentTime(segment)}</button>
+            : <p className="text-xs text-muted-foreground">{segmentTime(segment)}</p>}
+          {showCorrected ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{segmentText(segment)}</p>
+            : transcriptParagraphs(segment.text, data.actions.filter(action => action.segment_index === segment.index).map(action => action.evidence)).map((paragraph, i) => <p key={i} className="text-sm leading-relaxed">{paragraph}</p>)}
+          {!segmentText(segment) && <p className="text-sm text-muted-foreground">Nuk u dallua të folur në këtë pjesë.</p>}
         </div>)}
       </section>}
       </div>}
       {data.can_start_analysis && (!data.analysis || data.analysis.status === "FAILED") && <div className="space-y-3 rounded-md border p-4">
         <div className="max-w-xs"><Label htmlFor="transcript-language">Gjuha e bisedës</Label><select id="transcript-language" className={selectClass} value={language} disabled={Boolean(data.analysis)} onChange={e => setLanguage(e.target.value)}><option value="sq">Shqip</option><option value="en">English</option><option value="de">Deutsch</option><option value="auto">Zbulo automatikisht / e përzier</option></select></div>
-        <p className="text-sm text-muted-foreground">Audioja përpunohet nga OpenAI. Kontrollo rezultatet para se të krijosh detyrat.</p>
+        <p className="text-sm text-muted-foreground">OpenAI përpunon audion për transkriptin, korrigjimin dhe përmbledhjen. Kontrollo rezultatet para se të krijosh detyrat.</p>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />Kam autorizimin për këtë përpunim të audios dhe të dhënave të pjesëmarrësve.</label>
         <Button disabled={!data.configured || !consent || busy} onClick={() => void start()}>{busy ? "Duke nisur…" : data.analysis ? "Riprovo përpunimin" : "Transkripto dhe përmblidh"}</Button>
       </div>}

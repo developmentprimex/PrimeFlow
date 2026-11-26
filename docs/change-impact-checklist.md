@@ -75,6 +75,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 | Planifikim | Weekly Planner, Monthly Planner, PX JAV, My View, Common View, 1H SHTYPI Today, 1H SHTYPI Tomorrow, Realization, Weekly Planning Check, M1 / M2 / M3, M1 PIKAT, M2 PIKAT, M3 PIKAT |
 | Realization dhe Reviews | My View, Department Views, Finance View, Realization, Reviews, Common View, Weekly Planner, Kontrolli ditor RLZ, M3 PIKAT |
 | Regjistrime dhe Mira | Regjistrimet, Mira, Meetings, PX Notes, Task Details |
+| Regjistrime → Transkripti i korrigjuar | Pas analizës, worker-i ridëgjon audion dhe ruan korrigjimin për secilën pjesë. Regjistrimet shfaqin tekstin e korrigjuar kur të gjitha pjesët janë gati. Kontrollo ripërpunimin nga pronari për regjistrimet e vjetra, riprovimin, origjinalin, kopjimin dhe hapjen e audios nga intervali. Protokolli, citimet dhe propozimet e detyrave vazhdojnë të lexojnë transkriptin origjinal. Takimet, Historia e klientit, PX Notes dhe raportet e lidhura përdorin të dhënat ekzistuese të takimit dhe të detyrave. Mira/Discord kanë transkriptim më vete. |
 | Mira Notetaker / Smart Notes | Mira → Notetaker dhe API-ja e historikut shfaqin çdo takim të përpunuar për të gjithë përdoruesit e autentikuar të PrimeFlow, pavarësisht organizatorit ose kanalit të nisjes. Përmbledhja ruhet veç shënimeve dhe transkriptit. Kontrollo Discord (`/takimi`, Mira Zhvillim, `mira-kontrolli`, kanalet personale), Mira → Shënimet, PX Notes, lidhjet e transkriptit dhe përjashtimin ekzistues të Mira Notes nga 1H Reports, After Break Report dhe M1 PIKAT. |
 | Nisja e botëve të regjistrimit | Boti kryesor i Discord-it dhe Mira Zhvillim përdorin të njëjtin format të shënimeve. Moduli `discord_voice_note_format.py` ndan etiketat dhe datën nga klienti OpenAI dhe router-at FastAPI. Kontrollo importin e të dy botëve në një proces të pastër dhe gatishmërinë në Discord pas deployment-it. |
 | Ask MIRA | Komanda `/mira pyet`, përmendjet e botit kryesor, API-ja Discord dhe lidhjet te segmentet e Notetaker. Karta private shfaq pyetjen, përgjigjen dhe burimet e lidhura. Transkripti është burimi, kujtesa mban kontekstin dhe qasja verifikohet sërish para kthimit të burimeve. Kontrollo dërgimin privat, identitetin e revokuar, kufirin e pyetjeve, hapjen e lidhjeve dhe komandat e raportimit 1H që ndajnë grupin `/mira`. |
@@ -249,6 +250,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ditor RLZ, M2 Post-Break, M2/M3 PIKAT, eksportet dhe Discord M2. Arsyeja
   ruhet në `task_daily_rlz_states` pas migrimit 0210. Mbyllja si DONE e detyrave
   që kërkojnë koment për rezultatin përdor një rregull më vete.
+
+- Done në Finance, Edit në Finance dhe System Task Instances, si dhe Edit te
+  All Today në Product Content përdorin përgjigjen e API-së së detyrës për të
+  kërkuar komentin e përgjegjësit ose arsyen e përjashtimit të administratorit
+  apo menaxherit. Kontrollo caktimin e instancës, anulimin, detyrat me koment
+  të ruajtur dhe gabimet e strukturuara. Mbyllja e detyrave sistemore te My
+  View në Development, Graphic Design dhe Product Content shfaq mesazhin e
+  API-së si për instancat ashtu edhe për rrjedhën sipas shabllonit.
 
 - **BZ M3** te **Reports & Control → Meetings** lexon simbolet M2, M3 dhe M2/3
   të detyrave të planifikuara për datën e raportit dhe lidhjet aktive
@@ -805,6 +814,23 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Detyrat pa periudhë të caktuar futen te AM me etiketën AM/PM të kartës.
   API-ja Common View, eksporti Excel dhe raportet e veçanta SHTYPI nuk përdorin
   filtrin Short.
+
+- **Planning → Weekly Planner Short** përdor tekstin dhe rendin e 18 pikave të
+  checklistës “PLNF JAV SHORT- E ENJTE”. Ruajtja e vendimeve dhe komenteve
+  bazohet te numri i pikës dhe e hëna e javës. Çdo përdorues i autentikuar mund të
+  komentojë. Pika 1 lexon PV/festat nga kalendari Microsoft dhe përdor PV/FEST
+  të PrimeFlow kur Microsoft nuk përgjigjet. Pika 2 lexon PRJK nga Common View
+  për të hënën deri të premten dhe bashkon projektet e përsëritura sipas ID-së.
+  PRJK në Common View dhe pika 2 shfaqin projektin për ditët me të paktën një
+  detyrë të hapur. API-ja shënon emrat e detyrave të hapura me `openAssignees`
+  dhe përdor `null` për ditët pa detyrë të hapur. Mbulimi 1H dhe Admin Tasks
+  përdorin të dhënat e plota të PRJK.
+  Pikat 4 dhe 12 lexojnë Weekly Planner dhe Projects. Pika 6 lexon vetëm
+  takimet externe të javës pasuese. Pikat 8 dhe 9 lexojnë PX JAV dhe detyrat
+  Waiting Client.
+  Butoni “Rifresko gjetjet” i rilexon burimet. Kur ndryshojnë fushat
+  ose rregullat e këtyre burimeve, kontrollo edhe gjetjet te Weekly Planner
+  Short. Komentet dhe vendimet ruhen përmes API-së së vet.
 
 - Eksporti `/exports/checklists.xlsx` përdoret nga checklistat e Product Content
   dhe kontrollon edhe shabllonet globale sipas `group_key`: MST, TT dhe

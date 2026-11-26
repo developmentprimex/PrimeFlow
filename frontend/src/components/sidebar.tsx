@@ -203,6 +203,7 @@ const navGroups: NavGroup[] = [
     icon: CalendarDays,
     items: [
       { href: "/weekly-planner", label: "Weekly Planner", icon: CalendarDays },
+      { href: "/weekly-planner-short", label: "Weekly Planner Short", icon: CalendarDays },
       { href: "/monthly-planner", label: "Monthly Planner", icon: CalendarRange },
       { href: "/meeting-scheduler", label: "Meeting Scheduler", icon: CalendarClock },
       {

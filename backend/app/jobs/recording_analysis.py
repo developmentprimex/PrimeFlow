@@ -6,7 +6,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from sqlalchemy import select, or_
+from sqlalchemy import select, and_, or_
 from app.config import settings
 from app.db import SessionLocal
 from app.models.department import Department
@@ -51,14 +51,17 @@ async def _process_recording_analysis():
         return 0
     from app.services import recording_analysis_provider as provider
     async with SessionLocal() as db:
+        review_status = Analysis.summary_progress['transcript_review']['status'].as_string()
         job = (await db.execute(select(Analysis).join(MeetingRecording, MeetingRecording.id == Analysis.recording_id)
-            .where(MeetingRecording.deleted_at.is_(None), Analysis.status.in_(['QUEUED', 'TRANSCRIBING', 'SUMMARIZING']),
+            .where(MeetingRecording.deleted_at.is_(None), or_(Analysis.status.in_(['QUEUED', 'TRANSCRIBING', 'SUMMARIZING']),
+                and_(Analysis.status == 'READY', review_status.in_(['QUEUED', 'RUNNING']))),
             or_(Analysis.lease_until.is_(None), Analysis.lease_until < now())).order_by(Analysis.updated_at)
             .with_for_update(skip_locked=True).limit(1))).scalar_one_or_none()
         if not job:
             return 0
         sid, token = job.recording_id, uuid.uuid4()
-        job.lease_token, job.lease_until = token, now() + timedelta(minutes=15)
+        reviewing = job.status == 'READY'
+        job.lease_token, job.lease_until = token, now() + timedelta(minutes=25 if reviewing else 15)
         row = await db.get(MeetingRecording, sid)
         source = LocalMeetingStorage(settings.MEETING_RECORDINGS_ROOT).path(
             f"{row.storage_key}/recording.{recording_extension(row.mime_type)}")
@@ -71,7 +74,7 @@ async def _process_recording_analysis():
         current = (await db.execute(select(Analysis).where(Analysis.recording_id == sid).with_for_update())).scalar_one()
         if current.lease_token != token:
             raise ValueError('analysis_lease_changed')
-        current.lease_until = now() + timedelta(minutes=15)
+        current.lease_until = now() + timedelta(minutes=25 if reviewing else 15)
         return current
 
     async def checkpoint(cache):
@@ -85,17 +88,45 @@ async def _process_recording_analysis():
             current = await fenced(db)
             segments = list((await db.execute(select(Transcript).where(Transcript.recording_id == sid).order_by(Transcript.index))).scalars())
             done = {s.index for s in segments}
-            pending = next(((i, start, length) for i, (start, length) in enumerate(provider.segment_plan(duration))
-                if i not in done), None)
-            current.status = 'TRANSCRIBING' if pending else 'SUMMARIZING'
+            if reviewing:
+                review = current.summary_progress['transcript_review']
+                summary = current.summary
+                current.summary_progress = {**current.summary_progress, 'transcript_review': {**review, 'status': 'RUNNING'}}
+            else:
+                pending = next(((i, start, length) for i, (start, length) in enumerate(provider.segment_plan(duration))
+                    if i not in done), None)
+                current.status = 'TRANSCRIBING' if pending else 'SUMMARIZING'
             await db.commit()
+        vocabulary = departments + [t.strip() for t in settings.RECORDING_TRANSCRIPTION_VOCABULARY.split(',') if t.strip()]
+        if reviewing:
+            remaining = [s for s in segments if 'corrected_text' not in (s.notes or {})]
+            if remaining:
+                segment = remaining[0]
+                rows = [{'index': s.index, 'start_seconds': s.start_seconds, 'duration_seconds': s.duration_seconds,
+                         'text': s.text} for s in segments]
+                previous = next((s.text for s in segments if s.index == segment.index - 1), '')
+                wav = await asyncio.to_thread(provider.extract_audio, source, segment.start_seconds, segment.duration_seconds)
+                second_listen = await provider.transcribe(wav, language, vocabulary=[name for _, name in participants] + vocabulary,
+                    previous=previous, review=True)
+                del wav
+                target = next(s for s in rows if s['index'] == segment.index)
+                corrected = await provider.refine_transcript(target, second_listen, rows, title=title, summary=summary)
+            async with SessionLocal() as db:
+                current = await fenced(db)
+                if remaining:
+                    stored = await db.get(Transcript, (sid, segment.index))
+                    stored.notes = {**(stored.notes or {}), 'corrected_text': corrected}
+                current.summary_progress = {**current.summary_progress, 'transcript_review': {
+                    'status': 'RUNNING' if len(remaining) > 1 else 'READY',
+                    'completed': len(segments) - max(0, len(remaining) - 1)}}
+                current.lease_until = None
+                await db.commit()
+            return 1
         if pending:
             index, start, length = pending
             previous = next((s.text for s in segments if s.index == index - 1), '')
-            vocabulary = [name for _, name in people] + departments + [
-                t.strip() for t in settings.RECORDING_TRANSCRIPTION_VOCABULARY.split(',') if t.strip()]
             wav = await asyncio.to_thread(provider.extract_audio, source, start, length)
-            text = await provider.transcribe(wav, language, vocabulary=vocabulary, previous=previous)
+            text = await provider.transcribe(wav, language, vocabulary=[name for _, name in people] + vocabulary, previous=previous)
             del wav
             async with SessionLocal() as db:
                 current = await fenced(db)
@@ -128,6 +159,7 @@ async def _process_recording_analysis():
             # Default recorder titles already carry the date; add it only when missing.
             heading = title if re.search(r'\d{1,2}\.\d{1,2}\.\d{4}', title) else provider.albanian_date_for(meeting_day) + '\n' + title
             current.status, current.summary, current.decisions = 'READY', heading + '\n\n' + notes['summary'], notes['decisions']
+            current.summary_progress = {**(current.summary_progress or {}), 'transcript_review': {'status': 'QUEUED'}}
             current.error_message, current.attempts, current.lease_until = None, 0, None
             await db.commit()
     except Exception as exc:
@@ -136,7 +168,15 @@ async def _process_recording_analysis():
         logger.warning('Recording analysis failed: recording=%s code=%s', sid, safe_code)
         async with SessionLocal() as db:
             current = (await db.execute(select(Analysis).where(Analysis.recording_id == sid).with_for_update())).scalar_one()
-            if current.lease_token == token:
+            if current.lease_token == token and reviewing:
+                review = current.summary_progress['transcript_review']
+                attempts = review.get('attempts', 0) + 1
+                retry = str(exc) not in PERMANENT_ERRORS and attempts < MAX_ATTEMPTS
+                current.summary_progress = {**current.summary_progress, 'transcript_review': {
+                    **review, 'status': 'QUEUED' if retry else 'FAILED', 'attempts': attempts}}
+                current.lease_until = now() + timedelta(minutes=attempts) if retry else None
+                await db.commit()
+            elif current.lease_token == token:
                 current.attempts = (current.attempts or 0) + 1
                 if str(exc) not in PERMANENT_ERRORS and current.attempts < MAX_ATTEMPTS:
                     # Transient provider or network failure: back off and let the next tick resume from the checkpoint.

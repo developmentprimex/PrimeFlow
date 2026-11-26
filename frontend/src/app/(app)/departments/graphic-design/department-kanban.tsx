@@ -4,6 +4,7 @@ import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage
 import * as React from "react"
 import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
 import { isTaskPausedOnDay } from "@/lib/task-pause"
+import { taskResponseError } from "@/lib/task-completion"
 import { MyViewTaskColumns } from "@/components/my-view-task-columns"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
@@ -4786,7 +4787,7 @@ export default function DepartmentKanban() {
           body: JSON.stringify({ comment: closeComment }),
         })
         if (!commentRes.ok) {
-          toast.error("Failed to save the required result comment")
+          toast.error(await taskResponseError(commentRes, "Failed to save the required result comment"))
           return
         }
         const updateRes = await apiFetch(`/tasks/${taskToCloseId}`, {
@@ -4795,7 +4796,7 @@ export default function DepartmentKanban() {
           body: JSON.stringify({ status: "DONE" }),
         })
         if (!updateRes.ok) {
-          toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
+          toast.error(await taskResponseError(updateRes, "Failed to close system task"))
           return
         }
       } else {
@@ -4814,7 +4815,7 @@ export default function DepartmentKanban() {
           }),
         })
         if (!res.ok) {
-          toast.error("Failed to close system task")
+          toast.error(await taskResponseError(res, "Failed to close system task"))
           return
         }
       }

@@ -286,6 +286,17 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(action['suggested_due_date'], '2026-10-21')
         self.assertIsNone(action['created_task_id'])
         self.assertEqual(self.start(sid).status_code, 202)
+        self.assertEqual(data['transcript_review']['status'], 'QUEUED')
+        with patch('app.services.recording_analysis_provider.transcribe', new=AsyncMock(return_value='Do ta dërgoj raportin nesër.')) as listen, \
+                patch('app.services.recording_analysis_provider.refine_transcript',
+                      new=AsyncMock(return_value='Do ta dërgoj raportin nesër.')):
+            self.assertEqual(self.tick(), 1)
+            self.assertTrue(listen.await_args.kwargs['review'])
+        corrected = self.get(sid).json()
+        self.assertEqual(corrected['transcript_review'], {'status': 'READY', 'completed': 1})
+        self.assertEqual(corrected['segments'][0]['corrected_text'], 'Do ta dërgoj raportin nesër.')
+        self.assertEqual(corrected['segments'][0]['text'], data['segments'][0]['text'])
+        self.assertEqual(corrected['actions'], data['actions'])
         self.assertEqual(self.tick(), 0)
         async def department():
             from app.models.user import User

@@ -31,6 +31,26 @@ def action(**overrides):
 
 
 class RecordingAnalysisProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_transcript_review_uses_both_listens_and_context_without_accepting_a_summary(self):
+        from app.services.recording_analysis_provider import refine_transcript
+
+        first = 'Qit raportin e kryjmë sot. Pastaj ia çojmë Artës nesër në 08:30.'
+        second = 'Këtë raport e kryjmë sot. Pastaj ia çojmë Artës nesër në 08:30.'
+        segment = {'index': 0, 'start_seconds': 0, 'duration_seconds': 300, 'text': first}
+        following = {'index': 1, 'start_seconds': 300, 'duration_seconds': 60, 'text': 'Arta do ta kontrollojë raportin.'}
+        review = AsyncMock(return_value={'status': 'completed', 'output': [{'type': 'message', 'content': [
+            {'type': 'output_text', 'text': second}]}]})
+        with patch('app.services.recording_analysis_provider.request', review):
+            result = await refine_transcript(segment, second, [segment, following], title='Takimi', summary='Raporti')
+            self.assertEqual(result, second)
+            content = json.loads(review.await_args.kwargs['json']['input'][1]['content'])
+            self.assertEqual(content['first_transcription'], first)
+            self.assertEqual(content['second_transcription_of_same_audio'], second)
+            self.assertIn(following['text'], content['other_segments'][0])
+            review.return_value['output'][0]['content'][0]['text'] = 'Diskutuan raportin.'
+            with self.assertRaisesRegex(ValueError, 'invalid_transcript_review'):
+                await refine_transcript(segment, second, [segment, following], title='Takimi', summary='Raporti')
+
     async def test_segment_plan_bounds_multi_hour_recording(self):
         from app.services.recording_analysis_provider import segment_plan
         plan = segment_plan(43200)
