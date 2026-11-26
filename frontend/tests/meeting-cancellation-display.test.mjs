@@ -48,6 +48,10 @@ test("daily report retains external meeting and labels only canceled occurrences
     calendar_imported: true, ends_at: "2026-10-22T10:30:00", participant_ids: ["lh"],
     recurrence_type: "weekly", recurrence_days_of_week: [3],
   }))
+  meetings.push({
+    ...meetings[1], id: "internal", title: "Team sync", meeting_type: "internal",
+    calendar_imported: false, all_participants: true,
+  })
   const render = (day) => renderToStaticMarkup(React.createElement(DailyReportMeetingsTable, {
     meetings, users: [{ id: "lh", full_name: "Laurent Hoxha" }], reportDateIso: day,
   }))
@@ -59,6 +63,7 @@ test("daily report retains external meeting and labels only canceled occurrences
   assert.match(canceledDay, />09:00<\/td><td[^>]*>10:30<\/td>/)
   assert.match(canceledDay, />Deri<\/th><th[^>]*>Personat<\/th><\/tr>/)
   assert.match(canceledDay, />Laurent Hoxha<\/td><\/tr>/)
+  assert.match(canceledDay, />ALL<\/td><\/tr>/)
   assert.equal((canceledDay.match(/ANULUAR/g) || []).length, 1)
   assert.doesNotMatch(render("2026-10-29"), /ANULUAR/)
 })

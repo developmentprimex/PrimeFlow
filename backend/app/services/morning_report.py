@@ -88,6 +88,7 @@ from app.services.meetings_report import (
 from app.services.report_section_merge import preserve_keyed_line
 from app.services.m1_gmail_pilot import read_m1_gmail_messages
 from app.services.primeflow_report import report_timezone
+from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, load_follow_up_comments, task_model_groups
 
 REPORT_TYPE = "morning_report"
 REPORT_LABEL = "Hapja e dites M1"
@@ -101,6 +102,7 @@ PHYSICAL_GA_TITLE = "FIZIKISHT ME GA?"
 KA_GENT_QUESTIONS_TITLE = "A KA PYTJE/SQARIME ME KA/GENTIN"
 GA_PF_COMMENTS_TITLE = "(GA) A KA KOMENTE NE PF?"
 NEW_EMAILS_SECTION_TITLE = "EMAILS TE REJA?"
+MORNING_FOLLOW_UP_TITLE = "DET 08:00/DL AM"
 REORGANIZATION_TITLE = "A KA RIORGANIZIM?"
 REORGANIZATION_PLAN_LABEL = "SI BËHET RIORGANIZIMI?"
 LEGACY_REORGANIZATION_PLAN_LABEL = "SI BËHET ORGANIZIMI?"
@@ -124,11 +126,13 @@ SECTION_TITLES = [
     *MARKER_TASK_SECTIONS,
     GA_REACTIONS_SECTION_KEY,
     GA_PF_COMMENTS_TITLE,
+    MORNING_FOLLOW_UP_TITLE,
     REORGANIZATION_TITLE,
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[2],
     GA_HV_DV_TASKS_TITLE,
+    MORNING_FOLLOW_UP_TITLE,
     PHYSICAL_GA_TITLE,
     SECTION_TITLES[1],
     SECTION_TITLES[0],
@@ -191,6 +195,8 @@ def is_generated_subject(subject: str | None, day: date) -> bool:
 
 
 def _default_body(title: str) -> str:
+    if title == MORNING_FOLLOW_UP_TITLE:
+        return _morning_follow_up_tables([], {}, {}, {}, None)[0]
     if title == REORGANIZATION_TITLE:
         return "\n".join(["BZ M1: JO", "KOMENT:", *(f"{label}: JO" for label in REORGANIZATION_WORKLOAD_LABELS)])
     if title == GA_PF_COMMENTS_TITLE:
@@ -351,6 +357,8 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         if is_removed_morning_manual_question(raw_title, section_key):
             continue
         title = _canonical_section_title(section_key or raw_title)
+        if _canonical_section_title(raw_title) == REORGANIZATION_TITLE:
+            title = REORGANIZATION_TITLE
         body = str(section.get("body") or "")
         if raw_title == LEGACY_NOTES_TITLE or (
             title == SECTION_TITLES[3] and any(_is_manual_email_line(line) for line in body.splitlines())
@@ -435,6 +443,11 @@ def _split_pv_table(body: str) -> tuple[str, str]:
 
 def _normalize_reorganization_body(body: str) -> str:
     fields = dict(field.split(":", 1) for field in re.split(r"\n(?=\S)", body) if ":" in field)
+    if body.strip() not in {"", "(Ploteso manualisht)"} and not fields.keys() & {
+        "BZ M1", "KOMENT", *REORGANIZATION_WORKLOAD_LABELS, REORGANIZATION_PLAN_LABEL,
+        LEGACY_REORGANIZATION_PLAN_LABEL, REORGANIZATION_CAUSE_LABEL,
+    }:
+        fields["KOMENT"] = " " + "\n ".join(body.strip().splitlines())
     if LEGACY_REORGANIZATION_PLAN_LABEL in fields:
         fields.setdefault(REORGANIZATION_PLAN_LABEL, fields[LEGACY_REORGANIZATION_PLAN_LABEL])
     previous_discussion = fields.get("BZ M1", "").strip()
@@ -506,19 +519,21 @@ def preserve_morning_plan_note(
     title = SECTION_TITLES[2]
     saved = next((section.get("body") for section in existing or []
                   if _canonical_section_title(section.get("section_key") or section.get("title") or "") == title), None)
-    saved_reorganization = next((
-        section["body"] for section in existing or []
-        if (section.get("section_key") or section.get("title")) == REORGANIZATION_TITLE
-    ), None)
-    merged = []
+    saved_reorganization = next(
+        (section.get("body") for section in existing or []
+         if _canonical_section_title(section.get("section_key") or "") == REORGANIZATION_TITLE
+         or _canonical_section_title(section.get("title") or "") == REORGANIZATION_TITLE),
+        None,
+    )
+    result = []
     for section in sections:
-        key = section.get("section_key") or section["title"]
-        if _canonical_section_title(key) == title:
+        key = _canonical_section_title(section.get("section_key") or section["title"])
+        if key == title:
             section = {**section, "body": preserve_keyed_line(section["body"], saved, "NDRYSHON PLANI")}
         elif key == REORGANIZATION_TITLE and saved_reorganization is not None:
             section = {**section, "body": _normalize_reorganization_body(saved_reorganization)}
-        merged.append(section)
-    return merged
+        result.append(section)
+    return result
 
 
 def _entry_day(entry: CommonEntry) -> date | None:
@@ -907,6 +922,27 @@ def _marker_task_table(
     ))
 
 
+def _morning_follow_up_tables(tasks, names, owners, department_codes, report_day, comments=None):
+    grouped = {group: [] for group in FOLLOW_UP_BY_SLOT.values()}
+    frozen = {group: (comments or {}).get(slot, {}) for slot, group in FOLLOW_UP_BY_SLOT.items()}
+    for task in tasks:
+        groups = task_model_groups(task, report_day)
+        for group in grouped:
+            if group in groups or str(task.id) in frozen[group]:
+                grouped[group].append(task)
+    tables = []
+    for slot, group in FOLLOW_UP_BY_SLOT.items():
+        answers = frozen[group]
+        tables.extend(_m3_status_table(
+            group, grouped[group], names, with_status=True, include_department=True,
+            include_am_pm=True, include_type=True, include_priority_tone=True,
+            department_codes=department_codes, assignee_ids_by_task=owners, show_all_assignees=True,
+            comments_by_task={task.id: answers[str(task.id)] for task in grouped[group] if str(task.id) in answers},
+        ))
+        tables.append("")
+    return _normalize_section(tables), sum(map(len, grouped.values()))
+
+
 def _symbol_comment_table(rows: list[list[str]]) -> str:
     if not rows:
         rows = [["-", "-", "-", "-", "-", "-", "-", "(Asnje koment te simbolet)", "-", "-"]]
@@ -995,6 +1031,10 @@ async def refresh_morning_task_tables(
         db, tasks, names, assignee_ids_by_task, report_day, department_codes, task_feedback_overrides or {},
     )
     bodies = {GA_HV_DV_TASKS_TITLE: body}
+    comments = await load_follow_up_comments(db, report_day, FOLLOW_UP_BY_SLOT)
+    bodies[MORNING_FOLLOW_UP_TITLE], _ = _morning_follow_up_tables(
+        tasks, names, assignee_ids_by_task, department_codes, report_day, comments,
+    )
     for title, (markers, caption) in MARKER_TASK_SECTIONS.items():
         marked_tasks, owners = _group_marked_tasks(
             _marked_tasks_for_day(tasks, report_day, markers), names, assignee_ids_by_task,
@@ -1329,6 +1369,12 @@ async def build_morning_report_sections(
             "body": _marker_task_table(caption, marked_tasks, names, owners, department_codes),
         })
         snapshot["counts"][title] = len(marked_tasks)
+    comments = await load_follow_up_comments(db, report_day, FOLLOW_UP_BY_SLOT)
+    follow_up_body, follow_up_count = _morning_follow_up_tables(
+        tasks, names, assignee_ids_by_task, department_codes, report_day, comments,
+    )
+    sections.append({"section_key": MORNING_FOLLOW_UP_TITLE, "title": MORNING_FOLLOW_UP_TITLE, "body": follow_up_body})
+    snapshot["counts"][MORNING_FOLLOW_UP_TITLE] = follow_up_count
     ordered = await refresh_m1_gmail_section(
         normalize_morning_report_sections(sections), report_day, generated_snapshot=snapshot,
     )

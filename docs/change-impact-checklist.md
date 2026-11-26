@@ -94,6 +94,20 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 ## Varësi që nuk duhen harruar
 
+- **M1 / DET 08:00/DL AM** dhe **1H Reports 11:00/11:50** përdorin të
+  njëjtën përzgjedhje sipas datës lokale të afatit, shenjës 08:00 dhe
+  kombinimit `Deadline Important` me periudhën `AM`. M1 ruan përgjigjen
+  manuale te **A KA RIORGANIZIM?** gjatë rigjenerimit. Kontrollo dy tabelat
+  e M1, statuset dhe komentet në pamjen e rifreskuar të 1H dhe eksportet.
+  Burimi i tabelave 1H përfshin edhe detyrat e kryera pa slot dhe detyrat
+  e raportuara që më pas u zhvendosën. Discord pyet çdo ditë pune nga data
+  e fillimit deri te afati, për 08:00 në 11:00 dhe për DL AM në 11:50.
+  Pyet pse nuk është punuar kur statusi është TODO dhe pse nuk është kryer
+  kur detyra mbetet e hapur në datën e afatit. Raportet e rifreskuara i
+  lexojnë përgjigjet e ruajtura sipas datës, slotit, punonjësit dhe detyrës.
+  Mira Host lexon detyrat shtesë
+  në slotin përkatës. Emaili ruan gjendjen e momentit të dërgimit.
+
 - 1H SHTYPI Today/Tomorrow dhe 1H Reports lexojnë Common View nga databaza
   brenda procesit të autorizuar. Kontrollo preview, printimin nga Common
   View, gjenerimin e raporteve, javët e njëpasnjëshme dhe arkivin e Today
@@ -242,9 +256,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Titulli që krahasohet me postimin e Discord-it ruhet pa etiketën e pauzës.
   Komentet ruhen sipas datës, detyrës
   dhe përgjegjësit në `discord_task_delivery_comments` (migrimi 0209).
-  Pika 2 i shfaq dallimet mes përgjegjësve në dy tabela, me titullin në rreshtin e parë
-  dhe pjesën e mbetur të detyrës pas kontrollit +/−. Tabelat ndjekin ngjyrat
-  e statusit dhe renditjen e punonjësve nga Weekly Planner. Editorët
+  Pika 2 i shfaq dallimet në slote dhe simbole në dy tabela të ndara, me një
+  rresht për çdo detyrë brenda secilës tabelë. API-ja lidh kopjet e së njëjtës
+  detyrë me identitetin e përbashkët që përdor kontrolli i zgjedhjeve.
+  Personat me të njëjtën zgjedhje dhe hollësi të njëjta shfaqen së bashku.
+  Kolona sipas personit përfshin edhe zgjedhjet e kolegëve që dalin vetëm te
+  krahasimet. Komentet kanë kolonë më vete brenda rreshtit të detyrës.
+  Raporti i sotëm krahason slotet aktuale për datën efektive të planifikimit.
+  Për datat e kaluara tabela përdor slotin e fundit të disponueshëm në
+  historik për secilin person. Simbolet e vendosura shfaqen me të kuqe.
+  Titulli shfaqet një herë, me pjesën e mbetur pas kontrollit +/−.
+  Tabelat ndjekin ngjyrat e statusit dhe renditjen e punonjësve nga Weekly Planner. Editorët
   e detyrave kërkojnë koment kur zgjedhja individuale ndryshon nga zgjedhjet
   e kolegëve. Ruhet vlera e mëparshme, zgjedhja, homologët dhe arsyeja në
   historikun e ndryshimeve. Për rreshtat e përbashkët zgjedhja individuale
@@ -961,14 +983,24 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 - Taskat përdoren edhe nga M1/M2/M3 dhe PIKAT PËR RAP. Mos i përjashto këto
   vetëm sepse ndryshimi fillon në My View ose Common View. Përfshirja e taskut
   varet nga kategoria, data, personi dhe filtrat e raportit.
-- M2 Post-Break shfaq **ARSYEJA** dhe **KOMENT** te **DET TE PAKRYERA,
-  08:00/DEADLINE** nga Daily Report i My View për datën e raportit. Vlerat
+- M2 Post-Break shfaq **ARSYEJA** dhe **KOMENT** te **STATUSI I DET
+  08:00/DEADLINE/DUE DATE SOT** nga Daily Report i My View për datën e raportit. Vlerat
   lidhen sipas ID-së së detyrës. Gjenerimi, preview-ja dhe daljet e dërgimit
   përdorin të njëjtën tabelë. M2 PIKAT ndan përzgjedhjen e detyrave dhe ka
   rrjedhën e vet për shpjegimet dhe komentet manuale.
   M2 Post-Break përfshin edhe shënimet e veçanta nga Discord dhe komentet e
   vazhdimit AM → PM. Ndryshimet manuale ruhen për secilën fushë në draftin
   e M2 Post-Break dhe kanë përparësi gjatë rifreskimit dhe rigjenerimit.
+  Tabela Post-Break përfshin edhe detyrat 08:00 dhe Deadline Important AM
+  nga data e fillimit deri në datën e afatit, përfshirë detyrat e kryera.
+  Kolona PROGRESI shfaq statusin. Rreshtat 08:00 marrin ngjyrën e statusit
+  dhe ruajnë kornizën e kuqe në M2 Post-Break dhe daljet e tij. Filtri në
+  DUE DATE shfaq të gjitha detyrat, vetëm SOT ose datat e tjera së bashku.
+  Vetëm qeliza DUE DATE me vlerën SOT ka sfond të kuq në M2 Post-Break
+  dhe në daljet e së njëjtës tabelë. DISCORD 1H
+  shfaq përgjigjet e 11:00 dhe 11:50 të datës së raportit për të njëjtën ID
+  detyre dhe ruan ndarjen nga KOMENT. M2 PIKAT dhe pyetjet M2 në Discord
+  vazhdojnë të përdorin përzgjedhjen e detyrave AM/AM-PM të pakryera me afat sot.
   Në ekran, Arsyeja ruhet nga lista brenda qelizës dhe Komenti kur fusha
   humb fokusin. Numri i rreshtit lidhet me ID-në e detyrës pas filtrit të
   mungesave. Preview-ja dhe dërgimi përdorin tekstin e ruajtur.
@@ -1026,6 +1058,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   statuse sipas datës dhe taska PARA/PAS ose përgatitjeje. Kontrollo këto lidhje
   edhe kur ndryshon ose anulohet takimi. 1H Reports preket nga taskat përkatëse,
   pa qenë domosdoshmërisht një tabelë e plotë takimesh.
+- `ALL` te krijimi i TAK INT në Common View ruan departamentin e takimit dhe
+  cakton stafin aktiv nga të gjitha departamentet si pjesëmarrës individualë.
+  `all_participants` ruan zgjedhjen për shfaqje. Ndryshimi manual i listës e
+  heq etiketën, ndërsa ndryshimi vetëm i kujtesës e ruan. Kontrollo Common View
+  (lista, detajet, printimi dhe Excel), Takimet, Admin Tasks (GA Time Table,
+  pamja javore dhe Excel), tabelat ditore të Development,
+  Graphic Design dhe Product Content në Department dhe My View, raportet
+  M1/M2/M3, BZ të fundit të javës dhe SHTYPI Today/Tomorrow. Filtrat dhe
+  kujtesat përdorin ID-të individuale të pjesëmarrësve. Finance nuk përdor
+  tabelën ditore të takimeve.
 - Meeting Scheduler krijon TAK EXT manual përmes `POST /meetings`, me emër,
   interval, pjesëmarrës dhe link opsional, pa krijuar automatikisht event/ftesë
   Microsoft ose TAK INT. Vetëm kontrolli i këtij formulari dërgon

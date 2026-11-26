@@ -147,7 +147,7 @@ export function DailyReportMeetingsTable({
                       {time.to}
                     </td>
                     <td className="border border-slate-200 px-2 py-2 align-top text-slate-700">
-                      {persons.length ? persons.join(", ") : "-"}
+                      {meeting.all_participants ? "ALL" : persons.length ? persons.join(", ") : "-"}
                     </td>
                   </tr>
                 )

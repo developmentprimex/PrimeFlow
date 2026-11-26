@@ -8,7 +8,7 @@ import zipfile
 import asyncio
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import (
@@ -50,7 +50,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             (mira, "Elsa", None, None),
             (SimpleNamespace(content="Desktop summary", from_mira_desktop=True, created_at=created), None, None, None),
             (SimpleNamespace(content="Shared Mira summary", from_mira=True, mira_shared_to_px=True, created_at=created), None, None, None),
-            (SimpleNamespace(content=ordinary, from_mira=False, created_at=created), None, "tester", None),
+            (SimpleNamespace(id=uuid.uuid4(), content=ordinary, from_mira=False, created_at=created), None, "tester", None),
             (SimpleNamespace(content=" ", from_mira=False, created_at=created), None, None, None),
         ]
 
@@ -64,7 +64,8 @@ class PrimeFlowReportTests(unittest.TestCase):
             async def execute(self, _statement):
                 return SimpleNamespace(all=lambda: rows)
 
-        with patch("app.services.primeflow_report_delivery.SessionLocal", return_value=FakeSession()):
+        with patch("app.services.primeflow_report_delivery.SessionLocal", return_value=FakeSession()), \
+             patch("app.services.gmail_px_notes.sync_gmail_px_notes", AsyncMock()):
             notes = asyncio.run(load_undiscussed_notes())
             full_notes = asyncio.run(load_undiscussed_notes(show_full_mira_notes=True))
         self.assertEqual([note.content for note in notes], [ordinary])
@@ -883,8 +884,37 @@ class PrimeFlowReportTests(unittest.TestCase):
                 ]
                 if current == "14:10":
                     expected_titles.append("BLLOK 14:30-16:00 28.07.2026")
+                elif current in {"11:00", "11:50"}:
+                    expected_titles.append(f"DET {'08:00' if current == '11:00' else 'DL AM'} · PROGRESI")
                 self.assertEqual([section.title for section in document.sections], expected_titles)
                 self.assertEqual(document.task_count, 2)
+
+    def test_morning_follow_up_table_includes_early_done_and_the_exact_task_comment(self):
+        day = date(2026, 7, 28)
+        common = {"date": day.isoformat(), "due_date": day.isoformat(), "person": "Anisa Test"}
+        first = {**common, "task_id": "early", "title": "08:00 Oferta", "status": "DONE",
+                 "completed_at": f"{day}T08:30:00+02:00"}
+        am = {**common, "task_id": "am", "title": "Plani", "status": "IN_PROGRESS",
+              "is_deadline_important": True, "finish_period": "AM"}
+        pm = {**am, "task_id": "pm", "finish_period": "PM"}
+        early_copy = {**first, "id": "early-previous-day", "date": "2026-07-27"}
+        data = {"items": {"oneH": [early_copy], "important": [am, pm]}, "morning_follow_up_tasks": [first]}
+        for slot, row, status in (("11:00", first, "DONE"), ("11:50", am, "IN_PROGRESS")):
+            comment = "AT: Pragu < 50%"
+            document = build_report_document(
+                data, day, slot, completion_window_start=strike_interval_start(day, slot),
+                completion_window_end=strike_interval_end(day, slot),
+                morning_follow_up_comments={row["task_id"]: comment},
+            )
+            follow_up = document.sections[-1]
+            self.assertTrue(follow_up.morning_follow_up)
+            self.assertEqual([(task.task_id, task.status) for person in follow_up.employees for task in person.tasks],
+                             [(row["task_id"], status)])
+            self.assertIn("AT: Pragu &lt; 50%", render_html(document))
+            self.assertIn(comment, render_plain_text(document))
+            xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml")
+            self.assertIn(b"AT: Pragu &lt; 50%", xml)
+            self.assertTrue(render_png(document).startswith(b"\x89PNG"))
 
     def test_html_has_a_clear_separator_between_report_sections(self) -> None:
         data = {

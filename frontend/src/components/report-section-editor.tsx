@@ -324,7 +324,7 @@ function renderKeyedLine(text: string, className = "px-3 py-2") {
   )
 }
 
-function rowTone(label: string, cells: string[], headers: string[]) {
+function rowTone(label: string, cells: string[], headers: string[], colorEightAmByStatus = false) {
   const normalizedLabel = label.toUpperCase()
   const statusIndex = headers.findIndex((header) => normalizeHeader(header) === "STATUS")
   const statusValue = statusIndex >= 0 ? cells[statusIndex]?.trim().toUpperCase().replace(/_/g, " ") : ""
@@ -339,8 +339,9 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   const typeValue = typeIndex >= 0 ? cells[typeIndex]?.trim().toUpperCase() : ""
   // Priority report treatments are table/type semantics and must win over
   // ordinary task status colors.
-  if (priorityTone === "EIGHT_AM" || typeValue.includes("08:00") || normalizedLabel.includes("08:00 TASKS")) return "bg-white text-slate-950"
-  if (priorityTone === "DEADLINE" || typeValue.includes("DEADLINE") || normalizedLabel.includes("TASKS WITH DEADLINE")) return "bg-red-600 text-white"
+  const eightAm = priorityTone === "EIGHT_AM" || typeValue.includes("08:00") || normalizedLabel.includes("08:00 TASKS")
+  if (eightAm && !colorEightAmByStatus) return "bg-white text-slate-950"
+  if (!eightAm && (priorityTone === "DEADLINE" || typeValue.includes("DEADLINE") || normalizedLabel.includes("TASKS WITH DEADLINE"))) return "bg-red-600 text-white"
   if (resolvedStatus === "LATE") return "bg-red-100"
   const productsIndex = headers.findIndex((header) => normalizeHeader(header) === "PRODUCTS")
   const productsValue = productsIndex >= 0 ? cells[productsIndex] || "" : ""
@@ -353,7 +354,7 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   if (resolvedStatus === "PAUSED" || resolvedStatus === "STOPPED") return "bg-slate-200"
   if (resolvedStatus === "TODO") return "bg-pink-200"
   if (resolvedStatus === "DONE") return "bg-green-100"
-  if (typeValue.includes("08:00")) return "bg-white text-slate-950"
+  if (eightAm) return "bg-white text-slate-950"
   if (typeValue.includes("DEADLINE")) return "bg-red-600 text-white"
   if (normalizedLabel.includes("DEADLINE")) return "bg-red-600 text-white"
   if (normalizedLabel.includes("LATE")) return "bg-red-100"
@@ -582,6 +583,8 @@ export function ReportSectionPreview({
   body,
   filterCreatedWeek = false,
   filterWfeAge = false,
+  filterDueDate = false,
+  colorEightAmByStatus = false,
   projectColumnWidth,
   compactBzColumn = false,
   largerTableText = false,
@@ -593,6 +596,8 @@ export function ReportSectionPreview({
   body: string
   filterCreatedWeek?: boolean
   filterWfeAge?: boolean
+  filterDueDate?: boolean
+  colorEightAmByStatus?: boolean
   projectColumnWidth?: string
   compactBzColumn?: boolean
   largerTableText?: boolean
@@ -603,6 +608,7 @@ export function ReportSectionPreview({
 }) {
   const [createdWeekFilter, setCreatedWeekFilter] = React.useState<"all" | "this" | "last">("all")
   const [wfeAgeFilter, setWfeAgeFilter] = React.useState("all")
+  const [dueDateFilter, setDueDateFilter] = React.useState("all")
   const lines = reportSectionEditorLines(body)
   const templates = tableGridTemplates(lines)
   const lineContexts = lines.reduce<{ contexts: Array<{ label: string; headers: string[] }>; label: string; headers: string[] }>(
@@ -799,6 +805,8 @@ export function ReportSectionPreview({
     const createdColumnIndex = headers.findIndex((header) => normalizeHeader(header) === "ADDED")
     const canFilterCreatedWeek = filterCreatedWeek && createdColumnIndex >= 0
     const canFilterWfeAge = filterWfeAge && createdColumnIndex >= 0
+    const dueDateColumnIndex = rows[0].headers.findIndex((header) => normalizeHeader(header) === "DUE DATE")
+    const canFilterDueDate = filterDueDate && dueDateColumnIndex >= 0
     const dataRows = rows.filter((row) => !row.isHeader)
     const wfeDates = canFilterWfeAge
       ? [...new Set(dataRows.map((row) => row.cells[createdColumnIndex]?.trim()).filter((value) => /^\d{2}\.\d{2}$/.test(value || "")))]
@@ -813,12 +821,18 @@ export function ReportSectionPreview({
     const ageFilteredRows = canFilterWfeAge && wfeAgeFilter !== "all"
       ? orderedDataRows.filter((row) => row.cells[createdColumnIndex]?.trim().toUpperCase() === wfeAgeFilter)
       : orderedDataRows
-    const visibleDataRows = !canFilterCreatedWeek || createdWeekFilter === "all"
+    const weekFilteredRows = !canFilterCreatedWeek || createdWeekFilter === "all"
       ? ageFilteredRows
       : ageFilteredRows.filter((row) => {
           const value = row.cells[createdColumnIndex]?.trim().toUpperCase()
           return createdWeekFilter === "this" ? value === "THIS W" : value === "LAST W"
         })
+    const visibleDataRows = canFilterDueDate && dueDateFilter !== "all"
+      ? weekFilteredRows.filter((row) => {
+          const dueDate = row.cells[dueDateColumnIndex]?.trim().toUpperCase() || ""
+          return dueDateFilter === "today" ? dueDate === "SOT" : /^\d{2}\.\d{2}\.\d{4}$/.test(dueDate)
+        })
+      : weekFilteredRows
     const hasWideColumn = headers.some((header) => {
       const name = normalizeHeader(header)
       return name === "TITLE" || name === "NOTE" || name === "PYETJA" || name === "PËRGJIGJJA E GA"
@@ -854,7 +868,21 @@ export function ReportSectionPreview({
                             header === "NR" ? "w-8" : ""
                           } ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${header === "DERGUESI" || (hasGmailSender && header === "TITLE") ? "w-[180px]" : ""}`}
                         >
-                          {header === "ADDED" && canFilterWfeAge ? (
+                          {header === "DUE DATE" && canFilterDueDate ? (
+                            <label className="flex flex-col gap-1 text-left">
+                              <span>{trimTableCell(cell) || "-"}</span>
+                              <select
+                                aria-label="Filtro sipas datës së afatit"
+                                value={dueDateFilter}
+                                onChange={(event) => setDueDateFilter(event.target.value)}
+                                className="h-6 rounded border border-slate-300 bg-white px-1 text-[10px] font-medium text-slate-700"
+                              >
+                                <option value="all">Të gjitha</option>
+                                <option value="today">Sot</option>
+                                <option value="other">Datat e tjera</option>
+                              </select>
+                            </label>
+                          ) : header === "ADDED" && canFilterWfeAge ? (
                             <label className="flex flex-col gap-1 text-left">
                               <span>{trimTableCell(cell) || "-"}</span>
                               <select
@@ -899,9 +927,12 @@ export function ReportSectionPreview({
               })}
           </thead>
           <tbody>
+            {canFilterDueDate && dueDateFilter !== "all" && !visibleDataRows.length ? (
+              <tr><td colSpan={headers.length} className="px-2 py-2 text-slate-600">Asnjë detyrë për këtë filtër.</td></tr>
+            ) : null}
             {visibleDataRows.map((row, rowIndex) => {
                 const visible = displayCells(row)
-                const tone = meetingRowTone(row.headers, row.cells) || rowTone(row.label, row.cells, row.headers)
+                const tone = meetingRowTone(row.headers, row.cells) || rowTone(row.label, row.cells, row.headers, colorEightAmByStatus)
                 const eightAmTask = isEightAmTaskRow(row.headers, row.cells, row.label)
                 const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)
                 const amPmDivider = hasAmPmDivider(row.label, visibleDataRows, rowIndex)
@@ -932,6 +963,10 @@ export function ReportSectionPreview({
                               : "px-2"
                           } ${continuationCellTone(header, cell)} ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${tyoCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
                             createdWeekCellTone(visible.headers, visible.cells, cellIndex, canFilterWfeAge || row.label.toUpperCase().includes("DT WFE"))
+                          } ${
+                            canFilterDueDate && header === "DUE DATE" && displayedCell.trim().toUpperCase() === "SOT"
+                              ? "bg-red-600 font-semibold text-white"
+                              : ""
                           } ${
                             stackedDate
                               ? "w-[1%] whitespace-pre"

@@ -215,10 +215,11 @@ test("M1 inbox shows the subject and expands only the selected email", async ({ 
   }
 })
 
-test("M2 places compact BZ ME after LLOJI and saves task explanations by task ID", async ({ page }) => {
+test("M2 filters due dates, colors 08:00 by status and saves task explanations by task ID", async ({ page }) => {
   const user = { id: "m2-editor", full_name: "Report editor", email: "editor@example.test", role: "STAFF", is_active: true }
-  const table = (caption: string, columns: string[], values: string[]) =>
-    `${caption}:\n+---+\n| ${columns.join(" | ")} |\n+---+\n| ${values.join(" | ")} |\n+---+`
+  const table = (caption: string, columns: string[], ...rows: string[][]) =>
+    [caption + ":", "+---+", "| " + columns.join(" | ") + " |", "+---+",
+      ...rows.flatMap(values => ["| " + values.join(" | ") + " |", "+---+"])].join("\n")
   const task = { row_number: "1", task_id: "test-task", title: "Test task", assignees: "EF", reason: "-", comment: "Discord note" }
   const key = "DET TE PAKRYERA, 08:00/DEADLINE"
   const ga = "GA MBYLLJA E DET"
@@ -227,7 +228,11 @@ test("M2 places compact BZ ME after LLOJI and saves task explanations by task ID
     id: "draft", status: "DRAFT", report_date: "2026-11-24", subject: "M2",
     recipients: { to: [], cc: [], bcc: [] }, unfinished_task_explanations: [task],
     sections: [
-      { section_key: key, title: key, body: table(key, ["NR", "KUSH", "TITULLI", "ARSYEJA", "KOMENT"], ["1", "EF", "Test task", task.reason, task.comment]) },
+      { section_key: key, title: key, body: table(key,
+        ["NR", "KUSH", "STATUS", "LLOJI", "TITULLI", "DUE DATE", "PROGRESI", "ARSYEJA", "KOMENT"],
+        ["1", "EF", "IN_PROGRESS", "08:00", "Test task", "SOT", "IN PROGRESS", task.reason, task.comment],
+        ["2", "RA", "TODO", "DEADLINE / 08:00", "Deadline this week", "27.11.2026", "TODO", "-", "-"],
+        ["3", "DV", "DONE", "08:00", "Deadline next week", "04.12.2026", "DONE", "-", "-"]) },
       { section_key: ga, title: ga, body: [
         table("TODO", ["NR", "KUSH", "LLOJI", "TITULLI", "BZ ME"], ["1", "GA", "SYS", "Long task title", "OH"]),
         table("IN PROGRESS", ["NR", "KUSH", "LLOJI", "TITULLI", "BZ ME"], ["1", "GA", "PRJK", "Another task", "DV / LV / EP"]),
@@ -253,6 +258,24 @@ test("M2 places compact BZ ME after LLOJI and saves task explanations by task ID
     return route.fulfill({ json: [] })
   })
   await page.goto("/after-break-report")
+  const dueFilter = page.getByRole("combobox", { name: "Filtro sipas datës së afatit" })
+  const today = page.getByRole("row").filter({ hasText: "Test task" })
+  const thisWeek = page.getByRole("row").filter({ hasText: "Deadline this week" })
+  const nextWeek = page.getByRole("row").filter({ hasText: "Deadline next week" })
+  await expect(today).toHaveClass(/bg-yellow-100/)
+  await expect(today.getByRole("cell", { name: "SOT", exact: true })).toHaveClass(/bg-red-600/)
+  await expect(thisWeek.getByRole("cell", { name: "27.11.2026", exact: true })).not.toHaveClass(/bg-red-600/)
+  await expect(thisWeek).toHaveClass(/bg-pink-200/)
+  await expect(nextWeek).toHaveClass(/bg-green-100/)
+  await dueFilter.selectOption("today")
+  await expect(today).toBeVisible()
+  await expect(thisWeek).toHaveCount(0)
+  await expect(nextWeek).toHaveCount(0)
+  await dueFilter.selectOption("other")
+  await expect(today).toHaveCount(0)
+  await expect(thisWeek).toBeVisible()
+  await expect(nextWeek).toBeVisible()
+  await dueFilter.selectOption("all")
   const headers = page.getByRole("columnheader", { name: "BZ ME", exact: true })
   await expect(headers).toHaveCount(4)
   const columns = await headers.evaluateAll(cells => cells.map(cell => ({

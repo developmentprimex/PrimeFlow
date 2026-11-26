@@ -1074,6 +1074,7 @@ def _m3_status_table(
     include_priority_tone: bool = False,
     show_all_assignees: bool = False,
     bz_labels_by_task: dict[Any, str] | None = None,
+    comments_by_task: dict[Any, str] | None = None,
     pause_day: date | None = None,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
@@ -1097,7 +1098,9 @@ def _m3_status_table(
     if bz_labels_by_task is not None:
         columns.append(("BZ ME", 14))
     if daily_rlz_by_task is not None:
-        columns.extend((("ARSYEJA", 24), ("KOMENT", 36)))
+        columns.append(("ARSYEJA", 24))
+    if daily_rlz_by_task is not None or comments_by_task is not None:
+        columns.append(("KOMENT", 36))
 
     border = "+" + "+".join("-" * (width + 2) for _, width in columns) + "+"
 
@@ -1135,7 +1138,9 @@ def _m3_status_table(
         if bz_labels_by_task is not None:
             values.append("-")
         if daily_rlz_by_task is not None:
-            values.extend(("-", "-"))
+            values.append("-")
+        if daily_rlz_by_task is not None or comments_by_task is not None:
+            values.append("-")
         rows.append(table_row(values))
         rows.append(border)
         return rows
@@ -1183,7 +1188,9 @@ def _m3_status_table(
         title_lines = _wrap_fixed_width(display_title, 64)
         reason, comment = (daily_rlz_by_task or {}).get(task.id, ("-", "-"))
         reason_lines = _wrap_fixed_width(reason or "-", 24) if daily_rlz_by_task is not None else []
-        comment_lines = _wrap_fixed_width(comment or "-", 36) if daily_rlz_by_task is not None else []
+        if comments_by_task is not None:
+            comment = comments_by_task.get(task.id, "-").replace("|", "/")
+        comment_lines = _wrap_fixed_width(comment or "-", 36) if daily_rlz_by_task is not None or comments_by_task is not None else []
         status = _normalize_report_status(task.status) if with_status else None
         padded_titles = _append_status_marker_to_lines(title_lines, status, 64)
         if pause_day and pause_until_on_day(getattr(task, "pause_periods", None), pause_day):
@@ -1222,7 +1229,9 @@ def _m3_status_table(
         if bz_labels_by_task is not None:
             values.append(bz_labels_by_task.get(task.id, "-"))
         if daily_rlz_by_task is not None:
-            values.extend((reason_lines[0], comment_lines[0]))
+            values.append(reason_lines[0])
+        if comment_lines:
+            values.append(comment_lines[0])
         rows.append(table_row(values))
         continuation_count = max(
             len(padded_titles), len(project_lines), len(reason_lines), len(comment_lines)
@@ -1251,10 +1260,9 @@ def _m3_status_table(
             if bz_labels_by_task is not None:
                 continuation.append("")
             if daily_rlz_by_task is not None:
-                continuation.extend((
-                    reason_lines[line_index] if line_index < len(reason_lines) else "",
-                    comment_lines[line_index] if line_index < len(comment_lines) else "",
-                ))
+                continuation.append(reason_lines[line_index] if line_index < len(reason_lines) else "")
+            if comment_lines:
+                continuation.append(comment_lines[line_index] if line_index < len(comment_lines) else "")
             rows.append(table_row(continuation))
         rows.append(border)
     return rows
@@ -2060,6 +2068,8 @@ def _meeting_title_with_highlight(
     linked_external: Meeting | None = None,
 ) -> str:
     title = _clean_task_title(meeting.title)
+    if getattr(meeting, "all_participants", False):
+        title = f"{title} (ALL)"
     origin = _meeting_origin_label(meeting, linked_external=linked_external)
     if origin:
         title = f"[{origin}] {title}"
@@ -2480,6 +2490,8 @@ def _common_meeting_lines(
         if _item_date(item) != day:
             continue
         title = _clean_task_title(str(item.get("title") or item.get("task_title") or "Meeting"))
+        if item.get("allParticipants"):
+            title = f"{title} (ALL)"
         origin = _meeting_origin_label(item, meeting_type=meeting_type)
         if origin:
             title = f"[{origin}] {title}"
@@ -3046,6 +3058,19 @@ def _table_tone_from_type(task_type: str) -> str:
     return ""
 
 
+def _is_m2_priority_progress_table(header: list[str]) -> bool:
+    return "PROGRESI" in header and "DISCORD 1H" in header
+
+
+def _eight_am_progress_tone(header: list[str], row: list[str], tone: str) -> str:
+    if tone != "eight-am" or not _is_m2_priority_progress_table(header):
+        return tone
+    index = header.index("PROGRESI")
+    if index < len(row) and (status := _table_tone_from_status(row[index].split(" · ", 1)[0])):
+        return f"eight-am:{status}"
+    return tone
+
+
 def _has_negative_product_delta(value: str) -> bool:
     return bool(re.search(r"\(\s*-\d+\s*\)", value or ""))
 
@@ -3077,6 +3102,7 @@ def _sort_priority_task_rows(header: list[str], rows: list[list[str]]) -> list[l
 
 
 def _table_tone_styles(tone: str) -> tuple[str, str]:
+    tone = tone.removeprefix("eight-am:")
     if tone in MEETING_TONE_COLORS:
         return MEETING_TONE_COLORS[tone], "#111827"
     if tone == "todo":
@@ -3104,10 +3130,14 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
     return "#f8fafc", "#111827"
 
 
-def _table_cell_style_override(header: str, value: str) -> tuple[str, str, bool] | None:
+def _table_cell_style_override(
+    header: str, value: str, *, highlight_due_today: bool = False,
+) -> tuple[str, str, bool] | None:
     """Return per-cell styling shared by email-equivalent native exports."""
     header_name = _normalized_table_header(header)
     normalized = value.strip().upper()
+    if highlight_due_today and header_name == "DUE DATE" and normalized == "SOT":
+        return "#DC2626", "#FFFFFF", True
     if header_name == "DISK":
         if normalized == "YES":
             return "#DCFCE7", "#166534", True
@@ -3217,6 +3247,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     header, body_rows = _normalize_meeting_status_table(header, body_rows)
     body_rows = _merge_ascii_continuation_rows(header, body_rows)
     body_rows = _sort_priority_task_rows(header, body_rows)
+    highlight_m2_priority = _is_m2_priority_progress_table(header)
     status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "STATUS"), None)
     type_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TYPE"), None)
     title_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TITLE"), None)
@@ -3252,8 +3283,8 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         if tone in {"deadline", "eight-am"} and type_index is None:
             row_tone = tone
         if title_index is not None and len(row) > title_index and TASK_PAUSE_LABEL in row[title_index]:
-            row_tone = "paused"
-        row_tones.append(row_tone)
+            row_tone = "eight-am:paused" if row_tone == "eight-am" and highlight_m2_priority else "paused"
+        row_tones.append(_eight_am_progress_tone(header, row, row_tone))
         highlighted_meeting_rows.append(is_highlighted_meeting)
         cleaned_body_rows.append(row)
     body_rows = cleaned_body_rows
@@ -3353,8 +3384,8 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                     ' bgcolor="#dc2626" style="background-color:#dc2626!important;'
                     'color:#ffffff!important;font-weight:400;text-align:left;"'
                 )
-            if _normalized_table_header(header[index]) == "VAZHDON?":
-                override = _table_cell_style_override(header[index], current_cell)
+            if _normalized_table_header(header[index]) in {"VAZHDON?", "DUE DATE"}:
+                override = _table_cell_style_override(header[index], current_cell, highlight_due_today=highlight_m2_priority)
                 if override:
                     background, foreground, _ = override
                     cell_style = (
@@ -3372,11 +3403,19 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             if is_highlighted_meeting:
                 if _normalized_table_header(header[index]) == "TITLE":
                     cell_classes.append("title")
+            if row_tone.startswith("eight-am:"):
+                edge = "border-left:3px solid #dc2626;" if index == 0 else (
+                    "border-right:3px solid #dc2626;" if index == len(row) - 1 else ""
+                )
+                cell_style = _append_cell_style_attribute(
+                    cell_style, f"border-top:3px solid #dc2626;border-bottom:3px solid #dc2626;{edge}",
+                )
             row_cells.append(
                 f"<td{_email_column_width_attr(column_widths[index])}{cell_style} class=\"{' '.join(filter(None, cell_classes))}\">"
                 f"{_render_table_cell_html(header[index], current_cell, strong_start_due_divider=_is_m3_start_due_table(caption))}</td>"
             )
-        row_classes = " ".join(filter(None, (row_tone, "highlight" if is_highlighted_meeting else "")))
+        row_classes = " ".join(filter(None, (row_tone.removeprefix("eight-am:"),
+                                             "highlight" if is_highlighted_meeting else "")))
         row_style = (
             f' bgcolor="{row_background}" style="background-color:{row_background}!important;'
             f'color:{row_foreground}!important;"'
@@ -3758,6 +3797,7 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
     header, body_rows = _section_report_table_rows(lines)
     if not header:
         return [], [], [], []
+    highlight_m2_priority = _is_m2_priority_progress_table(header)
     status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "STATUS"), None)
     type_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TYPE"), None)
     title_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TITLE"), None)
@@ -3789,11 +3829,11 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
         if tone in {"deadline", "eight-am"} and type_index is None:
             row_tone = tone
         if title_index is not None and TASK_PAUSE_LABEL in row[title_index]:
-            row_tone = "paused"
+            row_tone = "eight-am:paused" if row_tone == "eight-am" and highlight_m2_priority else "paused"
+        row_tones.append(_eight_am_progress_tone(header, row, row_tone))
         if status_index is not None:
             row = [cell for index, cell in enumerate(row) if index != status_index]
         cleaned_rows.append(row)
-        row_tones.append(row_tone)
         highlights.append(highlighted)
     if status_index is not None:
         header = [cell for index, cell in enumerate(header) if index != status_index]
@@ -4190,6 +4230,7 @@ def render_section_report_docx(
             cell.text = caption
             cell_style(cell, "#F8FAFC", bold=True, size=9)
         header = block["header"]
+        highlight_due_today = _is_m2_priority_progress_table(header)
         table = document.add_table(rows=1, cols=len(header))
         table.autofit = False
         column_widths = table_widths(header, block["rows"])
@@ -4208,7 +4249,7 @@ def render_section_report_docx(
             for column, value in enumerate(values):
                 header_name = _normalized_table_header(header[column])
                 cell_fill, cell_color, cell_bold = fill, color, False
-                override = _table_cell_style_override(header_name, str(value))
+                override = _table_cell_style_override(header_name, str(value), highlight_due_today=highlight_due_today)
                 if override is not None:
                     cell_fill, cell_color, cell_bold = override
                 elif header_name == "DISK" and str(value).strip().upper() == "YES":
@@ -4228,7 +4269,7 @@ def render_section_report_docx(
                     str(value),
                     strong_start_due_divider=_is_m3_start_due_table(caption),
                 )
-                outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
+                outline = "#DC2626" if tone.split(":", 1)[0] == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
                 cell_style(cell, cell_fill, color=cell_color, bold=cell_bold, size=8, outline=outline)
                 if header_name == "TITLE" and _split_leading_task_marker(str(value)):
                     marker_run = cell.paragraphs[0].runs[0]
@@ -4401,6 +4442,7 @@ def render_section_report_png(
                 draw.text((margin + 10, y + 6), str(block["caption"]), fill="#111827", font=bold)
                 y += 32
             header, column_widths = block["header"], widths(block["header"], block["rows"])
+            highlight_due_today = _is_m2_priority_progress_table(header)
             x = margin
             for index, value in enumerate(header):
                 right = x + column_widths[index]
@@ -4433,7 +4475,7 @@ def render_section_report_png(
                 for index, value in enumerate(row):
                     header_name = _normalized_table_header(header[index])
                     cell_fill, cell_color, cell_font = fill, color, font
-                    override = _table_cell_style_override(header_name, str(value))
+                    override = _table_cell_style_override(header_name, str(value), highlight_due_today=highlight_due_today)
                     if override is not None:
                         cell_fill, cell_color, override_bold = override
                         cell_font = bold if override_bold else font
@@ -4450,8 +4492,9 @@ def render_section_report_png(
                     elif header_name == "TITLE" and _split_leading_task_marker(str(value)):
                         cell_font = bold
                     right = x + column_widths[index]
-                    outlined = highlighted or tone == "eight-am"
-                    outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
+                    eight_am = tone.split(":", 1)[0] == "eight-am"
+                    outlined = highlighted or eight_am
+                    outline = "#DC2626" if eight_am else ("#2563EB" if highlighted else "#CBD5E1")
                     draw.rectangle((x, y, right, y + row_height), fill=cell_fill, outline=outline, width=3 if outlined else 1)
                     if _is_stacked_start_due_cell(header[index], str(value)):
                         start_line, due_line = str(value).split("\n", 1)

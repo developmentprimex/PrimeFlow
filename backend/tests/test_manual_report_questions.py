@@ -106,8 +106,8 @@ def test_numbered_manual_question_keeps_requested_position(kind):
         "body": "(Ploteso manualisht)",
     }
     sections = normalize([numbered])
-    # M2 has no built-in manual questions after the email point became automatic.
-    expected_position = 0 if kind == "after_break" else 1
+    # M1 keeps its built-in reorganization question at the end of the report.
+    expected_position = 0 if kind in {"morning", "after_break"} else 1
     assert sections[expected_position] == numbered
     assert normalize(sections)[expected_position] == numbered
 

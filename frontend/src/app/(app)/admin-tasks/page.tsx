@@ -728,6 +728,7 @@ type InternalItem = {
   platform: string
   owner: string
   assignees?: string[]
+  allParticipants?: boolean
   department?: string
   recurrenceType?: string | null
   recurrence_type?: string | null
@@ -2144,7 +2145,10 @@ function GaTimeMeetingCard({ kind, meeting }: TimeTableMeeting) {
         {statusLabel ? <span className={`ga-time-meeting-status ${status}`} data-meeting-status={status}>{statusLabel}</span> : null}
       </span>
       <span className="ga-time-meeting-title">
-        <span className="ga-time-meeting-title-text"><strong>{kind === "internal" ? "TAK INT:" : "TAK EXT:"}</strong> {meeting.title}</span>
+        <span className="ga-time-meeting-title-text">
+          <strong>{kind === "internal" ? "TAK INT:" : "TAK EXT:"}</strong> {meeting.title}
+          {kind === "internal" && meeting.allParticipants ? " (ALL)" : null}
+        </span>
       </span>
     </div>
   )
@@ -6551,6 +6555,7 @@ export default function AdminTasksPage() {
     const columns = ["NR", "LLOJI", ...commonWeekISOs.map((iso) => `${getDayCode(fromISODate(iso))} = ${formatDateHuman(iso)}`)]
 
     const assigneesSuffix = (entry: any) => {
+      if (entry.allParticipants) return " (ALL)"
       const initialsList = entryAssignees(entry).map((name: string) => commonViewInitials(name)).filter(Boolean)
       return initialsList.length ? ` (${initialsList.join(", ")})` : ""
     }
@@ -6955,7 +6960,7 @@ export default function AdminTasksPage() {
               <span className="week-table-meeting-title"><span className="week-table-meeting-title-text">{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span></span>
             </span>
             <div className="week-table-avatars">
-              {entryAssignees(e).map((name: string) => (
+              {e.allParticipants ? <span className="week-table-avatar">ALL</span> : entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
                   {commonViewInitials(name)}
                 </span>

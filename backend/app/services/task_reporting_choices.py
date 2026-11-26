@@ -234,6 +234,7 @@ async def replace_group_marker_overrides(db, tasks, user, value, day, *, marker_
 
 
 async def reporting_differences(db, day: date, now: datetime, *, marker_day: date, slot_day: date):
+    is_today = day == now.date()
     start = datetime.combine(day, time.min, now.tzinfo)
     stop = datetime.combine(day + timedelta(days=1), time.min, now.tzinfo)
     entries = (await db.scalars(select(AuditLog).where(
@@ -244,9 +245,9 @@ async def reporting_differences(db, day: date, now: datetime, *, marker_day: dat
     rows = [
         {**entry.after, "id": str(entry.id), "task_id": str(entry.entity_id), "changed_at": entry.created_at.isoformat(),
          "previous": choice_label(entry.action, (entry.before or {}).get("value"))}
-        for entry in entries if entry.after.get("peers")
+        for entry in entries if entry.after.get("peers") and (not is_today or entry.action != "slot")
     ]
-    if day != now.date():
+    if not is_today:
         return rows
     # Show current differences that predate the warning, including missing symbols.
     tasks = (await db.scalars(select(Task).where(Task.is_active.is_(True), Task.work_staff_filter(),
@@ -263,6 +264,10 @@ async def reporting_differences(db, day: date, now: datetime, *, marker_day: dat
     slots = await slot_values(db, candidates, slot_day)
     personal = await personal_choices(db, [task.id for task in candidates if len(owners[task.id]) > 1],
                                       slot_day, marker_day=marker_day)
+    latest_slots = {}
+    for entry in entries:
+        if entry.action == "slot" and entry.after["date"] == slot_day.isoformat():
+            latest_slots.setdefault((entry.entity_id, entry.after["owner_id"]), entry)
     seen = {(row.get("task_id"), row["owner_id"], row["field"], row["value"]) for row in rows}
     for group in groups:
         for field in ("slot", "marker"):
@@ -275,9 +280,16 @@ async def reporting_differences(db, day: date, now: datetime, *, marker_day: dat
                 if peers:
                     task = min((item for item in group if owner in owners[item.id]),
                                key=lambda item: (item.assigned_to != owner, item.id))
+                    reason = ""
+                    if field == "slot":
+                        changes = (latest_slots.get((item.id, str(owner))) for item in group)
+                        latest = max((change for change in changes if change is not None),
+                                     key=lambda change: (change.created_at, change.id), default=None)
+                        if latest is not None and same_choice(field, latest.after["value"], value):
+                            reason = latest.after.get("reason", "")
                     rows.append({"id": f"{task.id}:{owner}:{field}", "field": field, "task_title": task.title,
                                  "task_id": str(task.id), "owner_id": str(owner),
                                  "person": names[owner], "label": choice_label(field, value), "peers": peers,
-                                 "reason": "", "date": (slot_day if field == "slot" else marker_day).isoformat(),
+                                 "reason": reason, "date": (slot_day if field == "slot" else marker_day).isoformat(),
                                  "previous": None, "changed_at": None})
     return rows

@@ -58,6 +58,8 @@ def task_lines(tasks: list[dict]) -> str:
         parts = [t.get("read_aloud") or t.get("spoken") or t["title"], t.get("status_label") or t["status"], t["period"]]
         if t.get("color"):
             parts.append("ngjyra " + t["color"])
+        if t.get("morning_follow_up"):
+            parts.append(t["morning_follow_up"])
         if t.get("symbol"):
             parts.append("simboli " + t["symbol"])
         if t.get("deadline"):
@@ -96,6 +98,7 @@ def turn_brief(current: dict) -> dict:
                 "diskutuar": (brief.get("discussion") or {}).get(task_id, {}),
                 "pershkrimi": task.get("description"), "komenti_simbolit": task.get("symbol_comment"),
                 "simboli": task.get("symbol"), "afati": task.get("due"), "deadline": bool(task.get("deadline")),
+                **({"ndjekja_e_mengjesit": task["morning_follow_up"]} if task.get("morning_follow_up") else {}),
             })
     result = {
         "turn_id": current.get("id"),

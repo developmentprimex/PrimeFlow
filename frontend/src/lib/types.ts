@@ -795,6 +795,7 @@ export interface Meeting {
   created_at: string
   updated_at: string
   participant_ids?: string[]
+  all_participants?: boolean
   paired_internal_meeting?: Meeting | null
   paired_external_meeting_id?: string | null
   pre_external_meeting_id?: string | null

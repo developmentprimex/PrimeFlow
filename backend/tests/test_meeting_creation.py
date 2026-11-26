@@ -13,10 +13,10 @@ from fastapi import HTTPException
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost/primex_test")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
-from app.api.routers.meetings import create_meeting
+from app.api.routers.meetings import create_meeting, update_meeting_reminder_settings
 from app.models.enums import UserRole
 from app.models.meeting import Meeting, MeetingParticipant
-from app.schemas.meeting import MeetingCreate
+from app.schemas.meeting import MeetingCreate, MeetingReminderSettingsUpdate
 
 
 class _ListResult:
@@ -103,6 +103,52 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         foreign_key = next(iter(Meeting.__table__.c.pre_external_meeting_id.foreign_keys))
         self.assertEqual(foreign_key.target_fullname, "meetings.id")
         self.assertEqual(foreign_key.ondelete, "CASCADE")
+
+    async def test_internal_all_persists_the_scope_and_real_participants(self) -> None:
+        department_id = uuid.uuid4()
+        active_user_ids = [uuid.uuid4(), uuid.uuid4()]
+        db = _FakeDb(valid_user_ids=active_user_ids)
+        payload = MeetingCreate(
+            title="Team sync",
+            meeting_type="internal",
+            department_id=department_id,
+            all_participants=True,
+        )
+        result = await create_meeting(
+            payload=payload, db=db,
+            user=SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None),
+        )
+        self.assertTrue(result.all_participants)
+        self.assertEqual(result.department_id, department_id)
+        self.assertCountEqual(result.participant_ids, active_user_ids)
+        self.assertCountEqual(
+            [value.user_id for value in db.added if isinstance(value, MeetingParticipant)],
+            active_user_ids,
+        )
+
+    async def test_all_label_survives_reminder_edits_and_clears_when_participants_change(self) -> None:
+        now = datetime.now(timezone.utc)
+        meeting = Meeting(
+            id=uuid.uuid4(), title="Team sync", meeting_type="internal",
+            department_id=uuid.uuid4(), all_participants=True, created_at=now, updated_at=now,
+            external_agent_test_task_requested=False, external_pim_image_test_task_requested=False,
+        )
+        user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
+        first, second = uuid.uuid4(), uuid.uuid4()
+        db = AsyncMock()
+        db.add = lambda _value: None
+        db.execute.return_value = _ListResult([meeting])
+        for participant_ids, expected_all in [([second, first], True), ([first], False)]:
+            with (
+                patch("app.api.routers.meetings.manual_participant_ids", new=AsyncMock(return_value={meeting.id: [first, second]})),
+                patch("app.api.routers.meetings.replace_manual_participants", new=AsyncMock(return_value=participant_ids)),
+            ):
+                updated = await update_meeting_reminder_settings(
+                    meeting.id, MeetingReminderSettingsUpdate(participant_ids=participant_ids, reminder_minutes_before=10),
+                    db=db, user=user,
+                )
+            self.assertEqual(updated.all_participants, expected_all)
+            self.assertCountEqual(updated.participant_ids, participant_ids)
 
     async def test_external_meeting_with_internal_time_creates_both_atomically(self) -> None:
         department_id = uuid.uuid4()

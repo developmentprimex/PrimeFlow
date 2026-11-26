@@ -559,7 +559,9 @@ async def reminder_tasks(reminder_id: uuid.UUID, payload: Actor, db: AsyncSessio
     if reminder.bucket in one_h.SLOTS:
         tasks = await daily_tasks(db, user, include_done=True)
         if reminder.one_h_report is None:
-            planned = [t for t in tasks if t.get('one_h_report_slot') == reminder.bucket]
+            planned = one_h.planned_tasks(tasks, reminder.day, reminder.bucket)
+            if reminder.bucket == '11:50' and not planned:
+                return {'tasks': [], 'bucket': reminder.bucket}
             reminder.one_h_report = one_h.snapshot(planned, datetime.now(ZoneInfo(settings.APP_TIMEZONE)), slot=reminder.bucket)
         reminder.one_h_report = one_h.refresh(reminder.one_h_report, tasks, slot=reminder.bucket)
         result = one_h.presentation(reminder)
@@ -590,6 +592,8 @@ async def answer_one_h(reminder_id: uuid.UUID, payload: OneHAnswer, db: AsyncSes
     reminder = await one_h.reminder_for(db, reminder_id, link, at, lock=True)
     if reminder.one_h_report is None:
         raise HTTPException(409, 'Rifresko raportimin para se të përgjigjesh.')
+    if reminder.bucket == '11:50' and (payload.item_id == 'next' or payload.continuation):
+        raise HTTPException(422, 'Ky raportim pranon përgjigje vetëm për detyrat DL AM.')
     # A retry must not append the comment again or replace a later corrected answer.
     if any(h.get('request_id') == payload.request_id
            for item in [*reminder.one_h_report['tasks'], reminder.one_h_report['next']]

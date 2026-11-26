@@ -728,7 +728,7 @@ def _excel_task_title(
 def _excel_meeting_user_initials(
     item: dict[str, Any], *, default_color: str = "000000"
 ) -> str | CellRichText:
-    users = _meeting_users(item)
+    users = _display_meeting_users(item)
     if not users:
         return "-"
     unavailable = {str(value) for value in item.get("_unavailableUserInitials") or []}
@@ -1094,7 +1094,11 @@ def _is_faded_calendar_internal(item: dict[str, Any], *, meeting_type: str) -> b
 
 
 def _meeting_user_initials(item: dict[str, Any]) -> str:
-    return "/".join(label for label, _ in _meeting_users(item)) or "-"
+    return "/".join(label for label, _ in _display_meeting_users(item)) or "-"
+
+
+def _display_meeting_users(item: dict[str, Any]) -> list[tuple[str, str | None]]:
+    return [("ALL", None)] if item.get("allParticipants") else _meeting_users(item)
 
 
 def _meeting_users(item: dict[str, Any]) -> list[tuple[str, str | None]]:
@@ -1686,7 +1690,7 @@ def _dated_meetings_html(
                 f'<td data-meeting-users="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
             )
         meeting_from, meeting_to = meeting_time_columns(item.get("time"))
-        meeting_users = _meeting_users(item)
+        meeting_users = _display_meeting_users(item)
         unavailable_users = {
             str(value) for value in item.get("_unavailableUserInitials") or []
         }
@@ -2559,7 +2563,7 @@ def _docx_table_attachment(
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         paragraph = cell.paragraphs[0]
         paragraph.paragraph_format.space_after = Pt(0)
-        users = _meeting_users(item)
+        users = _display_meeting_users(item)
         unavailable = {str(value) for value in item.get("_unavailableUserInitials") or []}
         for index, (label, _) in enumerate(users or [("-", None)]):
             if index:
@@ -3310,7 +3314,7 @@ def _core_png_table_attachment(
                         str(value) for value in item.get("_unavailableUserInitials") or []
                     }
                     for user_index, (user_label, _) in enumerate(
-                        _meeting_users(item) or [("-", None)]
+                        _display_meeting_users(item) or [("-", None)]
                     ):
                         token = f"/{user_label}" if user_index else user_label
                         token_color = (

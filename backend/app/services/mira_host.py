@@ -153,7 +153,9 @@ async def common_payload(db: AsyncSession, day: date, *, fresh: bool = False) ->
     if cached and not fresh and monotonic_time.monotonic() - cached[0] < 20:
         return cached[1]
     from app.services.today_print_report_freeze import _source_payload
-    payload = await _source_payload(db, day)
+    from app.services.morning_task_follow_up import load_morning_task_rows
+
+    payload = {**await _source_payload(db, day), "morning_follow_up_tasks": await load_morning_task_rows(db, day)}
     _payload_cache.clear()
     _payload_cache[day] = (monotonic_time.monotonic(), payload)
     return payload
@@ -195,7 +197,10 @@ class SlotData:
         items = {key: [row for row in values if not isinstance(row, dict) or
                       (not excluded_task(row) and str(row.get("task_id") or row.get("id")) not in excluded_tasks)]
                  if key in task_buckets else values for key, values in raw_items.items()}
-        self.payload = {**payload, "items": items}
+        self.payload = {**payload, "items": items, "morning_follow_up_tasks": [
+            row for row in payload.get("morning_follow_up_tasks") or []
+            if not excluded_task(row) and str(row.get("task_id") or row.get("id")) not in excluded_tasks
+        ]}
         self.all_unavailable, self.unavailable_ids, self.unavailable_names = _full_day_unavailable(items, day)
         self.slots: dict[str, list[dict]] = {slot: [] for slot in SLOTS}
         self.blocked: list[dict] = []
@@ -224,7 +229,7 @@ class SlotData:
     def participants(self, slot: str) -> list[str]:
         """Current-slot staff, followed by owners of work explicitly reviewed in this slot."""
         order = []
-        tasks = list(self.slots.get(slot, []))
+        tasks = self.current_tasks(slot)
         if slot in ALL_EARLIER_SLOTS:
             tasks += [item for earlier in SLOTS[:SLOTS.index(slot)] for item in self.slots[earlier]
                       if str(item.get("status") or "TODO").upper() in {"TODO", "IN_PROGRESS"}]
@@ -237,6 +242,20 @@ class SlotData:
                         and not excluded_host_turn(slot, name):
                     order.append(uid)
         return order
+
+    def current_tasks(self, slot: str) -> list[dict]:
+        from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT
+        from app.services.primeflow_report import morning_follow_up_rows
+
+        tasks = list(self.slots.get(slot, []))
+        follow_up = morning_follow_up_rows(self.payload, self.day, slot)
+        if not follow_up:
+            return tasks
+        ids = {str(item.get("task_id") or item.get("id")) for item in follow_up}
+        return [
+            *({**item, "morning_follow_up": FOLLOW_UP_BY_SLOT[slot]} for item in follow_up),
+            *(item for item in tasks if str(item.get("task_id") or item.get("id")) not in ids),
+        ]
 
     def user_tasks(self, slot: str | None, user_id: str, *, open_only: bool = False) -> list[dict]:
         if not slot:
@@ -351,6 +370,7 @@ def task_line(item: dict) -> dict:
         "start": str(item.get("start_date") or "")[:10] or None,
         "due": str(item.get("due_date") or "")[:10] or None,
         "description": plain(item.get("description"))[:600] or None,
+        **({"morning_follow_up": item["morning_follow_up"]} if item.get("morning_follow_up") else {}),
     }
 
 
@@ -367,6 +387,8 @@ BLOCKED_SLOT = "16:00"
 
 def task_text(line: dict) -> str:
     parts = [line["title"], STATUS_LABELS.get(line["status"], line["status"]), line["period"]]
+    if line.get("morning_follow_up"):
+        parts.insert(0, line["morning_follow_up"])
     if line["symbol"]:
         parts.append("simboli " + line["symbol"])
     if line["deadline"]:
@@ -379,7 +401,7 @@ def task_text(line: dict) -> str:
 def person_brief(data: SlotData, slot: str, user_id: str) -> dict:
     previous = previous_slot(slot)
     earlier = list(SLOTS[:SLOTS.index(slot)]) if slot in ALL_EARLIER_SLOTS else [previous] if previous else []
-    current = [task_line(i) for i in data.user_tasks(slot, user_id)]
+    current = [task_line(i) for i in data.current_tasks(slot) if user_id in data.owners(i)]
     current_ids = {t["task_id"] for t in current}
     open_lines: list[dict] = []
     for earlier_slot in earlier:
@@ -394,8 +416,7 @@ def person_brief(data: SlotData, slot: str, user_id: str) -> dict:
         "previous_open": open_lines,
         # The To Do follow-up checks only this slot and its immediate predecessor,
         # including completed work, without adding it back to the spoken discussion plan.
-        "continuation_check_tasks": [task_line(item) for check_slot in (slot, previous)
-                                     for item in data.user_tasks(check_slot, user_id)],
+        "continuation_check_tasks": [*current, *(task_line(item) for item in data.user_tasks(previous, user_id))],
         # Everything in the slot is done: Mira asks what comes next instead of asking about each task.
         "all_done": bool(current) and all(settled_for_questions(t["status"]) for t in current),
         "blocked": [task_line(i) for i in data.blocked_tasks(user_id)] if slot == BLOCKED_SLOT else [],

@@ -14,7 +14,8 @@ from app.services.task_strike_events import _point_entries, _struck_points_by_id
 
 REMINDERS = (
     ("10:00", time(10, 0)), ("11:00", time(11, 0)),
-    # M2/M3 cover midday and end-of-day reporting separately.
+    ("11:50", time(11, 50)),
+    # M2/M3 cover the remaining midday and end-of-day reporting separately.
     ("14:20", time(14, 20)),
 )
 
@@ -22,10 +23,13 @@ REMINDERS = (
 def due_buckets(now: datetime) -> list[str]:
     if now.weekday() >= 5:
         return []
-    # Keep the report's slot identity, but invite staff one minute before it.
-    return [bucket for bucket, at in REMINDERS
-            if timedelta(0) <= now - (datetime.combine(now.date(), at, now.tzinfo)
-                - timedelta(minutes=1)) < timedelta(minutes=5)]
+    buckets = []
+    for bucket, at in REMINDERS:
+        # Regular cards also invite staff to join. DL AM asks for status at the slot itself.
+        starts_at = datetime.combine(now.date(), at, now.tzinfo) - timedelta(minutes=0 if bucket == "11:50" else 1)
+        if timedelta(0) <= now - starts_at < timedelta(minutes=5):
+            buckets.append(bucket)
+    return buckets
 
 
 def in_bucket(task: dict, bucket: str, overrides: dict[str, str], *, include_done: bool = False) -> bool:

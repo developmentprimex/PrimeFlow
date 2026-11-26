@@ -94,6 +94,7 @@ function sectionGroupLabel(section: Section) {
     GA_REACTIONS_SECTION,
     GA_PF_COMMENTS_SECTION,
     TASK_FEEDBACK_SECTION,
+    "DET 08:00/DL AM",
     "GA TASKS",
     "HV TASKS",
     "DV TASKS",

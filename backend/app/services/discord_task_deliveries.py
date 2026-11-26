@@ -534,9 +534,12 @@ async def _format_reporting_differences(db: AsyncSession, differences: list[dict
     task_ids = {UUID(row["task_id"]) for row in differences}
     tasks = {str(task.id): task for task in await db.scalars(select(Task).where(Task.id.in_(task_ids)))}
     person_order = await weekly_planner_user_sort_keys(db, {UUID(row["owner_id"]) for row in differences})
+    group_ids = {}
     formatted = []
     for row in differences:
-        task = tasks.get(row["task_id"])
+        task_id = row["task_id"]
+        task = tasks.get(task_id)
+        task_group_id = group_ids.setdefault(group_key(task), task_id) if task is not None else task_id
         owner_id = UUID(row["owner_id"])
         fill, foreground, eight_am = _task_appearance(task, row["task_title"])
         sort_key = (
@@ -547,7 +550,7 @@ async def _format_reporting_differences(db: AsyncSession, differences: list[dict
             _clean_task_title(row["task_title"], is_system_task=True).casefold(),
         )
         formatted.append((sort_key, {
-            **row, "initials": _initials(row["person"]), "fill": fill,
+            **row, "task_group_id": task_group_id, "initials": _initials(row["person"]), "fill": fill,
             "foreground": foreground, "eight_am": eight_am,
             "peers": [{**peer, "initials": _initials(peer["person"])} for peer in row["peers"]],
         }))

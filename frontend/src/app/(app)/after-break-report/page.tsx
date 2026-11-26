@@ -767,6 +767,8 @@ export default function AfterBreakReportPage() {
                             ? { report: "M2", date: draft.report_date, source: "reaction" } : undefined}
                         body={reportSectionPreviewText(section.body)}
                         filterWfeAge={isWaitingClientSection(section)}
+                        filterDueDate={editsExplanations}
+                        colorEightAmByStatus={editsExplanations}
                         renderCell={editsExplanations && canEdit ? (_label, number, header) => {
                           const task = explanationsByRow?.get(number)
                           if (!task) return null

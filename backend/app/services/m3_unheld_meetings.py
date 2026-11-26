@@ -86,8 +86,11 @@ def select_unheld_meetings(meetings, statuses: dict, day: date) -> list[dict]:
         if (kind not in {"internal", "external"} or not meeting.starts_at or status not in CANCELED_STATUSES
                 or not is_common_view_visible_meeting(meeting) or not _meeting_occurs_on_date(meeting, day)):
             continue
+        title = _clean_task_title(meeting.title)
+        if getattr(meeting, "all_participants", False):
+            title = f"{title} (ALL)"
         rows.append({"meeting_id": str(meeting.id), "occurrence_date": day.isoformat(),
-                     "meeting_type": "INT" if kind == "internal" else "EXT", "title": _clean_task_title(meeting.title),
+                     "meeting_type": "INT" if kind == "internal" else "EXT", "title": title,
                      "time": _local_time(meeting.starts_at), "status": status, "status_label": "Anuluar",
                      **meeting_appearance(meeting, external_by_id)})
     return sorted(rows, key=lambda row: (row["time"], row["meeting_type"], row["title"].casefold(), row["meeting_id"]))

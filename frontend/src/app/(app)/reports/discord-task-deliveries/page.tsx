@@ -56,6 +56,8 @@ type MissingSlotRow = TaskAppearance & {
 }
 type ReportingDifference = TaskAppearance & {
   id: string
+  task_id: string
+  task_group_id?: string
   field: "slot" | "marker"
   task_title: string
   person: string
@@ -227,52 +229,136 @@ function ReportTaskTitle({ row }: { row: { task_title: string; eight_am?: boolea
   </details>
 }
 
+function DifferenceEntries({ entries, cell, formatTime }: {
+  entries: [ReportingDifference, ...ReportingDifference[]]; cell: string; formatTime: (value: string) => string
+}) {
+  const isSymbol = entries[0].field === "marker"
+  const latestSlots = new Map<string, ReportingDifference>()
+  if (!isSymbol) {
+    for (const entry of entries) {
+      const prior = latestSlots.get(entry.person)
+      if (!prior || entry.date > prior.date || (entry.date === prior.date && prior.changed_at !== null
+        && (entry.changed_at === null || entry.changed_at > prior.changed_at))) {
+        latestSlots.set(entry.person, entry)
+      }
+    }
+  }
+  const choices = isSymbol ? entries : Array.from(latestSlots.values())
+  const groups = new Map<string, [ReportingDifference, ...ReportingDifference[]]>()
+  const peopleWithEntries = new Set(choices.map((entry) => entry.person))
+  const otherPeople = new Map<string, ReportingDifference["peers"][number] & { source: ReportingDifference }>()
+  for (const entry of choices) {
+    const actor = entry.actor === entry.person ? null : entry.actor ?? null
+    const key = JSON.stringify(isSymbol
+      ? [entry.previous, entry.label, entry.date, entry.changed_at, actor, entry.reason]
+      : [entry.label, entry.date, entry.reason])
+    const group = groups.get(key)
+    if (group) group.push(entry)
+    else groups.set(key, [entry])
+
+    for (const peer of entry.peers) {
+      if (peopleWithEntries.has(peer.person)) continue
+      const previous = otherPeople.get(peer.person)?.source
+      if (!previous || entry.date > previous.date || (entry.date === previous.date && previous.changed_at !== null
+        && (entry.changed_at === null || entry.changed_at > previous.changed_at))) {
+        otherPeople.set(peer.person, { ...peer, source: entry })
+      }
+    }
+  }
+  const summaries = Array.from(groups.values(), (group) => {
+    const [entry] = group
+    const people = Array.from(new Map(group.map((member) => [member.person, member])).values())
+    return { entry, people, initials: people.map((person) => person.initials).join(", ") }
+  })
+  const date = choices[0].date
+  const sharedDate = choices.every((entry) => entry.date === date)
+  const displayDate = (value: string) => value.split("-").reverse().join(".")
+  const symbolColor = (label: string) => isSymbol && label !== "Pa simbol" ? "text-red-600 dark:text-red-400" : undefined
+  const comments = summaries.filter(({ entry }) => entry.reason)
+  const detailCell = `${cell} bg-card text-card-foreground [overflow-wrap:anywhere]`
+  return <>
+    <td className={detailCell}>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1">
+        {summaries.map(({ entry, people, initials }) => (
+          <li key={entry.id}>
+            <strong className="rounded px-1" title={people.map((person) => person.person).join(", ")}
+              style={{ backgroundColor: entry.fill, color: entry.foreground }}>{initials}</strong>
+            {" "}{isSymbol && entry.previous && <><span className={symbolColor(entry.previous)}>{entry.previous}</span> → </>}
+            <strong className={symbolColor(entry.label)}>{entry.label}</strong>
+            {!sharedDate && <span className="ml-1 text-xs text-muted-foreground">{displayDate(entry.date)}</span>}
+            {isSymbol && entry.changed_at && <span className="ml-1 text-xs text-muted-foreground"
+              title="Ora e regjistrimit">{formatTime(entry.changed_at)}</span>}
+            {isSymbol && entry.actor && entry.actor !== entry.person && <span className="ml-1 text-xs">Ndryshoi {entry.actor}</span>}
+          </li>
+        ))}
+        {Array.from(otherPeople.values(), ({ person, initials, label, source }) => (
+          <li key={person}>
+            <strong title={person}>{initials}</strong>{" "}<strong className={symbolColor(label)}>{label}</strong>
+            {(!sharedDate || source.date !== date) && (
+              <span className="ml-1 text-xs text-muted-foreground">{displayDate(source.date)}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {sharedDate && <div className="mt-1 text-xs text-muted-foreground">{displayDate(date)}</div>}
+    </td>
+    <td className={detailCell}>
+      {comments.length ? <ul className="space-y-1 whitespace-pre-wrap">
+        {comments.map(({ entry, initials }) => (
+          <li key={entry.id}>
+            {(summaries.length > 1 || otherPeople.size > 0) && <><strong>{initials}</strong>{" · "}</>}
+            {entry.reason}
+          </li>
+        ))}
+      </ul> : <span className="text-xs text-muted-foreground">Pa koment të regjistruar</span>}
+    </td>
+  </>
+}
+
 function DifferenceTable({ field, rows, formatTime }: {
   field: ReportingDifference["field"]; rows: ReportingDifference[]; formatTime: (value: string) => string
 }) {
   const id = `reporting-differences-${field}`
   const cell = "border-r border-t border-slate-500/30 px-3 py-2 align-top last:border-r-0"
-  const choice = field === "slot" ? "Sloti" : "Simboli"
+  const taskGroups = new Map<string, [ReportingDifference, ...ReportingDifference[]]>()
+  for (const row of rows) {
+    const key = row.task_group_id ?? row.task_id
+    const group = taskGroups.get(key)
+    if (group) group.push(row)
+    else taskGroups.set(key, [row])
+  }
   return <section className="border-t">
     <h3 id={id} className="px-4 py-3 text-sm font-semibold sm:px-5">
       {field === "slot" ? "Dallimet në slote" : "Dallimet në simbole"}
     </h3>
-    {rows.length === 0 ? (
+    {taskGroups.size === 0 ? (
       <p className="border-t px-4 py-4 text-sm text-muted-foreground sm:px-5">Asnjë dallim për datën e zgjedhur.</p>
     ) : (
       <div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-ring" tabIndex={0}
         role="region" aria-labelledby={id}>
-        <table className="w-full min-w-[54rem] border-collapse text-left text-sm" aria-labelledby={id}>
+        <table className="w-full min-w-[44rem] table-fixed border-collapse text-left text-sm" aria-labelledby={id}>
+          <colgroup>
+            <col className="w-12" />
+            <col className="w-[35%]" />
+            <col className="w-[38%]" />
+            <col />
+          </colgroup>
           <thead className="bg-muted/65 text-xs font-semibold">
-            <tr>{["Nr.", "Kush", "Titulli", choice, "Zgjedhjet e kolegëve", "Arsyeja", "Data / ora"].map((heading) => (
+            <tr>{["Nr.", "Titulli", field === "slot" ? "Sloti sipas personit" : "Simboli sipas personit", "Komenti"].map((heading) => (
               <th key={heading} scope="col" className={`${cell} whitespace-nowrap`}>{heading}</th>
             ))}</tr>
           </thead>
-          <tbody>{rows.map((row, index) => (
-            <tr key={row.id}
-              className={row.eight_am ? eightAmBorder : ""}
-              style={{ backgroundColor: row.fill, color: row.foreground }}>
-              <td className={cell}>{index + 1}</td>
-              <td className={cell} title={row.person}>
-                {row.initials}
-                {row.actor && row.actor !== row.person && <span className="block text-xs">
-                  Ndryshoi {row.actor}
-                </span>}
-              </td>
-              <th scope="row" className={`${cell} w-[35%] min-w-48 max-w-80 break-words font-medium`}><ReportTaskTitle row={row} /></th>
-              <td className={`${cell} min-w-24`}>{row.previous && <span>{row.previous} → </span>}<strong>{row.label}</strong></td>
-              <td className={`${cell} bg-card text-card-foreground`}>
-                <ul className="space-y-0.5">{row.peers.map((peer, peerIndex) => (
-                  <li key={peerIndex} title={peer.person}>{peer.initials} · {peer.label}</li>
-                ))}</ul>
-              </td>
-              <td className={`${cell} min-w-44 whitespace-pre-wrap break-words bg-card text-card-foreground`}>{row.reason || <span className="text-muted-foreground">Pa koment të regjistruar</span>}</td>
-              <td className={`${cell} whitespace-nowrap tabular-nums bg-card text-card-foreground`}>
-                {row.date.split("-").reverse().join(".")}
-                {row.changed_at && <span className="block text-xs text-muted-foreground">Regjistruar në {formatTime(row.changed_at)}</span>}
-              </td>
-            </tr>
-          ))}</tbody>
+          <tbody>{Array.from(taskGroups, ([key, entries], index) => {
+            const [task] = entries
+            return (
+              <tr key={key} className={task.eight_am ? eightAmBorder : ""}
+                style={{ backgroundColor: task.fill, color: task.foreground }}>
+                <td className={`${cell} tabular-nums`}>{index + 1}</td>
+                <th scope="row" className={`${cell} break-words font-medium`}><ReportTaskTitle row={task} /></th>
+                <DifferenceEntries entries={entries} cell={cell} formatTime={formatTime} />
+              </tr>
+            )
+          })}</tbody>
         </table>
       </div>
     )}
@@ -369,18 +455,13 @@ export default function DiscordTaskDeliveriesPage() {
   useEffect(() => {
     if (!allowed) return
     let active = true
-    let inFlight = false
-    let currentDay = ""
     async function load() {
-      if (inFlight) return
-      inFlight = true
       const revision = commentRevision.current
       try {
         const query = day ? `?report_date=${encodeURIComponent(day)}` : ""
         const response = await apiFetch(`/discord-task-deliveries${query}`, { cache: "no-store" })
         if (!response.ok) throw new Error()
         const value: Report = await response.json()
-        currentDay = value.today
         if (active) {
           if (revision === commentRevision.current) setReport(value)
           setError("")
@@ -388,15 +469,11 @@ export default function DiscordTaskDeliveriesPage() {
       } catch {
         if (active) setError("Raporti nuk u ngarkua. Provo përsëri me Rifresko.")
       } finally {
-        inFlight = false
         if (active) setLoading(false)
       }
     }
     void load()
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && (!day || !currentDay || day === currentDay)) void load()
-    }, 60_000)
-    return () => { active = false; window.clearInterval(timer) }
+    return () => { active = false }
   }, [allowed, apiFetch, day, refresh])
 
   if (authLoading) return <p className="p-6 text-sm text-muted-foreground" role="status">Duke u ngarkuar…</p>

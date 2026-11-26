@@ -81,6 +81,7 @@ from app.services.meetings_report import (
     send_section_report,
 )
 from app.services.task_title_rules import title_has_eight_am_indicator
+from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, load_follow_up_comments, task_model_groups
 from app.services.primeflow_report import report_timezone
 from app.services.px_note_email import EMAIL_NOTE_ORIGINS, email_preview, email_preview_text, is_email_note_content
 from app.services.report_inboxes import MailSource, REPORT_INBOX_SOURCES, read_report_inbox, report_mailbox
@@ -88,6 +89,7 @@ from app.services.report_inboxes import MailSource, REPORT_INBOX_SOURCES, read_r
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
 UNFINISHED_PRIORITY_TABLE_LABEL = "DET TE PAKRYERA, 08:00/DEADLINE"
+M2_PRIORITY_PROGRESS_TITLE = "STATUSI I DET 08:00/DEADLINE/DUE DATE SOT"
 UNFINISHED_EXPLANATION_OVERRIDES = "unfinished_explanation_overrides"
 WAITING_CLIENT_TABLE_LABEL = "DT WFE"
 DONE_AM_TABLE_LABEL = "DET E KRYERA NE AM"
@@ -133,7 +135,12 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[8],
     *SECTION_TITLES[10:12],
 ]
+SECTION_DISPLAY_TITLES = {
+    GA_REACTIONS_SECTION_KEY: GA_REACTIONS_SECTION_TITLE,
+    UNFINISHED_PRIORITY_TABLE_LABEL: M2_PRIORITY_PROGRESS_TITLE,
+}
 SECTION_TITLE_ALIASES = {
+    M2_PRIORITY_PROGRESS_TITLE: UNFINISHED_PRIORITY_TABLE_LABEL,
     GA_REACTIONS_SECTION_TITLE: GA_REACTIONS_SECTION_KEY,
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[9],
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED?": SECTION_TITLES[9],
@@ -153,6 +160,10 @@ UNFINISHED_PRIORITY_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("STATUS", 12),
     ("LLOJI", 18), ("TIPI", 5), ("TITULLI", 45), ("DUE DATE", 12),
     ("ARSYEJA", 24), ("KOMENT", 36),
+]
+M2_PRIORITY_PROGRESS_COLUMNS = [
+    *UNFINISHED_PRIORITY_COLUMNS[:-2], ("PROGRESI", 24),
+    *UNFINISHED_PRIORITY_COLUMNS[-2:], ("DISCORD 1H", 36),
 ]
 DONE_AM_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
@@ -272,19 +283,20 @@ def _unfinished_priority_task_rows(
     cutoff: datetime,
     timezone: ZoneInfo,
     department_codes: dict[Any, str] | None = None,
-    *, include_task_id: bool = False,
+    *, include_task_id: bool = False, include_morning_progress: bool = False,
 ) -> list[list[str]]:
-    """AM/AM-PM TODO or in-progress work whose due date is the report day."""
-    selected: list[tuple[Task, datetime | None, str, str]] = []
+    """Due-today morning work, with planned priority progress in M2 Post-Break."""
+    selected: list[tuple[Task, date, str, str, str]] = []
     for task in tasks:
         due_at = _as_timezone(task.due_date, timezone)
-        if due_at is None or due_at.date() != report_day:
+        if due_at is None:
             continue
 
-        # M2 section 7 covers work that belonged to the morning. PM-only tasks
-        # remain outside this section even when marked as 08:00 or deadline.
+        due_day = due_at.date()
         finish_period = str(getattr(task, "finish_period", None) or "").strip().upper()
-        if finish_period not in {"AM", "AM/PM"}:
+        morning_due_today = due_day == report_day and finish_period in {"AM", "AM/PM"}
+        tracked = include_morning_progress and bool(task_model_groups(task, report_day, include_planned_days=True))
+        if not (morning_due_today or tracked):
             continue
 
         # Match Common View: its 08:00 badge/filter is driven by the title marker,
@@ -300,15 +312,13 @@ def _unfinished_priority_task_rows(
             continue
 
         completed_at = _as_timezone(task.completed_at, timezone)
-        if completed_at is not None and completed_at <= cutoff:
-            continue
-
         status = _normalize_report_status(task.status)
-        # A report regenerated after the cutoff may see a task that was still
-        # open at send time as DONE. Preserve it as in-progress for that cutoff.
-        if status == "DONE" and completed_at is not None and completed_at > cutoff:
+        completed_later = completed_at is not None and completed_at > cutoff and status == "DONE"
+        if completed_at is not None and completed_at <= cutoff:
+            status = "DONE"
+        elif completed_later:
             status = "IN_PROGRESS"
-        if status not in {"TODO", "IN_PROGRESS"}:
+        if not tracked and status not in {"TODO", "IN_PROGRESS"}:
             continue
 
         task_type = (
@@ -316,7 +326,8 @@ def _unfinished_priority_task_rows(
             if is_deadline and is_eight_am
             else ("DEADLINE" if is_deadline else ("08:00" if is_eight_am else "DUE SOT"))
         )
-        selected.append((task, due_at, task_type, status))
+        progress = status.replace("_", " ")
+        selected.append((task, due_day, task_type, status, progress))
 
     selected.sort(
         key=lambda item: (
@@ -334,9 +345,9 @@ def _unfinished_priority_task_rows(
             task_type,
             _m3_task_type_label(task),
             task_title_with_pause(_display_title(task.title), getattr(task, "pause_periods", None), report_day),
-            "SOT",
-        ] + ([str(task.id)] if include_task_id else [])
-        for index, (task, due_at, task_type, status) in enumerate(selected, start=1)
+            "SOT" if due_day == report_day else due_day.strftime("%d.%m.%Y"),
+        ] + ([progress] if include_morning_progress else []) + ([str(task.id)] if include_task_id else [])
+        for index, (task, due_day, task_type, status, progress) in enumerate(selected, start=1)
     ]
 
 
@@ -469,6 +480,7 @@ def _waiting_client_task_rows(
 
 async def build_unfinished_priority_task_rows(
     db: AsyncSession, report_day: date, *, include_task_id: bool = False,
+    include_morning_progress: bool = False,
     explanation_overrides: dict | None = None, explanation_rows: list | None = None,
 ) -> list[list[str]]:
     """Load unfinished morning work at the configured M2 send cutoff."""
@@ -491,12 +503,14 @@ async def build_unfinished_priority_task_rows(
         cutoff_timezone,
         department_codes,
         include_task_id=True,
+        include_morning_progress=include_morning_progress,
     )
     if include_task_id:
         return rows
     return await _append_unfinished_priority_explanations(
         db, rows, tasks, report_day, names, assignee_ids_by_task,
         overrides=explanation_overrides, explanation_rows=explanation_rows,
+        include_morning_progress=include_morning_progress,
     )
 
 
@@ -508,11 +522,13 @@ async def _append_unfinished_priority_explanations(
     names: dict[Any, str],
     assignee_ids_by_task: dict[Any, set[Any]],
     *, overrides: dict | None = None, explanation_rows: list | None = None,
+    include_morning_progress: bool = False,
 ) -> list[list[str]]:
     row_ids = {row[-1] for row in rows}
     selected = [task for task in tasks if str(task.id) in row_ids]
     values = await _daily_rlz_values_by_task(db, selected, report_day, names, assignee_ids_by_task)
     by_id = {str(task_id): fields for task_id, fields in values.items()}
+    follow_up = await load_follow_up_comments(db, report_day, FOLLOW_UP_BY_SLOT) if include_morning_progress and rows else {}
     discord_comments: dict[str, list[str]] = {}
     if selected:
         selected_ids = [task.id for task in selected]
@@ -555,7 +571,12 @@ async def _append_unfinished_priority_explanations(
                 "row_number": row[0], "task_id": task_id, "title": row[7],
                 "assignees": row[1], "reason": reason, "comment": comment,
             })
-        result.append([*row[:-1], reason.replace("|", "¦"), comment.replace("|", "¦")])
+        cells = [*row[:-1], reason.replace("|", "¦"), comment.replace("|", "¦")]
+        if include_morning_progress:
+            answers = [f"{slot}: {answer}" for slot in FOLLOW_UP_BY_SLOT
+                       if (answer := follow_up.get(slot, {}).get(task_id))]
+            cells.append((" / ".join(answers) or "-").replace("|", "¦"))
+        result.append(cells)
     return result
 
 
@@ -567,18 +588,21 @@ async def apply_unfinished_priority_task_table(
 ) -> list[dict[str, str]]:
     """Refresh M2 section 7 from the task state at the configured send cutoff."""
     rows = await build_unfinished_priority_task_rows(
-        db, report_day, explanation_overrides=explanation_overrides, explanation_rows=explanation_rows,
+        db, report_day, include_morning_progress=True,
+        explanation_overrides=explanation_overrides, explanation_rows=explanation_rows,
     )
     body = _normalize_section(
         _ascii_table(
-            UNFINISHED_PRIORITY_TABLE_LABEL,
-            UNFINISHED_PRIORITY_COLUMNS,
+            M2_PRIORITY_PROGRESS_TITLE,
+            M2_PRIORITY_PROGRESS_COLUMNS,
             rows,
             show_empty_table=True,
         )
     )
     return [
-        {**section, "body": body}
+        {**section, "section_key": UNFINISHED_PRIORITY_TABLE_LABEL,
+         "title": M2_PRIORITY_PROGRESS_TITLE if section["title"] == UNFINISHED_PRIORITY_TABLE_LABEL else section["title"],
+         "body": body}
         if section.get("section_key") == UNFINISHED_PRIORITY_TABLE_LABEL
         or section.get("title") == UNFINISHED_PRIORITY_TABLE_LABEL
         else section
@@ -907,6 +931,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             if title in by_title:
                 continue
         body = str(section.get("body") or "")
+        if title == UNFINISHED_PRIORITY_TABLE_LABEL and body.startswith(f"{UNFINISHED_PRIORITY_TABLE_LABEL}:"):
+            body = M2_PRIORITY_PROGRESS_TITLE + body[len(UNFINISHED_PRIORITY_TABLE_LABEL):]
         if title == SECTION_TITLES[8]:
             body = re.sub(r"(?m)^WAITING CONFIRMATION(?=:)", "WFC INT", body)
         if title == SECTION_TITLES[9]:
@@ -917,6 +943,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             visible_title = raw_title if section_key or raw_title in SECTION_TITLE_ALIASES else title
             if title == GA_REACTIONS_SECTION_KEY:
                 visible_title = GA_REACTIONS_SECTION_TITLE
+            elif title == UNFINISHED_PRIORITY_TABLE_LABEL and visible_title == UNFINISHED_PRIORITY_TABLE_LABEL:
+                visible_title = M2_PRIORITY_PROGRESS_TITLE
             by_title[title] = {
                 "section_key": title,
                 "title": visible_title,
@@ -935,14 +963,14 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             section = by_title[title]
             if (
                 title == SECTION_TITLES[4]
-                and section.get("body", "").strip() == f"{UNFINISHED_PRIORITY_TABLE_LABEL}: 0"
+                and section.get("body", "").strip() == f"{M2_PRIORITY_PROGRESS_TITLE}: 0"
             ):
                 section = {
                     **section,
                     "body": _normalize_section(
                         _ascii_table(
-                            UNFINISHED_PRIORITY_TABLE_LABEL,
-                            UNFINISHED_PRIORITY_COLUMNS,
+                            M2_PRIORITY_PROGRESS_TITLE,
+                            M2_PRIORITY_PROGRESS_COLUMNS,
                             [],
                             show_empty_table=True,
                         )
@@ -961,8 +989,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         elif title == SECTION_TITLES[4]:
             body = _normalize_section(
                 _ascii_table(
-                    UNFINISHED_PRIORITY_TABLE_LABEL,
-                    UNFINISHED_PRIORITY_COLUMNS,
+                    M2_PRIORITY_PROGRESS_TITLE,
+                    M2_PRIORITY_PROGRESS_COLUMNS,
                     [],
                     show_empty_table=True,
                 )
@@ -982,7 +1010,7 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         else:
             body = "NOTES: 0"
         normalized.append({"section_key": title,
-                           "title": GA_REACTIONS_SECTION_TITLE if title == GA_REACTIONS_SECTION_KEY else title,
+                           "title": SECTION_DISPLAY_TITLES.get(title, title),
                            "body": body})
     # Keep Common View–synced manuals with the other manuals (before auto sections).
     manual_count = len(MANUAL_SECTION_TITLES)
@@ -1280,9 +1308,11 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         cutoff_timezone,
         department_codes,
         include_task_id=True,
+        include_morning_progress=True,
     )
     unfinished_priority_rows = await _append_unfinished_priority_explanations(
         db, unfinished_priority_rows, tasks, report_day, names, assignee_ids_by_task,
+        include_morning_progress=True,
     )
     done_am_rows = _done_am_task_rows(
         tasks,
@@ -1349,11 +1379,12 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         {"section_key": GA_REACTIONS_SECTION_KEY, "title": GA_REACTIONS_SECTION_TITLE,
          "body": await reaction_summary_for_day(db, report_day, report="M2", generated_at=generated_at)},
         {
-            "title": SECTION_TITLES[4],
+            "section_key": UNFINISHED_PRIORITY_TABLE_LABEL,
+            "title": M2_PRIORITY_PROGRESS_TITLE,
             "body": _normalize_section(
                 _ascii_table(
-                    UNFINISHED_PRIORITY_TABLE_LABEL,
-                    UNFINISHED_PRIORITY_COLUMNS,
+                    M2_PRIORITY_PROGRESS_TITLE,
+                    M2_PRIORITY_PROGRESS_COLUMNS,
                     unfinished_priority_rows,
                     show_empty_table=True,
                 )

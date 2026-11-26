@@ -17,6 +17,26 @@ def local_time(hour, minute=0, second=0):
     return datetime(2026, 11, 25, hour, minute, second, tzinfo=ZONE)
 
 
+def test_difference_rows_share_a_group_across_task_copies_and_fields(monkeypatch):
+    shared_group = uuid4()
+    title = "Detyra e përbashkët"
+    tasks = [SimpleNamespace(id=uuid4(), fast_task_group_id=group, is_deadline_important=False, fast_task_order=None)
+             for group in (shared_group, shared_group, uuid4())]
+    database = SimpleNamespace(scalars=AsyncMock(return_value=tasks))
+    monkeypatch.setattr(deliveries, "weekly_planner_user_sort_keys", AsyncMock(return_value={}))
+    monkeypatch.setattr(deliveries, "_task_appearance", lambda task, title: ("", "", False))
+    differences = [
+        {"task_id": str(task.id), "field": field, "owner_id": str(uuid4()),
+         "task_title": title, "person": "Punonjësi", "peers": []}
+        for task, field in zip(tasks, ("slot", "marker", "slot"))
+    ]
+
+    rows = asyncio.run(deliveries._format_reporting_differences(database, differences))
+
+    assert rows[0]["task_group_id"] == rows[1]["task_group_id"]
+    assert rows[0]["task_group_id"] != rows[2]["task_group_id"]
+
+
 def test_morning_coverage_accepts_any_of_the_three_requested_cases():
     check = deliveries._covers_morning
     assert check(is_one_h=True, slot="10:00", personal_with_someone=False, period="PM", marker=None)

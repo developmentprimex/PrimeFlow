@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -10,6 +10,49 @@ from fastapi import HTTPException
 from app.services import task_reporting_choices as choices
 
 DAY = date(2026, 11, 25)
+
+
+def test_slot_differences_compare_current_choices_and_drop_resolved_history(monkeypatch):
+    first, second = uuid4(), uuid4()
+    group_id = uuid4()
+    tasks = [
+        SimpleNamespace(id=uuid4(), assigned_to=owner, fast_task_group_id=group_id,
+                        title="Detyrë e përbashkët", one_h_report_slot=None, one_h_marker=None, is_active=True)
+        for owner in (first, second)
+    ]
+    names = {first: "First Person", second: "Second Person"}
+    owners = {task.id: {task.assigned_to} for task in tasks}
+    now = datetime(2026, 11, 25, 14, tzinfo=timezone.utc)
+    history = SimpleNamespace(
+        id=uuid4(), entity_id=tasks[0].id, action="slot", before={"value": "09:00"}, created_at=now,
+        after={"date": DAY.isoformat(), "owner_id": str(first), "person": names[first],
+               "field": "slot", "value": "10:00", "label": "10:00", "reason": "Arsye e vjetër",
+               "peers": [{"person": names[second], "label": "11:00"}]},
+    )
+    monkeypatch.setattr(choices, "choice_members", AsyncMock(return_value=(owners, names)))
+    monkeypatch.setattr(choices, "personal_choices", AsyncMock(return_value={}))
+    slots = {tasks[0].id: "14:20", tasks[1].id: "11:00"}
+    monkeypatch.setattr(choices, "slot_values", AsyncMock(return_value=slots))
+
+    async def run_report():
+        db = SimpleNamespace(scalars=AsyncMock(side_effect=[
+            SimpleNamespace(all=lambda: [history]), SimpleNamespace(all=lambda: tasks),
+        ]))
+        return await choices.reporting_differences(db, DAY, now, marker_day=DAY, slot_day=DAY)
+
+    rows = asyncio.run(run_report())
+    assert {(row["person"], row["label"]) for row in rows} == {
+        (names[first], "14:20"), (names[second], "11:00"),
+    }
+    assert all(row["previous"] is None and not row["reason"] for row in rows)
+    assert rows[0]["peers"] == [{"person": names[second], "label": "11:00"}]
+
+    slots[tasks[0].id] = "10:00"
+    assert asyncio.run(run_report())[0]["reason"] == history.after["reason"]
+
+    slots[tasks[0].id] = "14:20"
+    slots[tasks[1].id] = "14:20"
+    assert asyncio.run(run_report()) == []
 
 
 def test_shared_task_assignees_reads_active_siblings_by_identity(monkeypatch):

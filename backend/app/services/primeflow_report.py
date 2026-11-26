@@ -26,17 +26,19 @@ from app.services.compact_report_questions import question_parts, questions_html
 from app.config import settings
 from app.services.one_h_ga_summary import GaTaskCounts, build_ga_summary, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
 from app.services.px_note_email import is_email_note_content
+from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, task_row_groups
 
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
 REPORT_SENDER_EMAIL = "130primex.eu@gmail.com"
 SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00")
-STATUS_ORDER = {"IN_PROGRESS": 0, "PAUSED": 1, "TODO": 2, "WAITING_CLIENT": 3, "DONE": 4}
+STATUS_ORDER = {"IN_PROGRESS": 0, "PAUSED": 1, "TODO": 2, "WAITING_CLIENT": 3, "WAITING_CONFIRMATION": 4, "DONE": 5}
 STATUS_MARKERS = {
     "PAUSED": "⏸ STOPPED",
     "IN_PROGRESS": "🟡 IN PROGRESS",
     "TODO": "⚪ TODO",
     "WAITING_CLIENT": "🟣 WFE",
+    "WAITING_CONFIRMATION": "WFC",
     "DONE": "✅ DONE",
 }
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
@@ -62,6 +64,7 @@ STATUS_COLORS = {
     "PAUSED": (TASK_PAUSE_BACKGROUND, "#334155", TASK_PAUSE_ACCENT),
     "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
     "WAITING_CLIENT": ("#e2c15b", "#4f3a00", "#b8860b"),
+    "WAITING_CONFIRMATION": ("#ede9fe", "#4c1d95", "#8b5cf6"),
     "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
 }
 REPORT_STRIKE_LEGEND = (
@@ -104,6 +107,7 @@ ONE_H_MARKER_LEGEND = (
     ("BZ1N1", ""),
 )
 BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-16:00"
+MORNING_TASK_TABLE_COLUMNS = ("NR", "KUSH", "DEP", "TITULLI", "STATUS", "KOMENT")
 
 
 class GmailVerificationError(RuntimeError):
@@ -124,6 +128,7 @@ class ReportTask(BaseModel):
     is_paused: bool = False
     one_h_marker: str = ""
     strike_count: int | None = None
+    follow_up_comment: str = ""
 
     def display_title(self) -> tuple[str, list[str]]:
         heading, details = split_task_display(self.title)
@@ -151,6 +156,7 @@ class ReportEmployee(BaseModel):
 
 
 class ReportSection(BaseModel):
+    morning_follow_up: bool = False
     title: str
     employees: list[ReportEmployee] = Field(default_factory=list)
 
@@ -494,6 +500,7 @@ def _group_tasks_by_employee(tasks: list[dict[str, Any]]) -> list[tuple[str, lis
 
 def filter_tasks(
     items: list[dict[str, Any]], day: date, slot: str | None = None,
+    *, include_waiting_confirmation: bool = False,
 ) -> list[dict[str, Any]]:
     seen: set[str] = set()
     result = []
@@ -509,6 +516,8 @@ def filter_tasks(
             continue
         seen.add(key)
         status = str(item.get("status") or "").upper()
+        if status == "WAITING_CONFIRMATION" and not include_waiting_confirmation:
+            continue
         if status not in STATUS_ORDER:
             logger.error("Unexpected task status task_id=%s status=%s", key, status)
             continue
@@ -561,6 +570,8 @@ def _document_section(
     description_overrides: dict[str, tuple[str, str]] | None = None,
     department_codes: dict[str, str] | None = None,
     strike_counts: dict[str, int] | None = None,
+    *,
+    follow_up_comments: dict[str, str] | None = None,
 ) -> ReportSection:
     employees = []
     for employee, employee_tasks in _group_tasks_by_employee(tasks):
@@ -608,12 +619,13 @@ def _document_section(
                 is_paused=bool(task.get("is_paused")),
                 one_h_marker=one_h_marker_symbol(task.get("one_h_marker") or task.get("oneHMarker")),
                 strike_count=strike_count,
+                follow_up_comment=(follow_up_comments or {}).get(task_id, ""),
             ))
         employees.append(ReportEmployee(
             name=employee_initials(employee),
             tasks=report_tasks,
         ))
-    return ReportSection(title=title, employees=employees)
+    return ReportSection(title=title, employees=employees, morning_follow_up=follow_up_comments is not None)
 
 
 def _without_full_day_unavailable(data: dict[str, Any], day: date) -> dict[str, Any]:
@@ -625,7 +637,30 @@ def _without_full_day_unavailable(data: dict[str, Any], day: date) -> dict[str, 
     return {**data, "items": {
         bucket: present(rows) if bucket in {"oneH", "blocked", "important", "r1", "personal"} else rows
         for bucket, rows in (data.get("items") or {}).items()
-    }, "tasks": present(data.get("tasks") or [])}
+    }, "tasks": present(data.get("tasks") or []),
+        "morning_follow_up_tasks": present(data.get("morning_follow_up_tasks") or [])}
+
+
+def morning_follow_up_rows(
+    data: dict[str, Any], day: date, slot: str, *, frozen_task_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    group = FOLLOW_UP_BY_SLOT.get(slot)
+    if not group:
+        return []
+    items = data.get("items") or {}
+    candidates = [task for bucket in ("oneH", "blocked", "important", "r1", "personal")
+                  for task in items.get(bucket) or []] + (data.get("tasks") or []) + (data.get("morning_follow_up_tasks") or [])
+    frozen = frozen_task_ids or set()
+    scheduled = []
+    rescheduled = []
+    for task in candidates:
+        was_planned = str(task.get("task_id") or task.get("id") or "") in frozen
+        if _task_date(task) == day:
+            if was_planned or group in task_row_groups(task, day):
+                scheduled.append(task)
+        elif was_planned:
+            rescheduled.append({**task, "date": day.isoformat()})
+    return _merge_unique_tasks(filter_tasks(scheduled + rescheduled, day, include_waiting_confirmation=True))
 
 
 def build_report_document(
@@ -641,6 +676,7 @@ def build_report_document(
     completion_window_end: datetime | None = None,
     strike_window_start: datetime | None = None,
     daily_strike_overrides: tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]] | None = None,
+    morning_follow_up_comments: dict[str, str] | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
@@ -739,6 +775,10 @@ def build_report_document(
                 f"{BLOCKED_SECTION_TITLE_PREFIX} {report_day:%d.%m.%Y}",
                 filter_tasks(items.get("blocked") or [], report_day),
             ))
+    follow_up = FOLLOW_UP_BY_SLOT.get(slot)
+    follow_up_tasks = morning_follow_up_rows(
+        data, report_day, slot, frozen_task_ids=set(morning_follow_up_comments or {}),
+    )
     strike_counts: dict[str, int] = {}
     if strike_window_start is not None:
         # Count from the daily window while the displayed marks follow the slot.
@@ -787,7 +827,10 @@ def build_report_document(
                 strike_counts,
             )
             for title, tasks in definitions
-        ],
+        ] + ([_document_section(
+            f"DET {follow_up} · PROGRESI", follow_up_tasks, title_overrides, description_overrides,
+            department_codes, strike_counts, follow_up_comments=morning_follow_up_comments or {},
+        )] if follow_up else []),
         board_reminders=_board_reminder_questions(report_day),
         reminders=list(reminders or []),
         undiscussed_notes=list(undiscussed_notes or []),
@@ -835,6 +878,16 @@ def render_plain_text(document: ReportDocument) -> str:
         lines = [section.title]
         if not section.employees:
             lines.append("(Asnjë detyrë)")
+        elif section.morning_follow_up:
+            lines.append(" | ".join(MORNING_TASK_TABLE_COLUMNS))
+            rows = ((employee.name, task) for employee in section.employees for task in employee.tasks)
+            for number, (employee, task) in enumerate(rows, 1):
+                heading, details = task.display_title()
+                title = " ".join(filter(None, (task.one_h_marker, heading, *details, task.description)))
+                lines.append(" | ".join((str(number), employee, task.department,
+                    " ".join(title.splitlines()), task.marker, " / ".join(task.follow_up_comment.splitlines()) or "—")))
+            blocks.append("\n".join(lines))
+            continue
         for employee in section.employees:
             lines.append(employee.name)
             for task in employee.tasks:
@@ -943,8 +996,10 @@ def render_html(
             '</table>'
         )
 
-    def bll_task_table(section: ReportSection) -> str:
-        """Compact BLL table used at the end of the normal afternoon report."""
+    def compact_task_table(section: ReportSection) -> str:
+        follow_up = section.morning_follow_up
+        headers = MORNING_TASK_TABLE_COLUMNS if follow_up else MORNING_TASK_TABLE_COLUMNS[:4]
+        table_marker = "data-morning-follow-up-table" if follow_up else "data-bll-task-table"
         rows: list[str] = []
         number = 0
         for employee in section.employees:
@@ -958,6 +1013,14 @@ def render_html(
                 if task.description:
                     details += detail_row(marked_html(task.description, task.marked_description))
                 details += strike_badge(task)
+                follow_up_cells = ""
+                if follow_up:
+                    comment = html.escape(task.follow_up_comment or "—").replace("\n", "<br>")
+                    follow_up_cells = (
+                        f'<td bgcolor="{background}" style="padding:9px;border:1px solid {accent};font-weight:700;">'
+                        f'{html.escape(STATUS_MARKERS[task.status])}</td>'
+                        f'<td style="padding:9px;border:1px solid #cbd5e1;overflow-wrap:anywhere;">{comment}</td>'
+                    )
                 rows.append(
                     f'<tr data-report-task="true" data-strike-count="{task.strike_count if task.strike_count is not None else "unknown"}" '
                     f'data-task-id="{html.escape(task.task_id, quote=True)}" data-task-status="{html.escape(task.status, quote=True)}">'
@@ -966,21 +1029,21 @@ def render_html(
                     f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;">{html.escape(task.department)}</td>'
                     f'<td bgcolor="{background}" style="padding:9px;border:1px solid {accent};font-family:Arial,sans-serif;">'
                     f'<div style="font-size:14px;font-weight:700;color:#050505;">{marker_badge(task.one_h_marker)}{marked_html(heading or task.title, task.marked_title)}</div>{details}'
-                    "</td></tr>"
+                    f"</td>{follow_up_cells}</tr>"
                 )
         if not rows:
             rows.append(
-                '<tr><td colspan="4" style="padding:10px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;color:#64748b;">(Asnjë detyrë)</td></tr>'
+                f'<tr><td colspan="{len(headers)}" style="padding:10px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;color:#64748b;">(Asnjë detyrë)</td></tr>'
             )
+        header = "".join(
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;'
+            f'text-align:{"center" if label == "NR" else "left"};font-size:12px;">{label}</th>'
+            for label in headers
+        )
         return (
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
-            'data-bll-task-table="true" style="width:100%;border-collapse:collapse;margin:8px 0 4px;">'
-            '<tr bgcolor="#e2e8f0">'
-            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:center;font-size:12px;">NR</th>'
-            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">KUSH</th>'
-            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">DEP</th>'
-            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">TITULLI</th>'
-            "</tr>"
+            f'{table_marker}="true" style="width:100%;border-collapse:collapse;margin:8px 0 4px;">'
+            f'<tr bgcolor="#e2e8f0">{header}</tr>'
             f"{''.join(rows)}"
             "</table>"
         )
@@ -1167,8 +1230,8 @@ def render_html(
         if section_index or document.undiscussed_notes:
             body_chunks.append(section_separator())
         body_chunks.append(section_title_block(section.title))
-        if section.title.startswith(BLOCKED_SECTION_TITLE_PREFIX):
-            body_chunks.append(bll_task_table(section))
+        if section.morning_follow_up or section.title.startswith(BLOCKED_SECTION_TITLE_PREFIX):
+            body_chunks.append(compact_task_table(section))
             body_chunks.append('</div>')
             continue
         if not section.employees:
@@ -1427,6 +1490,34 @@ def render_docx(document: ReportDocument) -> bytes:
         section_run.font.size = Pt(13)
         if not section.employees:
             doc.add_paragraph("(Asnjë detyrë)")
+        elif section.morning_follow_up:
+            table = doc.add_table(rows=1, cols=len(MORNING_TASK_TABLE_COLUMNS))
+            table.style = "Table Grid"
+            for column, inches in zip(table.columns, (0.35, 0.55, 0.55, 2.4, 1.0, 2.2)):
+                column.width = Inches(inches)
+            for cell, label in zip(table.rows[0].cells, MORNING_TASK_TABLE_COLUMNS):
+                shade(cell, "#e2e8f0")
+                cell.paragraphs[0].add_run(label).bold = True
+            rows = ((employee.name, task) for employee in section.employees for task in employee.tasks)
+            for number, (employee, task) in enumerate(rows, 1):
+                number_cell, who, department, title, status, comment = table.add_row().cells
+                number_cell.text, who.text, department.text = str(number), employee, task.department
+                background, _, _ = STATUS_COLORS[task.status]
+                shade(title, background)
+                shade(status, background)
+                status.text = task.marker
+                comment.text = task.follow_up_comment or "—"
+                heading, details = task.display_title()
+                if task.one_h_marker:
+                    title.paragraphs[0].add_run(f"{task.one_h_marker} ").font.color.rgb = RGBColor.from_string("DC2626")
+                add_marked_runs(title.paragraphs[0], heading or task.title, task.marked_title, bold=True, color="#050505")
+                for detail in details:
+                    add_marked_runs(title.add_paragraph(), detail, task.marked_title, bold=False, color="#64748b")
+                if task.description:
+                    add_marked_runs(title.add_paragraph(), task.description, task.marked_description, bold=False, color="#64748b")
+                if task.strike_count is not None:
+                    title.add_paragraph(strike_count_label(task.strike_count, document))
+            continue
         for employee in section.employees:
             employee_paragraph = doc.add_paragraph()
             employee_paragraph.paragraph_format.space_before = Pt(8)
@@ -1509,7 +1600,9 @@ def render_png(document: ReportDocument) -> bytes:
         )
         + sum(
             3 + sum(
-                5 + len(textwrap.wrap(task.title, 85)) + len(wrap_description(task.description, 90))
+                (5 + len(textwrap.wrap(task.title, 85)) + len(wrap_description(task.description, 90))
+                 + (3 + len(wrap_description(task.title, 42)) + len(wrap_description(task.description, 42))
+                    + len(wrap_description(task.follow_up_comment, 35)) if section.morning_follow_up else 0))
                 for task in employee.tasks
             )
             for section in document.sections
@@ -1696,6 +1789,44 @@ def render_png(document: ReportDocument) -> bytes:
         if not section.employees:
             draw.text((margin + 18, y), "(Asnjë detyrë)", fill="#64748b", font=font)
             y += 40
+        elif section.morning_follow_up:
+            bounds = [margin, margin + 55, margin + 140, margin + 220, margin + 720, margin + 900, width - margin]
+            for left, right, label in zip(bounds, bounds[1:], MORNING_TASK_TABLE_COLUMNS):
+                draw.rectangle((left, y, right, y + 34), fill="#e2e8f0", outline="#cbd5e1")
+                draw.text((left + 8, y + 6), label, fill="#0f172a", font=bold)
+            y += 34
+            rows = ((employee.name, task) for employee in section.employees for task in employee.tasks)
+            for number, (employee, task) in enumerate(rows, 1):
+                background, _, accent = STATUS_COLORS[task.status]
+                heading_text, details = task.display_title()
+                title_lines = wrap_description(f"{task.one_h_marker} {heading_text}".strip(), 42)
+                detail_lines = [line for detail in details for line in wrap_description(detail, 42)]
+                description_lines = wrap_description(task.description, 42)
+                strike_lines = wrap_description(strike_count_label(task.strike_count, document), 42) if task.strike_count is not None else []
+                comment = wrap_description(task.follow_up_comment or "—", 35)
+                status_lines = textwrap.wrap(task.marker, 14)
+                row_height = 16 + 26 * max(1, len(title_lines) + len(detail_lines) + len(description_lines) + len(strike_lines),
+                                           len(status_lines), len(comment))
+                for column, lines in enumerate(([str(number)], [employee], [task.department], [], status_lines, comment)):
+                    left, right = bounds[column:column + 2]
+                    colored = column in {3, 4}
+                    draw.rectangle((left, y, right, y + row_height), fill=background if colored else "white",
+                                   outline=accent if colored else "#cbd5e1")
+                    for index, line in enumerate(lines):
+                        draw.text((left + 8, y + 8 + 26 * index), line, fill="#0f172a", font=font)
+                line_y = y + 8
+                for lines, marked, line_font, color in (
+                    (title_lines, task.marked_title, bold, "#050505"),
+                    (detail_lines, task.marked_title, font, "#64748b"),
+                    (description_lines, task.marked_description, font, "#64748b"),
+                    (strike_lines, "", font, "#1e40af"),
+                ):
+                    for line in lines:
+                        draw_line_with_marks(bounds[3] + 8, line_y, line, marked, line_font, color)
+                        line_y += 26
+                y += row_height
+            y += 14
+            continue
         for employee in section.employees:
             draw.text((margin + 5, y), employee.name, fill="#0f172a", font=bold)
             y += 38

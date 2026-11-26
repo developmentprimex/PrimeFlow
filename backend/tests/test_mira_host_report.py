@@ -25,6 +25,32 @@ def event(tid, text, at, *, field='DESCRIPTION', action='STRUCK', actor='EF'):
 
 
 class ReportParity(unittest.IsolatedAsyncioTestCase):
+    def test_morning_follow_up_is_in_the_host_brief_for_the_responsible_staff(self):
+        early = item('EF', '10:00', '08:00 Oferta', rank=0, due_date=DAY.isoformat(), person=NAMES['EF'])
+        am = item('DV', '10:00', 'Projekti', rank=1, due_date=DAY.isoformat(), person=NAMES['DV'],
+                  is_deadline_important=True, finish_period='AM', status='IN_PROGRESS')
+        source = payload([])
+        source['morning_follow_up_tasks'] = [early, am]
+        data = host.SlotData(source, DAY)
+        for initials, slot, group, row in (('EF', '11:00', '08:00', early), ('DV', '11:50', 'DL AM', am)):
+            self.assertIn(IDS[initials], data.participants(slot))
+            brief = host.person_brief(data, slot, IDS[initials])
+            self.assertEqual(brief['current'][0]['task_id'], row['task_id'])
+            self.assertEqual(brief['current'][0]['morning_follow_up'], group)
+            self.assertNotIn(row['task_id'], {task['task_id'] for task in brief['previous_open']})
+
+    async def test_morning_follow_up_does_not_announce_an_early_completion_as_new(self):
+        start = strike_interval_start(DAY, '11:00')
+        early = item('EF', None, '08:00 Oferta', rank=0, due_date=DAY.isoformat(), person=NAMES['EF'],
+                     status='DONE', completed_at=(start - timedelta(minutes=20)).isoformat())
+        source = {**payload([]), 'morning_follow_up_tasks': [early]}
+        db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [])))
+        data = host.SlotData(source, DAY)
+        meeting = Mira1HMeeting(id=uuid.uuid4(), meeting_date=DAY, slot='11:00', status='GA_PHASE')
+        facts = await host.new_progress(db, meeting, data, record=False)
+        self.assertEqual(facts['done'], [])
+        self.assertEqual(host.person_brief(data, '11:00', IDS['EF'])['current'][0]['status'], 'DONE')
+
     async def test_haxhere_tasks_never_enter_done_strike_speech_or_acknowledgements(self):
         at=strike_interval_start(DAY,'11:00')+timedelta(minutes=20)
         hidden=item('EF','11:00','FINANCA PRIVATE',rank=0,status='DONE',completed_at=at.isoformat(),
@@ -69,7 +95,9 @@ class ReportParity(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self,*_):pass
         with patch('app.services.primeflow_report_delivery.SessionLocal',return_value=Session()), \
              patch('app.services.primeflow_report_delivery.load_1h_reminder_questions',AsyncMock(return_value=[])), \
-             patch('app.services.primeflow_report_delivery.load_undiscussed_notes',AsyncMock(return_value=[])):
+             patch('app.services.primeflow_report_delivery.load_undiscussed_notes',AsyncMock(return_value=[])), \
+             patch('app.services.morning_task_follow_up.load_follow_up_comments',AsyncMock(return_value={})), \
+             patch('app.services.morning_task_follow_up.load_morning_task_rows',AsyncMock(return_value=[])):
             report=await generate_fresh(DAY,slot,{'to':[]},data=source)
         meeting=Mira1HMeeting(id=uuid.uuid4(),meeting_date=DAY,slot=slot,status='GA_PHASE')
         facts=await host.new_progress(db,meeting,data)

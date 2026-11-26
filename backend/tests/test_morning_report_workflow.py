@@ -133,7 +133,8 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
     def test_requested_section_order_is_used_in_m1_and_email(self) -> None:
         comments = GA_PF_COMMENTS_TITLE
         expected = [
-            SECTION_TITLES[2], GA_HV_DV_TASKS_TITLE, PHYSICAL_GA_TITLE, SECTION_TITLES[1],
+            SECTION_TITLES[2], GA_HV_DV_TASKS_TITLE, "DET 08:00/DL AM",
+            PHYSICAL_GA_TITLE, SECTION_TITLES[1],
             SECTION_TITLES[0], GA_REACTIONS_SECTION_KEY, comments, SECTION_TITLES[3],
             SECTION_TITLES[4], SECTION_TITLES[5], KA_GENT_QUESTIONS_TITLE, *SECTION_TITLES[7:9],
             REORGANIZATION_TITLE,
@@ -145,7 +146,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         ]
         sections = normalize_morning_report_sections([manual, *saved])
         self.assertEqual([section["section_key"] for section in sections], [manual["section_key"], *expected])
-        self.assertIn("(Asnje koment te simbolet)", sections[7]["body"])
+        self.assertIn("(Asnje koment te simbolet)", next(section["body"] for section in sections if section["title"] == comments))
         self.assertEqual(section_group_label("morning", comments, comments), "AUTO-FILLED FROM PRIMEFLOW")
         report_day = date(2026, 9, 1)
         document = Document(BytesIO(render_section_report_docx("M1", "M1", report_day, sections)))
@@ -160,7 +161,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         regenerated = preserve_manual_sections(normalize_morning_report_sections([]), [
             {"title": comments, "section_key": comments, "body": "Dy komente për diskutim"},
         ], MANUAL_SECTION_TITLES)
-        self.assertIn("(Asnje koment te simbolet)", normalize_morning_report_sections(regenerated)[6]["body"])
+        self.assertIn("(Asnje koment te simbolet)", next(section["body"] for section in normalize_morning_report_sections(regenerated) if section["title"] == comments))
 
     def test_symbol_comments_use_a_saved_table_in_every_m1_format(self) -> None:
         report_day = date(2026, 9, 1)
@@ -744,7 +745,8 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         ]
         retained = {"title": "Another question", "section_key": "manual:custom:2:retained", "body": "Keep this answer"}
         sections = normalize_morning_report_sections([*retired, retained, {"title": "PIKAT E DITES SOT", "body": "Legacy"}])
-        self.assertEqual([section["section_key"] for section in sections], [retained["section_key"], *DISPLAY_SECTION_TITLES])
+        self.assertEqual([section["section_key"] for section in sections],
+                         [retained["section_key"], *DISPLAY_SECTION_TITLES])
         for question in retired:
             self.assertTrue(is_known_report_title("morning", question["title"]))
             self.assertFalse(is_known_report_title("after_break", question["title"]))
@@ -843,15 +845,14 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         ]
         sections = normalize_morning_report_sections(existing)
         self.assertEqual(sections[0]["title"], "Pyetje manuale")
-        first_auto = sections[1]
-        self.assertEqual(first_auto["section_key"], SECTION_TITLES[2])
+        first_auto = next(section for section in sections if section["section_key"] == SECTION_TITLES[2])
         self.assertIn("VONESA/MUNGESA/PV", first_auto["title"])
         self.assertEqual(first_auto["body"], f"VONESA: 0\n\nMUNGESA: 0\n\n{pv}\n\nNDRYSHON PLANI: Ruaje këtë vendim")
         context = next(section for section in sections if section["section_key"] == SECTION_TITLES[4])
         self.assertEqual(context["body"], "FESTA EXTERNE: 0\n\nTAKIMET EXTERNE: 0")
         self.assertEqual(normalize_morning_report_sections(sections), sections)
         generated = preserve_morning_plan_note(normalize_morning_report_sections([]), existing)
-        self.assertIn("Ruaje këtë vendim", generated[0]["body"])
+        self.assertIn("Ruaje këtë vendim", next(section["body"] for section in generated if section["section_key"] == SECTION_TITLES[2]))
         report_day = date(2026, 11, 23)
         rendered = [
             render_html("M1", report_day, sections),
@@ -860,6 +861,18 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         ]
         for output in rendered:
             self.assertLess(output.index("27.11.2026"), output.index("GA reply"))
+
+    def test_reorganization_answer_survives_m1_regeneration(self) -> None:
+        from app.services.meeting_point_manual_sync import section_group_label
+        from app.services.morning_report import preserve_morning_plan_note
+
+        draft = normalize_morning_report_sections([])
+        answered = [{**section, "body": "Po, plani ndryshoi."}
+                    if section["section_key"] == REORGANIZATION_TITLE else section for section in draft]
+        regenerated = preserve_morning_plan_note(draft, answered)
+        manual = next(section for section in regenerated if section["section_key"] == REORGANIZATION_TITLE)
+        self.assertIn("KOMENT: Po, plani ndryshoi.", manual["body"])
+        self.assertEqual(section_group_label("morning", manual["title"], manual["section_key"]), "MANUAL QUESTIONS")
 
     def test_normalization_renames_the_previous_notes_section(self) -> None:
         previous_title = (

@@ -1378,6 +1378,7 @@ async def _build_common_view(
                                 "time": time_label,
                                 "platform": meeting.platform or "TBD",
                                 "owner": owner_name,
+                                "allParticipants": bool(meeting.all_participants),
                                 "assignees": [
                                     name for name, _ in participant_users_by_meeting.get(meeting.id, [])
                                 ],
@@ -1405,6 +1406,7 @@ async def _build_common_view(
                             "time": calendar_meeting_time_range(meeting, _tirane_tz()) or _format_time(meeting.starts_at),
                             "platform": meeting.platform or "TBD",
                             "owner": owner_name,
+                            "allParticipants": bool(meeting.all_participants),
                             "assignees": [
                                 name for name, _ in participant_users_by_meeting.get(meeting.id, [])
                             ],
