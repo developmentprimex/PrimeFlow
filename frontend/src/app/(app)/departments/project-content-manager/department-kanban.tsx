@@ -4,6 +4,7 @@ import { DailyProjectCoverageNotices } from "@/components/daily-project-coverage
 import * as React from "react"
 import { TaskPauseBadge, TaskPauseField } from "@/components/task-pause-field"
 import { isTaskPausedOnDay } from "@/lib/task-pause"
+import { taskResponseError, updateTaskWithCompletion } from "@/lib/task-completion"
 import { MyViewTaskColumns } from "@/components/my-view-task-columns"
 import { CollapsibleTaskTitle } from "@/components/collapsible-task-title"
 import { calendarMeetingTimeRange } from "@/lib/calendar-meeting-time"
@@ -5192,7 +5193,7 @@ export default function DepartmentKanban() {
           body: JSON.stringify({ comment: closeComment }),
         })
         if (!commentRes.ok) {
-          toast.error("Failed to save the required result comment")
+          toast.error(await taskResponseError(commentRes, "Failed to save the required result comment"))
           return
         }
         const updateRes = await apiFetch(`/tasks/${taskToCloseId}`, {
@@ -5201,7 +5202,7 @@ export default function DepartmentKanban() {
           body: JSON.stringify({ status: "DONE" }),
         })
         if (!updateRes.ok) {
-          toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
+          toast.error(await taskResponseError(updateRes, "Failed to close system task"))
           return
         }
       } else {
@@ -5220,7 +5221,7 @@ export default function DepartmentKanban() {
           }),
         })
         if (!res.ok) {
-          toast.error("Failed to close system task")
+          toast.error(await taskResponseError(res, "Failed to close system task"))
           return
         }
       }
@@ -5916,7 +5917,7 @@ export default function DepartmentKanban() {
   const updateAllTodayTask = async () => {
     if (!allTodayEditingTaskId || !allTodayEditStatus) return
     const editingTask = allTodayTaskLookup.get(allTodayEditingTaskId) || null
-    if (!canEditAllTodayTask(editingTask)) {
+    if (!editingTask || !canEditAllTodayTask(editingTask)) {
       toast.error("You do not have permission to edit this task")
       return
     }
@@ -5931,10 +5932,8 @@ export default function DepartmentKanban() {
       const isProjectLinked = hasProjectId(editingTask?.project_id)
       const startDateValue = allTodayEditStartDate ? new Date(allTodayEditStartDate).toISOString() : null
       const dueDateValue = allTodayEditDueDate ? new Date(allTodayEditDueDate).toISOString() : null
-      const res = await apiFetch(`/tasks/${allTodayEditingTaskId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isNoteOriginTask ? {
+      const updated = await updateTaskWithCompletion(
+        apiFetch, editingTask, user?.id, isNoteOriginTask ? {
           status: allTodayEditStatus,
           pause_days: allTodayEditStatus === "DONE" ? undefined : allTodayPauseDays,
           start_date: startDateValue,
@@ -5975,20 +5974,9 @@ export default function DepartmentKanban() {
           ...(isWaitingConfirmation(allTodayEditStatus)
             ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
             : {}),
-        }),
-      })
-      if (!res.ok) {
-        let detail = "Failed to update task"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (typeof data?.detail === "string") detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
-      const updated = (await res.json()) as Task
+        }, "Failed to update task",
+      )
+      if (!updated) return
       setDepartmentTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
       setNoProjectTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
       setSystemCreatedTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
@@ -6003,6 +5991,8 @@ export default function DepartmentKanban() {
       await refreshDailyReport()
       cancelAllTodayTaskEdit()
       toast.success("Task updated")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update task")
     } finally {
       setAllTodayUpdating(false)
     }

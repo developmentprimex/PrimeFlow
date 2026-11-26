@@ -31,6 +31,7 @@ import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { financeTaskAlignment, financeTaskMatchesDates, financeTaskMatchesPerson, financeUserInitials as initials } from "@/lib/finance-task-rows"
 import type { DailyReportResponse, Department, SystemTaskOut, SystemTaskTemplate, Task, User } from "@/lib/types"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
+import { updateTaskWithCompletion } from "@/lib/task-completion"
 
 const ALL_USERS_VALUE = "__all__"
 const VIEW_ALL = "all"
@@ -619,50 +620,17 @@ export default function DepartmentKanban() {
     [apiFetch, handleTaskUpdated]
   )
 
+  const completionActorId = user?.id
   const handleMarkDone = React.useCallback(
-    async (taskId: string) => {
-      const task = tasks.find((item) => item.id === taskId)
-      const skipsResultComment = Boolean(
-        task && (
-          task.ga_note_origin_id || task.plan_note_origin_id || task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal
-        )
-      )
-      const resultComment = skipsResultComment
-        ? null
-        : window.prompt("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")?.trim()
-      if (!skipsResultComment && !resultComment) {
-        toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
-        return
-      }
+    async (task: Task) => {
+      const taskId = task.id
       setUpdatingTaskIds((prev) => ({ ...prev, [taskId]: true }))
 
       try {
-        if (resultComment) {
-          const commentRes = await apiFetch(`/tasks/${taskId}/comment`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ comment: resultComment }),
-          })
-          if (!commentRes.ok) throw new Error("Komenti i rezultatit nuk u ruajt.")
-        }
-        const res = await apiFetch(`/tasks/${taskId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "DONE" }),
-        })
-
-        if (!res.ok) {
-          let detail = "Failed to mark task as done."
-          try {
-            const payload = (await res.json()) as { detail?: string }
-            if (payload?.detail) detail = payload.detail
-          } catch {
-            // Ignore JSON parse errors for non-JSON error bodies.
-          }
-          throw new Error(detail)
-        }
-
-        const updatedTask = (await res.json()) as Task
+        const updatedTask = await updateTaskWithCompletion(
+          apiFetch, task, completionActorId, { status: "DONE" }, "Failed to mark task as done.",
+        )
+        if (!updatedTask) return
         handleTaskUpdated(updatedTask)
         toast.success("Task marked as done")
       } catch (markError) {
@@ -676,7 +644,7 @@ export default function DepartmentKanban() {
         })
       }
     },
-    [apiFetch, handleTaskUpdated, tasks]
+    [apiFetch, completionActorId, handleTaskUpdated]
   )
 
   const handleExportExcel = React.useCallback(async () => {
@@ -1036,7 +1004,7 @@ export default function DepartmentKanban() {
                               <Button
                                 size="sm"
                                 className="h-7 bg-emerald-500 px-2 text-white hover:bg-emerald-600"
-                                onClick={() => void handleMarkDone(row.id)}
+                                onClick={() => void handleMarkDone(row.task)}
                                 disabled={Boolean(updatingTaskIds[row.id])}
                               >
                                 {updatingTaskIds[row.id] ? "Saving..." : "Done"}

@@ -250,6 +250,14 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ruhet në `task_daily_rlz_states` pas migrimit 0210. Mbyllja si DONE e detyrave
   që kërkojnë koment për rezultatin përdor një rregull më vete.
 
+- Done në Finance, Edit në Finance dhe System Task Instances, si dhe Edit te
+  All Today në Product Content përdorin përgjigjen e API-së së detyrës për të
+  kërkuar komentin e përgjegjësit ose arsyen e përjashtimit të administratorit
+  apo menaxherit. Kontrollo caktimin e instancës, anulimin, detyrat me koment
+  të ruajtur dhe gabimet e strukturuara. Mbyllja e detyrave sistemore te My
+  View në Development, Graphic Design dhe Product Content shfaq mesazhin e
+  API-së si për instancat ashtu edhe për rrjedhën sipas shabllonit.
+
 - **BZ M3** te **Reports & Control → Meetings** lexon simbolet M2, M3 dhe M2/3
   të detyrave të planifikuara për datën e raportit dhe lidhjet aktive
   PrimeFlow–Discord të punonjësve. Përdor historikun e simboleve për datat

@@ -22,6 +22,7 @@ import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { updateTaskWithCompletion } from "@/lib/task-completion"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { SkillCategory, Task, TaskFinishPeriod, UserLookup } from "@/lib/types"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
@@ -129,7 +130,8 @@ export function TaskEditDialog({
   showDescriptionField?: boolean
   embedded?: boolean
 }) {
-  const { apiFetch } = useAuth()
+  const { apiFetch, user } = useAuth()
+  const completionActorId = user?.id
   const isNoteOriginTask = Boolean(task?.ga_note_origin_id || task?.plan_note_origin_id)
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
@@ -284,24 +286,8 @@ export function TaskEditDialog({
         return
       }
 
-      const res = await apiFetch(`/tasks/${task.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      })
-
-      if (!res.ok) {
-        let detail = "Failed to update task."
-        try {
-          const payload = (await res.json()) as { detail?: string }
-          if (payload?.detail) detail = payload.detail
-        } catch {
-          // Ignore non-JSON error bodies.
-        }
-        throw new Error(detail)
-      }
-
-      const updatedTask = (await res.json()) as Task
+      const updatedTask = await updateTaskWithCompletion(apiFetch, task, completionActorId, updates, "Failed to update task.")
+      if (!updatedTask) return
       await onUpdated(updatedTask)
       toast.success("Task updated")
       onOpenChange(false)
@@ -313,6 +299,7 @@ export function TaskEditDialog({
     }
   }, [
     apiFetch,
+    completionActorId,
     confirmationAssigneeId,
     isRepetitive,
     description,
