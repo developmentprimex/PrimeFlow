@@ -11226,7 +11226,6 @@ export default function DepartmentKanban() {
                                     <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
                                   </summary>
                                   <DevelopmentMeetingAnswer section={answer} canUpdateMeetingStatus={internalSlot !== "M2"}
-                                    canCloseNote={internalSlot !== "M2"}
                                     pending={checklistReport.loading || checklistReport.failed} savingNote={checklistReport.savingNote}
                                     updateNote={checklistReport.updateNote} savingMeeting={checklistReport.savingMeeting}
                                     updateMeetingStatus={checklistReport.updateMeetingStatus} />

@@ -46,7 +46,28 @@ claude.ai ──HTTPS──> api-flow.primexeu.com  /.well-known/oauth-authoriza
 - Qasja jepet vetëm për email-et në `MCP_ASSISTANT_ALLOWED_EMAILS`. Ky kontroll bëhet në
   pëlqim, në refresh dhe në çdo verifikim token-i.
 - Kodet dhe token-at ruhen vetëm si SHA-256. Access token jeton 60 min, refresh token 30 ditë.
-- Gjithçka kthen 404 derisa `MCP_ASSISTANT_ENABLED=true`.
+- Resource-i i asistentit aktivizohet me `MCP_ASSISTANT_ENABLED=true`.
+
+## OAuth për Knowledge PX në provë
+
+Knowledge PX regjistrohet si resource i veçantë dhe autorizon vetëm scope-in `knowledge.read`.
+Për provën duhen `MCP_KNOWLEDGE_ENABLED=true`, URL-ja HTTPS e MCP-së së provës te
+`MCP_KNOWLEDGE_RESOURCE_URL`, lista `MCP_KNOWLEDGE_ALLOWED_EMAILS` dhe një sekret i
+veçantë te `MCP_KNOWLEDGE_INTROSPECTION_SECRET`. Vendos callback-et e sakta të klientëve
+të Knowledge PX te `MCP_KNOWLEDGE_ALLOWED_REDIRECT_URIS`. Për Knowledge PX lejohen callback-e të plota HTTPS. Knowledge PX duhet ta dërgojë `resource`
+në kërkesën e autorizimit dhe listën e vet të `scopes_supported` në metadata-n e MCP-së.
+Metadata e autorizimit vjen nga i njëjti issuer. Consent-i identifikon leximin e Knowledge PX.
+
+Pas lëshimit, një token Knowledge vlen vetëm për atë resource. Knowledge PX e kontrollon
+me `POST /api/oauth/internal/knowledge/introspect`, me JSON `{"token":"…"}` dhe header-in
+`X-MCP-Knowledge-Secret`. Për token aktiv përgjigjja jep `sub`, `client_id`, `scope`,
+`resource` dhe `exp`. Për token të pavlefshëm ose të revokuar jep `{"active":false}`.
+Kjo përgjigje nuk jep JWT për API-në PrimeFlow. Endpoint-i i sesionit të asistentit
+vazhdon të pranojë vetëm token-et e tij.
+
+Ky opsion është i fikur si parazgjedhje. Provo me llogari dhe databazë të dedikuar të
+staging, duke ruajtur qasjen e projekteve në Knowledge PX sipas `sub`. Asnjë migrim
+databaze nuk kërkohet për këto fusha OAuth.
 
 ## Tools e reja
 
