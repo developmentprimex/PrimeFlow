@@ -28,7 +28,7 @@ import { DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
 import { addManualReportSection, isCustomManualReportSection, ManualReportQuestionAdd, ManualReportQuestionDelete } from "@/components/manual-report-question-add"
 
 type Section = { section_key?: string; title: string; body: string }
-type TaskExplanation = { row_number: string; task_id: string; title: string; assignees: string; reason: string; comment: string }
+type TaskExplanation = { row_number: string; task_id: string; title: string; assignees: string; reason: string; comment: string; continued_only?: boolean }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
@@ -65,8 +65,9 @@ const GA_REACTIONS_SECTION = "A KA REACTION TE GRUPI?"
 const PCM_PROJECTS_SECTION = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
 const NEW_EMAILS_SECTION = "(GA) EMAILS TE REJA?"
 const UNFINISHED_SECTION = "DET TE PAKRYERA, 08:00/DEADLINE"
+const HV_GA_POSTPONED_SECTION = "DET TE SHTYERA TE HV ME GA"
 const EXPLANATION_REASONS: readonly string[] = DAILY_RLZ_REASONS.map(([, label]) => label)
-const AUTOMATED_SECTIONS = new Set([NEW_EMAILS_SECTION, GA_REPLIES_SECTION, GA_REACTIONS_SECTION, PCM_PROJECTS_SECTION])
+const AUTOMATED_SECTIONS = new Set([NEW_EMAILS_SECTION, GA_REPLIES_SECTION, GA_REACTIONS_SECTION, PCM_PROJECTS_SECTION, HV_GA_POSTPONED_SECTION])
 
 function isWaitingClientSection(section: Section) {
   return [section.section_key, section.title].some((value) =>
@@ -186,6 +187,7 @@ export default function AfterBreakReportPage() {
   const canManageDelivery = isManagerOrAdmin
   const [reportDate, setReportDate] = useReportDate(todayIso)
   const [draft, setDraft] = React.useState<Draft | null>(null)
+  const [expandedContinuationsDate, setExpandedContinuationsDate] = React.useState<string | null>(null)
   const explanationSaveQueue = React.useRef<Promise<void>>(Promise.resolve())
   const pendingExplanationValues = React.useRef(new Map<string, string>())
   const [loading, setLoading] = React.useState(false)
@@ -698,6 +700,10 @@ export default function AfterBreakReportPage() {
               const explanationsByRow = editsExplanations
                 ? new Map(draft.unfinished_task_explanations?.map((task) => [task.row_number, task]))
                 : undefined
+              const continuedCount = editsExplanations
+                ? draft.unfinished_task_explanations?.filter((task) => task.continued_only).length ?? 0
+                : 0
+              const showContinuations = expandedContinuationsDate === draft.report_date
               return (
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
@@ -732,6 +738,12 @@ export default function AfterBreakReportPage() {
                           </div>
                         ) : null}
                       </div>
+                      {continuedCount > 0 && (
+                        <Button variant="outline" size="sm" aria-expanded={showContinuations}
+                          onClick={() => setExpandedContinuationsDate(showContinuations ? null : draft.report_date)}>
+                          {showContinuations ? "− Fshih" : "+ Shfaq"} detyrat që kanë vazhduar ({continuedCount})
+                        </Button>
+                      )}
                       {canEdit && !editsExplanations && !isEditing && !AUTOMATED_SECTIONS.has(section.section_key || section.title) ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
@@ -769,6 +781,9 @@ export default function AfterBreakReportPage() {
                         filterWfeAge={isWaitingClientSection(section)}
                         filterDueDate={editsExplanations}
                         colorEightAmByStatus={editsExplanations}
+                        hideRow={continuedCount > 0 && !showContinuations
+                          ? (number) => explanationsByRow?.get(number)?.continued_only === true
+                          : undefined}
                         renderCell={editsExplanations && canEdit ? (_label, number, header) => {
                           const task = explanationsByRow?.get(number)
                           if (!task) return null

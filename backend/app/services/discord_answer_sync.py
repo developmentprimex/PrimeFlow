@@ -88,6 +88,8 @@ async def m2_payload(db, question, link):
         result['platform_status'] = status
     if question.kind == 'unfinished':
         result['task_actionable'] = actionable
+        if actionable:
+            result['task_status'] = str(getattr(task.status, 'value', task.status))
         related = (await db.execute(select(DiscordM2Question).where(
             DiscordM2Question.link_id == question.link_id, DiscordM2Question.day == question.day,
             DiscordM2Question.task_id == question.task_id, DiscordM2Question.kind == 'continuation'))).scalar_one_or_none()

@@ -26,7 +26,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import String, cast, or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
@@ -39,9 +39,12 @@ from app.models.ga_note import GaNote
 from app.services.gmail_px_notes import sync_gmail_px_notes
 from app.models.meeting import Meeting
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
+from app.models.project import Project
 from app.models.question_library import QuestionCategory, QuestionDefinition, QuestionUserStatus
 from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
+from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.services.report_note_visibility import is_mira_note, mira_note_expression
@@ -53,6 +56,7 @@ from app.services.meetings_report import (
     _all_participant_user_ids,
     _ascii_table_block,
     _assignee_names,
+    _audit_local_date,
     apply_weekly_planner_task_order,
     _clean_task_title as _display_title,
     _daily_rlz_values_by_task,
@@ -68,6 +72,7 @@ from app.services.meetings_report import (
     _m3_department_code_label,
     _m3_department_label,
     _m3_finance_ga_sections,
+    _m3_status_table,
     _m3_task_type_label,
     _normalize_section,
     _normalize_report_status,
@@ -82,6 +87,8 @@ from app.services.meetings_report import (
     send_section_report,
 )
 from app.services.task_title_rules import title_has_eight_am_indicator
+from app.services.ga_identity import resolve_ga_user
+from app.services.daily_realization_events import postponement_explanation_from_events
 from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, load_follow_up_comments, task_model_groups
 from app.services.primeflow_report import report_timezone
 from app.services.px_note_email import EMAIL_NOTE_ORIGINS, email_preview, email_preview_text, is_email_note_content
@@ -94,6 +101,8 @@ M2_PRIORITY_PROGRESS_TITLE = "STATUSI I DET 08:00/DEADLINE/DUE DATE SOT"
 UNFINISHED_EXPLANATION_OVERRIDES = "unfinished_explanation_overrides"
 WAITING_CLIENT_TABLE_LABEL = "DT WFE"
 DONE_AM_TABLE_LABEL = "DET E KRYERA NE AM"
+HV_GA_POSTPONED_TITLE = "DET TE SHTYERA TE HV ME GA"
+HV_GA_POSTPONED_NOT_GENERATED = "Nuk ka të dhëna të ruajtura për këtë pikë."
 UNHELD_MEETINGS_TABLE_LABEL = "TAK INT/EXT TE PAMBAJTURA"
 PCM_PROJECTS_TITLE = "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU"
 PCM_PROJECT_CODES = ("VS", "VL", "MST", "TT")
@@ -103,7 +112,7 @@ PCM_PROJECT_SUMMARY_PATTERN = re.compile("\n".join(f"{code} - (?:PO|JO)" for cod
 NEW_EMAILS_TITLE = "(GA) EMAILS TE REJA?"
 NEW_EMAILS_SNAPSHOT_KEY = "new_email_mailboxes"
 NEW_EMAILS_NOT_GENERATED = "Gjenero raportin për të lexuar email-et e ardhura nga ora 08:00."
-AUTOMATED_SECTION_TITLES = {NEW_EMAILS_TITLE, GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_KEY, PCM_PROJECTS_TITLE}
+AUTOMATED_SECTION_TITLES = {NEW_EMAILS_TITLE, GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_KEY, PCM_PROJECTS_TITLE, HV_GA_POSTPONED_TITLE}
 SECTION_TITLES = [
     NEW_EMAILS_TITLE,
     PCM_PROJECTS_TITLE,
@@ -120,6 +129,7 @@ SECTION_TITLES = [
     WAITING_CLIENT_TABLE_LABEL,
     GA_REPLIES_SECTION_TITLE,
     GA_REACTIONS_SECTION_KEY,
+    HV_GA_POSTPONED_TITLE,
 ]
 MANUAL_SECTION_TITLES: set[str] = set()
 DISPLAY_SECTION_TITLES = [
@@ -135,6 +145,7 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[7],
     SECTION_TITLES[8],
     *SECTION_TITLES[10:12],
+    HV_GA_POSTPONED_TITLE,
 ]
 SECTION_DISPLAY_TITLES = {
     GA_REACTIONS_SECTION_KEY: GA_REACTIONS_SECTION_TITLE,
@@ -540,6 +551,7 @@ async def _append_unfinished_priority_explanations(
     by_id = {str(task_id): fields for task_id, fields in values.items()}
     follow_up = await load_follow_up_comments(db, report_day, FOLLOW_UP_BY_SLOT) if include_morning_progress and rows else {}
     discord_comments: dict[str, list[str]] = {}
+    progress_confirmations: dict[str, list[str]] = {}
     if selected:
         selected_ids = [task.id for task in selected]
         continued_from_am = select(cast(DiscordM2Question.id, String)).where(
@@ -567,7 +579,8 @@ async def _append_unfinished_priority_explanations(
             comment = (evidence.get("comment") or "").strip()
             if comment:
                 initials = _initials(names.get(user_id))
-                discord_comments.setdefault(str(task_id), []).append(f"{initials}: {comment}" if initials != "-" else comment)
+                target = progress_confirmations if evidence.get("continued") is True else discord_comments
+                target.setdefault(str(task_id), []).append(f"{initials}: {comment}" if initials != "-" else comment)
     result = []
     for row in rows:
         task_id = row[-1]
@@ -575,11 +588,14 @@ async def _append_unfinished_priority_explanations(
         sources = ([comment] if comment != "-" else []) + discord_comments.get(task_id, [])
         manual = (overrides or {}).get(task_id, {})
         reason = manual.get("reason", reason) or "-"
-        comment = manual.get("comment", "; ".join(dict.fromkeys(sources))) or "-"
+        confirmation = progress_confirmations.get(task_id, [])
+        comment = manual.get("comment", "; ".join(dict.fromkeys([*sources, *confirmation]))) or "-"
         if explanation_rows is not None:
             explanation_rows.append({
                 "row_number": row[0], "task_id": task_id, "title": row[7],
                 "assignees": row[1], "reason": reason, "comment": comment,
+                "continued_only": row[4] == "IN_PROGRESS" and bool(confirmation)
+                and reason == "-" and not sources and manual.get("comment", "-") in {"", "-"},
             })
         cells = [*row[:-1], reason.replace("|", "¦"), comment.replace("|", "¦")]
         if include_morning_progress:
@@ -996,6 +1012,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             body = REACTIONS_UNAVAILABLE
         elif title == PCM_PROJECTS_TITLE:
             body = ""
+        elif title == HV_GA_POSTPONED_TITLE:
+            body = HV_GA_POSTPONED_NOT_GENERATED
         elif title == SECTION_TITLES[4]:
             body = _normalize_section(
                 _ascii_table(
@@ -1294,9 +1312,110 @@ def _new_emails_report_body(mailboxes: dict[MailSource, dict], report_day: date,
     return "\n\n".join(blocks)
 
 
+def _hv_ga_postponements_body(
+    audited_tasks, *, names, assignee_ids_by_task=None, department_codes=None, project_titles_by_id=None,
+) -> tuple[str, int]:
+    tasks_by_id = {}
+    events_by_task = {}
+    dates_by_task = {}
+    for task, event in audited_tasks:
+        old = _audit_local_date((event.before or {}).get("value"))
+        new = _audit_local_date((event.after or {}).get("value"))
+        if old is None or new is None or new <= old:
+            continue
+        tasks_by_id[task.id] = task
+        events_by_task.setdefault(task.id, []).append(event)
+        dates_by_task.setdefault(task.id, {}).setdefault(event.action, []).append((old, new))
+
+    both, single = [], []
+    date_ranges, explanations = {}, {}
+    for task_id, task in tasks_by_id.items():
+        dates = dates_by_task[task_id]
+        (both if len(dates) == 2 else single).append(task)
+        changes = [
+            (label, moves[0][0], moves[-1][1])
+            for action, label in (("task.start_date_changed", "START"), ("task.due_date_changed", "DUE"))
+            if (moves := dates.get(action))
+        ]
+        date_ranges[task_id] = (
+            " / ".join(f"{label}: {old:%d.%m.%Y}" for label, old, _ in changes),
+            " / ".join(f"{label}: {new:%d.%m.%Y}" for label, _, new in changes),
+        )
+        explanation = postponement_explanation_from_events(events_by_task[task_id])
+        explanations[task_id] = (explanation.get("reason", "-"), explanation.get("comment", "-"))
+
+    tables = []
+    for caption, tasks in (("SHTYER START DHE DUE DATE", both), ("SHTYER START OSE DUE DATE", single)):
+        tables.extend(_m3_status_table(
+            caption, tasks, names,
+            with_status=True, include_type=True, include_department=True, include_am_pm=True,
+            department_codes=department_codes, project_titles_by_id=project_titles_by_id or {},
+            assignee_ids_by_task=assignee_ids_by_task, show_all_assignees=True,
+            date_range_by_task=date_ranges, daily_rlz_by_task=explanations,
+            include_priority_tone=True, escape_ascii_delimiters=True,
+        ))
+        tables.append("")
+    return _normalize_section(tables), len(tasks_by_id)
+
+
+async def _load_hv_ga_postponements(db: AsyncSession, report_day: date, as_of: datetime) -> tuple[str, int]:
+    ga = await resolve_ga_user(db, work_staff_only=True)
+    if ga is None:
+        return _hv_ga_postponements_body([], names={})
+    start = datetime.combine(report_day, time.min, tzinfo=report_timezone())
+    hv_owner = select(TaskAssignee.task_id).where(TaskAssignee.user_id == AuditLog.actor_user_id).correlate(AuditLog)
+    ga_owner = select(TaskAssignee.task_id).where(TaskAssignee.user_id == ga.id)
+    ga_alignment = select(TaskAlignmentUser.task_id).where(TaskAlignmentUser.user_id == ga.id)
+    ga_template_alignment = select(SystemTaskTemplateAlignmentUser.template_id).where(
+        SystemTaskTemplateAlignmentUser.user_id == ga.id,
+    )
+    audited_tasks = (await db.execute(
+        select(Task, AuditLog, Department.code, Project.title)
+        .join(AuditLog, AuditLog.entity_id == Task.id)
+        .join(User, User.id == AuditLog.actor_user_id)
+        .outerjoin(Department, Department.id == Task.department_id)
+        .outerjoin(Project, Project.id == Task.project_id)
+        .where(
+            Task.work_staff_filter(),
+            func.lower(func.trim(User.full_name)) == "haxhere spahiu",
+            or_(Task.assigned_to == AuditLog.actor_user_id, Task.id.in_(hv_owner)),
+            or_(Task.assigned_to == ga.id, Task.id.in_(ga_owner), Task.id.in_(ga_alignment),
+                Task.system_template_origin_id.in_(ga_template_alignment)),
+            AuditLog.entity_type == "task",
+            AuditLog.action.in_(("task.start_date_changed", "task.due_date_changed")),
+            AuditLog.created_at >= start,
+            AuditLog.created_at < start + timedelta(days=1),
+            AuditLog.created_at <= as_of,
+        ).order_by(AuditLog.created_at, AuditLog.id)
+    )).all()
+    tasks = list({task.id: task for task, _, _, _ in audited_tasks}.values())
+    return _hv_ga_postponements_body(
+        [(task, event) for task, event, _, _ in audited_tasks],
+        names=await _assignee_names(db, tasks),
+        assignee_ids_by_task=await _effective_task_assignee_ids(db, tasks),
+        department_codes={task.department_id: code for task, _, code, _ in audited_tasks if code},
+        project_titles_by_id={task.project_id: title for task, _, _, title in audited_tasks if title},
+    )
+
+
+async def refresh_hv_ga_postponements(
+    db: AsyncSession, sections: list[dict[str, str]], report_day: date, *, sent: bool,
+) -> list[dict[str, str]]:
+    now = datetime.now(report_timezone())
+    if sent or report_day != now.date():
+        return sections
+    body, _ = await _load_hv_ga_postponements(db, report_day, now)
+    return [
+        {**section, "body": body}
+        if section.get("section_key") == HV_GA_POSTPONED_TITLE else section
+        for section in sections
+    ]
+
+
 async def build_after_break_report_sections(db: AsyncSession, report_day: date) -> tuple[list[dict[str, str]], dict[str, Any]]:
     generated_at = datetime.now(timezone.utc)
     mailboxes = await load_new_email_mailboxes(report_day, generated_at)
+    hv_postponed_body, hv_postponed_count = await _load_hv_ga_postponements(db, report_day, generated_at)
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
@@ -1425,6 +1544,8 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         {"title": SECTION_TITLES[9], "body": _normalize_section(section_3)},
         {"title": SECTION_TITLES[10], "body": ga_section},
         {"title": SECTION_TITLES[11], "body": hv_section},
+        {"section_key": HV_GA_POSTPONED_TITLE, "title": HV_GA_POSTPONED_TITLE,
+         "body": hv_postponed_body},
     ]
     sections_by_title = {section.get("section_key", section["title"]): section for section in sections}
     sections = [sections_by_title[title] for title in DISPLAY_SECTION_TITLES]
@@ -1445,6 +1566,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             SECTION_TITLES[9]: len(section_3),
             SECTION_TITLES[10]: ga_section.count("\n- ") + (1 if ga_section.startswith("- ") else 0),
             SECTION_TITLES[11]: hv_section.count("\n- ") + (1 if hv_section.startswith("- ") else 0),
+            HV_GA_POSTPONED_TITLE: hv_postponed_count,
         },
     }
     return await filter_report_sections(db, sections, report_day), snapshot

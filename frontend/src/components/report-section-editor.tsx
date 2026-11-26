@@ -591,6 +591,7 @@ export function ReportSectionPreview({
   largerTableText = false,
   emphasizeOwnerSeparator = false,
   discordReplyReport,
+  hideRow,
   renderCell,
   renderLine,
 }: {
@@ -604,6 +605,7 @@ export function ReportSectionPreview({
   largerTableText?: boolean
   emphasizeOwnerSeparator?: boolean
   discordReplyReport?: DiscordReplyReport
+  hideRow?: (rowNumber: string) => boolean
   renderCell?: (label: string, rowNumber: string, header: string, text: string) => React.ReactNode
   renderLine?: (text: string) => React.ReactNode
 }) {
@@ -840,12 +842,15 @@ export function ReportSectionPreview({
           const value = row.cells[createdColumnIndex]?.trim().toUpperCase()
           return createdWeekFilter === "this" ? value === "THIS W" : value === "LAST W"
         })
-    const visibleDataRows = canFilterDueDate && dueDateFilter !== "all"
+    const dueFilteredRows = canFilterDueDate && dueDateFilter !== "all"
       ? weekFilteredRows.filter((row) => {
           const dueDate = row.cells[dueDateColumnIndex]?.trim().toUpperCase() || ""
           return dueDateFilter === "today" ? dueDate === "SOT" : /^\d{2}\.\d{2}\.\d{4}$/.test(dueDate)
         })
       : weekFilteredRows
+    const visibleDataRows = hideRow
+      ? dueFilteredRows.filter((row) => !hideRow(row.cells[0]?.trim() || ""))
+      : dueFilteredRows
     const hasWideColumn = headers.some((header) => {
       const name = normalizeHeader(header)
       return name === "TITLE" || name === "NOTE" || name === "PYETJA" || name === "PËRGJIGJJA E GA"
@@ -940,7 +945,7 @@ export function ReportSectionPreview({
               })}
           </thead>
           <tbody>
-            {canFilterDueDate && dueDateFilter !== "all" && !visibleDataRows.length ? (
+            {(hideRow || (canFilterDueDate && dueDateFilter !== "all")) && !visibleDataRows.length ? (
               <tr><td colSpan={headers.length} className="px-2 py-2 text-slate-600">Asnjë detyrë për këtë filtër.</td></tr>
             ) : null}
             {visibleDataRows.map((row, rowIndex) => {

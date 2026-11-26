@@ -116,6 +116,8 @@ const meetingItems: NavItem[] = [
   { href: "/meeting-recordings", label: "Regjistrimet", icon: Video },
 ]
 
+const planComparisonItem: NavItem = { href: "/today-plan-comparison", label: "Krahasimi i planit", icon: ClipboardCheck }
+
 const gaReportItems: NavItem[] = [
   { href: "/today-print-report", label: "1H SHTYPI Today", icon: MailCheck },
   { href: "/tomorrow-print-report", label: "1H SHTYPI Tomorrow", icon: MailCheck },
@@ -127,7 +129,7 @@ const gaReportItems: NavItem[] = [
   { href: "/m3-reporting-points", label: "M3 PIKAT PER RAP", icon: ClipboardCheck },
 ]
 
-const gaReportHrefs = new Set(gaReportItems.map((item) => item.href))
+const gaReportHrefs = new Set([...gaReportItems, planComparisonItem].map((item) => item.href))
 
 const navGroups: NavGroup[] = [
   {
@@ -218,6 +220,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/today-print-report", label: "1H SHTYPI Today", icon: MailCheck },
       { href: "/tomorrow-print-report", label: "1H SHTYPI Tomorrow", icon: MailCheck },
+      planComparisonItem,
       {
         href: "/admin/1h-reports",
         label: "1H Reports",
@@ -557,6 +560,7 @@ export function Sidebar({ role }: { role: UserRole }) {
           .flatMap((item) => isGaUser && item.href === "/admin-tasks" ? [item, ...gaReportItems] : [item])
           .filter(canViewItem)
           .map((item) => renderNavItem(item))}
+        {isGaUser && canViewItem(planComparisonItem) && renderNavItem(planComparisonItem)}
 
         <div>
           <button

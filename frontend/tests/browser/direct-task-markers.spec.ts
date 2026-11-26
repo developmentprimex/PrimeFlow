@@ -299,7 +299,7 @@ test("Common View Short filters both workweeks and the weekly print", async ({ p
     for (const title of excluded) await expect(table.getByText(title)).toHaveCount(0)
     for (const title of matchingApprovals) await expect(confirmation.getByText(title, { exact: true })).toBeVisible()
     await expect(excludedApproval).toHaveCount(0)
-    await expect(table.locator("tbody tr")).toHaveCount(5)
+    await expect(table.locator("tbody .week-table-label")).toHaveCount(5)
   }
 
   await page.emulateMedia({ media: "print" })
@@ -346,8 +346,9 @@ test("Common View Short groups 1H by period and sorts each user's tasks by prior
         task(1, "Deadline second user", { oneHMarker: null, isDeadlineImportant: true }),
         task(1, "08:00 second user", { oneHReportSlot: "11:00", isDeadlineImportant: true, status: "DONE" }),
         task(0, "Urgent first user PM", { finishPeriod: "PM" }),
-        task(1, "Urgent second user PM", { finishPeriod: "PM" }),
+        task(1, "Urgent second user PM", { finishPeriod: "PM", oneHMarkerComment: "Comment in full view" }),
         task(1, "08:00 second user PM", { finishPeriod: "PM" }),
+        task(0, "Task spanning both periods", { finishPeriod: "AM/PM" }),
       ] },
     } })
   })
@@ -356,11 +357,18 @@ test("Common View Short groups 1H by period and sorts each user's tasks by prior
   const row = page.locator(".week-table-row.oneh")
   const am = row.getByRole("group", { name: "AM", exact: true })
   const pm = row.getByRole("group", { name: "PM", exact: true })
+  const amRow = row.filter({ has: page.getByRole("group", { name: "AM", exact: true }) })
+  const pmRow = row.filter({ has: page.getByRole("group", { name: "PM", exact: true }) })
   const expectedAM = ["08:00 second user", "Deadline second user", "Urgent second user", "08:00 first user"]
   const expectedPM = ["08:00 second user PM", "Urgent second user PM", "Urgent first user PM"]
   for (const week of ["This Week Short", "Next Week Short"]) {
     await page.getByRole("button", { name: week, exact: true }).click()
+    await expect(amRow.locator(".week-table-period-heading")).toHaveText(Array(5).fill("AM"))
+    await expect(pmRow.locator(".week-table-period-heading")).toHaveText(Array(5).fill("PM"))
     await expect(row.getByRole("group")).toHaveText([/^AM/, /^PM/])
+    await expect(am.locator(".period-indicator")).toHaveText(["AM/PM"])
+    await expect(pm.locator(".period-indicator")).toHaveCount(0)
+    await expect(row.getByText("Comment in full view", { exact: false })).toHaveCount(0)
     await expect(am.locator(".week-table-entry-main > span > span").filter({ hasText: /user/ }))
       .toHaveText(expectedAM)
     await expect(pm.locator(".week-table-entry-main > span > span").filter({ hasText: /user/ }))
@@ -369,10 +377,15 @@ test("Common View Short groups 1H by period and sorts each user's tasks by prior
   await page.emulateMedia({ media: "print" })
   await expect(am.getByText("08:00 second user", { exact: true })).toBeVisible()
   await expect(pm.getByText("Urgent first user PM", { exact: true })).toBeVisible()
+  await expect(pm.locator(".period-indicator")).toHaveCount(0)
+  await expect(row.getByText("Comment in full view", { exact: false })).toHaveCount(0)
+  await expect(pmRow.locator("td").first()).toHaveCSS("border-top-width", "2px")
   await page.emulateMedia({ media: "screen" })
   await page.getByRole("button", { name: "Next Week", exact: true }).click()
   await expect(am).toHaveCount(0)
   await expect(pm).toHaveCount(0)
+  await expect(row.locator(".period-indicator").filter({ hasText: /^PM$/ })).toHaveCount(3)
+  await expect(row.getByText("Comment in full view", { exact: false })).toBeVisible()
 })
 
 async function chooseGroupSymbols(page: Page) {

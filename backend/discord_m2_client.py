@@ -37,7 +37,17 @@ def prompt(job):
         return text[:1900]
     text = f"<@{job['discord_user_id']}> **M2 · {KINDS[job['kind']]}**\n{row['title']}"
     if job['kind'] == 'unfinished':
-        text += '\n\nA vazhdon me këtë detyrë në PM?'
+        status = job.get('task_status', row.get('status'))
+        if row.get('priority_follow_up') and status == 'TODO':
+            text += '\n\n**Pse nuk ke vazhduar me këtë detyrë?** Shëno arsyen te Koment.'
+        elif row.get('priority_follow_up') and status == 'IN_PROGRESS':
+            text += '\n\n**A ke vazhduar sot me këtë detyrë?** Nëse jo, shëno pse te Koment.'
+            if job.get('choice') == 'PO':
+                text += '\n✅ **Ka vazhduar**'
+        else:
+            text += '\n\nA vazhdon me këtë detyrë në PM?'
+        if row.get('due_label') == 'SOT':
+            text += '\n**Pse nuk është kryer?** Sot është afati.'
         related = job.get('continuation', {})
         if related.get('answered'):
             text += '\n✅ **Vazhdon në PM**' if related.get('choice') == 'PO' else '\n⏸ **Nuk vazhdon në PM**'
@@ -87,8 +97,13 @@ def controls(job):
         pending = job.get('postponement', {}).get('status') == 'PENDING'
         view.add_item(discord.ui.Button(label='Në pritje të konfirmimit' if pending else 'Shtyje',
             custom_id=f"pf:m2a:request:{job['id']}", disabled=pending))
-        view.add_item(discord.ui.Button(label='Vazhdon në PM', style=discord.ButtonStyle.primary,
-            custom_id=f"pf:m2:continue:{job['id']}", disabled=job.get('continuation', {}).get('choice') == 'PO'))
+        row = job['snapshot']
+        if not row.get('priority_follow_up') or (row.get('due_label') == 'SOT' and row.get('am_pm') in {'AM', 'AM/PM'}):
+            view.add_item(discord.ui.Button(label='Vazhdon në PM', style=discord.ButtonStyle.primary,
+                custom_id=f"pf:m2:continue:{job['id']}", disabled=job.get('continuation', {}).get('choice') == 'PO'))
+        if row.get('priority_follow_up') and job.get('task_status', row.get('status')) == 'IN_PROGRESS':
+            view.add_item(discord.ui.Button(label='Po, ka vazhduar', style=discord.ButtonStyle.success,
+                custom_id=f"pf:m2:worked:{job['id']}", disabled=job.get('choice') == 'PO'))
         return finish()
     if job['kind'] == 'continuation' and job.get('postponement', {}).get('status') == 'APPROVED':
         view.add_item(open_task)
@@ -228,13 +243,19 @@ async def handle(bot, interaction):
         return await bot.bridge(f'/bot/m2/{parts[3]}/open', actor(interaction))
 
     deferred = False
-    if direct_yes or parts[2] in {'open', 'detail', 'return', 'question', 'done'}:
+    if direct_yes or parts[2] in {'open', 'detail', 'return', 'question', 'done', 'worked'}:
         await interaction.response.defer()
         job = await load()
     else:
         job, deferred = await prepare_modal(interaction, load)
     if parts[2] == 'note':
         await open_modal(interaction, CommentOnlyModal(bot, job), deferred=deferred)
+        return
+    if parts[2] == 'worked':
+        await bot.bridge(f"/bot/m2/{job['id']}/comment", {**actor(interaction),
+            'comment': 'Ka vazhduar.', 'continued': True, 'request_id': str(interaction.id)})
+        latest = await bot.bridge(f"/bot/m2/{job['id']}/open", actor(interaction))
+        await refresh_unfinished(bot, interaction, latest, interaction.message)
         return
     if parts[2] in {'done', 'continue'}:
         if job['kind'] != 'unfinished':

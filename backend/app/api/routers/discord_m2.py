@@ -26,6 +26,7 @@ from app.services import discord_m2 as service, m2_reporting_points as reports
 from app.services.audit import add_audit_log
 from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.primeflow_report import report_timezone
+from app.services.morning_task_follow_up import task_model_groups
 
 router = APIRouter(dependencies=[Depends(require_bot)])
 
@@ -40,7 +41,7 @@ async def task_owned(db, user_id, task_id):
 
 
 async def data_with_moves(db, day):
-    data = await reports.build_task_data(db, day)
+    data = await reports.build_task_data(db, day, include_discord_morning=True)
     # Identify the latest date change so an old reply cannot explain a new move.
     ids = {uuid.UUID(row['task_id']) for key in ('postponed', 'postponed_am') for row in data.get(key, [])}
     if ids:
@@ -200,6 +201,10 @@ class Comment(Actor):
     request_id: str = Field(pattern=r'^\d{1,32}$')
 
 
+class ReportComment(Comment):
+    continued: bool = False
+
+
 class ContinuePM(Comment):
     expected_answered_at: datetime | None = None
 
@@ -263,12 +268,21 @@ class Answer(Actor):
 
 
 @router.post('/{question_id}/comment')
-async def add_comment(question_id: uuid.UUID, payload: Comment, db: AsyncSession = Depends(get_db)):
+async def add_comment(question_id: uuid.UUID, payload: ReportComment, db: AsyncSession = Depends(get_db)):
     question, _, user = await own_question(db, question_id, payload)
-    comment = payload.comment.strip()
+    continued = getattr(payload, 'continued', False)
+    comment = 'Ka vazhduar.' if continued else payload.comment.strip()
     if not comment:
         raise HTTPException(422, 'Shkruaj komentin.')
     report = await reports.locked_report(db, question.day)
+    if continued:
+        await db.refresh(question)
+        task = await task_owned(db, user.id, question.task_id)
+        if (question.kind != 'unfinished' or getattr(task.status, 'value', task.status) != 'IN_PROGRESS'
+                or not task_model_groups(task, question.day, include_planned_days=True)):
+            raise HTTPException(409, 'Konfirmimi vlen për detyrat 08:00 ose Deadline AM që janë në progres.')
+        if question.choice == 'PO':
+            return {'ok': True}
     duplicate = (await db.execute(select(AuditLog.id).where(AuditLog.entity_type == 'task',
         AuditLog.entity_id == question.task_id, AuditLog.actor_user_id == user.id,
         AuditLog.action == 'task.discord_m2_comment', AuditLog.after['request_id'].astext == payload.request_id))).first()
@@ -282,6 +296,8 @@ async def add_comment(question_id: uuid.UUID, payload: Comment, db: AsyncSession
     else:
         db.add(TaskUserComment(task_id=question.task_id, user_id=user.id, comment=body))
     await record_report_comment(db, report, question, user, payload, comment)
+    if continued:
+        question.choice = 'PO'
     # This is a note, not an answer: preserve choice, reason and answered_at.
     await db.commit()
     return {'ok': True}
@@ -302,7 +318,8 @@ async def record_report_comment(db, report, question, user, payload, comment):
     report.status, report.last_error = 'DRAFT', None
     add_audit_log(db=db, actor_user_id=user.id, entity_type='task', entity_id=question.task_id,
         action='task.discord_m2_comment', after={'question_id': str(question.id), 'request_id': payload.request_id,
-            'day': question.day.isoformat(), 'kind': question.kind, 'comment': comment})
+            'day': question.day.isoformat(), 'kind': question.kind, 'comment': comment,
+            **({'continued': True} if getattr(payload, 'continued', False) else {})})
 
 
 async def update_report_answers(db, report, question):

@@ -586,6 +586,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Fshehja e tabelës dhe zgjedhja e simboleve në faqen M3 veprojnë vetëm në pamjen e faqes.
   Kontrollo filtrin për të gjitha simbolet, faqen M3, preview, emailin, Word dhe PNG.
 
+- M2 Post-Break: **DET TE SHTYERA TE HV ME GA** lexon ndryshimet e auditit
+  që HV ka bërë në START ose DUE DATE gjatë datës së raportit. Përfshin
+  detyrat e caktuara HV-së ku GA është te BZ ME ose te përgjegjësit.
+  Përdor formatin e M3 me tabelat SHTYER START DHE DUE DATE dhe SHTYER START
+  OSE DUE DATE, kolonat NGA/NE dhe arsyen/komentin nga auditi. Kontrollo
+  secilin rast, datat e stivuara dhe ngjyrat e statusit.
+  Kontrollo draftin, preview, emailin manual dhe automatik, Word dhe PNG.
+  M2 PIKAT, M3 dhe Realization përdorin përzgjedhjet e tyre.
+
 - M2: **PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU** shfaq PO/JO për VS,
   VL, MST dhe TT sipas kodeve në titujt e detyrave të caktuara stafit PCM.
   MST dhe TT kërkojnë një detyrë të lidhur me projekt (`project_id`), ndërsa
@@ -785,7 +794,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   sipas secilit kriter dhe printimin e së njëjtës tabelë. WFC INT përfshin
   vetëm detyrat me deadline të shënuar, treguesin 08:00 ose simbolin `!!!`.
   Rreshti WFC INT fshihet kur asnjë detyrë e javës nuk plotëson kriteret.
-  Brenda çdo dite në rreshtin 1H, grupi AM vjen para PM. Brenda secilit grup
+  Rreshti 1H ndahet në AM dhe PM në të dyja pamjet Short dhe në printim.
+  Titujt e periudhave rreshtohen njësoj në të pesë ditët, edhe te qelizat bosh.
+  Kartat 1H nuk përsërisin etiketën AM ose PM të grupit në pamjet Short
+  dhe në printimin e tyre. Karta me periudhë AM/PM e shfaq etiketën.
+  Pamjet Short dhe printimi i tyre fshehin etiketat COM të kartave.
+  Brenda secilit grup
   zbatohet renditja e departamenteve dhe e përdoruesve nga Weekly Planner.
   Për secilin përdorues rendi është 08:00, deadline i shënuar, pastaj `!!!`.
   Detyrat pa periudhë të caktuar futen te AM me etiketën AM/PM të kartës.
@@ -1036,8 +1050,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Vetëm qeliza DUE DATE me vlerën SOT ka sfond të kuq në M2 Post-Break
   dhe në daljet e së njëjtës tabelë. DISCORD 1H
   shfaq përgjigjet e 11:00 dhe 11:50 të datës së raportit për të njëjtën ID
-  detyre dhe ruan ndarjen nga KOMENT. M2 PIKAT dhe pyetjet M2 në Discord
-  vazhdojnë të përdorin përzgjedhjen e detyrave AM/AM-PM të pakryera me afat sot.
+  detyre dhe ruan ndarjen nga KOMENT. Pyetjet M2 në Discord përfshijnë
+  detyrat 08:00 dhe Deadline Important AM nga data e fillimit deri në afat.
+  TODO kërkon arsyen pse nuk është punuar dhe IN PROGRESS pyet nëse puna
+  ka vazhduar. Në ditën e afatit mbetet pyetja pse detyra është ende e hapur.
+  M2 PIKAT ruan përzgjedhjen AM/AM-PM për afatin e ditës.
+  M2 Post-Break palos detyrat IN PROGRESS me konfirmim vazhdimi nga Discord,
+  kur mungon një arsye ose sqarim tjetër M2. Butoni +/− vepron në ekran.
   Në ekran, Arsyeja ruhet nga lista brenda qelizës dhe Komenti kur fusha
   humb fokusin. Numri i rreshtit lidhet me ID-në e detyrës pas filtrit të
   mungesave. Preview-ja dhe dërgimi përdorin tekstin e ruajtur.
@@ -1248,13 +1267,17 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Realization, bazat e planit, numërimet dhe raportet, përveç paraqitjes së taskut.
 - Kopjet historike/snapshot-et nuk krahasohen si të dhëna live. SHTYPI Today
   ka kopje të ngrirë në 16:00; ruaj historikun dhe dallimin para/pas cutoff-it.
-- Krahasimi i planit te faqja 1H SHTYPI Today përdor kopjen e detyrave të
+- Faqja Krahasimi i planit përdor kopjen e detyrave të
   Tomorrow të ruajtur automatikisht në 17:00, sipas datës së planifikuar
   (e premtja ruan të hënën). Kontrollo ruajtjen e vetme edhe me disa procese,
   Regenerate dhe emailin e Tomorrow, gjendjen aktuale para 16:00 dhe krahasimin
   e arkivuar pas 16:00. Mos rindërto një kopje të humbur me të dhënat e reja.
-  Kontrollo që butoni shfaqet vetëm te Today më vete, edhe pse Admin Tasks
-  ndan komponentin. M3 End of Day dhe 1H Reports për GA përdorin gjeneruesin
+  Kontrollo që lidhja shfaqet vetëm te Today më vete, edhe pse Admin Tasks
+  ndan komponentin. Lidhja hap faqen e krahasimit me datën e raportit dhe
+  lidhja e kthimit ruan po atë datë. Hyrja nga menyja përdor datën e sotme.
+  Për GA lidhja e menysë vendoset menjëherë para Takimet. Për përdoruesit e
+  tjerë është te Reports & Control. Kontrollo që secili ta shohë vetëm një herë.
+  M3 End of Day dhe 1H Reports për GA përdorin gjeneruesin
   e SHTYPI. Verifiko që krahasimi mbetet jashtë raporteve, emailit dhe eksporteve.
 - Notes nga Mira kanë rregulla të veçanta dukshmërie në raporte. Mos supozo se
   çdo Note duhet të dalë në çdo raport; dallo regjistrimin nga tasku i krijuar.

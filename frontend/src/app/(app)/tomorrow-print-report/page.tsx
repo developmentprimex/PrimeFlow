@@ -3,6 +3,7 @@
 import { taskMarkerLabel, splitTaskMarkers, openTaskMarkerPicker, type TaskMarkerValue } from "@/lib/task-markers"
 
 import * as React from "react"
+import Link from "next/link"
 import { useReportLinkDate } from "@/lib/report-link-date"
 import { createPortal } from "react-dom"
 import { ChevronDown, Minus, Plus, RefreshCw, Save, Send, Settings } from "lucide-react"
@@ -13,7 +14,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/lib/auth"
 import { useMarkerComments } from "@/components/marker-comments-context"
-import { TodayPrintPlanComparison } from "@/components/today-print-plan-comparison"
 import { installReportNoteControls, ReportNoteAttachmentDialog, type ReportNoteAttachment, type ReportNoteAttachments } from "@/components/report-note-attachments"
 import type { NoteEmailHeadings, NoteEmailPreviews } from "@/lib/types"
 import { isReportTaskDone, reportTaskUsers, reportSummaryUser, reportUserOptions, reportPlannerUserOrder, isReportSummaryTask, collapseEmptyReportTaskRows } from "@/lib/one-h-report-users"
@@ -1163,7 +1163,9 @@ export function PrintReportPage({
           {preview ? <>{userFilterControl}{dueDateFilterControl}{markerFilterControl()}{strikesFilterControl}{strikeTotalControl}</> : null}
           <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading || Boolean(selectedReportDate) || (today && Boolean(preview?.is_frozen))}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
           {today && user && !snapshotLoading ? (
-            <TodayPrintPlanComparison key={comparisonDate} reportDate={comparisonDate} isFrozen={Boolean(preview?.is_frozen)} />
+            <Button variant="outline" asChild className="print:hidden">
+              <Link href={`/today-plan-comparison?date=${encodeURIComponent(comparisonDate)}`}>Krahaso me planin e ruajtur</Link>
+            </Button>
           ) : null}
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending || Boolean(selectedReportDate)}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>

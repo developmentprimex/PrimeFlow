@@ -438,7 +438,7 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(service.m3, "build_task_data", new=AsyncMock(side_effect=enriched_sections)), \
              patch.object(service, "build_unfinished_priority_task_rows", new=AsyncMock(return_value=rows)) as shared_rows:
             data = await service.build_task_data(db, DAY)
-        shared_rows.assert_awaited_once_with(db, DAY, include_task_id=True)
+        shared_rows.assert_awaited_once_with(db, DAY, include_task_id=True, include_morning_progress=False)
         assert data["delivery"] == data["postponed"] == []
         assert [row["title"] for row in data["unfinished_priority"]] == [row[7] for row in rows]
         assert data["unfinished_priority"][0]["deadline_important"] is False
@@ -459,6 +459,28 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         word = Document(io.BytesIO(attachments[0][1]))
         assert word.tables[0].rows[2].cells[6].text == priority["title"]
         assert word.tables[0].rows[2].cells[7].text == "SOT"
+
+    async def test_discord_question_source_adds_planned_morning_rows_to_its_own_list(self):
+        today_id, planned_id, done_id = (str(uuid.uuid4()) for _ in range(3))
+        rows = [
+            ["1", "EF", "DEV", "AM", "TODO", "DUE SOT", "FT", "Today", "SOT", "TODO", today_id],
+            ["2", "EF", "DEV", "AM", "IN_PROGRESS", "DEADLINE", "FT", "Planned", "30.10.2026", "IN PROGRESS", planned_id],
+            ["3", "EF", "DEV", "AM", "DONE", "08:00", "FT", "Done", "SOT", "DONE", done_id],
+        ]
+        db = AsyncMock()
+        db.execute.return_value = MagicMock()
+        db.execute.return_value.all.return_value = []
+        async def enriched_sections(db, day, *, section_selector):
+            return section_selector([], [], day)
+
+        with patch.object(service.m3, "build_task_data", AsyncMock(side_effect=enriched_sections)), \
+             patch.object(service, "build_unfinished_priority_task_rows", AsyncMock(return_value=rows)) as shared_rows:
+            data = await service.build_task_data(db, DAY, include_discord_morning=True)
+        shared_rows.assert_awaited_once_with(db, DAY, include_task_id=True, include_morning_progress=True)
+        assert [row["task_id"] for row in data["unfinished_priority"]] == [today_id]
+        assert [(row["task_id"], row["priority_follow_up"]) for row in data["discord_morning_priority"]] == [
+            (today_id, False), (planned_id, True),
+        ]
 
     async def test_email_preparation_uses_full_html_word_png_and_excel_without_real_email(self):
         fixture = complete_export_fixture()

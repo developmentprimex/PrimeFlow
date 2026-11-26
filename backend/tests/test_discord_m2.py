@@ -62,6 +62,14 @@ class M2RulesTests(unittest.TestCase):
         explained = {**row, 'status': 'TODO', 'postponement_explanation': True, 'comment': 'Already explained'}
         self.assertEqual(service.question_rows({'postponed': [explained]}), [])
 
+    def test_planned_morning_work_adds_discord_questions_without_changing_m2_points(self):
+        today = {'task_id': str(uuid.uuid4()), 'status': 'TODO', 'due_label': 'SOT'}
+        tracked = {'task_id': str(uuid.uuid4()), 'status': 'IN_PROGRESS', 'due_label': '29.10.2026',
+                   'priority_follow_up': True}
+        data = {'unfinished_priority': [today], 'discord_morning_priority': [today, tracked]}
+        self.assertEqual(service.question_rows(data), [('unfinished', today), ('unfinished', tracked)])
+        self.assertEqual(data['unfinished_priority'], [today])
+
     def test_no_delivery_requires_explanation_and_reason_codes_are_platform_codes(self):
         for choice in (None, 'JO'):
             with self.assertRaises(ValueError):
@@ -96,6 +104,30 @@ class M2RulesTests(unittest.TestCase):
                 asyncio.run(api.own_question(db, uuid.uuid4(), None))
         self.assertEqual(raised.exception.status_code, 403)
         owned.assert_not_awaited()
+
+    def test_progress_confirmation_saves_once_as_a_comment(self):
+        from unittest.mock import Mock
+
+        question = SimpleNamespace(id=uuid.uuid4(), task_id=uuid.uuid4(), day=datetime.now().date(),
+                                   kind='unfinished', choice=None)
+        user = SimpleNamespace(id=uuid.uuid4())
+        task = SimpleNamespace(status='IN_PROGRESS')
+        report = SimpleNamespace()
+        db = SimpleNamespace(refresh=AsyncMock(), execute=AsyncMock(return_value=SimpleNamespace(
+            first=lambda: None, scalar_one_or_none=lambda: None)), add=Mock(), commit=AsyncMock())
+        payload = api.ReportComment(discord_user_id='1', guild_id='2', channel_id='3',
+                                    comment='Ka vazhduar.', continued=True, request_id='42')
+        with patch.object(api, 'own_question', AsyncMock(return_value=(question, None, user))), \
+             patch.object(api, 'task_owned', AsyncMock(return_value=task)), \
+             patch.object(api.reports, 'locked_report', AsyncMock(return_value=report)), \
+             patch.object(api, 'task_model_groups', return_value={'08:00'}), \
+             patch.object(api, 'record_report_comment', AsyncMock()) as save:
+            self.assertTrue(asyncio.run(api.add_comment(question.id, payload, db))['ok'])
+            self.assertTrue(asyncio.run(api.add_comment(question.id, payload, db))['ok'])
+        save.assert_awaited_once_with(db, report, question, user, payload, 'Ka vazhduar.')
+        self.assertEqual(question.choice, 'PO')
+        self.assertIn('Ka vazhduar.', db.add.call_args.args[0].comment)
+        db.commit.assert_awaited_once()
 
     def test_postponement_reply_never_writes_or_overwrites_manual_report_comment(self):
         task_id = uuid.uuid4()
@@ -144,6 +176,35 @@ class M2DiscordTests(unittest.TestCase):
             self.assertEqual(payload['comment'], 'Koment i ri')
             self.assertNotIn('choice', payload)
             interaction.followup.send.assert_not_awaited()
+        asyncio.run(check())
+
+    def test_priority_discord_prompt_and_confirmation_are_specific_to_status(self):
+        import discord_m2_client as client
+
+        async def check():
+            job = {'id': str(uuid.uuid4()), 'kind': 'unfinished', 'discord_user_id': '3',
+                   'snapshot': {'title': '08:00 Oferta', 'priority_follow_up': True, 'due_label': '29.10.2026'}}
+            job['task_status'] = 'TODO'
+            self.assertIn('Pse nuk ke vazhduar', client.prompt(job))
+            self.assertNotIn('Po, ka vazhduar', [button.label for button in client.controls(job).children])
+            job['task_status'] = 'IN_PROGRESS'
+            self.assertIn('A ke vazhduar sot', client.prompt(job))
+            self.assertIn('Po, ka vazhduar', [button.label for button in client.controls(job).children])
+            self.assertNotIn('Pse nuk është kryer?', client.prompt(job))
+            job['snapshot'].update(due_label='SOT', am_pm='AM')
+            self.assertIn('Pse nuk është kryer?', client.prompt(job))
+            self.assertIn('Vazhdon në PM', [button.label for button in client.controls(job).children])
+            interaction = SimpleNamespace(id=77, guild_id=1, channel_id=2, user=SimpleNamespace(id=3),
+                data={'custom_id': f"pf:m2:worked:{job['id']}"}, message=SimpleNamespace(),
+                response=SimpleNamespace(defer=AsyncMock()))
+            bot = SimpleNamespace(private_channel=AsyncMock(), bridge=AsyncMock(side_effect=[job, {'ok': True}, job]))
+            with patch.object(client, 'refresh_unfinished', AsyncMock()) as refresh:
+                await client.handle(bot, interaction)
+            path, payload = bot.bridge.await_args_list[1].args
+            self.assertTrue(path.endswith('/comment'))
+            self.assertTrue(payload['continued'])
+            refresh.assert_awaited_once()
+
         asyncio.run(check())
 
     def test_unfinished_close_saves_without_new_messages(self):

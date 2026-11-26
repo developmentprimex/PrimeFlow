@@ -27,6 +27,7 @@ from app.services.after_break_report import (
     build_after_break_report_sections,
     build_unfinished_priority_task_rows,
     normalize_after_break_report_sections,
+    refresh_hv_ga_postponements,
     is_retired_after_break_question,
     after_break_automated_section_title,
     AUTOMATED_SECTION_TITLES,
@@ -174,6 +175,7 @@ def _draft(row: AfterBreakReportDraft, sections: list[dict[str, str]] | None = N
 
 async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) -> dict:
     sections = normalize_after_break_report_sections(row.sections)
+    sections = await refresh_hv_ga_postponements(db, sections, row.report_date, sent=row.status == "SENT")
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
     sections = await refresh_after_break_discord_sections(
         db, sections, row.report_date, generated_snapshot=row.generated_snapshot,
@@ -425,6 +427,7 @@ async def preview_draft(
     sections = await apply_1h_confirmation_questions(
         db, normalize_after_break_report_sections(row.sections)
     )
+    sections = await refresh_hv_ga_postponements(db, sections, row.report_date, sent=row.status == "SENT")
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
     sections = await refresh_after_break_discord_sections(
         db, sections, row.report_date, generated_snapshot=row.generated_snapshot,
@@ -458,6 +461,7 @@ async def send_draft(
     sections = await apply_1h_confirmation_questions(
         db, normalize_after_break_report_sections(row.sections)
     )
+    sections = await refresh_hv_ga_postponements(db, sections, row.report_date, sent=row.status == "SENT")
     sections = await populate_pcm_projects_section(db, sections, row.report_date)
     sections = await refresh_after_break_discord_sections(
         db, sections, row.report_date, generated_snapshot=row.generated_snapshot,

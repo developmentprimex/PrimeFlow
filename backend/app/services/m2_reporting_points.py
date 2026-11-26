@@ -110,24 +110,36 @@ def select_task_sections(tasks, events, day: date, *, personal_titles: dict | No
     return sections
 
 
-async def build_task_data(db: AsyncSession, day: date) -> dict:
+async def build_task_data(db: AsyncSession, day: date, *, include_discord_morning=False) -> dict:
     # Common View classifies note-based personal tasks using the original note text.
     personal_titles = {}
     for model, origin in ((GaNote, Task.ga_note_origin_id), (PlanNote, Task.plan_note_origin_id)):
         personal_titles.update((await db.execute(select(model.id, model.content).join(
             Task, origin == model.id,
         ).where(Task.is_active.is_(True), Task.is_personal.is_(True)))).all())
-    rows = await build_unfinished_priority_task_rows(db, day, include_task_id=True)
+    rows = await build_unfinished_priority_task_rows(
+        db, day, include_task_id=True, include_morning_progress=include_discord_morning,
+    )
     unfinished = [
-        {"task_id": row[9], "assignees": row[1], "department": row[2], "am_pm": row[3], "status": row[4],
+        {"task_id": row[-1], "assignees": row[1], "department": row[2], "am_pm": row[3], "status": row[4],
          "priority": row[5], "task_type": row[6], "title": row[7].removesuffix(f" {TASK_PAUSE_LABEL}"), "due_label": row[8],
          "is_paused": row[7].endswith(f" {TASK_PAUSE_LABEL}"),
          "deadline_important": "DEADLINE" in row[5], "eight_am": "08:00" in row[5]}
         for row in rows
+        if row[4] in {"TODO", "IN_PROGRESS"}
     ]
     def sections(tasks, events, report_day):
-        return {**select_task_sections(tasks, events, report_day, personal_titles=personal_titles),
-                "unfinished_priority": unfinished}
+        result = select_task_sections(tasks, events, report_day, personal_titles=personal_titles)
+        result["unfinished_priority"] = unfinished
+        if include_discord_morning:
+            result["unfinished_priority"] = [
+                row for row in unfinished if row["due_label"] == "SOT" and row["am_pm"] in {"AM", "AM/PM"}
+            ]
+            result["discord_morning_priority"] = [
+                {**row, "priority_follow_up": row["eight_am"] or (row["deadline_important"] and row["am_pm"] == "AM")}
+                for row in unfinished
+            ]
+        return result
 
     order = {row["task_id"]: index for index, row in enumerate(unfinished)}
     data = await m3.build_task_data(db, day, section_selector=sections)

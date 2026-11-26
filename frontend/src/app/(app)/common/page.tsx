@@ -11949,10 +11949,18 @@ export default function CommonViewPage() {
           flex-direction: column;
           gap: 4px;
         }
+        .week-table .week-table-period-row > td {
+          vertical-align: top;
+        }
+        .week-table .week-table-period-row-pm > td {
+          border-top: 2px solid #64748b;
+        }
         .week-table-period-heading {
           font-size: 10px;
           font-weight: 700;
-          border-bottom: 1px solid #cbd5e1;
+          color: #172554;
+          background: #dbeafe;
+          padding: 3px 6px;
         }
         .week-table-entry {
           font-size: 10px;
@@ -12612,6 +12620,9 @@ export default function CommonViewPage() {
           }
           .week-table-entries {
             gap: 1px;
+          }
+          .week-table .week-table-period-row-pm > td {
+            border-top-width: 2px !important;
           }
           .week-table-avatars {
             display: inline-flex;
@@ -16647,7 +16658,7 @@ export default function CommonViewPage() {
                     }
                     const weekRowClass = getWeekRowClass(row.id)
 
-                    const getCellContent = (iso: string) => {
+                    const getCellContent = (iso: string, period?: "AM" | "PM") => {
                       const entries = dayEntries[iso] || []
                       if (entries.length === 0) return null
                       const renderWeekTaskMarkers = (entry: FastTaskEntry) => {
@@ -16806,7 +16817,11 @@ export default function CommonViewPage() {
                                   ) : null}
                                   {e.isPaused && <TaskPauseBadge />}
                                   {renderCommonTaskStatusIndicator(e)}
-                                  <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintTaskTitle(e))}{e.mira_dictation_source && <span className="text-xs text-muted-foreground">{miraDictationLabel(e.mira_dictation_source)}</span>}</span>
+                                  <span className="inline-flex min-w-0 flex-col align-middle">
+                                    {!shortWeek && <TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />}
+                                    {renderWfcText(commonPrintTaskTitle(e))}
+                                    {e.mira_dictation_source && <span className="text-xs text-muted-foreground">{miraDictationLabel(e.mira_dictation_source)}</span>}
+                                  </span>
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -16865,7 +16880,9 @@ export default function CommonViewPage() {
                                   {(isOneHSlotRowId(row.id) || row.id === "r1" || e.oneHReportSlot) ? (
                                     <span className="oneh-slot-indicator">{getOneHReportSlotLabel(e.oneHReportSlot)}</span>
                                   ) : null}
-                                  <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
+                                  {getCommonTaskPeriodLabel(e.finishPeriod) !== period && (
+                                    <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
+                                  )}
                                   {renderWfcIndicator(e, row.id === "waitingConfirmation")}
                                   {isShtypiTaskRowId(row.id) ? renderWeekTaskMarkers(e) : null}
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
@@ -16873,7 +16890,10 @@ export default function CommonViewPage() {
                                   ) : null}
                                   {e.isPaused && <TaskPauseBadge />}
                                   {renderCommonTaskStatusIndicator(e)}
-                                  <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintTitleLine(e.title))}</span>
+                                  <span className="inline-flex min-w-0 flex-col align-middle">
+                                    {!shortWeek && <TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />}
+                                    {renderWfcText(commonPrintTitleLine(e.title))}
+                                  </span>
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -16885,17 +16905,13 @@ export default function CommonViewPage() {
                             </div>
                           </div>
                         )
-                        if (shortWeek && isOneHSlotRowId(row.id)) {
-                          return (["AM", "PM"] as const).map((period, rank) => {
-                            const tasksInPeriod = tasks.filter((entry) => getCommonTaskPeriodSortRank(entry.finishPeriod) === rank)
-                            const offset = period === "AM" ? 0 : tasks.length - tasksInPeriod.length
-                            return tasksInPeriod.length ? (
-                              <div key={period} role="group" aria-label={period} className="week-table-entries">
-                                <div className="week-table-period-heading">{period}</div>
-                                {tasksInPeriod.map((entry, index) => renderTask(entry, offset + index))}
-                              </div>
-                            ) : null
-                          })
+                        if (period) {
+                          const rank = period === "AM" ? 0 : 1
+                          const tasksInPeriod = tasks.filter((entry) => getCommonTaskPeriodSortRank(entry.finishPeriod) === rank)
+                          const offset = period === "AM" ? 0 : tasks.length - tasksInPeriod.length
+                          return tasksInPeriod.length
+                            ? tasksInPeriod.map((entry, index) => renderTask(entry, offset + index))
+                            : null
                         }
                         return tasks.map(renderTask)
                       } else if (isPersonalRowId(row.id)) {
@@ -16922,7 +16938,10 @@ export default function CommonViewPage() {
                                   ) : null}
                                   {e.isPaused && <TaskPauseBadge />}
                                   {renderCommonTaskStatusIndicator(e, true)}
-                                  <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintPersonalTaskTitle(e))}</span>
+                                  <span className="inline-flex min-w-0 flex-col align-middle">
+                                    {!shortWeek && <TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />}
+                                    {renderWfcText(commonPrintPersonalTaskTitle(e))}
+                                  </span>
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -17134,6 +17153,37 @@ export default function CommonViewPage() {
 
                     const rowLabel = row.label.toUpperCase()
                     const rowSubtext = getCommonPrintRowSubtext(row.id)
+                    if (shortWeek && isOneHSlotRowId(row.id)) {
+                      return (
+                        <React.Fragment key={row.id}>
+                          {(["AM", "PM"] as const).map((period) => (
+                            <tr key={period} className={`week-table-row ${weekRowClass} week-table-period-row week-table-period-row-${period.toLowerCase()}`}>
+                              {period === "AM" && (
+                                <>
+                                  <td rowSpan={2} className="week-table-number">{rowIndex + 1}</td>
+                                  <td rowSpan={2} className="week-table-label">
+                                    {renderWeekRowToggle(row)}
+                                    <span>{rowLabel}</span>
+                                    {rowSubtext ? <span className="week-table-label-subtext">{rowSubtext}</span> : null}
+                                  </td>
+                                </>
+                              )}
+                              {weekISOs.map((iso) => {
+                                const content = getCellContent(iso, period)
+                                return (
+                                  <td key={iso} className="week-table-cell">
+                                    <div className="week-table-entries" role={content ? "group" : undefined} aria-label={content ? period : undefined}>
+                                      <div className="week-table-period-heading">{period}</div>
+                                      {content ?? <span className="week-table-empty">—</span>}
+                                    </div>
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      )
+                    }
                     if (row.id === "feedback") {
                       const feedbackSummary = getFeedbackWeekSummary()
                       return (

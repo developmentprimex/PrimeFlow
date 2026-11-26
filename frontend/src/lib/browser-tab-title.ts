@@ -24,6 +24,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/realization": "Realization",
   "/today-print-report": "1H SHTYPI Today",
   "/tomorrow-print-report": "1H SHTYPI Tomorrow",
+  "/today-plan-comparison": "Krahasimi i planit",
   "/admin/1h-reports": "1H Reports",
   "/system-task-instances": "System Tasks Report",
   "/external-tickets": "STD Tickets EXT",

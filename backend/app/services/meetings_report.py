@@ -1076,6 +1076,7 @@ def _m3_status_table(
     bz_labels_by_task: dict[Any, str] | None = None,
     comments_by_task: dict[Any, str] | None = None,
     pause_day: date | None = None,
+    escape_ascii_delimiters: bool = False,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -1105,6 +1106,8 @@ def _m3_status_table(
     border = "+" + "+".join("-" * (width + 2) for _, width in columns) + "+"
 
     def table_row(values: list[str]) -> str:
+        if escape_ascii_delimiters:
+            values = [value.replace("|", "¦") for value in values]
         return "| " + " | ".join(
             f"{value:<{width}}" for value, (_, width) in zip(values, columns)
         ) + " |"

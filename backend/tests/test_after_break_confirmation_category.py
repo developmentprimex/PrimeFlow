@@ -37,6 +37,45 @@ from app.services.discord_ga_reactions import GA_REACTIONS_SECTION_TITLE
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
+    def test_hv_postponements_have_one_automatic_m2_section_and_show_each_date(self):
+        from app.services.after_break_report import (
+            HV_GA_POSTPONED_TITLE, _hv_ga_postponements_body,
+        )
+        from app.models.task import Task
+
+        def event(task, field, before, after, **metadata):
+            return task, SimpleNamespace(id=uuid.uuid4(), entity_id=task.id, action=f"task.{field}_changed",
+                                         created_at=datetime(2026, 11, 26, 11),
+                                         before={"value": before}, after={"value": after, **metadata})
+
+        both = Task(id=uuid.uuid4(), title="Raporti | i stokut", status="TODO", assigned_to="hv")
+        single = Task(id=uuid.uuid4(), title="Vetëm afati", status="IN_PROGRESS", assigned_to="hv")
+        excluded = Task(id=uuid.uuid4(), title="Afati u afrua", status="TODO", assigned_to="hv")
+        body, count = _hv_ga_postponements_body([
+            event(both, "start_date", "2026-11-26", "2026-11-27"),
+            event(both, "due_date", "2026-11-27", "2026-11-30", reason="Tjetër", comment="Biseduar | me GA"),
+            event(single, "due_date", "2026-11-26", "2026-11-27"),
+            event(excluded, "due_date", "2026-11-30", "2026-11-27"),
+        ], names={"hv": "Haxhere Spahiu"})
+        self.assertEqual(count, 2)
+        first, second = body.split("SHTYER START OSE DUE DATE:")
+        self.assertIn("SHTYER START DHE DUE DATE", first)
+        self.assertIn("Raporti ¦ i stokut", first)
+        self.assertIn("START: 26.11.2026 / DUE: 27.11.2026", first)
+        self.assertIn("START: 27.11.2026 / DUE: 30.11.2026", first)
+        self.assertIn("Vetëm afati", second)
+        sections = normalize_after_break_report_sections([])
+        point = [section for section in sections if section["section_key"] == HV_GA_POSTPONED_TITLE]
+        self.assertEqual(len(point), 1)
+        self.assertEqual(section_group_label("after_break", point[0]["title"]), "AUTO-FILLED FROM PRIMEFLOW")
+        point[0]["body"] = body
+        day = date(2026, 11, 26)
+        for output in (render_html("M2", day, sections), render_plain_text("M2", day, sections)):
+            self.assertIn("Raporti ¦ i stokut", output)
+            self.assertIn("30.11.2026", output)
+            self.assertIn("Biseduar ¦ me GA", output)
+            self.assertNotIn("Afati u afrua", output)
+
     def test_m2_replaces_the_old_manual_email_point_in_saved_drafts(self) -> None:
         old_title = "DET NGA EMAIL/ PX INFO & ZHVILLIM"
         sections = normalize_after_break_report_sections([
@@ -127,7 +166,7 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
         self.assertEqual(automatic[:4], [NEW_EMAILS_TITLE, GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_TITLE, PCM_PROJECTS_TITLE])
         self.assertEqual(automatic[4:9], ["NOTES TE REJA ( NOT DISSCUSED)", "TAK INT/EXT TE PAMBAJTURA",
                                         M2_PRIORITY_PROGRESS_TITLE, "DT WFE", "DET E KRYERA NE AM"])
-        self.assertEqual(automatic[-2:], ["GA MBYLLJA E DET", "HV MBYLLJA E DET"])
+        self.assertEqual(automatic[-3:], ["GA MBYLLJA E DET", "HV MBYLLJA E DET", "DET TE SHTYERA TE HV ME GA"])
 
     def test_pcm_projects_use_title_codes_on_tasks_covering_the_report_day(self) -> None:
         def task(title, start, due, project_id=None):
@@ -444,6 +483,30 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
         for text in ("PROGRESI", "DISCORD 1H", "IN PROGRESS", "Manual M2", "EF: Sot 45%",
                      'bgcolor="#fef3c7"', "border-top:3px solid #dc2626", 'bgcolor="#DC2626"'):
             self.assertIn(text, rendered)
+
+    def test_only_confirmed_continuations_without_another_m2_explanation_are_folded(self):
+        from app.services import after_break_report as service
+
+        day = date(2026, 8, 24)
+        tasks = [SimpleNamespace(id=task_id) for task_id in ("continued", "blocked", "unconfirmed")]
+        columns = ["1", "EF", "DEV", "AM", "IN_PROGRESS", "08:00", "FT", "Title", "SOT", "IN PROGRESS"]
+        rows = [[*columns, task.id] for task in tasks]
+        notes = SimpleNamespace(all=lambda: [
+            ("continued", "ef", {"comment": "Ka vazhduar.", "continued": True}),
+            ("blocked", "ef", {"comment": "Ka vazhduar.", "continued": True}),
+            ("blocked", "ef", {"comment": "Pres QA."}),
+        ])
+        db = SimpleNamespace(execute=AsyncMock(return_value=notes))
+        explanations = []
+        with patch.object(service, "_daily_rlz_values_by_task", AsyncMock(return_value={})), \
+             patch.object(service, "load_follow_up_comments", AsyncMock(return_value={})):
+            result = asyncio.run(_append_unfinished_priority_explanations(
+                db, rows, tasks, day, {"ef": "Eva First"}, {},
+                explanation_rows=explanations, include_morning_progress=True,
+            ))
+        self.assertEqual([row["continued_only"] for row in explanations], [True, False, False])
+        self.assertEqual(result[0][-2], "EF: Ka vazhduar.")
+        self.assertIn("EF: Pres QA.", result[1][-2])
 
     def test_m2_manual_explanation_patch_preserves_other_saved_fields(self) -> None:
         from app.api.routers import after_break_report as api

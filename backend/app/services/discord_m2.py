@@ -28,7 +28,8 @@ def context_key(kind: str, row: dict) -> str:
 
 def question_rows(data: dict) -> list[tuple[str, dict]]:
     seen, result = set(), []
-    for section, kind in (("unfinished_priority", "unfinished"), ("postponed", "postponed"),
+    morning_section = "discord_morning_priority" if "discord_morning_priority" in data else "unfinished_priority"
+    for section, kind in ((morning_section, "unfinished"), ("postponed", "postponed"),
                           ("postponed_am", "postponed"), ("ga_progress", "progress"), ("delivery", "delivery"),
                           ("pm_continuation", "continuation")):
         for row in data.get(section, []):

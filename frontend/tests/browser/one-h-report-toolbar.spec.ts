@@ -4,7 +4,35 @@ import path from "node:path"
 
 const backend = path.resolve(__dirname, "../../../backend")
 
-test("Today compares the selected date with the saved Tomorrow plan", async ({ page }) => {
+for (const isGa of [true, false]) {
+  test(`Plan comparison sidebar placement for ${isGa ? "GA" : "other staff"}`, async ({ page }) => {
+    const username = isGa ? "gane.arifaj" : "other.staff"
+    const user = { id: username, username, email: `${username}@example.test`, full_name: "Sidebar Test", role: "STAFF", is_active: true }
+    await page.addInitScript(account => {
+      localStorage.setItem("primex_access_token", "test-only-browser-token")
+      localStorage.setItem("primex_user", JSON.stringify(account))
+    }, user)
+    await page.route("**/api/**", route => {
+      const pathname = new URL(route.request().url()).pathname
+      if (pathname === "/api/auth/me") return route.fulfill({ json: user })
+      if (pathname.endsWith("/plan-comparison")) return route.fulfill({ json: { report_date: "2026-11-26", status: "no_plan" } })
+      return route.fulfill({ json: [] })
+    })
+    await page.goto("/today-plan-comparison")
+    const sidebar = page.locator("aside nav")
+    const comparison = sidebar.getByRole("link", { name: "Krahasimi i planit", exact: true })
+    const reports = sidebar.getByRole("button", { name: "Reports & Control", exact: true })
+    if (await reports.getAttribute("aria-expanded") === "false") await reports.click()
+    await expect(comparison).toHaveCount(1)
+    if (isGa) {
+      await expect(sidebar.locator(':scope > a[href="/today-plan-comparison"] + div > button')).toHaveText("Takimet")
+    } else {
+      await expect(sidebar.locator("#sidebar-group-reports").getByRole("link", { name: "Krahasimi i planit", exact: true })).toBeVisible()
+    }
+  })
+}
+
+test("Today opens the plan comparison page for the selected date", async ({ page }) => {
   const user = { id: "comparison-test", email: "staff@example.test", full_name: "Comparison Test", role: "STAFF", is_active: true }
   const day = "2026-10-23"
   await page.addInitScript(account => {
@@ -29,18 +57,22 @@ test("Today compares the selected date with the saved Tomorrow plan", async ({ p
     return route.fulfill({ json: [] })
   })
   await page.goto(`/today-print-report?date=${day}`)
-  await page.getByRole("button", { name: "Krahaso me planin e ruajtur" }).click()
-  const dialog = page.getByRole("dialog")
-  await expect(dialog.getByRole("columnheader")).toHaveText(["DETYRA", "PLANI NË 17:00", "SOT"])
-  const row = dialog.getByRole("row").filter({ hasText: "Katalogu" })
+  await page.getByRole("link", { name: "Krahaso me planin e ruajtur" }).click()
+  await expect(page).toHaveURL(new RegExp(`/today-plan-comparison\\?date=${day}$`))
+  await expect(page.getByRole("heading", { name: "Krahasimi me planin e ruajtur" })).toBeVisible()
+  const table = page.getByRole("table", { name: "Krahasimi i detyrave" })
+  await expect(table.getByRole("columnheader")).toHaveText(["DETYRA", "PLANI NË 17:00", "SOT"])
+  const row = table.getByRole("row").filter({ hasText: "Katalogu" })
   await expect(row.getByRole("rowheader")).toContainText("Sloti · AM/PM · Përgjegjësi")
   await expect(row.getByRole("cell").nth(0)).toContainText("10:00 · AM")
   await expect(row.getByRole("cell").nth(0)).toContainText("Arta")
   await expect(row.getByRole("cell").nth(1)).toContainText("14:20 · PM")
   await expect(row.getByRole("cell").nth(1)).toContainText("Besnik")
+  await page.getByRole("link", { name: "Kthehu te 1H SHTYPI Today" }).click()
+  await expect(page).toHaveURL(new RegExp(`/today-print-report\\?date=${day}$`))
   await page.goto(`/tomorrow-print-report?date=${day}`)
   await expect(page.frameLocator('iframe[title*="generated email"]').getByText("Saved report")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Krahaso me planin e ruajtur" })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Krahaso me planin e ruajtur" })).toHaveCount(0)
 })
 
 test("ASIST GA report links load the requested date on all eight PrimeFlow pages", async ({ page }) => {
@@ -260,18 +292,21 @@ test("M2 filters due dates, colors 08:00 by status and saves task explanations b
     [caption + ":", "+---+", "| " + columns.join(" | ") + " |", "+---+",
       ...rows.flatMap(values => ["| " + values.join(" | ") + " |", "+---+"])].join("\n")
   const task = { row_number: "1", task_id: "test-task", title: "Test task", assignees: "EF", reason: "-", comment: "Discord note" }
+  const continued = { row_number: "4", task_id: "continued-task", title: "Continued task", assignees: "EF",
+    reason: "-", comment: "EF: Ka vazhduar.", continued_only: true }
   const key = "DET TE PAKRYERA, 08:00/DEADLINE"
   const ga = "GA MBYLLJA E DET"
   const submitted: unknown[] = []
   const draft = () => ({
     id: "draft", status: "DRAFT", report_date: "2026-11-24", subject: "M2",
-    recipients: { to: [], cc: [], bcc: [] }, unfinished_task_explanations: [task],
+    recipients: { to: [], cc: [], bcc: [] }, unfinished_task_explanations: [task, continued],
     sections: [
       { section_key: key, title: key, body: table(key,
         ["NR", "KUSH", "STATUS", "LLOJI", "TITULLI", "DUE DATE", "PROGRESI", "ARSYEJA", "KOMENT"],
         ["1", "EF", "IN_PROGRESS", "08:00", "Test task", "SOT", "IN PROGRESS", task.reason, task.comment],
         ["2", "RA", "TODO", "DEADLINE / 08:00", "Deadline this week", "27.11.2026", "TODO", "-", "-"],
-        ["3", "DV", "DONE", "08:00", "Deadline next week", "04.12.2026", "DONE", "-", "-"]) },
+        ["3", "DV", "DONE", "08:00", "Deadline next week", "04.12.2026", "DONE", "-", "-"],
+        ["4", "EF", "IN_PROGRESS", "08:00", "Continued task", "SOT", "IN PROGRESS", continued.reason, continued.comment]) },
       { section_key: ga, title: ga, body: [
         table("TODO", ["NR", "KUSH", "LLOJI", "TITULLI", "BZ ME"], ["1", "GA", "SYS", "Long task title", "OH"]),
         table("IN PROGRESS", ["NR", "KUSH", "LLOJI", "TITULLI", "BZ ME"], ["1", "GA", "PRJK", "Another task", "DV / LV / EP"]),
@@ -301,6 +336,15 @@ test("M2 filters due dates, colors 08:00 by status and saves task explanations b
   const today = page.getByRole("row").filter({ hasText: "Test task" })
   const thisWeek = page.getByRole("row").filter({ hasText: "Deadline this week" })
   const nextWeek = page.getByRole("row").filter({ hasText: "Deadline next week" })
+  const continuedRow = page.getByRole("row").filter({ hasText: "Continued task" })
+  const toggle = page.getByRole("button", { name: /detyrat që kanë vazhduar/ })
+  await expect(continuedRow).toHaveCount(0)
+  await expect(toggle).toHaveAttribute("aria-expanded", "false")
+  await toggle.click()
+  await expect(continuedRow).toBeVisible()
+  await expect(toggle).toHaveAttribute("aria-expanded", "true")
+  await toggle.click()
+  await expect(continuedRow).toHaveCount(0)
   await expect(today).toHaveClass(/bg-yellow-100/)
   await expect(today.getByRole("cell", { name: "SOT", exact: true })).toHaveClass(/bg-red-600/)
   await expect(thisWeek.getByRole("cell", { name: "27.11.2026", exact: true })).not.toHaveClass(/bg-red-600/)
