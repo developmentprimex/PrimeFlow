@@ -902,6 +902,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   përkatës. Screenshot-i kërkon video. Ruajtja private, arkiva FILES, analiza e
   regjistrimit dhe eksporti i kohëve të citimeve përdorin të njëjtën prapashtesë
   të skedarit; kontrollo WebM dhe M4A për audio dhe formatet ekzistuese për video.
+  Në iPhone, “Ekran” është veprim më vete poshtë nisjes së audios dhe përdor
+  të njëjtën rrugë të kapjes së ekranit kur shfletuesi e mbështet. Kontrollo
+  formularin edhe nga lidhjet e Takimeve, çshënimin e konfirmimit dhe statusin
+  ON/OFF pas ndryshimit të mikrofonit në panel.
 
 - Radha IndexedDB dhe shiriti i regjistruesit në krye të aplikacionit përdoren
   nga Ekran dhe Vetëm audio. Ngarkimi i vonuar mbetet në sfond dhe riprovohet
