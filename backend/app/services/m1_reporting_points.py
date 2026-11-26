@@ -487,8 +487,11 @@ def export_blocks(report: dict) -> list[dict]:
             for index, row in enumerate(report.get("data", {}).get(key) or [], 1):
                 fill, color, _ = m3.task_row_appearance(row)
                 rows.append([{"text": str(m2.table_value(report, row, column, index, "", "delivery" if linked_delivery else "")),
-                              "fill": fill, "color": color, "bold": column in {"title", "marker"},
-                              "divider": False} for column, _, _ in columns])
+                              "fill": "#ffffff" if column == "delivery_details" else fill,
+                              "color": "#000000" if column == "delivery_details" else color,
+                              "bold": column in {"title", "marker"}, "divider": False,
+                              **(m3.delivery_export_metadata(row) if column == "delivery_details" else {})}
+                             for column, _, _ in columns])
             blocks.append({"kind": "table", "columns": columns, "rows": rows} if rows else
                           {"kind": "text", "text": "Asnjë detyrë.", "level": 0})
         else:
@@ -499,6 +502,11 @@ def export_blocks(report: dict) -> list[dict]:
 
 
 def render_html(report: dict) -> str:
+    def cell_value(cell):
+        if cell.get("delivery"):
+            return m3.delivery_details_html(cell["delivery"])
+        return runs_html(cell["runs"]) if cell.get("runs") else html.escape(cell["text"]).replace("\n", "<br>")
+
     parts = ["<!doctype html><html><head><meta charset='utf-8'></head><body style='font-family:Arial,sans-serif;color:#0f172a'>"]
     for block in export_blocks(report):
         if block["kind"] == "text":
@@ -512,7 +520,7 @@ def render_html(report: dict) -> str:
             header = "".join(f"<th width='{round(width * 100 / total_width)}%' style='width:{round(width * 100 / total_width)}%;background:#e2e8f0;border:1px solid #000;padding:7px;text-align:left;direction:ltr;vertical-align:{'bottom' if index < 2 else 'top'};font-size:11px'>{html.escape(label)}</th>"
                              for index, (_, label, width) in enumerate(block["columns"]))
             rows = "".join("<tr>" + "".join(
-                f"<td style='background:{cell['fill']};color:{cell['color']};border:1px solid #000;padding:7px;vertical-align:{'bottom' if index < 2 else 'top'};text-align:left;direction:ltr;white-space:pre-wrap;overflow-wrap:anywhere{';font-weight:bold' if cell['bold'] else ''}'>{runs_html(cell['runs']) if cell.get('runs') else html.escape(cell['text']).replace(chr(10), '<br>')}</td>"
+                f"<td style='background:{cell['fill']};color:{cell['color']};border:1px solid #000;padding:7px;vertical-align:{'bottom' if index < 2 else 'top'};text-align:left;direction:ltr;white-space:pre-wrap;overflow-wrap:anywhere{';font-weight:bold' if cell['bold'] else ''}'>{cell_value(cell)}</td>"
                 for index, cell in enumerate(row)) + "</tr>" for row in block["rows"])
             table_width = f"{total_width}px" if len(block["columns"]) == 3 else "100%"
             notes_table = " data-undiscussed-notes-table='true'" if any(key == "content" for key, _, _ in block["columns"]) else ""

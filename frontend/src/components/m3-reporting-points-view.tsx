@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { DiscordDeliveryDetails, type DiscordDelivery } from "@/components/discord-delivery-details"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { TaskPauseBadge } from "@/components/task-pause-field"
@@ -15,11 +16,6 @@ export const MANUAL_POINTS = {
 export type ManualKey = keyof typeof MANUAL_POINTS | `meeting_plan:${string}` | `untouched_comment:${string}` | `delivery:${string}` | `delivery_choice:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 export type DeliverySlot = "M2" | "M3"
-type DeliveryEvidence = {
-  status: "on_time" | "late" | "missing" | "pending" | "unlinked" | "ambiguous" | "unavailable"
-  verified_at?: string
-  url?: string
-}
 type RealizationDepartment = {
   department_id: string; code: string; name: string; percent: number | null; employees: number; comment: string
   comment_key?: string; manager_comment?: string
@@ -52,7 +48,7 @@ export type TaskRow = {
   risk?: "OK" | "RREZIK"
   category?: string
   completed_today?: number
-  discord_delivery?: DeliveryEvidence
+  discord_delivery?: DiscordDelivery
   delivery_note_editable?: boolean
   completed_value?: number | null
   total_value?: number | null
@@ -283,6 +279,7 @@ export function DiscordDeliveryTable({ rows, slot, notes, onNoteChange, disabled
           <td className="whitespace-nowrap border p-2 align-top">
             <span className={`rounded px-2 py-1 ${tone}`}>{label}</span>
             {delivery?.url && delivery.verified_at ? <a className="mt-2 block underline" href={delivery.url} target="_blank" rel="noreferrer" aria-label={`Hap postimin në Discord për ${row.title}`}>{reportTime(delivery.verified_at)}</a> : null}
+            <DiscordDeliveryDetails delivery={delivery} label={`${slot} · ${row.title} · ${row.assignees}`} />
           </td>
           <td className="min-w-[14rem] space-y-1 border p-2 align-top">
             {row.comment ? <p className="whitespace-pre-wrap">{row.comment}</p> : null}

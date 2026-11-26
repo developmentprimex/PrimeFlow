@@ -104,9 +104,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   mente, WFE të artë dhe detyrat personale vjollcë. Kontrollo legjendat, badge-in CON:,
   pamjet e departamenteve, PX Notes/PX JAV, planifikimin dhe M1/M2/M3. Kontrollo
   inicialet nga Confirm by, detyrat pa konfirmues, filtrin për person dhe
-  javën e plotë. Në Common View rreshti mbetet i dukshëm me filtrin All ose
-  WFC INT kur rezultati është bosh. Waiting Client dhe rreshtat e personalëve për KA/GENT
-  vazhdojnë të përdorin klasifikimet e tyre.
+  javën e plotë. Në Common View jashtë mënyrës Short, rreshti mbetet i dukshëm
+  me filtrin All ose WFC INT kur rezultati është bosh. Waiting Client dhe
+  rreshtat e personalëve për KA/GENT vazhdojnë të përdorin klasifikimet e tyre.
 
 - Development → Meetings → M1 dhe seksioni M1 Zhvillim në Export Excel përdorin
   të njëjtin raport ditor. Mungesat, vonesat, pushimet dhe takimet lexohen nga
@@ -191,6 +191,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   drejtpërdrejt. Në BZ M3, e gjithë qeliza është e gjelbër për Po dhe e kuqe
   për Jo. Dorëzimi i vonuar shënohet te teksti i qelizës. Kur leximi direkt
   mungon, arkivi ekzistues i kanalit mund të konfirmojë një postim të gjetur.
+  Në BZ M3 dhe M1/M2/M3 PIKAT, “Shiko dorëzimin” hap tekstin e postimit të
+  verifikuar për atë kolonë dhe liston skedarët. Parapamja, emaili dhe Word
+  shfaqin lidhjet e skedarëve kur vijnë nga leximi direkt. Excel dhe PNG
+  shfaqin tekstin, emrat e skedarëve dhe adresën e postimit, me lidhje
+  të klikueshme në Excel. Nga arkivi shfaqen emrat dhe lidhja e postimit.
+  Rreshtat e dorëzimeve përdorin datën e raportit për shenjën e pauzës.
+  Titulli që krahasohet me postimin e Discord-it ruhet pa etiketën e pauzës.
   Komentet ruhen sipas datës, detyrës
   dhe përgjegjësit në `discord_task_delivery_comments` (migrimi 0209).
   Pika 2 i shfaq dallimet mes përgjegjësve në dy tabela, me titullin në rreshtin e parë
@@ -667,8 +674,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 - Common View Short filtron detyrat e tabelës javore për This Week dhe Next
   Week para grupimit të kartave. Kontrollo kolonat e hënë–e premte, përfshirjen
-  sipas secilit kriter dhe printimin e së njëjtës tabelë. API-ja Common View,
-  eksporti Excel dhe raportet e veçanta SHTYPI nuk përdorin filtrin Short.
+  sipas secilit kriter dhe printimin e së njëjtës tabelë. WFC INT përfshin
+  vetëm detyrat me deadline të shënuar, treguesin 08:00 ose simbolin `!!!`.
+  Rreshti WFC INT fshihet kur asnjë detyrë e javës nuk plotëson kriteret.
+  Brenda çdo dite në rreshtin 1H, grupi AM vjen para PM. Brenda secilit grup
+  zbatohet renditja e departamenteve dhe e përdoruesve nga Weekly Planner.
+  Për secilin përdorues rendi është 08:00, deadline i shënuar, pastaj `!!!`.
+  Detyrat pa periudhë të caktuar futen te AM me etiketën AM/PM të kartës.
+  API-ja Common View, eksporti Excel dhe raportet e veçanta SHTYPI nuk përdorin
+  filtrin Short.
 
 - Eksporti `/exports/checklists.xlsx` përdoret nga checklistat e Product Content
   dhe kontrollon edhe shabllonet globale sipas `group_key`: MST, TT dhe

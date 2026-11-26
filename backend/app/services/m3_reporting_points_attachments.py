@@ -57,7 +57,7 @@ def _text(value: Any) -> str:
 def export_blocks(report: dict) -> list[dict]:
     from app.services.m3_reporting_points import (
         AUTO_TITLES, M3_TITLE, MANUAL_POINTS,
-        report_table_columns, report_table_value, task_table_groups, task_row_appearance,
+        delivery_export_metadata, report_table_columns, report_table_value, task_table_groups, task_row_appearance,
         realization_department_rows, realization_comment_text,
         delivery_summary, reporting_point_answer,
     )
@@ -97,7 +97,7 @@ def export_blocks(report: dict) -> list[dict]:
                 for column_index, (column, _, _) in enumerate(columns):
                     fill = row_fill
                     color, bold = row_color, column in {"title", "marker", "choice"}
-                    if key == "delivery" and column in {"choice", "answer"}:
+                    if key == "delivery" and column in {"choice", "answer", "delivery_details"}:
                         fill, color = "#ffffff", "#000000"
                         choice = report_table_value(row, column, index, movement, report, key)
                         if column == "choice" and choice in {"PO", "JO"}:
@@ -109,7 +109,8 @@ def export_blocks(report: dict) -> list[dict]:
                                   "fill": fill, "color": color, "bold": bold,
                                   "marker": row.get("marker") if column == "title" and key != "delivery" else None,
                                   "eight_am": eight_am, "first": column_index == 0, "last": column_index == len(columns) - 1,
-                                  "divider": column in {"from", "to"} and movement == "start_due"})
+                                  "divider": column in {"from", "to"} and movement == "start_due",
+                                  **(delivery_export_metadata(row) if column == "delivery_details" else {})})
                 rendered_rows.append(cells)
             blocks.append({"kind": "table", "columns": columns, "rows": rendered_rows})
 
@@ -161,12 +162,15 @@ def export_blocks(report: dict) -> list[dict]:
 
 
 def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
+    from docx.opc.constants import RELATIONSHIP_TYPE
     from docx import Document
     from docx.enum.section import WD_ORIENT
     from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Inches, Pt, RGBColor, Twips
+
+    from app.services.m3_reporting_points import _delivery_detail_lines
 
     document = Document()
     page = document.sections[0]
@@ -196,7 +200,20 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
         shading.set(qn("w:fill"), fill.lstrip("#"))
         properties.append(shading)
 
-    def write_cell(cell, value, fill, color="#000000", bold=False, divider=False, eight_am=False, first=False, last=False, marker=None, meeting_highlight=False, runs=None):
+    def write_delivery(paragraph, delivery):
+        for index, (text, url) in enumerate(_delivery_detail_lines(delivery)):
+            if index:
+                paragraph.add_run().add_break()
+            run = paragraph.add_run(_text(text))
+            font(run, color="#1d4ed8" if url else "#000000")
+            if url:
+                run.underline = True
+                link = OxmlElement("w:hyperlink")
+                link.set(qn("r:id"), paragraph.part.relate_to(url, RELATIONSHIP_TYPE.HYPERLINK, is_external=True))
+                paragraph._p.append(link)
+                link.append(run._element)
+
+    def write_cell(cell, value, fill, color="#000000", bold=False, divider=False, eight_am=False, first=False, last=False, marker=None, meeting_highlight=False, runs=None, delivery=None):
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
         properties = cell._tc.get_or_add_tcPr()
         shade(properties, fill)
@@ -214,7 +231,9 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
             paragraph = cell.paragraphs[0] if index == 0 else cell.add_paragraph()
             paragraph.paragraph_format.space_after = Pt(2 if divider else 0)
             paragraph.paragraph_format.keep_with_next = divider and index == 0
-            if runs:
+            if delivery:
+                write_delivery(paragraph, delivery)
+            elif runs:
                 for item in runs:
                     rich_run = paragraph.add_run(item["text"])
                     font(rich_run, bold=bold, color=item.get("color", color))
@@ -274,13 +293,13 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
                 write_cell(cell, label, "#e2e8f0", bold=True)
             for values in block["rows"]:
                 row = table.add_row()
-                if blocks is not None:
+                if blocks is not None and not any(value.get("delivery") for value in values):
                     # Keep an ordinary M2 task row together across page breaks.
                     row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
                 for index, value in enumerate(values):
                     cell = row.cells[index]
                     cell.width = Twips(widths[index])
-                    write_cell(cell, **{key: value[key] for key in ("fill", "color", "bold", "divider", "eight_am", "first", "last", "marker", "meeting_highlight", "runs") if key in value}, value=value["text"])
+                    write_cell(cell, **{key: value[key] for key in ("fill", "color", "bold", "divider", "eight_am", "first", "last", "marker", "meeting_highlight", "runs", "delivery") if key in value}, value=value["text"])
             document.add_paragraph().paragraph_format.space_after = Pt(3)
     output = io.BytesIO()
     document.save(output)

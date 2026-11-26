@@ -69,7 +69,7 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str, preview_png: bytes | Non
         return start + count - 1
 
     def write(start: int, end: int, left: int, right: int, value, *, fill="FFFFFF",
-              color="000000", bold=False, size=10, border=None, marker=None, number_format=None, runs=None):
+              color="000000", bold=False, size=10, border=None, marker=None, number_format=None, runs=None, url=None):
         if isinstance(value, str):
             value = _text(value)
             if len(value) > 32767:
@@ -79,6 +79,8 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str, preview_png: bytes | Non
         # User-entered answers/titles are literal text, even if they begin '='.
         if isinstance(value, str):
             cell.data_type = "s"
+        if url:
+            cell.hyperlink = url
         if runs:
             cell.value = CellRichText(*[
                 TextBlock(InlineFont(rFont="Arial", sz=size, b=bold,
@@ -178,7 +180,8 @@ def render_xlsx(blocks: list[dict], *, sheet_name: str, preview_png: bytes | Non
                             cell_value, number_format = float(part[:-1]) / 100, "0.##%"
                         write(start, stop, left, right, cell_value,
                               fill=value.get("fill", "FFFFFF"), color=value.get("color", "000000"),
-                              bold=value.get("bold", False), marker=value.get("marker"), number_format=number_format, runs=value.get("runs"),
+                              bold=value.get("bold", False), marker=value.get("marker"), number_format=number_format,
+                              runs=value.get("runs"), url=value.get("url"),
                               border=Border(left=left_edge, right=right_edge,
                                             top=divider if index else top,
                                             bottom=divider if len(parts) == 2 and index == 0 else bottom))

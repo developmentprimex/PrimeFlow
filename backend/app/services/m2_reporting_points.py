@@ -289,7 +289,7 @@ def export_blocks(report):
                 for column_index, (column, _, _) in enumerate(columns):
                     value = str(table_value(report, row, column, index, movement, key))
                     cell_fill, cell_color = fill, color
-                    if column in {"answer", "manual_comment", "choice"}:
+                    if column in {"answer", "manual_comment", "choice", "delivery_details"}:
                         cell_fill, cell_color = "#ffffff", "#000000"
                     if column == "choice" and value in {"PO", "JO"}:
                         cell_fill, cell_color = ("#16a34a" if value == "PO" else "#dc2626"), "#ffffff"
@@ -300,6 +300,7 @@ def export_blocks(report):
                         "bold": column in {"title", "marker", "choice", "risk"}, "marker": row.get("marker") if key in {"postponed", "postponed_am"} and column == "title" else None,
                         "eight_am": eight_am, "first": column_index == 0, "last": column_index == len(columns) - 1,
                         "divider": column in {"from", "to"} and movement == "start_due",
+                        **(m3.delivery_export_metadata(row) if column == "delivery_details" else {}),
                     })
                 rendered.append(cells)
             blocks.append({"kind": "table", "columns": columns, "rows": rendered})
@@ -331,7 +332,7 @@ def render_html(report):
                         style += ";border-left:3px solid #dc2626"
                     if cell.get("last"):
                         style += ";border-right:3px solid #dc2626"
-                value = escaped(cell["text"])
+                value = m3.delivery_details_html(cell["delivery"]) if cell.get("delivery") else escaped(cell["text"])
                 if cell.get("divider"):
                     first, _, last = cell["text"].partition("\n")
                     value = f"<div style='border-bottom:2px solid #000;padding-bottom:3px;margin-bottom:3px'>{escaped(first)}</div>{escaped(last)}"
