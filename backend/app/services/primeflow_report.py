@@ -26,7 +26,9 @@ from app.services.compact_report_questions import question_parts, questions_html
 from app.config import settings
 from app.services.one_h_ga_summary import GaTaskCounts, build_ga_summary, summary_html, summary_text, TITLE as GA_SUMMARY_TITLE
 from app.services.px_note_email import is_email_note_content
-from app.services.morning_task_follow_up import FOLLOW_UP_BY_SLOT, is_open_follow_up, report_follow_up_groups, task_row_groups
+from app.services.morning_task_follow_up import (
+    FOLLOW_UP_BY_SLOT, is_open_follow_up, local_task_day, report_follow_up_groups, task_row_groups,
+)
 
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
@@ -107,7 +109,7 @@ ONE_H_MARKER_LEGEND = (
     ("BZ1N1", ""),
 )
 BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-16:00"
-MORNING_TASK_TABLE_COLUMNS = ("NR", "KUSH", "DEP", "TITULLI", "STATUS", "KOMENT")
+MORNING_TASK_TABLE_COLUMNS = ("NR", "KUSH", "DEP", "TITULLI", "DUE DATE", "STATUS", "KOMENT")
 
 
 class GmailVerificationError(RuntimeError):
@@ -130,6 +132,11 @@ class ReportTask(BaseModel):
     strike_count: int | None = None
     slot_strike_count: int | None = None
     follow_up_comment: str = ""
+    due_date: date | None = None
+
+    @property
+    def due_date_label(self) -> str:
+        return self.due_date.strftime("%d.%m.%Y") if self.due_date else "—"
 
     def display_title(self) -> tuple[str, list[str]]:
         heading, details = split_task_display(self.title)
@@ -621,6 +628,7 @@ def _document_section(
                 strike_count=strike_count,
                 slot_strike_count=slot_strike_count,
                 follow_up_comment=(follow_up_comments or {}).get(task_id, ""),
+                due_date=local_task_day(task.get("due_date")) if follow_up_comments is not None else None,
             ))
         employees.append(ReportEmployee(
             name=employee_initials(employee),
@@ -661,7 +669,8 @@ def morning_follow_up_rows(
         was_planned = not is_carried and str(task.get("task_id") or task.get("id") or "") in frozen
         if _task_date(task) == day:
             if was_planned or (
-                group in task_row_groups(task, day) and (not is_carried or is_open_follow_up(task))
+                group in task_row_groups(task, day, include_planned_days=not is_carried)
+                and (not is_carried or is_open_follow_up(task))
             ):
                 scheduled.append(task)
         elif was_planned:
@@ -898,7 +907,8 @@ def render_plain_text(document: ReportDocument) -> str:
                 heading, details = task.display_title()
                 title = " ".join(filter(None, (task.one_h_marker, heading, *details, task.description)))
                 lines.append(" | ".join((str(number), employee, task.department,
-                    " ".join(title.splitlines()), task.marker, " / ".join(task.follow_up_comment.splitlines()) or "—")))
+                    " ".join(title.splitlines()), task.due_date_label, task.marker,
+                    " / ".join(task.follow_up_comment.splitlines()) or "—")))
             blocks.append("\n".join(lines))
             continue
         for employee in section.employees:
@@ -1039,6 +1049,8 @@ def render_html(
                 if follow_up:
                     comment = html.escape(task.follow_up_comment or "—").replace("\n", "<br>")
                     follow_up_cells = (
+                        f'<td style="padding:9px;border:1px solid #cbd5e1;font-size:12px;white-space:nowrap;">'
+                        f'{task.due_date_label}</td>'
                         f'<td bgcolor="{background}" style="padding:9px;border:1px solid {accent};font-weight:700;">'
                         f'{html.escape(STATUS_MARKERS[task.status])}</td>'
                         f'<td data-follow-up-comment="true" style="padding:9px;border:1px solid #cbd5e1;overflow-wrap:anywhere;vertical-align:top;">{comment}</td>'
@@ -1066,7 +1078,7 @@ def render_html(
         layout = "table-layout:fixed;" if follow_up else ""
         columns = (
             '<colgroup><col style="width:40px"><col style="width:60px"><col style="width:60px">'
-            '<col><col style="width:118px"><col style="width:24%"></colgroup>'
+            '<col><col style="width:86px"><col style="width:100px"><col style="width:22%"></colgroup>'
             if follow_up else ""
         )
         return (
@@ -1521,15 +1533,16 @@ def render_docx(document: ReportDocument) -> bytes:
         elif section.morning_follow_up:
             table = doc.add_table(rows=1, cols=len(MORNING_TASK_TABLE_COLUMNS))
             table.style = "Table Grid"
-            for column, inches in zip(table.columns, (0.35, 0.55, 0.55, 2.4, 1.0, 2.2)):
+            for column, inches in zip(table.columns, (0.35, 0.55, 0.55, 2.05, 0.85, 1.0, 1.7)):
                 column.width = Inches(inches)
             for cell, label in zip(table.rows[0].cells, MORNING_TASK_TABLE_COLUMNS):
                 shade(cell, "#e2e8f0")
                 cell.paragraphs[0].add_run(label).bold = True
             rows = ((employee.name, task) for employee in section.employees for task in employee.tasks)
             for number, (employee, task) in enumerate(rows, 1):
-                number_cell, who, department, title, status, comment = table.add_row().cells
+                number_cell, who, department, title, due_date, status, comment = table.add_row().cells
                 number_cell.text, who.text, department.text = str(number), employee, task.department
+                due_date.text = task.due_date_label
                 background, _, _ = STATUS_COLORS[task.status]
                 shade(title, background)
                 shade(status, background)
@@ -1629,7 +1642,7 @@ def render_png(document: ReportDocument) -> bytes:
         + sum(
             3 + sum(
                 (5 + len(textwrap.wrap(task.title, 85)) + len(wrap_description(task.description, 90))
-                 + (3 + len(wrap_description(task.title, 42)) + len(wrap_description(task.description, 42))
+                 + (3 + len(wrap_description(task.title, 36)) + len(wrap_description(task.description, 36))
                     + len(wrap_description(task.follow_up_comment, 35)) if section.morning_follow_up else 0))
                 for task in employee.tasks
             )
@@ -1818,7 +1831,7 @@ def render_png(document: ReportDocument) -> bytes:
             draw.text((margin + 18, y), "(Asnjë detyrë)", fill="#64748b", font=font)
             y += 40
         elif section.morning_follow_up:
-            bounds = [margin, margin + 55, margin + 140, margin + 220, margin + 720, margin + 900, width - margin]
+            bounds = [margin, margin + 55, margin + 140, margin + 220, margin + 655, margin + 775, margin + 930, width - margin]
             for left, right, label in zip(bounds, bounds[1:], MORNING_TASK_TABLE_COLUMNS):
                 draw.rectangle((left, y, right, y + 34), fill="#e2e8f0", outline="#cbd5e1")
                 draw.text((left + 8, y + 6), label, fill="#0f172a", font=bold)
@@ -1827,17 +1840,19 @@ def render_png(document: ReportDocument) -> bytes:
             for number, (employee, task) in enumerate(rows, 1):
                 background, _, accent = STATUS_COLORS[task.status]
                 heading_text, details = task.display_title()
-                title_lines = wrap_description(f"{task.one_h_marker} {heading_text}".strip(), 42)
-                detail_lines = [line for detail in details for line in wrap_description(detail, 42)]
-                description_lines = wrap_description(task.description, 42)
-                strike_lines = wrap_description(strike_count_label(task.strike_count, document), 42) if task.strike_count is not None else []
+                title_lines = wrap_description(f"{task.one_h_marker} {heading_text}".strip(), 36)
+                detail_lines = [line for detail in details for line in wrap_description(detail, 36)]
+                description_lines = wrap_description(task.description, 36)
+                strike_lines = wrap_description(strike_count_label(task.strike_count, document), 36) if task.strike_count is not None else []
                 comment = wrap_description(task.follow_up_comment or "—", 35)
                 status_lines = textwrap.wrap(task.marker, 14)
                 row_height = 16 + 26 * max(1, len(title_lines) + len(detail_lines) + len(description_lines) + len(strike_lines),
                                            len(status_lines), len(comment))
-                for column, lines in enumerate(([str(number)], [employee], [task.department], [], status_lines, comment)):
+                for column, lines in enumerate((
+                    [str(number)], [employee], [task.department], [], [task.due_date_label], status_lines, comment,
+                )):
                     left, right = bounds[column:column + 2]
-                    colored = column in {3, 4}
+                    colored = column in {3, 5}
                     draw.rectangle((left, y, right, y + row_height), fill=background if colored else "white",
                                    outline=accent if colored else "#cbd5e1")
                     for index, line in enumerate(lines):

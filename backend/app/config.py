@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     MCP_ASSISTANT_ALLOWED_EMAILS: str = ""
     MCP_ASSISTANT_RESOURCE_URL: str = "https://mcp-flow.primexeu.com/mcp"
     MCP_ASSISTANT_INTERNAL_SECRET: str | None = None
+    MCP_KNOWLEDGE_ENABLED: bool = False
+    MCP_KNOWLEDGE_RESOURCE_URL: str = ""
+    MCP_KNOWLEDGE_ALLOWED_EMAILS: str = ""
+    MCP_KNOWLEDGE_ALLOWED_REDIRECT_URIS: str = "https://claude.ai/api/mcp/auth_callback"
+    MCP_KNOWLEDGE_INTROSPECTION_SECRET: SecretStr | None = None
     OAUTH_ISSUER_URL: str = "https://api-flow.primexeu.com"
     OAUTH_ALLOWED_REDIRECT_URIS: str = "https://claude.ai/api/mcp/auth_callback"
     OAUTH_ACCESS_TOKEN_MINUTES: int = 60

@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+from dataclasses import dataclass
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 
 from app.config import settings
@@ -17,6 +18,8 @@ ACCESS_TOKEN_PREFIX = "pfm_at_"
 REFRESH_TOKEN_PREFIX = "pfm_rt_"
 CODE_PREFIX = "pfm_ac_"
 SUPPORTED_SCOPE = "primeflow"
+KNOWLEDGE_SCOPE = "knowledge.read"
+KNOWN_SCOPES = {SUPPORTED_SCOPE, KNOWLEDGE_SCOPE}
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 
 
@@ -54,11 +57,11 @@ def email_is_allowed(email: str | None) -> bool:
     return bool(email) and email.strip().casefold() in allowed_emails()
 
 
-def redirect_uri_is_allowed(uri: str) -> bool:
+def redirect_uri_is_allowed(uri: str, configured: str | None = None) -> bool:
     """Exact match against the configured list, or any loopback http URI (RFC 8252)."""
     if not uri or "#" in uri:
         return False
-    if uri in _csv(settings.OAUTH_ALLOWED_REDIRECT_URIS):
+    if uri in _csv(settings.OAUTH_ALLOWED_REDIRECT_URIS if configured is None else configured):
         return True
     try:
         parts = urlsplit(uri)
@@ -78,6 +81,96 @@ def resource_is_allowed(resource: str | None) -> bool:
 def granted_scope(requested: str | None) -> str:
     """Every grant carries only the PrimeFlow scope, whatever the client asked for."""
     return SUPPORTED_SCOPE
+
+
+@dataclass(frozen=True)
+class ResourceGrant:
+    url: str
+    scope: str
+    allowed_emails: frozenset[str]
+    redirects: str
+
+    def allows_redirect(self, uri: str) -> bool:
+        if self.scope == KNOWLEDGE_SCOPE:
+            return uri.startswith("https://") and "#" not in uri and uri in _csv(self.redirects)
+        return redirect_uri_is_allowed(uri, self.redirects)
+
+    def allows_user(self, email: str | None) -> bool:
+        return bool(email) and email.strip().casefold() in self.allowed_emails
+
+
+def knowledge_resource() -> ResourceGrant | None:
+    if not settings.MCP_KNOWLEDGE_ENABLED:
+        return None
+    url = settings.MCP_KNOWLEDGE_RESOURCE_URL.rstrip("/")
+    try:
+        parsed = urlsplit(url)
+        assistant = urlsplit(settings.MCP_ASSISTANT_RESOURCE_URL.rstrip("/"))
+        same_resource = (
+            (parsed.scheme, parsed.hostname, parsed.port or 443, parsed.path)
+            == (assistant.scheme, assistant.hostname, assistant.port or 443, assistant.path)
+        )
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+        or parsed.password is not None or parsed.query or parsed.fragment or same_resource
+        or any(character.isspace() for character in url)
+    ):
+        return None
+    secret = settings.MCP_KNOWLEDGE_INTROSPECTION_SECRET
+    if not secret or hmac.compare_digest(
+        secret.get_secret_value().encode("utf-8"),
+        (settings.MCP_ASSISTANT_INTERNAL_SECRET or "").encode("utf-8"),
+    ):
+        return None
+    emails = frozenset(email.casefold() for email in _csv(settings.MCP_KNOWLEDGE_ALLOWED_EMAILS))
+    return ResourceGrant(url, KNOWLEDGE_SCOPE, emails, settings.MCP_KNOWLEDGE_ALLOWED_REDIRECT_URIS)
+
+
+def assistant_resource() -> ResourceGrant | None:
+    if not settings.MCP_ASSISTANT_ENABLED:
+        return None
+    return ResourceGrant(
+        settings.MCP_ASSISTANT_RESOURCE_URL.rstrip("/"), SUPPORTED_SCOPE,
+        frozenset(allowed_emails()), settings.OAUTH_ALLOWED_REDIRECT_URIS,
+    )
+
+
+def available_resources() -> list[ResourceGrant]:
+    return [grant for grant in (assistant_resource(), knowledge_resource()) if grant is not None]
+
+
+def resolve_resource(resource: str | None) -> ResourceGrant | None:
+    """An omitted or empty indicator retains the assistant's historical default."""
+    if not resource:
+        return assistant_resource()
+    return next((grant for grant in available_resources() if grant.url == resource.rstrip("/")), None)
+
+
+def available_scopes() -> list[str]:
+    return [grant.scope for grant in available_resources()]
+
+
+def registration_scope(requested: str | None, redirect_uris: list[str]) -> str:
+    known_requested = KNOWN_SCOPES.intersection((requested or "").split())
+    return " ".join(
+        grant.scope for grant in available_resources()
+        if (not known_requested or grant.scope in known_requested)
+        and any(grant.allows_redirect(uri) for uri in redirect_uris)
+    )
+
+
+def authorization_scope_is_allowed(requested: str | None, resource: str | None, grant: ResourceGrant) -> bool:
+    known_requested = KNOWN_SCOPES.intersection((requested or "").split())
+    # An explicit target can narrow a request listing both advertised scopes.
+    return not known_requested or (
+        grant.scope in known_requested and (bool(resource) or known_requested == {grant.scope})
+    )
+
+
+def registered_redirect_is_allowed(uri: str) -> bool:
+    return any(grant.allows_redirect(uri) for grant in available_resources())
 
 
 def with_query(uri: str, params: dict[str, str | None]) -> str:
@@ -113,6 +206,6 @@ def authorization_server_metadata() -> dict:
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "revocation_endpoint_auth_methods_supported": ["none"],
-        "scopes_supported": [SUPPORTED_SCOPE],
+        "scopes_supported": available_scopes(),
         "authorization_response_iss_parameter_supported": True,
     }

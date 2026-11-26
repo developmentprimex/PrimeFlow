@@ -6,7 +6,7 @@ code + PKCE (S256), refresh-token rotation, RFC 7009 revocation, and RFC 8707
 resource binding. Login and consent happen on the existing PrimeFlow frontend
 (``/oauth/consent``), which calls the authenticated ``/api/oauth/requests`` API.
 
-Everything returns 404 unless ``MCP_ASSISTANT_ENABLED`` is true.
+The assistant and Knowledge PX resources are enabled independently.
 """
 from __future__ import annotations
 
@@ -33,13 +33,17 @@ from app.services.oauth_server import (
     CODE_PREFIX,
     REFRESH_TOKEN_PREFIX,
     SUPPORTED_SCOPE,
+    ResourceGrant,
+    authorization_scope_is_allowed,
     authorization_server_metadata,
-    email_is_allowed,
+    available_scopes,
     hash_secret,
     issuer,
+    knowledge_resource,
     new_secret,
-    redirect_uri_is_allowed,
-    resource_is_allowed,
+    registered_redirect_is_allowed,
+    registration_scope,
+    resolve_resource,
     verify_pkce,
     with_query,
 )
@@ -55,7 +59,7 @@ def _now() -> datetime:
 
 
 def _ensure_enabled() -> None:
-    if not settings.MCP_ASSISTANT_ENABLED:
+    if not available_scopes():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
@@ -95,19 +99,21 @@ class ClientRegistrationIn(BaseModel):
 async def register_client(payload: ClientRegistrationIn, db: AsyncSession = Depends(get_db)) -> JSONResponse:
     _ensure_enabled()
     for uri in payload.redirect_uris:
-        if not redirect_uri_is_allowed(uri):
+        if not registered_redirect_is_allowed(uri):
             return _oauth_error("invalid_redirect_uri", "Redirect URI is not allowed for this server.")
     grant_types = payload.grant_types or ["authorization_code", "refresh_token"]
     if not set(grant_types) <= {"authorization_code", "refresh_token"}:
         return _oauth_error("invalid_client_metadata", "Only authorization_code and refresh_token are supported.")
-    # Requested scopes are informational (claude.ai sends e.g. "claudeai"); RFC 7591 lets
-    # the server replace them, so every client is registered with the single PrimeFlow scope.
+    # Some clients send their own scope hint. Only configured scopes can be registered.
+    scope = registration_scope(payload.scope, payload.redirect_uris)
+    if not scope:
+        return _oauth_error("invalid_client_metadata", "The callbacks are not allowed for the requested scope.")
     client = OAuthClient(
         client_id="pfm_" + uuid.uuid4().hex,
         client_name=(payload.client_name or "").strip()[:200] or None,
         redirect_uris=list(dict.fromkeys(payload.redirect_uris)),
         grant_types=grant_types,
-        scope=SUPPORTED_SCOPE,
+        scope=scope,
     )
     db.add(client)
     await db.commit()
@@ -120,7 +126,7 @@ async def register_client(payload: ClientRegistrationIn, db: AsyncSession = Depe
             "grant_types": client.grant_types,
             "response_types": ["code"],
             "token_endpoint_auth_method": "none",
-            "scope": SUPPORTED_SCOPE,
+            "scope": client.scope,
         },
         status_code=status.HTTP_201_CREATED,
         headers=NO_STORE,
@@ -145,7 +151,7 @@ async def authorize(request: Request, db: AsyncSession = Depends(get_db)):
     # Never redirect to an unverified URI: report these two errors directly.
     if client is None:
         return _oauth_error("invalid_client", "Unknown client_id.")
-    if redirect_uri not in (client.redirect_uris or []) or not redirect_uri_is_allowed(redirect_uri):
+    if redirect_uri not in (client.redirect_uris or []) or not registered_redirect_is_allowed(redirect_uri):
         return _oauth_error("invalid_request", "redirect_uri does not match the registered client.")
 
     state = params.get("state")
@@ -161,19 +167,24 @@ async def authorize(request: Request, db: AsyncSession = Depends(get_db)):
     challenge = params.get("code_challenge") or ""
     if params.get("code_challenge_method") != "S256" or not (43 <= len(challenge) <= 128):
         return fail("invalid_request", "PKCE with code_challenge_method=S256 is required.")
-    # Unknown requested scopes are ignored (RFC 6749 3.3): the grant always carries
-    # only the PrimeFlow scope, so nothing beyond it can be requested.
+    targets = params.getlist("resource")
     resource = params.get("resource")
-    if not resource_is_allowed(resource):
-        return fail("invalid_target", "The requested resource is not served by this authorization server.")
+    grant = resolve_resource(resource)
+    if len(targets) > 1 or grant is None:
+        return fail("invalid_target", "Select exactly one configured resource.")
+    if not grant.allows_redirect(redirect_uri):
+        return _oauth_error("invalid_request", "redirect_uri is not allowed for the selected resource.")
+    if (grant.scope not in (client.scope or SUPPORTED_SCOPE).split()
+            or not authorization_scope_is_allowed(params.get("scope"), resource, grant)):
+        return fail("invalid_scope", "The requested scope does not match this resource.")
 
     pending = OAuthAuthorizationRequest(
         client_id=client.client_id,
         redirect_uri=redirect_uri,
         code_challenge=challenge,
         state=state,
-        scope=SUPPORTED_SCOPE,
-        resource=resource or settings.MCP_ASSISTANT_RESOURCE_URL,
+        scope=grant.scope,
+        resource=grant.url,
         expires_at=_now() + timedelta(seconds=settings.OAUTH_PENDING_REQUEST_SECONDS),
     )
     db.add(pending)
@@ -183,6 +194,11 @@ async def authorize(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 # ---------------------------------------------------------------- consent (authenticated API)
+
+
+def _grant_for(row: OAuthAuthorizationRequest | OAuthToken) -> ResourceGrant | None:
+    grant = resolve_resource(row.resource)
+    return grant if grant is not None and row.scope == grant.scope else None
 
 
 async def _pending_request(db: AsyncSession, request_id: uuid.UUID) -> OAuthAuthorizationRequest:
@@ -204,6 +220,7 @@ async def get_authorization_request(
 ) -> dict:
     _ensure_enabled()
     row = await _pending_request(db, request_id)
+    grant = _grant_for(row)
     client = await _client(db, row.client_id)
     return {
         "request_id": str(row.id),
@@ -211,7 +228,7 @@ async def get_authorization_request(
         "redirect_host": urlsplit(row.redirect_uri).netloc,
         "scope": row.scope,
         "user_email": user.email,
-        "allowed": email_is_allowed(user.email),
+        "allowed": grant is not None and grant.allows_user(user.email) and grant.allows_redirect(row.redirect_uri),
     }
 
 
@@ -223,8 +240,9 @@ async def approve_authorization_request(
 ) -> dict:
     _ensure_enabled()
     row = await _pending_request(db, request_id)
-    if not email_is_allowed(user.email):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is not allowed to connect the assistant")
+    grant = _grant_for(row)
+    if grant is None or not grant.allows_user(user.email) or not grant.allows_redirect(row.redirect_uri):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account or callback is not allowed for this resource")
     code = new_secret(CODE_PREFIX)
     row.user_id = user.id
     row.code_hash = hash_secret(code)
@@ -259,7 +277,7 @@ async def deny_authorization_request(
 
 
 async def _issue_tokens(
-    db: AsyncSession, *, client_id: str, user_id: uuid.UUID, resource: str | None, family_id: uuid.UUID
+    db: AsyncSession, *, client_id: str, user_id: uuid.UUID, grant: ResourceGrant, family_id: uuid.UUID
 ) -> dict:
     access = new_secret(ACCESS_TOKEN_PREFIX)
     refresh = new_secret(REFRESH_TOKEN_PREFIX)
@@ -272,7 +290,7 @@ async def _issue_tokens(
         db.add(
             OAuthToken(
                 token_hash=hash_secret(raw), token_type=kind, client_id=client_id, user_id=user_id,
-                scope=SUPPORTED_SCOPE, resource=resource, family_id=family_id, expires_at=now + ttl,
+                scope=grant.scope, resource=grant.url, family_id=family_id, expires_at=now + ttl,
             )
         )
     return {
@@ -280,7 +298,7 @@ async def _issue_tokens(
         "token_type": "Bearer",
         "expires_in": int(access_ttl.total_seconds()),
         "refresh_token": refresh,
-        "scope": SUPPORTED_SCOPE,
+        "scope": grant.scope,
     }
 
 
@@ -292,9 +310,9 @@ async def _revoke_family(db: AsyncSession, family_id: uuid.UUID) -> None:
     )
 
 
-async def _active_allowed_user(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+async def _active_allowed_user(db: AsyncSession, user_id: uuid.UUID, grant: ResourceGrant) -> User | None:
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if user is None or not user.is_active or not email_is_allowed(user.email):
+    if user is None or not user.is_active or not grant.allows_user(user.email):
         return None
     return user
 
@@ -308,9 +326,10 @@ async def token(request: Request, db: AsyncSession = Depends(get_db)) -> JSONRes
     client = await _client(db, client_id)
     if client is None:
         return _oauth_error("invalid_client", "Unknown client_id.", status.HTTP_401_UNAUTHORIZED)
-    resource = form.get("resource")
-    if resource is not None and not resource_is_allowed(str(resource)):
-        return _oauth_error("invalid_target", "The requested resource is not served by this server.")
+    target = form.get("resource")
+    requested = resolve_resource(str(target)) if target is not None else None
+    if len(form.getlist("resource")) > 1 or (target is not None and requested is None):
+        return _oauth_error("invalid_target", "Select exactly one configured resource.")
 
     if grant_type == "authorization_code":
         code = str(form.get("code") or "")
@@ -334,12 +353,17 @@ async def token(request: Request, db: AsyncSession = Depends(get_db)) -> JSONRes
             return _oauth_error("invalid_grant", "redirect_uri does not match the authorization request.")
         if not verify_pkce(str(form.get("code_verifier") or ""), row.code_challenge):
             return _oauth_error("invalid_grant", "PKCE verification failed.")
+        grant = _grant_for(row)
+        if grant is None or not grant.allows_redirect(row.redirect_uri):
+            return _oauth_error("invalid_grant", "The authorized resource or callback is unavailable.")
+        if requested is not None and requested.url != grant.url:
+            return _oauth_error("invalid_target", "The requested resource does not match the authorization.")
         row.consumed_at = _now()
-        if await _active_allowed_user(db, row.user_id) is None:
+        if await _active_allowed_user(db, row.user_id, grant) is None:
             await db.commit()
-            return _oauth_error("invalid_grant", "The user is no longer allowed to use the assistant.")
+            return _oauth_error("invalid_grant", "The user is no longer allowed to use this resource.")
         body = await _issue_tokens(
-            db, client_id=client.client_id, user_id=row.user_id, resource=row.resource, family_id=uuid.uuid4()
+            db, client_id=client.client_id, user_id=row.user_id, grant=grant, family_id=uuid.uuid4()
         )
         await db.commit()
         return JSONResponse(body, headers=NO_STORE)
@@ -354,6 +378,11 @@ async def token(request: Request, db: AsyncSession = Depends(get_db)) -> JSONRes
         ).scalar_one_or_none()
         if row is None or row.client_id != client.client_id:
             return _oauth_error("invalid_grant", "Refresh token is invalid.")
+        grant = _grant_for(row)
+        if grant is None:
+            return _oauth_error("invalid_grant", "The authorized resource is unavailable.")
+        if requested is not None and requested.url != grant.url:
+            return _oauth_error("invalid_target", "The requested resource does not match the authorization.")
         if row.revoked_at is not None:
             # A rotated refresh token was replayed: treat the whole grant as compromised.
             await _revoke_family(db, row.family_id)
@@ -361,13 +390,13 @@ async def token(request: Request, db: AsyncSession = Depends(get_db)) -> JSONRes
             return _oauth_error("invalid_grant", "Refresh token was already used; the session has been revoked.")
         if row.expires_at <= _now():
             return _oauth_error("invalid_grant", "Refresh token has expired.")
-        if await _active_allowed_user(db, row.user_id) is None:
+        if await _active_allowed_user(db, row.user_id, grant) is None:
             await _revoke_family(db, row.family_id)
             await db.commit()
-            return _oauth_error("invalid_grant", "The user is no longer allowed to use the assistant.")
+            return _oauth_error("invalid_grant", "The user is no longer allowed to use this resource.")
         row.revoked_at = _now()
         body = await _issue_tokens(
-            db, client_id=client.client_id, user_id=row.user_id, resource=row.resource, family_id=row.family_id
+            db, client_id=client.client_id, user_id=row.user_id, grant=grant, family_id=row.family_id
         )
         await db.commit()
         return JSONResponse(body, headers=NO_STORE)
@@ -401,6 +430,48 @@ class SessionIn(BaseModel):
     token: str = Field(min_length=10, max_length=200)
 
 
+async def _active_access_token(db: AsyncSession, token: str) -> OAuthToken | None:
+    if not token.startswith(ACCESS_TOKEN_PREFIX):
+        return None
+    row = (
+        await db.execute(
+            select(OAuthToken).where(OAuthToken.token_hash == hash_secret(token), OAuthToken.token_type == "access")
+        )
+    ).scalar_one_or_none()
+    if row is None or row.revoked_at is not None or row.expires_at <= _now():
+        return None
+    return row
+
+
+@api_router.post("/internal/knowledge/introspect")
+async def introspect_knowledge_access(
+    payload: SessionIn,
+    db: AsyncSession = Depends(get_db),
+    knowledge_secret: str | None = Header(default=None, alias="X-MCP-Knowledge-Secret"),
+) -> JSONResponse:
+    """Return identity and scope only for active Knowledge PX tokens."""
+    grant = knowledge_resource()
+    if grant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    expected = settings.MCP_KNOWLEDGE_INTROSPECTION_SECRET
+    if expected is None or not hmac.compare_digest(
+        (knowledge_secret or "").encode("utf-8"), expected.get_secret_value().encode("utf-8")
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid introspection credential")
+    inactive = JSONResponse({"active": False}, headers=NO_STORE)
+    row = await _active_access_token(db, payload.token)
+    if row is None or row.resource != grant.url or row.scope != grant.scope:
+        return inactive
+    user = await _active_allowed_user(db, row.user_id, grant)
+    if user is None:
+        return inactive
+    return JSONResponse(
+        {"active": True, "sub": str(user.id), "client_id": row.client_id,
+         "scope": grant.scope, "resource": grant.url, "exp": int(row.expires_at.timestamp())},
+        headers=NO_STORE,
+    )
+
+
 @api_router.post("/internal/session")
 async def internal_session(
     payload: SessionIn,
@@ -413,21 +484,17 @@ async def internal_session(
     API token is the normal PrimeFlow JWT for the token's user, so every API
     write is attributed to that user (created_by, audit_logs).
     """
-    _ensure_enabled()
+    assistant = resolve_resource(None)
+    if assistant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     expected = settings.MCP_ASSISTANT_INTERNAL_SECRET or ""
     if not expected or not hmac.compare_digest(x_mcp_internal_secret or "", expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal secret")
     inactive = JSONResponse({"active": False}, headers=NO_STORE)
-    if not payload.token.startswith(ACCESS_TOKEN_PREFIX):
+    row = await _active_access_token(db, payload.token)
+    if row is None or _grant_for(row) != assistant:
         return inactive
-    row = (
-        await db.execute(
-            select(OAuthToken).where(OAuthToken.token_hash == hash_secret(payload.token), OAuthToken.token_type == "access")
-        )
-    ).scalar_one_or_none()
-    if row is None or row.revoked_at is not None or row.expires_at <= _now() or not resource_is_allowed(row.resource):
-        return inactive
-    user = await _active_allowed_user(db, row.user_id)
+    user = await _active_allowed_user(db, row.user_id, assistant)
     if user is None:
         return inactive
     row.last_used_at = _now()

@@ -890,6 +890,8 @@ class PrimeFlowReportTests(unittest.TestCase):
                 self.assertEqual(document.task_count, 2)
 
     def test_morning_follow_up_table_includes_early_done_and_the_exact_task_comment(self):
+        from PIL import ImageDraw
+
         day = date(2026, 7, 28)
         common = {"date": day.isoformat(), "due_date": day.isoformat(), "person": "Anisa Test"}
         first = {**common, "task_id": "early", "title": "08:00 Oferta", "status": "DONE",
@@ -910,16 +912,26 @@ class PrimeFlowReportTests(unittest.TestCase):
             self.assertTrue(follow_up.morning_follow_up)
             self.assertEqual([(task.task_id, task.status) for person in follow_up.employees for task in person.tasks],
                              [(row["task_id"], status)])
+            self.assertEqual(follow_up.employees[0].tasks[0].due_date, day)
             self.assertIn("AT: Pragu &lt; 50%", render_html(document))
             follow_up_html = render_html(document).split('data-morning-follow-up-table="true"', 1)[1].split("</table>", 1)[0]
             self.assertIn("table-layout:fixed", follow_up_html)
             self.assertIn('<colgroup><col style="width:40px"><col style="width:60px"><col style="width:60px">', follow_up_html)
             self.assertIn('data-report-marker-host="true"', follow_up_html)
+            self.assertRegex(follow_up_html, r'<th[^>]*>DUE DATE</th><th[^>]*>STATUS</th>')
+            self.assertIn(">28.07.2026</td>", follow_up_html)
             self.assertRegex(follow_up_html, r'<td data-follow-up-comment="true"[^>]*>AT: Pragu &lt; 50%</td>')
-            self.assertIn(comment, render_plain_text(document))
+            plain_text = render_plain_text(document)
+            self.assertIn("TITULLI | DUE DATE | STATUS", plain_text)
+            self.assertIn(f" | 28.07.2026 | {STATUS_MARKERS[status]} | {comment}", plain_text)
             xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml")
+            self.assertIn(b">DUE DATE</w:t>", xml)
+            self.assertIn(b">28.07.2026</w:t>", xml)
             self.assertIn(b"AT: Pragu &lt; 50%", xml)
-            self.assertTrue(render_png(document).startswith(b"\x89PNG"))
+            with patch.object(ImageDraw.ImageDraw, "text", autospec=True, side_effect=ImageDraw.ImageDraw.text) as draw:
+                self.assertTrue(render_png(document).startswith(b"\x89PNG"))
+            self.assertIn("DUE DATE", [call.args[2] for call in draw.call_args_list])
+            self.assertIn("28.07.2026", [call.args[2] for call in draw.call_args_list])
 
     def test_fresh_1150_report_renders_the_saved_deadline_am_answer(self):
         from app.services import morning_task_follow_up as follow_up, primeflow_report_delivery as delivery
@@ -963,6 +975,24 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(regular, {"11:00": {"legacy": "Anisa Test: Në punë", "tracked": "Anisa Test: E dërgova"}})
         tracked = asyncio.run(load_follow_up_comments(db, day, ["11:00"], group="08:00"))
         self.assertEqual(tracked, {"11:00": {"tracked": "Anisa Test: E dërgova"}})
+
+    def test_unslotted_morning_tasks_appear_between_start_and_due_date(self):
+        day = date(2026, 7, 28)
+        common = {"date": day.isoformat(), "start_date": "2026-07-27", "due_date": "2026-07-29",
+                  "person": "Anisa Test", "status": "TODO"}
+        early = {**common, "task_id": "early", "title": "08:00 Oferta"}
+        deadline = {**common, "task_id": "am", "title": "Plani",
+                    "is_deadline_important": True, "finish_period": "AM"}
+        future = {**early, "task_id": "future", "start_date": "2026-07-29"}
+        data = {"morning_follow_up_tasks": [early, deadline, future]}
+        for slot, expected in (("11:00", ["early"]), ("11:50", ["am"]),
+                               ("14:10", []), ("14:20", []), ("16:00", [])):
+            with self.subTest(slot=slot):
+                report = build_report_document(data, day, slot)
+                self.assertEqual([
+                    task.task_id for section in report.sections if section.morning_follow_up
+                    for employee in section.employees for task in employee.tasks
+                ], expected)
 
     def test_due_today_open_morning_tasks_carry_to_later_reports(self):
         day = date(2026, 7, 28)

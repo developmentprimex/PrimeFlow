@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
 from app.config import settings
 from app.models.discord_assistant import DiscordLink, DiscordReminder
@@ -87,7 +87,7 @@ def task_model_groups(task, day, *, include_planned_days=False):
 
 
 async def load_morning_task_rows(db, day, *, frozen_task_ids=()):
-    """Include ordinary completed tasks and frozen tasks moved outside Common View's window."""
+    """Load morning tasks in their planned date range, including tasks without a slot."""
     from app.services.meetings_report import (
         _assignee_names, _effective_task_assignee_ids, _normalize_report_status, apply_weekly_planner_task_order,
     )
@@ -95,12 +95,16 @@ async def load_morning_task_rows(db, day, *, frozen_task_ids=()):
     from app.services.task_pause import pause_until_on_day
 
     start = datetime.combine(day, time.min, ZoneInfo(settings.APP_TIMEZONE))
+    end = start + timedelta(days=1)
     frozen = {UUID(task_id) for task_id in frozen_task_ids}
     tasks = (await db.execute(select(Task).where(
         Task.work_staff_filter(), Task.is_active.is_(True),
-        or_(Task.due_date.between(start, start + timedelta(days=1) - timedelta(microseconds=1)), Task.id.in_(frozen)),
+        or_(
+            and_(Task.due_date >= start, or_(Task.due_date < end, Task.start_date < end)),
+            Task.id.in_(frozen),
+        ),
     ))).scalars().all()
-    tasks = [task for task in tasks if task.id in frozen or task_model_groups(task, day)]
+    tasks = [task for task in tasks if task.id in frozen or task_model_groups(task, day, include_planned_days=True)]
     if not tasks:
         return []
     owners = await _effective_task_assignee_ids(db, tasks)
