@@ -11071,8 +11071,14 @@ export default function DepartmentKanban() {
                 </div>
               </Card>
 
-              <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
-                <div className="flex flex-wrap items-center justify-end gap-2">
+              <Card className="gap-4 rounded-2xl border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {INTERNAL_MEETING.team.join(", ")}
+                    </div>
+                  </div>
                   <Button
                     type="button"
                     variant="outline"
@@ -11103,12 +11109,6 @@ export default function DepartmentKanban() {
                     </Table>
                   </div>
                 ) : null}
-                <div>
-                  <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    {INTERNAL_MEETING.team.join(", ")}
-                  </div>
-                </div>
                 <div data-slot="button-group" className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
                   {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
                     <button

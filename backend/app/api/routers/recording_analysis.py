@@ -56,6 +56,7 @@ def available():
 async def get_analysis(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     row = await load_recording(db, recording_id, user)
     job = await db.get(Analysis, row.id)
+    review = (job.summary_progress or {}).get('transcript_review') if job else None
     segments = (await db.execute(select(Transcript).where(Transcript.recording_id == row.id).order_by(Transcript.index))).scalars().all() if job else []
     actions = (await db.execute(select(Action).where(Action.recording_id == row.id).order_by(Action.segment_index, Action.id))).scalars().all() if job else []
     from app.models.meeting_note import MeetingNote
@@ -67,11 +68,13 @@ async def get_analysis(recording_id: uuid.UUID, db: AsyncSession = Depends(get_d
     return {'configured': available(), 'can_manage': row.created_by == user.id, 'can_start_analysis': True,
         'timing_configured': bool(settings.RECORDING_TIMING_ENABLED and settings.RECORDING_TIMING_PYTHON),
         'timing': job.timing if job else None,
+        'transcript_review': {'status': review['status'], 'completed': review.get('completed', 0)} if review else None,
         'analysis': {**{key: getattr(job, key) for key in ('status', 'language', 'total_segments', 'segments_done', 'summary', 'error_message', 'updated_at')},
             # Analyses from before meeting-level notes kept decisions per segment.
             'decisions': job.decisions if job.decisions is not None else [d for s in segments for d in (s.notes or {}).get('decisions', [])]} if job else None,
         'segments': [{'index': s.index, 'start_seconds': s.start_seconds, 'duration_seconds': s.duration_seconds,
-                      'text': s.text} for s in segments],
+                      'text': s.text, 'corrected_text': (s.notes or {}).get('corrected_text')
+                      if review and review['status'] == 'READY' else None} for s in segments],
         'meeting_id': getattr(row, 'meeting_id', None),
         'actions': [{**{key: getattr(a, key) for key in ('id', 'segment_index', 'title', 'description', 'evidence', 'assignee_text', 'deadline_text',
             'suggested_assignee_id', 'suggested_due_date', 'created_task_id', 'confirmed_at', 'dismissed_at')},
@@ -104,6 +107,26 @@ async def start_analysis(recording_id: uuid.UUID, payload: AnalysisStart, db: As
     audit(db, user, row, 'recording_analysis_requested', provider='openai', language=payload.language, consent_acknowledged=True)
     await db.commit()
     return {'status': job.status}
+
+
+@router.post('/{recording_id}/transcript-review', status_code=202)
+async def request_transcript_review(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    row = await load_recording(db, recording_id, user, write=True)
+    job = (await db.execute(select(Analysis).where(Analysis.recording_id == row.id).with_for_update())).scalar_one_or_none()
+    if row.status != 'READY' or not job or job.status != 'READY':
+        raise HTTPException(409, 'Përfundoni transkriptimin para se të kërkoni korrigjimin.')
+    review = (job.summary_progress or {}).get('transcript_review') or {}
+    if review.get('status') in ('QUEUED', 'RUNNING', 'READY'):
+        return {'status': review['status']}
+    if not available():
+        raise HTTPException(503, 'Shërbimi AI nuk është konfiguruar.')
+    if not (await db.execute(select(Transcript.index).where(Transcript.recording_id == row.id).limit(1))).first():
+        raise HTTPException(409, 'Nuk ka transkript për t’u korrigjuar.')
+    job.summary_progress = {**(job.summary_progress or {}), 'transcript_review': {
+        'status': 'QUEUED', 'completed': review.get('completed', 0)}}
+    audit(db, user, row, 'recording_transcript_review_requested', provider='openai')
+    await db.commit()
+    return {'status': 'QUEUED'}
 
 
 @router.post('/{recording_id}/citation-times', status_code=202)

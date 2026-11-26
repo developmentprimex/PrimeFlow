@@ -58,6 +58,23 @@ class RecordingAnalysisAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result['can_start_analysis'])
         self.assertFalse(result['can_manage'])
 
+    async def test_legacy_transcript_review_requires_owner_and_queues_only_once(self):
+        owner = SimpleNamespace(id=self.recording.created_by)
+        job = SimpleNamespace(status='READY', summary_progress={'old_summary_cache': {}})
+        self.db.execute = AsyncMock(side_effect=[Mock(scalar_one_or_none=Mock(return_value=job)),
+            Mock(first=Mock(return_value=(0,))), Mock(scalar_one_or_none=Mock(return_value=job))])
+        with patch.object(api, 'load_recording', new=AsyncMock(side_effect=HTTPException(404))) as load:
+            with self.assertRaises(HTTPException):
+                await api.request_transcript_review(self.recording.id, self.db, self.viewer)
+            load.assert_awaited_once_with(self.db, self.recording.id, self.viewer, write=True)
+        with patch.object(api, 'load_recording', new=AsyncMock(return_value=self.recording)), \
+                patch.object(api, 'available', return_value=True), patch.object(api, 'audit'):
+            for _ in range(2):
+                result = await api.request_transcript_review(self.recording.id, self.db, owner)
+                self.assertEqual(result, {'status': 'QUEUED'})
+        self.assertIn('old_summary_cache', job.summary_progress)
+        self.db.commit.assert_awaited_once()
+
 
 if __name__ == '__main__':
     unittest.main()
