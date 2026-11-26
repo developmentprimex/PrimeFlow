@@ -10437,7 +10437,7 @@ export default function DepartmentKanban() {
         {activeTab === "meetings" ? (
           <div className="space-y-4 sm:space-y-6">
             <div className="text-lg sm:text-xl font-semibold">Meetings</div>
-            <div className={cn("grid grid-cols-1 gap-4", showMeetingLists && "lg:grid-cols-2")}>
+            <div className={cn("grid grid-cols-1 gap-4", showMeetingLists ? "lg:grid-cols-2" : "max-w-[52rem] print:max-w-none")}>
               <Card hidden={!showMeetingLists} className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-sm font-semibold">External Meetings</div>
