@@ -50,6 +50,7 @@ def test_development_m2_uses_existing_questions_for_live_answers_and_excel():
         patch("app.services.development_m2.load_new_email_mailboxes", new_callable=AsyncMock) as read_mail,
         patch("app.services.development_m2.load_blue_notes", new_callable=AsyncMock) as read_notes,
         patch("app.services.development_m2._delivery_rows", new_callable=AsyncMock) as read_delivery,
+        patch("app.services.development_discord_notes.load_development_discord_notes", new_callable=AsyncMock) as read_discord,
         patch("app.api.routers.exports.build_development_m1", new=AsyncMock(return_value=None)),
         patch("app.api.routers.exports.read_development_reorganization", new=AsyncMock(
             return_value="KOMENT: Vetëm M2",
@@ -67,6 +68,10 @@ def test_development_m2_uses_existing_questions_for_live_answers_and_excel():
             ("mail-note", ["2", "NO", "EM IT: 08:00 PROJEKTI · Subjekti · Dërguesi", "-", "10:40"]),
         ]
         read_delivery.return_value = [{"id": "task", "title": "Dorëzo projektin", "detail": "", "marker": "M2"}]
+        read_discord.return_value = {"rows": [{
+            "id": "post", "title": "Autor Discord", "detail": "Shënimi nga zhvillim-text",
+            "labels": ["25.11.2026 11:00"], "href": "https://discord.com/channels/1/2/3",
+        }], "message": None}
 
         report = asyncio.run(build_development_m2(db, user))
         cutoff = received.replace(hour=12, minute=0)
@@ -85,12 +90,17 @@ def test_development_m2_uses_existing_questions_for_live_answers_and_excel():
     note_rows = next(section["rows"] for section in report["sections"] if section["key"] == "notes")
     assert "email_heading" not in note_rows[0]
     assert note_rows[1]["email_heading"] == "EM IT: 08:00 PROJEKTI"
-    rows = list(load_workbook(io.BytesIO(data)).active.values)
+    sheet = load_workbook(io.BytesIO(data)).active
+    rows = list(sheet.values)
+    notes_title = report["item_titles"][str(items[1].id)]
     questions = {row[1]: index for index, row in enumerate(rows) if row[0] in range(1, 6)}
     assert rows[questions[titles[0]]][2] == "✓"
     assert rows[questions[titles[0]] + 1][1] == "Email për projektin\n10:30 · Klienti"
-    assert rows[questions[titles[1]] + 1][1] == "Shënim i ri\nDP · 10:35"
-    assert rows[questions[titles[1]] + 2][1] == "EM IT: 08:00 PROJEKTI · Subjekti · Dërguesi\n- · 10:40"
+    assert rows[questions[notes_title] + 1][1] == "Shënim i ri\nDP · 10:35"
+    assert rows[questions[notes_title] + 2][1] == "EM IT: 08:00 PROJEKTI · Subjekti · Dërguesi\n- · 10:40"
+    discord_cell = sheet.cell(questions[notes_title] + 5, 2)
+    assert "Shënimi nga zhvillim-text" in discord_cell.value
+    assert discord_cell.hyperlink.target == "https://discord.com/channels/1/2/3"
     assert questions[titles[2]] + 1 == questions[titles[3]]
     assert questions[titles[3]] + 1 == questions[items[-1].title]
     assert rows[questions[items[-1].title] + 1][1] == "Dorëzo projektin\nM2"

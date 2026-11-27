@@ -12,6 +12,7 @@ from app.models.enums import ChecklistItemType
 from app.models.task import Task
 from app.models.user import User
 from app.services.after_break_report import load_blue_notes
+from app.services.development_discord_notes import attach_development_discord_notes
 from app.services.daily_realization_events import semantic_local_day
 from app.services.development_m1 import (
     DEVELOPMENT_CHECKLIST_KEY, _task_answer, development_meeting_rows, development_note_answer,
@@ -24,7 +25,7 @@ from app.services.task_marker import active_one_h_marker
 
 
 M3_TOPICS = {
-    "notes": r"px\s*notes|shenim\w*.*(?:teams|trello|grup)",
+    "notes": r"px\s*notes|\bzhvillim-text\b|shenim\w*.*(?:teams|trello|grup)",
     "leave": r"\bpv\b|pushim\w*",
     "delivery": r"\bdoc\b|dorez\w*|simbol\w*.*common\s*view",
     "internal": r"takim\w*\s+int",
@@ -118,7 +119,7 @@ async def build_development_m3(db, user, *, checklist_items=None):
         notes = await load_blue_notes(db, created_before=now)
         add_section("notes", "PX Notes të padiskutuara", [
             development_note_answer(note_id, values) for note_id, values in notes
-        ], "Jo")
+        ], "S’ka PX Notes të padiskutuara.")
 
     if active_sections & {"leave", "delivery"}:
         people = (await db.scalars(select(User).where(User.work_staff_filter()))).all()
@@ -143,4 +144,6 @@ async def build_development_m3(db, user, *, checklist_items=None):
         add_section("internal", INTERNAL_MEETINGS_TITLE, internal, "Jo")
         add_section("external", "Takimet externe për nesër", external, "Nuk ka takime.")
 
-    return {"date": day.isoformat(), "item_sections": item_sections, "item_titles": item_titles, "sections": sections}
+    return await attach_development_discord_notes(db, user, "M3", now, {
+        "date": day.isoformat(), "item_sections": item_sections, "item_titles": item_titles, "sections": sections,
+    }, checklist_items)

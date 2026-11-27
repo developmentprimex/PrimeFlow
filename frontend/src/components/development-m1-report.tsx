@@ -68,6 +68,11 @@ type DevelopmentMeetingReport = {
       marker_by_ga?: boolean
       marker_comment?: string | null
     }[]
+    discord_notes?: {
+      rows: { id: string; title: string; detail: string; labels?: string[]; href?: string }[]
+      message: string | null
+      interval?: string
+    }
   }[]
 }
 
@@ -293,7 +298,7 @@ export function DevelopmentMeetingAnswer({
     ? new Map([...groups.flatMap((group) => group.rows), ...emailRows].map((row, index) => [row.id, index + 1]))
     : undefined
 
-  const renderRows = (rows: typeof section.rows, horizontal = false) => (
+  const renderRows = (rows: typeof section.rows, horizontal = false, discord = false) => (
     <ul key={rows[0].id}
       className={horizontal
         ? "grid min-w-0 grid-flow-col auto-cols-[min(100%,20rem)] gap-2 overflow-x-auto p-1 print:grid-flow-row print:auto-cols-auto print:overflow-visible"
@@ -308,7 +313,7 @@ export function DevelopmentMeetingAnswer({
         const showStatusSelect = Boolean(occurrence?.id && canUpdateMeetingStatus)
         const savingStatus = Boolean(savingMeeting && savingMeeting.id === occurrence?.id && savingMeeting.date === occurrence.date)
         const savingNoteAction = savingNote?.id === row.id ? savingNote.action : undefined
-        const noteNumber = noteNumbers?.get(row.id)
+        const noteNumber = discord ? undefined : noteNumbers?.get(row.id)
         const labels = meeting ? undefined : row.labels?.filter((label) => !row.task_status_labels?.includes(label))
         const isEmailMessage = section.key === "emails" && row.email_body !== undefined
         return (
@@ -414,7 +419,7 @@ export function DevelopmentMeetingAnswer({
                 </a>
               ) : null}
             </div>
-            {section.key === "notes" ? (
+            {section.key === "notes" && !discord ? (
               <div className="flex flex-wrap items-center gap-2 print:hidden" aria-busy={Boolean(savingNoteAction)}>
                 <Button type="button" size="sm" variant="outline" disabled={pending || savingNote !== null}
                   className="h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
@@ -447,8 +452,20 @@ export function DevelopmentMeetingAnswer({
           <div className="mt-2">{renderRows(emailRows)}</div>
         </details>
       ) : null}
-      {section.message || !section.rows.length ? (
+      {section.message || (!section.rows.length && !section.discord_notes) ? (
         <p className="text-sm text-muted-foreground">{section.message || "Nuk ka për sot."}</p>
+      ) : null}
+      {section.discord_notes ? (
+        <div className="space-y-2 rounded-lg border p-3">
+          <h4 className="text-sm font-semibold">Discord · #zhvillim-text</h4>
+          {section.discord_notes.interval ? (
+            <p className="text-xs text-muted-foreground">{section.discord_notes.interval}</p>
+          ) : null}
+          {section.discord_notes.rows.length ? renderRows(section.discord_notes.rows, false, true) : null}
+          {section.discord_notes.message ? (
+            <p className="text-sm text-muted-foreground">{section.discord_notes.message}</p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )

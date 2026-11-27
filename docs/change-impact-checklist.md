@@ -242,8 +242,7 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Nëse Outlook kthen URL-në, aty mund të hapet edhe emaili origjinal.
   Excel përdor subjektin, dërguesin dhe orën për pikën e inbox-it.
   Dorëzimet GA përdorin rregullin M2/M2_M3 të M2 PIKAT, të filtruar për
-  Development. Pikat për punën e
-  paradites, planin PM dhe pjesa e Teams plotësohen në takim. Si në M1,
+  Development. Pikat për punën e paradites dhe planin PM plotësohen në takim. Si në M1,
   “YES” dhe “Close” ofrohen për çdo PX Note në Department dhe My View
   dhe përdorin statusin e përbashkët të PX Notes. Email-et e importuara
   si PX Notes grupohen nën “Email-et” me titujt e shkurtër dhe të njëjtat
@@ -262,6 +261,15 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   dhëna, përgjigjja shfaqet pranë pyetjes dhe klikimi
   në rresht ndryshon ✓ në Department dhe My View. Meetings Report dhe
   M3 PIKAT përdorin rrjedhat e tyre.
+
+- Development → Meetings → M1/M2/M3 lexon postimet nga kanali tekst
+  i vetëm me emrin `#zhvillim-text` në serverin Discord të konfiguruar.
+  Department, My View dhe Export Excel kontrollojnë lejet e llogarisë
+  Discord të lidhur dhe të botit për historikun e kanalit. M1 lexon nga
+  dita e fundit e punës në 16:30 deri në 08:15, M2 nga 08:15 deri në
+  12:00 dhe M3 nga 12:00 deri në 16:30, me kufi te ora e kontrollit.
+  Excel përfshin autorin, orën, tekstin dhe lidhjen origjinale. Skedarët
+  paraqiten me emër te postimi dhe hapen përmes mesazhit në Discord.
 
 - Arsyeja `PV` pranohet pa koment në raportin ditor RLZ, te shtyrjet e
   detyrave dhe në përgjigjet M2 që përdorin listën e arsyeve. Kontrollo

@@ -13,6 +13,7 @@ from app.models.enums import ChecklistItemType
 from app.models.task import Task
 from app.models.user import User
 from app.services.after_break_report import load_blue_notes, load_new_email_mailboxes
+from app.services.development_discord_notes import attach_development_discord_notes
 from app.services.development_m1 import (
     DEVELOPMENT_CHECKLIST_KEY, _task_answer, development_note_answer, select_development_report_tasks,
 )
@@ -25,7 +26,7 @@ from app.services.report_inboxes import report_mailbox
 
 M2_TOPICS = {
     "emails": r"\b(?:e[- ]?mails?|imell\w*|imejl\w*|emaill\w*)\b.*\b(?:it|std)\b",
-    "notes": r"px\s*notes|ai\s*agents?\s*teams|shenim\w*.*\b(?:ga/ka|trello|teams)\b",
+    "notes": r"px\s*notes|ai\s*agents?\s*teams|\bzhvillim-text\b|shenim\w*.*\b(?:ga/ka|trello|teams)\b",
     "delivery": r"dorez\w*.*\bga\b",
 }
 
@@ -117,8 +118,7 @@ async def build_development_m2(db, user, *, checklist_items=None):
                 **development_note_answer(note_id, values),
                 "href": f"/ga-ka-notes#ga-note-content-{note_id}",
             } for note_id, values in notes],
-            "message": ("Teams kontrollohet në takim." if notes else
-                        "S’ka PX Notes të reja të padiskutuara në këtë interval. Teams kontrollohet në takim."),
+            "message": None if notes else "S’ka PX Notes të reja të padiskutuara në këtë interval.",
         })
     if "delivery" in active_sections:
         sections.append({
@@ -127,5 +127,7 @@ async def build_development_m2(db, user, *, checklist_items=None):
             "rows": await _delivery_rows(db, department, day),
             "message": None,
         })
-    return {"date": day.isoformat(), "cutoff": cutoff.strftime("%H:%M"),
-            "item_sections": item_sections, "sections": sections}
+    return await attach_development_discord_notes(db, user, "M2", now, {
+        "date": day.isoformat(), "cutoff": cutoff.strftime("%H:%M"),
+        "item_sections": item_sections, "sections": sections,
+    }, checklist_items)

@@ -21,6 +21,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.services.after_break_report import _belongs_to_day, _is_done, _task_covers_day, load_blue_notes
+from app.services.development_discord_notes import attach_development_discord_notes
 from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import (
     _clean_task_title, _effective_task_assignee_ids, _ka_genti_owner, _local_date,
@@ -43,7 +44,7 @@ M1_TOPICS = (
     ("internal", r"takim\w*\s+int"),
     ("questions", r"(?:pyet|pytj|sqarim).*(?:gent|(?:per|me)\s+ka\b)"),
     ("notes", r"px\s*notes"),
-    ("teams", r"\bteams\b|shenim\w*.*(?:trello|grup)"),
+    ("teams", r"\bteams\b|\bzhvillim-text\b|shenim\w*.*(?:trello|grup)"),
     ("visitors", r"vizitor|\bfrg\b"),
     ("physical", r"fizik|simbol\w*\s+f\b"),
     ("plan", r"detyr\w*\s+e\s+(?:secilit|te\s+gjitheve)|am\s*/\s*pm"),
@@ -335,7 +336,7 @@ async def build_development_m1(db, user, *, checklist_items=None):
         ("internal_all", "Takime interne", internal, None),
         ("internal", "Takime interne me KA", internal_with_ka, None),
         ("questions", "Pyetje për KA / Gentin", [_task_answer(group, assignees, people_by_id, day) for group in questions.values()], None),
-        ("teams", "Shënime në Teams Zhvillim", [], "Pikë manuale. Microsoft Graph nuk lexon bisedat e Teams Personal."),
+        ("teams", "Shënime nga #zhvillim-text", [], None),
         ("notes", "PX Notes të padiskutuara", notes, None),
         ("visitors", "EF/RA · FRG · Vizitorë të rinj", [], "Pikë për diskutim në takim."),
         ("plan", "Diskutohen detyrat e secilit për AM / PM", [], "Pikë për diskutim në takim."),
@@ -362,12 +363,14 @@ async def build_development_m1(db, user, *, checklist_items=None):
             combined_rows.append({"id": key, "title": heading, "detail": "", "heading": True})
             combined_rows.extend(rows or [{"id": f"{key}-empty", "title": "Nuk ka për sot.", "detail": ""}])
         sections.append(("ka_gent", title, combined_rows, None))
-    return {
+    return await attach_development_discord_notes(db, user, "M1", local_now, {
         "date": date_key,
         "item_sections": item_sections,
+        "item_titles": {item_id: "Shënime nga #zhvillim-text / a ka ndryshim të planit?"
+                        for item_id, key in item_sections.items() if key == "teams"},
         "hidden_item_ids": hidden_item_ids,
         "sections": [
             {"key": key, "title": title, "rows": rows, "message": message}
             for key, title, rows, message in sections
         ],
-    }
+    }, checklist_items)

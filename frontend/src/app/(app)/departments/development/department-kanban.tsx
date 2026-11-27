@@ -11180,7 +11180,7 @@ export default function DepartmentKanban() {
                         const discussionOnly = internalSlot === "M1" && (answer?.key === "visitors" || answer?.key === "plan")
                         const emptyKaGent = answer?.key === "ka_gent" && hasKaGentContent === false
                         const emptyDelivery = internalSlot === "M2" && answer?.key === "delivery" && answer.rows.length === 0
-                        const emptyM3 = internalSlot === "M3" && answer?.rows.length === 0
+                        const emptyM3 = internalSlot === "M3" && answer?.rows.length === 0 && !answer.discord_notes
                         const inlineAnswer = emptyKaGent ? "Nuk ka për sot." : emptyDelivery ? "Jo" : emptyM3 ? answer.message : null
                         const expandable = answer && checklistReport && !discussionOnly && !inlineAnswer
                         const rowChecksOnClick = !showMeetingLists && !isEditing && !expandable

@@ -3948,8 +3948,14 @@ async def export_department_internal_meetings_xlsx(
             row_idx += 1
             if answer:
                 answer_rows = list(answer["rows"])
-                if answer["message"] or not answer_rows:
+                discord = answer.get("discord_notes")
+                if answer["message"] or (not answer_rows and not discord):
                     answer_rows.append({"title": answer["message"] or "Nuk ka për sot.", "detail": ""})
+                if discord:
+                    answer_rows.append({"title": "Discord · #zhvillim-text", "detail": discord.get("interval", ""), "heading": True})
+                    answer_rows.extend({**row, "discord_message_url": row["href"]} for row in discord["rows"])
+                    if discord["message"]:
+                        answer_rows.append({"title": discord["message"], "detail": ""})
                 for index, row in enumerate(answer_rows):
                     symbol = one_h_marker_label(row.get("marker"), row.get("marker_by_ga", False))
                     detail = "\n".join(filter(None, (", ".join(row.get("task_assignees", [])), row["detail"])))
@@ -3959,6 +3965,8 @@ async def export_department_internal_meetings_xlsx(
                     )))
                     content = "\n".join(filter(None, (row["title"], details)))
                     cell = ws.cell(row=row_idx, column=2, value=content)
+                    if url := row.get("discord_message_url"):
+                        cell.hyperlink = url
                     cell.data_type = "s"
                     cell.alignment = Alignment(vertical="top", wrap_text=True, indent=1)
                     ws.row_dimensions[row_idx].height = min(409, 15 * sum(

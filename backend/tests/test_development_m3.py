@@ -76,7 +76,10 @@ def test_m3_live_answers_and_excel_share_the_development_checklist():
     sections = {section["key"]: section["rows"] for section in report["sections"]}
     assert [row["labels"][0] for row in sections["leave"]] == ["27.11.2026", "30.11.2026"]
     assert [row["title"] for row in sections["delivery"]] == ["Dokumenti M3", "Dokumenti M2/3"]
-    assert report["item_titles"] == {str(items[4].id): INTERNAL_MEETINGS_TITLE}
+    assert report["item_titles"] == {
+        str(items[0].id): "A KA SHENIME TE REJA PF PX NOTES / Discord #zhvillim-text?",
+        str(items[4].id): INTERNAL_MEETINGS_TITLE,
+    }
     assert [row["title"] for row in sections["internal"]] == ["Plan me Gentin", "Takim i Finance"]
     assert len(sections["external"]) == 1
     assert sections["external"][0]["meeting"]["date"] == friday.isoformat()
