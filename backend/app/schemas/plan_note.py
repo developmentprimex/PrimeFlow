@@ -105,6 +105,7 @@ class PlanNoteCreate(BaseModel):
 class PlanNoteUpdate(BaseModel):
     content: str | None = None
     comment: str | None = None
+    comment_review_date: date | None = None
     status: GaNoteStatus | None = None
     priority: GaNotePriority | None = None
     is_converted_to_task: bool | None = None
@@ -114,6 +115,12 @@ class PlanNoteUpdate(BaseModel):
     next_week: bool | None = None
     planned_for_date: date | None = None
     planning_brief: PxJavPlanningBrief | None = None
+
+    @model_validator(mode="after")
+    def review_date_requires_comment(self):
+        if self.comment_review_date is not None and not (self.comment or "").strip():
+            raise ValueError("A review date requires a comment")
+        return self
 
 
 class PlanNoteTaskDeadlineUpdate(TaskPostponementExplanations):

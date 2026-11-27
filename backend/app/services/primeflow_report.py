@@ -392,7 +392,9 @@ def done_ranges(value: str, marked_source: str) -> list[tuple[int, int, str]]:
     ranges = []
     cursor = 0
     for match in DONE_BLOCK.finditer(marked_source):
-        selected = TECHNICAL_TAGS.sub("", match.group(2))
+        selected = clean_description(match.group(2))
+        if not selected:
+            continue
         start = value.find(selected, cursor)
         if start >= 0:
             colour = STRIKE_COLORS.get((match.group(1) or "grey").lower(), STRIKE_COLORS["grey"])

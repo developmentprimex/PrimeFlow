@@ -835,17 +835,64 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   bazohet te numri i pikës dhe e hëna e javës. Çdo përdorues i autentikuar mund të
   komentojë. Pika 1 lexon PV/festat nga kalendari Microsoft dhe përdor PV/FEST
   të PrimeFlow kur Microsoft nuk përgjigjet. Pika 2 lexon PRJK nga Common View
-  për të hënën deri të premten dhe bashkon projektet e përsëritura sipas ID-së.
+  për të hënën deri të premten, bashkon projektet e përsëritura sipas ID-së
+  dhe shfaq gjithë listën menjëherë.
   PRJK në Common View dhe pika 2 shfaqin projektin për ditët me të paktën një
   detyrë të hapur. API-ja shënon emrat e detyrave të hapura me `openAssignees`
   dhe përdor `null` për ditët pa detyrë të hapur. Mbulimi 1H dhe Admin Tasks
   përdorin të dhënat e plota të PRJK.
-  Pikat 4 dhe 12 lexojnë Weekly Planner dhe Projects. Pika 6 lexon vetëm
-  takimet externe të javës pasuese. Pikat 8 dhe 9 lexojnë PX JAV dhe detyrat
-  Waiting Client.
+  Pika 4 është kontroll manual. Pika 12 lexon Weekly Planner dhe Projects.
+  Pikat 6 dhe 7 paraqiten
+  bashkë me listën e plotë të takimeve externe të javës pasuese, me datën
+  dhe orën e fillimit në zonën kohore të PrimeFlow për secilin takim. Vendimet
+  dhe komentet ruhen sipas numrit të secilës pikë. Butoni “Anulo” përdor API-në
+  e statusit për datën e takimit, me të njëjtat efekte te detyrat e gjeneruara,
+  takimet e lidhura dhe raportet si anulimi nga Common View dhe M1. Takimet e
+  anuluara mbeten në listë me statusin “Anuluar”. Pika 8 shfaq shënimet e
+  hapura të PX JAV pa task të lidhur (të kaltrat), me komentin, PLAN dhe DL
+  nga burimi kur janë plotësuar. Shënimet pa “Planned for” dhe shënimet e
+  diskutuara mbeten të dukshme. Përjashtohen shënimet me “Planned for” pas
+  së dielës së javës së dytë që pason javën e zgjedhur. Kontrolli i taskave
+  përdor të njëjtën përmbledhje sipas origjinës si PX JAV. Pika 9 lexon
+  detyrat Waiting Client me inicialet e personave të caktuar në kopjen
+  që është ende në pritje. Kur titulli nis me inicialet e atij grupi,
+  ato zëvendësohen në këtë pamje nga inicialet e personave në pritje.
+  Pikat 8 dhe 9 shfaqin rreshtin e parë të secilit
+  shënim ose task si titull, i cili mbështillet sipas gjerësisë së kolonës.
+  Shigjeta hap pjesën tjetër të tekstit dhe detajet direkt poshtë titullit.
+  Shenjat e ruajtura `[[added]]` dhe `[[done]]` nuk shfaqen si tekst.
+  Butonat DISK dhe Close shfaqen pranë titullit te pika 8 dhe ruajnë
+  statusin me PATCH të PX JAV.
+  Shënimi i mbyllur hiqet nga pika 8; shënimi i diskutuar mbetet i
+  dukshëm sa kohë është i hapur. PX JAV Kontrolli dhe eksportet lexojnë
+  statuset e ruajtura nga i njëjti burim.
+  Kolona KOMENT te PX JAV ofron zgjedhje standarde dhe koment manual.
+  “31.12”, “PAS J.T” dhe zgjedhja e një date fshehin shënimin nga pika 8
+  deri në datën e rikontrollit në zonën kohore të PrimeFlow. “NUK ËSHTË J.T”
+  ka të njëjtën sjellje si “PAS J.T” dhe rishfaqet të hënën e javës pas
+  javës tjetër. Për komentet pa datë të shprehur, java llogaritet nga
+  data e përditësimit të shënimit. Pritja nga
+  klienti ose konfirmimi i brendshëm pa datë e fsheh deri në ndryshimin
+  e komentit. “INFO” dhe “J.T” nuk shtojnë kufizim në Short. Komenti ruhet
+  me PATCH ekzistues dhe lexohet edhe nga PX JAV Kontrolli dhe eksportet.
+  Create Task propozon Due date nga DL i vlefshëm, përgjegjësit e identifikuar
+  nga KUSH dhe llojin e detyrës kur lejohet nga projekti. Detajet e tjera
+  të planifikimit lexohen te detyra e lidhur. Një koment me datë rikontrolli
+  plotëson DL bosh ose e shtyn DL që bie më herët. Komenti dhe DL ruhen
+  me të njëjtën kërkesë, ndërsa DL që bie më vonë ruhet.
   Butoni “Rifresko gjetjet” i rilexon burimet. Kur ndryshojnë fushat
   ose rregullat e këtyre burimeve, kontrollo edhe gjetjet te Weekly Planner
   Short. Komentet dhe vendimet ruhen përmes API-së së vet.
+  Te pika 16, “Shto takim intern” përdor të njëjtën llogaritje të
+  përsëritjes dhe API kontrolli të orarit si Common View. Takimi ruhet
+  përmes API-së ekzistuese dhe lexohet nga pamjet dhe raportet e TAK INT.
+  Pika 18 lexon rreshtat personalë KA dhe GENT nga Common View për të hënën
+  deri të premten e javës së zgjedhur, me klasifikimin e përbashkët të
+  prefikseve. Përfshin WFC INT të drejtuara atje dhe përjashton Waiting
+  Client. Çdo ID detyre shfaqet një herë edhe kur del në disa ditë.
+  Te tabela PX JAV në ekran, SHENIMI ka 400 px dhe PLANIFIKIM 220 px.
+  Teksti i shënimit shfrytëzon gjerësinë poshtë ikonave. Printimi i PX JAV
+  dhe eksportet Excel, Word dhe PDF kanë dimensionet e tyre.
 
 - Eksporti `/exports/checklists.xlsx` përdoret nga checklistat e Product Content
   dhe kontrollon edhe shabllonet globale sipas `group_key`: MST, TT dhe
@@ -882,6 +929,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   detyrat që mungojnë në seksionet e slotit shfaqen te “STRIKES TË DITËS”.
   Kontrollo preview, filtrin Strikes, email, Word/PNG/Text dhe raportet
   historike. SHTYPI Today më vete dhe Mira Host përdorin dritaret e slotit.
+  Në preview, email dhe Word, përputhja për vijën e strike pastron hapësirat
+  dhe orën/datën e pikës me të njëjtin rregull si teksti i shfaqur.
 
 - Përjashtimi i personave me mungesë gjithë ditën/PV në raporte ndahet te
   `backend/app/services/report_attendance.py`. Rregulli ndjek 1H Reports:
@@ -1330,19 +1379,24 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   për ruajtje manuale. Pas dështimit përfundimtar të përmbledhjes, transkripti
   vazhdon të ruhet. Mira Host ka përmbledhje të veçantë te Mira → Takimet.
 - “Mira, shëno … fund shënimi” nga një folës me llogari Discord të lidhur
-  krijon një shënim më vete direkt te PX Notes. Kontrollo komandat e ndara
+  krijon një shënim më vete direkt te PX Notes. Edhe “fond, shënime” mbyll
+  diktimin e shënimeve në PX Notes dhe PX JAV. Kontrollo komandat e ndara
   në segmente, folësit që ndërhyjnë dhe riprovimet. Në All Tasks/Notes burimi
   shfaqet me tekst të thjeshtë. Diktimet nuk shtohen në listën Mira → Shënimet
   ose në listat e shënimeve të raporteve që përjashtojnë shënimet e Mirës.
 - Për të dy regjistruesit, “fund titulli” ndan titullin me shkronja të mëdha
   nga teksti në rreshtin pasues. Pranohen edhe “fund titullit”, “fund titull”,
   “fund titulle”, “fund titullë” dhe format e bashkuara si “fundtitulli”.
+  Për PX Notes, PX JAV dhe detyrat pranohen edhe format me “nd”, si
+  “nd titullin”, “nd titulli”, “nd titullë” dhe “ndtitulli”.
   Kur ndarësi mungon ose nuk njihet,
   “fund shënimi” ruan gjithë tekstin e diktuar. Kontrollo rreshtat në PX Notes,
   Excel dhe shënimin e lidhur te Mira → Takimet.
 - “Mira, planifiko … fund shënimi” krijon shënim direkt në PX JAV për të dy
   regjistruesit. Pranohen edhe “planfiko” dhe “planifko”, me ose pa `ë` ose
   `e` në fund, njësoj si “planifiko”.
+  Për PX JAV, “fond titulle” pranohet gjithashtu si ndarës. “Planifiko.” në fillim të segmentit
+  mund të njihet pa “Mira” kur i njëjti segment përmban mbylljen e plotë.
   Përdor të njëjtat variante të “fund titulli” dhe ruan gjithë
   tekstin pa ndarës të njohur. Shënimi hyn në PX JAV dhe PX JAV Kontrolli
   me rregullat ekzistuese të një shënimi të hapur pa detyrë të krijuar.

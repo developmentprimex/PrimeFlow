@@ -147,6 +147,34 @@ def test_bll_table_also_displays_its_strike_count():
     assert 'color:#16a34a;text-decoration:line-through;text-decoration-thickness:2px;">1. Earlier title</span>' in output
 
 
+def test_a_counted_strike_keeps_its_colour_after_display_text_is_cleaned():
+    raw_title = "Example task\n1. Two  spaces 09:15 23.10\n2. Still open"
+    marked_title = "Example task\n[[done:blue]]1. Two  spaces 09:15 23.10[[/done]]\n2. Still open"
+    row = {"task_id": "example", "date": DAY.isoformat(), "slot": "10:00",
+           "title": raw_title, "status": "TODO", "person": "Example"}
+    document = build_report_document(
+        {"items": {"oneH": [row]}}, DAY, "10:00",
+        title_overrides={"example": (raw_title, marked_title)},
+        completion_window_end=strike_interval_end(DAY, "10:00"),
+        strike_window_start=strike_interval_start(DAY, "10:00"),
+    )
+
+    output = render_html(document)
+    assert 'data-slot-strike-count="1"' in output
+    assert "Strikes: 1" in output
+    assert 'color:#2563eb;text-decoration:line-through;text-decoration-thickness:2px;">1. Two spaces</span>' in output
+    assert "09:15 23.10" not in output
+
+    with zipfile.ZipFile(io.BytesIO(render_docx(document))) as archive:
+        word = ElementTree.fromstring(archive.read("word/document.xml"))
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    struck_runs = [run for run in word.findall(".//w:r", ns)
+                   if run.find("w:rPr/w:strike[@w:val='0']", ns) is None
+                   and run.find("w:rPr/w:strike", ns) is not None]
+    assert any(run.findtext("w:t", namespaces=ns) == "1. Two spaces"
+               and run.find("w:rPr/w:color[@w:val='2563EB']", ns) is not None for run in struck_runs)
+
+
 @pytest.mark.parametrize("slot", ("11:00", "16:00"))
 def test_earlier_strike_survives_the_done_window_and_slot_selection(slot):
     document, _, expected = fresh_document(slot, include_earlier_task=True)
