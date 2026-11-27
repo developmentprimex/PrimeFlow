@@ -37,7 +37,7 @@ def order_custom_manual_sections(kind: ReportKind, sections: list[dict[str, str]
     for section in sections:
         title, key = section.get("title"), section.get(SECTION_KEY_FIELD)
         if is_manual_section_title(kind, title, key) and (
-            kind != "morning" or canonical_report_section_key(kind, key or title) is None
+            kind not in {"morning", "after_break"} or canonical_report_section_key(kind, key or title) is None
         ):
             manual.append(section)
         else:
@@ -192,9 +192,12 @@ def is_known_report_title(kind: ReportKind, title: str | None) -> bool:
         if is_removed_morning_manual_question(title):
             return True
     if kind == "after_break":
-        from app.services.after_break_report import after_break_automated_section_title, is_retired_after_break_question
+        from app.services.after_break_report import (
+            after_break_automated_section_title, is_after_break_reorganization, is_retired_after_break_question,
+        )
 
-        if is_retired_after_break_question(title) or after_break_automated_section_title(title):
+        if (is_retired_after_break_question(title) or after_break_automated_section_title(title)
+                or is_after_break_reorganization(title)):
             return True
     return canonical_report_section_key(kind, title) is not None
 
@@ -386,14 +389,18 @@ async def merge_common_view_manual_sections(
         ]
     elif kind == "after_break":
         from app.services.after_break_report import (
-            after_break_automated_section_title, is_retired_after_break_question, is_waiting_client_section,
+            after_break_automated_section_title, is_after_break_reorganization, is_retired_after_break_question,
+            is_waiting_client_section, with_after_break_reorganization_section,
         )
 
+        if any(is_after_break_reorganization(section.get("title"), section.get(SECTION_KEY_FIELD)) for section in sections):
+            sections = with_after_break_reorganization_section(sections, preferred_sections=existing_sections)
         extras = [
             section for section in extras
             if not is_retired_after_break_question(section["title"], section.get(SECTION_KEY_FIELD))
             and not after_break_automated_section_title(section["title"], section.get(SECTION_KEY_FIELD))
             and not is_waiting_client_section(section["title"], section.get(SECTION_KEY_FIELD))
+            and not is_after_break_reorganization(section["title"], section.get(SECTION_KEY_FIELD))
         ]
     else:
         from app.services.meetings_report import is_tomorrow_symbols_section, without_retired_meetings_sections

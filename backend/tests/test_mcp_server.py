@@ -63,6 +63,21 @@ class TestMcpResolution(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user_id, "11111111-1111-1111-1111-111111111111")
 
 
+class TestMcpReorganizationTools(unittest.IsolatedAsyncioTestCase):
+    async def test_structured_updates_preserve_unspecified_fields_and_allow_explicit_clear(self) -> None:
+        with patch.object(mcp_server, "_request", new_callable=AsyncMock) as request:
+            await mcp_server.ga_m1_reorg("2026-11-27", discussion="po", overload="jo", plan="")
+            request.assert_awaited_once_with(
+                "POST", "/api/ga-assistant/m1/reorg",
+                json={"date": "2026-11-27", "discussion": "po", "overload": "jo", "plan": ""},
+            )
+            request.reset_mock()
+            await mcp_server.ga_m1_reorg("2026-11-27", answer=None)
+            request.assert_awaited_once_with(
+                "POST", "/api/ga-assistant/m1/reorg", json={"date": "2026-11-27", "answer": None},
+            )
+
+
 class TestMcpTaskTools(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         mcp_server._lookup_cache.clear()

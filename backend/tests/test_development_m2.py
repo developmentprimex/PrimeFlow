@@ -51,6 +51,9 @@ def test_development_m2_uses_existing_questions_for_live_answers_and_excel():
         patch("app.services.development_m2.load_blue_notes", new_callable=AsyncMock) as read_notes,
         patch("app.services.development_m2._delivery_rows", new_callable=AsyncMock) as read_delivery,
         patch("app.api.routers.exports.build_development_m1", new=AsyncMock(return_value=None)),
+        patch("app.api.routers.exports.read_development_reorganization", new=AsyncMock(
+            return_value="KOMENT: Vetëm M2",
+        )) as read_reorg,
     ):
         clock.now.return_value = received.replace(hour=15)
         read_mail.return_value = {"it": {"connected": True, "messages": [{
@@ -70,6 +73,7 @@ def test_development_m2_uses_existing_questions_for_live_answers_and_excel():
         read_mail.assert_awaited_once_with(cutoff.date(), cutoff, sources=("it",))
         read_notes.assert_awaited_once_with(db, created_from=cutoff.replace(hour=8), created_before=cutoff)
         data = asyncio.run(download())
+        read_reorg.assert_awaited_once_with(db, "m2", cutoff.date())
 
     assert report["cutoff"] == "12:00"
     assert report["item_sections"] == {
@@ -90,3 +94,5 @@ def test_development_m2_uses_existing_questions_for_live_answers_and_excel():
     assert questions[titles[2]] + 1 == questions[titles[3]]
     assert questions[titles[3]] + 1 == questions[items[-1].title]
     assert rows[questions[items[-1].title] + 1][1] == "Dorëzo projektin\nM2"
+    assert rows[questions[items[-1].title] + 2][1] == "A KA RIORGANIZIM?"
+    assert rows[questions[items[-1].title] + 4][1] == "KOMENT: Vetëm M2"

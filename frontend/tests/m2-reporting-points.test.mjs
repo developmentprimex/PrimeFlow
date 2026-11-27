@@ -66,16 +66,16 @@ test("M2 presents delivery and PM continuation as separate questions", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: { reorganization: "Riorganizo", [answerKey]: "Dorezuar", [`delivery_choice:${taskId}`]: "PO" }, disabled: false, onAnswerChange: () => {},
   }))
-  assert.match(html, /1\. RIORGANIZIM\?/)
-  assert.match(html, /2\. DET TE PAKRYERA, 08:00\/DEADLINE\/AM/)
-  assert.match(html, /3\. A KA DET QË SHTYHEN \(SOT\/SOT\) OSE DEADLINE\?/)
+  assert.match(html, /7\. A KA RIORGANIZIM\?/)
+  assert.match(html, /1\. DET TE PAKRYERA, 08:00\/DEADLINE\/AM/)
+  assert.match(html, /2\. A KA DET QË SHTYHEN \(SOT\/SOT\) OSE DEADLINE\?/)
   assert.match(html, /DET QË JANË SHTYER SOT AM/)
-  assert.match(html, /4\. PROGRESI I DET ME GA \(AM\)/)
-  assert.match(html, /5\. DET PM ME DUE DATE SOT/)
-  assert.match(html, /6\. SA PER DOREZIM M2\?/)
-  assert.match(html, /7\. A VAZHDOJNË DETYRAT NË PM\?/)
+  assert.match(html, /3\. PROGRESI I DET ME GA \(AM\)/)
+  assert.match(html, /4\. DET PM ME DUE DATE SOT/)
+  assert.match(html, /5\. SA PER DOREZIM M2\?/)
+  assert.match(html, /6\. A VAZHDOJNË DETYRAT NË PM\?/)
   assert.ok(html.indexOf('id="m2-pm-due-today"') < html.indexOf('id="m2-delivery"'))
-  assert.equal((html.match(/<textarea/g) || []).length, 2)
+  assert.equal((html.match(/<textarea/g) || []).length, 4)
   assert.match(html, /Dorezuar/)
   assert.match(html, /M2\/3/)
   assert.match(html, />SIMBOLI<\/th><th[^>]*>TITULLI<\/th>/)
@@ -89,6 +89,26 @@ test("M2 presents delivery and PM continuation as separate questions", () => {
   assert.match(html, /P.RGJIGJA MANUALE<\/th><\/tr>/)
 })
 
+test("the M2 reorganization form shows every field and preserves a legacy comment", () => {
+  const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+    report, answers: { reorganization: "Takim: pas pauzës\nNdahen detyrat." }, disabled: false, onAnswerChange: () => {},
+  }))
+  const section = html.slice(html.indexOf('id="m2-reorganization"'))
+  assert.ok(html.indexOf('id="m2-pm-continuation"') < html.indexOf('id="m2-reorganization"'))
+  for (const label of ["BZ M1", "KOMENT", "NËNNGARKESË", "MBINGARKESË", "SI BËHET RIORGANIZIMI?", "SHKAKTARI I MUNGESËS OSE VONESËS"]) {
+    assert.ok(section.includes(label), label)
+  }
+  assert.match(section, /Takim: pas pauzës\nNdahen detyrat\.<\/textarea>/)
+})
+
+test("an M2 reorganization draft restores the full serialized form", () => {
+  const map = new Map()
+  const storage = { getItem: (key) => map.get(key), setItem: (key, value) => map.set(key, value) }
+  const body = "BZ M1: PO\nKOMENT: " + "a".repeat(10_000) + "\nSI BËHET RIORGANIZIMI?: " + "b".repeat(10_000)
+  writeManualDraft(storage, "u1", report.report_date, { reorganization: body })
+  assert.equal(readManualDraft(storage, "u1", report.report_date).reorganization, body)
+})
+
 test("M2 afternoon due section lists task details, due date, symbols and status colors", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report: { ...report, data: { pm_due_today: [
@@ -99,7 +119,7 @@ test("M2 afternoon due section lists task details, due date, symbols and status 
     ] } }, answers: {}, disabled: true, onAnswerChange: () => {},
   }))
   const section = html.slice(html.indexOf('aria-labelledby="m2-pm-due-today"'), html.indexOf('aria-labelledby="m2-delivery"'))
-  assert.match(section, /5\. DET PM ME DUE DATE SOT/)
+  assert.match(section, /4\. DET PM ME DUE DATE SOT/)
   assert.ok(section.indexOf("Afternoon task") < section.indexOf("Full day task"))
   assert.ok(section.indexOf("Full day task") < section.indexOf("Done first"))
   assert.ok(section.indexOf("Done first") < section.indexOf("Done second"))
@@ -114,14 +134,14 @@ test("M2 afternoon due section lists task details, due date, symbols and status 
   assert.doesNotMatch(section, /<textarea|<select/)
 })
 
-test("unfinished priority tasks appear second with due labels and priority styling", () => {
+test("unfinished priority tasks appear first with due labels and priority styling", () => {
   const priority = { task_id: "11111111-1111-4111-8111-111111111111", reason: "Arsyeja nga My View", comment: "Komenti nga My View", assignees: "ER", department: "GD", am_pm: "AM", status: "IN_PROGRESS", priority: "DEADLINE / 08:00",
     task_type: "PRJK", title: "08:00 Detyre <test>", due_label: "SOT", deadline_important: true, eight_am: true }
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report: { ...report, data: { ...report.data, unfinished_priority: [priority] } }, answers: { [`unfinished_comment:${priority.task_id}`]: "Koment manual" }, disabled: false, onAnswerChange: () => {},
   }))
   const section = html.slice(html.indexOf('aria-labelledby="m2-unfinished-priority"'), html.indexOf('aria-labelledby="m2-postponed"'))
-  assert.ok(html.indexOf('id="m2-reorganization"') < html.indexOf('id="m2-unfinished-priority"'))
+  assert.match(section, /1\. DET TE PAKRYERA/)
   assert.match(section, /LLOJI<\/th><th[^>]*>TIPI<\/th>/)
   assert.match(section, /DUE DATE<\/th>/)
   assert.match(section, /08:00 Detyre &lt;test&gt;/)
@@ -170,11 +190,13 @@ test("M2 edits the existing comment column using My View text or an empty value"
   assert.doesNotMatch(render({ [`unfinished_comment:${tasks[0].task_id}`]: "" }), /Nga My View/)
 })
 
-test("read-only reports keep all manual fields disabled", () => {
+test("read-only reports prevent editing the M2 reorganization and delivery answers", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: {}, disabled: true, onAnswerChange: () => {},
   }))
-  assert.equal((html.match(/<textarea[^>]*disabled/g) || []).length, 2)
+  assert.equal((html.match(/<textarea[^>]*\sreadOnly=""/g) || []).length, 3)
+  assert.equal((html.match(/<textarea[^>]*\sdisabled=""/g) || []).length, 1)
+  assert.equal((html.match(/<select[^>]*\sdisabled=""/g) || []).length, 3)
 })
 
 test("delivery totals count only PO answers for tasks currently in the report", () => {
@@ -502,7 +524,7 @@ test("removed GA reply stays hidden and is ignored in old drafts", () => {
     report, answers: { ga_reply: "GA u përgjigj" }, disabled: false, onAnswerChange: () => {},
   }))
   assert.doesNotMatch(html, /A KA REPLY NGA GA|m2-ga-reply|ga_reply|GA u përgjigj/)
-  assert.match(html, /1\. RIORGANIZIM\? \(PARA PAUZES- PAS KO TE DET PM\)- PAS PAUZES, TAKIM INT, NDARJE E DET/)
+  assert.match(html, /7\. A KA RIORGANIZIM\?/)
   const map = new Map()
   const storage = { getItem: (key) => map.get(key) || null, setItem: (key, value) => map.set(key, value) }
   writeManualDraft(storage, "u1", report.report_date, { ga_reply: "GA u përgjigj", reorganization: "Po" })

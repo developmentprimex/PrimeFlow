@@ -16,7 +16,7 @@ from app.models.user import User
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.today_print_report_freeze import (
-    FROZEN_KIND, TodayPrintFreezeMissing, frozen_history, frozen_report, is_closed, local_now,
+    FROZEN_KIND, TodayPrintFreezeMissing, freeze_at, frozen_history, frozen_report, is_closed, local_now,
     today_report, view_metadata,
 )
 from app.services.one_h_print_report_snapshot import (
@@ -25,7 +25,7 @@ from app.services.one_h_print_report_snapshot import (
     serialize_one_h_print_snapshot,
 )
 from app.services.today_print_strikes import with_report_strikes
-from app.services.today_print_plan import PLAN_KIND, compare_plan
+from app.services.today_print_plan import PLAN_KIND, compare_plan, with_audited_reschedule_dates
 from app.services.tomorrow_print_report import (
     REQUIRED_SHTYPI_RECIPIENTS,
     ensure_required_shtypi_recipient,
@@ -203,12 +203,18 @@ async def get_plan_comparison(
     if not is_closed(day):
         payload = await load_report_common_view_with_previous_week(db, day)
         comparison = await compare_plan(db, day, plan, payload)
-        if not is_closed(day):
+        cutoff = local_now()
+        if not is_closed(day, cutoff):
+            comparison = await with_audited_reschedule_dates(db, comparison, plan.report_payload, cutoff)
             return {**result, **comparison, "status": "ready", "is_frozen": False}
     archived = await get_one_h_print_snapshot(db, FROZEN_KIND, day)
-    comparison = (archived.report_payload or {}).get("plan_comparison") if archived else None
+    archive_payload = archived.report_payload or {} if archived else {}
+    comparison = archive_payload.get("plan_comparison")
     if comparison is None:
         return {**result, "status": "no_archive", "saved_at": plan.report_payload["saved_at"]}
+    source_captured_at = archive_payload.get("source_captured_at")
+    cutoff = datetime.fromisoformat(source_captured_at) if source_captured_at else freeze_at(day)
+    comparison = await with_audited_reschedule_dates(db, comparison, plan.report_payload, cutoff)
     return {**result, **comparison, "status": "ready", "is_frozen": True}
 
 

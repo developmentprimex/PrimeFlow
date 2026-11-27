@@ -31,6 +31,7 @@ import { formatDepartmentName } from "@/lib/department-name"
 import { formatPxJavDate, parsePxJavDate, pxJavCommentPlan } from "@/lib/px-jav-planning"
 import { taskDateKey as primeFlowDateKey } from "@/lib/task-calendar-date"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
+import { hasNewNoteContent, NEW_NOTE_TEMPLATE } from "@/lib/note-markup"
 import type { Department, PlanNote, PlanNoteAttachment, Project, PxJavPlanningBrief, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
@@ -963,7 +964,7 @@ export default function NextWeekPlanPage() {
   const [taskOneHMarkerComment, setTaskOneHMarkerComment] = React.useState("")
   const [taskOneHReportSlot, setTaskOneHReportSlot] = React.useState<OneHReportSlot | typeof ONE_H_REPORT_SLOT_NONE_VALUE>(ONE_H_REPORT_SLOT_NONE_VALUE)
   const [taskDateLeaveItems, setTaskDateLeaveItems] = React.useState<CommonLeaveItem[]>([])
-  const [content, setContent] = React.useState("")
+  const [content, setContent] = React.useState(NEW_NOTE_TEMPLATE)
   const [plannedHorizonNewNote, setPlannedHorizonNewNote] = React.useState<PlannedHorizonOption>(PLANNED_HORIZON_NONE)
   const [noteType] = React.useState<NoteType>("GA")
   const [priority] = React.useState<NotePriority>("NONE")
@@ -1018,6 +1019,9 @@ export default function NextWeekPlanPage() {
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
   const contentTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  React.useEffect(() => {
+    if (content === NEW_NOTE_TEMPLATE) contentTextareaRef.current?.setSelectionRange(0, 0)
+  }, [content])
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [loadingAttachmentsNoteId, setLoadingAttachmentsNoteId] = React.useState<string | null>(null)
@@ -1703,7 +1707,7 @@ export default function NextWeekPlanPage() {
   }, [attachmentsDialogOpen, resetManageAttachmentsState])
 
   const createNote = async () => {
-    if (!content.trim()) {
+    if (!hasNewNoteContent(content)) {
       toast.error("Content is required")
       return
     }
@@ -1755,7 +1759,7 @@ export default function NextWeekPlanPage() {
       }
       const created = (await res.json()) as PlanNote
       setNotes((prev) => [created, ...prev])
-      setContent("")
+      setContent((latest) => latest === content ? NEW_NOTE_TEMPLATE : latest)
       setNoteOneHMarker(ONE_H_MARKER_NONE)
       setNoteOneHMarkerComment("")
       setPlannedHorizonNewNote(PLANNED_HORIZON_NONE)
@@ -2888,7 +2892,7 @@ export default function NextWeekPlanPage() {
               ref={contentTextareaRef}
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              rows={4}
+              rows={7}
               className="min-h-[110px] md:min-h-[120px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
             />

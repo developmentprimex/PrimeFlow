@@ -2,6 +2,8 @@ import type { ManualAnswers, ManualKey } from "@/components/m2-reporting-points-
 
 type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
 const storageKey = (userId: string) => `primeflow:m2-reporting-points:answers:${userId}`
+// The reorganization body stores three text fields, escaping each continuation line with a space.
+const REORGANIZATION_BODY_LIMIT = 61_000
 
 export function readManualDraft(storage: DraftStorage | null, userId: string, day: string): ManualAnswers | null {
   try {
@@ -12,7 +14,8 @@ export function readManualDraft(storage: DraftStorage | null, userId: string, da
       if (key !== "reorganization" && !/^(?:delivery(?:_choice)?|postponed_comment|unfinished_comment|progress_reason|progress_comment|postponed_reason|unfinished_reason|pm_choice|pm_comment):[a-f0-9-]{36}$/.test(key)) continue
       const value = draft.answers[key]
       if (key.startsWith("delivery_choice:") && !["", "PO", "JO"].includes(value)) continue
-      if (typeof value === "string" && value.length <= 10000) answers[key] = value
+      const limit = key === "reorganization" ? REORGANIZATION_BODY_LIMIT : 10_000
+      if (typeof value === "string" && value.length <= limit) answers[key] = value
     }
     return answers
   } catch { return null }

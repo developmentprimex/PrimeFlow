@@ -103,23 +103,31 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Filtri DUE DATE ofron Të gjitha, Sot dhe Datat e tjera. Rreshtat 08:00
   marrin ngjyrën e statusit dhe ruajnë kornizën e kuqe. Në ekran, preview,
   email dhe eksport, vetëm qelizat DUE DATE me vlerën SOT marrin sfond të kuq.
+  Në tabelat e afateve të M1 dhe M2 Post-Break, kontrolli −/+ në skajin e
+  djathtë fsheh të gjitha të dhënat e detyrës dhe lë vetëm + për ta rihapur.
+  `ReportSectionPreview` e aktivizon këtë sjellje vetëm për këto dy tabela.
   Në M1 dhe M2 Post-Break, brenda grupeve 08:00 dhe DEADLINE, afatet SOT
   renditen para datave të tjera. Rreshtat DEADLINE / 08:00 janë në grupin 08:00.
+  Në tabelat e progresit të M1 dhe M2 Post-Break, detyrat DONE dalin pas
+  detyrave të tjera në ekran dhe në daljet e raportit. Renditja sipas
+  prioritetit dhe afatit zbatohet brenda secilit grup.
   Në M1 dhe M2 Post-Break rreshtat me të dyja etiketat marrin ngjyrën e
   DEADLINE në ekran, preview, email, Word dhe PNG. Pauza ruan ngjyrën gri.
   M1 ruan përgjigjen manuale te **A KA RIORGANIZIM?** gjatë rigjenerimit.
-  Kontrollo statuset dhe komentet në pamjen e rifreskuar të 1H Reports
-  11:00/11:50 dhe eksportet e tyre.
-  Tabelat 1H marrin detyrat 08:00 dhe Deadline Important AM nga fillimi deri
-  në afat në slotin përkatës, edhe pa slot të caktuar ose kartë në Discord.
-  Përfshihen edhe detyrat e raportuara që më pas u zhvendosën.
+  Në 1H Reports, të dyja tabelat 08:00 dhe Deadline Important AM shfaqen në
+  çdo slot, duke filluar në 10:00. Secila përfshin detyrat e grupit nga data
+  e fillimit deri në afat, edhe pa slot ose kartë në Discord. Detyrat DONE
+  me orë të regjistruar shfaqen vetëm në intervalin kur u kryen, sipas
+  të njëjtit filtër si seksionet e tjera të 1H Reports. Në slotet e raportimit
+  përfshihen edhe detyrat e raportuara që më pas u zhvendosën. Kontrollo
+  preview, email dhe eksportet.
   Discord pyet çdo ditë pune nga data
   e fillimit deri te afati, për 08:00 në 11:00 dhe për DL AM në 11:50.
   Pyet pse nuk është punuar kur statusi është TODO dhe pse nuk është kryer
   kur detyra mbetet e hapur në datën e afatit. Raportet e rifreskuara i
   lexojnë përgjigjet e ruajtura sipas datës, slotit, punonjësit dhe detyrës.
-  Detyrat 08:00 me afat sot që mbeten të hapura barten edhe në 11:50.
-  Të dy grupet barten në raportet 14:10, 14:20 dhe 16:00 deri në DONE.
+  Në Mira Host dhe Discord, detyrat 08:00 me afat sot që mbeten të hapura
+  barten edhe në 11:50. Të dy grupet barten në slotet e pasdites deri në DONE.
   Discord ndjek të dy grupet në 14:20 dhe 16:00 me një pyetje për detyrë
   edhe kur e njëjta detyrë ka të dyja etiketat. Në kartën personale 1H,
   pyetjet 08:00 dhe Deadline AM shfaqen në një bllok të theksuar me titull
@@ -150,7 +158,18 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   rreshtat e personalëve për KA/GENT vazhdojnë të përdorin klasifikimet e tyre.
 
 - Development → Meetings → M1 dhe seksioni M1 Zhvillim në Export Excel përdorin
-  të njëjtin raport ditor. Mungesat, vonesat, pushimet dhe takimet lexohen nga
+  të njëjtin raport ditor. Pyetja «A KA RIORGANIZIM?» përdor formularin e
+  M1 Start of Day në Department dhe My View, me përgjigje të ruajtura më vete
+  sipas datës së Zhvillimit. Plani dhe shkaktari i mungesës/vonesës shfaqen
+  gjithmonë në formularin e Zhvillimit dhe në Excel-in e takimeve të brendshme.
+  Formulari shfaqet ndërsa raporti ngarkohet dhe redaktimi aktivizohet pasi
+  të jenë ngarkuar përgjigjja dhe lejet e ditës.
+  Kontrollo ruajtjen, rifreskimin, ndërrimin e ditës dhe eksportin e M1.
+  M2 ka formularin e njëjtë me përgjigjen e vet sipas datës. Të dy formularët
+  lexohen nga API-ja e riorganizimit veç përgjigjeve automatike të checklistës.
+  Export Excel merr përgjigjen e secilit slot veçmas. Kontrollo ndërrimin
+  M1/M2 në Department dhe My View dhe që M3 ruan pikat e tij.
+  Mungesat, vonesat, pushimet dhe takimet lexohen nga
   Common View. Takimet externe të ditës përfshijnë të gjitha departamentet.
   Pika “Takimet interne” lexon takimet e ditës nga të gjitha departamentet.
   M1, M2 dhe M3 e shfaqin checklistën në gjithë gjerësinë; tabelat e takimeve
@@ -297,12 +316,16 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Titulli që krahasohet me postimin e Discord-it ruhet pa etiketën e pauzës.
   Komentet ruhen sipas datës, detyrës
   dhe përgjegjësit në `discord_task_delivery_comments` (migrimi 0209).
-  Pika 2 i shfaq dallimet në slote dhe simbole në dy tabela të ndara, me një
-  rresht për çdo detyrë brenda secilës tabelë. API-ja lidh kopjet e së njëjtës
+  Pika 2 i shfaq dallimet në slote, simbole dhe lloj të detyrës në tri tabela,
+  me një rresht për çdo detyrë brenda secilës tabelë. API-ja lidh kopjet e së njëjtës
   detyrë me identitetin e përbashkët që përdor kontrolli i zgjedhjeve.
   Personat me të njëjtën zgjedhje dhe hollësi të njëjta shfaqen së bashku.
   Kolona sipas personit përfshin edhe zgjedhjet e kolegëve që dalin vetëm te
   krahasimet. Komentet kanë kolonë më vete brenda rreshtit të detyrës.
+  Tabela e llojit krahason llojin aktual të kopjes për secilin përgjegjës të
+  planifikuar për datën e zgjedhur, edhe nëse detyra nuk ka slot ose simbol.
+  Për shembull, kopjet e së njëjtës detyrë të projektit dalin si BLL dhe 1H
+  kur kanë etiketa të ndryshme. Kjo tabelë përdoret vetëm nga BZ M3.
   Raporti i sotëm krahason slotet aktuale për datën efektive të planifikimit.
   Për datat e kaluara tabela përdor slotin e fundit të disponueshëm në
   historik për secilin person. Simbolet e vendosura shfaqen me të kuqe.
@@ -312,6 +335,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   e kolegëve. Ruhet vlera e mëparshme, zgjedhja, homologët dhe arsyeja në
   historikun e ndryshimeve. Për rreshtat e përbashkët zgjedhja individuale
   lexohet në My View, Common View, Task Details dhe te dorëzimet për M2/M3.
+  Ndryshimi i llojit te kopjet për përgjegjës përdor të njëjtin konfirmim si
+  sloti dhe simboli. Arsyeja nga editimi i detyrës, PX Notes/PX JAV ose nga
+  Discord shfaqet në kolonën Komenti të tabelës së llojit në BZ M3. Kontrollo
+  që ruajtja e kopjes të mos mbishkruajë llojin e kolegëve dhe që një kërkesë
+  Discord e konfirmuar të riprovojë vetëm veprimet e paruajtura.
   Kontrollo edhe Development, Graphic Design, Product Content dhe Finance,
   "Për të gjithë" në Common View, 1H SHTYPI, 1H Reports, M1/M2/M3 PIKAT,
   PX Notes/PX JAV dhe Discord që përdorin burimet e tyre të raportimit.
@@ -364,6 +392,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tomorrow shfaqin titullin për shënimet nga email-et. Butoni `+` hap
   përmbledhjen dhe hapat e ruajtur, ose detajet e shënimit manual. Lidhja
   «Hap emailin origjinal» hap email-in te ofruesi kur URL-ja është ruajtur.
+  Në PX Notes, «Hap në Outlook Classic» përdor kutinë dhe `Message-ID` të
+  importit. Windows kërkon komponentin lokal te `desktop/outlook`. Provo
+  kutitë individuale dhe të deleguara, importet e vjetra pas rifreskimit,
+  mesazhin e zhvendosur dhe hapjen web për New Outlook. M1, M2, M1 PIKAT,
+  1H Reports dhe SHTYPI Tomorrow vazhdojnë të përdorin lidhjet web.
   PX Notes, M1 Start of Day, M2 Post-Break dhe M1 PIKAT shfaqin etiketën
   Forward ose Reply nga prefiksi i subjektit origjinal. Për shënimet EM
   manuale përdoret prefiksi pas orës në kryerresht. Te prefikset e njëpasnjëshme
@@ -400,8 +433,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Mungesa/vonesa hap edhe fushën e shkaktarit. Rigjenerimi ruan përgjigjet
   e datës dhe paraqitja në preview, email, Word dhe PNG ndjek të njëjtat kushte.
 
-- Te M1 PIKAT PËR RAP, «8. A DUHET RIORGANIZIM?» është pika e fundit
-  në ekran, preview, email dhe eksportet Word, PNG e Excel.
+- «A KA RIORGANIZIM?» shfaq të gjashta fushat në M2 Post-Break Summary
+  (pika e fundit), M1 PIKAT PËR RAP (pika 8) dhe M2 PIKAT PËR RAP (pika 7, në fund).
+  Secili raport ruan përgjigjen te drafti i vet për datën dhe e përdor në
+  preview, email dhe eksportet përkatëse. Kontrollo ruajtjen pas rigjenerimit,
+  përgjigjet e vjetra dhe që pyetja e njëjtë nga Common View të mos
+  krijojë dublim në M2 Post-Break Summary. M1 Start of Day dhe M3 mbajnë
+  formularët dhe të dhënat e tyre.
 
 - Leximi i kutive postare të M1 dhe M2 ndan intervalin me përgjigjet e GA.
   M1 nis në 16:30 të ditës paraardhëse, ose të ditës së fundit të punës
@@ -620,6 +658,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Kontrollo draftin, preview, emailin manual dhe automatik, Word dhe PNG.
   M2 PIKAT, M3 dhe Realization përdorin përzgjedhjet e tyre.
 
+- M1 PIKAT PËR RAP, pika 5: tabela **TË KRIJUARA SOT ME START DATE NË DITË
+  TJETËR** përjashton detyrat e sistemit, përfshirë ato pa Start Date.
+  API-ja e raportit zbaton filtrin edhe për raportet e ruajtura. Kontrollo
+  numëruesin në faqe, preview, emailin dhe eksportet HTML, Text, Word, PNG
+  dhe Excel. Tabela **TË KRIJUARA SOT ME START DATE SOT** përfshin edhe
+  detyrat e sistemit.
+
 - M2: **PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU** shfaq PO/JO për VS,
   VL, MST dhe TT sipas kodeve në titujt e detyrave të caktuara stafit PCM.
   MST dhe TT kërkojnë një detyrë të lidhur me projekt (`project_id`), ndërsa
@@ -697,12 +742,13 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tabela HV dhe bashkëngjitja e 1H Reports përdorin paraqitjen e tyre.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
-  Te pika 6 e M1 PIKAT PËR RAP shfaqen tabelat HV, DV dhe GA të draftit
-  M1 Start of Day të së njëjtës datë, edhe për detyrat pa përgjigje.
-  Statusi aktual lexohet me ID-në e detyrës. Rigjenerimi dhe ruajtja e
-  draftit mbajnë rreshtat e larguar që detyrat e mbyllura të shfaqen në
-  grupin e tyre, me kohën e mbylljes kur është ruajtur. Preview, email dhe
-  Word/PNG/Excel përdorin të njëjtat tabela. Lidhja në ekran hap draftin e datës.
+  Te pika 6 e M1 PIKAT PËR RAP, tabelat HV, DV dhe GA përdorin gjeneruesin,
+  filtrat dhe kolonat e M1 Start of Day për datën e raportit, bashkë me
+  përgjigjet e ruajtura në draft. Të dyja faqet përdorin të njëjtat fusha dhe
+  ruajnë te drafti M1 i datës përmes të njëjtës API. Komenti ruhet kur fusha
+  humb fokusin. Preview, emaili dhe eksportet lexojnë përgjigjet e ruajtura.
+  Kontrollo renditjen, kolonën BZ ME te GA, përgjigjet për planin dhe
+  vazhdimin, preview, emailin dhe eksportet Word, PNG dhe Excel.
 
 - Në tabelën **Finance Tasks**, filtri i datave përfshin çdo detyrë që
   mbivendoset me intervalin e zgjedhur, përfshirë kufijtë. Një datë e vetme
@@ -1192,6 +1238,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   pranishëm; mungesat e pjesshme nuk i fshehin. Kontrollo edhe fallback-un
   `tasks` kur `oneH` mbetet bosh. Snapshot-et historike ruajnë përmbajtjen
   e gjenerimit origjinal; Common View dhe të dhënat e taskut nuk ndryshojnë.
+- Formularët New Note në PX Notes dhe PX JAV përdorin modelin e përbashkët
+  `DL`, `AM/PM`, `LL` dhe `SIMBOLI` për çdo përdorues. Kontrollo hapjen,
+  ruajtjen dhe rikthimin e modelit, si edhe rastin kur vetëm modeli është
+  në fushë. Fushat janë pjesë e tekstit të Note-s dhe lexohen si tekst nga
+  raportet, eksportet dhe përshkrimi i parazgjedhur gjatë krijimit të detyrës.
 - PX Notes dhe PX JAV lidhen me taskat përmes origjinës së Note dhe paketave
   Note–Task. Kontrollo edhe taskat për secilin përgjegjës, afatet dhe markerat.
   PX Notes lexon `/plan-notes?converted_to_task_only=true`: përfshin shënimet
@@ -1365,6 +1416,20 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   (e premtja ruan të hënën). Kontrollo ruajtjen e vetme edhe me disa procese,
   Regenerate dhe emailin e Tomorrow, gjendjen aktuale para 16:00 dhe krahasimin
   e arkivuar pas 16:00. Mos rindërto një kopje të humbur me të dhënat e reja.
+  Kolona “Çfarë ndryshoi” liston fushat që kanë ndryshuar: llojin, slotin,
+  AM/PM, përgjegjësin, Due date dhe Start date.
+  Te Plani në 17:00 dhe Sot shfaqen vetëm vlerat e fushave që kanë ndryshuar,
+  nga një rresht për fushë. Përgjegjësit shfaqen te Kush.
+  Detyrat DONE përjashtohen nga krahasimi dhe numërimi, edhe kur arkivat e
+  vjetra i shënojnë si “Shtuar sot” ose kur mbyllja zhvendos datën a slotin.
+  Kryet e tabelës mbetet i dukshëm gjatë scroll-it. Rreshtat ndjekin rendin
+  e departamenteve dhe stafit nga Weekly Planner. Nr., Kush dhe Detyra
+  përdorin ngjyrën e statusit të sotëm ose atë të ruajtur kur ky i pari mungon.
+  Due date dhe Start date ruhen në snapshot-in e planit. Për zhvendosjet nga
+  planet e vjetra, historiku i detyrës plotëson vlerat që mungojnë vetëm me
+  ngjarje mes ruajtjes së planit dhe prerjes së krahasimit. Një zhvendosje
+  pa ndryshim të verifikuar në Due date ose Start date nuk shfaqet në tabelë.
+  Dallo fushën e panjohur nga një datë e hequr.
   Kontrollo që lidhja shfaqet vetëm te Today më vete, edhe pse Admin Tasks
   ndan komponentin. Lidhja hap faqen e krahasimit me datën e raportit dhe
   lidhja e kthimit ruan po atë datë. Hyrja nga menyja përdor datën e sotme.
@@ -1560,8 +1625,9 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 - ASIST GA – DET GA lidh M1 Start of Day, After Break, Meetings Report,
   M1/M2/M3 PIKAT dhe 1H SHTYPI Sot/Nesër me `?date=YYYY-MM-DD`.
   Për datat e arkivuara SHTYPI përdor snapshot-in e datës, edhe te Nesër.
-  Ruajtja MCP e pikës «A duhet riorganizim?» përdor përgjigjen manuale të
-  M1 PIKAT. Kontrollo edhe preview, email dhe eksportet e M1 PIKAT. Lista
+  Mjetet MCP për riorganizimin lexojnë dhe ruajnë fushat e M1 PIKAT sipas
+  datës. Vendimi i mëparshëm PO/JO ruhet veç nga shenja e diskutimit BZ M1.
+  Kontrollo edhe preview, email dhe eksportet e M1 PIKAT. Lista
   PX e afateve përdor përgjegjësin ose konfirmuesin GA si lista GA Tasks.
   Agjenda MCP lexon simbolet e ruajtura që përdorin Common View, 1H
   dhe raportet M1/M2/M3. Takimet lexojnë të njëjtën ditë dhe status si GA

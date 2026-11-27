@@ -1,12 +1,16 @@
 import asyncio
 import io
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
+import pytest
+from fastapi import HTTPException
 from openpyxl import load_workbook
+from pydantic import ValidationError
 
+from app.api.routers.departments import ReorganizationUpdate, save_development_reorganization
 from app.api.routers.exports import export_department_internal_meetings_xlsx
 from app.models.checklist_item import ChecklistItem
 from app.models.enums import ChecklistItemType, UserRole
@@ -159,6 +163,41 @@ def test_m1_shows_company_external_meetings_and_development_internal_meetings_wi
     ]
 
 
+@pytest.mark.parametrize("slot", ["m1", "m2"])
+def test_reorganization_upserts_only_the_slot_and_rejects_other_department_edits(slot):
+    now = datetime(2026, 11, 27, 8, tzinfo=timezone.utc)
+    department_id = uuid4()
+    db = AsyncMock()
+    db.scalar.return_value = department_id
+    staff = User(role=UserRole.STAFF, department_id=department_id)
+    outside_staff = User(role=UserRole.STAFF, department_id=uuid4())
+    payload = ReorganizationUpdate(report_date=now.date(), body="BZ M1: PO\nKOMENT: Plan i ri")
+
+    with patch("app.api.routers.departments.datetime") as clock:
+        clock.now.return_value = now
+        with pytest.raises(HTTPException) as denied:
+            asyncio.run(save_development_reorganization(slot, payload, db, outside_staff))
+        assert denied.value.status_code == 403
+        previous_day = payload.model_copy(update={"report_date": now.date() - timedelta(days=1)})
+        with pytest.raises(HTTPException) as stale:
+            asyncio.run(save_development_reorganization(slot, previous_day, db, staff))
+        assert stale.value.status_code == 409
+        db.execute.assert_not_awaited()
+        result = asyncio.run(save_development_reorganization(slot, payload, db, staff))
+
+    assert result["body"] == "BZ M1: PO\nKOMENT: Plan i ri\nNËNNGARKESË: JO\nMBINGARKESË: JO"
+    statement = db.execute.await_args.args[0]
+    assert statement.table.name == f"development_{slot}_reorganization"
+    assert "ON CONFLICT (report_date) DO UPDATE" in str(statement)
+    assert statement.compile().params["report_date"] == now.date()
+    db.commit.assert_awaited_once()
+
+
+def test_m1_save_rejects_characters_that_excel_cannot_export():
+    with pytest.raises(ValidationError):
+        ReorganizationUpdate(report_date=date(2026, 11, 27), body="KOMENT: \x0b")
+
+
 def test_m1_excel_places_the_colored_answer_directly_under_the_checked_question():
     checked = ChecklistItem(id=uuid4(), item_type=ChecklistItemType.CHECKBOX, title="PX Notes të reja?",
                             day="M1", is_checked=True, position=1)
@@ -168,6 +207,10 @@ def test_m1_excel_places_the_colored_answer_directly_under_the_checked_question(
                               day="M1", is_checked=True, position=3)
     hidden = ChecklistItem(id=uuid4(), item_type=ChecklistItemType.CHECKBOX, title="Pyetje KA?",
                             day="M1", position=4)
+    body = (
+        "BZ M1: PO\nKOMENT: Ndryshojmë planin\n Për pasdite\nMBINGARKESË: JO\n"
+        "SI BËHET RIORGANIZIMI?: Rishpërndajmë punën\nSHKAKTARI I MUNGESËS OSE VONESËS: Ruajtur"
+    )
     report = {"date": "2026-11-25", "item_sections": {str(checked.id): "notes", str(combined.id): "ka_gent"},
               "hidden_item_ids": [str(hidden.id)], "sections": [
         {"key": "notes", "title": "PX Notes", "message": None,
@@ -191,7 +234,11 @@ def test_m1_excel_places_the_colored_answer_directly_under_the_checked_question(
         )
         return b"".join([part async for part in response.body_iterator])
 
-    with patch("app.api.routers.exports.build_development_m1", new=AsyncMock(return_value=report)):
+    with (
+        patch("app.api.routers.exports.build_development_m1", new=AsyncMock(return_value=report)),
+        patch("app.api.routers.exports.build_development_m2", new=AsyncMock(return_value=None)),
+        patch("app.api.routers.exports.read_development_reorganization", new=AsyncMock(return_value=body)),
+    ):
         workbook = load_workbook(io.BytesIO(asyncio.run(download())))
 
     assert workbook.sheetnames == ["Internal Meetings"]
@@ -205,7 +252,15 @@ def test_m1_excel_places_the_colored_answer_directly_under_the_checked_question(
     assert workbook.active["C8"].value == "✓"
     assert workbook.active["B9"].value == "Takimet interne me KA"
     assert workbook.active["B10"].value == "Rishiko planin\nIn progress · Dev Colleague, Dev Person\nKontrollo afatet"
-    assert hidden.title not in [cell.value for cell in workbook.active["B"]]
+    assert workbook.active["B11"].value == "A KA RIORGANIZIM?"
+    assert workbook.active["B12"].value == "BZ M1: PO"
+    assert workbook.active["B13"].value == "KOMENT: Ndryshojmë planin\nPër pasdite"
+    assert workbook.active["B15"].value == "MBINGARKESË: JO"
+    assert workbook.active["B16"].value == "SI BËHET RIORGANIZIMI?: Rishpërndajmë punën"
+    titles = [cell.value for cell in workbook.active["B"]]
+    assert hidden.title not in titles
+    assert workbook.active["B17"].value == "SHKAKTARI I MUNGESËS OSE VONESËS: Ruajtur"
+    assert titles.count("A KA RIORGANIZIM?") == 1
 
 
 def test_existing_m1_checklist_inserts_internal_meetings_once_after_external():

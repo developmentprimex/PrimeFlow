@@ -3175,14 +3175,30 @@ async def ga_report_links(date: str) -> Any:
 
 @_tool(read_only=True)
 async def ga_m1_reorg_get(date: str) -> Any:
-    """Read the M1 Pikat reorganization answer for an ISO date. Returns answer (po, jo or null) and comment."""
+    """Read M1 Pikat reorganization for an ISO date. Returns the legacy answer, comment and any saved form fields."""
     return await _request("GET", "/api/ga-assistant/m1/reorg", params={"date": date})
 
 
 @_tool()
-async def ga_m1_reorg(date: str, answer: Literal["po", "jo"] | None, comment: str = "") -> Any:
-    """Save the M1 Pikat reorganization answer and optional comment. Pass null for unanswered."""
-    return await _request("POST", "/api/ga-assistant/m1/reorg", json={"date": date, "answer": answer, "comment": comment})
+async def ga_m1_reorg(
+    date: str,
+    answer: Literal["po", "jo", "unchanged"] | None = "unchanged",
+    comment: str | None = None,
+    discussion: Literal["po", "jo"] | None = None,
+    underload: Literal["po", "jo"] | None = None,
+    overload: Literal["po", "jo"] | None = None,
+    plan: str | None = None,
+    cause: str | None = None,
+) -> Any:
+    """Update M1 Pikat reorganization. discussion is BZ M1. answer is the legacy verdict; null clears it. Omit form fields to keep them or pass empty text to clear plan or cause."""
+    payload = {"date": date}
+    if answer != "unchanged":
+        payload["answer"] = answer
+    payload.update({key: value for key, value in {
+        "comment": comment, "discussion": discussion, "underload": underload,
+        "overload": overload, "plan": plan, "cause": cause,
+    }.items() if value is not None})
+    return await _request("POST", "/api/ga-assistant/m1/reorg", json=payload)
 
 
 @_tool(read_only=True)

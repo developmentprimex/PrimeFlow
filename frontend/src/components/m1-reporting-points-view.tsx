@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import Link from "next/link"
+import { MorningTaskFeedback, type TaskFeedback, type TaskFeedbackRow, type TaskFeedbackRows } from "@/components/morning-task-feedback"
 import { EmailNoteDisclosure, NoteEmailPreview, splitManualEmailNote } from "@/components/note-email-preview"
 import type { NoteEmailPreview as EmailPreview } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
@@ -12,9 +12,10 @@ import { TaskOneHMarkerFromLabel } from "@/components/task-one-h-marker"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { DiscordDeliveryTable, reportDate, reportTime, ReportingTaskTable } from "@/components/m3-reporting-points-view"
 import type { DeliverySlot, TaskRow as GaTaskRow } from "@/components/m3-reporting-points-view"
+import { MorningReorganization, REORGANIZATION_SECTION } from "@/components/morning-reorganization"
 
 export { reportDate, reportTime }
-export type ManualKey = "plan_changes" | "reorganization"
+export type ManualKey = "plan_changes" | "reorganization" | "reorganization_form"
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 
 type AttendanceRow = { id: string; person: string; note?: string | null; from?: string; to?: string; start?: string; until?: string }
@@ -26,17 +27,11 @@ function PointNote({ note }: { note: NoteRow }) {
     : renderMarkedNoteContent(note.content)
 }
 type TaskRow = { id: string; is_paused?: boolean; title: string; status: string; created_at: string; start_date?: string | null; assignees?: string; department?: string; am_pm?: string; task_type?: string; marker?: string; planned_for?: string }
-type MorningAnswer = { continuation: "" | "PO" | "JO"; comment: string }
-type MorningTaskFeedback = {
-  title: string;
-  plan: MorningAnswer | null;
-  tasks: (MorningAnswer & { key: string; owners: string; title: string; status: string; closed: boolean })[]
-}
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
   manual_answers: ManualAnswers
   discord_delivery_slot?: DeliverySlot
-  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[]; postponed?: GaTaskRow[]; morning_task_groups?: MorningTaskFeedback[] }
+  data: { captured_until?: string; absences?: AttendanceRow[]; delays?: AttendanceRow[]; notes?: NoteRow[]; tasks?: TaskRow[]; ga_progress?: GaTaskRow[]; delivery?: GaTaskRow[]; postponed?: GaTaskRow[]; morning_task_body?: string; morning_task_draft_id?: string; morning_task_rows?: TaskFeedbackRows }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -105,26 +100,26 @@ function Created({ rows, kind }: { rows: NoteRow[] | TaskRow[]; kind: "note" | "
     ] }))} />
 }
 
-export function M1ReportingPointsView({ report, answers, disabled, onAnswerChange }: {
+export function M1ReportingPointsView({ report, answers, disabled, onAnswerChange, onMorningTaskSave }: {
   report: ReportingPointsReport; answers: ManualAnswers; disabled: boolean
   onAnswerChange: (key: ManualKey, value: string) => void
+  onMorningTaskSave?: (row: TaskFeedbackRow, edit: Partial<TaskFeedback>) => void
 }) {
   const cutoffTime = report.data.captured_until ? reportTime(report.data.captured_until) : "08:30"
   const tasks = report.data.tasks || []
   const todayTasks = tasks.filter((task) => task.start_date === report.report_date)
   const otherTasks = tasks.filter((task) => task.start_date !== report.report_date)
-  const manual = (key: ManualKey, title: string) => <Point id={`m1-${key}`} title={title}>
-    <div className="space-y-2 p-5"><Label htmlFor={`m1-answer-${key}`} className="text-sm">PËRGJIGJA / komenti</Label>
-      <Textarea id={`m1-answer-${key}`} value={answers[key] || ""} disabled={disabled} maxLength={10000} autoResize
-        className="min-h-24 bg-white" placeholder="Shëno përgjigjen dhe komentin." onChange={(event) => onAnswerChange(key, event.target.value)} />
-    </div>
-    {key === "plan_changes" && !!report.data.postponed?.length ? <ReportingTaskTable rows={report.data.postponed} kind="postponed" /> : null}
-  </Point>
   return <div className="space-y-5">
     <div><h2 className="text-xl font-bold">PIKAT PËR RAPORTIM M1</h2><p className="mt-1 text-sm text-muted-foreground">Gjendja për {reportDate(report.report_date)} deri në {cutoffTime}.</p></div>
     <Point id="m1-absences" title="1. MUNGESA" count={(report.data.absences || []).length}><Attendance rows={report.data.absences || []} kind="absence" /></Point>
     <Point id="m1-delays" title="2. VONESA" count={(report.data.delays || []).length}><Attendance rows={report.data.delays || []} kind="delay" /></Point>
-    {manual("plan_changes", "3. A KA NDRYSHIM TË PLANIT / PRIORITETEVE?")}
+    <Point id="m1-plan_changes" title="3. A KA NDRYSHIM TË PLANIT / PRIORITETEVE?">
+      <div className="space-y-2 p-5"><Label htmlFor="m1-answer-plan_changes" className="text-sm">PËRGJIGJA / komenti</Label>
+        <Textarea id="m1-answer-plan_changes" value={answers.plan_changes || ""} disabled={disabled} maxLength={10000} autoResize
+          className="min-h-24 bg-white" placeholder="Shëno përgjigjen dhe komentin." onChange={(event) => onAnswerChange("plan_changes", event.target.value)} />
+      </div>
+      {report.data.postponed?.length ? <ReportingTaskTable rows={report.data.postponed} kind="postponed" /> : null}
+    </Point>
     <Point id="m1-notes" title="4. NOTES TË REJA?" count={(report.data.notes || []).length} description={`Të krijuara nga dje 16:30 deri sot ${cutoffTime}.`}><Created rows={report.data.notes || []} kind="note" /></Point>
     <Point id="m1-tasks" title="5. DETYRA TË REJA TË KRIJUARA SOT?" count={tasks.length} description={`Të krijuara sot nga 00:00 deri në ${cutoffTime}.`}>
       {([
@@ -150,35 +145,19 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
             row.task_type || "—", <TaskOneHMarkerFromLabel key="marker" label={row.marker} />, <strong key="title">{row.title}{row.is_paused && <TaskPauseBadge />}</strong>]
             .map((cell, column) => <span key={column} style={{ color: row.is_paused ? "inherit" : row.deadline_important ? "white" : "black" }}>{cell}</span>),
         }))} />
-      {key === "ga_progress" && !!report.data.morning_task_groups?.length && (
-        <div className="border-t">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
-            <h4 className="text-sm font-semibold">GA/HV/DV TASKS NGA M1 START OF DAY</h4>
-            <Link href={`/morning-report?date=${report.report_date}`} className="text-sm underline underline-offset-4">
-              Hap M1 Start of Day
-            </Link>
-          </div>
-          {report.data.morning_task_groups.map(({ title, plan, tasks }) => (
-            <section key={title} className="my-4 border-y">
-              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 bg-slate-50 px-5 py-2 text-sm">
-                <h5 className="font-semibold">{title}</h5>
-                <span className="whitespace-pre-line">
-                  A prishet plani për sot? <strong>{plan?.continuation || "—"}</strong>
-                  {plan?.comment ? ` · ${plan.comment}` : null}
-                </span>
-              </div>
-              <Grid name={title} labels={["KUSH", "DETYRA", "STATUSI AKTUAL", "VAZHDON?", "KOMENT"]}
-                widths={[65, 260, 160, 80, 220]} empty="Asnjë detyrë."
-                rows={tasks.map((row) => ({
-                  id: row.key,
-                  fill: row.closed ? "#c4fdc4" : "#ffffff",
-                  cells: [row.owners || "—", row.title, row.status || "—", row.continuation || "—", row.comment || "—"],
-                }))} />
-            </section>
-          ))}
+      {key === "ga_progress" && report.data.morning_task_body && (
+        <div className="space-y-3 border-t px-5 py-4">
+          <h4 className="text-sm font-semibold">GA/HV/DV TASKS NGA M1 START OF DAY</h4>
+          <MorningTaskFeedback body={report.data.morning_task_body} rows={report.data.morning_task_rows}
+            onSave={report.data.morning_task_draft_id ? onMorningTaskSave : undefined} />
         </div>
       )}
     </Point>)}
-    {manual("reorganization", "8. A DUHET RIORGANIZIM?")}
+    <Point id="m1-reorganization" title={`8. ${REORGANIZATION_SECTION}`}>
+      <div className="px-5 pb-5">
+        <MorningReorganization body={answers.reorganization_form ?? answers.reorganization ?? ""} showAllFollowUps legacyComment
+          readOnly={disabled} maxLength={10000} onChange={(body) => onAnswerChange("reorganization_form", body)} />
+      </div>
+    </Point>
   </div>
 }

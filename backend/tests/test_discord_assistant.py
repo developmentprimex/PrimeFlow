@@ -265,7 +265,7 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.status_code, 422)
 
     async def run_command(self, parsed_plan, *, fail_comment=False, changed=False, displayed_changed=False,
-                          require_comment=False, direct=False, confirmed_slot=None):
+                          require_comment=False, direct=False, confirmed_slot=None, reporting_choice=False):
         self.link = SimpleNamespace(id=uuid.uuid4(), selected_task_id=uuid.UUID(TASK_ID), pending_instruction=None, selected_at=None, selected_fingerprint=None)
         user = SimpleNamespace(id=uuid.UUID(USER_ID))
         self.action = None
@@ -289,6 +289,13 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
                 raise HTTPException(403, "Comment refused")
             if method == "PATCH" and require_comment:
                 raise HTTPException(409, {"code": "RLZ_TASK_COMMENT_REQUIRED", "message": "Shto komentin e rezultatit."})
+            if method == "PATCH" and reporting_choice and not kwargs["body"].get("reporting_choice_confirmations"):
+                raise HTTPException(409, {
+                    "code": "TASK_REPORTING_CHOICE_REASON_REQUIRED", "field": "task_type",
+                    "confirmation_field": "task_type", "key": "choice-key", "label": "1H",
+                    "person": "Test User", "task_title": "Test task",
+                    "peers": [{"person": "Coleague", "label": "BLL"}],
+                })
             return task
         payload = api.Command(discord_user_id="12", guild_id="123", channel_id="44", request_id="999", instruction="Lëre në progres dhe shto koment")
         if direct:
@@ -314,6 +321,17 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
                     replacement_slot=confirmed_slot,
                 ), db)
                 self.assertEqual(pending.status, "SLOT_CONFIRMATION_USED")
+            if reporting_choice:
+                self.assertEqual(result["status"], "REPORTING_CHOICE")
+                self.assertEqual(result["reporting_choice"]["peers"][0]["label"], "BLL")
+                pending = self.action
+                db.get.side_effect = lambda _model, key: pending if key == "999" else None
+                result = await api.command(api.Command(
+                    discord_user_id="12", guild_id="123", channel_id="44", request_id="1000",
+                    instruction="Ruaj zgjedhjen", reporting_choice_request_id="999",
+                    reporting_choice_reason="Raportohet në 11:00",
+                ), db)
+                self.assertEqual(pending.status, "REPORTING_CHOICE_USED")
             if direct:
                 interpret.assert_not_called()
             return result
@@ -322,6 +340,17 @@ class CommandFlowTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_command(plan(("update_task", {"status": "WAITING_CLIENT"})), direct=True)
         self.assertEqual(result["status"], "DONE")
         self.assertEqual(self.action.result["operations"][0]["body"]["status"], "WAITING_CLIENT")
+
+    async def test_reporting_choice_retries_the_original_discord_edit_with_the_staff_reason(self):
+        result = await self.run_command(plan(("update_task", {"is_1h_report": True})), direct=True, reporting_choice=True)
+        self.assertEqual(result["status"], "DONE")
+        writes = [kwargs["body"] for method, _, kwargs in self.requests if method == "PATCH"]
+        self.assertEqual(writes, [
+            {"is_1h_report": True},
+            {"is_1h_report": True, "reporting_choice_confirmations": {
+                "task_type": {"key": "choice-key", "reason": "Raportohet në 11:00"},
+            }},
+        ])
 
     async def test_slot_reminder_defers_discord_writes_until_slot_is_chosen(self):
         for slot in ("16:00", "14:20"):

@@ -54,25 +54,32 @@ test("M1 plan changes show the explanation captured by each postponement", () =>
   }))
   assert.match(html, /M1 saved reason/)
   assert.match(html, /M1 saved comment/)
-  assert.match(html, /6\. DET ME GA:.*7\. SA PER DOREZIM M2\?.*8\. A DUHET RIORGANIZIM\?/s)
+  assert.match(html, /6\. DET ME GA:.*7\. SA PER DOREZIM M2\?.*id="m1-reorganization"/s)
 })
 
-test("M1 separates GA/HV/DV tasks, shows closure and links to Start of Day", () => {
+test("M1 shows the Start of Day tables inline without linking away", () => {
   const { M1ReportingPointsView } = load("@/components/m1-reporting-points-view")
+  const body = [
+    "A prishet plani për sot? (HV): Po · Takimi 10:15",
+    "HV TASKS:",
+    "DV TASKS:",
+    "GA TASKS:",
+    "| NR | KUSH | DEP | AM/PM | LLOJI | STATUS | T/Y/O | TITULLI | BZ ME | VAZHDON? | KOMENT |",
+    "| 1 | GA | GA | AM | FT | TODO | SOT | Detyrë GA | EF | X | Presim përgjigje |",
+  ].join("\n")
+  const rows = {
+    plan: [{ key: "plan:HV", title: "A prishet plani për sot?", owners: "HV", continuation: "PO", comment: "Takimi 10:15" }],
+    "GA TASKS": [{ key: "GA TASKS:task", title: "Detyrë GA", owners: "GA", continuation: "JO", comment: "Presim përgjigje" }],
+  }
   const html = renderToStaticMarkup(React.createElement(M1ReportingPointsView, {
-    report: { ...report, data: { morning_task_groups: [
-      { title: "HV TASKS", plan: { continuation: "PO", comment: "Takimi 10:15" }, tasks: [] },
-      { title: "DV TASKS", plan: null, tasks: [] },
-      { title: "GA TASKS", plan: null, tasks: [
-        { key: "GA TASKS:task", owners: "GA", title: "Detyrë GA", status: "Mbyllur · 13.10.2026 10:15", closed: true,
-          continuation: "JO", comment: "Presim përgjigje" },
-      ] },
-    ] } },
-    answers: {}, disabled: false, onAnswerChange: () => {},
+    report: { ...report, data: { morning_task_body: body, morning_task_draft_id: "m1-draft", morning_task_rows: rows } },
+    answers: {}, disabled: false, onAnswerChange: () => {}, onMorningTaskSave: () => {},
   }))
   assert.match(html, /GA\/HV\/DV TASKS NGA M1 START OF DAY/)
-  assert.ok(html.includes(`href="/morning-report?date=${report.report_date}"`))
-  assert.match(html, /HV TASKS.*A prishet plani për sot\?.*PO.*Takimi 10:15.*DV TASKS.*GA TASKS.*Detyrë GA.*Mbyllur.*JO.*Presim përgjigje/s)
+  assert.doesNotMatch(html, /href="\/morning-report|Hap M1 Start of Day/)
+  assert.match(html, /HV TASKS.*A prishet plani për sot\?.*Takimi 10:15.*DV TASKS.*GA TASKS.*BZ ME.*Detyrë GA.*Presim përgjigje/s)
+  assert.match(html, /<select[^>]*aria-label="Vazhdon\? Detyrë GA \(GA\)"/)
+  assert.match(html, /<textarea[^>]*aria-label="Koment për Detyrë GA \(GA\)"[^>]*>Presim përgjigje<\/textarea>/)
 })
 
 function render(overrides = {}, answers = {}, disabled = false) {
@@ -119,7 +126,7 @@ test("M1, M2 and M3 show Discord delivery per person instead of a shared manual 
     assert.match(html, />EF<\/td>.*?>Po<\/span>.*?>EH<\/td>.*?>Jo<\/span>/)
     assert.doesNotMatch(html, /aria-label="PO\/JO për Detyra"/)
     if (View === M1ReportingPointsView) {
-      assert.match(html, /7\. SA PER DOREZIM M2\?.*8\. A DUHET RIORGANIZIM\?/s)
+      assert.match(html, /7\. SA PER DOREZIM M2\?.*id="m1-reorganization"/s)
     }
   }
 })
@@ -375,7 +382,7 @@ test("report managers retain manual answers and send controls", () => {
 })
 
 // Exercise the page's save effects and user events without browser dependencies.
-function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" }) {
+function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" }, pageName = "m3-reporting-points") {
   const state = [], callbacks = [], effects = [], pending = [], timers = new Map()
   let cursor = 0, effectCursor = 0, callbackCursor = 0, timerId = 0, changed = true, tree
   const same = (left, right) => left && right && left.length === right.length && left.every((value, index) => Object.is(value, right[index]))
@@ -387,6 +394,11 @@ function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" })
         const next = typeof value === "function" ? value(state[index]) : value
         if (!Object.is(next, state[index])) { state[index] = next; changed = true }
       }]
+    },
+    useRef(initial) {
+      const index = cursor++
+      if (!(index in state)) state[index] = { current: initial }
+      return state[index]
     },
     useCallback(callback, deps) {
       const index = callbackCursor++
@@ -402,7 +414,7 @@ function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" })
       }
     },
   }
-  const source = readFileSync(path.join(src, "app", "(app)", "m3-reporting-points", "page.tsx"), "utf8")
+  const source = readFileSync(path.join(src, "app", "(app)", pageName, "page.tsx"), "utf8")
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText
   const pageModule = { exports: {} }
   vm.runInNewContext(compiled, {
@@ -410,7 +422,10 @@ function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" })
     require: (name) => {
       if (name === "react") return hooks
       if (name === "@/lib/auth") return { useAuth: () => ({ user, loading: false, apiFetch }) }
-      if (name === "@/lib/report-link-date") return { useReportDate: (initialDate) => hooks.useState(initialDate) }
+      if (name === "@/lib/report-link-date") return { useReportDate: (initialDate) => {
+        const [date, setDate] = hooks.useState(initialDate)
+        return [date, setDate, pageName === "m1-reporting-points" ? date : undefined]
+      } }
       return load(name)
     },
     window: { localStorage: storage,
@@ -427,7 +442,9 @@ function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" })
     }
     return null
   }
-  const findView = (node) => findNode(node, (item) => item.type === M3ReportingPointsView)
+  const view = pageName === "m1-reporting-points"
+    ? load("@/components/m1-reporting-points-view").M1ReportingPointsView : M3ReportingPointsView
+  const findView = (node) => findNode(node, (item) => item.type === view)
   const content = (node) => typeof node === "string" ? node : React.Children.toArray(node?.props?.children).map(content).join("")
   const button = (label) => {
     const node = findNode(tree, (item) => item.props?.onClick && content(item) === label)
@@ -443,6 +460,7 @@ function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" })
       }
     },
     edit(key, value) { findView(tree).props.onAnswerChange(key, value) },
+    morningFeedback() { return findView(tree).props },
     answers() { return findView(tree).props.answers },
     viewDisabled() { return findView(tree).props.disabled },
     meetingCommentsDisabled() { return findView(tree).props.meetingCommentsDisabled },
@@ -457,6 +475,39 @@ function mountPage(storage, apiFetch, user = { id: "manager", role: "MANAGER" })
     unmount() { for (const effect of effects) effect?.cleanup?.() },
   }
 }
+
+test("M1 points saves task and plan feedback to the same Start of Day draft", async () => {
+  const task = { key: "GA TASKS:task", title: "Detyrë GA", owners: "GA", continuation: "", comment: "" }
+  const plan = { key: "plan:GA", title: "A prishet plani për sot?", owners: "GA", continuation: "", comment: "" }
+  let rows = { plan: [plan], "GA TASKS": [task] }
+  const edits = []
+  const api = async (url, options) => {
+    let payload = { ...report, data: {
+      captured_until: new Date().toISOString(), morning_task_draft_id: "morning-draft",
+      morning_task_body: "GA TASKS:", morning_task_rows: rows,
+    } }
+    if (options?.method === "PATCH") {
+      assert.equal(url, "/morning-report/morning-draft")
+      const { task_feedback } = JSON.parse(options.body)
+      edits.push(task_feedback)
+      rows = Object.fromEntries(Object.entries(rows).map(([group, items]) => [
+        group, items.map((item) => ({ ...item, ...task_feedback[item.key] })),
+      ]))
+      payload = { sections: [{ section_key: "GA/HV/DV TASKS", body: "GA TASKS:" }], task_feedback_rows: rows }
+    }
+    return { ok: true, status: 200, json: async () => payload }
+  }
+  const page = mountPage({ getItem: () => null }, api, { id: "staff", role: "STAFF" }, "m1-reporting-points")
+  await page.flush()
+  page.morningFeedback().onMorningTaskSave(task, { comment: "Takimi në 10:15" })
+  page.morningFeedback().onMorningTaskSave(plan, { continuation: "JO" })
+  await page.flush()
+  assert.deepEqual(edits, [{ [task.key]: { comment: "Takimi në 10:15" } }, { [plan.key]: { continuation: "JO" } }])
+  const saved = page.morningFeedback().report.data.morning_task_rows
+  assert.equal(saved["GA TASKS"][0].comment, "Takimi në 10:15")
+  assert.equal(saved.plan[0].continuation, "JO")
+  page.unmount()
+})
 
 test("sent reports remain editable, regenerate, autosave and send repeatedly", async () => {
   const values = new Map()

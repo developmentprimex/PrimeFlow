@@ -929,26 +929,22 @@ def _wrap_fixed_width(value: str, width: int) -> list[str]:
     return textwrap.wrap(cleaned, width=width, break_long_words=False, break_on_hyphens=False) or ["-"]
 
 
-def _m3_task_type_label(task: Task) -> str:
+def _m3_task_type_label(task: Task, *, prefer_reporting_type: bool = False) -> str:
     """Task kind for M3 GA/HV tables: system, project, or fast (with subtype).
 
     GA/PX note origins are sources, not types. Fast tasks show FT, or a subtype
     when flagged (1H/BLL/R1/P).
     """
-    if bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)):
+    reporting_type = next((label for flag, label in (
+        ("is_bllok", "BLL"), ("is_r1", "R1"), ("is_1h_report", "1H"), ("is_personal", "P"),
+    ) if getattr(task, flag, False)), None)
+    if prefer_reporting_type and reporting_type:
+        return reporting_type
+    if getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None):
         return "SYS"
     if getattr(task, "project_id", None) is not None:
         return "PRJK"
-    # Fast-task subtypes take priority over generic FT
-    if getattr(task, "is_bllok", False):
-        return "BLL"
-    if getattr(task, "is_r1", False):
-        return "R1"
-    if getattr(task, "is_1h_report", False):
-        return "1H"
-    if getattr(task, "is_personal", False):
-        return "P"
-    return "FT"
+    return reporting_type or "FT"
 
 
 def _m3_department_code_label(department_id: Any, department_codes: dict[Any, str] | None) -> str:
@@ -3096,18 +3092,24 @@ def _sort_priority_task_rows(header: list[str], rows: list[list[str]]) -> list[l
         (index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TYPE"),
         None,
     )
-    if type_index is None or not any(
+    if type_index is None:
+        return rows
+    due_index = header.index("DUE DATE") if _is_priority_progress_table(header) else None
+    if due_index is None and not any(
         len(row) > type_index and _priority_task_type_rank(row[type_index]) < 3 for row in rows
     ):
         return rows
-    due_index = header.index("DUE DATE") if _is_priority_progress_table(header) else None
+    progress_index = header.index("PROGRESI") if due_index is not None else None
 
-    def sort_key(row: list[str]) -> tuple[int, int, int]:
+    def sort_key(row: list[str]) -> tuple[int, int, int, int]:
         rank = _priority_task_type_rank(row[type_index]) if len(row) > type_index else 3
         if due_index is None:
-            return rank, 0, 0
+            return 0, rank, 0, 0
+        done = progress_index is not None and len(row) > progress_index and (
+            _normalize_report_status(row[progress_index].split(" · ", 1)[0]) == "DONE"
+        )
         today = len(row) > due_index and row[due_index].strip().upper() == "SOT"
-        return (0 if rank < 2 else rank), int(rank < 3 and not today), rank
+        return int(done), (0 if rank < 2 else rank), int(rank < 3 and not today), rank
 
     return sorted(rows, key=sort_key)
 

@@ -586,6 +586,7 @@ export function ReportSectionPreview({
   filterWfeAge = false,
   filterDueDate = false,
   colorEightAmByStatus = false,
+  collapsibleTaskRowsDate,
   projectColumnWidth,
   compactBzColumn = false,
   largerTableText = false,
@@ -600,6 +601,7 @@ export function ReportSectionPreview({
   filterWfeAge?: boolean
   filterDueDate?: boolean
   colorEightAmByStatus?: boolean
+  collapsibleTaskRowsDate?: string
   projectColumnWidth?: string
   compactBzColumn?: boolean
   largerTableText?: boolean
@@ -612,6 +614,7 @@ export function ReportSectionPreview({
   const [createdWeekFilter, setCreatedWeekFilter] = React.useState<"all" | "this" | "last">("all")
   const [wfeAgeFilter, setWfeAgeFilter] = React.useState("all")
   const [dueDateFilter, setDueDateFilter] = React.useState("all")
+  const [collapsedTaskRows, setCollapsedTaskRows] = React.useState(() => new Set<string>())
   const lines = reportSectionEditorLines(body)
   const templates = tableGridTemplates(lines)
   const lineContexts = lines.reduce<{ contexts: Array<{ label: string; headers: string[] }>; label: string; headers: string[] }>(
@@ -774,6 +777,10 @@ export function ReportSectionPreview({
 
   const renderDataTable = (rows: TablePreviewItem[], key: string) => {
     const headers = withoutStatusColumn(rows[0].headers, rows[0].cells).headers
+    const numberIndex = headers.indexOf("NR")
+    const titleIndex = headers.indexOf("TITLE")
+    const ownerIndex = headers.indexOf("WHO")
+    const canCollapseTasks = Boolean(collapsibleTaskRowsDate) && numberIndex >= 0 && titleIndex >= 0
     const bzIndex = compactBzColumn ? headers.indexOf("BZ ME") : -1
     const typeIndex = headers.indexOf("TYPE")
     const columnOrder = headers.map((_, index) => index)
@@ -815,12 +822,17 @@ export function ReportSectionPreview({
       ? [...new Set(dataRows.map((row) => row.cells[createdColumnIndex]?.trim()).filter((value) => /^\d{2}\.\d{2}$/.test(value || "")))]
       : []
     const hasPriorityTaskTypes = dataRows.some((row) => priorityTaskTypeRank(row.headers, row.cells) < 3)
-    const dueTodayFirst = canFilterDueDate && headers.includes("PROGRESI")
-    const orderedDataRows = hasPriorityTaskTypes && !canFilterWfeAge
+    const progressColumnIndex = rows[0].headers.indexOf("PROGRESI")
+    const dueTodayFirst = canFilterDueDate && progressColumnIndex >= 0
+    const isDone = (progress?: string) =>
+      ["DONE", "COMPLETED", "COMPLETE"].includes(progress?.split(" · ", 1)[0].trim().toUpperCase() ?? "")
+    const orderedDataRows = (hasPriorityTaskTypes || dueTodayFirst) && !canFilterWfeAge
       ? [...dataRows].sort((left, right) => {
           const leftRank = priorityTaskTypeRank(left.headers, left.cells)
           const rightRank = priorityTaskTypeRank(right.headers, right.cells)
           if (dueTodayFirst) {
+            const completionOrder = Number(isDone(left.cells[progressColumnIndex])) - Number(isDone(right.cells[progressColumnIndex]))
+            if (completionOrder !== 0) return completionOrder
             // Both 08:00 labels belong to the same group.
             const groupOrder = (leftRank < 2 ? 0 : leftRank) - (rightRank < 2 ? 0 : rightRank)
             if (groupOrder !== 0) return groupOrder
@@ -940,24 +952,35 @@ export function ReportSectionPreview({
                         </th>
                       )
                     })}
+                    {canCollapseTasks && (
+                      <th scope="col" className="w-8 border-b border-slate-300">
+                        <span className="sr-only">Shfaqja e detyrës</span>
+                      </th>
+                    )}
                   </tr>
                 )
               })}
           </thead>
           <tbody>
             {(hideRow || (canFilterDueDate && dueDateFilter !== "all")) && !visibleDataRows.length ? (
-              <tr><td colSpan={headers.length} className="px-2 py-2 text-slate-600">Asnjë detyrë për këtë filtër.</td></tr>
+              <tr><td colSpan={headers.length + Number(canCollapseTasks)} className="px-2 py-2 text-slate-600">Asnjë detyrë për këtë filtër.</td></tr>
             ) : null}
             {visibleDataRows.map((row, rowIndex) => {
                 const visible = displayCells(row)
+                const number = visible.cells[numberIndex]?.trim() ?? ""
+                const title = visible.cells[titleIndex]?.trim() ?? ""
+                const taskRowKey = canCollapseTasks && /^\d+$/.test(number) && title && title !== "-"
+                  ? JSON.stringify([collapsibleTaskRowsDate, key, number, title, visible.cells[ownerIndex]])
+                  : null
+                const collapsed = taskRowKey !== null && collapsedTaskRows.has(taskRowKey)
                 const tone = meetingRowTone(row.headers, row.cells) || rowTone(row.label, row.cells, row.headers, colorEightAmByStatus)
                 const eightAmTask = isEightAmTaskRow(row.headers, row.cells, row.label)
                 const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)
                 const amPmDivider = hasAmPmDivider(row.label, visibleDataRows, rowIndex)
                 const strongStartDueDivider = hasStrongStartDueDivider(row.label)
                 return (
-                  <tr key={renderCell ? (visible.cells[0]?.trim() || row.key) : row.key} className={tone}>
-                    {visible.cells.map((cell, cellIndex) => {
+                  <tr key={renderCell ? (visible.cells[0]?.trim() || row.key) : row.key} className={collapsed ? "bg-slate-50" : tone}>
+                    {collapsed ? <td colSpan={visible.cells.length} className="border-b border-slate-200" /> : visible.cells.map((cell, cellIndex) => {
                       const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
                       const narrow = isNarrowTableHeader(header)
                       const displayedCell = previewTableCell(cell, header)
@@ -1025,6 +1048,28 @@ export function ReportSectionPreview({
                         </td>
                       )
                     })}
+                    {canCollapseTasks && (
+                      <td className="border-b border-slate-200 px-1 py-0.5 text-right align-top">
+                        {taskRowKey && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon-sm"
+                            className="size-6 border-slate-300 bg-white text-slate-950"
+                            aria-expanded={!collapsed}
+                            aria-label={collapsed ? `Shfaq detyrën ${number}` : `Fshih detyrën: ${title}`}
+                            onClick={() => setCollapsedTaskRows((current) => {
+                              const next = new Set(current)
+                              if (current.has(taskRowKey)) next.delete(taskRowKey)
+                              else next.add(taskRowKey)
+                              return next
+                            })}
+                          >
+                            <span aria-hidden="true">{collapsed ? "+" : "−"}</span>
+                          </Button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 )
               })}

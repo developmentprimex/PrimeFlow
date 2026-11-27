@@ -11,10 +11,15 @@ import type { ReportingChoiceDetails, SlotReminderDetails } from "@/lib/task-rep
 function ChoiceForm({ details, onFinish }: { details: ReportingChoiceDetails; onFinish: (answer: string | null) => void }) {
   const [reason, setReason] = useState("")
   const slot = details.field === "slot"
+  const title = {
+    slot: "Slot tjetër për të njëjtën detyrë",
+    marker: "Simbol tjetër për të njëjtën detyrë",
+    task_type: "Lloj tjetër për të njëjtën detyrë",
+  }[details.field]
   return <Dialog open onOpenChange={(open) => { if (!open) onFinish(null) }}>
     <DialogContent className="sm:max-w-lg" onInteractOutside={(event) => event.preventDefault()}>
       <DialogHeader>
-        <DialogTitle>{slot ? "Slot tjetër për të njëjtën detyrë" : "Simbol tjetër për të njëjtën detyrë"}</DialogTitle>
+        <DialogTitle>{title}</DialogTitle>
         <DialogDescription>Shpjego arsyen për ta ruajtur këtë zgjedhje.</DialogDescription>
       </DialogHeader>
       <form className="space-y-4" onSubmit={(event) => {

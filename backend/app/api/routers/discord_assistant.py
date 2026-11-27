@@ -129,6 +129,8 @@ class Command(Actor):
     instruction: str = Field(min_length=1, max_length=4000)
     expected_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
     direct_actions: list[tools.ToolAction] | None = Field(default=None, min_length=1, max_length=20)
+    reporting_choice_request_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
+    reporting_choice_reason: str | None = Field(default=None, max_length=2000)
     continue_slot_request_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
     replacement_slot: Literal["10:00", "11:00", "11:50", "14:20", "16:00"] | None = None
     # Tasks on screen in Discord (replied-to or latest bot message), in the order shown.
@@ -409,7 +411,21 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             raise HTTPException(409, "Komandë e përsëritur me identitet tjetër.")
         return (old.result.get("reply", old.result) if old.result else
             {"message": "Kjo komandë është në përpunim ose kërkon kontroll në PrimeFlow; nuk do të përsëritet.", "status": old.status})
-    if payload.continue_slot_request_id:
+    reporting_plan = None
+    if payload.reporting_choice_request_id:
+        pending = await db.get(DiscordAction, payload.reporting_choice_request_id)
+        if not pending or pending.link_id != link.id or pending.status != "REPORTING_CHOICE":
+            raise HTTPException(409, "Kjo kërkesë për koment nuk është më aktive.")
+        reason = (payload.reporting_choice_reason or "").strip()
+        if not reason:
+            raise HTTPException(422, "Shkruaj arsyen për zgjedhjen.")
+        reporting_plan = pending.result["reporting_plan"]
+        payload = payload.model_copy(update={
+            "task_id": pending.task_id, "instruction": pending.instruction,
+            "expected_fingerprint": reporting_plan["fingerprint"],
+        })
+        pending.status = "REPORTING_CHOICE_USED"
+    elif payload.continue_slot_request_id:
         pending = await db.get(DiscordAction, payload.continue_slot_request_id)
         if not pending or pending.link_id != link.id or pending.status != "SLOT_CONFIRMATION":
             raise HTTPException(409, "Ky rikujtim nuk është më aktiv.")
@@ -473,9 +489,10 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
         users = [{k: u.get(k) for k in ("id", "full_name", "username", "email")} for u in users if u.get("is_active", True)]
         # Buttons and forms already specify the exact change. They use the same
         # validation/audit/idempotency path, without asking AI to reinterpret it.
-        plan = (tools.TaskPlan(question=None, actions=payload.direct_actions) if payload.direct_actions is not None
+        plan = (tools.TaskPlan(question=None, actions=[]) if reporting_plan is not None else
+                tools.TaskPlan(question=None, actions=payload.direct_actions) if payload.direct_actions is not None
                 else await tools.interpret(payload.instruction, before, checklists, users, history))
-        if not payload.continue_slot_request_id:
+        if not payload.continue_slot_request_id and reporting_plan is None:
             plan = tools.with_closing_steps(plan, before)
         if plan.question:
             link.selected_task_id, link.selected_at = task_id, datetime.now(timezone.utc)
@@ -483,11 +500,20 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             link.pending_instruction = link.pending_instruction[-8000:]
             result = {"message": plan.question, "status": "QUESTION"}
         else:
-            operations = tools.compile_actions(plan, before, checklists, users, ((history + "\n") if history else "") + payload.instruction, datetime.now(ZoneInfo(settings.APP_TIMEZONE)), user_id=str(user.id))
+            if reporting_plan is not None:
+                first_operation, *remaining = reporting_plan["operations"]
+                detail = reporting_plan["detail"]
+                body = first_operation["body"]
+                confirmations = {**body.get("reporting_choice_confirmations", {})}
+                confirmations[detail.get("confirmation_field", detail["field"])] = {"key": detail["key"], "reason": reason}
+                operations = [{**first_operation, "body": {**body, "reporting_choice_confirmations": confirmations}},
+                              *remaining]
+            else:
+                operations = tools.compile_actions(plan, before, checklists, users, ((history + "\n") if history else "") + payload.instruction, datetime.now(ZoneInfo(settings.APP_TIMEZONE)), user_id=str(user.id))
             current = await owned_task(db, user, task_id)
             if tools.fingerprint(current) != tools.fingerprint(before):
                 raise ValueError("Detyra ndryshoi gjatë bisedës. Zgjidhe përsëri dhe ridërgo udhëzimin.")
-            if not payload.continue_slot_request_id and not before.get("is_r1") and not before.get("is_bllok"):
+            if reporting_plan is None and not payload.continue_slot_request_id and not before.get("is_r1") and not before.get("is_bllok"):
                 for operation in operations:
                     body = operation.get("body") or {}
                     if operation["path"].endswith("/one-h-report-slot") and body.get("one_h_report_slot") == "16:00":
@@ -503,10 +529,30 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
                             action.status = result["status"]
                             await db.commit()
                             return result
-            for operation in operations:
+            for index, operation in enumerate(operations):
                 await identity(db, payload)
-                await owned_task(db, user, task_id)
-                await tools.user_api(user, operation["method"], operation["path"], body=operation.get("body"), params=operation.get("params"))
+                current = await owned_task(db, user, task_id)
+                try:
+                    await tools.user_api(user, operation["method"], operation["path"], body=operation.get("body"), params=operation.get("params"))
+                except HTTPException as exc:
+                    if (exc.status_code != 409 or not isinstance(exc.detail, dict)
+                            or exc.detail.get("code") != "TASK_REPORTING_CHOICE_REASON_REQUIRED"):
+                        raise
+                    detail = exc.detail
+                    result = {
+                        "status": "REPORTING_CHOICE",
+                        "message": "Shpjego arsyen për ta ruajtur zgjedhjen.",
+                        "reporting_choice_id": action.id,
+                        "reporting_choice": {key: detail[key] for key in ("field", "person", "label", "task_title", "peers")},
+                        "applied": [item["label"] for item in applied],
+                    }
+                    action.status = result["status"]
+                    action.result = {"reply": result, "reporting_plan": {
+                        "fingerprint": tools.fingerprint(current)[:16], "detail": detail,
+                        "operations": operations[index:],
+                    }}
+                    await db.commit()
+                    return result
                 applied.append(operation)
             link.pending_instruction = None
             after = None if any(op["method"] == "DELETE" for op in operations) else await tools.user_api(user, "GET", f"/api/tasks/{task_id}")

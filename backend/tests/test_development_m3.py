@@ -94,9 +94,11 @@ def test_m3_live_answers_and_excel_share_the_development_checklist():
     with (
         patch("app.api.routers.exports.build_development_m1", new=AsyncMock(return_value=None)),
         patch("app.api.routers.exports.build_development_m3", new=AsyncMock(return_value=report)) as build,
+        patch("app.api.routers.exports.read_development_reorganization", new=AsyncMock(return_value="")) as read_reorg,
     ):
         data = asyncio.run(download())
     build.assert_awaited_once_with(db, staff, checklist_items=items)
+    assert [args.args[1] for args in read_reorg.await_args_list] == ["m2"]
     rows = list(load_workbook(io.BytesIO(data)).active.values)
     manual = rows.index((2, titles[1], "✓"))
     assert rows[manual + 1][1] == titles[2]

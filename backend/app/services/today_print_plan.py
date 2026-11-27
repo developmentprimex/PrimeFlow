@@ -6,14 +6,15 @@ import logging
 from datetime import date, datetime, time, timedelta
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
+from app.models.audit_log import AuditLog
 from app.models.one_h_print_report_snapshot import OneHPrintReportSnapshot
 from app.models.task import Task
 from app.services.one_h_print_report_snapshot import get_one_h_print_snapshot
-from app.services.primeflow_report import report_timezone
+from app.services.primeflow_report import report_timezone, task_calendar_day
 from app.services.tomorrow_print_report import (
     _slot,
     _task_period_label,
@@ -27,6 +28,13 @@ logger = logging.getLogger(__name__)
 PLAN_KIND = "TOMORROW_PLAN"
 CAPTURE_TIME = time(16, 59, 59)
 SAVE_TIME = time(17)
+DATE_FIELDS = {"start_date": "startDate", "due_date": "dueDate"}
+DATE_ACTIONS = {f"task.{field}_changed": field for field in DATE_FIELDS}
+
+
+def _calendar_date(value) -> str | None:
+    day = task_calendar_day(value)
+    return day.isoformat() if day else None
 
 
 def capture_target(now: datetime) -> date | None:
@@ -46,13 +54,21 @@ def report_tasks(payload: dict, day: date, *, include_completed: bool = False) -
             task_id = item.get("task_id") or item.get("taskId")
             if not task_id:
                 continue
+            status = "DONE" if item.get("isDone") is True else _task_status(item)
+            if status != "DONE" and item.get("is_paused"):
+                status = "PAUSED"
             task = tasks.setdefault(str(task_id), {
                 "title": _task_title(item, personal=True),
                 "slot": _slot(item),
                 "period": _task_period_label(item),
                 "assignees": sorted(set(item.get("assignees") or [item.get("person") or item.get("owner") or ""]) - {""}),
                 "sections": [],
-                "status": _task_status(item),
+                "status": status,
+                **{
+                    field: _calendar_date(item.get(field, item.get(alias)))
+                    for field, alias in DATE_FIELDS.items()
+                    if field in item or alias in item
+                },
             })
             label = section.splitlines()[0]
             if label not in task["sections"]:
@@ -65,21 +81,23 @@ def compare_tasks(planned: dict, actual: dict, absent: dict) -> list[dict]:
     for task_id, before in planned.items():
         after = actual.get(task_id)
         evidence = absent.get(task_id, {"kind": "missing"})
+        if (after and after["status"] == "DONE") or evidence["kind"] == "completed":
+            continue
         if after is None:
             changes.append({"task_id": task_id, "before": before, "after": None, **evidence})
-        elif after["status"] == "DONE":
-            changes.append({"task_id": task_id, "before": before, "after": after, "kind": "completed"})
-        elif any(before[field] != after[field] for field in ("slot", "period", "assignees", "sections")):
+        elif any(before[field] != after[field] for field in ("slot", "period", "assignees", "sections")) or any(
+            field in before and field in after and before[field] != after[field] for field in DATE_FIELDS
+        ):
             changes.append({"task_id": task_id, "before": before, "after": after, "kind": "changed"})
     changes.extend(
         {"task_id": task_id, "before": None, "after": after, "kind": "added"}
-        for task_id, after in actual.items() if task_id not in planned
+        for task_id, after in actual.items() if task_id not in planned and after["status"] != "DONE"
     )
     return changes
 
 
 async def compare_plan(db: AsyncSession, day: date, plan: OneHPrintReportSnapshot, payload: dict) -> dict:
-    from app.api.routers.common_view import _as_tirane_date, _get_task_dates
+    from app.api.routers.common_view import _get_task_dates
 
     planned = plan.report_payload["tasks"]
     actual = report_tasks(payload, day, include_completed=True)
@@ -87,20 +105,64 @@ async def compare_plan(db: AsyncSession, day: date, plan: OneHPrintReportSnapsho
     missing_ids = [UUID(task_id) for task_id in planned.keys() - actual.keys()]
     if missing_ids:
         tasks = (await db.execute(select(Task).where(
-            Task.id.in_(missing_ids), Task.is_active.is_(True), Task.work_staff_filter(),
+            Task.id.in_(missing_ids), or_(Task.is_active.is_(True), Task.status == "DONE"), Task.work_staff_filter(),
         ))).scalars()
         for task in tasks:
-            if task.status == "DONE":
-                if _as_tirane_date(task.completed_at) == day:
-                    absent[str(task.id)] = {"kind": "completed"}
+            status = _task_status({"status": task.status})
+            if status == "DONE":
+                absent[str(task.id)] = {"kind": "completed"}
                 continue
+            current_dates = {field: _calendar_date(getattr(task, field)) for field in DATE_FIELDS}
             dates = _get_task_dates(task, (task.phase or "").upper() in {"CHECK", "CONTROL"})
+            absent[str(task.id)] = {"kind": "missing", "current_dates": current_dates, "current_status": status}
             if day not in dates:
-                absent[str(task.id)] = {
-                    "kind": "rescheduled",
-                    "date": min(dates, key=lambda scheduled: abs(scheduled - day)).isoformat(),
-                }
+                absent[str(task.id)].update(
+                    kind="rescheduled",
+                    date=min(dates, key=lambda scheduled: abs(scheduled - day)).isoformat(),
+                )
     return {"saved_at": plan.report_payload["saved_at"], "changes": compare_tasks(planned, actual, absent)}
+
+
+async def with_audited_reschedule_dates(db: AsyncSession, comparison: dict, plan_payload: dict, cutoff: datetime) -> dict:
+    """Recover date fields missing from older snapshots using events inside the comparison window."""
+    rows = {
+        UUID(row["task_id"]): row for row in comparison["changes"]
+        if row["kind"] == "rescheduled" and row["before"] is not None
+        and any(field not in row["before"] or field not in row.get("current_dates", {}) for field in DATE_FIELDS)
+    }
+    if not rows:
+        return comparison
+
+    captured_at = datetime.fromisoformat(plan_payload.get("source_captured_at") or plan_payload["saved_at"])
+    events = (await db.execute(select(AuditLog).where(
+        AuditLog.entity_type == "task",
+        AuditLog.entity_id.in_(rows),
+        AuditLog.action.in_(DATE_ACTIONS),
+        AuditLog.created_at > captured_at,
+        AuditLog.created_at <= cutoff,
+    ).order_by(AuditLog.created_at, AuditLog.id))).scalars()
+
+    first_values: dict[tuple[UUID, str], str | None] = {}
+    last_values: dict[tuple[UUID, str], str | None] = {}
+    for event in events:
+        if "value" in (event.before or {}) and "value" in (event.after or {}):
+            key = (event.entity_id, DATE_ACTIONS[event.action])
+            first_values.setdefault(key, _calendar_date(event.before["value"]))
+            last_values[key] = _calendar_date(event.after["value"])
+
+    updates = {}
+    for task_id, row in rows.items():
+        before = row["before"].copy()
+        current = row.get("current_dates", {}).copy()
+        for field in DATE_FIELDS:
+            key = (task_id, field)
+            if key not in first_values or first_values[key] == last_values[key]:
+                continue
+            if before.get(field, first_values[key]) == first_values[key] and current.get(field, last_values[key]) == last_values[key]:
+                before.setdefault(field, first_values[key])
+                current.setdefault(field, last_values[key])
+        updates[row["task_id"]] = {**row, "before": before, "current_dates": current}
+    return {**comparison, "changes": [updates.get(row["task_id"], row) for row in comparison["changes"]]}
 
 
 async def capture_tomorrow_plan(capture_at: datetime) -> bool:

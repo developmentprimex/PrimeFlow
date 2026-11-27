@@ -5,6 +5,7 @@ from app.services.report_attendance import filter_points_payload
 
 import asyncio
 import html
+import re
 from datetime import date, datetime
 
 from sqlalchemy import select, text
@@ -19,6 +20,7 @@ from app.services.daily_realization_events import semantic_local_day
 from app.services import m3_reporting_points as m3
 from app.services.m3_reporting_points import planned_for_report_day
 from app.services.meetings_report import _clean_task_title, _m3_am_pm_label, _m3_task_type_label
+from app.services.morning_report import REORGANIZATION_TITLE, normalize_morning_reorganization_body
 from app.services.note_markup import parse_marked_note_content
 from app.services.personal_task_owner import personal_task_owner
 from app.services.meetings_report_scheduler import normalize_recipients
@@ -28,16 +30,18 @@ from app.services.daily_rlz_compliance import REASON_LABELS
 
 TITLE = "PIKAT PER RAPORTIM M2"
 MANUAL_POINTS = {
-    "reorganization": "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
+    "reorganization": f"7. {REORGANIZATION_TITLE}",
 }
+# Three text fields of 10,000 characters, plus labels and escaped continuation lines.
+REORGANIZATION_BODY_LIMIT = 61_000
 AUTO_TITLES = {
-    "unfinished_priority": f"2. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",
-    "postponed": "3. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
+    "unfinished_priority": f"1. {UNFINISHED_PRIORITY_TABLE_LABEL}/AM",
+    "postponed": "2. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
     "postponed_am": "DET QE JANE SHTYER SOT AM - PARA PAUZES",
-    "ga_progress": "4. PROGRESI I DET ME GA (AM)",
-    "pm_due_today": "5. DET PM ME DUE DATE SOT",
-    "delivery": "6. SA PER DOREZIM M2?",
-    "pm_continuation": "7. A VAZHDOJNË DETYRAT NË PM?",
+    "ga_progress": "3. PROGRESI I DET ME GA (AM)",
+    "pm_due_today": "4. DET PM ME DUE DATE SOT",
+    "delivery": "5. SA PER DOREZIM M2?",
+    "pm_continuation": "6. A VAZHDOJNË DETYRAT NË PM?",
 }
 DELIVERY_MARKERS = {"M2", "M2_M3"}
 
@@ -270,12 +274,16 @@ def table_value(report, row, column, index, movement, section=""):
     return m3.report_table_value(row, column, index, movement)
 
 
+def reorganization_export_fields(body: str) -> list[str]:
+    if body and not re.match(r"^BZ M1: (?:PO|JO)(?:\n|$)", body):
+        body = "KOMENT: " + body.replace("\n", "\n ")
+    normalized = normalize_morning_reorganization_body(body, include_empty_follow_ups=True)
+    return [field.replace("\n ", "\n") for field in re.split(r"\n(?=\S)", normalized)]
+
+
 def export_blocks(report):
     blocks = [{"kind": "text", "text": TITLE, "level": 1},
               {"kind": "text", "text": f"Data: {report['report_date']}", "level": 0}]
-    for key, title in MANUAL_POINTS.items():
-        blocks.extend([{"kind": "text", "text": title, "level": 2},
-                       {"kind": "text", "text": report.get("manual_answers", {}).get(key) or "Pa pergjigje", "level": 0}])
     for key, title in AUTO_TITLES.items():
         blocks.append({"kind": "text", "text": title, "level": 2})
         if key == "delivery":
@@ -316,6 +324,9 @@ def export_blocks(report):
                     })
                 rendered.append(cells)
             blocks.append({"kind": "table", "columns": columns, "rows": rendered})
+    blocks.append({"kind": "text", "text": MANUAL_POINTS["reorganization"], "level": 2})
+    body = report.get("manual_answers", {}).get("reorganization") or ""
+    blocks.extend({"kind": "text", "text": field, "level": 0} for field in reorganization_export_fields(body))
     return blocks
 
 

@@ -124,7 +124,7 @@ async def read_inbox(
     end_operator = "le" if window is not None else "lt"
     filter_by_date = f"receivedDateTime ge {start_query} and receivedDateTime {end_operator} {end_query}"
     params = {
-        "$select": "id,subject,from,receivedDateTime,body,webLink",
+        "$select": "id,subject,from,receivedDateTime,body,webLink,internetMessageId",
         "$filter": filter_by_date,
         "$orderby": "receivedDateTime desc",
         "$top": "50",
@@ -154,5 +154,6 @@ async def read_inbox(
             "received_datetime": received_at.isoformat(),
             "body": content,
             **({"original_email_url": message["webLink"]} if message.get("webLink") else {}),
+            **({"internet_message_id": message["internetMessageId"]} if message.get("internetMessageId") else {}),
         })
     return rows

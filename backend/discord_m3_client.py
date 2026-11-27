@@ -173,6 +173,17 @@ async def save(bot, interaction, job, action, comment='', *, source_message=None
 
         await confirm_16_view(interaction, result['slot_reminder'], proceed)
         return
+    if detail := result.get('reporting_choice'):
+        message = source_message or getattr(interaction, 'message', None)
+
+        async def save_reason(click, reason):
+            confirmations = {**fields.get('reporting_choice_confirmations', {}),
+                             detail['confirmation_field']: {'key': detail['key'], 'reason': reason}}
+            await save(bot, click, job, action, comment, source_message=message,
+                       **{**fields, 'reporting_choice_confirmations': confirmations})
+
+        await bot.show_reporting_choice(interaction, result, on_reason=save_reason)
+        return
     latest = await bot.bridge(f"/bot/m3/{job['id']}/open", actor(interaction))
     message = source_message or getattr(interaction, 'message', None)
     if message:

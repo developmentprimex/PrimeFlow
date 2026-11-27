@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from fastapi.responses import FileResponse, HTMLResponse
 from app.services.one_h_slot_reminder import SlotReminderHeader, confirm_pm_block_slot, note_slot_owners
 from app.services.one_h_slots import current_effective_slot_date
+from app.services.task_reporting_choices import check_note_reporting_choices
 from sqlalchemy import insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -120,7 +121,7 @@ def _note_out(note: GaNote) -> GaNoteOut:
     return GaNoteOut(
         id=note.id,
         content=meeting_note_heading(note.content) if note.from_mira and not note.from_mira_desktop else note.content,
-        email_preview=email_preview(note),
+        email_preview=email_preview(note, include_outlook=True),
         created_by=note.created_by,
         note_type=note.note_type,
         status=note.status,
@@ -571,6 +572,7 @@ async def update_ga_note_task_bundle(
         marker_changed, shared_marker = note_bundle_marker_update(note, payload, existing_tasks)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await check_note_reporting_choices(db, existing_tasks, payload, user)
     semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
     already_at_16 = {
         task.id for task in existing_tasks

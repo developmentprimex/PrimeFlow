@@ -18,7 +18,7 @@ from app.api.routers import microsoft_mail as api
 from app.integrations import gmail_mail, homeface_mail
 from app.integrations import microsoft_mail as mail
 from app.models.enums import UserRole
-from app.services import info_px_notes
+from app.services import info_px_notes, px_note_email
 
 
 def test_authorize_requests_read_only_permissions(monkeypatch):
@@ -45,6 +45,7 @@ def test_graph_reads_inbox_directly_in_report_timezone():
         return httpx.Response(200, json={"value": [{
             "id": "mail-1", "subject": "A test", "receivedDateTime": "2026-11-23T09:50:00Z",
             "webLink": "https://outlook.office.com/mail/deeplink/read/mail-1",
+            "internetMessageId": "<mail-1@example.test>",
             "from": {"emailAddress": {"name": "Sender", "address": "sender@example.test"}},
             "body": {"contentType": "text", "content": "The email body"},
         }]})
@@ -57,6 +58,7 @@ def test_graph_reads_inbox_directly_in_report_timezone():
         "id": "mail-1", "subject": "A test", "sender": "Sender <sender@example.test>",
         "received_at": "10:50", "received_datetime": "2026-11-23T10:50:00+01:00", "body": "The email body",
         "original_email_url": "https://outlook.office.com/mail/deeplink/read/mail-1",
+        "internet_message_id": "<mail-1@example.test>",
     }]
 
 
@@ -171,6 +173,25 @@ def test_px_note_formats_each_mailbox_and_skips_already_imported_messages(monkey
     assert asyncio.run(info_px_notes.save_mailbox_notes(db, [message], mailboxes[0]))
     assert db.execute.await_count == 9
     assert draft.await_count == 4
+
+
+def test_outlook_destination_is_specific_to_px_notes_and_backfilled_on_sync():
+    mailbox = mail.mailbox_for("info-px")
+    message = {"id": "old", "subject": "Test", "sender": "Sender", "body": "Body",
+               "internet_message_id": "<outlook-test@example.test>"}
+    old_metadata = {"subject": "Original title", "original_email_url": "https://outlook.office.com/mail/deeplink/read/old"}
+    db = AsyncMock()
+    note_id = uuid.uuid5(uuid.NAMESPACE_URL, f"primeflow:{mailbox.email}:{message['id']}")
+    db.execute.return_value = SimpleNamespace(all=lambda: [(note_id, old_metadata)])
+    assert asyncio.run(info_px_notes.save_mailbox_notes(db, [message], mailbox))
+    statement = db.execute.await_args.args[0].compile(dialect=dialect())
+    metadata = statement.params["email_metadata"]
+    assert metadata == {**old_metadata, "mailbox": mailbox.email, "internet_message_id": message["internet_message_id"]}
+    note = SimpleNamespace(id="old", content="EM INFO PX: 08:00 TEST\nSummary", knowledge_type=mailbox.note_origin,
+                           email_metadata=metadata)
+    assert "internet_message_id" not in px_note_email.email_preview(note)
+    assert px_note_email.email_preview(note, include_outlook=True)["mailbox"] == mailbox.email
+    assert px_note_email.internet_message_id("<bad\n@example.test>") is None
 
 
 def test_failed_mail_summary_stays_available_for_retry(monkeypatch):

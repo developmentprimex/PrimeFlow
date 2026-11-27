@@ -3,13 +3,13 @@
 import * as React from "react"
 import { TaskPauseBadge } from "@/components/task-pause-field"
 import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
+import { MorningReorganization, REORGANIZATION_SECTION } from "@/components/morning-reorganization"
 import { DiscordDeliveryTable, reportDate, type DeliverySlot, type TaskRow } from "@/components/m3-reporting-points-view"
 import { DAILY_RLZ_REASONS, dailyRlzReasonLabel } from "@/lib/daily-rlz-ui"
 
 export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
 export const MANUAL_POINTS = {
-  reorganization: "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET",
+  reorganization: `7. ${REORGANIZATION_SECTION}`,
 } as const
 export type ManualKey = keyof typeof MANUAL_POINTS | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}` | `unfinished_comment:${string}` | `progress_reason:${string}` | `progress_comment:${string}` | `postponed_reason:${string}` | `unfinished_reason:${string}` | `pm_choice:${string}` | `pm_comment:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
@@ -85,10 +85,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
   </div>
 
   return <div className="space-y-7">
-    <section className="space-y-3" aria-labelledby="m2-reorganization"><Label id="m2-reorganization" htmlFor="reorganization" className="text-lg font-bold">{MANUAL_POINTS.reorganization}</Label>
-      <Textarea id="reorganization" value={answers.reorganization || ""} disabled={disabled} maxLength={10000} className="min-h-28" placeholder="Shëno përgjigjjen për riorganizimin." onChange={(event) => onAnswerChange("reorganization", event.target.value)} />
-    </section>
-    <section className="space-y-3" aria-labelledby="m2-unfinished-priority"><h2 id="m2-unfinished-priority" className="text-lg font-bold">2. DET TE PAKRYERA, 08:00/DEADLINE/AM</h2>
+    <section className="space-y-3" aria-labelledby="m2-unfinished-priority"><h2 id="m2-unfinished-priority" className="text-lg font-bold">1. DET TE PAKRYERA, 08:00/DEADLINE/AM</h2>
       <div className="overflow-x-auto border">
         <table className="w-full min-w-[900px] border-collapse text-xs">
           <thead className="bg-slate-100"><tr>{["NR", ...unfinishedColumns.map(([, title]) => title)].map((title) => <th key={title} className="border px-2 py-2 text-left">{title}</th>)}</tr></thead>
@@ -114,14 +111,14 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
       </div>
     </section>
     {([
-      ["postponed", "3. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?"],
+      ["postponed", "2. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?"],
       ["postponed_am", "DET QË JANË SHTYER SOT AM — PARA PAUZËS"],
     ] as const).map(([section, title]) => <section key={section} className="space-y-3" aria-labelledby={`m2-${section}`}><h2 id={`m2-${section}`} className="text-lg font-bold">{title}</h2>
       <p className="text-sm text-muted-foreground">{section === "postponed" ? "Shtyrjet e bëra sot për detyrat Deadline Important ose të krijuara, filluara dhe planifikuara për sot." : "Shtyrjet e bëra sot para orës 12:00 për detyrat që, para shtyrjes, ishin të planifikuara për ditën e raportit (brenda intervalit Start–Due)."}</p>
       <p className="text-sm font-bold">Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></p>
       {[["start_due", "SHTYRË START DHE DUE DATE"], ["due", "SHTYRË DUE DATE"], ["start", "SHTYRË START DATE"]].map(([kind, title]) => <div key={kind} className="space-y-2"><h3 className="text-sm font-semibold">{title}</h3>{renderTable((report.data[section] || []).filter((row) => row.postponement_kind === kind), false)}</div>)}
     </section>)}
-    <section className="space-y-3" aria-labelledby="m2-ga-progress"><h2 id="m2-ga-progress" className="text-lg font-bold">4. PROGRESI I DET ME GA (AM)</h2>
+    <section className="space-y-3" aria-labelledby="m2-ga-progress"><h2 id="m2-ga-progress" className="text-lg font-bold">3. PROGRESI I DET ME GA (AM)</h2>
       <p className="text-sm text-muted-foreground">Detyrat AM dhe AM/PM me simbolin F ose GA dhe detyrat personale me GA, brenda intervalit start–due të datës së raportit.</p>
       <div className="overflow-x-auto border">
         <table className="w-full min-w-[900px] border-collapse text-xs">
@@ -152,7 +149,7 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
         {!progressRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
       </div>
     </section>
-    <section className="space-y-3" aria-labelledby="m2-pm-due-today"><h2 id="m2-pm-due-today" className="text-lg font-bold">5. DET PM ME DUE DATE SOT</h2>
+    <section className="space-y-3" aria-labelledby="m2-pm-due-today"><h2 id="m2-pm-due-today" className="text-lg font-bold">4. DET PM ME DUE DATE SOT</h2>
       <p className="text-sm text-muted-foreground">Të gjitha detyrat PM dhe AM/PM me Due Date në datën e raportit.</p>
       <div className="overflow-x-auto border">
         <table className="w-full min-w-[900px] border-collapse text-xs">
@@ -169,17 +166,22 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
       </div>
     </section>
     {report.discord_delivery_slot ? <section className="space-y-3" aria-labelledby="m2-delivery">
-      <h2 id="m2-delivery" className="text-lg font-bold">6. SA PER DOREZIM M2?</h2>
+      <h2 id="m2-delivery" className="text-lg font-bold">5. SA PER DOREZIM M2?</h2>
       <DiscordDeliveryTable rows={deliveryRows} slot={report.discord_delivery_slot} notes={answers} onNoteChange={onAnswerChange} disabled={disabled} />
-    </section> : <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">6. SA PER DOREZIM M2?</h2>
+    </section> : <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">5. SA PER DOREZIM M2?</h2>
       <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">SA/TOTALI: <span className="text-2xl font-extrabold tabular-nums">{deliveredCount}/{deliveryRows.length}</span></span></div>
       <p className="text-sm text-muted-foreground">Detyrat me simbolet M2 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
       {renderTable(deliveryRows, true)}
     </section>}
     <section className="space-y-3" aria-labelledby="m2-pm-continuation">
-      <h2 id="m2-pm-continuation" className="text-lg font-bold">7. A VAZHDOJNË DETYRAT NË PM?</h2>
+      <h2 id="m2-pm-continuation" className="text-lg font-bold">6. A VAZHDOJNË DETYRAT NË PM?</h2>
       <p className="text-sm text-muted-foreground">Përgjigjet për detyrat e planifikuara në PM sot. Kërkesat për shtyrje në Discord ndryshojnë datat vetëm pas konfirmimit të Diellza Veliut.</p>
       {renderTable(report.data.pm_continuation || [], true, true)}
+    </section>
+    <section className="space-y-3" aria-labelledby="m2-reorganization">
+      <h2 id="m2-reorganization" className="text-lg font-bold">{MANUAL_POINTS.reorganization}</h2>
+      <MorningReorganization body={answers.reorganization || ""} showAllFollowUps legacyComment readOnly={disabled}
+        maxLength={10000} onChange={(body) => onAnswerChange("reorganization", body)} />
     </section>
   </div>
 }

@@ -49,7 +49,7 @@ async def progress(db, meeting, data, user_ids=None, *, for_brief=False):
     titles, descriptions = report_text_overrides(snapshot, interval_start=start, interval_end=end)
     document = build_report_document(source, meeting.meeting_date, meeting.slot,
         title_overrides=titles, description_overrides=descriptions,
-        completion_window_start=start, completion_window_end=end)
+        completion_window_start=start, completion_window_end=end, meeting_follow_ups_only=True)
     selected, report_owners, regular_task_ids = {}, {}, set()
     for section in document.sections:
         for person in section.employees:

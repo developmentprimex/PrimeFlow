@@ -48,7 +48,7 @@ def test_pm_due_today_is_included_in_preview_text_and_export_tables():
         "due_date": DAY.isoformat(), "assignees": "EF", "department": "DEV", "task_type": "PRJK",
     }]}}
     for output in (service.render_html(value), service.render_plain_text(value)):
-        assert "5. DET PM ME DUE DATE SOT" in output
+        assert "4. DET PM ME DUE DATE SOT" in output
         assert "Afternoon due task" in output
         assert "06.10.2026" in output
     table = next(block for block in service.export_blocks(value) if block["kind"] == "table")
@@ -285,7 +285,7 @@ def test_ga_progress_exports_task_columns_before_delivery():
     assert headers == ["nr", "assignees", "department", "project", "am_pm", "task_type", "marker", "title", "reason", "comment"]
     assert cells["marker"]["text"] == "GA"
     html = service.render_html(value)
-    assert html.index("4. PROGRESI I DET ME GA (AM)") < html.index("5. DET PM ME DUE DATE SOT") < html.index("6. SA PER DOREZIM M2?")
+    assert html.index("3. PROGRESI I DET ME GA (AM)") < html.index("4. DET PM ME DUE DATE SOT") < html.index("5. SA PER DOREZIM M2?")
     attachments = service.report_attachments(value)
     word = Document(io.BytesIO(attachments[0][1]))
     assert word.tables[0].rows[0].cells[-1].text == "KOMENTI / PROGRESI"
@@ -358,6 +358,40 @@ def test_complete_exports_have_matching_colors_and_complete_content():
         colors = {color for _, color in image.getcolors(image.width * image.height)}
         for color in ((22, 163, 74), (220, 38, 38), (220, 252, 231), (254, 226, 226)):
             assert color in colors
+
+
+def test_reorganization_exports_all_fields_and_preserves_legacy_text():
+    value = {"report_date": DAY.isoformat(), "manual_answers": {"reorganization": "Takim: pas pauzës\nNdahen detyrat."}}
+    assert "KOMENT: Takim: pas pauzës\nNdahen detyrat." in service.render_plain_text(value)
+
+    answers = [
+        "BZ M1: PO", "KOMENT: Takim <intern>", "NËNNGARKESË: PO", "MBINGARKESË: JO",
+        "SI BËHET RIORGANIZIMI?: Ndahen detyrat", "SHKAKTARI I MUNGESËS OSE VONESËS:",
+    ]
+    value["manual_answers"]["reorganization"] = "\n".join(answers)
+    html = service.render_html(value)
+    plain = service.render_plain_text(value)
+    attachments = {name.rsplit(".", 1)[-1]: content for name, content, _ in service.report_attachments(value)}
+    word = Document(io.BytesIO(attachments["docx"]))
+    sheet = load_workbook(io.BytesIO(attachments["xlsx"])).active
+    title = "7. A KA RIORGANIZIM?"
+    previous_title = "6. A VAZHDOJNË DETYRAT NË PM?"
+    word_text = [paragraph.text for paragraph in word.paragraphs]
+    excel_text = [cell.value for row in sheet for cell in row]
+    for output in (html, plain, word_text, excel_text):
+        assert output.index(previous_title) < output.index(title)
+    for answer in [title, *answers]:
+        assert answer.replace("<", "&lt;").replace(">", "&gt;") in html
+        assert answer in plain
+        assert answer in word_text
+        assert answer in excel_text
+    with Image.open(io.BytesIO(attachments["png"])) as image:
+        assert image.format == "PNG"
+
+
+def test_reorganization_accepts_multiple_text_fields_at_the_manual_answer_limit():
+    body = "BZ M1: PO\nKOMENT: " + "a" * 10_000 + "\nSI BËHET RIORGANIZIMI?: " + "b" * 10_000
+    assert api.ManualAnswersPayload(manual_answers={"reorganization": body}).manual_answers["reorganization"] == body
 
 
 def test_preview_and_native_exports_preserve_last_manual_column_and_escape_text():
@@ -448,7 +482,7 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         value = {"report_date": DAY.isoformat(), "manual_answers": {}, "data": data}
         blocks = service.export_blocks(value)
         titles = [block["text"] for block in blocks if block["kind"] == "text" and block["level"] == 2]
-        assert titles == [*service.MANUAL_POINTS.values(), *service.AUTO_TITLES.values()]
+        assert titles == [*service.AUTO_TITLES.values(), *service.MANUAL_POINTS.values()]
         table = next(block for block in blocks if block["kind"] == "table")
         assert [column[1] for column in table["columns"]] == ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TIPI", "TITULLI", "DUE DATE", "ARSYEJA", "KOMENTI"]
         assert all(cell["fill"] == "#dc2626" and cell["eight_am"] for cell in table["rows"][1])
@@ -674,7 +708,7 @@ def test_removed_ga_reply_is_ignored_when_saving_and_exporting_old_reports():
         html = service.render_html(result)
         assert "A KA REPLY NGA GA" not in html
         assert "Pergjigje e vjeter" not in html
-        assert "1. RIORGANIZIM? (PARA PAUZES- PAS KO TE DET PM)- PAS PAUZES, TAKIM INT, NDARJE E DET" in html
+        assert "7. A KA RIORGANIZIM?" in html
         titles = [block["text"] for block in service.export_blocks(result) if block["kind"] == "text" and block["level"] == 2]
         assert [title.split(". ")[0] for title in titles if ". " in title] == ["1", "2", "3", "4", "5", "6", "7"]
         assert service.AUTO_TITLES["postponed_am"] in titles

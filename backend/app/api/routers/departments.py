@@ -3,14 +3,20 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
+from app.api.access import ensure_department_access, ensure_reports_access
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.department import Department
 from app.models.enums import UserRole
@@ -19,17 +25,75 @@ from app.services.audit import add_audit_log
 from app.services.development_m1 import build_development_m1
 from app.services.development_m2 import build_development_m2
 from app.services.development_m3 import build_development_m3
+from app.services.development_reorganization import (
+    DevelopmentSlot, REORGANIZATION_MODELS, read_development_reorganization,
+)
+from app.services.morning_report import normalize_morning_reorganization_body
+from app.services.primeflow_report import report_timezone
 
 
 router = APIRouter()
 
 
 @router.get("/development/m1")
-async def get_development_m1(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def get_development_m1(response: Response, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     report = await build_development_m1(db, user)
     if report is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Development department not found")
+    response.headers["Cache-Control"] = "no-store"
     return report
+
+
+class ReorganizationUpdate(BaseModel):
+    report_date: date
+    body: str = Field(max_length=32_000, pattern=r"^[^\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]*$")
+
+
+async def _development_department_id(db: AsyncSession):
+    department_id = await db.scalar(select(Department.id).where(Department.code == "DEV"))
+    if department_id is None:
+        raise HTTPException(status_code=404, detail="Development department not found")
+    return department_id
+
+
+def _development_reorganization_day(slot: DevelopmentSlot) -> date:
+    return datetime.now(ZoneInfo(settings.APP_TIMEZONE) if slot == "m1" else report_timezone()).date()
+
+
+@router.get("/development/{slot}/reorganization")
+async def get_development_reorganization(
+    slot: DevelopmentSlot, response: Response, db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+    department_id = await _development_department_id(db)
+    day = _development_reorganization_day(slot)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "date": day.isoformat(),
+        "body": await read_development_reorganization(db, slot, day),
+        "can_edit": user.role in (UserRole.ADMIN, UserRole.MANAGER) or user.department_id == department_id,
+    }
+
+
+@router.put("/development/{slot}/reorganization")
+async def save_development_reorganization(
+    slot: DevelopmentSlot, payload: ReorganizationUpdate,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+    department_id = await _development_department_id(db)
+    ensure_department_access(user, department_id)
+    if payload.report_date != _development_reorganization_day(slot):
+        raise HTTPException(status_code=409, detail="Data e raportit ndryshoi. Rifresko dhe provo përsëri.")
+
+    body = normalize_morning_reorganization_body(payload.body)
+    model = REORGANIZATION_MODELS[slot]
+    statement = insert(model).values(report_date=payload.report_date, body=body)
+    await db.execute(statement.on_conflict_do_update(
+        index_elements=[model.report_date], set_={"body": statement.excluded.body},
+    ))
+    await db.commit()
+    return {"body": body}
 
 
 @router.get("/development/m2")

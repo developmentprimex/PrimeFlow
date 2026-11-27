@@ -411,6 +411,9 @@ class PrimeFlowBot(discord.Client):
             await interaction.followup.send(message, ephemeral=True)
 
     async def show_result(self, interaction, result):
+        if result.get("reporting_choice_id"):
+            await self.show_reporting_choice(interaction, result)
+            return
         if result.get("slot_confirmation_id"):
             await self.show_slot_confirmation(interaction, result)
             return
@@ -434,9 +437,59 @@ class PrimeFlowBot(discord.Client):
                 "instruction": f"Ruaj slotin {slot}", "continue_slot_request_id": result["slot_confirmation_id"],
                 "replacement_slot": slot,
             })
+            if saved.get("reporting_choice_id"):
+                await self.show_reporting_choice(click, saved)
             return saved["message"]
 
         await m3_client.confirm_16_view(source, result["message"], proceed, channel=channel)
+
+    async def show_reporting_choice(self, source, result, *, channel=None, on_reason=None):
+        detail = result["reporting_choice"]
+        owner = source.author.id if channel is not None else source.user.id
+        titles = {"slot": "Slot tjetër", "marker": "Simbol tjetër", "task_type": "Lloj tjetër"}
+        heading = titles[detail["field"]]
+        lines = [f"**{heading} për të njëjtën detyrë**", display_text(detail["task_title"])[:300]]
+        lines.extend(f"{display_text(peer['person'])} · {display_text(peer['label'])}" for peer in detail["peers"])
+        lines.extend((f"Zgjedhja për {display_text(detail['person'])} · {display_text(detail['label'])}", result["message"]))
+        if result.get("applied"):
+            lines.append("U zbatuan: " + "; ".join(result["applied"]))
+        bot = self
+
+        class ReasonModal(discord.ui.Modal, title="Komenti i detyrueshëm"):
+            reason = discord.ui.TextInput(label="Pse po zgjedh ndryshe?", style=discord.TextStyle.paragraph, max_length=2000)
+
+            async def on_submit(self, interaction):
+                if interaction.user.id != owner:
+                    return
+                await interaction.response.defer(ephemeral=True, thinking=True)
+                try:
+                    if on_reason is not None:
+                        await on_reason(interaction, self.reason.value)
+                        return
+                    saved = await bot.bridge("/bot/command", {
+                        **actor(interaction.user.id, interaction.guild_id, interaction.channel_id),
+                        "request_id": str(interaction.id), "instruction": "Ruaj zgjedhjen me koment",
+                        "reporting_choice_request_id": result["reporting_choice_id"],
+                        "reporting_choice_reason": self.reason.value,
+                    })
+                    await bot.show_result(interaction, saved)
+                except Exception as exc:
+                    await interaction.followup.send(bot.error_message(exc), ephemeral=True)
+
+        button = discord.ui.Button(label="Shkruaj arsyen", style=discord.ButtonStyle.primary)
+        view = discord.ui.View(timeout=900)
+
+        async def open_reason(interaction):
+            if interaction.user.id == owner:
+                await interaction.response.send_modal(ReasonModal())
+
+        button.callback = open_reason
+        view.add_item(button)
+        content = "\n".join(lines)[:1900]
+        if channel is None:
+            await source.followup.send(content, view=view, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await channel.send(content, view=view, allowed_mentions=discord.AllowedMentions.none())
 
     def remember_task(self, interaction, detail):
         key = (interaction.guild_id, interaction.channel_id, interaction.user.id, detail["task"]["id"])
@@ -515,6 +568,9 @@ class PrimeFlowBot(discord.Client):
             # Remember the order first: a closed task leaves the list.
             order = [task["id"] for task in await self.today(interaction)] if closing and in_place(interaction) and not ui.report_card_origin(getattr(interaction, 'message', None)) else None
             result = await self.apply(interaction, task_id, fingerprint, actions, instruction)
+            if result.get("reporting_choice_id"):
+                await self.show_reporting_choice(interaction, result)
+                return
             if result.get("slot_confirmation_id"):
                 await self.show_slot_confirmation(interaction, result)
                 return
@@ -939,6 +995,9 @@ class PrimeFlowBot(discord.Client):
             if result.get("status") == "MEETING_DRAFT":
                 await channel.send(result["message"], embed=ui.meeting_draft_card(result["meeting"]),
                     view=ui.meeting_draft_view(result["draft_id"]))
+                return
+            if result.get("reporting_choice_id"):
+                await self.show_reporting_choice(message, result, channel=channel)
                 return
             if result.get("slot_confirmation_id"):
                 await self.show_slot_confirmation(message, result, channel=channel)

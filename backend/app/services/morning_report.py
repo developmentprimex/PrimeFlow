@@ -416,7 +416,7 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         if title == GA_PF_COMMENTS_TITLE and body.strip() in {"", "(Ploteso manualisht)"}:
             body = _default_body(title)
         if title == REORGANIZATION_TITLE:
-            body = _normalize_reorganization_body(body)
+            body = normalize_morning_reorganization_body(body)
         if title not in by_title:
             visible_title = SECTION_DISPLAY_TITLES.get(title, title)
             if (section_key and raw_title != title
@@ -467,7 +467,7 @@ def _split_pv_table(body: str) -> tuple[str, str]:
     return "", body
 
 
-def _normalize_reorganization_body(body: str) -> str:
+def normalize_morning_reorganization_body(body: str, *, include_empty_follow_ups: bool = False) -> str:
     fields = dict(field.split(":", 1) for field in re.split(r"\n(?=\S)", body) if ":" in field)
     if body.strip() not in {"", "(Ploteso manualisht)"} and not fields.keys() & {
         "BZ M1", "KOMENT", *REORGANIZATION_WORKLOAD_LABELS, REORGANIZATION_PLAN_LABEL,
@@ -486,8 +486,8 @@ def _normalize_reorganization_body(body: str) -> str:
         "KOMENT:" + fields.get("KOMENT", ""),
         *(f"{label}: {'PO' if fields.get(label, '').strip() == 'PO' else 'JO'}"
           for label in REORGANIZATION_WORKLOAD_LABELS),
-        *(label + ":" + fields[label] for label in (REORGANIZATION_PLAN_LABEL, REORGANIZATION_CAUSE_LABEL)
-          if label in fields),
+        *(label + ":" + fields.get(label, "") for label in (REORGANIZATION_PLAN_LABEL, REORGANIZATION_CAUSE_LABEL)
+          if include_empty_follow_ups or label in fields),
     ])
 
 
@@ -512,31 +512,33 @@ def morning_has_absence_or_delay(sections: list[dict[str, str]]) -> bool:
     return False
 
 
+def visible_morning_reorganization_fields(body: str, has_attendance_issue: bool) -> list[str]:
+    # Saved answers retain their values when a follow-up is temporarily hidden.
+    fields = re.split(r"\n(?=\S)", normalize_morning_reorganization_body(body))
+    fields_by_label = {field.partition(":")[0]: field for field in fields}
+    needs_plan = has_attendance_issue or any(
+        fields_by_label.get(label, "").partition(":")[2].strip() == "PO"
+        for label in REORGANIZATION_WORKLOAD_LABELS
+    )
+    for label, show in (
+        (REORGANIZATION_PLAN_LABEL, needs_plan),
+        (REORGANIZATION_CAUSE_LABEL, has_attendance_issue),
+    ):
+        saved = fields_by_label.get(label)
+        if not show and saved is not None:
+            fields.remove(saved)
+        elif show and saved is None:
+            fields.append(f"{label}:")
+    return fields
+
+
 def _morning_delivery_sections(sections: list[dict[str, str]]) -> list[dict[str, str]]:
     has_attendance_issue = morning_has_absence_or_delay(sections)
-    result = []
-    for section in sections:
-        if (section.get("section_key") or section.get("title")) != REORGANIZATION_TITLE:
-            result.append(section)
-            continue
-        # Saved answers retain their values when a follow-up is temporarily hidden.
-        fields = re.split(r"\n(?=\S)", _normalize_reorganization_body(section.get("body") or ""))
-        fields_by_label = {field.partition(":")[0]: field for field in fields}
-        needs_plan = has_attendance_issue or any(
-            fields_by_label.get(label, "").partition(":")[2].strip() == "PO"
-            for label in REORGANIZATION_WORKLOAD_LABELS
-        )
-        for label, show in (
-            (REORGANIZATION_PLAN_LABEL, needs_plan),
-            (REORGANIZATION_CAUSE_LABEL, has_attendance_issue),
-        ):
-            saved = fields_by_label.get(label)
-            if not show and saved is not None:
-                fields.remove(saved)
-            elif show and saved is None:
-                fields.append(f"{label}:")
-        result.append({**section, "body": "\n".join(fields)})
-    return result
+    return [
+        {**section, "body": "\n".join(visible_morning_reorganization_fields(section.get("body") or "", has_attendance_issue))}
+        if (section.get("section_key") or section.get("title")) == REORGANIZATION_TITLE else section
+        for section in sections
+    ]
 
 
 def preserve_morning_plan_note(
@@ -557,7 +559,7 @@ def preserve_morning_plan_note(
         if key == title:
             section = {**section, "body": preserve_keyed_line(section["body"], saved, "NDRYSHON PLANI")}
         elif key == REORGANIZATION_TITLE and saved_reorganization is not None:
-            section = {**section, "body": _normalize_reorganization_body(saved_reorganization)}
+            section = {**section, "body": normalize_morning_reorganization_body(saved_reorganization)}
         result.append(section)
     return result
 
@@ -1040,14 +1042,7 @@ async def _load_symbol_comments(
     return rows
 
 
-async def refresh_morning_task_tables(
-    db: AsyncSession,
-    sections: list[dict[str, str]],
-    report_day: date,
-    *,
-    task_feedback_overrides: dict | None = None,
-) -> list[dict[str, Any]]:
-    """Refresh the auto-filled task tables in an existing M1 draft."""
+async def _morning_task_context(db: AsyncSession, report_day: date) -> tuple:
     tasks = (await db.execute(select(Task).where(Task.work_staff_filter()).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
@@ -1057,6 +1052,25 @@ async def refresh_morning_task_tables(
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
     await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task, department_codes)
+    return tasks, names, assignee_ids_by_task, department_codes
+
+
+async def morning_task_feedback_table(
+    db: AsyncSession, report_day: date, overrides: dict | None = None,
+) -> tuple[str, dict]:
+    tasks, names, owners, department_codes = await _morning_task_context(db, report_day)
+    return await _ga_hv_dv_task_section(db, tasks, names, owners, report_day, department_codes, overrides or {})
+
+
+async def refresh_morning_task_tables(
+    db: AsyncSession,
+    sections: list[dict[str, str]],
+    report_day: date,
+    *,
+    task_feedback_overrides: dict | None = None,
+) -> list[dict[str, Any]]:
+    """Refresh the auto-filled task tables in an existing M1 draft."""
+    tasks, names, assignee_ids_by_task, department_codes = await _morning_task_context(db, report_day)
     body, feedback_rows = await _ga_hv_dv_task_section(
         db, tasks, names, assignee_ids_by_task, report_day, department_codes, task_feedback_overrides or {},
     )

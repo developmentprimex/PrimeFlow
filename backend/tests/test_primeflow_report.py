@@ -849,6 +849,8 @@ class PrimeFlowReportTests(unittest.TestCase):
                 "14:10 SLOTI 28.07.2026",
                 "11:50 SLOTI PARAPRAK 28.07.2026",
                 "BLLOK 14:30-16:00 28.07.2026",
+                "DET 08:00 · PROGRESI",
+                "DET DL AM · PROGRESI",
             ],
         )
         self.assertEqual(document.task_count, 3)
@@ -884,8 +886,7 @@ class PrimeFlowReportTests(unittest.TestCase):
                 ]
                 if current == "14:10":
                     expected_titles.append("BLLOK 14:30-16:00 28.07.2026")
-                elif current in {"11:00", "11:50"}:
-                    expected_titles.append(f"DET {'08:00' if current == '11:00' else 'DL AM'} · PROGRESI")
+                expected_titles.extend(["DET 08:00 · PROGRESI", "DET DL AM · PROGRESI"])
                 self.assertEqual([section.title for section in document.sections], expected_titles)
                 self.assertEqual(document.task_count, 2)
 
@@ -895,26 +896,29 @@ class PrimeFlowReportTests(unittest.TestCase):
         day = date(2026, 7, 28)
         common = {"date": day.isoformat(), "due_date": day.isoformat(), "person": "Anisa Test"}
         first = {**common, "task_id": "early", "title": "08:00 Oferta", "status": "DONE",
-                 "completed_at": f"{day}T08:30:00+02:00"}
+                 "completed_at": f"{day}T10:30:00+02:00"}
         am = {**common, "task_id": "am", "title": "Plani", "status": "IN_PROGRESS",
               "is_deadline_important": True, "finish_period": "AM"}
         pm = {**am, "task_id": "pm", "finish_period": "PM"}
         early_copy = {**first, "id": "early-previous-day", "date": "2026-07-27"}
         data = {"items": {"oneH": [early_copy], "important": [am, pm]}, "morning_follow_up_tasks": [first]}
-        for slot, row, status in (("11:00", first, "DONE"), ("11:50", am, "IN_PROGRESS")):
+        for slot, group, row, status in (
+            ("11:00", "08:00", first, "DONE"), ("11:50", "DL AM", am, "IN_PROGRESS"),
+        ):
             comment = "AT: Pragu < 50%"
             document = build_report_document(
                 data, day, slot, completion_window_start=strike_interval_start(day, slot),
                 completion_window_end=strike_interval_end(day, slot),
                 morning_follow_up_comments={row["task_id"]: comment},
             )
-            follow_up = next(section for section in document.sections if section.morning_follow_up)
+            follow_up = next(section for section in document.sections if section.title == f"DET {group} · PROGRESI")
             self.assertTrue(follow_up.morning_follow_up)
             self.assertEqual([(task.task_id, task.status) for person in follow_up.employees for task in person.tasks],
                              [(row["task_id"], status)])
             self.assertEqual(follow_up.employees[0].tasks[0].due_date, day)
             self.assertIn("AT: Pragu &lt; 50%", render_html(document))
-            follow_up_html = render_html(document).split('data-morning-follow-up-table="true"', 1)[1].split("</table>", 1)[0]
+            tables = render_html(document).split('data-morning-follow-up-table="true"')[1:]
+            follow_up_html = tables[0 if group == "08:00" else 1].split("</table>", 1)[0]
             self.assertIn("table-layout:fixed", follow_up_html)
             self.assertIn('<colgroup><col style="width:40px"><col style="width:60px"><col style="width:60px">', follow_up_html)
             self.assertIn('data-report-marker-host="true"', follow_up_html)
@@ -941,6 +945,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         task = {"task_id": task_id, "date": day.isoformat(), "due_date": day.isoformat(),
                 "person": "Anisa Test", "title": "Morning deadline", "status": "IN_PROGRESS",
                 "is_deadline_important": True, "finish_period": "AM"}
+        early = {**task, "task_id": str(uuid.uuid4()), "title": "08:00 Oferta", "is_deadline_important": False}
         db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [
             ("11:50", {"tasks": [{"id": task_id, "follow_up": "DL AM", "answer": "Pres konfirmimin."}]}, "Anisa Test", "anisa"),
             ("14:20", {"tasks": [{"id": task_id, "follow_up": "DL AM", "answer": "Po pres ofertën."}]}, "Anisa Test", "anisa"),
@@ -953,8 +958,10 @@ class PrimeFlowReportTests(unittest.TestCase):
             load_1h_reminder_questions=AsyncMock(return_value=[]),
             load_undiscussed_notes=AsyncMock(return_value=[]),
             _report_snapshot_with_fallback=AsyncMock(return_value={"titles": {}, "descriptions": {}, "events": {}}),
-        ), patch.object(follow_up, "load_morning_task_rows", AsyncMock(return_value=[task])):
+        ), patch.object(follow_up, "load_morning_task_rows", AsyncMock(return_value=[task, early])):
             for slot, expected in (
+                ("10:00", ""),
+                ("11:00", ""),
                 ("11:50", "11:50 · Anisa Test: Pres konfirmimin."),
                 ("14:10", "14:20 · Anisa Test: Po pres ofertën."),
                 ("14:20", "14:20 · Anisa Test: Po pres ofertën."),
@@ -962,6 +969,8 @@ class PrimeFlowReportTests(unittest.TestCase):
             ):
                 with self.subTest(slot=slot):
                     document = asyncio.run(delivery.generate_fresh(day, slot, {"to": ["test@example.test"]}, data={"items": {}}))
+                    early_section = next(section for section in document.sections if section.title == "DET 08:00 · PROGRESI")
+                    self.assertEqual(early_section.employees[0].tasks[0].task_id, early["task_id"])
                     section = next(section for section in document.sections if section.title == "DET DL AM · PROGRESI")
                     self.assertEqual(section.employees[0].tasks[0].follow_up_comment, expected)
                     rendered = render_html(document)
@@ -993,34 +1002,41 @@ class PrimeFlowReportTests(unittest.TestCase):
                     "is_deadline_important": True, "finish_period": "AM"}
         future = {**early, "task_id": "future", "start_date": "2026-07-29"}
         data = {"morning_follow_up_tasks": [early, deadline, future]}
-        for slot, expected in (("11:00", ["early"]), ("11:50", ["am"]),
-                               ("14:10", []), ("14:20", []), ("16:00", [])):
+        for slot in ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00"):
             with self.subTest(slot=slot):
                 report = build_report_document(data, day, slot)
                 self.assertEqual([
                     task.task_id for section in report.sections if section.morning_follow_up
                     for employee in section.employees for task in employee.tasks
-                ], expected)
+                ], ["early", "am"])
+                self.assertEqual(render_html(report).count('data-morning-follow-up-table="true"'), 2)
 
-    def test_due_today_open_morning_tasks_carry_to_later_reports(self):
+    def test_morning_follow_up_tables_show_done_only_in_the_completion_window(self):
         day = date(2026, 7, 28)
         common = {"date": day.isoformat(), "due_date": day.isoformat(), "person": "Anisa Test"}
         early = {**common, "task_id": "early", "title": "08:00 Open", "status": "TODO"}
         am = {**common, "task_id": "am", "title": "AM Deadline", "status": "IN_PROGRESS",
               "is_deadline_important": True, "finish_period": "AM"}
-        done = {**early, "task_id": "done", "status": "DONE"}
+        done = {**early, "task_id": "done", "status": "DONE", "completed_at": f"{day}T11:00:00+02:00"}
+        done_am = {**am, "task_id": "done-am", "status": "DONE", "completed_at": f"{day}T11:35:00+02:00"}
         tomorrow = {**am, "task_id": "future", "due_date": "2026-07-29"}
-        data = {"morning_follow_up_tasks": [early, am, done, tomorrow]}
-        for slot in ("11:50", "14:10", "14:20", "16:00"):
-            document = build_report_document(data, day, slot, morning_follow_up_comments={"early": "AT: Në punë"})
-            tasks_by_section = {
-                section.title: [task.task_id for employee in section.employees for task in employee.tasks]
-                for section in document.sections if section.morning_follow_up
-            }
-            self.assertEqual(tasks_by_section, {
-                "DET 08:00 · PROGRESI": ["early"], "DET DL AM · PROGRESI": ["am"],
-            })
-            self.assertIn("AT: Në punë", render_html(document))
+        data = {"morning_follow_up_tasks": [early, am, done, done_am, tomorrow]}
+        for slot in ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00"):
+            with self.subTest(slot=slot):
+                document = build_report_document(
+                    data, day, slot, completion_window_start=strike_interval_start(day, slot),
+                    completion_window_end=strike_interval_end(day, slot),
+                    morning_follow_up_comments={"early": "AT: Në punë"},
+                )
+                tasks_by_section = {
+                    section.title: {task.task_id for employee in section.employees for task in employee.tasks}
+                    for section in document.sections if section.morning_follow_up
+                }
+                self.assertEqual(tasks_by_section, {
+                    "DET 08:00 · PROGRESI": {"early", "done"} if slot == "11:00" else {"early"},
+                    "DET DL AM · PROGRESI": {"am", "done-am"} if slot == "11:50" else {"am"},
+                })
+                self.assertIn("AT: Në punë", render_html(document))
 
     def test_html_has_a_clear_separator_between_report_sections(self) -> None:
         data = {
@@ -1032,8 +1048,8 @@ class PrimeFlowReportTests(unittest.TestCase):
             ]},
         }
         html = render_html(build_report_document(data, date(2026, 7, 28), "14:10"))
-        # Current slot, prior slot, and BLL need two unmistakable dividers.
-        self.assertEqual(html.count('data-report-section-separator="true"'), 2)
+        # Separate current slot, prior slot, BLL, and both progress tables.
+        self.assertEqual(html.count('data-report-section-separator="true"'), 4)
 
     def test_employee_names_are_uppercase_initials(self) -> None:
         self.assertEqual(employee_initials("Anisa Tërnava"), "AT")
@@ -1118,7 +1134,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         }
 
         document = build_report_document(data, date(2026, 7, 28), "14:10")
-        blocked_section = document.sections[-1]
+        blocked_section = next(section for section in document.sections if section.title.startswith("BLLOK "))
         self.assertEqual(blocked_section.title, "BLLOK 14:30-16:00 28.07.2026")
         self.assertEqual([employee.name for employee in blocked_section.employees], ["ZDF", "ADF", "BP"])
 

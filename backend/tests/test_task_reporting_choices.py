@@ -73,6 +73,49 @@ def test_shared_task_assignees_reads_active_siblings_by_identity(monkeypatch):
     assert "tasks.is_active IS true" in str(db.scalars.await_args.args[0])
 
 
+@pytest.mark.parametrize("report_day", [DAY, date(2026, 11, 24)])
+def test_task_type_differences_compare_only_linked_copies(monkeypatch, report_day):
+    first, second, third = uuid4(), uuid4(), uuid4()
+    names = {first: "First Person", second: "Second Person", third: "Third Person"}
+    group_id, project_id = uuid4(), uuid4()
+    tasks = [
+        SimpleNamespace(id=uuid4(), assigned_to=owner, is_active=True, fast_task_group_id=group,
+                        project_id=project_id, title="Detyrë e përbashkët", one_h_report_slot=None,
+                        one_h_marker=None, is_bllok=bllok, is_1h_report=not bllok)
+        for owner, group, bllok in (
+            (first, group_id, True), (second, group_id, False), (third, uuid4(), False),
+        )
+    ]
+    monkeypatch.setattr(choices, "choice_members", AsyncMock(return_value=(
+        {task.id: {task.assigned_to} for task in tasks}, names,
+    )))
+    monkeypatch.setattr(choices, "slot_values", AsyncMock(return_value={}))
+    monkeypatch.setattr(choices, "personal_choices", AsyncMock(return_value={}))
+    now = datetime(2026, 11, 25, 14, tzinfo=timezone.utc)
+    history = SimpleNamespace(
+        id=uuid4(), entity_id=tasks[1].id, action="task_type", created_at=now,
+        after={"date": report_day.isoformat(), "owner_id": str(second), "value": "1H", "reason": "Për raportim"},
+    )
+
+    def run():
+        db = SimpleNamespace(scalars=AsyncMock(side_effect=[
+            SimpleNamespace(all=lambda: [history]), SimpleNamespace(all=lambda: tasks),
+        ]))
+        return [row for row in asyncio.run(
+            choices.reporting_differences(db, report_day, now, marker_day=DAY, slot_day=report_day),
+        ) if row["field"] == "task_type"]
+
+    rows = run()
+    assert {(row["person"], row["label"], row["date"]) for row in rows} == {
+        (names[first], "BLL", report_day.isoformat()), (names[second], "1H", report_day.isoformat()),
+    }
+    assert next(row["reason"] for row in rows if row["person"] == names[second]) == "Për raportim"
+
+    tasks[0].is_bllok = False
+    tasks[0].is_1h_report = True
+    assert run() == []
+
+
 def test_slot_difference_requires_reason_and_keeps_the_first_assignees_slot(monkeypatch):
     first, second = uuid4(), uuid4()
     task = SimpleNamespace(id=uuid4(), title="Detyra e përbashkët", assigned_to=first, is_active=True,
@@ -130,3 +173,62 @@ def test_marker_removal_from_one_copy_warns_and_display_applies_explicit_null(mo
     }, second)
     assert dto.one_h_marker is None
     assert dto.one_h_report_slot is None
+
+
+def test_changing_one_copy_requires_a_reason_for_the_other_task_type(monkeypatch):
+    first, second = uuid4(), uuid4()
+    task = SimpleNamespace(id=uuid4(), title="Punë e përbashkët", assigned_to=first, is_active=True)
+    peer = SimpleNamespace(id=uuid4(), assigned_to=second, is_active=True, is_bllok=True)
+    monkeypatch.setattr(choices, "choice_members", AsyncMock(return_value=(
+        {task.id: {first}, peer.id: {second}}, {first: "First Person", second: "Second Person"},
+    )))
+    saved = []
+    db = SimpleNamespace(add=saved.append)
+    actor = SimpleNamespace(id=first, full_name="First Person")
+
+    async def change(confirmation=None):
+        return await choices.check_task_type_change(
+            db, task, [task, peer], actor, {"is_1h_report": True}, DAY, confirmation,
+        )
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(change())
+    assert error.value.detail["peers"][0]["label"] == "BLL"
+    assert saved == []
+    asyncio.run(change({"key": error.value.detail["key"], "reason": "Raportohet në 11:00."}))
+    assert saved[0].after["reason"] == "Raportohet në 11:00."
+
+
+def test_note_bundle_confirms_each_divergent_choice_without_reasking_for_unchanged_fields(monkeypatch):
+    from app.schemas.ga_note import GaNoteTaskBundleUpdate
+
+    first, second = uuid4(), uuid4()
+    note = uuid4()
+    tasks = [
+        SimpleNamespace(id=uuid4(), assigned_to=owner, is_active=True, ga_note_origin_id=note,
+                        project_id=None, title="Punë e përbashkët", one_h_report_slot="10:00",
+                        one_h_marker="M2", is_1h_report=True)
+        for owner in (first, second)
+    ]
+    monkeypatch.setattr(choices, "choice_members", AsyncMock(return_value=(
+        {task.id: {task.assigned_to} for task in tasks}, {first: "First", second: "Second"},
+    )))
+    monkeypatch.setattr(choices, "slot_values", AsyncMock(return_value={}))
+    payload = GaNoteTaskBundleUpdate(assignee_states=[{
+        "assignee_id": first, "status": "TODO", "one_h_report_slot": "11:50",
+        "one_h_marker": "M3", "is_1h_report": True,
+    }])
+    actor = SimpleNamespace(id=first, full_name="First")
+
+    for field, expected in (("slot", "10:00"), ("marker", "M2")):
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(choices.check_note_reporting_choices(SimpleNamespace(add=lambda _: None), tasks, payload, actor))
+        detail = error.value.detail
+        assert detail["confirmation_field"] == f"{field}:{first}"
+        assert detail["peers"][0]["label"] == expected
+        payload.reporting_choice_confirmations[detail["confirmation_field"]] = {
+            "key": detail["key"], "reason": "Rregullimi i raportimit",
+        }
+    saved = []
+    asyncio.run(choices.check_note_reporting_choices(SimpleNamespace(add=saved.append), tasks, payload, actor))
+    assert [row.action for row in saved] == ["slot", "marker"]

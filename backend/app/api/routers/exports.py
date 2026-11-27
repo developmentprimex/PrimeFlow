@@ -72,6 +72,8 @@ from app.services.daily_report_logic import (
 )
 from app.services.ga_time_table import get_ga_time_table_rows, get_ga_time_table_tasks
 from app.services.development_m1 import DEVELOPMENT_CHECKLIST_KEY, build_development_m1
+from app.services.development_reorganization import read_development_reorganization
+from app.services.morning_report import REORGANIZATION_TITLE, normalize_morning_reorganization_body
 from app.services.development_m2 import build_development_m2
 from app.services.development_m3 import build_development_m3
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
@@ -3834,7 +3836,7 @@ async def export_department_internal_meetings_xlsx(
     )
     development_m2 = (
         await build_development_m2(db, user, checklist_items=all_items)
-        if group_key == DEVELOPMENT_CHECKLIST_KEY and any(item.day == "M2" for item in all_items) else None
+        if group_key == DEVELOPMENT_CHECKLIST_KEY else None
     )
     development_m3 = (
         await build_development_m3(db, user, checklist_items=all_items)
@@ -3909,15 +3911,27 @@ async def export_department_internal_meetings_xlsx(
             )
         row_idx += 1
 
-        rows = slot_items or [None]
-        for item_index, item in enumerate(rows, start=1):
-            answer = sections.get(item_sections.get(str(item.id))) if item else None
-            values = (
-                [item_index, answer["title"] if answer and answer["key"] == "ka_gent" else item_titles.get(str(item.id), item.title or ""),
-                 "\u2713" if item.is_checked else ""]
-                if item is not None
-                else ["", "No checklist items", ""]
+        rows = []
+        for item_index, item in enumerate(slot_items, start=1):
+            answer = sections.get(item_sections.get(str(item.id)))
+            item_title = answer["title"] if answer and answer["key"] == "ka_gent" else item_titles.get(str(item.id), item.title or "")
+            rows.append(([item_index, item_title, "\u2713" if item.is_checked else ""], answer))
+        if slot_key in {"M1", "M2"} and report is not None:
+            reorganization_body = await read_development_reorganization(
+                db, "m1" if slot_key == "M1" else "m2", date.fromisoformat(report["date"]),
             )
+            body = normalize_morning_reorganization_body(
+                reorganization_body, include_empty_follow_ups=True,
+            )
+            fields = re.split(r"\n(?=\S)", body)
+            rows.append(([len(rows) + 1, REORGANIZATION_TITLE, ""], {
+                "rows": [{"title": field.replace("\n ", "\n"), "detail": ""} for field in fields],
+                "message": None,
+            }))
+        if not rows:
+            rows.append((["", "No checklist items", ""], None))
+
+        for item_index, (values, answer) in enumerate(rows, start=1):
             for col_idx, value in enumerate(values, start=1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 if isinstance(value, str):

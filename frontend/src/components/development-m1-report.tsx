@@ -6,6 +6,7 @@ import { ChevronDown, Minus, Plus } from "lucide-react"
 import { toast } from "sonner"
 
 import { OriginalEmailLink } from "@/components/note-email-preview"
+import { MorningReorganization, REORGANIZATION_SECTION } from "@/components/morning-reorganization"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { TaskMarkerDisplay } from "@/components/task-marker-display"
@@ -168,9 +169,88 @@ export function useDevelopmentMeetingReport(slot: "M1" | "M2" | "M3", enabled: b
   }
 
   return {
-    report, loading, failed, savingNote, updateNote, savingMeeting, updateMeetingStatus,
+    report, loading, failed, savingNote, updateNote, savingMeeting, updateMeetingStatus, refresh,
     reload: () => setRefresh((previous) => previous + 1),
   }
+}
+
+type DevelopmentReorganization = { date: string; body: string; can_edit: boolean }
+
+export function DevelopmentMeetingReorganization({ slot, refresh, reload }: {
+  slot: "M1" | "M2"
+  refresh: number
+  reload: () => void
+}) {
+  const { apiFetch } = useAuth()
+  const path = `/departments/development/${slot.toLowerCase()}/reorganization`
+  const [report, setReport] = useState<DevelopmentReorganization | null>(null)
+  const [draft, setDraft] = useState<{ date: string; body: string } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const body = draft && draft.date === report?.date ? draft.body : report?.body ?? ""
+
+  useEffect(() => {
+    if (saving) return
+    const controller = new AbortController()
+    async function load() {
+      setLoading(true)
+      setFailed(false)
+      try {
+        const response = await apiFetch(path, { cache: "no-store", signal: controller.signal })
+        if (!response.ok) throw new Error("Reorganization request failed")
+        const data: DevelopmentReorganization = await response.json()
+        if (!controller.signal.aborted) setReport(data)
+      } catch {
+        if (!controller.signal.aborted) setFailed(true)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    void load()
+    return () => controller.abort()
+  }, [apiFetch, path, refresh, saving])
+
+  async function save() {
+    if (!report?.can_edit || loading || failed || saving) return
+    setSaving(true)
+    try {
+      const response = await apiFetch(path, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ report_date: report.date, body }),
+      })
+      if (response.status === 409) throw new Error("Data e raportit ndryshoi. Rifresko dhe provo përsëri.")
+      if (!response.ok) throw new Error("Përgjigjja e riorganizimit nuk u ruajt.")
+      const saved: { body: string } = await response.json()
+      setReport({ ...report, body: saved.body })
+      setDraft(null)
+      toast.success("Përgjigjja e riorganizimit u ruajt.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Përgjigjja e riorganizimit nuk u ruajt.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section aria-label={REORGANIZATION_SECTION}
+      className="rounded-xl border border-slate-200 bg-background p-4">
+      <h3 className="text-sm font-semibold">{REORGANIZATION_SECTION}</h3>
+      {failed ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p role="alert" className="text-sm text-destructive">Përgjigjja e riorganizimit nuk u ngarkua.</p>
+          <Button type="button" variant="outline" size="sm" onClick={reload}>Rifresko riorganizimin</Button>
+        </div>
+      ) : !report ? (
+        <p className="mt-2 text-sm text-muted-foreground">Po ngarkohet përgjigjja e ruajtur.</p>
+      ) : null}
+      <MorningReorganization body={body} showAllFollowUps
+        readOnly={report?.can_edit !== true} saving={saving} saveDisabled={loading || failed}
+        onChange={(next) => { if (report) setDraft({ date: report.date, body: next }) }}
+        onSave={() => void save()} />
+    </section>
+  )
 }
 
 function meetingAppearance(meeting: M1Meeting) {

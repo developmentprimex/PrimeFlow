@@ -21,7 +21,8 @@ from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
 from app.services.m2_reporting_points import (
-    MANUAL_POINTS, get_settings, locked_report, refresh_report, render_html,
+    MANUAL_POINTS, REORGANIZATION_BODY_LIMIT, get_settings, locked_report, refresh_report, render_html,
+    reorganization_export_fields,
     render_plain_text, report_payload, current_report_payload, send_report, report_attachments,
 )
 
@@ -65,7 +66,11 @@ class ManualAnswersPayload(BaseModel):
                 raise ValueError("Zgjedhja duhet te jete PO ose JO.")
             if prefix.endswith("_reason") and value[key] and value[key] not in REASON_LABELS:
                 raise ValueError("Arsye e panjohur.")
-        if any(len(answer) > 10000 for answer in value.values()):
+        reorganization = value.get("reorganization", "")
+        if (len(reorganization) > REORGANIZATION_BODY_LIMIT
+                or any(len(field.partition(":")[2].removeprefix(" ")) > 10_000
+                       for field in reorganization_export_fields(reorganization))
+                or any(len(answer) > 10_000 for key, answer in value.items() if key != "reorganization")):
             raise ValueError("Pergjigjja nuk mund te kete mbi 10000 karaktere.")
         return value
 
