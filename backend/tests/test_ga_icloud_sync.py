@@ -122,6 +122,40 @@ class TestGaIcloudSync(unittest.TestCase):
 
 
 class TestGaIcloudReminderImport(unittest.IsolatedAsyncioTestCase):
+    async def test_import_stores_weekend_items_within_sync_window(self) -> None:
+        saturday = date(2026, 9, 5)
+        sunday = date(2026, 9, 6)
+        connection = SimpleNamespace(
+            id=uuid.uuid4(), ga_user_id=uuid.uuid4(), calendar_name="Calendar", reminder_list_name="REMINDER"
+        )
+        db = SimpleNamespace(execute=AsyncMock(return_value=Mock(all=Mock(return_value=[]))), add_all=Mock(), commit=AsyncMock())
+        payload = GaIcloudSyncImport.model_validate({
+            "sync_window_start": saturday,
+            "sync_window_end": sunday,
+            "calendar_name": "Calendar",
+            "reminder_list_name": "REMINDER",
+            "events": [
+                {"title": "Weekend event", "starts_at": f"{day}T09:00:00+02:00"}
+                for day in (saturday, sunday, date(2026, 9, 7))
+            ],
+            "reminders": [
+                {"title": "Weekend reminder", "due_date": day}
+                for day in (saturday, sunday, date(2026, 9, 4))
+            ],
+        })
+        with (
+            patch.object(ga_time_slots, "_connection_from_sync_token", AsyncMock(return_value=connection)),
+            patch.object(ga_time_slots, "get_ga_time_table_rows", AsyncMock(return_value=[])),
+        ):
+            result = await ga_time_slots.import_icloud_timetable_data(payload, "test-token", db)
+
+        self.assertEqual((result.calendar_imported, result.reminders_imported, result.skipped), (2, 2, 2))
+        self.assertCountEqual(
+            [(entry.source_type, entry.day_date) for entry in db.add_all.call_args.args[0]],
+            [(source, day) for source in ("calendar", "reminder") for day in (saturday, sunday)],
+        )
+        db.commit.assert_awaited_once()
+
     async def test_import_preserves_completed_reopened_and_legacy_reminders(self) -> None:
         connection = SimpleNamespace(
             id=uuid.uuid4(), ga_user_id=uuid.uuid4(), calendar_name="Calendar", reminder_list_name="REMINDER"

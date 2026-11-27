@@ -1067,7 +1067,7 @@ async def import_icloud_timetable_data(
             zone=zone,
             rows=time_rows,
         )
-        if not payload.sync_window_start <= item.day_date <= payload.sync_window_end or item.day_date.weekday() > 4:
+        if not payload.sync_window_start <= item.day_date <= payload.sync_window_end:
             skipped += 1
             continue
         prepared.append(item)
@@ -1089,7 +1089,7 @@ async def import_icloud_timetable_data(
             is_completed=reminder.is_completed,
             original_due_at=reminder.original_due_at,
         )
-        if not payload.sync_window_start <= item.day_date <= payload.sync_window_end or item.day_date.weekday() > 4:
+        if not payload.sync_window_start <= item.day_date <= payload.sync_window_end:
             skipped += 1
             continue
         prepared.append(item)
@@ -1321,6 +1321,7 @@ async def list_ga_time_slots(
                 GaTimeSlotEntry.sync_connection_id.is_not(None),
                 GaTimeSlotEntry.day_date >= week_start,
                 GaTimeSlotEntry.day_date <= week_end,
+                GaTimeSlotEntry.falls_on_weekday(),
             )
             .order_by(GaTimeSlotEntry.day_date, GaTimeSlotEntry.start_time, GaTimeSlotEntry.created_at)
         )

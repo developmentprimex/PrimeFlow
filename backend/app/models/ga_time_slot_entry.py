@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     String,
     Time,
+    extract,
     false,
     func,
 )
@@ -55,3 +56,7 @@ class GaTimeSlotEntry(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    @classmethod
+    def falls_on_weekday(cls):
+        return extract("dow", cls.day_date).between(1, 5)

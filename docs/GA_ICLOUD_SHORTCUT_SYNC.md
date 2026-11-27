@@ -10,8 +10,9 @@ PrimeFlow ruan kërkesën derisa Shortcut-i ta kryejë në iPhone dhe ta konfirm
 - Timezone: `Europe/Berlin`
 
 Serveri refuzon emra të tjerë edhe nëse Shortcut-i dërgon të dhëna nga një listë
-ose kalendar tjetër. Të dhënat e së shtunës dhe së dielës anashkalohen, sepse GA
-Time Table paraqet javën e punës nga e hëna në të premte.
+ose kalendar tjetër. Serveri importon të dhënat për të shtatë ditët brenda
+intervalit të sinkronizimit. GA Time Table, printimi, eksporti Excel dhe agjenda
+e Asistentes GA shfaqin hyrjet e importuara nga e hëna në të premte.
 
 ## 1. Aktivizimi në PrimeFlow
 

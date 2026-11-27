@@ -525,6 +525,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   njëjtit interval. Kur zgjerohet dritarja e Shortcut-it, kontrollo që të dyja
   listat të mbulojnë intervalin dhe verifiko hyrjet e importuara në eksportin
   `ga-time.xlsx` dhe në tabelën GA të emailit 1H (HTML dhe PNG).
+  Calendar dhe Reminders importohen edhe në fundjavë. Hyrjet e fundjavës ruhen
+  në databazë. API-ja e Time Table (përfshirë printimin ditor të NEWS-PX),
+  eksporti Excel dhe agjenda e Asistentes GA filtrojnë hyrjet e importuara
+  sipas ditëve të punës. Tabelat 1H HTML dhe PNG përdorin pesë datat e javës së punës.
   Importi ruan `is_completed` për Reminders. GA Time Table dhe printimi ditor
   që përdor PDF-ja e NEWS-PX shfaqin `✓ Done`. Eksporti `ga-time.xlsx`,
   bashkëngjitjet GA të 1H dhe agjenda e Asistentes GA i përjashtojnë hyrjet e

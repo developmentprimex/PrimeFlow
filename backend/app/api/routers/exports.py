@@ -1608,6 +1608,7 @@ async def export_ga_time_xlsx(
                 GaTimeSlotEntry.is_completed.is_(False),
                 GaTimeSlotEntry.day_date >= week_dates[0],
                 GaTimeSlotEntry.day_date <= week_dates[-1],
+                GaTimeSlotEntry.falls_on_weekday(),
             )
             .order_by(GaTimeSlotEntry.day_date, GaTimeSlotEntry.start_time, GaTimeSlotEntry.created_at)
         )
