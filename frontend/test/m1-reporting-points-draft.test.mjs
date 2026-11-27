@@ -15,7 +15,7 @@ function memoryStorage() {
 
 test("M1 manual answers survive reload only for their report day", () => {
   const storage = memoryStorage()
-  const answers = { plan_changes: "Po, prioritet i ri", reorganization: "Jo" }
+  const answers = { reorganization_form: "BZ M1: JO" }
   writeManualDraft(storage, "user-1", "2026-10-13", answers)
   assert.deepEqual(readManualDraft(storage, "user-1", "2026-10-13"), answers)
   assert.equal(readManualDraft(storage, "user-1", "2026-10-14"), null)
@@ -29,10 +29,13 @@ test("M1 moves to tomorrow only after today's edits are saved", () => {
   assert.equal(shouldAdvanceReportDay("2026-10-12", "2026-10-13", "2026-10-14", false), false)
 })
 
-test("M1 saves only locally changed answers so an MCP update to a different answer survives", () => {
+test("M1 draft saves ignore the retired plan change answer", () => {
   const original = { plan_changes: "Jo", reorganization: "Jo" }
-  assert.deepEqual(changedManualAnswers(original, { ...original, plan_changes: "Po" }), { plan_changes: "Po" })
+  assert.deepEqual(changedManualAnswers(original, { ...original, plan_changes: "Po" }), {})
   assert.deepEqual(changedManualAnswers(original, { plan_changes: "Jo" }), { reorganization: "" })
+  const storage = memoryStorage()
+  writeManualDraft(storage, "user-1", "2026-10-13", original)
+  assert.deepEqual(readManualDraft(storage, "user-1", "2026-10-13"), { reorganization: "Jo" })
 })
 
 test("M1 refreshes today's unsent report when task columns or order are old", () => {

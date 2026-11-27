@@ -5,9 +5,7 @@ import { MorningTaskFeedback, type TaskFeedback, type TaskFeedbackRow, type Task
 import { EmailNoteDisclosure, NoteEmailPreview, splitManualEmailNote } from "@/components/note-email-preview"
 import type { NoteEmailPreview as EmailPreview } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
-import { Label } from "@/components/ui/label"
 import { TaskPauseBadge } from "@/components/task-pause-field"
-import { Textarea } from "@/components/ui/textarea"
 import { TaskOneHMarkerFromLabel } from "@/components/task-one-h-marker"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { DiscordDeliveryTable, reportDate, reportTime, ReportingTaskTable } from "@/components/m3-reporting-points-view"
@@ -15,7 +13,7 @@ import type { DeliverySlot, TaskRow as GaTaskRow } from "@/components/m3-reporti
 import { MorningReorganization, REORGANIZATION_SECTION } from "@/components/morning-reorganization"
 
 export { reportDate, reportTime }
-export type ManualKey = "plan_changes" | "reorganization" | "reorganization_form"
+export type ManualKey = "reorganization" | "reorganization_form"
 export type ManualAnswers = Partial<Record<ManualKey, string>>
 
 type AttendanceRow = { id: string; person: string; note?: string | null; from?: string; to?: string; start?: string; until?: string }
@@ -81,6 +79,18 @@ function Attendance({ rows, kind }: { rows: AttendanceRow[]; kind: "absence" | "
     ] }))} />
 }
 
+function GaTaskGrid({ name, rows }: { name: string; rows: GaTaskRow[] }) {
+  return <Grid name={name} labels={["NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "SIMBOLI", "TITULLI"]}
+    widths={[32, 58, 55, 96, 65, 65, 60, 450]} empty="Asnjë detyrë."
+    rows={rows.map((row, index) => ({
+      id: row.task_id,
+      fill: row.deadline_important ? "#dc2626" : STATUS_COLORS[row.status] || "#ffffff",
+      cells: [index + 1, row.assignees || "—", row.department || "—", row.project || "—", row.am_pm || "—",
+        row.task_type || "—", <TaskOneHMarkerFromLabel key="marker" label={row.marker} />, <strong key="title">{row.title}{row.is_paused && <TaskPauseBadge />}</strong>]
+        .map((cell, column) => <span key={column} style={{ color: row.is_paused ? "inherit" : row.deadline_important ? "white" : "black" }}>{cell}</span>),
+    }))} />
+}
+
 function Created({ rows, kind }: { rows: NoteRow[] | TaskRow[]; kind: "note" | "task" }) {
   return <Grid name={kind === "note" ? "Notes të reja" : "Detyrat e reja"} flexColumnIndex={kind === "note" ? 2 : 5}
     labels={kind === "note" ? ["NR", "KUSH", "NOTE", "KRIJUAR"] : ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "DETYRA", "SIMBOLI", "PËR KUR", "KRIJUAR"]}
@@ -113,12 +123,10 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
     <div><h2 className="text-xl font-bold">PIKAT PËR RAPORTIM M1</h2><p className="mt-1 text-sm text-muted-foreground">Gjendja për {reportDate(report.report_date)} deri në {cutoffTime}.</p></div>
     <Point id="m1-absences" title="1. MUNGESA" count={(report.data.absences || []).length}><Attendance rows={report.data.absences || []} kind="absence" /></Point>
     <Point id="m1-delays" title="2. VONESA" count={(report.data.delays || []).length}><Attendance rows={report.data.delays || []} kind="delay" /></Point>
-    <Point id="m1-plan_changes" title="3. A KA NDRYSHIM TË PLANIT / PRIORITETEVE?">
-      <div className="space-y-2 p-5"><Label htmlFor="m1-answer-plan_changes" className="text-sm">PËRGJIGJA / komenti</Label>
-        <Textarea id="m1-answer-plan_changes" value={answers.plan_changes || ""} disabled={disabled} maxLength={10000} autoResize
-          className="min-h-24 bg-white" placeholder="Shëno përgjigjen dhe komentin." onChange={(event) => onAnswerChange("plan_changes", event.target.value)} />
-      </div>
-      {report.data.postponed?.length ? <ReportingTaskTable rows={report.data.postponed} kind="postponed" /> : null}
+    <Point id="m1-postponed" title="3. DETYRAT E SHTYRA">
+      {report.data.postponed?.length
+        ? <ReportingTaskTable rows={report.data.postponed} kind="postponed" />
+        : <p className="px-5 py-6 text-sm text-muted-foreground">Asnjë detyrë e shtyrë.</p>}
     </Point>
     <Point id="m1-notes" title="4. NOTES TË REJA?" count={(report.data.notes || []).length} description={`Të krijuara nga dje 16:30 deri sot ${cutoffTime}.`}><Created rows={report.data.notes || []} kind="note" /></Point>
     <Point id="m1-tasks" title="5. DETYRA TË REJA TË KRIJUARA SOT?" count={tasks.length} description={`Të krijuara sot nga 00:00 deri në ${cutoffTime}.`}>
@@ -131,29 +139,27 @@ export function M1ReportingPointsView({ report, answers, disabled, onAnswerChang
         <Created rows={rows} kind="task" />
       </div>)}
     </Point>
-    {(["ga_progress", "delivery"] as const).map((key) => key === "delivery" && report.discord_delivery_slot ? <Point key={key} id="m1-delivery" title="7. SA PER DOREZIM M2?">
-      <DiscordDeliveryTable rows={report.data.delivery || []} slot={report.discord_delivery_slot} />
-    </Point> : <Point key={key} id={`m1-${key}`}
-      title={key === "ga_progress" ? "6. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA" : "7. SA PER DOREZIM M2?"}
-      count={(report.data[key] || []).length}
-      description={key === "ga_progress" ? "Detyrat AM dhe AM/PM personale me GA ose me simbolet F/GA, brenda intervalit start–due." : "Detyrat me simbolet M2 dhe M2/3, AM dhe PM, brenda intervalit start–due, si te M2."}>
-      <Grid name={key === "ga_progress" ? "Detyrat me GA" : "Detyrat për dorëzim M2"} labels={["NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "SIMBOLI", "TITULLI"]}
-        widths={[32, 58, 55, 96, 65, 65, 60, 450]} empty="Asnjë detyrë."
-        rows={(report.data[key] || []).map((row, index) => ({ id: row.task_id,
-          fill: row.deadline_important ? "#dc2626" : STATUS_COLORS[row.status] || "#ffffff",
-          cells: [index + 1, row.assignees || "—", row.department || "—", row.project || "—", row.am_pm || "—",
-            row.task_type || "—", <TaskOneHMarkerFromLabel key="marker" label={row.marker} />, <strong key="title">{row.title}{row.is_paused && <TaskPauseBadge />}</strong>]
-            .map((cell, column) => <span key={column} style={{ color: row.is_paused ? "inherit" : row.deadline_important ? "white" : "black" }}>{cell}</span>),
-        }))} />
-      {key === "ga_progress" && report.data.morning_task_body && (
-        <div className="space-y-3 border-t px-5 py-4">
-          <h4 className="text-sm font-semibold">GA/HV/DV TASKS NGA M1 START OF DAY</h4>
+    <Point id="m1-ga_progress" title="6. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA"
+      count={(report.data.ga_progress || []).length}
+      description="Detyrat AM dhe AM/PM personale me GA ose me simbolet F/GA, brenda intervalit start–due.">
+      <GaTaskGrid name="Detyrat me GA" rows={report.data.ga_progress || []} />
+    </Point>
+    <Point id="m1-morning-tasks" title="7. GA/HV/DV TASKS">
+      {report.data.morning_task_body ? (
+        <div className="px-5 py-4">
           <MorningTaskFeedback body={report.data.morning_task_body} rows={report.data.morning_task_rows}
             onSave={report.data.morning_task_draft_id ? onMorningTaskSave : undefined} />
         </div>
-      )}
-    </Point>)}
-    <Point id="m1-reorganization" title={`8. ${REORGANIZATION_SECTION}`}>
+      ) : <p className="px-5 py-6 text-sm text-muted-foreground">S’ka draft të M1 Start of Day për këtë datë.</p>}
+    </Point>
+    <Point id="m1-delivery" title="8. SA PER DOREZIM M2?"
+      count={report.discord_delivery_slot ? undefined : (report.data.delivery || []).length}
+      description={report.discord_delivery_slot ? undefined : "Detyrat me simbolet M2 dhe M2/3, AM dhe PM, brenda intervalit start–due, si te M2."}>
+      {report.discord_delivery_slot
+        ? <DiscordDeliveryTable rows={report.data.delivery || []} slot={report.discord_delivery_slot} />
+        : <GaTaskGrid name="Detyrat për dorëzim M2" rows={report.data.delivery || []} />}
+    </Point>
+    <Point id="m1-reorganization" title={`9. ${REORGANIZATION_SECTION}`}>
       <div className="px-5 pb-5">
         <MorningReorganization body={answers.reorganization_form ?? answers.reorganization ?? ""} showAllFollowUps legacyComment
           readOnly={disabled} maxLength={10000} onChange={(body) => onAnswerChange("reorganization_form", body)} />

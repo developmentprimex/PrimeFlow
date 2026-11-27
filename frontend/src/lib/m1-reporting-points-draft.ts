@@ -2,7 +2,7 @@
 
 type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
 const storageKey = (userId: string) => `primeflow:m1-reporting-points:answers:${userId}`
-const manualKeys = ["plan_changes", "reorganization", "reorganization_form"] as const
+const manualKeys = ["reorganization", "reorganization_form"] as const
 
 export function changedManualAnswers(saved: ManualAnswers, edited: ManualAnswers): ManualAnswers {
   const changes: ManualAnswers = {}

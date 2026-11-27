@@ -20,7 +20,7 @@ from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
 from app.services.m1_reporting_points import (
-    MANUAL_POINTS, backfill_saved_note_authors, backfill_saved_task_planning, needs_saved_task_planning,
+    backfill_saved_note_authors, backfill_saved_task_planning, needs_saved_task_planning,
     excluded_note_ids, get_settings, locked_report, refresh_report,
     reorder_saved_report_tasks, render_html, REORGANIZATION_FORM_KEY, REORGANIZATION_FORM_LIMIT,
     REORGANIZATION_FORM_TEXT_LIMIT, reorganization_form_values,
@@ -51,7 +51,8 @@ class ManualAnswersPayload(BaseModel):
     @field_validator("manual_answers")
     @classmethod
     def validate_answers(cls, value: dict[str, str]) -> dict[str, str]:
-        if set(value) - (set(MANUAL_POINTS) | {REORGANIZATION_FORM_KEY}):
+        # Accept saves from tabs opened before the plan changes question was removed.
+        if set(value) - {"plan_changes", "reorganization", REORGANIZATION_FORM_KEY}:
             raise ValueError("Pike manuale e panjohur.")
         if any(len(answer) > 10000 for key, answer in value.items() if key != REORGANIZATION_FORM_KEY):
             raise ValueError("Pergjigjja nuk mund te kete mbi 10000 karaktere.")

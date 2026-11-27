@@ -225,22 +225,37 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         day = date(2026, 11, 24)
         tomorrow = date(2026, 11, 25)
         db = AsyncMock()
+        ga_id = uuid.uuid4()
+        shared_task = SimpleNamespace(id=uuid.uuid4(), title="Review shared stock")
         db.execute.return_value = SimpleNamespace(all=lambda: [
-            (SimpleNamespace(title="Review invoices"), datetime(2026, 11, 24, 9, 15, tzinfo=tz)),
+            (SimpleNamespace(id=uuid.uuid4(), title="Review invoices"), datetime(2026, 11, 24, 9, 15, tzinfo=tz), True, False),
             (
-                SimpleNamespace(title="Check daily payments", system_template_origin_id=uuid.uuid4()),
-                datetime(2026, 11, 24, 14, 30, tzinfo=tz),
+                SimpleNamespace(id=uuid.uuid4(), title="Check daily payments", system_template_origin_id=uuid.uuid4()),
+                datetime(2026, 11, 24, 14, 30, tzinfo=tz), False, True,
             ),
+            (shared_task, datetime(2026, 11, 24, 15, 0, tzinfo=tz), False, True),
+            (SimpleNamespace(id=uuid.uuid4(), title="Review alone"), datetime(2026, 11, 24, 16, 0, tzinfo=tz), False, False),
         ])
 
-        body, count = await _hv_done_section(db, day)
+        with (
+            patch("app.services.meetings_report.resolve_ga_user", AsyncMock(return_value=SimpleNamespace(id=ga_id))),
+            patch("app.services.task_reporting_choices.shared_task_assignee_ids", AsyncMock(return_value={shared_task.id: [ga_id]})),
+        ):
+            body, count = await _hv_done_section(db, day)
         query = db.execute.await_args.args[0].compile(dialect=postgresql.dialect())
         self.assertIn("DISTINCT ON (audit_logs.entity_id)", str(query))
         self.assertIn("users.id = task_completions.actor_user_id", str(query))
         self.assertIn("haxhere spahiu", query.params.values())
         self.assertIn(datetime.combine(day, time.min, tzinfo=tz), query.params.values())
         self.assertIn(datetime.combine(tomorrow, time.min, tzinfo=tz), query.params.values())
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 4)
+        for table in ("task_assignees", "task_alignment_users", "system_task_template_alignment_users"):
+            self.assertIn(table, str(query))
+        from app.services.meetings_report import _section_report_table_rows
+
+        headers, rows = _section_report_table_rows(body.splitlines())
+        self.assertEqual([row[headers.index("GA")] for row in rows],
+                         ["ASSIGNED GA", "BZ ME GA", "ASSIGNED GA + BZ ME GA", "—"])
 
         sections = normalize_meetings_report_sections([{"title": HV_DONE_TITLE, "body": body}])
         self.assertEqual(section_group_label("meetings", HV_DONE_TITLE), "AUTO-FILLED FROM PRIMEFLOW")
@@ -253,7 +268,7 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         outputs.append(Document(BytesIO(render_section_report_docx("M3", "M3", day, sections))).element.body.xml)
         self.assertTrue(render_section_report_png("M3", "M3", day, sections).startswith(b"\x89PNG\r\n\x1a\n"))
         for output in outputs:
-            for label in (HV_DONE_TITLE, "Review invoices", "Check daily payments", "SYS", "14:30"):
+            for label in (HV_DONE_TITLE, "Review invoices", "Check daily payments", "SYS", "14:30", "ASSIGNED GA + BZ ME GA"):
                 self.assertIn(label, output)
 
     async def test_opening_today_twice_refreshes_only_symbol_table(self) -> None:
