@@ -735,6 +735,7 @@ async def collect_time_table_reminders(
                 GaTimeSlotEntry.is_completed.is_(False),
                 GaIcloudSyncConnection.revoked_at.is_(None),
                 GaTimeSlotEntry.day_date <= day_to,
+                GaTimeSlotEntry.falls_on_weekday(),
             )
             .order_by(GaTimeSlotEntry.day_date, GaTimeSlotEntry.start_time)
         )

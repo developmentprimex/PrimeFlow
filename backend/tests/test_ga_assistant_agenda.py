@@ -10,6 +10,7 @@ os.environ.setdefault("JWT_SECRET", "test-only-secret")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://u:p@localhost/db")
 
 from app.services import ga_assistant as svc
+from app.services.ga_time_table import DEFAULT_GA_TIME_TABLE_ROWS, get_ga_time_table_tasks
 
 DAY = date(2026, 11, 19)
 TZ = ZoneInfo("Europe/Belgrade")
@@ -42,6 +43,28 @@ def task(title, *, assignee=None, marker=None, period=None, due=None):
         fast_task_group_id=None, original_due_date=None, is_bllok=False, priority="NORMAL",
         is_1h_report=False, one_h_report_slot=None,
     )
+
+
+def test_time_table_projects_existing_ga_tasks_by_date_and_effective_time():
+    owner = SimpleNamespace(id=uuid4(), full_name="GA")
+    timed = task("Review order", assignee=owner.id, due=at(8, 15))
+    untimed = task("Read notes", assignee=owner.id)
+    removed = task("Removed for today", assignee=owner.id)
+    flagged = task("Marked for GA", marker="FLAG")
+    overrides = [
+        SimpleNamespace(item_key=f"pf_task:{timed.id}", day_date=DAY, has_time_override=True,
+                        time_value="11:20", removed=False),
+        SimpleNamespace(item_key=f"pf_task:{removed.id}", day_date=DAY, has_time_override=False,
+                        time_value=None, removed=True),
+    ]
+    db = session([], [timed, untimed, removed, flagged], [], [], [], [owner], overrides)
+
+    entries = asyncio.run(get_ga_time_table_tasks(db, owner, DAY, DAY, list(DEFAULT_GA_TIME_TABLE_ROWS)))
+
+    assert [(entry.task_id, entry.day, entry.row_start, entry.text) for entry in entries] == [
+        (timed.id, DAY, time(11), "11:20 Review order"),
+        (untimed.id, DAY, time(0), "Read notes"),
+    ]
 
 
 def test_agenda_emits_ga_symbol_and_preserves_existing_f_marker():

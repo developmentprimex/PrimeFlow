@@ -1,10 +1,14 @@
 from dataclasses import dataclass
-from datetime import time
+from datetime import date, datetime, time
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ga_time_table_row import GaTimeTableRow
+from app.models.user import User
+from app.services import ga_assistant
+from app.services.ga_icloud_sync import TimeRow, resolve_row
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,15 @@ class GaTimeTableRowData:
     comment_text_color: str = "#0F172A"
     comment_is_bold: bool = False
     comment_is_italic: bool = False
+
+
+@dataclass(frozen=True)
+class GaTimeTableTask:
+    task_id: UUID
+    day: date
+    row_start: time
+    scheduled_time: time | None
+    text: str
 
 
 def _time(value: str) -> time:
@@ -64,3 +77,39 @@ async def get_ga_time_table_rows(db: AsyncSession) -> list[GaTimeTableRow | GaTi
         )
     ).scalars().all()
     return list(rows) if rows else list(DEFAULT_GA_TIME_TABLE_ROWS)
+
+
+async def get_ga_time_table_tasks(
+    db: AsyncSession,
+    owner: User,
+    day_from: date,
+    day_to: date,
+    rows: list[GaTimeTableRow | GaTimeTableRowData],
+) -> list[GaTimeTableTask]:
+    tz = ga_assistant.ga_tz()
+    items = await ga_assistant.collect_task_items(db, owner, day_from, day_to, today=datetime.now(tz).date(), tz=tz)
+    tasks = [
+        item for item in items
+        if item.kind == ga_assistant.KIND_GA_TASK and item.day is not None and day_from <= item.day <= day_to
+    ]
+    if not tasks:
+        return []
+
+    states = await ga_assistant.load_day_states(db, owner.id, day_from, day_to)
+    tasks = ga_assistant.apply_day_states(tasks, states, tz)
+    timed_rows = [TimeRow(row.start_time, row.end_time) for row in rows if not row.is_special]
+    untimed_start = next((row.start_time for row in rows if row.is_special), rows[0].start_time)
+    result = []
+    for item in sorted(tasks, key=ga_assistant.sort_key):
+        clock = item.start.time() if item.start else None
+        row = resolve_row(clock, timed_rows) if clock is not None else None
+        prefix = f"{clock:%H:%M} " if clock is not None else ""
+        status = "✓ Done " if not item.is_open else ""
+        result.append(GaTimeTableTask(
+            task_id=UUID(item.id.removeprefix(ga_assistant.PREFIX_TASK)),
+            day=item.day,
+            row_start=row.start if row else untimed_start,
+            scheduled_time=clock,
+            text=f"{status}{prefix}{item.title}",
+        ))
+    return result

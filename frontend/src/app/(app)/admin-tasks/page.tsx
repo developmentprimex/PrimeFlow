@@ -826,6 +826,13 @@ type GaTimeSlotEntry = {
   source_name?: string | null
 }
 
+type GaTimeTableTask = {
+  task_id: string
+  day: string
+  scheduled_time: string | null
+  text: string
+}
+
 type GaIcloudSyncConnection = {
   id: string
   device_name: string
@@ -2329,6 +2336,7 @@ export default function AdminTasksPage() {
   const [gaSystemLoading, setGaSystemLoading] = React.useState(false)
   const [gaSystemError, setGaSystemError] = React.useState<string | null>(null)
   const [gaTimeEntries, setGaTimeEntries] = React.useState<GaTimeSlotEntry[]>([])
+  const [gaTimeTasks, setGaTimeTasks] = React.useState<GaTimeTableTask[]>([])
   const [gaTimeRows, setGaTimeRows] = React.useState<GaTimeRow[]>(() => [...DEFAULT_GA_TIME_ROWS])
   const [gaTimeLoading, setGaTimeLoading] = React.useState(false)
   const [gaTimeError, setGaTimeError] = React.useState<string | null>(null)
@@ -2910,7 +2918,8 @@ export default function AdminTasksPage() {
     async function loadGaTimeSlots() {
       const weekStartIso = toISODate(commonWeekStart)
       const cacheKey = `slots|${user?.id || ""}|${weekStartIso}`
-      const cached = readGaViewCache<{ rows: GaTimeRow[]; entries: GaTimeSlotEntry[] }>(cacheKey)
+      const cached = readGaViewCache<{ rows: GaTimeRow[]; entries: GaTimeSlotEntry[]; tasks?: GaTimeTableTask[] }>(cacheKey)
+      setGaTimeTasks(cached?.tasks ?? [])
       if (cached?.rows && cached.entries) {
         setGaTimeRows(cached.rows)
         setGaTimeEntries(cached.entries)
@@ -2919,9 +2928,10 @@ export default function AdminTasksPage() {
       }
       setGaTimeError(null)
       try {
-        const [rowsRes, entriesRes] = await Promise.all([
+        const [rowsRes, entriesRes, tasksRes] = await Promise.all([
           apiFetch("/ga-time-slots/rows"),
           apiFetch(`/ga-time-slots?week_start=${encodeURIComponent(weekStartIso)}`),
+          apiFetch(`/ga-time-slots/tasks?week_start=${encodeURIComponent(weekStartIso)}`).catch(() => null),
         ])
         if (!rowsRes.ok) {
           throw new Error(`ga_time_rows_failed_${rowsRes.status}`)
@@ -2931,11 +2941,14 @@ export default function AdminTasksPage() {
         }
         const rows = normalizeGaTimeRows((await rowsRes.json()) as GaTimeTableRowResponse[])
         const data = (await entriesRes.json()) as GaTimeSlotEntry[]
+        const scheduledTasks = tasksRes?.ok ? (await tasksRes.json()) as GaTimeTableTask[] : cached?.tasks ?? []
         if (!mounted) return
         const nextRows = rows.length ? rows : [...DEFAULT_GA_TIME_ROWS]
         setGaTimeRows(nextRows)
         setGaTimeEntries(data)
-        writeGaViewCache(cacheKey, { rows: nextRows, entries: data })
+        setGaTimeTasks(scheduledTasks)
+        if (!tasksRes?.ok) setGaTimeError("Failed to load GA tasks for the time table.")
+        writeGaViewCache(cacheKey, { rows: nextRows, entries: data, tasks: scheduledTasks })
       } catch (err) {
         console.error("Failed to load GA time slots", err)
         if (mounted && !cached) setGaTimeError("Failed to load GA time slots.")
@@ -6087,6 +6100,26 @@ export default function AdminTasksPage() {
     return map
   }, [gaTimeEntries, gaTimeRows])
 
+  const gaTimeTasksByCell = React.useMemo(() => {
+    const map = new Map<string, GaTimeTableTask[]>()
+    const timedRows = gaTimeRows.filter((row) => !row.isSpecial).sort((a, b) => a.start.localeCompare(b.start))
+    const untimedRow = gaTimeRows.find((row) => row.isSpecial) ?? gaTimeRows[0]
+    for (const task of gaTimeTasks) {
+      const clock = task.scheduled_time ? normalizeSlotTime(task.scheduled_time) : null
+      let row = untimedRow
+      if (clock && timedRows.length) {
+        row = timedRows.find((slot) => slot.start <= clock && clock < slot.end) ??
+          (clock < timedRows[0].start ? timedRows[0] : timedRows[timedRows.length - 1])
+      }
+      if (!row) continue
+      const key = `${task.day}|${row.start}`
+      const list = map.get(key) ?? []
+      list.push(task)
+      map.set(key, list)
+    }
+    return map
+  }, [gaTimeTasks, gaTimeRows])
+
   const gaMeetingsByCell = React.useMemo(() => {
     const map = new Map<string, TimeTableMeeting[]>()
     const addMeeting = (item: TimeTableMeeting) => {
@@ -7775,6 +7808,7 @@ export default function AdminTasksPage() {
                           const cellKey = `${dayOfWeek}|${slot.start}`
                           const entries = gaTimeEntriesByCell.get(cellKey) || []
                           const meetings = gaMeetingsByCell.get(cellKey) || []
+                          const cellTasks = gaTimeTasksByCell.get(`${iso}|${slot.start}`) || []
                           return (
                             <td key={`ga-print-${cellKey}`} className="ga-time-cell">
                               <div className="ga-time-cell-content">
@@ -7793,7 +7827,10 @@ export default function AdminTasksPage() {
                                       <GaTimeEntryContent entry={entry} />
                                     </div>
                                   ))}
-                                {!entries.length && !meetings.length && !slot.isSpecial ? (
+                                {cellTasks.map((task) => (
+                                  <div key={task.task_id} className="ga-time-entry ga-time-task"><span>{task.text}</span></div>
+                                ))}
+                                {!entries.length && !meetings.length && !cellTasks.length && !slot.isSpecial ? (
                                   <span className="week-table-empty">-</span>
                                 ) : null}
                               </div>
@@ -7987,6 +8024,7 @@ export default function AdminTasksPage() {
                       const cellKey = `${dayOfWeek}|${slot.start}`
                       const entries = gaTimeEntriesByCell.get(cellKey) || []
                       const meetings = gaMeetingsByCell.get(cellKey) || []
+                      const cellTasks = gaTimeTasksByCell.get(`${iso}|${slot.start}`) || []
                       return (
                         <td
                           key={`${cellKey}`}
@@ -8063,6 +8101,11 @@ export default function AdminTasksPage() {
                                 key={`ga-meeting-${item.kind}-${item.meeting.id || `${item.meeting.date}-${item.meeting.time}-${index}`}`}
                                 {...item}
                               />
+                            ))}
+                            {cellTasks.map((task) => (
+                              <a key={task.task_id} className="ga-time-entry ga-time-task hover:underline" href={`/tasks/${task.task_id}`}>
+                                <span>{task.text}</span>
+                              </a>
                             ))}
                             {entries.map((entry, entryIndex) => {
                               const isImported = Boolean(entry.source_type)
@@ -9789,6 +9832,9 @@ export default function AdminTasksPage() {
           border-radius: 6px;
           padding: 4px 6px;
           font-size: 11px;
+        }
+        .admin-week-table .ga-time-entry.ga-time-task {
+          background: #f1f5f9;
         }
         .admin-week-table .ga-time-entry-contrast,
         .admin-week-table .ga-time-editor-contrast {

@@ -19,14 +19,26 @@ from app.services.ga_note_creation import build_ga_note
 
 
 log = logging.getLogger(__name__)
+PLAN_START_WORD = r"(?:planifiko|planfiko|planifko)[ëe]?"
 COMMAND = re.compile(
     r"(?<!\w)(?:(?P<note>mir[ëe]?a[\s,:.]*sh[ëe]n[oaëe])|(?P<task>mira[\s,:.]+detyr[ëe]?)"
-    r"|(?P<plan_note>mir[ëe]?a[\s,:.]+(?:planifiko|planfiko|planifko)[ëe]?)"
-    r"|fund[\s,:.]+(?:(?P<end_note>sh[ëe]nim[ie])|(?P<end_task>detyr(?:[ëe]s?|a))))(?!\w)",
+    rf"|(?P<plan_note>mir[ëe]?a[\s,:.]+{PLAN_START_WORD})"
+    r"|(?P<end_note>f[uo]nd[\s,:.]+sh[ëe]nim[ie])"
+    r"|(?P<end_task>fund[\s,:.]+detyr(?:[ëe]s?|a)))(?!\w)",
     re.IGNORECASE,
 )
 START_PREFIX = re.compile(r"(?<!\w)mir[ëe]?a[\s,:.]*$", re.IGNORECASE)
-TITLE_END = re.compile(r"\bfund[\s,:.]*titull(?:it?|[eë])?\b", re.IGNORECASE)
+TITLE_END = re.compile(
+    r"\b(?:fund[\s,:.]*titull(?:it?|[eë])?|nd[\s,:.]*titull(?:i[tn]?|[eë])?)\b",
+    re.IGNORECASE,
+)
+PLAN_TITLE_END = re.compile(
+    rf"{TITLE_END.pattern}|\bfond[\s,:.]*titull(?:i[tn]?|[eë])?\b",
+    re.IGNORECASE,
+)
+PLAN_START_WITHOUT_NAME = re.compile(rf"^{PLAN_START_WORD}\s*[.,:]", re.IGNORECASE)
+INCOMPLETE_TASK_PREFIX = re.compile(r"p[ëe]r[\s,:.]*", re.IGNORECASE)
+COMMAND_ENDS = {"note": "end_note", "task": "end_task", "plan_note": "end_note"}
 ASSIGNEE_PREFIX = re.compile(r"^p[ëe]r[\s,:]+", re.IGNORECASE)
 TASK_BODY = re.compile(
     r"^(?P<initials>[a-zçë](?:[.\s]+[a-zçë]){1,3}|[a-zçë]{2,5})"
@@ -39,8 +51,8 @@ TASK_LIMIT_PER_TICK = 10
 DICTATED_ASSIGNEE_ALIASES = {"EFA": "elsa ferati"}
 
 
-def _format_titled_content(body):
-    marker = TITLE_END.search(body)
+def _format_titled_content(body, title_end=TITLE_END):
+    marker = title_end.search(body)
     if marker is None:
         return None
     title = " ".join(body[:marker.start()].split()).rstrip(" ,:;.")
@@ -53,9 +65,20 @@ def _format_titled_content(body):
 def consume(text, start_ms, end_ms, pending):
     """Read one speaker's chunks and return their next state and complete commands."""
     text = text.strip()
+    if pending and start_ms - pending["end_ms"] > 15_000:
+        pending = None
+    # Recover a dropped wake word only for a complete planning command at the start of this chunk.
+    closing = COMMAND.search(text) if PLAN_START_WITHOUT_NAME.match(text) else None
+    if closing and closing.lastgroup == "end_note":
+        if pending and pending.get("kind") == "task" and (
+            not pending["text"] or INCOMPLETE_TASK_PREFIX.fullmatch(pending["text"])
+        ):
+            pending = None
+        if pending is None:
+            text = f"Mira, {text}"
     started = None
     kind = None
-    if pending and start_ms - pending["end_ms"] <= 15_000:
+    if pending:
         started = pending.get("started")
         if started is None or end_ms - started <= MAX_DICTATION_MS:
             text = f"{pending['text']} {text}"
@@ -67,14 +90,16 @@ def consume(text, start_ms, end_ms, pending):
     body_start = 0
     for marker in COMMAND.finditer(text):
         marker_kind = marker.lastgroup
-        if marker_kind in ("note", "task", "plan_note") and (kind is None or kind == marker_kind):
+        if marker_kind in COMMAND_ENDS and (kind is None or kind == marker_kind):
             started = start_ms
             kind = marker_kind
             body_start = marker.end()
-        elif started is not None and marker_kind == ("end_task" if kind == "task" else "end_note"):
+        elif started is not None and marker_kind == COMMAND_ENDS[kind]:
             body = text[body_start:marker.start()].lstrip(" ,:.-–—\n\t").rstrip()
             if body and len(body) <= MAX_DICTATION_CHARS:
-                if kind != "task":
+                if kind == "plan_note":
+                    body = _format_titled_content(body, PLAN_TITLE_END) or body
+                elif kind == "note":
                     body = _format_titled_content(body) or body
                 commands.append((kind, body))
             started = None

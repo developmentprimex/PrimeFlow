@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -348,6 +349,28 @@ async def create_plan_note(
     return _note_out(note)
 
 
+def _plan_note_deadline(value: str | None, reference: date) -> date | None:
+    value = (value or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    match = re.fullmatch(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{4}))?\.?", value)
+    if not match:
+        return None
+    day, month, year = match.groups()
+    years = (int(year),) if year else range(reference.year, min(reference.year + 5, 10_000))
+    for candidate_year in years:
+        try:
+            candidate = date(candidate_year, int(month), int(day))
+        except ValueError:
+            continue
+        if year or candidate >= reference:
+            return candidate
+    return None
+
+
 @router.patch("/{note_id}", response_model=PlanNoteOut)
 async def update_plan_note(
     note_id: uuid.UUID,
@@ -355,7 +378,10 @@ async def update_plan_note(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> PlanNoteOut:
-    note = (await db.execute(select(PlanNote).where(PlanNote.id == note_id))).scalar_one_or_none()
+    query = select(PlanNote).where(PlanNote.id == note_id)
+    if payload.comment_review_date is not None or "planning_brief" in payload.model_fields_set:
+        query = query.with_for_update()
+    note = (await db.execute(query)).scalar_one_or_none()
     if note is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan note not found")
     await _ensure_note_access(note, user, db)
@@ -388,13 +414,22 @@ async def update_plan_note(
         note.next_week = bool(update_data["next_week"])
     if "planned_for_date" in update_data:
         note.planned_for_date = update_data["planned_for_date"]
-    planning_brief_changed = "planning_brief" in update_data and update_data["planning_brief"] != old_planning_brief
     if "planning_brief" in update_data:
         brief = payload.planning_brief
         note.planning_brief = brief.model_dump(mode="json") if brief else None
+    review_date = payload.comment_review_date
+    if review_date is not None and note.status == GaNoteStatus.OPEN and not note.is_converted_to_task:
+        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
+        saved_at = note.updated_at or datetime.now(timezone.utc)
+        if saved_at.tzinfo is None:
+            saved_at = saved_at.replace(tzinfo=timezone.utc)
+        planning_brief = note.planning_brief or {}
+        current_deadline = _plan_note_deadline(planning_brief.get("dl"), saved_at.astimezone(app_timezone).date())
+        if current_deadline is None or current_deadline < review_date:
+            note.planning_brief = {**planning_brief, "dl": review_date.strftime("%d.%m.%Y")}
 
     planning_notifications = []
-    if planning_brief_changed:
+    if note.planning_brief != old_planning_brief:
         add_audit_log(
             db=db,
             actor_user_id=user.id,

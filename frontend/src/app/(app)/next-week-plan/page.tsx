@@ -24,9 +24,12 @@ import { TaskTitleLimitHint } from "@/components/task-title-limit-hint"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
+import { PxJavCommentSelect } from "@/components/px-jav-comment-select"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
+import { formatPxJavDate, parsePxJavDate, pxJavCommentPlan } from "@/lib/px-jav-planning"
+import { taskDateKey as primeFlowDateKey } from "@/lib/task-calendar-date"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { hasNewNoteContent, NEW_NOTE_TEMPLATE } from "@/lib/note-markup"
 import type { Department, PlanNote, PlanNoteAttachment, Project, PxJavPlanningBrief, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
@@ -916,6 +919,18 @@ function isDevelopmentDepartment(dept?: Department | null) {
   return name === "DEVELOPMENT" || code === "DEV"
 }
 
+function planningUsers(value: string | null | undefined, users: UserLookup[]): string[] {
+  const ids = (value ?? "").split(/[,;\n]/).flatMap((part) => {
+    const name = part.trim().replace(/^@/, "").toLowerCase()
+    if (!name) return []
+    const matches = users.filter((user) =>
+      user.is_active !== false && (user.username?.toLowerCase() === name || user.full_name?.trim().toLowerCase() === name)
+    )
+    return matches.length === 1 ? [matches[0].id] : []
+  })
+  return [...new Set(ids)]
+}
+
 export default function NextWeekPlanPage() {
   const { user, apiFetch } = useAuth()
   const confirm = useConfirm()
@@ -1116,14 +1131,17 @@ export default function NextWeekPlanPage() {
     const previousValue = planningBriefDraft(previousBrief)[field] || ""
     if (value.trim() === previousValue.trim()) return
 
+    const currentDay = primeFlowDateKey(new Date().toISOString())!
+    const deadline = field === "dl" ? parsePxJavDate(value, currentDay) : null
+    const storedValue = deadline ? formatPxJavDate(deadline) : value
     const nextBrief = {
       ...planningBriefDraft(note.planning_brief),
-      [field]: value,
+      [field]: storedValue,
       ...(field === "dg_kush" ? { dg_kush_user_ids: [] } : {}),
-      ...(field === "kush" ? { kush_user_ids: [] } : {}),
+      ...(field === "kush" ? { kush_user_ids: planningUsers(value, users) } : {}),
     }
     void savePlanningBrief(note.id, nextBrief, previousBrief)
-  }, [savePlanningBrief])
+  }, [savePlanningBrief, users])
 
   const loadDepartments = React.useCallback(async () => {
     const res = await apiFetch("/departments")
@@ -1340,7 +1358,7 @@ export default function NextWeekPlanPage() {
   }, [])
 
   const saveNoteComment = React.useCallback(
-    async (noteId: string, comment: string, previousComment = "") => {
+    async (noteId: string, comment: string, previousComment = "", reviewDate: string | null = null) => {
       const trimmed = comment.trim()
 
       setSavingCommentIds((prev) => ({ ...prev, [noteId]: true }))
@@ -1348,7 +1366,7 @@ export default function NextWeekPlanPage() {
         const res = await apiFetch(`/plan-notes/${noteId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ comment: trimmed || null }),
+          body: JSON.stringify({ comment: trimmed || null, ...(reviewDate ? { comment_review_date: reviewDate } : {}) }),
         })
         if (!res?.ok) {
           let message = "Failed to save comment"
@@ -1363,9 +1381,11 @@ export default function NextWeekPlanPage() {
 
         const updated = (await res.json()) as PlanNote
         setNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
+        return true
       } catch (error) {
         updateNoteCommentDraft(noteId, previousComment)
         toast.error(error instanceof Error ? error.message : "Failed to save comment")
+        return false
       } finally {
         setSavingCommentIds((prev) => {
           const next = { ...prev }
@@ -2110,20 +2130,31 @@ export default function NextWeekPlanPage() {
       return
     }
     const defaultTitle = noteToTaskTitle(note.content || "")
+    const brief = note.planning_brief
+    const referenceDay = primeFlowDateKey(note.updated_at) ?? primeFlowDateKey(new Date().toISOString())!
+    const assignees = brief?.kush_user_ids?.length
+      ? brief.kush_user_ids.filter((id) => users.some((person) => person.id === id && person.is_active !== false))
+      : planningUsers(brief?.kush, users)
+    const plannedType = brief?.lloji_det === "P" ? "PERSONAL" : brief?.lloji_det
+    const validTypes: readonly TaskTypeOption[] = hasProject ? TASK_TYPE_OPTIONS_WITH_PROJECT : TASK_TYPE_OPTIONS_NO_PROJECT
     setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
     setTaskOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
     setTaskOneHMarkerComment(note.one_h_marker_comment ?? "")
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
     setTaskDescription("") // start empty so creator can add detailed description
-    setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+    setTaskPriority(plannedType && validTypes.includes(plannedType) ? plannedType : note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
-    setTaskDueDate("")
+    setTaskDueDate(parsePxJavDate(brief?.dl, referenceDay) ?? "")
     setTaskStartDate("")
     setTaskDeadlineImportant(false)
     setTaskIsRepetitive(false)
-    setTaskAssigneeIds([])
-    setTaskDepartmentIds([])
+    setTaskAssigneeIds(assignees)
+    setTaskDepartmentIds(assignees.length ? [...new Set([
+      noteProject?.department_id,
+      note.department_id,
+      ...assignees.map((id) => users.find((person) => person.id === id)?.department_id),
+    ].filter((id): id is string => Boolean(id)))] : [])
     setTaskProjectId(note.project_id ?? "NONE")
   }
 
@@ -2452,12 +2483,13 @@ export default function NextWeekPlanPage() {
 
   // Project list is used only in the task creation dialog (filtered separately).
   const taskDialogNote = taskDialogNoteId ? notes.find((n) => n.id === taskDialogNoteId) || null : null
+  const taskDialogDepartmentId = taskDialogNote?.department_id
   const taskDepartmentLocked = false
   const effectiveTaskDepartmentIds = React.useMemo(() => {
     if (taskDepartmentIds.length > 0) return taskDepartmentIds
-    if (taskDialogNote?.department_id) return [taskDialogNote.department_id]
+    if (taskDialogDepartmentId) return [taskDialogDepartmentId]
     return []
-  }, [taskDepartmentIds, taskDialogNote?.department_id])
+  }, [taskDepartmentIds, taskDialogDepartmentId])
   const taskAssigneeOptions = users
   const taskSelectedDateRange = React.useMemo(() => {
     const dates = [taskStartDate, taskDueDate].filter(Boolean).sort()
@@ -2810,6 +2842,11 @@ export default function NextWeekPlanPage() {
 
   return (
     <div className="space-y-6">
+      <datalist id="px-jav-planning-users">
+        {users.filter((person) => person.is_active !== false).map((person) => (
+          <option key={person.id} value={person.username || person.full_name || person.id}>{person.full_name}</option>
+        ))}
+      </datalist>
       <div className="rounded-2xl border bg-gradient-to-r from-amber-50 via-indigo-50 to-cyan-50 p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -3442,8 +3479,8 @@ export default function NextWeekPlanPage() {
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
-                      <th className="min-w-[300px] w-[300px] max-w-[300px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
-                      <th className="min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PLANIFIKIM</th>
+                      <th className="min-w-[400px] w-[400px] max-w-[400px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                      <th className="min-w-[220px] w-[220px] max-w-[220px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PLANIFIKIM</th>
                       <th className="min-w-[180px] w-[180px] max-w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KOMENT</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal leading-tight text-xs" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>THIS<br />WEEK</th>
@@ -3530,9 +3567,10 @@ export default function NextWeekPlanPage() {
                     const showMobileDeptBadge =
                       mobileDeptAbbrev === "DEV" || mobileDeptAbbrev === "GDS" || mobileDeptAbbrev === "PCM"
                     const commentValue = note.comment ?? ""
+                    const planningReferenceDay = primeFlowDateKey(note.updated_at) ?? primeFlowDateKey(new Date().toISOString())!
                     const isSavingComment = Boolean(savingCommentIds[note.id])
                     const isSavingNextWeek = Boolean(savingNextWeekIds[note.id])
-                    const isSavingPlanning = Boolean(savingPlanningIds[note.id])
+                    const isSavingPlanning = Boolean(savingPlanningIds[note.id]) || isSavingComment
                     const planningNames = (ids?: string[], fallback?: string | null) => {
                       const names = (ids || []).map((id) => {
                         const person = users.find((item) => item.id === id)
@@ -3549,7 +3587,7 @@ export default function NextWeekPlanPage() {
                       <React.Fragment key={note.id}>
                       <tr className="hover:bg-muted/50 border-b transition-colors">
                         <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
-                        <td className={`min-w-[300px] w-[300px] max-w-[300px] whitespace-pre-wrap break-words border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
+                        <td className={`min-w-[400px] w-[400px] max-w-[400px] whitespace-pre-wrap break-words border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0 flex-1 flex flex-col gap-1">
@@ -3589,15 +3627,7 @@ export default function NextWeekPlanPage() {
                                 <TaskOneHMarkerEditor noteId={note.id} noteSource="plan-notes"
                                   marker={note.one_h_marker} markerByGa={note.one_h_marker_by_ga} markerComment={note.one_h_marker_comment}
                                   onSaved={fields => setNotes(current => current.map(item => item.id === note.id ? { ...item, ...fields } : item))} />
-                                  <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
-                                    {renderMarkedNoteContent(note.content)}
-                                  </span>
                                 </div>
-                                {taskInfo?.description ? (
-                                  <div className="border-t border-slate-200/80 pt-1 text-[11px] text-slate-600 line-clamp-4 whitespace-pre-wrap break-words">
-                                    {taskInfo.description}
-                                  </div>
-                                ) : null}
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
                                 {!editDisabled ? (
@@ -3677,6 +3707,14 @@ export default function NextWeekPlanPage() {
                                 ) : null}
                               </div>
                             </div>
+                            <div id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
+                              {renderMarkedNoteContent(note.content)}
+                            </div>
+                            {taskInfo?.description && (
+                              <div className="border-t border-slate-200/80 pt-1 text-[11px] text-slate-600 line-clamp-4 whitespace-pre-wrap break-words">
+                                {taskInfo.description}
+                              </div>
+                            )}
                             <div className="text-[11px] text-slate-600 sm:hidden">
                               {(() => {
                                 const parts = formatDateParts(note.created_at)
@@ -3729,7 +3767,7 @@ export default function NextWeekPlanPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="relative min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 p-0.5 align-top">
+                        <td className="relative min-w-[220px] w-[220px] max-w-[220px] border border-slate-600 p-0.5 align-top">
                           {savingPlanningIds[note.id] ? (
                             <span className="absolute right-1 top-0.5 z-10 text-[9px] font-medium text-violet-600">Duke ruajtur...</span>
                           ) : null}
@@ -3811,6 +3849,7 @@ export default function NextWeekPlanPage() {
                               <label htmlFor={`planning-kush-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">KUSH</label>
                               <Input
                                 id={`planning-kush-${note.id}`}
+                                list="px-jav-planning-users"
                                 value={note.planning_brief?.kush || planningNames(note.planning_brief?.kush_user_ids, "")}
                                 onFocus={(event) => { event.currentTarget.dataset.previousBrief = JSON.stringify(note.planning_brief ?? null) }}
                                 onChange={(event) => updatePlanningBriefDraft(note.id, { kush: event.target.value, kush_user_ids: [] })}
@@ -3862,14 +3901,22 @@ export default function NextWeekPlanPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="border border-slate-600 p-1 align-middle min-w-[180px] w-[180px] max-w-[180px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-1 align-top min-w-[180px] w-[180px] max-w-[180px]">
+                          {!isClosed && !hasTask && (
+                            <PxJavCommentSelect
+                              comment={commentValue}
+                              referenceDay={planningReferenceDay}
+                              disabled={isSavingPlanning}
+                              onSave={(value, reviewDate) => saveNoteComment(note.id, value, commentValue, reviewDate)}
+                            />
+                          )}
                           <Textarea
                             value={commentValue}
                             placeholder="Koment"
                             aria-label="Koment"
                             rows={3}
                             className="min-h-[72px] w-full resize-none rounded-sm border-slate-300 bg-white px-2 py-1.5 text-xs leading-snug whitespace-pre-wrap"
-                            disabled={isSavingComment}
+                            disabled={isSavingPlanning}
                             onFocus={(event) => {
                               event.currentTarget.dataset.previousValue = commentValue
                             }}
@@ -3878,7 +3925,9 @@ export default function NextWeekPlanPage() {
                               const previousValue = event.currentTarget.dataset.previousValue ?? ""
                               const nextValue = event.currentTarget.value
                               if (nextValue.trim() !== previousValue.trim()) {
-                                void saveNoteComment(note.id, nextValue, previousValue)
+                                const today = primeFlowDateKey(new Date().toISOString())!
+                                const reviewDate = !isClosed && !hasTask ? pxJavCommentPlan(nextValue, today)?.reviewDate : null
+                                void saveNoteComment(note.id, nextValue, previousValue, reviewDate)
                               }
                             }}
                             onKeyDown={(event) => {
