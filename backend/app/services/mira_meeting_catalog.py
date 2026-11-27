@@ -108,12 +108,13 @@ async def note_matches(db, user, query):
 async def list_meetings(db, user, *, limit, offset, group, query, follow_up_query):
     hosts = (await db.execute(select(Host.id, Host.meeting_date, Host.slot, Host.started_at,
         Host.is_test, Host.status, Host.voice_meeting_id))).all()
-    voices = (await db.execute(select(Voice.id, Voice.title, Voice.created_at, Voice.started_at,
+    voices = (await db.execute(select(Voice.id, Voice.title, Voice.mira_title, Voice.created_at, Voice.started_at,
         Voice.partial, Voice.voice_channel_id, Voice.recorder, Voice.request_id, Voice.status)
         .where(Voice.status.in_(mira_memory.RECORD_STATUSES)))).all()
     desktops = (await db.execute(select(Desktop.id, Desktop.title, Desktop.created_at, Desktop.partial, Desktop.status)
         .where(or_(Desktop.user_id == user.id, Desktop.note_id.is_not(None))))).all()
     voice_ids = {voice.id for voice in voices}
+    custom_titles = {voice.id: voice.mira_title for voice in voices if voice.mira_title}
     recorded_slots = slot_recordings(voices)
     links = {host.id: host.voice_meeting_id or recorded_slots.get((host.meeting_date, host.slot))
         if not host.is_test else host.voice_meeting_id for host in hosts}
@@ -143,6 +144,7 @@ async def list_meetings(db, user, *, limit, offset, group, query, follow_up_quer
         matches = {"discord": voice_matches, "host": host_matches, "desktop": desktop_matches}
         needle = query.casefold()
         rows = [row for row in rows if needle in row[3].casefold()
+                or needle in custom_titles.get(row[2], "").casefold()
                 or (row[4] == "AI_AGENT" and needle in meeting_title(row[3]).casefold())
                 or row[2] in matches[row[1]]]
     ordered = sorted(rows, key=lambda row: (row[0], row[1], row[2]), reverse=True)
@@ -160,7 +162,9 @@ async def list_meetings(db, user, *, limit, offset, group, query, follow_up_quer
     })
     recorders = {voice.id: voice.recorder for voice in voices if voice.id in page_ids}
     return {"total": len(ordered), "items": [
-        {"id": str(id_), "source": source, "title": meeting_title(title) if group_ == "AI_AGENT" else title, "group": group_, "status": status,
+        {"id": str(id_), "source": source,
+         "title": custom_titles.get(id_) or (meeting_title(title) if group_ == "AI_AGENT" else title),
+         "has_custom_title": id_ in custom_titles, "group": group_, "status": status,
          "started_at": when.isoformat(), "partial": partial, "open_count": counts.get(id_, 0),
          "recorder": recorders.get(id_), **artifacts.get(id_, {})}
         for when, source, id_, title, group_, status, partial in page
@@ -289,8 +293,18 @@ async def discord_detail(db, meeting_id):
     if (not hosts and not host_for_slot and slot and slot in await discord_one_h.slot_groups(db)
             and await voice_for_slot(db, *slot) == meeting_id):
         host_ids.append(str(discord_one_h.slot_id(*slot)))
-    return {**detail, "source": "discord", "status": voice.status, "notes": notes, "host_ids": host_ids,
+    return {**detail, "source": "discord", "title": voice.mira_title or detail["title"],
+            "has_custom_title": bool(voice.mira_title), "status": voice.status, "notes": notes, "host_ids": host_ids,
             "created_tasks": await created_tasks(db, hosts, dictation)}
+
+
+async def rename_discord_meeting(db, meeting_id, title):
+    voice = await db.scalar(select(Voice).where(Voice.id == meeting_id,
+        Voice.status.in_(mira_memory.RECORD_STATUSES)).with_for_update())
+    if voice is None:
+        raise HTTPException(404, "Takimi nuk u gjet.")
+    voice.mira_title = title
+    await db.commit()
 
 
 async def meeting_detail(db, user, source, meeting_id):

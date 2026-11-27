@@ -70,6 +70,14 @@ class VoiceJobTests(PostgresMeetingTests):
             self.assertEqual([row["title"] for row in result["items"]], ["ZHVILLIM 08-05 & 12-00"])
             detail = await catalog.meeting_detail(db, user, "discord", development.id)
             self.assertEqual(detail["full_notes"], "ZHVILLIM 08-05 & 12-00\n\nHistorical notes.")
+            await catalog.rename_discord_meeting(db, development.id, "Oferta e Modeco")
+            renamed = await catalog.list_meetings(db, user, limit=30, offset=0, group="AI_AGENT",
+                query="Modeco", follow_up_query="")
+            self.assertEqual([(row["title"], row["group"], row["has_custom_title"]) for row in renamed["items"]],
+                             [("Oferta e Modeco", "AI_AGENT", True)])
+            self.assertEqual((await catalog.meeting_detail(db, user, "discord", development.id))["title"],
+                             "Oferta e Modeco")
+            self.assertEqual((await service.meeting_record(db, development.id))["title"], "ZHVILLIM 08-05 & 12-00")
             result = await catalog.list_meetings(db, user, limit=30, offset=0, group="1H",
                 query="Host saved note", follow_up_query="")
             self.assertEqual([row["id"] for row in result["items"]], [str(voice.id)])

@@ -22,6 +22,7 @@ class DiscordVoiceMeeting(Base):
     instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     capture_token_hash: Mapped[str] = mapped_column(String(64))
     title: Mapped[str] = mapped_column(String(200))
+    mira_title: Mapped[str | None] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20), default='STARTING')
     partial: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(String(500))
