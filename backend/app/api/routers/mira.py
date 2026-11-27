@@ -1,9 +1,9 @@
 """Mira view in PrimeFlow: 1H meeting history, Mira's notes, knowledge and host settings."""
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, require_manager_or_admin
@@ -51,6 +51,10 @@ class HostSwitch(BaseModel):
     until: str | None = Field(default=None, max_length=5)
 
 
+class MeetingTitlePatch(BaseModel):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
 def knowledge_row(row: MiraKnowledgeItem) -> dict:
     return {"id": str(row.id), "title": row.title, "category": row.category, "content_text": row.content_text,
             "source": row.source, "file_name": row.file_name, "is_active": row.is_active, "sort_order": row.sort_order,
@@ -76,6 +80,13 @@ async def meeting_catalog(limit: int = Query(default=30, ge=1, le=100), offset: 
 async def catalog_meeting(source: Literal["discord", "host", "desktop"], meeting_id: uuid.UUID,
         db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     return await catalog.meeting_detail(db, user, source, meeting_id)
+
+
+@router.patch('/meeting-catalog/discord/{meeting_id}/title', response_model=MeetingTitlePatch)
+async def rename_catalog_meeting(meeting_id: uuid.UUID, payload: MeetingTitlePatch,
+        db: AsyncSession = Depends(get_db), _user=Depends(require_manager_or_admin)):
+    await catalog.rename_discord_meeting(db, meeting_id, payload.title)
+    return payload
 
 
 @router.get('/notetaker/meetings')

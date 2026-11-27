@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
@@ -32,6 +33,7 @@ type Meeting = {
   id: string; source: MeetingSource; title: string; started_at: string; partial: boolean;
   group: MeetingGroup; status: string; open_count: number
   recorder?: string | null
+  has_custom_title?: boolean
   created_task_count?: number
   created_note_count?: number
 }
@@ -54,7 +56,7 @@ type MemoryPoint = Pick<MemoryListItem, "id" | "title" | "kind" | "status"> & {
   discussion_state?: "NEW" | "REPEATED" | "RESOLVED"
 }
 type PreviousPoint = { id: string; title: string; text: string; meeting_id: string; meeting_title: string; date: string; status?: MemoryListItem["status"] }
-type MeetingDetail = Pick<Meeting, "id" | "source" | "title"> & {
+type MeetingDetail = Pick<Meeting, "id" | "source" | "title" | "has_custom_title"> & {
   started_at?: string
   status?: string
   partial?: boolean
@@ -113,9 +115,9 @@ const meetingDateTime = new Intl.DateTimeFormat("en-GB", {
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 })
 
-function meetingDisplayTitle(meeting: Pick<MeetingDetail, "source" | "title" | "started_at">) {
+function meetingDisplayTitle(meeting: Pick<MeetingDetail, "source" | "title" | "started_at" | "has_custom_title">) {
   // The recording time already appears separately when the API supplies it.
-  if (meeting.source !== "discord" || !meeting.started_at) return meeting.title
+  if (meeting.has_custom_title || meeting.source !== "discord" || !meeting.started_at) return meeting.title
   return meeting.title.replace(/\s+·\s+\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}$/, "") || meeting.title
 }
 
@@ -293,6 +295,8 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
   const [closingPoints, setClosingPoints] = useState(() => new Set<string>())
   const [summaryRequest, setSummaryRequest] = useState<{ id: string; error?: string } | null>(null)
   const [transcriptAnchor, setTranscriptAnchor] = useState("")
+  const [editingTitle, setEditingTitle] = useState<{ id: string; title: string } | null>(null)
+  const [savingTitle, setSavingTitle] = useState(false)
   const selected = view === null && (detail?.source === "host" || detail?.source === "desktop")
     ? detail.source === "host" ? "report" : "full"
     : meetingView(view)
@@ -379,6 +383,28 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
     }
   }
 
+  async function saveMeetingTitle() {
+    if (!editingTitle || !editingTitle.title.trim() || savingTitle) return
+    const { id, title } = editingTitle
+    setSavingTitle(true)
+    try {
+      const updated = await json<{ title: string }>(await apiFetch(`${catalog}/discord/${encodeURIComponent(id)}/title`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim() }),
+      }))
+      setList(current => current && { ...current, items: current.items.map(item => item.id === id && item.source === "discord"
+        ? { ...item, title: updated.title, has_custom_title: true } : item) })
+      setReload(current => current + 1)
+      setEditingTitle(null)
+      toast.success("Titulli u ruajt.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Titulli nuk u ruajt.")
+    } finally {
+      setSavingTitle(false)
+    }
+  }
+
   async function closePoint(point: MemoryPoint) {
     if (!detail || closingPoints.has(point.id)) return
     const detailId = detail.id
@@ -431,6 +457,22 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
 
   if (!meetingId) return (
     <section className="mt-5 space-y-3">
+      <Dialog open={editingTitle !== null} onOpenChange={(open) => { if (!open && !savingTitle) setEditingTitle(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Redakto titullin e takimit</DialogTitle>
+            <DialogDescription>Titulli shfaqet te Mira → Takimet.</DialogDescription>
+          </DialogHeader>
+          {editingTitle && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void saveMeetingTitle() }}>
+            <Input aria-label="Titulli i takimit" value={editingTitle.title} maxLength={200} required disabled={savingTitle}
+              onChange={(event) => setEditingTitle({ ...editingTitle, title: event.target.value })} />
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={savingTitle} onClick={() => setEditingTitle(null)}>Anulo</Button>
+              <Button type="submit" disabled={savingTitle || !editingTitle.title.trim()}>{savingTitle ? "Po ruhet…" : "Ruaj"}</Button>
+            </DialogFooter>
+          </form>}
+        </DialogContent>
+      </Dialog>
       <div className="flex flex-wrap items-center gap-2">
         <form className="flex max-w-md flex-1 gap-2" onSubmit={(event) => {
           event.preventDefault(); setOffset(0); setQuery(search.trim())
@@ -465,21 +507,20 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
         <ul className="divide-y overflow-hidden rounded-lg border text-sm">
           {list.items.map((item) => {
             const aiAgent = item.recorder === "ai_agent" || item.group === "AI_AGENT"
-            const title = meetingDisplayTitle(item)
+            const title = aiAgent && !item.has_custom_title ? developmentMeetingTitle(meetingDisplayTitle(item)) : meetingDisplayTitle(item)
             const tasks = item.created_task_count ?? 0
             const notes = item.created_note_count ?? 0
             return (
-            <li key={`${item.source}:${item.id}`}>
-              <Link href={miraMeetingUrl(item.id, item.source)} className={cn(
-                "group grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring lg:grid-cols-[minmax(0,22rem)_8.5rem_minmax(0,1fr)_auto]",
+            <li key={`${item.source}:${item.id}`} className={cn("flex items-center",
                 aiAgent ? "bg-emerald-50/70 hover:bg-emerald-100/70 dark:bg-emerald-950/25 dark:hover:bg-emerald-900/40"
                   : "bg-blue-50/70 hover:bg-blue-100/70 dark:bg-blue-950/25 dark:hover:bg-blue-900/40"
               )}>
+              <Link href={miraMeetingUrl(item.id, item.source)} className="group grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring lg:grid-cols-[minmax(0,22rem)_8.5rem_minmax(0,1fr)_auto]">
                 <span className="flex min-w-0 items-center gap-3 font-medium">
                   <Image src={aiAgent ? "/mira-ai-agent-avatar.png" : "/mira-avatar.png"} alt="" width={34} height={34}
                     className={cn("shrink-0 rounded-full border", aiAgent ? "border-emerald-400" : "border-blue-400")} />
                   <span className="min-w-0">
-                    <span className="block break-words">{aiAgent ? developmentMeetingTitle(title) : title}</span>
+                    <span className="block break-words">{title}</span>
                     {(tasks > 0 || notes > 0) && <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
                       {tasks > 0 && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-900 dark:bg-blue-950 dark:text-blue-200">
                         {tasks} {tasks === 1 ? "detyrë e krijuar" : "detyra të krijuara"}
@@ -501,6 +542,9 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
                 </span>
                 <ChevronRight aria-hidden className="col-start-2 row-start-1 size-4 text-muted-foreground group-hover:translate-x-0.5 lg:col-start-4" />
               </Link>
+              {canManage && item.source === "discord" && <Button type="button" size="icon" variant="ghost" className="mr-2 size-8 shrink-0"
+                aria-label={`Redakto titullin: ${title}`} title="Redakto titullin"
+                onClick={() => setEditingTitle({ id: item.id, title })}><Pencil aria-hidden className="size-4" /></Button>}
             </li>
           )})}
         </ul>
@@ -534,7 +578,7 @@ export function NotetakerTab({ meetingId, source, view, filter }: {
       <Link href={base} className="text-sm underline">Kthehu te takimet</Link>
       <header>
         <h2 className="text-xl font-semibold">
-          {detail.source === "discord" ? developmentMeetingTitle(title) : title}
+          {detail.source === "discord" && !detail.has_custom_title ? developmentMeetingTitle(title) : title}
           {detail.started_at ? <> · <time dateTime={detail.started_at} className="whitespace-nowrap tabular-nums">
             {meetingDisplayDate(detail.started_at)}
           </time></> : detail.host && ` · ${dayLabel(detail.host.date)}`}

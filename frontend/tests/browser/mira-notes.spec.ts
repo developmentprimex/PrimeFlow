@@ -10,16 +10,17 @@ const archive = { ...note, id: archiveId, note_id: archiveId, title: "Shënimi i
 const meeting = { id: meetingId, source: "desktop", title: "Takimi me ekipin", started_at: note.created_at,
   status: "SAVED", group: "OTHER", partial: false, open_count: 0 }
 
-async function shell(page: Page, { failShare = false } = {}) {
+async function shell(page: Page, { failShare = false, role = user.role } = {}) {
   let shared = false
   const writes: string[] = []
+  const signedInUser = { ...user, role }
   await page.addInitScript(({ user }) => {
     localStorage.setItem("primex_access_token", "test-only-browser-token")
     localStorage.setItem("primex_user", JSON.stringify(user))
-  }, { user })
+  }, { user: signedInUser })
   await page.route("http://127.0.0.1:8012/api/**", async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
-    if (path === "/api/auth/me") return route.fulfill({ json: user })
+    if (path === "/api/auth/me") return route.fulfill({ json: signedInUser })
     if (path === "/api/mira/status") return route.fulfill({ json: { enabled: false, live: null } })
     if (path === "/api/mira/meeting-catalog") {
       const group = url.searchParams.get("group")
@@ -101,6 +102,32 @@ test("meeting dates appear once in the list and in meeting details", async ({ pa
   await page.getByRole("link", { name: "Kthehu te takimet" }).click()
   await agentRow.click()
   await expect(page.getByRole("heading", { name: "ZHVILLIM · 24.11.2026 08:08", exact: true })).toBeVisible()
+})
+
+test("a manager can rename a Discord recording from the catalog", async ({ page }) => {
+  await shell(page, { role: "MANAGER" })
+  let item = { ...meeting, source: "discord", group: "AI_AGENT", recorder: "ai_agent", title: "ZHVILLIM", has_custom_title: false }
+  await page.route("**/api/mira/meeting-catalog?*", route => route.fulfill({
+    json: { items: [item], total: 1, follow_up: [] },
+  }))
+  await page.route(`**/api/mira/meeting-catalog/discord/${meetingId}/title`, route => {
+    expect(route.request().method()).toBe("PATCH")
+    expect(route.request().postDataJSON()).toEqual({ title: "Oferta e Modeco" })
+    item = { ...item, title: "Oferta e Modeco", has_custom_title: true }
+    return route.fulfill({ json: { title: item.title } })
+  })
+  await page.route(`**/api/mira/meeting-catalog/discord/${meetingId}`, route => route.fulfill({
+    json: { ...item, host_ids: [], notes: [], transcript: [] },
+  }))
+
+  await page.goto("/mira?tab=takimet")
+  await page.getByRole("button", { name: "Redakto titullin: ZHVILLIM" }).click()
+  const dialog = page.getByRole("dialog", { name: "Redakto titullin e takimit" })
+  await dialog.getByRole("textbox", { name: "Titulli i takimit" }).fill("Oferta e Modeco")
+  await dialog.getByRole("button", { name: "Ruaj" }).click()
+  await expect(dialog).toBeHidden()
+  await page.getByRole("link", { name: /^Oferta e Modeco/ }).click()
+  await expect(page.getByRole("heading", { name: /^Oferta e Modeco/ })).toBeVisible()
 })
 
 test("a PX Notes link opens the exact note and failed sharing keeps the action available", async ({ page }) => {
