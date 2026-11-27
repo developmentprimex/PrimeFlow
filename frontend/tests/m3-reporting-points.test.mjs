@@ -46,18 +46,20 @@ test("due date postponements display their saved reason and comment", () => {
   assert.match(html, /Saved postponement comment/)
 })
 
-test("M1 plan changes show the explanation captured by each postponement", () => {
+test("M1 shows each postponement explanation without the former plan question", () => {
   const { M1ReportingPointsView } = load("@/components/m1-reporting-points-view")
   const html = renderToStaticMarkup(React.createElement(M1ReportingPointsView, {
     report: { ...report, data: { postponed: [{ ...row, postponement_kind: "start", postponement_period: "AM", reason: "M1 saved reason", comment: "M1 saved comment" }] } },
-    answers: {}, disabled: false, onAnswerChange: () => {},
+    answers: { plan_changes: "Përgjigje e vjetër" }, disabled: false, onAnswerChange: () => {},
   }))
+  assert.match(html, /3\. DETYRAT E SHTYRA/)
+  assert.doesNotMatch(html, /NDRYSHIM TË PLANIT|m1-answer-plan_changes|Përgjigje e vjetër/)
   assert.match(html, /M1 saved reason/)
   assert.match(html, /M1 saved comment/)
-  assert.match(html, /6\. DET ME GA:.*7\. SA PER DOREZIM M2\?.*id="m1-reorganization"/s)
+  assert.match(html, /6\. DET ME GA:.*7\. GA\/HV\/DV TASKS.*8\. SA PER DOREZIM M2\?.*id="m1-reorganization"/s)
 })
 
-test("M1 shows the Start of Day tables inline without linking away", () => {
+test("M1 shows the editable Start of Day tables as a separate report point", () => {
   const { M1ReportingPointsView } = load("@/components/m1-reporting-points-view")
   const body = [
     "A prishet plani për sot? (HV): Po · Takimi 10:15",
@@ -75,7 +77,7 @@ test("M1 shows the Start of Day tables inline without linking away", () => {
     report: { ...report, data: { morning_task_body: body, morning_task_draft_id: "m1-draft", morning_task_rows: rows } },
     answers: {}, disabled: false, onAnswerChange: () => {}, onMorningTaskSave: () => {},
   }))
-  assert.match(html, /GA\/HV\/DV TASKS NGA M1 START OF DAY/)
+  assert.match(html, /<\/section><section[^>]*aria-labelledby="m1-morning-tasks">.*7\. GA\/HV\/DV TASKS/s)
   assert.doesNotMatch(html, /href="\/morning-report|Hap M1 Start of Day/)
   assert.match(html, /HV TASKS.*A prishet plani për sot\?.*Takimi 10:15.*DV TASKS.*GA TASKS.*BZ ME.*Detyrë GA.*Presim përgjigje/s)
   assert.match(html, /<select[^>]*aria-label="Vazhdon\? Detyrë GA \(GA\)"/)
@@ -126,7 +128,7 @@ test("M1, M2 and M3 show Discord delivery per person instead of a shared manual 
     assert.match(html, />EF<\/td>.*?>Po<\/span>.*?>EH<\/td>.*?>Jo<\/span>/)
     assert.doesNotMatch(html, /aria-label="PO\/JO për Detyra"/)
     if (View === M1ReportingPointsView) {
-      assert.match(html, /7\. SA PER DOREZIM M2\?.*id="m1-reorganization"/s)
+      assert.match(html, /8\. SA PER DOREZIM M2\?.*id="m1-reorganization"/s)
     }
   }
 })

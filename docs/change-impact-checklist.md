@@ -631,6 +631,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 
 - M3: **DET DONE TE HV** përdor kalimin në DONE të regjistruar nga Haxhere
   Spahiu gjatë datës së raportit. Përfshin detyrat sistemore dhe të zakonshme.
+  Kolona GA shfaq ASSIGNED GA për caktimin në detyrë (edhe në kopjen e lidhur me të njëjtin
+  grup) dhe BZ ME GA nga pjesëmarrësit e detyrës ose shabllonit sistemor.
+  Vlerat lexohen kur gjenerohet drafti. Draftet e mëparshme e marrin kolonën
+  gjatë rigjenerimit.
   Kontrollo gjenerimin e M3, pamjen paraprake, email-in dhe eksportet Word/PNG.
 
 - M3: Tabela **DET 08:00** te pika e detyrave të nesërme ngjyros rreshtat
@@ -716,6 +720,10 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Reagimet historike pa orë të regjistruar nuk mund të futen në interval.
   M3 dhe sinkronizimi i reagimeve për përmendjet e GA kanë rrjedha të veçanta.
 
+- M1 PIKAT PËR RAP, pika 3 **DETYRAT E SHTYRA** shfaq tabelat e shtyrjeve
+  me arsyen dhe komentin e secilës detyrë. Pyetja dhe komenti i përgjithshëm
+  për ndryshimin e planit nuk shfaqen në faqe, preview, email ose eksporte.
+
 - M1: **GA/HV/DV TASKS** lexon përgjigjet e Discord-it nga
   `discord_m3_questions` me llojin `tomorrow_task`, sipas ID-së së detyrës,
   personit dhe datës së synuar. Për tabelën HV vlejnë personat e caktuar te
@@ -741,11 +749,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   Tabela HV dhe bashkëngjitja e 1H Reports përdorin paraqitjen e tyre.
   Pyetja **A prishet plani për sot?** ruhet për secilën tabelë HV, DV dhe GA
   dhe shfaqet edhe në preview, email dhe bashkëngjitjet e M1.
-  Te pika 6 e M1 PIKAT PËR RAP, tabelat HV, DV dhe GA përdorin gjeneruesin,
+  Te pika 7 **GA/HV/DV TASKS** e M1 PIKAT PËR RAP, tabelat përdorin gjeneruesin,
   filtrat dhe kolonat e M1 Start of Day për datën e raportit, bashkë me
   përgjigjet e ruajtura në draft. Të dyja faqet përdorin të njëjtat fusha dhe
   ruajnë te drafti M1 i datës përmes të njëjtës API. Komenti ruhet kur fusha
   humb fokusin. Preview, emaili dhe eksportet lexojnë përgjigjet e ruajtura.
+  Pas saj vijnë pika 8 për dorëzim M2 dhe pika 9 për riorganizim.
   Kontrollo renditjen, kolonën BZ ME te GA, përgjigjet për planin dhe
   vazhdimin, preview, emailin dhe eksportet Word, PNG dhe Excel.
 

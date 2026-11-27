@@ -47,14 +47,14 @@ TITLE = "PIKAT PER RAPORTIM M1"
 POINTS = (
     ("absences", "1. MUNGESA"),
     ("delays", "2. VONESA"),
-    ("plan_changes", "3. A KA NDRYSHIM TË PLANIT / PRIORITETEVE?"),
+    ("postponed", "3. DETYRAT E SHTYRA"),
     ("notes", "4. NOTES TË REJA?"),
     ("tasks", "5. DETYRA TË REJA TË KRIJUARA SOT?"),
     ("ga_progress", "6. DET ME GA: PERSONALISHT DHE ME SIMBOLE F, GA"),
-    ("delivery", "7. SA PER DOREZIM M2?"),
-    ("reorganization", f"8. {REORGANIZATION_TITLE}"),
+    ("morning_task_body", f"7. {GA_HV_DV_TASKS_TITLE}"),
+    ("delivery", "8. SA PER DOREZIM M2?"),
+    ("reorganization", f"9. {REORGANIZATION_TITLE}"),
 )
-MANUAL_POINTS = {key: title for key, title in POINTS if key in {"plan_changes", "reorganization"}}
 REORGANIZATION_FORM_KEY = "reorganization_form"
 REORGANIZATION_FORM_TEXT_LIMIT = 10000
 REORGANIZATION_FORM_LIMIT = 61000
@@ -431,14 +431,13 @@ TABLE_COLUMNS = {
               ("title", "DETYRA", 490), ("marker", "SIMBOLI", 60),
               ("planned_for", "PËR KUR", 100), ("created", "KRIJUAR", 135)],
 }
-MORNING_FEEDBACK_TITLE = "GA/HV/DV TASKS NGA M1 START OF DAY"
 MORNING_FEEDBACK_WIDTHS = {label: max(38, width * 7) for label, width in GA_TASK_COLUMNS}
 TASK_FILLS = {"TODO": "#ffc4ed", "IN_PROGRESS": "#ffff00", "PAUSED": "#cbd5e1", "DONE": "#c4fdc4",
               "WAITING_CLIENT": "#e2c15b", "WAITING_CONFIRMATION": "#ccfbf1"}
 
 
 def _morning_feedback_blocks(body: str) -> list[dict]:
-    blocks = [{"kind": "text", "text": MORNING_FEEDBACK_TITLE, "level": 3}]
+    blocks = []
     for block in _section_report_blocks(body):
         if block["kind"] == "text":
             blocks.append({"kind": "text", "text": "\n".join(block["lines"]).strip(), "level": 0})
@@ -520,31 +519,31 @@ def export_blocks(report: dict) -> list[dict]:
         blocks.append({"kind": "text", "text": f"Gjendja deri më: {_created_label(captured_until)}", "level": 0})
     for key, title in POINTS:
         blocks.append({"kind": "text", "text": title, "level": 2})
-        if key in MANUAL_POINTS:
+        if key == "reorganization":
             answers = report.get("manual_answers", {})
-            if key == "reorganization":
-                form = answers.get(REORGANIZATION_FORM_KEY)
-                if not form:
-                    legacy = answers.get(key) or ""
-                    form = reorganization_form_body({**reorganization_form_values(""), "comment": legacy})
-                for field, value in reorganization_form_values(form).items():
-                    label = REORGANIZATION_FORM_LABELS[field]
-                    blocks.append({"kind": "text", "text": f"{label}: {value}" if value else f"{label}:", "level": 0})
-            else:
-                blocks.append({"kind": "text", "text": answers.get(key) or "Pa përgjigje", "level": 0})
-            if key == "plan_changes":
-                for caption, movement, group in m3.task_table_groups(report.get("data", {}).get("postponed", []), "postponed_today"):
-                    if not group:
-                        continue
-                    blocks.append({"kind": "text", "text": caption, "level": 3})
-                    columns = m3.report_table_columns("postponed", movement)
-                    rows = []
-                    for index, row in enumerate(group, 1):
-                        fill, color, _ = m3.task_row_appearance(row)
-                        rows.append([{"text": str(m3.report_table_value(row, column, index, movement)),
-                                      "fill": fill, "color": color, "bold": column == "title", "divider": False}
-                                     for column, _, _ in columns])
-                    blocks.append({"kind": "table", "columns": columns, "rows": rows})
+            form = answers.get(REORGANIZATION_FORM_KEY)
+            if not form:
+                legacy = answers.get(key) or ""
+                form = reorganization_form_body({**reorganization_form_values(""), "comment": legacy})
+            for field, value in reorganization_form_values(form).items():
+                label = REORGANIZATION_FORM_LABELS[field]
+                blocks.append({"kind": "text", "text": f"{label}: {value}" if value else f"{label}:", "level": 0})
+        elif key == "postponed":
+            postponed = report.get("data", {}).get(key) or []
+            if not postponed:
+                blocks.append({"kind": "text", "text": "Asnjë detyrë e shtyrë.", "level": 0})
+            for caption, movement, group in m3.task_table_groups(postponed, "postponed_today"):
+                if not group:
+                    continue
+                blocks.append({"kind": "text", "text": caption, "level": 3})
+                columns = m3.report_table_columns("postponed", movement)
+                rows = []
+                for index, row in enumerate(group, 1):
+                    fill, color, _ = m3.task_row_appearance(row)
+                    rows.append([{"text": str(m3.report_table_value(row, column, index, movement)),
+                                  "fill": fill, "color": color, "bold": column == "title", "divider": False}
+                                 for column, _, _ in columns])
+                blocks.append({"kind": "table", "columns": columns, "rows": rows})
         elif key == "tasks":
             tasks = report.get("data", {}).get("tasks") or []
             day = date.fromisoformat(report["report_date"])
@@ -557,6 +556,11 @@ def export_blocks(report: dict) -> list[dict]:
                 rows = _table_rows({**report, "data": {"tasks": group}}, "tasks")
                 blocks.append({"kind": "table", "columns": TABLE_COLUMNS["tasks"], "rows": rows} if rows else
                               {"kind": "text", "text": "Asnjë detyrë.", "level": 0})
+        elif key == "morning_task_body":
+            if body := report.get("data", {}).get(key):
+                blocks.extend(_morning_feedback_blocks(body))
+            else:
+                blocks.append({"kind": "text", "text": "S’ka draft të M1 Start of Day për këtë datë.", "level": 0})
         elif key in {"ga_progress", "delivery"}:
             linked_delivery = key == "delivery" and report.get("discord_delivery_slot")
             columns = (m3.report_table_columns("delivery", discord_delivery=True)
@@ -574,8 +578,6 @@ def export_blocks(report: dict) -> list[dict]:
                              for column, _, _ in columns])
             blocks.append({"kind": "table", "columns": columns, "rows": rows} if rows else
                           {"kind": "text", "text": "Asnjë detyrë.", "level": 0})
-            if key == "ga_progress" and (body := report.get("data", {}).get("morning_task_body")):
-                blocks.extend(_morning_feedback_blocks(body))
         else:
             rows = _table_rows(report, key)
             blocks.append({"kind": "table", "compact": key in {"absences", "delays"}, "columns": TABLE_COLUMNS[key], "rows": rows} if rows else

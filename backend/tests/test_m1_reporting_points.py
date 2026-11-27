@@ -73,7 +73,7 @@ def test_morning_task_feedback_uses_the_m1_tables_for_the_report_date(monkeypatc
     html = service.render_html(payload)
     assert "Detyra &lt;GA&gt;" in html and "Takimi në 10:15" in html
     assert "BZ ME" in html and "Vazhdon sot" in html
-    assert html.index("6. DET ME GA") < html.index(service.MORNING_FEEDBACK_TITLE) < html.index("7. SA PER DOREZIM")
+    assert html.index("6. DET ME GA") < html.index("7. GA/HV/DV TASKS") < html.index("8. SA PER DOREZIM")
     docx, png, xlsx = service.report_attachments(payload)
     assert "BZ ME" in Document(BytesIO(docx[1])).element.body.xml
     assert png[1].startswith(b"\x89PNG")
@@ -443,7 +443,7 @@ def test_common_view_absences_and_delays_use_report_day_and_person():
     assert [(row["person"], row["start"], row["until"]) for row in data["delays"]] == [("Ada Test", "08:00", "09:00")]
 
 
-def test_render_includes_eight_points_and_reorganization_is_last():
+def test_render_includes_nine_points_and_reorganization_is_last():
     report = {"report_date": DAY.isoformat(), "manual_answers": {"plan_changes": "Po <sot>", "reorganization": "Jo"},
               "data": {"absences": [{"id": "absence", "person": "Ada", "from": "08:00", "to": "12:00", "note": "Sëmurë"}],
                        "delays": [], "notes": [{"id": "note", "source": "PX Notes", "content": "Shënim i ri", "created_at": at(DAY, 8).isoformat()}],
@@ -451,12 +451,14 @@ def test_render_includes_eight_points_and_reorganization_is_last():
     html = service.render_html(report)
     headings = [block["text"] for block in service.export_blocks(report)
                 if block["kind"] == "text" and block["level"] == 2]
-    assert [title.split(".", 1)[0] for title in headings] == list("12345678")
-    assert headings[-1] == "8. A KA RIORGANIZIM?"
-    assert html.index("7. SA PER DOREZIM M2?") < html.index(headings[-1])
-    assert "Po &lt;sot&gt;" in html and "Po <sot>" not in html
+    assert [title.split(".", 1)[0] for title in headings] == list("123456789")
+    assert headings[2] == "3. DETYRAT E SHTYRA"
+    assert headings[6:] == ["7. GA/HV/DV TASKS", "8. SA PER DOREZIM M2?", "9. A KA RIORGANIZIM?"]
+    assert "S’ka draft të M1 Start of Day për këtë datë." in html
+    assert "NDRYSHIM TË PLANIT" not in html and "Po &lt;sot&gt;" not in html
     plain = service.render_plain_text(report)
-    assert "8. A KA RIORGANIZIM?\n\nBZ M1: JO\n\nKOMENT: Jo" in plain
+    assert "Po <sot>" not in plain
+    assert "9. A KA RIORGANIZIM?\n\nBZ M1: JO\n\nKOMENT: Jo" in plain
     assert plain.endswith("SHKAKTARI I MUNGESËS OSE VONESËS:")
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.services.task_pause import TASK_PAUSE_BACKGROUND, TASK_PAUSE_LABEL, pause_until_on_day
 
 from app.services.report_attendance import LEAVE_TABLE_COLUMNS, filter_task_context, filter_report_sections
-from app.services.ga_identity import is_ga_username
+from app.services.ga_identity import is_ga_username, resolve_ga_user
 
 import html
 import os
@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
@@ -28,6 +28,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.services.report_ga_task_bz import ga_task_bz_labels
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
+from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.services.daily_realization_events import postponement_explanation_from_events
@@ -531,6 +532,7 @@ def _completed_tasks_for_report_day(tasks: list[Task], report_day: date) -> list
 
 async def _hv_done_section(db: AsyncSession, report_day: date) -> tuple[str, int]:
     from app.services.after_break_report import _ascii_table
+    from app.services.task_reporting_choices import shared_task_assignee_ids
 
     tz = report_timezone()
     start = datetime.combine(report_day, time.min, tzinfo=tz)
@@ -553,8 +555,21 @@ async def _hv_done_section(db: AsyncSession, report_day: date) -> tuple[str, int
         .order_by(AuditLog.entity_id, AuditLog.created_at.desc(), AuditLog.id.desc())
         .subquery("task_completions")
     )
+    ga_user = await resolve_ga_user(db, work_staff_only=True)
+    ga_id = ga_user.id if ga_user is not None else None
+    ga_assigned = or_(
+        Task.assigned_to == ga_id,
+        select(TaskAssignee.task_id).where(TaskAssignee.task_id == Task.id, TaskAssignee.user_id == ga_id).exists(),
+    ) if ga_id is not None else false()
+    bz_with_ga = or_(
+        select(TaskAlignmentUser.id).where(TaskAlignmentUser.task_id == Task.id, TaskAlignmentUser.user_id == ga_id).exists(),
+        select(SystemTaskTemplateAlignmentUser.template_id).where(
+            SystemTaskTemplateAlignmentUser.template_id == Task.system_template_origin_id,
+            SystemTaskTemplateAlignmentUser.user_id == ga_id,
+        ).exists(),
+    ) if ga_id is not None else false()
     tasks = (await db.execute(
-        select(Task, completions.c.created_at)
+        select(Task, completions.c.created_at, ga_assigned.label("ga_assigned"), bz_with_ga.label("bz_with_ga"))
         .join(completions, completions.c.entity_id == Task.id)
         .join(User, User.id == completions.c.actor_user_id)
         .where(
@@ -564,17 +579,22 @@ async def _hv_done_section(db: AsyncSession, report_day: date) -> tuple[str, int
         )
         .order_by(completions.c.created_at, Task.id)
     )).all()
-    rows = [
-        [
+    shared_assignees = await shared_task_assignee_ids(
+        db, [task for task, _, assigned, _ in tasks if not assigned],
+    ) if ga_id is not None else {}
+    rows = []
+    for index, (task, completed_at, assigned, bz) in enumerate(tasks, 1):
+        assigned = assigned or ga_id in shared_assignees.get(task.id, ())
+        ga_roles = " + ".join(label for label, included in (("ASSIGNED GA", assigned), ("BZ ME GA", bz)) if included)
+        rows.append([
             str(index),
             _m3_task_type_label(task),
             _clean_task_title(task.title, is_system_task=_is_system_task(task)).replace("|", "¦") or "-",
+            ga_roles or "—",
             completed_at.astimezone(tz).strftime("%H:%M"),
-        ]
-        for index, (task, completed_at) in enumerate(tasks, 1)
-    ]
+        ])
     return _normalize_section(_ascii_table(
-        HV_DONE_TITLE, [("NR", 3), ("LLOJI", 7), ("TITULLI", 64), ("ORA", 5)], rows, show_empty_table=True,
+        HV_DONE_TITLE, [("NR", 3), ("LLOJI", 7), ("TITULLI", 64), ("GA", 22), ("ORA", 5)], rows, show_empty_table=True,
     )), len(rows)
 
 
