@@ -79,7 +79,9 @@ class TestNoteTaskFinishPeriodSync(unittest.IsolatedAsyncioTestCase):
             execute=AsyncMock(side_effect=execute), add=Mock(),
             commit=AsyncMock(), refresh=AsyncMock(),
         )
-        user = SimpleNamespace(id=owner_id, role=UserRole.STAFF, department_id=task.department_id)
+        user = SimpleNamespace(
+            id=owner_id, role=UserRole.STAFF, department_id=task.department_id, email="owner@example.com",
+        )
         router = ga_notes if source == "GA_KA" else plan_notes
         with ExitStack() as stack:
             for module in (tasks, router):

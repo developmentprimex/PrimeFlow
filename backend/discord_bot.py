@@ -411,6 +411,9 @@ class PrimeFlowBot(discord.Client):
             await interaction.followup.send(message, ephemeral=True)
 
     async def show_result(self, interaction, result):
+        if result.get("slot_confirmation_id"):
+            await self.show_slot_confirmation(interaction, result)
+            return
         text = result["message"]
         if result.get("applied"):
             text += "\nU zbatuan: " + "; ".join(result["applied"])
@@ -423,6 +426,17 @@ class PrimeFlowBot(discord.Client):
         for part in chunks(text):
             # A refused click must not leave a new message in the channel.
             await interaction.followup.send(part, ephemeral=in_place(interaction))
+
+    async def show_slot_confirmation(self, source, result, *, channel=None):
+        async def proceed(click, slot):
+            saved = await self.bridge("/bot/command", {
+                **actor(click.user.id, click.guild_id, click.channel_id), "request_id": str(click.id),
+                "instruction": f"Ruaj slotin {slot}", "continue_slot_request_id": result["slot_confirmation_id"],
+                "replacement_slot": slot,
+            })
+            return saved["message"]
+
+        await m3_client.confirm_16_view(source, result["message"], proceed, channel=channel)
 
     def remember_task(self, interaction, detail):
         key = (interaction.guild_id, interaction.channel_id, interaction.user.id, detail["task"]["id"])
@@ -501,6 +515,9 @@ class PrimeFlowBot(discord.Client):
             # Remember the order first: a closed task leaves the list.
             order = [task["id"] for task in await self.today(interaction)] if closing and in_place(interaction) and not ui.report_card_origin(getattr(interaction, 'message', None)) else None
             result = await self.apply(interaction, task_id, fingerprint, actions, instruction)
+            if result.get("slot_confirmation_id"):
+                await self.show_slot_confirmation(interaction, result)
+                return
             source = getattr(interaction, 'message', None)
             if ui.one_h_strike_return(source) and (getattr(interaction, 'data', None) or {}).get('custom_id', '').startswith('pf:pointset:'):
                 detail = result if result.get('task') else await self.select(interaction, task_id)
@@ -922,6 +939,9 @@ class PrimeFlowBot(discord.Client):
             if result.get("status") == "MEETING_DRAFT":
                 await channel.send(result["message"], embed=ui.meeting_draft_card(result["meeting"]),
                     view=ui.meeting_draft_view(result["draft_id"]))
+                return
+            if result.get("slot_confirmation_id"):
+                await self.show_slot_confirmation(message, result, channel=channel)
                 return
             text = result["message"]
             if result.get("applied"):

@@ -38,6 +38,7 @@ from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.one_h_slots import current_effective_slot_date, effective_slot_date
+from app.services.one_h_slot_reminder import SlotReminderHeader, confirm_pm_block_slot, scheduled_slot_day
 from app.services import task_reporting_choices as reporting_choices
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
@@ -1935,11 +1936,13 @@ async def create_task(
     payload: TaskCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
+    slot_reminder: SlotReminderHeader = None,
 ) -> TaskOut:
-    return await create_task_in_session(payload, db, user)
+    return await create_task_in_session(payload, db, user, slot_reminder=slot_reminder)
 
 
-async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *, before_commit=None) -> TaskOut:
+async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
+                                 before_commit=None, slot_reminder: str | None = None) -> TaskOut:
     """Existing creation flow; an internal hook can attach provenance atomically.
 
     The hook is not an API parameter. It supports an ordinary task or one
@@ -2255,6 +2258,17 @@ async def create_task_in_session(payload: TaskCreate, db: AsyncSession, user, *,
                 day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
                 actor=user,
             )
+
+    if slot_reminder == "ask" and payload.one_h_report_slot == "16:00" and (
+        payload.is_1h_report and not payload.is_r1 and not payload.is_bllok
+    ):
+        task_dates = Task(
+            start_date=payload.start_date, due_date=payload.due_date,
+            phase=phase_value, created_at=datetime.now(timezone.utc),
+        )
+        await confirm_pm_block_slot(
+            slot_reminder, db, scheduled_slot_day(task_dates), set(assignee_ids or []), period=payload.finish_period,
+        )
 
     if _should_auto_status_from_product_counts(project, phase_value):
         total, completed = _extract_total_and_completed(payload.daily_products, payload.internal_notes)
@@ -2956,13 +2970,16 @@ async def update_task(
     payload: TaskUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
+    slot_reminder: SlotReminderHeader = None,
 ) -> TaskOut:
-    return await update_task_in_session(task_id, payload, db, user, coordinate_reporting=True)
+    return await update_task_in_session(
+        task_id, payload, db, user, coordinate_reporting=True, slot_reminder=slot_reminder,
+    )
 
 
 async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: AsyncSession, user,
                                  *, before_update=None, before_commit=None, return_dto=True,
-                                 coordinate_reporting=False) -> TaskOut | Task:
+                                 coordinate_reporting=False, slot_reminder: str | None = None) -> TaskOut | Task:
     """Internal hooks allow a reviewed proposal and the normal task edit to commit together."""
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
@@ -4051,6 +4068,14 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
                     after_description=task.description,
                 )
 
+    if slot_reminder == "ask" and payload.one_h_report_slot == "16:00" and (
+        task.is_1h_report and not task.is_r1 and not task.is_bllok
+    ):
+        await confirm_pm_block_slot(
+            slot_reminder, db, slot_day or current_effective_slot_date(),
+            {user.id} if personal_slot else new_assignee_ids,
+            period=task.finish_period,
+        )
     if before_commit is not None:
         from inspect import isawaitable
         result = before_commit(task)
@@ -4142,12 +4167,15 @@ async def update_task_one_h_report_slot(
     payload: TaskOneHReportSlotUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
+    slot_reminder: SlotReminderHeader = None,
 ) -> TaskOut:
-    return await update_task_one_h_report_slot_in_session(task_id, payload, db, user, coordinate_reporting=True)
+    return await update_task_one_h_report_slot_in_session(
+        task_id, payload, db, user, coordinate_reporting=True, slot_reminder=slot_reminder,
+    )
 
 
 async def update_task_one_h_report_slot_in_session(task_id, payload, db, user, *, before_commit=None, before_update=None,
-                                                  return_dto=True, coordinate_reporting=False):
+                                                  return_dto=True, coordinate_reporting=False, slot_reminder=None):
     if coordinate_reporting:
         task, group = await reporting_choices.lock_task_group(db, task_id)
     else:
@@ -4185,6 +4213,13 @@ async def update_task_one_h_report_slot_in_session(task_id, payload, db, user, *
         db, task, group, user, field="slot", value=next_slot, day=slot_date,
         confirmation=payload.reporting_choice_confirmations.get("slot"),
     )
+
+    if slot_reminder == "ask" and next_slot == "16:00" and not task.is_r1 and not task.is_bllok:
+        assignees = (await _assignees_for_tasks(db, [task.id])).get(task.id, [])
+        owners = {user.id} if personal else {person.id for person in assignees}
+        if not owners and task.assigned_to is not None:
+            owners.add(task.assigned_to)
+        await confirm_pm_block_slot(slot_reminder, db, slot_date, owners, period=task.finish_period)
 
     if not personal:
         task.one_h_report_slot = next_slot

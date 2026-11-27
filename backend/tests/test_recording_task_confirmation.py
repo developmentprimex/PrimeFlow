@@ -25,17 +25,18 @@ class RecordingTaskConfirmationTests(unittest.IsolatedAsyncioTestCase):
     async def test_full_form_is_forwarded_and_duplicate_does_not_create_twice(self):
         payload = self.payload(title='Përgatit raportin\nRaporti i kontrolluar.', description='', project_id=uuid.uuid4(), priority='NORMAL', finish_period='AM',
             start_date='2026-11-01T00:00:00+00:00', due_date='2026-11-03T17:00:00+00:00',
-            is_deadline_important=True, is_1h_report=True, one_h_report_slot='11:50',
+            is_deadline_important=True, is_1h_report=True, one_h_report_slot='16:00',
             one_h_marker='QUESTION', one_h_marker_comment='Kontrollo', skill_category='management')
         created = SimpleNamespace(id=uuid.uuid4())
-        async def create(task, db, user, *, before_commit):
+        async def create(task, db, user, *, before_commit, slot_reminder):
+            self.assertEqual(slot_reminder, 'ask')
             created.title = task.title
             before_commit(created)
             return created
         with patch.object(router, 'load_recording', new=AsyncMock(return_value=self.row)), \
                 patch.object(router, 'audit'), \
                 patch('app.api.routers.tasks.create_task_in_session', new=AsyncMock(side_effect=create)) as create_task:
-            result = await router.confirm_task(self.sid, self.aid, payload, self.db, self.user)
+            result = await router.confirm_task(self.sid, self.aid, payload, self.db, self.user, slot_reminder='ask')
             task = create_task.call_args.args[0]
             self.assertEqual(task.title, 'PËRGATIT RAPORTIN\nRaporti i kontrolluar.')
             self.assertEqual(task.assignees, [self.uid, self.second])

@@ -2,11 +2,11 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useTaskExplanationQueue } from "@/components/task-postponement-dialog"
-import type { ReportingChoiceDetails } from "@/lib/task-reporting-choice"
+import type { ReportingChoiceDetails, SlotReminderDetails } from "@/lib/task-reporting-choice"
 
 function ChoiceForm({ details, onFinish }: { details: ReportingChoiceDetails; onFinish: (answer: string | null) => void }) {
   const [reason, setReason] = useState("")
@@ -45,12 +45,37 @@ function ChoiceForm({ details, onFinish }: { details: ReportingChoiceDetails; on
   </Dialog>
 }
 
+function SlotReminderForm({ details, onFinish }: { details: SlotReminderDetails; onFinish: (answer: string | null) => void }) {
+  const [choosing, setChoosing] = useState(false)
+  return <Dialog open onOpenChange={(open) => { if (!open) onFinish(null) }}>
+    <DialogContent onInteractOutside={(event) => event.preventDefault()}>
+      <DialogHeader>
+        <DialogTitle>Bllok PM dhe sloti 16:00</DialogTitle>
+        <DialogDescription>{details.message}</DialogDescription>
+      </DialogHeader>
+      {choosing ? <>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Slotet e tjera">
+          {details.slots.map((slot) => <Button key={slot} variant="outline" onClick={() => onFinish(slot)}>
+            {slot}
+          </Button>)}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setChoosing(false)}>Kthehu</Button>
+        </DialogFooter>
+      </> : <DialogFooter>
+        {details.slots.length > 0 && <Button variant="outline" onClick={() => setChoosing(true)}>Ndërro slotin</Button>}
+        <Button onClick={() => onFinish("continue")}>Vazhdo me 16:00</Button>
+      </DialogFooter>}
+    </DialogContent>
+  </Dialog>
+}
+
 export function useTaskReportingChoice(sessionId: string | null) {
-  const { requestExplanation, active } = useTaskExplanationQueue<ReportingChoiceDetails, string>(sessionId)
+  const { requestExplanation, active } = useTaskExplanationQueue<ReportingChoiceDetails | SlotReminderDetails, string>(sessionId)
   return {
     requestChoiceExplanation: requestExplanation,
-    reportingChoiceDialog: active
-      ? <ChoiceForm key={active.id} details={active.details} onFinish={active.finish} />
-      : null,
+    reportingChoiceDialog: active && ("message" in active.details
+      ? <SlotReminderForm key={active.id} details={active.details} onFinish={active.finish} />
+      : <ChoiceForm key={active.id} details={active.details} onFinish={active.finish} />),
   }
 }

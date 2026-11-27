@@ -1477,6 +1477,17 @@ e kontrollit nuk zëvendëson verifikimin e deployment-it real në server.
 
 ## Pikat kryesore në kod
 
+- Para ruajtjes së slotit 1H 16:00, API-ja kontrollon nëse përgjegjësi ka një detyrë
+  aktive dhe të hapur Bllok PM në të njëjtën datë. Për slotin individual të një
+  detyre të përbashkët kontrollohet vetëm përgjegjësi që po ndryshon slotin e vet.
+  Rikujtimi del në My View dhe në pamjet Development, Graphic Design, Product
+  Content dhe Finance, në Task Details përmes dialogut të përbashkët, në PX
+  Notes/PX JAV dhe në formularin nga regjistrimet. Në Discord shfaqet në kartat
+  M3 dhe në asistent. “Vazhdo me 16:00” ruan slotin. “Ndërro slotin” hap
+  oraret e tjera të disponueshme dhe ruan atë që zgjidhet. Common
+  View, 1H SHTYPI Sot/Nesër, 1H Reports dhe raportet M1/M2/M3 përdorin të
+  dhënat e ruajtura nga rrjedhat ekzistuese.
+
 - Knowledge PX → Prompts hap formularin Create Task të PX Notes përmes
   `taskFor`. Titulli i marrë nga shënimi kalon në tekst të thjeshtë para
   numërimit të karaktereve dhe ruajtjes përmes `POST /tasks`. PX JAV ka

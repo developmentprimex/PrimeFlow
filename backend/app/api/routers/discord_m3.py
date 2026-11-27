@@ -385,6 +385,7 @@ class Answer(Actor):
     expected_slot_key: str | None = None
     plan_key: str | None = None
     request_id: str | None = Field(default=None, pattern=r'^\d{1,32}$')
+    continue_with_16: bool = False
 
 
 def validate_answer(q, value):
@@ -547,16 +548,28 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
     elif value.action == 'slot':
         # Same endpoint as My View, with an explicit tomorrow date (no rollover).
         from app.api.routers.tasks import update_task_one_h_report_slot_in_session, TaskOneHReportSlotUpdate
+        from app.services.one_h_slot_reminder import CODE, confirm_pm_block_slot
+        from app.services.one_h_slots import effective_slot_date
 
         async def recheck_slot(task):
             await task_owned(db, user.id, task.id)
             current = await live_payload(db, q, link, user)
             if current.get('resolved') or rules.context_key('slot', current['snapshot']) != value.expected_slot_key:
                 raise HTTPException(409, 'Slotet ndryshuan ndërkohë. Kontrollo përsëri.')
+            if value.slot == '16:00' and not task.is_r1 and not task.is_bllok:
+                await confirm_pm_block_slot(
+                    'continue' if value.continue_with_16 else 'ask',
+                    db, effective_slot_date(q.target_date), {user.id},
+                )
 
-        await update_task_one_h_report_slot_in_session(q.task_id, TaskOneHReportSlotUpdate(
-            report_date=q.target_date, one_h_report_slot=value.slot), db, user,
-            before_update=recheck_slot, before_commit=persist, return_dto=False)
+        try:
+            await update_task_one_h_report_slot_in_session(q.task_id, TaskOneHReportSlotUpdate(
+                report_date=q.target_date, one_h_report_slot=value.slot), db, user,
+                before_update=recheck_slot, before_commit=persist, return_dto=False)
+        except HTTPException as exc:
+            if isinstance(exc.detail, dict) and exc.detail.get('code') == CODE:
+                return {'ok': False, 'slot_reminder': exc.detail['message']}
+            raise
     elif q.kind == 'meeting':
         from app.api.routers.meetings import update_meeting_occurrence_status_in_session
         from app.schemas.meeting import MeetingOccurrenceStatusUpdate

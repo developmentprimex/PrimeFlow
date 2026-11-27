@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.services.report_attendance import load_report_attendance
 
 import hashlib
+import json
 import secrets
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
@@ -31,6 +32,8 @@ from app.services import discord_one_h as one_h
 from app.services import discord_ga_replies as ga_replies
 from app.services.discord_ga_reactions import ReactionEvidence, reaction_attachment_links, record_reaction
 from app.services import discord_task_tools as tools
+from app.services.one_h_slot_reminder import MESSAGE as SLOT_REMINDER_MESSAGE, has_pm_block
+from app.services.one_h_slots import effective_slot_date
 from app.services.primeflow_report import report_timezone
 
 router = APIRouter()
@@ -126,6 +129,8 @@ class Command(Actor):
     instruction: str = Field(min_length=1, max_length=4000)
     expected_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
     direct_actions: list[tools.ToolAction] | None = Field(default=None, min_length=1, max_length=20)
+    continue_slot_request_id: str | None = Field(default=None, pattern=r"^\d{1,32}$")
+    replacement_slot: Literal["10:00", "11:00", "11:50", "14:20", "16:00"] | None = None
     # Tasks on screen in Discord (replied-to or latest bot message), in the order shown.
     context_task_ids: list[uuid.UUID] | None = Field(default=None, max_length=25)
 
@@ -404,6 +409,25 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             raise HTTPException(409, "Komandë e përsëritur me identitet tjetër.")
         return (old.result.get("reply", old.result) if old.result else
             {"message": "Kjo komandë është në përpunim ose kërkon kontroll në PrimeFlow; nuk do të përsëritet.", "status": old.status})
+    if payload.continue_slot_request_id:
+        pending = await db.get(DiscordAction, payload.continue_slot_request_id)
+        if not pending or pending.link_id != link.id or pending.status != "SLOT_CONFIRMATION":
+            raise HTTPException(409, "Ky rikujtim nuk është më aktiv.")
+        plan = pending.result["slot_plan"]
+        actions = [tools.ToolAction.model_validate(item) for item in plan["actions"]]
+        if payload.replacement_slot and payload.replacement_slot != "16:00":
+            for item in actions:
+                if item.tool == "slot":
+                    args = json.loads(item.arguments_json)
+                    if args.get("one_h_report_slot") == "16:00":
+                        args["one_h_report_slot"] = payload.replacement_slot
+                        item.arguments_json = json.dumps(args)
+        payload = payload.model_copy(update={
+            "task_id": pending.task_id, "instruction": pending.instruction,
+            "expected_fingerprint": plan["fingerprint"],
+            "direct_actions": actions,
+        })
+        pending.status = "SLOT_CONFIRMATION_USED"
     task_id = payload.task_id
     if not task_id and (tools.MEETING_HINT.search(payload.instruction) or (link.pending_instruction or "").startswith(MEETING_MARK)):
         reply = await meeting_draft_reply(db, link, user, payload)
@@ -451,7 +475,8 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
         # validation/audit/idempotency path, without asking AI to reinterpret it.
         plan = (tools.TaskPlan(question=None, actions=payload.direct_actions) if payload.direct_actions is not None
                 else await tools.interpret(payload.instruction, before, checklists, users, history))
-        plan = tools.with_closing_steps(plan, before)
+        if not payload.continue_slot_request_id:
+            plan = tools.with_closing_steps(plan, before)
         if plan.question:
             link.selected_task_id, link.selected_at = task_id, datetime.now(timezone.utc)
             link.pending_instruction = ((history + "\n") if history else "") + payload.instruction + "\nPyetja: " + plan.question
@@ -462,6 +487,22 @@ async def command(payload: Command, db: AsyncSession = Depends(get_db)):
             current = await owned_task(db, user, task_id)
             if tools.fingerprint(current) != tools.fingerprint(before):
                 raise ValueError("Detyra ndryshoi gjatë bisedës. Zgjidhe përsëri dhe ridërgo udhëzimin.")
+            if not payload.continue_slot_request_id and not before.get("is_r1") and not before.get("is_bllok"):
+                for operation in operations:
+                    body = operation.get("body") or {}
+                    if operation["path"].endswith("/one-h-report-slot") and body.get("one_h_report_slot") == "16:00":
+                        day = effective_slot_date(date.fromisoformat(body["report_date"]))
+                        if await has_pm_block(db, day, {user.id}):
+                            result = {"status": "SLOT_CONFIRMATION", "message": SLOT_REMINDER_MESSAGE,
+                                      "slot_confirmation_id": action.id}
+                            action.result = {
+                                "reply": result,
+                                "slot_plan": {"fingerprint": tools.fingerprint(before)[:16],
+                                              "actions": [item.model_dump(mode="json") for item in plan.actions]},
+                            }
+                            action.status = result["status"]
+                            await db.commit()
+                            return result
             for operation in operations:
                 await identity(db, payload)
                 await owned_task(db, user, task_id)

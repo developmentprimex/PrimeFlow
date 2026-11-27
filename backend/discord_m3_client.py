@@ -164,6 +164,15 @@ async def save(bot, interaction, job, action, comment='', *, source_message=None
     result = await bot.bridge(f"/bot/m3/{job['id']}/answer", {**actor(interaction), 'action': action, 'comment': comment,
         'expected_answered_at': job.get('answered_at'), 'plan_key': job.get('plan_key'),
         'request_id': str(interaction.id), **fields})
+    if result.get('slot_reminder'):
+        message = source_message or getattr(interaction, 'message', None)
+
+        async def proceed(click, slot):
+            await save(bot, click, job, action, comment, source_message=message,
+                       **{**fields, 'slot': slot, 'continue_with_16': slot == '16:00'})
+
+        await confirm_16_view(interaction, result['slot_reminder'], proceed)
+        return
     latest = await bot.bridge(f"/bot/m3/{job['id']}/open", actor(interaction))
     message = source_message or getattr(interaction, 'message', None)
     if message:
@@ -179,6 +188,56 @@ async def save(bot, interaction, job, action, comment='', *, source_message=None
         except Exception as exc:
             log.warning('Tomorrow confirmation refresh %s failed: %s', child['id'], type(exc).__name__)
     return latest
+
+
+async def confirm_16_view(source, message, proceed, *, channel=None):
+    user_id = source.author.id if channel is not None else source.user.id
+    view = discord.ui.View(timeout=180)
+    accept = discord.ui.Button(label='Vazhdo me 16:00', style=discord.ButtonStyle.primary)
+    change = discord.ui.Button(label='Ndërro slotin', style=discord.ButtonStyle.secondary)
+    alternatives = discord.ui.Select(
+        placeholder='Zgjidh slotin e ri',
+        options=[discord.SelectOption(label=slot, value=slot) for slot in SLOTS if slot != '16:00'],
+    )
+
+    async def save_choice(click, slot):
+        if click.user.id != user_id:
+            return
+        view.stop()
+        if channel is None:
+            await click.response.edit_message(content=f'Po ruhet sloti {slot}…', view=None)
+        else:
+            await click.response.defer(ephemeral=True, thinking=True)
+            await click.message.edit(view=None)
+        try:
+            notice = await proceed(click, slot)
+        except Exception as exc:
+            await click.edit_original_response(content=click.client.error_message(exc), view=None)
+        else:
+            await click.edit_original_response(content=notice or f'Sloti {slot} u ruajt.', view=None)
+
+    async def choose_other(click):
+        if click.user.id != user_id:
+            return
+        if alternatives not in view.children:
+            view.add_item(alternatives)
+        await click.response.edit_message(view=view)
+
+    async def keep_slot(click):
+        await save_choice(click, '16:00')
+
+    async def choose_slot(click):
+        await save_choice(click, alternatives.values[0])
+
+    accept.callback = keep_slot
+    change.callback = choose_other
+    alternatives.callback = choose_slot
+    view.add_item(accept)
+    view.add_item(change)
+    if channel is None:
+        await source.followup.send(message, view=view, ephemeral=True)
+    else:
+        await channel.send(message, view=view)
 
 
 class AnswerModal(discord.ui.Modal):
