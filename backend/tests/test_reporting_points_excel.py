@@ -80,7 +80,7 @@ def test_long_answers_are_complete_and_formula_like_text_stays_literal():
     report["data"]["delivery"][0]["title"] = "Titull\x00 i sigurt"
     sheet = load(m2.export_blocks(report))
     cells = populated(sheet)
-    answer = next(cell for cell in cells if cell.value == formula_text)
+    answer = next(cell for cell in cells if cell.value == f"KOMENT: {formula_text}")
     assert answer.data_type == "s"
     long_cell = next(cell for cell in cells if cell.value == long_answer)
     merged = next(area for area in sheet.merged_cells.ranges if long_cell.coordinate in area)

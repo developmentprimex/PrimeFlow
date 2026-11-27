@@ -29,7 +29,10 @@ from app.models.user import User
 from app.services import ga_assistant as svc
 from app.services.after_break_report import _task_covers_day
 from app.services.ga_identity import is_ga_user, resolve_ga_user
-from app.services.m1_reporting_points import locked_report
+from app.services.m1_reporting_points import (
+    REORGANIZATION_FORM_KEY, REORGANIZATION_FORM_TEXT_LIMIT, locked_report,
+    reorganization_form_body, reorganization_form_values,
+)
 from app.services.primeflow_report import report_timezone
 
 router = APIRouter()
@@ -72,19 +75,34 @@ def reorg_data(day: date, value: str | None) -> dict:
     }
 
 
+def reorg_response(day: date, answers: dict[str, str]) -> dict:
+    result = reorg_data(day, answers.get("reorganization"))
+    if form := answers.get(REORGANIZATION_FORM_KEY):
+        fields = reorganization_form_values(form)
+        for key in ("discussion", "underload", "overload"):
+            fields[key] = fields[key].lower()
+        result.update(fields)
+    return result
+
+
 @router.get("/m1/reorg")
 async def m1_reorg_read(date: date, db: ReportDB, user: ReportUser) -> dict:
     ensure_assistant_user(user)
     answers = (await db.execute(
         select(M1ReportingPointsReport.manual_answers).where(M1ReportingPointsReport.report_date == date)
     )).scalar_one_or_none()
-    return reorg_data(date, (answers or {}).get("reorganization"))
+    return reorg_response(date, answers or {})
 
 
 class ReorgInput(BaseModel):
     date: date
-    answer: Literal["po", "jo"] | None
-    comment: str = Field(default="", max_length=9987)
+    answer: Literal["po", "jo"] | None = None
+    comment: str = Field(default="", max_length=REORGANIZATION_FORM_TEXT_LIMIT)
+    discussion: Literal["po", "jo"] | None = None
+    underload: Literal["po", "jo"] | None = None
+    overload: Literal["po", "jo"] | None = None
+    plan: str | None = Field(default=None, max_length=REORGANIZATION_FORM_TEXT_LIMIT)
+    cause: str | None = Field(default=None, max_length=REORGANIZATION_FORM_TEXT_LIMIT)
 
 
 @router.post("/m1/reorg")
@@ -97,11 +115,31 @@ async def m1_reorg_write(payload: ReorgInput, db: ReportDB, user: ReportUser) ->
     row = await locked_report(db, day)
     if row.generated_at is None and day < today:
         raise HTTPException(404, "M1 Pikat nuk është gjeneruar për këtë datë.")
-    comment = payload.comment.strip()
-    answer_text = payload.answer.capitalize() if payload.answer else ("Pa përgjigje" if comment else "")
-    value = "\n".join(part for part in (answer_text, comment) if part)
-    await save_locked_manual_answers(db, row, {"reorganization": value}, user)
-    return {"date": day, "answer": payload.answer, "comment": comment}
+    before = row.manual_answers or {}
+    prior = reorg_response(day, before)
+    flag_updates = {
+        key: value.upper() for key in ("discussion", "underload", "overload")
+        if (value := getattr(payload, key)) is not None
+    }
+    text_updates = {
+        key: value for key in ("plan", "cause")
+        if (value := getattr(payload, key)) is not None
+    }
+    form_updates = {**flag_updates, **text_updates}
+    has_answer = "answer" in payload.model_fields_set
+    has_comment = "comment" in payload.model_fields_set or (has_answer and not form_updates)
+    answer = payload.answer if has_answer else prior["answer"]
+    comment = payload.comment.strip() if has_comment else prior["comment"]
+    updates = {}
+    if has_answer or has_comment:
+        answer_text = answer.capitalize() if answer else ("Pa përgjigje" if comment else "")
+        updates["reorganization"] = "\n".join(part for part in (answer_text, comment) if part)
+    if form_updates or (has_comment and before.get(REORGANIZATION_FORM_KEY)):
+        fields = reorganization_form_values(before.get(REORGANIZATION_FORM_KEY) or "")
+        updates[REORGANIZATION_FORM_KEY] = reorganization_form_body({**fields, **form_updates, "comment": comment})
+    if updates:
+        await save_locked_manual_answers(db, row, updates, user)
+    return reorg_response(day, {**before, **updates})
 
 
 def devices_filter():

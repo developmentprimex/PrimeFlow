@@ -1,5 +1,13 @@
 import * as React from "react"
 
+// Note text goes on line 1; the template starts on line 4.
+export const NEW_NOTE_TEMPLATE = "\n\n\nDL:\nAM/PM:\nLL:\nSIMBOLI:"
+
+export function hasNewNoteContent(content: string): boolean {
+  const text = content.trim()
+  return text.length > 0 && text !== NEW_NOTE_TEMPLATE.trim()
+}
+
 // Some older titles were saved with a missing leading "[" token, e.g. `[added]]...[/added]]`.
 // Accept both forms when parsing so legacy task titles still render cleanly.
 const NOTE_MARK_TOKEN_RE = /\[{1,2}(done|added)\]\]|\[{1,2}\/(done|added)\]\]/g

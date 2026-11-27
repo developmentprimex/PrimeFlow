@@ -400,25 +400,23 @@ async def generate_fresh(
     show_full_mira_notes: bool = False,
 ) -> ReportDocument:
     from app.services.morning_task_follow_up import (
-        FOLLOW_UP_BY_SLOT, load_follow_up_comments, load_morning_task_rows, report_follow_up_groups,
+        FOLLOW_UP_BY_SLOT, load_follow_up_comments, load_morning_task_rows,
     )
 
     data = data or await load_common_view(day)
-    follow_up_comments = {}
     frozen_ids = set()
-    if report_follow_up_groups(slot):
-        discord_slot = "14:20" if slot == "14:10" else slot
-        async with SessionLocal() as db:
-            evidence = await load_follow_up_comments(db, day, [discord_slot], include_regular_answers=True)
-            if primary := FOLLOW_UP_BY_SLOT.get(slot):
-                frozen_ids = set((await load_follow_up_comments(db, day, [slot], group=primary)).get(slot, {}))
-            rows = await load_morning_task_rows(db, day, frozen_task_ids=frozen_ids)
-        follow_up_comments = {
-            task_id: f"{discord_slot} · {answer}"
-            for task_id, answer in evidence.get(discord_slot, {}).items()
-            if answer
-        }
-        data = {**data, "morning_follow_up_tasks": rows}
+    discord_slot = "14:20" if slot == "14:10" else slot
+    async with SessionLocal() as db:
+        evidence = await load_follow_up_comments(db, day, [discord_slot], include_regular_answers=True)
+        if primary := FOLLOW_UP_BY_SLOT.get(slot):
+            frozen_ids = set((await load_follow_up_comments(db, day, [slot], group=primary)).get(slot, {}))
+        rows = await load_morning_task_rows(db, day, frozen_task_ids=frozen_ids)
+    follow_up_comments = {
+        task_id: f"{discord_slot} · {answer}"
+        for task_id, answer in evidence.get(discord_slot, {}).items()
+        if answer
+    }
+    data = {**data, "morning_follow_up_tasks": rows}
     reminders = await load_1h_reminder_questions(slot, day)
     undiscussed_notes = await load_undiscussed_notes(show_full_mira_notes=show_full_mira_notes)
     strike_window_start = strike_interval_start(day, "10:00")

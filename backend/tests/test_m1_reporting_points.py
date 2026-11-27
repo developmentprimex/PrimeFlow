@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.services import m1_reporting_points as service
-from app.services.morning_report import preserve_removed_task_feedback
+from app.services.morning_report import _ga_hv_dv_tables_body
 from app.models.enums import CommonCategory, GaNoteStatus
 from app.api.routers.m1_reporting_points import ManualAnswersPayload
 
@@ -40,57 +40,45 @@ def test_saved_email_preview_loads_the_missing_summary(monkeypatch):
     assert "summary" not in saved_email
 
 
-def test_morning_task_feedback_keeps_groups_and_closed_tasks_after_regeneration():
+def test_morning_task_feedback_uses_the_m1_tables_for_the_report_date(monkeypatch):
     from io import BytesIO
     from docx import Document
     from openpyxl import load_workbook
 
-    closed_id, open_id, removed_open_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     plan = {"key": "plan:HV", "title": "A prishet plani për sot?", "owners": "HV",
-            "continuation": "PO", "comment": ""}
-    task = {"key": f"GA TASKS:{closed_id}", "title": "Detyra <GA>", "owners": "GA",
-            "continuation": "", "comment": "Takimi në 10:15"}
-    unanswered = {**task, "key": f"GA TASKS:{open_id}", "title": "Detyrë pa përgjigje", "comment": ""}
-    removed = {**unanswered, "key": f"GA TASKS:{removed_open_id}", "title": "E zhvendosur"}
-    current = {service.TASK_FEEDBACK_ROWS: {"plan": [plan], "GA TASKS": [unanswered]}}
-    previous = {service.TASK_FEEDBACK_ROWS: {"plan": [plan], "GA TASKS": [task, unanswered, removed]}}
-    snapshot = preserve_removed_task_feedback(current, previous)
-    snapshot = preserve_removed_task_feedback(current, snapshot)
-    assert snapshot[service.REMOVED_TASK_FEEDBACK_ROWS] == {"GA TASKS": [task, removed]}
-    db = SimpleNamespace(
-        scalar=AsyncMock(return_value=snapshot),
-        execute=AsyncMock(return_value=Mock(**{"all.return_value": [
-            (closed_id, "DONE", at(DAY, 10, 15), True),
-            (open_id, "TODO", None, True),
-            (removed_open_id, "TODO", None, True),
-        ]})),
-    )
+            "continuation": "PO", "comment": "Takimi në 10:15"}
+    task = ["1", "GA", "-", "AM", "FT", "TODO", "SOT", "Detyra <GA>", "EF", "✓", "Vazhdon sot"]
+    body = _ga_hv_dv_tables_body({"GA TASKS": [task]}, [plan])
+    overrides = {plan["key"]: {"continuation": "PO", "comment": plan["comment"]}}
+    feedback_rows = {"plan": [plan]}
+    generate = AsyncMock(return_value=(body, feedback_rows))
+    monkeypatch.setattr(service, "morning_task_feedback_table", generate)
+    attendance = AsyncMock(side_effect=lambda _db, sections, _day: sections)
+    monkeypatch.setattr(service, "filter_report_sections", attendance)
+    draft = SimpleNamespace(id=uuid.uuid4(), generated_snapshot={service.TASK_FEEDBACK_OVERRIDES: overrides})
+    db = SimpleNamespace(scalar=AsyncMock(return_value=draft))
     report = {"report_date": DAY.isoformat(), "data": {}}
 
     payload = asyncio.run(service.with_morning_task_feedback(db, report))
 
     statement, = db.scalar.await_args.args
     assert DAY in statement.compile().params.values()
-    hv, dv, ga = payload["data"]["morning_task_groups"]
-    assert (hv["title"], dv["title"], ga["title"]) == ("HV TASKS", "DV TASKS", "GA TASKS")
-    assert hv["plan"] == plan
-    assert dv["tasks"] == []
-    assert ga["tasks"] == [
-        {**unanswered, "closed": False, "status": "Për t’u bërë"},
-        {**task, "closed": True, "status": "Mbyllur · 13.10.2026 10:15"},
-    ]
-    assert "morning_task_groups" not in report["data"]
+    generate.assert_awaited_once_with(db, DAY, overrides)
+    attendance.assert_awaited_once_with(db, [{"title": service.GA_HV_DV_TASKS_TITLE, "body": body}], DAY)
+    assert payload["data"]["morning_task_body"] == body
+    assert payload["data"]["morning_task_draft_id"] == str(draft.id)
+    assert payload["data"]["morning_task_rows"] == feedback_rows
+    assert report["data"] == {}
+
     html = service.render_html(payload)
     assert "Detyra &lt;GA&gt;" in html and "Takimi në 10:15" in html
-    assert "Detyrë pa përgjigje" in html and "Mbyllur · 13.10.2026 10:15" in html
-    assert "E zhvendosur" not in html
+    assert "BZ ME" in html and "Vazhdon sot" in html
     assert html.index("6. DET ME GA") < html.index(service.MORNING_FEEDBACK_TITLE) < html.index("7. SA PER DOREZIM")
     docx, png, xlsx = service.report_attachments(payload)
-    closed_label = ga["tasks"][-1]["status"]
-    assert closed_label in Document(BytesIO(docx[1])).element.body.xml
+    assert "BZ ME" in Document(BytesIO(docx[1])).element.body.xml
     assert png[1].startswith(b"\x89PNG")
     workbook = load_workbook(BytesIO(xlsx[1]))
-    assert any(closed_label in row for row in workbook.active.values)
+    assert any("BZ ME" in row for row in workbook.active.values)
 
 
 def ga_task(**changes):
@@ -185,6 +173,29 @@ def test_created_tasks_split_by_local_start_day_independently_of_due_date():
         ["Start today"], ["Start tomorrow", "Start yesterday", "No start"]]
     assert [row[0]["text"] for row in tables[1]["rows"]] == ["1", "2", "3"]
     assert "Përfshihen edhe detyrat pa Start Date." in service.render_plain_text(report)
+
+
+def test_saved_report_excludes_system_tasks_from_the_other_start_date_table():
+    created_at = at(DAY, 8).isoformat()
+    tasks = [
+        {"title": "System starting today", "task_type": "SYS", "start_date": DAY.isoformat()},
+        {"title": "System starting tomorrow", "task_type": "SYS", "start_date": "2026-10-14"},
+        {"title": "System without a start date", "task_type": "SYS"},
+        {"title": "Project starting tomorrow", "task_type": "PRJK", "start_date": "2026-10-14"},
+        {"title": "Fast task without a start date", "task_type": "FT"},
+    ]
+    stored_tasks = [{**task, "id": str(index), "created_at": created_at} for index, task in enumerate(tasks)]
+    row = SimpleNamespace(id="report", report_date=DAY, manual_answers={}, data={"tasks": stored_tasks},
+                          status="DRAFT", generated_at=None, sent_at=None, last_error=None)
+
+    payload = service.report_payload(row)
+    assert [task["id"] for task in payload["data"]["tasks"]] == ["0", "3", "4"]
+    assert [task["id"] for task in row.data["tasks"]] == ["0", "1", "2", "3", "4"]
+
+    tables = [block for block in service.export_blocks(payload) if block["kind"] == "table"]
+    assert [[row[5]["text"] for row in table["rows"]] for table in tables] == [
+        ["System starting today"], ["Project starting tomorrow", "Fast task without a start date"],
+    ]
 
 
 @pytest.mark.parametrize("due,label", [
@@ -441,10 +452,62 @@ def test_render_includes_eight_points_and_reorganization_is_last():
     headings = [block["text"] for block in service.export_blocks(report)
                 if block["kind"] == "text" and block["level"] == 2]
     assert [title.split(".", 1)[0] for title in headings] == list("12345678")
-    assert headings[-1] == "8. A DUHET RIORGANIZIM?"
+    assert headings[-1] == "8. A KA RIORGANIZIM?"
     assert html.index("7. SA PER DOREZIM M2?") < html.index(headings[-1])
     assert "Po &lt;sot&gt;" in html and "Po <sot>" not in html
-    assert service.render_plain_text(report).endswith("8. A DUHET RIORGANIZIM?\n\nJo")
+    plain = service.render_plain_text(report)
+    assert "8. A KA RIORGANIZIM?\n\nBZ M1: JO\n\nKOMENT: Jo" in plain
+    assert plain.endswith("SHKAKTARI I MUNGESËS OSE VONESËS:")
+
+
+def test_reorganization_form_is_exported_with_all_fields():
+    from io import BytesIO
+    from docx import Document
+    from openpyxl import load_workbook
+
+    form = "BZ M1: PO\nKOMENT: Ndryshim <i ri>\n Rreshti tjetër\nNËNNGARKESË: JO\nMBINGARKESË: PO\nSI BËHET RIORGANIZIMI?: Zhvendos detyrën"
+    answers = ManualAnswersPayload(manual_answers={"reorganization_form": form}).manual_answers
+    report = {"report_date": DAY.isoformat(), "data": {}, "manual_answers": answers}
+
+    assert "KOMENT: Ndryshim &lt;i ri&gt;<br>Rreshti tjetër" in service.render_html(report)
+    assert "NËNNGARKESË: JO\n\nMBINGARKESË: PO" in service.render_plain_text(report)
+    assert service.render_plain_text(report).endswith("SHKAKTARI I MUNGESËS OSE VONESËS:")
+    docx, png, xlsx = service.report_attachments(report)
+    assert "Zhvendos detyrën" in Document(BytesIO(docx[1])).element.body.xml
+    assert png[1].startswith(b"\x89PNG")
+    assert any("Zhvendos detyrën" in str(cell) for row in load_workbook(BytesIO(xlsx[1])).active.values for cell in row)
+
+
+def test_ga_reorganization_updates_optional_form_fields_without_changing_legacy_answer(monkeypatch):
+    from app.api.routers import ga_report_data
+
+    row = SimpleNamespace(
+        generated_at=at(DAY, 8),
+        manual_answers={"plan_changes": "Plani", "reorganization": "Jo\nKomenti i mëparshëm"},
+    )
+    monkeypatch.setattr(ga_report_data, "locked_report", AsyncMock(return_value=row))
+    monkeypatch.setattr(ga_report_data, "ensure_assistant_user", lambda user: None)
+
+    async def store(db, report, answers, user):
+        report.manual_answers.update(answers)
+
+    monkeypatch.setattr(ga_report_data, "save_locked_manual_answers", store)
+    response = asyncio.run(ga_report_data.m1_reorg_write(
+        ga_report_data.ReorgInput(date=DAY, discussion="po", overload="po", plan="Ndrysho\nPlanin"),
+        None, None,
+    ))
+    assert response == {
+        "date": DAY, "answer": "jo", "comment": "Komenti i mëparshëm",
+        "discussion": "po", "underload": "jo", "overload": "po",
+        "plan": "Ndrysho\nPlanin", "cause": "",
+    }
+    legacy_response = asyncio.run(ga_report_data.m1_reorg_write(
+        ga_report_data.ReorgInput(date=DAY, answer="po", comment="Koment <nga GA>"),
+        None, None,
+    ))
+    assert legacy_response == {**response, "answer": "po", "comment": "Koment <nga GA>"}
+    assert "KOMENT: Koment <nga GA>" in row.manual_answers["reorganization_form"]
+    assert row.manual_answers["plan_changes"] == "Plani"
 
 
 def test_only_the_two_manual_points_can_be_saved():

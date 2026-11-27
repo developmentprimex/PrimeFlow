@@ -100,12 +100,13 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         deadline = self._task("Important AM", due_date=due, is_deadline_important=True)
         deadline_today = self._task("Important today", is_deadline_important=True)
         today = self._task("Ordinary due today")
+        completed = self._task("08:00 Completed priority", status="DONE")
         unrelated = self._task("Ordinary future", due_date=due)
         body, count = _morning_follow_up_tables(
-            [early, deadline, today, unrelated, early_today, deadline_today], {}, {}, {}, day,
+            [early, deadline, today, unrelated, early_today, deadline_today, completed], {}, {}, {}, day,
             {"11:00": {early.id: "EF: Started today"}},
         )
-        self.assertEqual(count, 5)
+        self.assertEqual(count, 6)
         for text in ("03.09.2026", "DUE SOT", "IN PROGRESS", "Important AM", "11:00: EF: Started today"):
             self.assertIn(text, body)
         self.assertNotIn(unrelated.title, body)
@@ -118,8 +119,10 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertEqual(section_group_label("morning", matching[0]["title"], matching[0]["section_key"]),
                          "AUTO-FILLED FROM PRIMEFLOW")
         html = render_html("M1", day, matching)
-        expected_titles = [early_today.title, early.title, deadline_today.title, deadline.title, today.title]
-        for rendered in (body, html):
+        document = Document(BytesIO(render_section_report_docx("M1", "M1", day, matching)))
+        word_rows = [" ".join(cell.text for cell in row.cells) for table in document.tables for row in table.rows]
+        expected_titles = [early_today.title, early.title, deadline_today.title, deadline.title, today.title, completed.title]
+        for rendered in (body, html, "\n".join(word_rows)):
             positions = [rendered.index(title) for title in expected_titles]
             self.assertEqual(positions, sorted(positions))
         self.assertIn('bgcolor="#fef3c7"', html)

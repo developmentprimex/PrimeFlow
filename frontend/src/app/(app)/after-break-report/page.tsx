@@ -26,6 +26,7 @@ import {
 import { useAuth } from "@/lib/auth"
 import { DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
 import { addManualReportSection, isCustomManualReportSection, ManualReportQuestionAdd, ManualReportQuestionDelete } from "@/components/manual-report-question-add"
+import { MorningReorganization, REORGANIZATION_SECTION } from "@/components/morning-reorganization"
 
 type Section = { section_key?: string; title: string; body: string }
 type TaskExplanation = { row_number: string; task_id: string; title: string; assignees: string; reason: string; comment: string; continued_only?: boolean }
@@ -97,6 +98,10 @@ function sectionGroupLabel(section: Section) {
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
   return sectionGroupLabel(sections[index]) !== sectionGroupLabel(sections[index - 1])
+}
+
+function isReorganizationSection(section: Section) {
+  return (section.section_key || section.title) === REORGANIZATION_SECTION
 }
 type DeliveryHistory = {
   id: string
@@ -429,7 +434,9 @@ export default function AfterBreakReportPage() {
 
   const addManualQuestion = async (title: string, position: number) => {
     if (!draft) return false
-    const sections = addManualReportSection(draft.sections, title, position, (section) => sectionGroupLabel(section) === "Manual questions")
+    const sections = addManualReportSection(draft.sections, title, position, (section) =>
+      sectionGroupLabel(section) === "Manual questions" && !isReorganizationSection(section),
+    )
     if (!sections) {
       toast.error("Kjo pikë ekziston tashmë")
       return false
@@ -688,7 +695,7 @@ export default function AfterBreakReportPage() {
       {draft ? (
         <>
           <div className="space-y-4">
-            {canEdit && !draft.sections.some((section) => sectionGroupLabel(section) === "Manual questions") ? (
+            {canEdit && !draft.sections.some((section) => sectionGroupLabel(section) === "Manual questions" && !isReorganizationSection(section)) ? (
               <div className="flex items-center justify-between gap-2 rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
                 Manual questions
                 <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} />
@@ -696,6 +703,7 @@ export default function AfterBreakReportPage() {
             ) : null}
             {draft.sections.map((section, index) => {
               const isEditing = editingSection?.index === index
+              const isReorganization = isReorganizationSection(section)
               const editsExplanations = (section.section_key || section.title) === UNFINISHED_SECTION
               const explanationsByRow = editsExplanations
                 ? new Map(draft.unfinished_task_explanations?.map((task) => [task.row_number, task]))
@@ -709,7 +717,7 @@ export default function AfterBreakReportPage() {
                   {shouldShowSectionGroup(draft.sections, index) ? (
                     <div className="flex items-center justify-between gap-2 rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
                       {sectionGroupLabel(section)}
-                      {sectionGroupLabel(section) === "Manual questions" && canEdit ? <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} /> : null}
+                      {sectionGroupLabel(section) === "Manual questions" && !isReorganization && canEdit ? <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} /> : null}
                     </div>
                   ) : null}
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -732,7 +740,7 @@ export default function AfterBreakReportPage() {
                         ) : (
                           <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
                         )}
-                        {!isEditing ? (
+                        {!isEditing && !isReorganization ? (
                           <div className="mt-1 text-xs text-muted-foreground">
                             {section.body.trim().split(/\s+/).filter(Boolean).length} words
                           </div>
@@ -744,7 +752,7 @@ export default function AfterBreakReportPage() {
                           {showContinuations ? "− Fshih" : "+ Shfaq"} detyrat që kanë vazhduar ({continuedCount})
                         </Button>
                       )}
-                      {canEdit && !editsExplanations && !isEditing && !AUTOMATED_SECTIONS.has(section.section_key || section.title) ? (
+                      {canEdit && !isReorganization && !editsExplanations && !isEditing && !AUTOMATED_SECTIONS.has(section.section_key || section.title) ? (
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
                             <Pencil className="h-4 w-4" /> Edit
@@ -756,7 +764,16 @@ export default function AfterBreakReportPage() {
                       ) : null}
                     </div>
 
-                    {isEditing ? (
+                    {isReorganization ? (
+                      <MorningReorganization
+                        body={section.body}
+                        showAllFollowUps
+                        readOnly={!canEdit}
+                        saving={saving}
+                        onChange={(body) => updateSection(index, body)}
+                        onSave={() => void save()}
+                      />
+                    ) : isEditing ? (
                       <ReportSectionFieldEditor
                         key={`edit-${index}`}
                         lines={editingSection.lines}
@@ -771,6 +788,7 @@ export default function AfterBreakReportPage() {
                       />
                     ) : (
                       <ReportSectionPreview
+                        collapsibleTaskRowsDate={editsExplanations ? draft.report_date : undefined}
                         compactBzColumn={(section.section_key || section.title) === "GA MBYLLJA E DET"}
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         discordReplyReport={(section.section_key || section.title) === GA_REPLIES_SECTION

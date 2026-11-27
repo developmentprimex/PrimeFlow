@@ -91,5 +91,6 @@ def read_inbox(
                 "received_at": received.strftime("%H:%M"),
                 "received_datetime": received.isoformat(),
                 "body": _message_body(message),
+                **({"internet_message_id": str(message["Message-ID"])} if message.get("Message-ID") else {}),
             })
     return sorted(rows, key=lambda row: datetime.fromisoformat(row["received_datetime"]).timestamp(), reverse=True)

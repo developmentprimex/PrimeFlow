@@ -248,6 +248,7 @@ def test_m1_automatic_delivery_is_due_at_0830_local_and_independent_of_manual_se
         row = row_for(M1ReportingPointsReport)
         row.report_date = now.date()
         db = AsyncMock()
+        db.scalar.return_value = None
         db.execute.return_value = MagicMock()
         db.execute.return_value.scalars.return_value.all.return_value = []
         context = MagicMock()

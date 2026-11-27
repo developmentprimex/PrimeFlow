@@ -37,6 +37,7 @@ from app.services.after_break_report import (
     render_plain_text,
     send_after_break_report,
     subject_for,
+    with_after_break_reorganization_section,
 )
 from app.services.meeting_point_manual_sync import (
     custom_manual_questions,
@@ -274,11 +275,12 @@ async def get_draft(
     _: User = Depends(require_after_break_report_user),
 ) -> dict:
     row = (
-        await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_date))
+        await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_date).with_for_update())
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     sections = with_section_keys("after_break", row.sections)
+    sections = with_after_break_reorganization_section(sections)
     sections = await apply_1h_confirmation_questions(db, sections)
     settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
@@ -378,10 +380,10 @@ async def update_draft(
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
-        existing = [
+        existing = with_after_break_reorganization_section([
             section for section in (row.sections or [])
             if not is_retired_after_break_question(section.get("title"), section.get("section_key"))
-        ]
+        ])
         if user.role != UserRole.ADMIN and removes_custom_manual_section(
             [section for section in existing
              if not after_break_automated_section_title(section.get("title"), section.get("section_key"))],
@@ -400,6 +402,7 @@ async def update_draft(
             and not after_break_automated_section_title(section.title, section.section_key)
         ])
         saved.extend(section for section in existing if section.get("section_key") in AUTOMATED_SECTION_TITLES)
+        saved = with_after_break_reorganization_section([*saved, existing[-1]], preferred_sections=saved)
         previous_questions = custom_manual_questions(row.sections)
         current_questions = custom_manual_questions(saved)
         if current_questions != previous_questions:

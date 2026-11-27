@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.integrations.microsoft_mail import Mailbox
 from app.models.ga_note import GaNote
-from app.services.px_note_email import format_email_title, original_email_url
+from app.services.px_note_email import format_email_title, internet_message_id, original_email_url
 
 
 class MailboxNoteDraft(BaseModel):
@@ -40,10 +40,12 @@ def _line(value: str) -> str:
     return " ".join(value.replace("\x00", "").replace("|", "｜").split())
 
 
-def _email_source(message: dict) -> dict:
+def _email_source(message: dict, mailbox: Mailbox) -> dict:
     metadata = {"subject": _line(message["subject"]), "sender": _line(message["sender"])}
     if url := original_email_url(message.get("original_email_url")):
         metadata["original_email_url"] = url
+    if message_id := internet_message_id(message.get("internet_message_id")):
+        metadata.update(mailbox=mailbox.email, internet_message_id=message_id)
     return {
         "email_metadata": metadata,
         "email_body": message["body"].replace("\x00", ""),
@@ -93,17 +95,18 @@ async def save_mailbox_notes(db: AsyncSession, messages: list[dict], mailbox: Ma
     )).all())
     updated_source = False
     for note_id, metadata in existing.items():
+        source = _email_source(by_id[note_id], mailbox)
         if metadata is None:
             await db.execute(update(GaNote).where(GaNote.id == note_id, GaNote.email_metadata.is_(None))
-                             .values(updated_at=GaNote.updated_at, **_email_source(by_id[note_id])))
+                             .values(updated_at=GaNote.updated_at, **source))
             updated_source = True
-        elif not metadata.get("original_email_url") and (
-            url := original_email_url(by_id[note_id].get("original_email_url"))
-        ):
-            await db.execute(update(GaNote).where(GaNote.id == note_id, GaNote.email_metadata == metadata)
-                             .values(updated_at=GaNote.updated_at,
-                                     email_metadata={**metadata, "original_email_url": url}))
-            updated_source = True
+        else:
+            missing = {key: value for key, value in source["email_metadata"].items()
+                       if key in {"original_email_url", "mailbox", "internet_message_id"} and not metadata.get(key)}
+            if missing:
+                await db.execute(update(GaNote).where(GaNote.id == note_id, GaNote.email_metadata == metadata)
+                                 .values(updated_at=GaNote.updated_at, email_metadata={**metadata, **missing}))
+                updated_source = True
     pending = sorted(by_id.keys() - existing.keys())
     if not pending:
         if updated_source:
@@ -135,7 +138,7 @@ async def save_mailbox_notes(db: AsyncSession, messages: list[dict], mailbox: Ma
             return {
                 "id": note_id,
                 "content": "\n".join(content),
-                **_email_source(message),
+                **_email_source(message, mailbox),
                 "knowledge_type": mailbox.note_origin,
                 "created_at": received_at,
                 "start_date": received_at,

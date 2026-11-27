@@ -599,7 +599,10 @@ export interface ProjectPhaseChecklistItem {
   updated_at: string
 }
 
-export type NoteEmailPreview = { id: string; title: string; subject: string; sender: string; summary?: string; original_email_url?: string }
+export type NoteEmailPreview = {
+  id: string; title: string; subject: string; sender: string; summary?: string; original_email_url?: string
+  mailbox?: string; internet_message_id?: string
+}
 export type NoteEmailPreviews = Record<string, NoteEmailPreview>
 export type NoteEmailHeading = { title: string; original: string; original_email_url?: string }
 export type NoteEmailHeadings = Record<string, NoteEmailHeading>

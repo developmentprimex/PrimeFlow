@@ -10,7 +10,8 @@ import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-re
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
+import { MorningReorganization, REORGANIZATION_SECTION } from "@/components/morning-reorganization"
+import { MorningTaskFeedback, TASK_FEEDBACK_SECTION, type TaskFeedback, type TaskFeedbackRow, type TaskFeedbackRows } from "@/components/morning-task-feedback"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,10 +32,7 @@ type Section = { section_key?: string; title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
-type TaskFeedback = { continuation: "" | "PO" | "JO"; comment: string }
-type TaskFeedbackRow = TaskFeedback & { key: string; title: string; owners: string }
 type TaskFeedbackEdits = Record<string, Partial<TaskFeedback>>
-const TASK_FEEDBACK_SECTION = "GA/HV/DV TASKS"
 const MORNING_FOLLOW_UP_SECTION = "DET 08:00/DL AM"
 const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 const NOTES_SECTION = "(GA) NOTES TE REJA ( NOT DISSCUSED)?"
@@ -42,15 +40,6 @@ const MARKER_TASK_SECTIONS = new Set(["FIZIKISHT ME GA?", "A KA PYTJE/SQARIME ME
 const GA_REPLIES_SECTION = "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?"
 const GA_REACTIONS_SECTION = "A KA REACTION TE GRUPI?"
 const GA_PF_COMMENTS_SECTION = "(GA) A KA KOMENTE NE PF?"
-const REORGANIZATION_SECTION = "A KA RIORGANIZIM?"
-const REORGANIZATION_FIELDS = {
-  discussion: "BZ M1",
-  comment: "KOMENT",
-  underload: "NËNNGARKESË",
-  overload: "MBINGARKESË",
-  plan: "SI BËHET RIORGANIZIMI?",
-  cause: "SHKAKTARI I MUNGESËS OSE VONESËS",
-} as const
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -70,7 +59,7 @@ type Draft = {
   note_emails?: NoteEmailPreviews
   note_email_headings?: NoteEmailHeadings
   generated_snapshot?: { ga_replies_generated_at?: string }
-  task_feedback_rows?: Record<string, TaskFeedbackRow[]>
+  task_feedback_rows?: TaskFeedbackRows
   status: string
   sent_at?: string | null
   gmail_message_id?: string | null
@@ -123,101 +112,6 @@ function sectionGroupLabel(section: Section) {
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
   return sectionGroupLabel(sections[index]) !== sectionGroupLabel(sections[index - 1])
-}
-
-function MorningReorganization({ body, hasAttendanceIssue, readOnly, saving, onChange, onSave }: {
-  body: string
-  hasAttendanceIssue: boolean
-  readOnly: boolean
-  saving: boolean
-  onChange: (body: string) => void
-  onSave: () => void
-}) {
-  const fields: Record<string, string> = Object.fromEntries(body.split(/\n(?=\S)/).flatMap((field) => {
-    const separator = field.indexOf(":")
-    return separator < 0 ? [] : [[field.slice(0, separator), field.slice(separator + 1)
-      .replace(/^ /, "").replace(/\n /g, "\n")]]
-  }))
-  const { discussion, comment, underload, overload, plan, cause } = REORGANIZATION_FIELDS
-  if (fields[plan] === undefined && fields["SI BËHET ORGANIZIMI?"] !== undefined) {
-    fields[plan] = fields["SI BËHET ORGANIZIMI?"]
-  }
-  const discussionChecked = fields[discussion] === "PO"
-  const needsPlan = hasAttendanceIssue || fields[underload] === "PO" || fields[overload] === "PO"
-  const update = (label: string, value: string) => {
-    const next: Record<string, string> = { [discussion]: "JO", [underload]: "JO", [overload]: "JO", ...fields, [label]: value }
-    onChange(Object.values(REORGANIZATION_FIELDS).flatMap((field) => {
-      const answer = next[field]
-      return answer === undefined ? [] : [answer ? `${field}: ${answer.replace(/\n/g, "\n ")}` : `${field}:`]
-    }).join("\n"))
-  }
-  const answerField = (label: string) => (
-    <label className="grid gap-2 text-sm font-medium">
-      {label}
-      <Textarea value={fields[label] ?? ""} onChange={(event) => update(label, event.target.value)}
-        rows={2} readOnly={readOnly} />
-    </label>
-  )
-  return (
-    <fieldset disabled={saving} className="mt-4 space-y-4">
-      <div className="grid items-start gap-4 md:grid-cols-[7rem_minmax(0,1fr)]">
-        <label className="grid w-28 gap-2 text-sm font-medium">
-          {discussion}
-          <span className="flex h-9 items-center justify-between rounded-md border border-input bg-background px-3 has-[:enabled]:cursor-pointer">
-            <Checkbox checked={discussionChecked} disabled={readOnly}
-              onCheckedChange={(checked) => update(discussion, checked === true ? "PO" : "JO")} />
-            <span aria-hidden="true" className={discussionChecked ? "font-semibold text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}>
-              {discussionChecked ? "PO" : "JO"}
-            </span>
-          </span>
-        </label>
-        {answerField(comment)}
-      </div>
-      <div className="flex flex-wrap gap-4">
-        {[underload, overload].map((label) => (
-          <label key={label} className="grid gap-2 text-sm font-medium">
-            {label}
-            <select value={fields[label] === "PO" ? "PO" : "JO"}
-              onChange={(event) => update(label, event.target.value)} disabled={readOnly}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-              <option value="JO">JO</option>
-              <option value="PO">PO</option>
-            </select>
-          </label>
-        ))}
-      </div>
-      {needsPlan ? answerField(plan) : null}
-      {hasAttendanceIssue ? answerField(cause) : null}
-      {readOnly ? null : (
-        <Button variant="outline" size="sm" onClick={onSave}>
-          <Save className="h-4 w-4" /> Ruaj
-        </Button>
-      )}
-    </fieldset>
-  )
-}
-
-function InlineTaskComment({ row, onSave }: {
-  row: TaskFeedbackRow
-  onSave: (comment: string) => void
-}) {
-  const [comment, setComment] = React.useState<string | null>(null)
-  React.useEffect(() => {
-    setComment((current) => current === row.comment ? null : current)
-  }, [row.comment])
-  return (
-    <Textarea
-      aria-label={`Koment për ${row.title} (${row.owners})`}
-      value={comment ?? row.comment}
-      onChange={(event) => setComment(event.target.value)}
-      onBlur={() => {
-        if (comment !== null && comment !== row.comment) onSave(comment)
-      }}
-      rows={1}
-      maxLength={4000}
-      className="min-h-6 min-w-36 resize-y border-slate-400 bg-white/60 px-1 py-0.5 text-xs print:border-0"
-    />
-  )
 }
 
 const API = "/morning-report"
@@ -811,6 +705,7 @@ export default function MorningReportPage() {
             {draft.sections.map((section, index) => {
               const isEditing = editingSection?.index === index
               const sectionKey = section.section_key || section.title
+              const isPrioritySection = sectionKey === MORNING_FOLLOW_UP_SECTION
               const isReorganization = sectionKey === REORGANIZATION_SECTION
               const isEmailSection = sectionKey === "(GA) DET NGA EMAILS TE REJA"
               const showSectionBody = !isEmailSection || Boolean(section.body.trim())
@@ -883,56 +778,22 @@ export default function MorningReportPage() {
                         onCancel={() => setEditingSection(null)}
                         onSave={applySectionEditor}
                       />
+                    ) : showSectionBody && isTaskFeedbackSection ? (
+                      <MorningTaskFeedback body={section.body} rows={draft.task_feedback_rows}
+                        onSave={canEdit ? saveTaskFeedback : undefined} />
                     ) : showSectionBody ? (
                       <ReportSectionPreview
+                        collapsibleTaskRowsDate={isPrioritySection ? draft.report_date : undefined}
                         body={reportSectionPreviewText(section.body)}
-                        filterDueDate={sectionKey === MORNING_FOLLOW_UP_SECTION}
-                        colorEightAmByStatus={sectionKey === MORNING_FOLLOW_UP_SECTION}
-                        compactBzColumn={isTaskFeedbackSection || sectionKey === "GA TASKS"}
+                        filterDueDate={isPrioritySection}
+                        colorEightAmByStatus={isPrioritySection}
+                        compactBzColumn={sectionKey === "GA TASKS"}
                         largerTableText={(section.section_key || section.title) === GA_REPLIES_SECTION}
                         discordReplyReport={sectionKey === GA_REPLIES_SECTION
                           ? { report: "M1", date: draft.report_date }
                           : sectionKey === GA_REACTIONS_SECTION
                             ? { report: "M1", date: draft.report_date, source: "reaction" } : undefined}
                         emphasizeOwnerSeparator={isMarkerTaskSection || sectionKey === GA_PF_COMMENTS_SECTION}
-                        renderLine={isTaskFeedbackSection && canEdit ? (line) => {
-                          const plans = draft.task_feedback_rows?.plan ?? []
-                          const row = plans.find((plan) =>
-                            line.startsWith(`${plan.title} (${plan.owners}):`),
-                          )
-                          if (!row) {
-                            return plans.some((plan) =>
-                              line.trim() === `${plan.owners} TASKS:` &&
-                              section.body.includes(`${plan.title} (${plan.owners}):`),
-                            ) ? false : null
-                          }
-                          return (
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-slate-50 px-3 py-2">
-                              <span className="shrink-0 font-semibold">{row.owners} TASKS:</span>
-                              <label className="flex items-center gap-2 font-semibold">
-                                {row.title} <span className="sr-only">({row.owners})</span>
-                                <select
-                                  className={`rounded border px-2 py-0.5 ${
-                                    row.continuation === "PO"
-                                      ? "border-red-300 bg-red-100 font-semibold text-red-800"
-                                      : row.continuation === "JO"
-                                        ? "border-green-300 bg-green-100 font-semibold text-green-800"
-                                        : "border-slate-400 bg-background font-normal"
-                                  }`}
-                                  value={row.continuation}
-                                  onChange={(event) => saveTaskFeedback(row, { continuation: event.target.value as TaskFeedback["continuation"] })}
-                                >
-                                  <option value="">–</option>
-                                  <option value="PO">Po</option>
-                                  <option value="JO">Jo</option>
-                                </select>
-                              </label>
-                              <div className="min-w-44 flex-1">
-                                <InlineTaskComment key={row.key} row={row} onSave={(comment) => saveTaskFeedback(row, { comment })} />
-                              </div>
-                            </div>
-                          )
-                        } : undefined}
                         renderCell={sectionKey === NOTES_SECTION ? (label, number, header, text) => {
                           if (label !== "NOTES:" || header !== "NOTE") return null
                           const files = draft.note_attachments?.[number]
@@ -943,26 +804,6 @@ export default function MorningReportPage() {
                           }
                           const formatted = reportEmailNoteDetails(text, draft.note_email_headings?.[number])
                           return files?.length ? <ReportNoteCell text={formatted ?? text} files={files} onOpen={setNoteFiles} /> : formatted
-                        } : isTaskFeedbackSection && canEdit ? (label, number, header) => {
-                          if (!/^[1-9]\d*$/.test(number)) return null
-                          const row = draft.task_feedback_rows?.[label.trim().replace(/:$/, "").toUpperCase()]?.[Number(number) - 1]
-                          if (!row) return null
-                          if (header === "KOMENT") {
-                            return <InlineTaskComment key={row.key} row={row} onSave={(comment) => saveTaskFeedback(row, { comment })} />
-                          }
-                          if (header !== "VAZHDON?") return null
-                          return (
-                            <select
-                              aria-label={`Vazhdon? ${row.title} (${row.owners})`}
-                              className="w-full rounded border border-slate-400 bg-transparent px-1"
-                              value={row.continuation}
-                              onChange={(event) => saveTaskFeedback(row, { continuation: event.target.value as TaskFeedback["continuation"] })}
-                            >
-                              <option value="">–</option>
-                              <option value="PO" aria-label="Po">✓</option>
-                              <option value="JO" aria-label="Jo">X</option>
-                            </select>
-                          )
                         } : undefined}
                       />
                     ) : null}

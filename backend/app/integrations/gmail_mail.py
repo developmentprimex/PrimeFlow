@@ -135,6 +135,7 @@ async def read_inbox(
                 "received_datetime": received_at.isoformat(),
                 "body": extract_gmail_text(payload),
                 **({"original_email_url": original_url} if original_url else {}),
+                **({"internet_message_id": headers["message-id"]} if headers.get("message-id") else {}),
             })
         next_page = page.get("nextPageToken")
         if not next_page:

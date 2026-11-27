@@ -58,7 +58,8 @@ type ReportingDifference = TaskAppearance & {
   id: string
   task_id: string
   task_group_id?: string
-  field: "slot" | "marker"
+  field: "slot" | "marker" | "task_type"
+  owner_id?: string
   task_title: string
   person: string
   initials: string
@@ -233,8 +234,9 @@ function DifferenceEntries({ entries, cell, formatTime }: {
   entries: [ReportingDifference, ...ReportingDifference[]]; cell: string; formatTime: (value: string) => string
 }) {
   const isSymbol = entries[0].field === "marker"
+  const isTaskType = entries[0].field === "task_type"
   const latestSlots = new Map<string, ReportingDifference>()
-  if (!isSymbol) {
+  if (entries[0].field === "slot") {
     for (const entry of entries) {
       const prior = latestSlots.get(entry.person)
       if (!prior || entry.date > prior.date || (entry.date === prior.date && prior.changed_at !== null
@@ -243,7 +245,7 @@ function DifferenceEntries({ entries, cell, formatTime }: {
       }
     }
   }
-  const choices = isSymbol ? entries : Array.from(latestSlots.values())
+  const choices = entries[0].field === "slot" ? Array.from(latestSlots.values()) : entries
   const groups = new Map<string, [ReportingDifference, ...ReportingDifference[]]>()
   const peopleWithEntries = new Set(choices.map((entry) => entry.person))
   const otherPeople = new Map<string, ReportingDifference["peers"][number] & { source: ReportingDifference }>()
@@ -267,7 +269,7 @@ function DifferenceEntries({ entries, cell, formatTime }: {
   }
   const summaries = Array.from(groups.values(), (group) => {
     const [entry] = group
-    const people = Array.from(new Map(group.map((member) => [member.person, member])).values())
+    const people = Array.from(new Map(group.map((member) => [isTaskType ? member.owner_id ?? member.id : member.person, member])).values())
     return { entry, people, initials: people.map((person) => person.initials).join(", ") }
   })
   const date = choices[0].date
@@ -300,7 +302,7 @@ function DifferenceEntries({ entries, cell, formatTime }: {
           </li>
         ))}
       </ul>
-      {sharedDate && <div className="mt-1 text-xs text-muted-foreground">{displayDate(date)}</div>}
+      {!isTaskType && sharedDate && <div className="mt-1 text-xs text-muted-foreground">{displayDate(date)}</div>}
     </td>
     <td className={detailCell}>
       {comments.length ? <ul className="space-y-1 whitespace-pre-wrap">
@@ -315,10 +317,17 @@ function DifferenceEntries({ entries, cell, formatTime }: {
   </>
 }
 
+const differenceLabels = {
+  slot: ["Dallimet në slote", "Sloti sipas personit"],
+  marker: ["Dallimet në simbole", "Simboli sipas personit"],
+  task_type: ["Dallimet në lloj të detyrës", "Lloji aktual sipas personit"],
+} as const
+
 function DifferenceTable({ field, rows, formatTime }: {
   field: ReportingDifference["field"]; rows: ReportingDifference[]; formatTime: (value: string) => string
 }) {
   const id = `reporting-differences-${field}`
+  const [title, byPerson] = differenceLabels[field]
   const cell = "border-r border-t border-slate-500/30 px-3 py-2 align-top last:border-r-0"
   const taskGroups = new Map<string, [ReportingDifference, ...ReportingDifference[]]>()
   for (const row of rows) {
@@ -329,7 +338,7 @@ function DifferenceTable({ field, rows, formatTime }: {
   }
   return <section className="border-t">
     <h3 id={id} className="px-4 py-3 text-sm font-semibold sm:px-5">
-      {field === "slot" ? "Dallimet në slote" : "Dallimet në simbole"}
+      {title}
     </h3>
     {taskGroups.size === 0 ? (
       <p className="border-t px-4 py-4 text-sm text-muted-foreground sm:px-5">Asnjë dallim për datën e zgjedhur.</p>
@@ -344,7 +353,7 @@ function DifferenceTable({ field, rows, formatTime }: {
             <col />
           </colgroup>
           <thead className="bg-muted/65 text-xs font-semibold">
-            <tr>{["Nr.", "Titulli", field === "slot" ? "Sloti sipas personit" : "Simboli sipas personit", "Komenti"].map((heading) => (
+            <tr>{["Nr.", "Titulli", byPerson, "Komenti"].map((heading) => (
               <th key={heading} scope="col" className={`${cell} whitespace-nowrap`}>{heading}</th>
             ))}</tr>
           </thead>
@@ -367,9 +376,10 @@ function DifferenceTable({ field, rows, formatTime }: {
 
 function ReportingDifferences({ rows, formatTime }: { rows: ReportingDifference[]; formatTime: (value: string) => string }) {
   return <section aria-labelledby="reporting-differences" className="min-w-0 overflow-hidden rounded-xl border bg-card">
-    <h2 id="reporting-differences" className="px-4 py-4 text-base font-semibold sm:px-5">2. Dallimet në slote dhe simbole</h2>
+    <h2 id="reporting-differences" className="px-4 py-4 text-base font-semibold sm:px-5">2. Dallimet në slote, simbole dhe lloj të detyrës</h2>
     <DifferenceTable field="slot" rows={rows.filter((row) => row.field === "slot")} formatTime={formatTime} />
     <DifferenceTable field="marker" rows={rows.filter((row) => row.field === "marker")} formatTime={formatTime} />
+    <DifferenceTable field="task_type" rows={rows.filter((row) => row.field === "task_type")} formatTime={formatTime} />
   </section>
 }
 

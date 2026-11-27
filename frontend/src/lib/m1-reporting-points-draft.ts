@@ -2,10 +2,11 @@
 
 type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
 const storageKey = (userId: string) => `primeflow:m1-reporting-points:answers:${userId}`
+const manualKeys = ["plan_changes", "reorganization", "reorganization_form"] as const
 
 export function changedManualAnswers(saved: ManualAnswers, edited: ManualAnswers): ManualAnswers {
   const changes: ManualAnswers = {}
-  for (const key of ["plan_changes", "reorganization"] as const) {
+  for (const key of manualKeys) {
     if ((saved[key] || "") !== (edited[key] || "")) changes[key] = edited[key] || ""
   }
   return changes
@@ -16,10 +17,9 @@ export function readManualDraft(storage: DraftStorage | null, userId: string, da
     const draft = JSON.parse(storage?.getItem(storageKey(userId)) || "null")
     if (!draft || draft.day !== day || !draft.answers || typeof draft.answers !== "object") return null
     const answers: ManualAnswers = {}
-    for (const key of Object.keys(draft.answers) as ManualKey[]) {
-      if (key !== "plan_changes" && key !== "reorganization") continue
+    for (const key of manualKeys) {
       const value = draft.answers[key]
-      if (typeof value === "string" && value.length <= 10000) answers[key] = value
+      if (typeof value === "string" && value.length <= (key === "reorganization_form" ? 61000 : 10000)) answers[key] = value
     }
     return answers
   } catch { return null }

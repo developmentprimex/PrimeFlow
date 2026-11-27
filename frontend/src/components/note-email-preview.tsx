@@ -47,8 +47,9 @@ export function OriginalEmailLink({ sourceUrl }: { sourceUrl?: string }) {
   )
 }
 
-export function EmailNoteDisclosure({ title, children, sourceUrl, kind }: {
+export function EmailNoteDisclosure({ title, children, sourceUrl, kind, outlookUrl }: {
   title: string; children: React.ReactNode; sourceUrl?: string; kind?: ReturnType<typeof emailSubjectKind>
+  outlookUrl?: string
 }) {
   const [expanded, setExpanded] = React.useState(false)
   return (
@@ -64,14 +65,22 @@ export function EmailNoteDisclosure({ title, children, sourceUrl, kind }: {
         >{expanded ? "−" : "+"}</span>
       </summary>
       <OriginalEmailLink sourceUrl={sourceUrl} />
+      {outlookUrl && (
+        <a href={outlookUrl} title="Kërkon komponentin PrimeFlow për Outlook Classic" className="ml-1 mt-2 inline-flex min-h-7 items-center rounded border border-blue-300 bg-background px-2 font-medium text-blue-700 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-blue-300 print:hidden">
+          Hap në Outlook Classic
+        </a>
+      )}
       <div className="mt-2 max-h-72 overflow-y-auto overscroll-contain rounded border bg-background p-2 whitespace-pre-wrap [overflow-wrap:anywhere] print:hidden" tabIndex={0} aria-label="Detajet e shënimit">{children}</div>
     </details>
   )
 }
 
-export function NoteEmailPreview({ email }: { email: NoteEmailPreview }) {
+export function NoteEmailPreview({ email, outlookClassic = false }: { email: NoteEmailPreview; outlookClassic?: boolean }) {
+  const outlookUrl = outlookClassic && email.mailbox && email.internet_message_id
+    ? `primeflow-outlook://message/${encodeURIComponent(email.mailbox)}/${encodeURIComponent(email.internet_message_id)}`
+    : undefined
   return (
-    <EmailNoteDisclosure title={email.title} sourceUrl={email.original_email_url} kind={emailSubjectKind(email.subject)}>
+    <EmailNoteDisclosure title={email.title} sourceUrl={email.original_email_url} kind={emailSubjectKind(email.subject)} outlookUrl={outlookUrl}>
       {email.summary || NO_EMAIL_SUMMARY}
     </EmailNoteDisclosure>
   )

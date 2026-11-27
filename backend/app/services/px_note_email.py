@@ -17,6 +17,7 @@ _MAIL_WEB_HOSTS = {
     "mail.google.com", "mail.yandex.com", "mail.yandex.ru", "mail.ya.ru",
 }
 _MANUAL_EMAIL_LINK = re.compile(r"^Email origjinal:\s*(\S+)\s*$", re.IGNORECASE)
+_INTERNET_MESSAGE_ID = re.compile(r"<[!-;=?-~]+@[!-;=?-~]+>")
 _EMAIL_TITLE = re.compile(r"^(EM (?:INFO PX|IT|HF|PX EU|GA|GMAIL)):\s*\d{1,2}:\d{2}(?:[ \t]+(.+))?$", re.IGNORECASE)
 _EMAIL_NOTE_PREFIX = re.compile(r"^EM(?:\s*:\s*|\s+)(?:INFO\s+PX|IT|HF|PX\s+EU|GA|GMAIL)\s*[:-]", re.I)
 _LEGACY_HEADER = re.compile(
@@ -66,7 +67,12 @@ def manual_original_email_url(content: str) -> str | None:
     return original_email_url(link[1]) if link else None
 
 
-def email_preview(note) -> dict[str, str] | None:
+def internet_message_id(value: str | None) -> str | None:
+    value = (value or "").strip()
+    return value if len(value) <= 998 and _INTERNET_MESSAGE_ID.fullmatch(value) else None
+
+
+def email_preview(note, *, include_outlook: bool = False) -> dict[str, str] | None:
     prefix = _PREFIXES.get(getattr(note, "knowledge_type", None))
     if not prefix:
         return None
@@ -84,6 +90,10 @@ def email_preview(note) -> dict[str, str] | None:
     if note_url:
         summary = summary.rpartition("\n")[0].strip()
     source_url = original_email_url(metadata.get("original_email_url")) or note_url
+    outlook = {}
+    if include_outlook and (message_id := internet_message_id(metadata.get("internet_message_id"))):
+        if mailbox := metadata.get("mailbox"):
+            outlook = {"internet_message_id": message_id, "mailbox": mailbox}
     return {
         "id": str(note.id),
         "title": format_email_title(prefix, (formatted[2] if formatted else None) or subject),
@@ -91,6 +101,7 @@ def email_preview(note) -> dict[str, str] | None:
         "sender": metadata.get("sender") or (original[1] if original else ""),
         **({"summary": summary} if summary else {}),
         **({"original_email_url": source_url} if source_url else {}),
+        **outlook,
     }
 
 

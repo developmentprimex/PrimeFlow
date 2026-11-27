@@ -1,6 +1,7 @@
 export type ReportingChoiceDetails = {
   key: string
-  field: "slot" | "marker"
+  field: "slot" | "marker" | "task_type"
+  confirmation_field?: string
   date: string
   person: string
   task_title: string
@@ -62,7 +63,7 @@ export async function withTaskReportingChoice(
 ): Promise<Response> {
   let response = await send(init)
   if (init.method?.toUpperCase() !== "PATCH" || typeof init.body !== "string"
-      || !/^\/tasks\/[^/?]+(?:\/(?:one-h-report-slot|one-h-marker))?(?:\?|$)/.test(path)) return response
+      || !/^\/(?:tasks\/[^/?]+(?:\/(?:one-h-report-slot|one-h-marker))?|(?:ga-notes|plan-notes)\/[^/?]+\/task-bundle)(?:\?|$)/.test(path)) return response
   let body
   let confirmations
   while (response.status === 409 && !init.signal?.aborted) {
@@ -75,7 +76,7 @@ export async function withTaskReportingChoice(
     if (!reason?.trim() || init.signal?.aborted) {
       return Response.json({ detail: "Ndryshimi u anulua." }, { status: 409 })
     }
-    confirmations[detail.field] = { key: detail.key, reason: reason.trim() }
+    confirmations[detail.confirmation_field ?? detail.field] = { key: detail.key, reason: reason.trim() }
     response = await send({ ...init, body: JSON.stringify({ ...body, reporting_choice_confirmations: confirmations }) })
   }
   return response

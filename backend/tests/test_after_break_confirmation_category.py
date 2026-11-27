@@ -400,6 +400,8 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
         self.assertEqual(by_title["08:00 Active"][8:], ["26.08.2026", "IN PROGRESS"])
         self.assertEqual(by_title["08:00 Done"][9], "DONE")
         self.assertEqual(by_title["Ordinary due today"][8:], ["SOT", "TODO"])
+        self.assertEqual([row[7] for row in rows],
+                         ["08:00 Active", "Important AM", "Ordinary due today", "08:00 Done"])
 
     def test_m2_priority_table_renames_old_draft_labels_and_keeps_its_key(self) -> None:
         legacy = UNFINISHED_PRIORITY_TABLE_LABEL

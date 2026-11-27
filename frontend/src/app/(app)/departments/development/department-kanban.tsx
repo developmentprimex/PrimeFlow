@@ -35,7 +35,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { DailyRlzCommentField, DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
 import { DailyReportMeetingsTable } from "@/components/daily-report-meetings-table"
-import { DevelopmentMeetingAnswer, useDevelopmentMeetingReport } from "@/components/development-m1-report"
+import { DevelopmentMeetingAnswer, DevelopmentMeetingReorganization, useDevelopmentMeetingReport } from "@/components/development-m1-report"
 import { MeetingCanceledBadge } from "@/components/meeting-canceled-badge"
 import { useCanceledMeetings } from "@/lib/use-canceled-meetings"
 import { PxJavPlanningBriefView } from "@/components/px-jav-planning-brief-view"
@@ -1576,8 +1576,9 @@ export default function DepartmentKanban() {
   }, [activeTab])
   const [internalMeetingChecklistId, setInternalMeetingChecklistId] = React.useState<string | null>(null)
   const [internalMeetingItems, setInternalMeetingItems] = React.useState<ChecklistItem[]>([])
+  const [internalChecklistLoaded, setInternalChecklistLoaded] = React.useState(false)
   const hasChecklist = activeTab === "meetings" && internalMeetingItems.length > 0
-  const m1 = useDevelopmentMeetingReport("M1", hasChecklist && internalSlot === "M1")
+  const m1 = useDevelopmentMeetingReport("M1", activeTab === "meetings" && internalSlot === "M1" && internalChecklistLoaded)
   const m2 = useDevelopmentMeetingReport("M2", hasChecklist && internalSlot === "M2")
   const m3 = useDevelopmentMeetingReport("M3", hasChecklist && internalSlot === "M3")
   const checklistReport = internalSlot === "M1" ? m1 : internalSlot === "M2" ? m2 : internalSlot === "M3" ? m3 : null
@@ -2094,6 +2095,8 @@ export default function DepartmentKanban() {
         setInternalMeetingItems(items)
       } catch (error) {
         console.error("Failed to load internal meetings checklist", error)
+      } finally {
+        if (!cancelled) setInternalChecklistLoaded(true)
       }
     }
     void loadInternalMeetingChecklist()
@@ -11085,7 +11088,7 @@ export default function DepartmentKanban() {
                     variant="outline"
                     size="sm"
                     onClick={() => void exportInternalMeetings()}
-                    disabled={exportingInternalMeetings || !internalMeetingItems.length}
+                    disabled={exportingInternalMeetings || !internalMeetingChecklistId}
                   >
                     {exportingInternalMeetings ? "Exporting..." : "Export Excel"}
                   </Button>
@@ -11134,7 +11137,7 @@ export default function DepartmentKanban() {
                       {checklistReport?.report ? ` · ${formatDateDMY(checklistReport.report.date)}` : ""}
                       {checklistReport?.report?.cutoff ? ` · Email-et dhe Notes deri në ${checklistReport.report.cutoff}` : ""}
                     </div>
-                    {checklistReport && internalMeetingItems.length ? (
+                    {checklistReport && (internalSlot === "M1" ? internalChecklistLoaded : internalMeetingItems.length > 0) ? (
                       <Button type="button" variant="outline" size="sm" onClick={checklistReport.reload}
                         disabled={checklistReport.loading || checklistReport.savingNote !== null || checklistReport.savingMeeting !== null}>
                         Rifresko
@@ -11296,6 +11299,10 @@ export default function DepartmentKanban() {
                       <div className="text-sm text-muted-foreground">No checklist items yet.</div>
                     ) : null}
                   </div>
+                  {(internalSlot === "M1" || internalSlot === "M2") && checklistReport ? (
+                    <DevelopmentMeetingReorganization key={internalSlot} slot={internalSlot}
+                      refresh={checklistReport.refresh} reload={checklistReport.reload} />
+                  ) : null}
                 </div>
               </Card>
             </div>

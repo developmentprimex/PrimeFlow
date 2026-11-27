@@ -31,7 +31,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { miraDictationLabel } from "@/lib/mira"
-import { getPlainMarkedText } from "@/lib/note-markup"
+import { getPlainMarkedText, hasNewNoteContent, NEW_NOTE_TEMPLATE } from "@/lib/note-markup"
 import { TeamMarkerCommentsButton } from "@/components/team-marker-comments-button"
 import { KNOWLEDGE_CONFIG, knowledgeText, type KnowledgeType } from "@/components/knowledge/knowledge-config"
 import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/prompt-link"
@@ -1249,10 +1249,6 @@ function isGraphicDesignDepartment(dept?: Department | null) {
   return name === "GRAPHIC DESIGN" || code === "GD" || code === "GDS"
 }
 
-const GA_NOTE_TEMPLATE_EMAIL = "ga@primexeu.com"
-// Note text goes on line 1; the template starts on line 4.
-const GA_NOTE_TEMPLATE = "\n\n\nDL:\nAM/PM:\nLL:\nSIMBOLI:"
-
 export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSaved, embeddedEditor = false }: {
   editorNote?: GaNote & { source?: "GA_KA" | "PX_JAV" }
   onEditorClose?: () => void
@@ -1293,14 +1289,13 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const urlProjectId = searchParams.get("project_id")
   const [departmentId, setDepartmentId] = React.useState(urlDepartmentId || "ALL")
   const [projectId, setProjectId] = React.useState(urlProjectId || "NONE")
-  const [content, setContentState] = React.useState("")
+  const [content, setContentState] = React.useState(NEW_NOTE_TEMPLATE)
   const setContent = React.useCallback((value: React.SetStateAction<string>) => {
     setContentState((previous) => capitalizeNoteFirstLetter(
       typeof value === "function" ? value(previous) : value
     ))
   }, [])
-  const isGaUser = user?.email?.trim().toLowerCase() === GA_NOTE_TEMPLATE_EMAIL
-  const defaultNoteContent = isGaUser ? GA_NOTE_TEMPLATE : ""
+  const isGaUser = user?.email?.trim().toLowerCase() === "ga@primexeu.com"
   const [noteType] = React.useState<NoteType>("GA")
   const [priority] = React.useState<NotePriority>("NONE")
   const [loading, setLoading] = React.useState(false)
@@ -1383,17 +1378,12 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
 
   React.useEffect(() => {
-    if (!defaultNoteContent) return
-    setContent((prev) => (prev ? prev : defaultNoteContent))
-  }, [defaultNoteContent, setContent])
-
-  React.useEffect(() => {
-    if (!defaultNoteContent || content !== defaultNoteContent) return
+    if (content !== NEW_NOTE_TEMPLATE) return
     const textarea = contentTextareaRef.current
     if (textarea && document.activeElement === textarea) {
       textarea.setSelectionRange(0, 0)
     }
-  }, [content, defaultNoteContent])
+  }, [content])
   const editNoteVersionRef = React.useRef<string | null>(null)
   const editContentLatestRef = React.useRef("")
   const editDictationSelectionRef = React.useRef({ start: 0, end: 0 })
@@ -2141,7 +2131,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   }, [attachmentsDialogOpen, resetManageAttachmentsState])
 
   const createNote = async () => {
-    if (!content.trim() || (defaultNoteContent && content.trim() === defaultNoteContent.trim())) {
+    if (!hasNewNoteContent(content)) {
       toast.error("Content is required")
       return
     }
@@ -2195,8 +2185,8 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       }
       const created = (await res.json()) as GaNote
       setNotes((prev) => [created, ...prev])
-      flushSync(() => setContent((latest) => latest === content ? defaultNoteContent : latest))
-      if (contentTextareaRef.current?.value === defaultNoteContent) {
+      flushSync(() => setContent((latest) => latest === content ? NEW_NOTE_TEMPLATE : latest))
+      if (contentTextareaRef.current?.value === NEW_NOTE_TEMPLATE) {
         contentTextareaRef.current.setSelectionRange(0, 0)
       }
       if (selectedFiles.length > 0) {
@@ -3398,7 +3388,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
         const text = editing ? editContent : content
         const parsed = note ? parseMarkedNoteContentWithProgress(note.content) : null
         const currentText = editing ? serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges) : content
-        const originalText = parsed ? serializeMarkedNoteContent(parsed.text, parsed.doneRanges, parsed.addedRanges) : defaultNoteContent
+        const originalText = parsed ? serializeMarkedNoteContent(parsed.text, parsed.doneRanges, parsed.addedRanges) : NEW_NOTE_TEMPLATE
         const taskInfo = editNoteId ? noteTaskInfo.get(editNoteId) : null
         const metadataChanged = editing && (
           editDescription.trim() !== (taskInfo?.description || "").trim()
@@ -3411,7 +3401,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
           draft: { text, doneRanges: editing ? editDoneRanges : [], addedRanges: editing ? editAddedRanges : [],
             cursor: { start: textarea?.selectionStart ?? text.length, end: textarea?.selectionEnd ?? text.length } },
           notes: renderedNotes.map(item => ({ id: item.id, source: item.source || "GA_KA", content: item.content, closed: item.status === "CLOSED" })),
-          dirty: currentText.trim() !== originalText.trim() || Boolean(metadataChanged),
+          dirty: (editing ? currentText.trim() !== originalText.trim() : hasNewNoteContent(content)) || Boolean(metadataChanged),
           busy: posting || savingEdit || loadingEditNote,
         }
       },
@@ -3436,7 +3426,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       },
       newNote: async () => {
         if (editorNote) throw new Error("Hap PX Notes për një Note të ri.")
-        if (content.trim() && content.trim() !== defaultNoteContent.trim()) throw new Error("Ruaje fillimisht draftin e ri.")
+        if (hasNewNoteContent(content)) throw new Error("Ruaje fillimisht draftin e ri.")
         flushSync(() => { setEditNoteId(null) })
         contentTextareaRef.current?.setSelectionRange(0, 0)
         await waitForTarget("new")
@@ -4053,7 +4043,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
               ref={contentTextareaRef}
               value={content}
               onChange={(event) => setContent(normalizeNoteTextareaInput(event.currentTarget))}
-              rows={4}
+              rows={7}
               className="min-h-[110px] md:min-h-[120px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
             />
@@ -4897,7 +4887,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                                         <TaskMarkerComment comment={symbol.comment} />
                                       </span>
                                     ) : null)}
-                                    {note.email_preview ? <NoteEmailPreview email={note.email_preview} /> : manualEmail
+                                    {note.email_preview ? <NoteEmailPreview email={note.email_preview} outlookClassic /> : manualEmail
                                       ? <EmailNoteDisclosure title={manualEmail.title} sourceUrl={manualEmail.sourceUrl} kind={manualEmail.kind}>{renderMarkedNoteContent(manualEmail.body, canViewStrikeTimestamps)}</EmailNoteDisclosure>
                                       : renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                     {dictationSource && <span className="mt-1 block text-xs text-muted-foreground">{dictationSource}</span>}

@@ -17,9 +17,14 @@ import { shouldRegenerateTaskData } from "@/lib/m1-reporting-points-data"
 import { reportResponseJson as responseJson } from "@/lib/report-response"
 import { useReportDate } from "@/lib/report-link-date"
 import { ReportingPointsManagement } from "@/components/reporting-points-management"
+import { TASK_FEEDBACK_SECTION, type TaskFeedback, type TaskFeedbackRow, type TaskFeedbackRows } from "@/components/morning-task-feedback"
 import { M1ReportingPointsView, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m1-reporting-points-view"
 
 const API = "/m1-reporting-points"
+type MorningFeedbackSave = {
+  sections: { section_key?: string; title: string; body: string }[]
+  task_feedback_rows: TaskFeedbackRows
+}
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type HistoryRow = Pick<ReportingPointsReport, "id" | "report_date" | "status" | "sent_at">
 
@@ -36,6 +41,8 @@ export default function M1ReportingPointsPage() {
   const [day, setDay, linkedDay] = useReportDate(today)
   const [report, setReport] = React.useState<ReportingPointsReport | null>(null)
   const activeReportId = React.useRef<string | undefined>(undefined)
+  const feedbackQueue = React.useRef(Promise.resolve())
+  const feedbackVersion = React.useRef(0)
   React.useEffect(() => { activeReportId.current = report?.id }, [report?.id])
   const [answers, setAnswers] = React.useState<ManualAnswers>({})
   const [recipients, setRecipients] = React.useState<Recipients | null>(null)
@@ -133,10 +140,11 @@ export default function M1ReportingPointsPage() {
     if (!canAccess || day !== today() || dirty || busy || savingAnswers) return
     let active = true
     const timer = window.setInterval(() => {
+      const version = feedbackVersion.current
       apiFetch(`${API}?report_date=${day}`, { cache: "no-store" }).then(async (response) => {
         if (response.ok) {
           const value = await responseJson<ReportingPointsReport>(response)
-          if (active) acceptReport(value)
+          if (active && version === feedbackVersion.current) acceptReport(value)
         }
       }).catch(() => {})
     }, 30000)
@@ -149,6 +157,7 @@ export default function M1ReportingPointsPage() {
     const savedAnswers = changedManualAnswers(report.manual_answers, answers)
     const savedDay = report.report_date
     const timer = window.setTimeout(async () => {
+      const version = feedbackVersion.current
       setSavingAnswers(true)
       try {
         const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${reportId}/answers`, {
@@ -156,7 +165,11 @@ export default function M1ReportingPointsPage() {
         }))
         // Preserve newer edits; the next save starts after this one finishes.
         if (activeReportId.current === reportId) {
-          setReport(value)
+          setReport((current) => {
+            if (version === feedbackVersion.current || !current) return value
+            const { morning_task_body, morning_task_rows, morning_task_draft_id } = current.data
+            return { ...value, data: { ...value.data, morning_task_body, morning_task_rows, morning_task_draft_id } }
+          })
           setAnswers((latest) => ({ ...value.manual_answers, ...changedManualAnswers(answers, latest) }))
         }
         if (user?.id) clearSavedManualDraft(draftStorage(), user.id, savedDay, savedAnswers)
@@ -169,9 +182,35 @@ export default function M1ReportingPointsPage() {
 
   const action = async (name: string, work: () => Promise<void>) => {
     setBusy(name)
-    try { await work() }
+    try {
+      await feedbackQueue.current
+      await work()
+    }
     catch (error) { toast.error(error instanceof Error ? error.message : "Veprimi dështoi.") }
     finally { setBusy(null) }
+  }
+
+  const saveMorningTask = (row: TaskFeedbackRow, edit: Partial<TaskFeedback>) => {
+    const draftId = report?.data.morning_task_draft_id
+    if (!draftId) return
+    feedbackQueue.current = feedbackQueue.current.then(async () => {
+      try {
+        const result = await responseJson<MorningFeedbackSave>(await apiFetch(`/morning-report/${draftId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task_feedback: { [row.key]: edit } }),
+        }))
+        const section = result.sections.find((item) => (item.section_key || item.title) === TASK_FEEDBACK_SECTION)
+        if (!section) return
+        feedbackVersion.current += 1
+        setReport((current) => current?.data.morning_task_draft_id === draftId ? {
+          ...current,
+          data: { ...current.data, morning_task_body: section.body, morning_task_rows: result.task_feedback_rows },
+        } : current)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Komenti ose përgjigjja nuk u ruajt.")
+      }
+    })
   }
 
   const generate = () => action("generate", async () => {
@@ -285,7 +324,8 @@ export default function M1ReportingPointsPage() {
           {saveError ? `Ruajtja automatike dështoi: ${saveError} Provo Ruaj përgjigjet.` : savingAnswers || dirty ? "Duke ruajtur përgjigjet…" : "Përgjigjet ruhen automatikisht për datën e këtij raporti."}
         </p> : null}
     {loading ? <p className="py-10 text-center text-muted-foreground">Duke ngarkuar raportin…</p> : report ? <>
-      <M1ReportingPointsView report={report} answers={answers} disabled={!!busy} onAnswerChange={changeAnswer} />
+      <M1ReportingPointsView report={report} answers={answers} disabled={!!busy} onAnswerChange={changeAnswer}
+        onMorningTaskSave={saveMorningTask} />
     </> : <div className="rounded-xl border border-dashed p-12 text-center"><h2 className="font-semibold">Nuk ka raport të ruajtur për {reportDate(day)}.</h2><p className="mt-2 text-sm text-muted-foreground">{day === today() ? "Gjenero raportin për të plotësuar përgjigjet dhe për të parë pikat automatike." : "Zgjidh një datë nga historiku për të parë të dhënat e ruajtura."}</p></div>}
       </TabsContent>
       <TabsContent value="history" className="space-y-3">

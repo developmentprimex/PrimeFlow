@@ -42,6 +42,17 @@ test("Today opens the plan comparison page for the selected date", async ({ page
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url())
     if (url.pathname === "/api/auth/me") return route.fulfill({ json: user })
+    if (url.pathname === "/api/users/lookup") return route.fulfill({ json: [
+      { full_name: "Arta", department_id: "dev", weekly_planner_sort_order: 30 },
+      { full_name: "Haris Shaqiri", department_id: "pcm", weekly_planner_sort_order: 1 },
+      { full_name: "Besnik Krasniqi", department_id: "gd", weekly_planner_sort_order: 0 },
+      { full_name: "Arben Gashi", department_id: "dev", weekly_planner_sort_order: 5 },
+    ] })
+    if (url.pathname === "/api/departments") return route.fulfill({ json: [
+      { id: "pcm", code: "PCM", name: "Product Content" },
+      { id: "gd", code: "GD", name: "Graphic Design" },
+      { id: "dev", code: "DEV", name: "Development" },
+    ] })
     if (url.pathname.endsWith("-print-report/snapshot")) {
       return route.fulfill({ json: { report_date: day, target_date: day, is_frozen: true, html: "<p>Saved report</p>" } })
     }
@@ -49,8 +60,47 @@ test("Today opens the plan comparison page for the selected date", async ({ page
       expect(url.searchParams.get("report_date")).toBe(day)
       return route.fulfill({ json: { report_date: day, status: "ready", is_frozen: true, saved_at: "2026-10-22T17:00:00+02:00",
         changes: [{ task_id: "task1", kind: "changed",
-          before: { title: "Katalogu", slot: "10:00", period: "AM", assignees: ["Arta"], sections: ["1H 10:00"] },
-          after: { title: "Katalogu", slot: "14:20", period: "PM", assignees: ["Besnik"], sections: ["1H 14:20"] },
+          before: { title: "Katalogu", slot: "10:00", period: "AM", assignees: ["Arta Gashi"], sections: ["1H 10:00"] },
+          after: { title: "Katalogu", slot: "14:20", period: "PM", assignees: ["Arben Gashi"], sections: ["1H 14:20"], status: "IN_PROGRESS" },
+        }, {
+          task_id: "task2", kind: "completed",
+          before: { title: "Porosia", slot: "10:00", period: "AM", assignees: ["Arta"], sections: ["1H 10:00", "WFE"] },
+          after: { title: "Porosia", slot: "", period: "AM", assignees: ["Arta"], sections: ["1H NO SLOT"] },
+        }, {
+          task_id: "completed-only", kind: "completed",
+          before: { title: "Detyra e përfunduar", slot: "", period: "AM", assignees: ["Arta"], sections: ["WFE"] },
+          after: { title: "Detyra e përfunduar", slot: "", period: "AM", assignees: ["Arta"], sections: ["1H NO SLOT"] },
+        }, {
+          task_id: "completed-absent", kind: "completed",
+          before: { title: "Detyra e mbyllur", slot: "10:00", period: "AM", assignees: ["Arta"], sections: ["WFC INT"] },
+          after: null,
+        }, {
+          task_id: "added-done", kind: "added", before: null,
+          after: { title: "Shtuar dhe mbyllur", slot: "", period: "AM", assignees: ["Arta"], sections: ["1H NO SLOT"], status: "DONE" },
+        }, {
+          task_id: "task3", kind: "rescheduled", date: "2026-10-26",
+          before: { title: "Takimi", slot: "10:00", period: "AM", assignees: ["Arta"], sections: ["1H 10:00"], due_date: "2026-10-24", start_date: "2026-10-21" },
+          after: null,
+          current_dates: { due_date: "2026-10-27", start_date: "2026-10-26" }, current_status: "PAUSED",
+        }, {
+          task_id: "task4", kind: "added", before: null,
+          after: { title: "Fotot", slot: "11:50", period: "PM", assignees: ["Haris Shaqiri", "Besnik Krasniqi"], sections: ["1H 11:50"], status: "WAITING_CLIENT" },
+        }, {
+          task_id: "task5", kind: "changed",
+          before: { title: "Plan javor", slot: "", period: "PM", assignees: ["Arta"], sections: ["BLL"], start_date: null },
+          after: { title: "Plan javor", slot: "", period: "AM", assignees: ["Arta"], sections: ["1H NO SLOT"], start_date: day },
+        }, {
+          task_id: "task6", kind: "rescheduled", date: "2026-10-26",
+          before: { title: "Kërkesa", slot: "10:00", period: "AM", assignees: ["Arta"], sections: ["1H 10:00"], due_date: day },
+          after: null, current_dates: { due_date: "2026-10-26" },
+        }, {
+          task_id: "period-only", kind: "changed",
+          before: { title: "Vetëm periudha", slot: "10:00", period: "AM/PM", assignees: ["Arta"], sections: ["1H 10:00"] },
+          after: { title: "Vetëm periudha", slot: "10:00", period: "PM", assignees: ["Arta"], sections: ["1H 10:00"] },
+        }, {
+          task_id: "report-date-only", kind: "rescheduled", date: "2026-10-26",
+          before: { title: "Zhvendosje në arkiv", slot: "10:00", period: "AM", assignees: ["Arta"], sections: ["1H 10:00"] },
+          after: null,
         }],
       } })
     }
@@ -61,15 +111,105 @@ test("Today opens the plan comparison page for the selected date", async ({ page
   await expect(page).toHaveURL(new RegExp(`/today-plan-comparison\\?date=${day}$`))
   await expect(page.getByRole("heading", { name: "Krahasimi me planin e ruajtur" })).toBeVisible()
   const table = page.getByRole("table", { name: "Krahasimi i detyrave" })
-  await expect(table.getByRole("columnheader")).toHaveText(["DETYRA", "PLANI NË 17:00", "SOT"])
+  await expect(table.getByRole("columnheader")).toContainText(["Nr.", "KUSH", "DETYRA", "ÇFARË NDRYSHOI", "PLANI NË 17:00", "SOT"])
+  await expect(page.getByText("6 detyra me ndryshime", { exact: true })).toBeVisible()
+  await expect(table.getByRole("rowheader", { name: "Porosia", exact: true })).toHaveCount(0)
+  await expect(table.getByRole("rowheader", { name: "Shtuar dhe mbyllur", exact: true })).toHaveCount(0)
+  await expect(table.getByRole("rowheader", { name: "Detyra e përfunduar" })).toHaveCount(0)
+  await expect(table.getByRole("rowheader", { name: "Detyra e mbyllur" })).toHaveCount(0)
+  await expect(table.getByRole("rowheader", { name: "Zhvendosje në arkiv" })).toHaveCount(0)
+  await expect(table.getByText("Report date", { exact: true })).toHaveCount(0)
+  await expect(table.getByRole("rowheader")).toHaveText(["Katalogu", "Takimi", "Plan javor", "Kërkesa", "Vetëm periudha", "Fotot"])
   const row = table.getByRole("row").filter({ hasText: "Katalogu" })
-  await expect(row.getByRole("rowheader")).toContainText("Sloti · AM/PM · Përgjegjësi")
-  await expect(row.getByRole("cell").nth(0)).toContainText("10:00 · AM")
-  await expect(row.getByRole("cell").nth(0)).toContainText("Arta")
-  await expect(row.getByRole("cell").nth(1)).toContainText("14:20 · PM")
-  await expect(row.getByRole("cell").nth(1)).toContainText("Besnik")
+  await expect(row.locator(":scope > :nth-child(3)")).toHaveText("Katalogu")
+  await expect(row.getByRole("rowheader")).toHaveCSS("background-color", "rgb(255, 255, 0)")
+  const cells = row.getByRole("cell")
+  expect((await cells.nth(0).boundingBox())!.width).toBeLessThanOrEqual(33)
+  expect((await cells.nth(1).boundingBox())!.width).toBeLessThanOrEqual(49)
+  await expect(cells.nth(0)).toHaveCSS("background-color", "rgb(255, 255, 0)")
+  await expect(cells.nth(1)).toHaveCSS("background-color", "rgb(255, 255, 0)")
+  await expect(cells.nth(2)).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+  await expect(cells.first()).toHaveText("1")
+  await expect(cells.nth(1).locator("dt")).toHaveText(["Në plan", "Sot"])
+  await expect(cells.nth(1).getByTitle("Arta Gashi")).toHaveText("AG")
+  await expect(cells.nth(1).getByTitle("Arben Gashi")).toHaveText("AG")
+  const changedLines = cells.nth(2).locator(":scope > div")
+  const plannedLines = cells.nth(3).locator(":scope > div")
+  const todayLines = cells.nth(4).locator(":scope > div")
+  await expect(plannedLines).toHaveText(["AM", "10:00", ""])
+  await expect(todayLines).toHaveText(["PM", "14:20", ""])
+  await expect(changedLines).toHaveText(["AM/PM", "1H slot", "Assignee"])
+  const firstLine = await plannedLines.nth(0).boundingBox()
+  const secondLine = await plannedLines.nth(1).boundingBox()
+  expect(secondLine!.y).toBeGreaterThan(firstLine!.y)
+  expect((await todayLines.nth(1).boundingBox())!.y).toBe(secondLine!.y)
+  expect((await changedLines.nth(1).boundingBox())!.y).toBe(secondLine!.y)
+  for (const lines of [changedLines, plannedLines, todayLines]) {
+    await expect(lines.first()).toHaveCSS("border-top-width", "0px")
+    await expect(lines.nth(1)).toHaveCSS("border-top-width", "1px")
+  }
+  const periodOnly = table.getByRole("row").filter({ hasText: "Vetëm periudha" }).getByRole("cell")
+  await expect(periodOnly).toHaveText(["5", "A", "AM/PM", "AM/PM", "PM"])
+  await expect(periodOnly.nth(2).locator(":scope > div")).toHaveCSS("border-top-width", "0px")
+  const rescheduled = table.getByRole("row").filter({ hasText: "Takimi" })
+  await expect(rescheduled.getByRole("rowheader")).toHaveCSS("background-color", "rgb(203, 213, 225)")
+  await expect(rescheduled.getByRole("cell").nth(2).locator(":scope > div")).toHaveText(["Due date", "Start date"])
+  await expect(rescheduled.getByRole("cell").nth(3).locator(":scope > div")).toHaveText(["24.10.2026", "21.10.2026"])
+  await expect(rescheduled.getByRole("cell").nth(4).locator(":scope > div")).toHaveText(["27.10.2026", "26.10.2026"])
+  const added = table.getByRole("row").filter({ hasText: "Fotot" })
+  await expect(added.getByRole("cell")).toHaveText(["6", "BK, HSH", "Shtuar sot", "—", "11:50 · PM · 1H"])
+  await expect(added.getByRole("rowheader")).toHaveCSS("background-color", "rgb(226, 193, 91)")
+  const reclassified = table.getByRole("row").filter({ hasText: "Plan javor" }).getByRole("cell")
+  await expect(reclassified.nth(2).locator(":scope > div")).toHaveText(["Start date", "AM/PM", "Task Type"])
+  await expect(reclassified.nth(3).locator(":scope > div")).toHaveText(["Pa datë", "PM", "BLL"])
+  await expect(reclassified.nth(4).locator(":scope > div")).toHaveText(["23.10.2026", "AM", "1H"])
+  const postponed = table.getByRole("row").filter({ hasText: "Kërkesa" }).getByRole("cell")
+  await expect(postponed.nth(2)).toHaveText("Due date")
+  await expect(postponed.nth(3)).toHaveText("23.10.2026")
+  await expect(postponed.nth(4)).toHaveText("26.10.2026")
+  const firstColumn = table.getByRole("columnheader", { name: "Nr.", exact: true })
+  await page.setViewportSize({ width: 1280, height: 260 })
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await expect.poll(async () => Math.round((await firstColumn.boundingBox())!.y)).toBe(0)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.setViewportSize({ width: 390, height: 390 })
+  const scrollRegion = page.getByRole("region", { name: "Ndryshimet e planit" })
+  expect(await scrollRegion.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+  await scrollRegion.evaluate(element => { element.scrollTop = 80 })
+  expect(await scrollRegion.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  await expect.poll(async () => Math.round((await firstColumn.boundingBox())!.y - (await scrollRegion.boundingBox())!.y)).toBe(1)
+  const todayColumn = table.getByRole("columnheader", { name: "SOT", exact: true })
+  await todayColumn.scrollIntoViewIfNeeded()
+  await expect(todayColumn).toBeInViewport({ ratio: 0.95 })
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const changeFilter = table.getByRole("button", { name: "Filtro sipas ndryshimit" })
+  await expect(changeFilter).toBeVisible({ timeout: 3000 })
+  await expect(table.getByRole("combobox", { name: "Filtro sipas ndryshimit" })).toHaveCount(0)
+  const selectChange = async (label: string) => {
+    await changeFilter.click()
+    await page.getByRole("menuitemradio", { name: label, exact: true }).click()
+  }
+  await selectChange("Due date")
+  await expect(table.getByRole("rowheader")).toHaveText(["Takimi", "Kërkesa"])
+  await expect(rescheduled.getByRole("cell").nth(2).locator(":scope > div")).toHaveText(["Due date", "Start date"])
+  await selectChange("Shtuar sot")
+  await expect(table.getByRole("rowheader")).toHaveText(["Fotot"])
+  await selectChange("Nuk shfaqet sot")
+  await expect(table.getByRole("rowheader")).toHaveCount(0)
+  await expect(table.getByText("S’ka detyra që përputhen me filtrin.")).toBeVisible()
+  await selectChange("Të gjitha")
+  await expect(table.getByRole("rowheader")).toHaveCount(6)
+  await expect(row).toHaveCSS("border-bottom-width", "2px")
+  await expect(row).toHaveCSS("border-bottom-color", "rgb(0, 0, 0)")
+  const isComparisonRequest = (request: { url(): string }) => new URL(request.url()).pathname.endsWith("/plan-comparison")
+  const restoredRequest = page.waitForRequest(isComparisonRequest, { timeout: 4000 })
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })))
+  expect((await restoredRequest).method()).toBe("GET")
   await page.getByRole("link", { name: "Kthehu te 1H SHTYPI Today" }).click()
   await expect(page).toHaveURL(new RegExp(`/today-print-report\\?date=${day}$`))
+  const reopenedRequest = page.waitForRequest(isComparisonRequest)
+  await page.getByRole("link", { name: "Krahaso me planin e ruajtur" }).click()
+  expect((await reopenedRequest).method()).toBe("GET")
   await page.goto(`/tomorrow-print-report?date=${day}`)
   await expect(page.frameLocator('iframe[title*="generated email"]').getByText("Saved report")).toBeVisible()
   await expect(page.getByRole("link", { name: "Krahaso me planin e ruajtur" })).toHaveCount(0)
@@ -107,11 +247,55 @@ test("ASIST GA report links load the requested date on all eight PrimeFlow pages
   expect(writes).toEqual([])
 })
 
+for (const [path, api] of [["ga-ka-notes", "ga-notes"], ["next-week-plan", "plan-notes"]] as const) {
+  test(`${path} prefills the new Note template for staff and resets it after saving`, async ({ page }) => {
+    const user = { id: "notes-staff", full_name: "Notes staff", email: "staff@example.test", role: "STAFF", is_active: true }
+    const template = "\n\n\nDL:\nAM/PM:\nLL:\nSIMBOLI:"
+    const noteText = "Shënim i ri për planin"
+    const saved: string[] = []
+    await page.addInitScript(account => {
+      localStorage.setItem("primex_access_token", "test-only-browser-token")
+      localStorage.setItem("primex_user", JSON.stringify(account))
+    }, user)
+    await page.route("**/api/**", route => {
+      const request = route.request()
+      const pathname = new URL(request.url()).pathname
+      if (pathname === "/api/auth/me") return route.fulfill({ json: user })
+      if (pathname === "/api/marker-comments") return route.fulfill({ json: { items: [] } })
+      if (pathname === `/api/${api}` && request.method() === "POST") {
+        const { content } = request.postDataJSON()
+        saved.push(content)
+        const timestamp = new Date().toISOString()
+        return route.fulfill({ status: 201, json: { id: "new-note", content, status: "OPEN", note_type: "GA",
+          created_at: timestamp, updated_at: timestamp, start_date: timestamp, attachments: [] } })
+      }
+      return route.fulfill({ json: [] })
+    })
+
+    await page.goto(`/${path}`)
+    const composer = page.locator('[data-slot="card"]').filter({ has: page.getByText("New Note", { exact: true }) })
+    const text = composer.getByRole("textbox").first()
+    const save = composer.getByRole("button", { name: "Save note" })
+    await expect(text).toHaveValue(template)
+    await expect(text).toHaveAttribute("rows", "7")
+    await save.click()
+    await expect(page.getByText("Content is required", { exact: true })).toBeVisible()
+    expect(saved).toEqual([])
+    await text.focus()
+    expect(await text.evaluate((element: HTMLTextAreaElement) => element.selectionStart)).toBe(0)
+    await page.keyboard.insertText(noteText)
+    await save.click()
+    await expect(text).toHaveValue(template)
+    expect(saved).toEqual([noteText + template])
+  })
+}
+
 test("PX Notes expands the saved summary and opens the original email separately", async ({ page }) => {
   const user = { id: "note-test-admin", full_name: "Notes admin", email: "admin@example.test", role: "ADMIN", is_active: true }
   const originalEmailUrl = "https://outlook.office.com/mail/deeplink/read/test"
   const manualEmailUrl = "https://mail.yandex.com/#message/123"
-  const email = { id: "px-mail", title: "EM IT: 10:00", subject: "Porosia", sender: "Drita <drita@example.test>", summary: "Klienti kërkon konfirmim.\n1) Verifiko porosinë.", original_email_url: originalEmailUrl }
+  const email = { id: "px-mail", title: "EM IT: 10:00", subject: "Porosia", sender: "Drita <drita@example.test>", summary: "Klienti kërkon konfirmim.\n1) Verifiko porosinë.", original_email_url: originalEmailUrl,
+    mailbox: "it@forestdream.de", internet_message_id: "<porosia+1@example.test>" }
   const timestamp = new Date().toISOString()
   const note = { status: "OPEN", note_type: "GA", created_at: timestamp, start_date: timestamp, updated_at: timestamp, attachments: [] }
   let requests = 0
@@ -152,6 +336,9 @@ test("PX Notes expands the saved summary and opens the original email separately
   const originalLink = content.getByRole("link", { name: "Hap emailin origjinal" })
   await expect(originalLink).toHaveAttribute("href", originalEmailUrl)
   await expect(originalLink).toHaveAttribute("target", "_blank")
+  await expect(content.getByRole("link", { name: "Hap në Outlook Classic" })).toHaveAttribute(
+    "href", "primeflow-outlook://message/it%40forestdream.de/%3Cporosia%2B1%40example.test%3E",
+  )
   await page.context().route(originalEmailUrl, route => route.fulfill({ body: "Mailbox fixture" }))
   const opened = page.waitForEvent("popup")
   await originalLink.click()
@@ -295,13 +482,14 @@ test("M2 filters due dates, colors 08:00 by status and saves task explanations b
   const continued = { row_number: "4", task_id: "continued-task", title: "Continued task", assignees: "EF",
     reason: "-", comment: "EF: Ka vazhduar.", continued_only: true }
   const key = "DET TE PAKRYERA, 08:00/DEADLINE"
+  const title = "STATUSI I DET 08:00/DEADLINE/DUE DATE SOT"
   const ga = "GA MBYLLJA E DET"
   const submitted: unknown[] = []
   const draft = () => ({
     id: "draft", status: "DRAFT", report_date: "2026-11-24", subject: "M2",
     recipients: { to: [], cc: [], bcc: [] }, unfinished_task_explanations: [task, continued],
     sections: [
-      { section_key: key, title: key, body: table(key,
+      { section_key: key, title, body: table(title,
         ["NR", "KUSH", "STATUS", "LLOJI", "TITULLI", "DUE DATE", "PROGRESI", "ARSYEJA", "KOMENT"],
         ["1", "EF", "IN_PROGRESS", "08:00", "Test task", "SOT", "IN PROGRESS", task.reason, task.comment],
         ["2", "RA", "TODO", "DEADLINE / 08:00", "Deadline this week", "27.11.2026", "TODO", "-", "-"],
@@ -359,6 +547,27 @@ test("M2 filters due dates, colors 08:00 by status and saves task explanations b
   await expect(thisWeek).toBeVisible()
   await expect(nextWeek).toBeVisible()
   await dueFilter.selectOption("all")
+  const hideTask = today.getByRole("button", { name: "Fshih detyrën: Test task" })
+  await expect(hideTask).toHaveText("−")
+  await expect(today.getByRole("cell").last().getByRole("button")).toHaveText("−")
+  await hideTask.press("Enter")
+  const showTask = page.getByRole("button", { name: "Shfaq detyrën 1", exact: true })
+  const foldedTask = page.getByRole("row").filter({ has: showTask })
+  await expect(showTask).toHaveText("+")
+  await expect(showTask).toHaveAttribute("aria-expanded", "false")
+  await expect(foldedTask.getByRole("cell").last().getByRole("button")).toHaveText("+")
+  await expect(foldedTask.getByRole("cell")).toHaveText(["", "+"])
+  await expect(today).toHaveCount(0)
+  await expect(today.getByRole("textbox")).toHaveCount(0)
+  await expect(thisWeek.getByRole("cell", { name: "27.11.2026", exact: true })).toBeVisible()
+  await expect(dueFilter).toBeVisible()
+  await dueFilter.selectOption("today")
+  await expect(showTask).toBeVisible()
+  await showTask.click()
+  await expect(hideTask).toHaveAttribute("aria-expanded", "true")
+  await expect(today.getByRole("textbox")).toHaveValue("Discord note")
+  await expect(dueFilter).toHaveValue("today")
+  await dueFilter.selectOption("all")
   const headers = page.getByRole("columnheader", { name: "BZ ME", exact: true })
   await expect(headers).toHaveCount(4)
   const columns = await headers.evaluateAll(cells => cells.map(cell => ({
@@ -380,9 +589,16 @@ test("M2 filters due dates, colors 08:00 by status and saves task explanations b
     { "test-task": { reason: "Tjetër" } },
     { "test-task": { comment: "Manual comment" } },
   ])
+  continued.continued_only = false
   await page.reload()
   await expect(reason).toHaveValue("Tjetër")
   await expect(comment).toHaveValue("Manual comment")
+  await expect(toggle).toHaveCount(0)
+  await continuedRow.getByRole("button", { name: "Fshih detyrën: Continued task" }).click()
+  await expect(continuedRow.getByRole("textbox")).toHaveCount(0)
+  await expect(comment).toHaveValue("Manual comment")
+  await page.getByRole("button", { name: "Shfaq detyrën 4", exact: true }).click()
+  await expect(continuedRow.getByRole("textbox")).toBeVisible()
 })
 
 test("M1 preserves edits and refreshed symbol tables when saving report details", async ({ page }) => {
@@ -405,6 +621,7 @@ test("M1 preserves edits and refreshed symbol tables when saving report details"
       body: [
         "DET 08:00/DL AM/DUE SOT:", "+---+",
         "| NR | KUSH | LLOJI | STATUS | TITULLI | DUE DATE | PROGRESI | KOMENT |", "+---+",
+        "| 5 | GA | 08:00 | DONE | Completed early task | SOT | DONE | - |", "+---+",
         "| 2 | GA | 08:00 | TODO | Later priority | 24.11.2026 | TODO | - |", "+---+",
         "| 1 | GA | DEADLINE / 08:00 | IN_PROGRESS | Morning priority | SOT | IN PROGRESS | - |", "+---+",
         "| 3 | GA | DEADLINE | TODO | Deadline next week | 24.11.2026 | TODO | - |", "+---+",
@@ -446,7 +663,25 @@ test("M1 preserves edits and refreshed symbol tables when saving report details"
   await expect(morningPriority.getByRole("cell", { name: "SOT", exact: true })).toHaveClass(/bg-red-600/)
   await expect(laterPriority.getByRole("cell", { name: "24.11.2026", exact: true })).not.toHaveClass(/bg-red-600/)
   await dueFilter.selectOption("today")
+  const priorityTable = morningPriority.locator("xpath=ancestor::table")
+  await expect(priorityTable.locator("tbody tr").last()).toContainText("Completed early task")
   await expect(laterPriority).toHaveCount(0)
+  const hidePriority = morningPriority.getByRole("button", { name: "Fshih detyrën: Morning priority" })
+  await expect(hidePriority).toHaveText("−")
+  await expect(morningPriority.getByRole("cell").last().getByRole("button")).toHaveText("−")
+  await hidePriority.press("Enter")
+  const showPriority = page.getByRole("button", { name: "Shfaq detyrën 1", exact: true })
+  await expect(showPriority).toHaveText("+")
+  await expect(showPriority).toHaveAttribute("aria-expanded", "false")
+  await expect(page.getByText("4. DET 08:00/DL AM/DUE SOT", { exact: true })).toBeVisible()
+  await expect(point).toBeVisible()
+  await expect(morningPriority).toHaveCount(0)
+  await expect(page.getByRole("row").filter({ hasText: "Deadline today" }).getByRole("cell", { name: "TODO" })).toBeVisible()
+  await expect(dueFilter).toBeVisible()
+  await showPriority.click()
+  await expect(hidePriority).toHaveAttribute("aria-expanded", "true")
+  await expect(morningPriority.getByRole("cell", { name: "IN PROGRESS", exact: true })).toBeVisible()
+  await expect(dueFilter).toHaveValue("today")
   await dueFilter.selectOption("other")
   await expect(morningPriority).toHaveCount(0)
   await expect(laterPriority).toBeVisible()

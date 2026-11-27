@@ -112,6 +112,7 @@ PCM_PROJECT_SUMMARY_PATTERN = re.compile("\n".join(f"{code} - (?:PO|JO)" for cod
 NEW_EMAILS_TITLE = "(GA) EMAILS TE REJA?"
 NEW_EMAILS_SNAPSHOT_KEY = "new_email_mailboxes"
 NEW_EMAILS_NOT_GENERATED = "Gjenero raportin për të lexuar email-et e ardhura nga ora 08:00."
+REORGANIZATION_TITLE = "A KA RIORGANIZIM?"
 AUTOMATED_SECTION_TITLES = {NEW_EMAILS_TITLE, GA_REPLIES_SECTION_TITLE, GA_REACTIONS_SECTION_KEY, PCM_PROJECTS_TITLE, HV_GA_POSTPONED_TITLE}
 SECTION_TITLES = [
     NEW_EMAILS_TITLE,
@@ -130,8 +131,9 @@ SECTION_TITLES = [
     GA_REPLIES_SECTION_TITLE,
     GA_REACTIONS_SECTION_KEY,
     HV_GA_POSTPONED_TITLE,
+    REORGANIZATION_TITLE,
 ]
-MANUAL_SECTION_TITLES: set[str] = set()
+MANUAL_SECTION_TITLES = {REORGANIZATION_TITLE}
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],
     GA_REPLIES_SECTION_TITLE,
@@ -146,6 +148,7 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[8],
     *SECTION_TITLES[10:12],
     HV_GA_POSTPONED_TITLE,
+    REORGANIZATION_TITLE,
 ]
 SECTION_DISPLAY_TITLES = {
     GA_REACTIONS_SECTION_KEY: GA_REACTIONS_SECTION_TITLE,
@@ -897,6 +900,38 @@ def is_waiting_client_section(title: str | None, section_key: str | None = None)
                for value in (title, section_key))
 
 
+def is_after_break_reorganization(title: str | None, section_key: str | None = None) -> bool:
+    return any(re.fullmatch(r"(?:MANUAL)?\d*AKARIORGANIZIM", re.sub(r"[^A-Z0-9]+", "", (value or "").upper()))
+               for value in (title, section_key))
+
+
+def _reorganization_section(body: str = "") -> dict[str, str]:
+    from app.services.morning_report import normalize_morning_reorganization_body
+
+    return {"section_key": REORGANIZATION_TITLE, "title": REORGANIZATION_TITLE,
+            "body": normalize_morning_reorganization_body(body, include_empty_follow_ups=True)}
+
+
+def with_after_break_reorganization_section(
+    sections: list[dict[str, Any]] | None,
+    *,
+    preferred_sections: list[dict[str, Any]] | None = None,
+) -> list[dict[str, str]]:
+    """Keep one final built-in question and preserve answers from the preferred draft."""
+    def matching(section: dict[str, Any]) -> bool:
+        return is_after_break_reorganization(section.get("title"), section.get("section_key"))
+
+    candidates = [section for section in (preferred_sections or []) if matching(section)]
+    if not candidates:
+        candidates = [section for section in (sections or []) if matching(section)]
+    saved = next((item for item in candidates if item.get("section_key") == REORGANIZATION_TITLE), None)
+    if saved is None:
+        saved = next((item for item in candidates if str(item.get("body") or "").strip()
+                      not in {"", "(Ploteso manualisht)"}), {})
+    return [*(section for section in (sections or []) if not matching(section)),
+            _reorganization_section(str(saved.get("body") or ""))]
+
+
 def after_break_automated_section_title(title: str | None, section_key: str | None = None) -> str | None:
     for value in (section_key, title):
         compact = re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
@@ -942,7 +977,7 @@ async def populate_pcm_projects_section(db: AsyncSession, sections: list[dict[st
 def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     by_title: dict[str, dict[str, str]] = {}
     extras: list[dict[str, str]] = []
-    for section in sections or []:
+    for section in with_after_break_reorganization_section(sections):
         raw_title = str(section.get("title") or "").strip()
         section_key = str(section.get("section_key") or "").strip()
         if is_retired_after_break_question(raw_title, section_key):
@@ -1041,12 +1076,9 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
                            "title": SECTION_DISPLAY_TITLES.get(title, title),
                            "body": body})
     # Keep Common View–synced manuals with the other manuals (before auto sections).
-    manual_count = len(MANUAL_SECTION_TITLES)
     from app.services.meeting_point_manual_sync import order_custom_manual_sections
 
-    if not extras:
-        return order_custom_manual_sections("after_break", normalized)
-    return order_custom_manual_sections("after_break", normalized[:manual_count] + extras + normalized[manual_count:])
+    return order_custom_manual_sections("after_break", normalized + extras)
 
 
 async def apply_1h_confirmation_questions(
@@ -1546,6 +1578,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         {"title": SECTION_TITLES[11], "body": hv_section},
         {"section_key": HV_GA_POSTPONED_TITLE, "title": HV_GA_POSTPONED_TITLE,
          "body": hv_postponed_body},
+        _reorganization_section(),
     ]
     sections_by_title = {section.get("section_key", section["title"]): section for section in sections}
     sections = [sections_by_title[title] for title in DISPLAY_SECTION_TITLES]

@@ -92,6 +92,68 @@ async function fixture(page: Page, group: "oneH" | "personal" | "blocked" = "one
   return { tasks, writes }
 }
 
+test("Development saves M1 and M2 reorganization answers separately and shows them in both views", async ({ page }) => {
+  await fixture(page)
+  const date = "2026-11-27"
+  const storedBodies = new Map<string, string>()
+  let releaseReport = () => {}
+  const reportReady = new Promise<void>((resolve) => { releaseReport = resolve })
+  await page.route(/\/api\/departments\/development\/m[12]$/, (route) => route.fulfill({
+    json: { date, item_sections: {}, sections: [] },
+  }))
+  await page.route(/\/api\/departments\/development\/m[12]\/reorganization$/, async (route) => {
+    const slot = new URL(route.request().url()).pathname.split("/").at(-2)!
+    if (route.request().method() === "PUT") {
+      const payload = route.request().postDataJSON()
+      expect(payload.report_date).toBe(date)
+      storedBodies.set(slot, payload.body)
+      return route.fulfill({ json: { body: payload.body } })
+    }
+    if (slot === "m1") await reportReady
+    return route.fulfill({ json: { date, body: storedBodies.get(slot) ?? "", can_edit: true } })
+  })
+
+  async function openM1(path: string) {
+    await page.goto(path)
+    await page.getByRole("button", { name: "Meetings", exact: true }).click()
+    await page.getByRole("button", { name: "M1", exact: true }).click()
+    return page.getByRole("region", { name: "A KA RIORGANIZIM?" })
+  }
+
+  let form = await openM1("/departments/development?view=mine&daily=full")
+  try {
+    await expect(form.getByRole("heading", { name: "A KA RIORGANIZIM?" })).toBeVisible({ timeout: 5000 })
+    await expect(form.getByLabel("KOMENT")).not.toBeEditable()
+    await expect(form.getByLabel("SI BËHET RIORGANIZIMI?")).toBeVisible()
+    await expect(form.getByLabel("SHKAKTARI I MUNGESËS OSE VONESËS")).toBeVisible()
+  } finally {
+    releaseReport()
+  }
+  await form.getByRole("checkbox", { name: "BZ M1" }).check()
+  await form.getByLabel("KOMENT").fill("Ndryshojmë planin")
+  await form.getByLabel("SI BËHET RIORGANIZIMI?").fill("Rishpërndajmë punën")
+  await form.getByLabel("SHKAKTARI I MUNGESËS OSE VONESËS").fill("U diskutua në takim")
+  await form.getByRole("button", { name: "Ruaj", exact: true }).click()
+  await expect(page.getByText("Përgjigjja e riorganizimit u ruajt.", { exact: true })).toBeVisible()
+
+  form = await openM1("/departments/development?view=department")
+  await expect(form.getByRole("checkbox", { name: "BZ M1" })).toBeChecked()
+  await expect(form.getByLabel("KOMENT")).toHaveValue("Ndryshojmë planin")
+  await expect(form.getByLabel("SI BËHET RIORGANIZIMI?")).toHaveValue("Rishpërndajmë punën")
+  await expect(form.getByLabel("SHKAKTARI I MUNGESËS OSE VONESËS")).toHaveValue("U diskutua në takim")
+  await page.getByRole("button", { name: "M2", exact: true }).click()
+  await expect(form.getByLabel("KOMENT")).toHaveValue("")
+  await form.getByLabel("KOMENT").fill("Vetëm M2")
+  await form.getByRole("button", { name: "Ruaj", exact: true }).click()
+  await expect.poll(() => storedBodies.get("m2")).toContain("KOMENT: Vetëm M2")
+  await page.getByRole("button", { name: "M1", exact: true }).click()
+  await expect(form.getByLabel("KOMENT")).toHaveValue("Ndryshojmë planin")
+  await page.getByRole("button", { name: "M2", exact: true }).click()
+  await expect(form.getByLabel("KOMENT")).toHaveValue("Vetëm M2")
+  await page.getByRole("button", { name: "M3", exact: true }).click()
+  await expect(form).toHaveCount(0)
+})
+
 async function chooseSymbols(page: Page, id: string, waitForSave = true) {
   const editor = page.locator(`[data-task-marker-id="${id}"]:visible`).first()
   await editor.getByRole("button", { name: "Task symbols (maximum 2)", exact: true }).click()

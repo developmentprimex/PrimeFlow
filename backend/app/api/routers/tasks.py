@@ -3006,7 +3006,13 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
     )
     slot_set = _payload_has_field(payload, "one_h_report_slot")
     marker_set = _payload_has_field(payload, "one_h_marker")
-    coordinate = coordinate_reporting and (slot_set or marker_set)
+    task_type_edits = {
+        field: getattr(payload, field) for field in reporting_choices.TASK_TYPE_FIELDS
+        if _payload_has_field(payload, field)
+    }
+    if slot_set and payload.one_h_report_slot:
+        task_type_edits["one_h_report_slot"] = payload.one_h_report_slot
+    coordinate = coordinate_reporting and (slot_set or marker_set or bool(task_type_edits))
 
     prepared_date_departments = None
     product_phases = {ProjectPhaseStatus.PRODUCT, ProjectPhaseStatus.CONTROL}
@@ -3053,6 +3059,11 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
         if prepared_date_departments is None:
             task, reporting_group = await reporting_choices.lock_task_group(db, task_id)
             ensure_task_editor(user, task)
+        if task_type_edits:
+            await reporting_choices.check_task_type_change(
+                db, task, reporting_group, user, task_type_edits, _realization_today(),
+                payload.reporting_choice_confirmations.get("task_type"),
+            )
         if slot_set:
             _validate_eight_am_one_h_slot(
                 payload.title or task.title, payload.one_h_report_slot,
@@ -3825,17 +3836,15 @@ async def update_task_in_session(task_id: uuid.UUID, payload: TaskUpdate, db: As
             shared_values["progress_percentage"] = task.progress_percentage
         if payload.daily_products is not None:
             shared_values["daily_products"] = task.daily_products
-        if payload.is_bllok is not None:
+        if not coordinate_reporting and payload.is_bllok is not None:
             shared_values["is_bllok"] = task.is_bllok
-        if payload.is_r1 is not None:
+        if not coordinate_reporting and payload.is_r1 is not None:
             shared_values["is_r1"] = task.is_r1
-        if payload.is_1h_report is not None:
+        if not coordinate_reporting and payload.is_1h_report is not None:
             shared_values["is_1h_report"] = task.is_1h_report
-        if (not coordinate_reporting and _payload_has_field(payload, "one_h_report_slot")) or (
-            payload.is_1h_report is not None and not slot_set
-        ):
+        if not coordinate_reporting and (slot_set or payload.is_1h_report is not None):
             shared_values["one_h_report_slot"] = task.one_h_report_slot
-        if payload.is_personal is not None:
+        if not coordinate_reporting and payload.is_personal is not None:
             shared_values["is_personal"] = task.is_personal
         if fast_task_order_set:
             shared_values["fast_task_order"] = task.fast_task_order
@@ -4209,6 +4218,11 @@ async def update_task_one_h_report_slot_in_session(task_id, payload, db, user, *
 
     # Current-day slots roll over to the next working day at 16:00.
     slot_date = effective_slot_date(payload.report_date)
+    if coordinate_reporting and next_slot is not None:
+        await reporting_choices.check_task_type_change(
+            db, task, group, user, {"one_h_report_slot": next_slot}, _realization_today(),
+            payload.reporting_choice_confirmations.get("task_type"),
+        )
     personal = coordinate_reporting and await reporting_choices.record_choice(
         db, task, group, user, field="slot", value=next_slot, day=slot_date,
         confirmation=payload.reporting_choice_confirmations.get("slot"),

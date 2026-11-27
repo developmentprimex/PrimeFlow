@@ -386,6 +386,7 @@ class Answer(Actor):
     plan_key: str | None = None
     request_id: str | None = Field(default=None, pattern=r'^\d{1,32}$')
     continue_with_16: bool = False
+    reporting_choice_confirmations: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 def validate_answer(q, value):
@@ -564,11 +565,15 @@ async def answer(question_id: uuid.UUID, value: Answer, db: AsyncSession = Depen
 
         try:
             await update_task_one_h_report_slot_in_session(q.task_id, TaskOneHReportSlotUpdate(
-                report_date=q.target_date, one_h_report_slot=value.slot), db, user,
-                before_update=recheck_slot, before_commit=persist, return_dto=False)
+                report_date=q.target_date, one_h_report_slot=value.slot,
+                reporting_choice_confirmations=value.reporting_choice_confirmations), db, user,
+                before_update=recheck_slot, before_commit=persist, return_dto=False, coordinate_reporting=True)
         except HTTPException as exc:
             if isinstance(exc.detail, dict) and exc.detail.get('code') == CODE:
                 return {'ok': False, 'slot_reminder': exc.detail['message']}
+            if isinstance(exc.detail, dict) and exc.detail.get('code') == 'TASK_REPORTING_CHOICE_REASON_REQUIRED':
+                return {'ok': False, 'message': 'Shpjego arsyen për ta ruajtur zgjedhjen.',
+                        'reporting_choice': exc.detail}
             raise
     elif q.kind == 'meeting':
         from app.api.routers.meetings import update_meeting_occurrence_status_in_session

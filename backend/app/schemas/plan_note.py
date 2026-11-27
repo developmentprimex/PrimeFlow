@@ -141,6 +141,7 @@ class PlanNoteTaskAssigneeStateUpdate(BaseModel):
 
 
 class PlanNoteTaskBundleUpdate(TaskPostponementExplanations):
+    reporting_choice_confirmations: dict[str, dict[str, str]] = Field(default_factory=dict, exclude=True)
     content: str | None = None
     description: str | None = None
     is_repetitive: bool | None = None

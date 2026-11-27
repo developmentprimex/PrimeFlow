@@ -22,7 +22,8 @@ from app.services.reporting_points_settings import DeliverySettingsPayload, read
 from app.services.m1_reporting_points import (
     MANUAL_POINTS, backfill_saved_note_authors, backfill_saved_task_planning, needs_saved_task_planning,
     excluded_note_ids, get_settings, locked_report, refresh_report,
-    reorder_saved_report_tasks, render_html,
+    reorder_saved_report_tasks, render_html, REORGANIZATION_FORM_KEY, REORGANIZATION_FORM_LIMIT,
+    REORGANIZATION_FORM_TEXT_LIMIT, reorganization_form_values,
     render_plain_text, report_payload, send_report, report_attachments, with_morning_task_feedback,
 )
 
@@ -50,10 +51,15 @@ class ManualAnswersPayload(BaseModel):
     @field_validator("manual_answers")
     @classmethod
     def validate_answers(cls, value: dict[str, str]) -> dict[str, str]:
-        if set(value) - set(MANUAL_POINTS):
+        if set(value) - (set(MANUAL_POINTS) | {REORGANIZATION_FORM_KEY}):
             raise ValueError("Pike manuale e panjohur.")
-        if any(len(answer) > 10000 for answer in value.values()):
+        if any(len(answer) > 10000 for key, answer in value.items() if key != REORGANIZATION_FORM_KEY):
             raise ValueError("Pergjigjja nuk mund te kete mbi 10000 karaktere.")
+        if form := value.get(REORGANIZATION_FORM_KEY):
+            if len(form) > REORGANIZATION_FORM_LIMIT or any(
+                len(field) > REORGANIZATION_FORM_TEXT_LIMIT for field in reorganization_form_values(form).values()
+            ):
+                raise ValueError("Një fushë e riorganizimit nuk mund të ketë mbi 10000 karaktere.")
         return value
 
 

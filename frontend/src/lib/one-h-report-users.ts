@@ -34,7 +34,7 @@ export function isReportSummaryTask(cell: HTMLElement): boolean {
 type PlannerUser = { full_name?: string | null; username?: string | null; email: string; department_id?: string | null; weekly_planner_sort_order?: number | null }
 type PlannerDepartment = { id: string; code: string; name: string }
 
-export function reportPlannerUserOrder(users: PlannerUser[], departments: PlannerDepartment[]): string[] {
+export function reportPlannerNameOrder(users: PlannerUser[], departments: PlannerDepartment[]): string[] {
   const ranks: Record<string, number> = { DEV: 0, DEVELOPMENT: 0, ZHV: 0, ZHVILLIM: 0, GD: 1, GDS: 1, DSG: 1, "GRAPHIC DESIGN": 1, DIZAJN: 1, PCM: 2, "PRODUCT CONTENT": 2, "PROJECT CONTENT MANAGER": 2 }
   const departmentRanks = new Map(departments.map((department) => [department.id,
     ranks[department.code.trim().toUpperCase()] ?? ranks[department.name.trim().toUpperCase()] ?? 99]))
@@ -44,7 +44,11 @@ export function reportPlannerUserOrder(users: PlannerUser[], departments: Planne
     || Number(a.weekly_planner_sort_order == null) - Number(b.weekly_planner_sort_order == null)
     || (a.weekly_planner_sort_order ?? 0) - (b.weekly_planner_sort_order ?? 0)
     || name(a).localeCompare(name(b))
-  ).map((person) => name(person).trim().split(/\s+/).map((part) => part[0]).join("").toUpperCase())
+  ).map((person) => name(person).trim())
+}
+
+export function reportPlannerUserOrder(users: PlannerUser[], departments: PlannerDepartment[]): string[] {
+  return reportPlannerNameOrder(users, departments).map((name) => name.split(/\s+/).map((part) => part[0]).join("").toUpperCase())
 }
 
 export function reportUserOptions(document: Document, plannerOrder: string[] = []): string[] {

@@ -652,13 +652,13 @@ def _without_full_day_unavailable(data: dict[str, Any], day: date) -> dict[str, 
 
 def morning_follow_up_rows(
     data: dict[str, Any], day: date, slot: str, *, group: str | None = None,
-    frozen_task_ids: set[str] | None = None,
+    frozen_task_ids: set[str] | None = None, meeting_follow_ups_only: bool = True,
 ) -> list[dict[str, Any]]:
     primary = FOLLOW_UP_BY_SLOT.get(slot)
     group = group or primary
     if not group:
         return []
-    is_carried = group != primary
+    is_carried = meeting_follow_ups_only and group != primary
     items = data.get("items") or {}
     candidates = [task for bucket in ("oneH", "blocked", "important", "r1", "personal")
                   for task in items.get(bucket) or []] + (data.get("tasks") or []) + (data.get("morning_follow_up_tasks") or [])
@@ -666,7 +666,7 @@ def morning_follow_up_rows(
     scheduled = []
     rescheduled = []
     for task in candidates:
-        was_planned = not is_carried and str(task.get("task_id") or task.get("id") or "") in frozen
+        was_planned = group == primary and str(task.get("task_id") or task.get("id") or "") in frozen
         if _task_date(task) == day:
             if was_planned or (
                 group in task_row_groups(task, day, include_planned_days=not is_carried)
@@ -693,6 +693,8 @@ def build_report_document(
     daily_strike_overrides: tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]] | None = None,
     morning_follow_up_comments: dict[str, str] | None = None,
     morning_follow_up_task_ids: set[str] | None = None,
+    *,
+    meeting_follow_ups_only: bool = False,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
@@ -793,12 +795,20 @@ def build_report_document(
             ))
     primary = FOLLOW_UP_BY_SLOT.get(slot)
     follow_up_sections = []
-    for group in report_follow_up_groups(slot):
+    groups = report_follow_up_groups(slot) if meeting_follow_ups_only else FOLLOW_UP_BY_SLOT.values()
+    for group in groups:
         tasks = morning_follow_up_rows(
             data, report_day, slot, group=group,
             frozen_task_ids=morning_follow_up_task_ids,
+            meeting_follow_ups_only=meeting_follow_ups_only,
         )
-        if tasks or group == primary:
+        if not meeting_follow_ups_only:
+            tasks = [
+                task for task in tasks if _completed_in_report_window(
+                    task, window_start=completion_window_start, window_end=completion_window_end,
+                )
+            ]
+        if not meeting_follow_ups_only or tasks or group == primary:
             follow_up_sections.append((f"DET {group} · PROGRESI", tasks))
     strike_counts: dict[str, int] = {}
     if strike_window_start is not None:
