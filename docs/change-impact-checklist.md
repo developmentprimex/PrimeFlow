@@ -518,6 +518,11 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   `tests/test_ga_assistant*.py`. Identiteti i GA-së lexohet vetëm nga
   `app/services/ga_identity.py` (`GA_USER_EMAIL` / `GA_USERNAME`); mos shto konstante të reja
   `GA_EMAIL` / `GA_USERNAME` nëpër module.
+  Taskat e GA-së nga PrimeFlow, përfshirë ato të krijuara nga Claude, lexohen
+  nga i njëjti burim si agjenda. Dita e planifikuar, ora e taskut ose ora e
+  vendosur nga Asistentja GA përcaktojnë qelizën. Taskat pa orë përdorin
+  rreshtin pa orë. Kontrollo ekranin, printimin e NEWS-PX, `ga-time.xlsx`,
+  tabelat 1H në HTML dhe PNG dhe mjetin `ga_time_table` të Claude.
   Agjenda lexon edhe **iPhone Sync** të GA Time Table (formati `REMINDER HH:MM: titulli` i
   `app/services/ga_icloud_sync.py` dhe dritarja sot−7 e Shortcut-it): kur ndryshon formati ose
   dritarja, ndrysho edhe `parse_reminder_content` / `IPHONE_SYNC_LOOKBACK_DAYS`.

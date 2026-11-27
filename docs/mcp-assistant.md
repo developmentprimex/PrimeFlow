@@ -88,11 +88,11 @@ Koha është në `GA_TIMEZONE` (`Europe/Belgrade`).
 | `ga_untimed_today(date)` | Detyrat pa orë për ditën |
 | `ga_item_done(item_id, comment?, override_reason?)` | Detyrë → DONE. Detyrat normale kërkojnë komentin e rezultatit të GA-së (rregulli RLZ, si në UI); 1H/speciale jo. BZ ku GA s'është assignee → “BZ u mbajt” (koment + audit), pa e mbyllur detyrën e kolegut. Takim → “Mbajtur”. To Do → completed |
 | `ga_item_postpone(item_id, new_date, new_time?, reason_code?, reason_comment?)` | Ndryshon `due_date` (ruhet `original_due_date`). Për detyra që s'janë të GA-së, PrimeFlow mund të kërkojë arsyen e shtyrjes. BZ dhe takimet s'shtyhen nga këtu |
-| `ga_item_set_time(item_id, time\|null, date?)` | Orë për ditë **vetëm në agjendën e GA-së** (`ga_assistant_item_times`); s'prek `due_date` apo orën BZ të template-it. To Do → orari i kujtesës |
+| `ga_item_set_time(item_id, time\|null, date?)` | Cakton orën për ditën në agjendën e GA-së dhe në GA Time Table për taskat e GA-së. Për To Do cakton orën e kujtesës. |
 | `ga_item_remove_from_day(item_id, reason, date?)` | E fsheh elementin nga agjenda e GA-së për atë ditë (soft; s'fshihet asgjë) |
 | `ga_add_comment(item_id, text)` | Detyrë → shtohet te komenti i GA-së; To Do → te shënimet |
 | `todo_list / todo_create / todo_update / todo_complete / todo_set_steps` | Microsoft To Do i `info@` |
-| `ga_time_table(week_start?)` | GA Time Table e javës (H–P), si te faqja: rreshtat e orëve me shënimet, hyrjet e template-it dhe rreshtat e iPhone Sync (“R: …”, “CALENDAR …”). Takimet/detyrat janë te `ga_agenda` |
+| `ga_time_table(week_start?)` | GA Time Table e javës (H–P), me shënimet, hyrjet e template-it, taskat e GA-së nga PrimeFlow dhe hyrjet e iPhone Sync (“R: …”, “CALENDAR …”). Taskat shfaqen te dita e planifikuar, sipas orës nga `ga_item_set_time` ose nga vetë tasku. Për takimet dhe pjesën tjetër të agjendës përdor `ga_agenda`. |
 | `ga_discord_mentions(since?, until?, only_open=true)` | Mesazhet në kanalet e serverit që e përmendin GA-në, një rol të saj, ose i përgjigjen asaj: kush (emri + inicialet), kanali, koha, teksti, linku, bashkëngjitjet, statusi |
 | `ga_discord_mentions_feed(before?, limit=25)` | Lista vetëm për lexim për Claude Artifact, me përmendjet direkte të GA-së nga `#det-nga-stafi-per-ga` dhe reagimet e tyre aktuale |
 | `ga_discord_mention_attachments(id)` | Linket e freskëta të bashkëngjitjeve nga një mesazh i listës, me emër dhe lloj skedari |

@@ -3287,8 +3287,8 @@ async def ga_item_postpone(
 async def ga_item_set_time(item_id: str, time: str | None = None, date: str | None = None) -> Any:
     """
     Set, change or clear (time=null) an item's time ("2 në 11:00").
-    PrimeFlow tasks/BZ: a per-day time for GA's agenda only (due date and BZ template stay
-    unchanged); date defaults to the item's day or today. To Do: sets/clears the reminder time.
+    PrimeFlow tasks/BZ: a per-day time for GA's agenda and for GA tasks in the Time Table.
+    Date defaults to the item's day or today. To Do: sets/clears the reminder time.
     """
     return await _request(
         "POST",
@@ -3398,15 +3398,16 @@ async def ga_time_table(week_start: str | None = None) -> Any:
     """
     The GA Time Table of /admin-tasks for one work week, as GA sees it: the time rows (with
     their notes) and, per day Monday-Friday, the entries in each row - weekly template
-    entries plus the iPhone Sync rows ("R: HH:MM: ..." reminders, "CALENDAR ..." events).
+    entries, GA's PrimeFlow tasks, and the iPhone Sync rows ("R: HH:MM: ..." reminders, "CALENDAR ..." events).
     week_start: any date of the week (YYYY-MM-DD or sot/neser; default this week).
-    Meetings and tasks are not part of this grid; use ga_agenda for those.
+    Use ga_agenda for meetings and the rest of GA's agenda.
     """
     day = _parse_day(week_start) if week_start else datetime.now(_local_tz()).date()
     monday = day - timedelta(days=day.weekday())
-    rows, entries = await asyncio.gather(
+    rows, entries, tasks = await asyncio.gather(
         _request("GET", "/api/ga-time-slots/rows"),
         _request("GET", "/api/ga-time-slots", params={"week_start": monday.isoformat()}),
+        _request("GET", "/api/ga-time-slots/tasks", params={"week_start": monday.isoformat()}),
     )
 
     def plain(value: str | None) -> str:
@@ -3439,6 +3440,11 @@ async def ga_time_table(week_start: str | None = None) -> Any:
                 and (entry.get("occurrence_date") == current.isoformat()
                      if entry.get("occurrence_date") else entry.get("day_of_week") == index)
             ]
+            cell.extend(
+                {"text": task["text"], "source": "primeflow", "kind": "task", "task_id": task["task_id"]}
+                for task in tasks or []
+                if task["day"] == current.isoformat() and task["row_start"][:5] == start
+            )
             if cell:
                 cells[f"{names[index]} {current.isoformat()}"] = cell
         notes = [plain(comment.get("content")) for comment in (row.get("comments") or []) if plain(comment.get("content"))]

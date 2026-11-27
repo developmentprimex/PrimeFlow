@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date, datetime
+import uuid
+from datetime import date, datetime, time
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from PIL import Image
 
-from app.services.ga_time_table import DEFAULT_GA_TIME_TABLE_ROWS
+from app.services.ga_time_table import DEFAULT_GA_TIME_TABLE_ROWS, GaTimeTableTask
 from app.services.meetings_report import _section_report_blocks
 from app.services.one_h_ga_attachments import (
     _render_ga_hv_status_tables_html,
@@ -33,6 +34,11 @@ def _result(rows):
 
 
 class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.time_table_tasks = self.enterContext(patch(
+            "app.services.one_h_ga_attachments.get_ga_time_table_tasks", new=AsyncMock(return_value=[])
+        ))
+
     def test_question_blocks_are_kept_for_ga_and_removed_for_regular_recipients(self) -> None:
         ga_document = build_report_document(
             {"guardrails": {"truncated": {}}, "items": {}},
@@ -218,6 +224,9 @@ LATE:
         self.assertNotIn("<img", rendered)
 
     async def test_timetable_email_includes_synced_reminders(self) -> None:
+        self.time_table_tasks.return_value = [
+            GaTimeTableTask(uuid.uuid4(), date(2026, 8, 24), time(7, 30), time(7, 45), "07:45 Review & send")
+        ]
         reminder = SimpleNamespace(
             day_date=date(2026, 8, 24),
             start_time=DEFAULT_GA_TIME_TABLE_ROWS[2].start_time,
@@ -238,6 +247,7 @@ LATE:
         self.assertIn("R: 00:00: Follow up tomorrow", rendered)
         self.assertNotIn("REMINDER 00:00: Follow up tomorrow", rendered)
         self.assertIn("background-color:#FEF3C7", rendered)
+        self.assertIn("07:45 Review &amp; send", rendered)
 
     async def test_timetable_email_uses_common_view_meeting_visibility(self) -> None:
         def meeting(

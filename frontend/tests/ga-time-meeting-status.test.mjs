@@ -47,6 +47,7 @@ test("printed timetable uses each day's occurrence status for the same recurring
     formatDateHuman: iso => iso, toDayOfWeek: iso => dates.indexOf(iso),
     gaTimeRows: [{ start: "08:00", end: "09:00", nrLabel: "1", label: "08:00 - 09:00" }],
     gaTimeCommentsForRow: () => [], gaTimeEntriesByCell: new Map(), gaMeetingsByCell: meetings,
+    gaTimeTasksByCell: new Map(),
     gaTimeEntryStyle: () => ({}), GaTimeEntryContent: () => null,
   }
   const render = new Function(...Object.keys(args), `${transpile(`const render = () => (${table});`)}; return render;`)(...Object.values(args))

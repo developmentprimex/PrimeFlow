@@ -70,7 +70,7 @@ from app.services.daily_report_logic import (
     task_matches_department_scope,
     task_is_visible_to_user,
 )
-from app.services.ga_time_table import get_ga_time_table_rows
+from app.services.ga_time_table import get_ga_time_table_rows, get_ga_time_table_tasks
 from app.services.development_m1 import DEVELOPMENT_CHECKLIST_KEY, build_development_m1
 from app.services.development_m2 import build_development_m2
 from app.services.development_m3 import build_development_m3
@@ -1642,6 +1642,9 @@ async def export_ga_time_xlsx(
         start_label = resolve_row_start(entry.start_time)
         key = (day_value, start_label)
         entry_map.setdefault(key, []).append(_ga_time_plain_text(entry.content))
+    for task in await get_ga_time_table_tasks(db, ga_user, week_dates[0], week_dates[-1], table_rows):
+        key = (task.day.weekday(), _format_time(task.row_start))
+        entry_map.setdefault(key, []).append(task.text)
 
     wb = Workbook()
     ws = wb.active

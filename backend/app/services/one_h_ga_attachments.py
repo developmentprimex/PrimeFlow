@@ -20,7 +20,7 @@ from app.models.meeting import Meeting
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.task import Task
 from app.models.user import User
-from app.services.ga_time_table import get_ga_time_table_rows
+from app.services.ga_time_table import get_ga_time_table_rows, get_ga_time_table_tasks
 from app.services.meeting_palette import meeting_report_color
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.meetings_report import (
@@ -75,6 +75,24 @@ def _row_start(rows: list[Any], value: time) -> time:
         None,
     )
     return containing.start_time if containing is not None else value
+
+
+async def _add_timetable_tasks(
+    db: AsyncSession,
+    owner: User | None,
+    cell_items: dict[tuple[int, time], list[dict[str, Any]]],
+    rows: list[Any],
+    week_dates: list[date],
+) -> None:
+    if owner is None:
+        return
+    for task in await get_ga_time_table_tasks(db, owner, week_dates[0], week_dates[-1], rows):
+        cell_items.setdefault((task.day.weekday(), task.row_start), []).append({
+            "text": task.text,
+            "fill": "#F1F5F9",
+            "color": "#0F172A",
+            "bold": False,
+        })
 
 
 def _meeting_time(meeting: Meeting) -> time | None:
@@ -199,6 +217,7 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
         })
 
     await _add_timetable_meetings(db, cell_items, rows, week_dates)
+    await _add_timetable_tasks(db, ga_user, cell_items, rows, week_dates)
 
     margin = 30
     column_widths = [54, 140, 230, 260, 260, 260, 260, 260, 230]
@@ -422,6 +441,7 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
             "italic": False,
         })
     await _add_timetable_meetings(db, cell_items, rows, week_dates)
+    await _add_timetable_tasks(db, ga_user, cell_items, rows, week_dates)
 
     def comments_for(row: Any, column: str) -> list[dict[str, Any]]:
         values = [

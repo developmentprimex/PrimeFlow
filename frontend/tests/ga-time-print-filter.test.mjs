@@ -19,6 +19,7 @@ test("print table includes only the selected day's column and entries", () => {
   const entries = new Map(dates.map((date, day) => [`${day}|08:00`, [
     { id: date, content: `REMINDER: ${date}`, source_type: "reminder", is_completed: day === 1 },
   ]]))
+  const tasks = new Map([[`${dates[1]}|08:00`, [{ task_id: "task-1", text: "08:10 Review order" }]]])
   for (const selected of ["", dates[1], dates[4]]) {
     const args = {
       React, cn: (...classes) => classes.filter(Boolean).join(" "),
@@ -27,6 +28,7 @@ test("print table includes only the selected day's column and entries", () => {
       formatDateHuman: iso => iso, toDayOfWeek: iso => dates.indexOf(iso),
       gaTimeRows: [{ start: "08:00", end: "09:00", nrLabel: "1", label: "08:00 - 09:00" }],
       gaTimeCommentsForRow: () => [], gaTimeEntriesByCell: entries, gaMeetingsByCell: new Map(),
+      gaTimeTasksByCell: tasks,
       gaTimeEntryStyle: () => ({}), getPlainGaTimeRichText: value => value,
       GaTimeRichTextContent: ({ value }) => value,
     }
@@ -38,6 +40,7 @@ test("print table includes only the selected day's column and entries", () => {
     for (const date of dates) {
       assert.equal(html.includes(date), !selected || date === selected)
     }
+    assert.equal(html.includes("08:10 Review order"), !selected || selected === dates[1])
   }
   assert.equal(ts.createSourceFile("page.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX).parseDiagnostics.length, 0)
 })

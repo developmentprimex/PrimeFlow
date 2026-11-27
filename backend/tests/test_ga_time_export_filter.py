@@ -1,5 +1,6 @@
 import io
 import unittest
+import uuid
 from datetime import date, time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,10 +9,11 @@ from openpyxl import load_workbook
 
 from app.api.routers import exports
 from app.models.enums import UserRole
+from app.services.ga_time_table import GaTimeTableTask
 
 
 class GaTimeExportFilterTests(unittest.IsolatedAsyncioTestCase):
-    async def export(self, selected_date=None, role=UserRole.ADMIN):
+    async def export(self, selected_date=None, role=UserRole.ADMIN, tasks=()):
         templates = [
             SimpleNamespace(day_of_week=day, start_time=time(8), content=f"Day {day}")
             for day in range(7)
@@ -29,7 +31,8 @@ class GaTimeExportFilterTests(unittest.IsolatedAsyncioTestCase):
         )]
         user = SimpleNamespace(role=role, full_name="Test User", username="test-user")
         with patch.object(exports, "_resolve_ga_user", AsyncMock(return_value=SimpleNamespace(id="ga"))), \
-             patch.object(exports, "get_ga_time_table_rows", AsyncMock(return_value=rows)):
+             patch.object(exports, "get_ga_time_table_rows", AsyncMock(return_value=rows)), \
+             patch.object(exports, "get_ga_time_table_tasks", AsyncMock(return_value=tasks)):
             response = await exports.export_ga_time_xlsx(
                 week_start=date(2026, 10, 26), selected_date=selected_date, db=db, user=user,
             )
@@ -59,6 +62,12 @@ class GaTimeExportFilterTests(unittest.IsolatedAsyncioTestCase):
         ws, _ = await self.export(date(2026, 10, 30))
         self.assertEqual(ws.max_column, 4)
         self.assertEqual(ws["D5"].value, "Day 4")
+
+    async def test_selected_day_includes_the_ga_task_in_its_time_row(self):
+        wednesday = date(2026, 10, 28)
+        task = GaTimeTableTask(uuid.uuid4(), wednesday, time(8), time(8, 15), "08:15 Review order")
+        ws, _ = await self.export(wednesday, tasks=[task])
+        self.assertEqual(ws["D5"].value, "Day 2\nWednesday import\n08:15 Review order")
 
     async def test_unfiltered_export_keeps_week_and_end_comments(self):
         ws, _ = await self.export()

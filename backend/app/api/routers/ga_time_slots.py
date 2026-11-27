@@ -41,8 +41,10 @@ from app.schemas.ga_time_slot import (
 from app.services.ga_time_table import (
     DEFAULT_GA_TIME_TABLE_ROWS,
     GaTimeTableRowData,
+    GaTimeTableTask,
     format_ga_time_label,
     get_ga_time_table_rows,
+    get_ga_time_table_tasks,
 )
 from app.services.ga_caldav import CALDAV_USERNAME, PRINCIPAL_HREF, build_caldav_profile
 from app.services.ga_calendar_feed import build_ga_calendar, caldav_password, feed_token, is_valid_feed_token
@@ -1327,6 +1329,19 @@ async def list_ga_time_slots(
         )
     ).scalars().all()
     return [*[_entry_out(row) for row in template_rows], *[_dated_entry_out(row) for row in dated_rows]]
+
+
+@router.get("/tasks", response_model=list[GaTimeTableTask])
+async def list_ga_time_table_tasks(
+    week_start: date,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list[GaTimeTableTask]:
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        return []
+    rows = await get_ga_time_table_rows(db)
+    return await get_ga_time_table_tasks(db, ga_user, week_start, week_start + timedelta(days=6), rows)
 
 
 @router.post("", response_model=GaTimeSlotEntryOut)
