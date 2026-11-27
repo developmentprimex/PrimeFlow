@@ -160,8 +160,9 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
 - Development → Meetings → M1 dhe seksioni M1 Zhvillim në Export Excel përdorin
   të njëjtin raport ditor. Pyetja «A KA RIORGANIZIM?» përdor formularin e
   M1 Start of Day në Department dhe My View, me përgjigje të ruajtura më vete
-  sipas datës së Zhvillimit. Plani dhe shkaktari i mungesës/vonesës shfaqen
-  gjithmonë në formularin e Zhvillimit dhe në Excel-in e takimeve të brendshme.
+  sipas datës së Zhvillimit. Plani shfaqet gjithmonë në formularin e Zhvillimit.
+  Shkaktari i mungesës/vonesës shfaqet në Excel-in e takimeve të brendshme,
+  dhe vlerat e ruajtura mbarten gjatë redaktimit të fushave të tjera.
   Formulari shfaqet ndërsa raporti ngarkohet dhe redaktimi aktivizohet pasi
   të jenë ngarkuar përgjigjja dhe lejet e ditës.
   Kontrollo ruajtjen, rifreskimin, ndërrimin e ditës dhe eksportin e M1.

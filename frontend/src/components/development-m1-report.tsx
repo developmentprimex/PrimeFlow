@@ -250,7 +250,7 @@ export function DevelopmentMeetingReorganization({ slot, refresh, reload }: {
       ) : !report ? (
         <p className="mt-2 text-sm text-muted-foreground">Po ngarkohet përgjigjja e ruajtur.</p>
       ) : null}
-      <MorningReorganization body={body} showAllFollowUps
+      <MorningReorganization body={body} showAllFollowUps showAbsenceCause={false}
         readOnly={report?.can_edit !== true} saving={saving} saveDisabled={loading || failed}
         onChange={(next) => { if (report) setDraft({ date: report.date, body: next }) }}
         onSave={() => void save()} />

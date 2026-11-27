@@ -18,12 +18,13 @@ const REORGANIZATION_FIELDS = {
 
 export function MorningReorganization({
   body, hasAttendanceIssue = false, showAllFollowUps = false, legacyComment = false,
-  readOnly, saving = false, saveDisabled, maxLength, onChange, onSave,
+  showAbsenceCause = true, readOnly, saving = false, saveDisabled, maxLength, onChange, onSave,
 }: {
   body: string
   hasAttendanceIssue?: boolean
   showAllFollowUps?: boolean
   legacyComment?: boolean
+  showAbsenceCause?: boolean
   readOnly: boolean
   saving?: boolean
   saveDisabled?: boolean
@@ -87,7 +88,7 @@ export function MorningReorganization({
         ))}
       </div>
       {needsPlan ? answerField(plan) : null}
-      {showAllFollowUps || hasAttendanceIssue ? answerField(cause) : null}
+      {showAbsenceCause && (showAllFollowUps || hasAttendanceIssue) ? answerField(cause) : null}
       {!readOnly && onSave ? (
         <Button type="button" variant="outline" size="sm" disabled={saveDisabled} onClick={onSave}>
           <Save className="h-4 w-4" /> Ruaj
