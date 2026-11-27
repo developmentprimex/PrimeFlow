@@ -250,6 +250,12 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   ditor RLZ, M2 Post-Break, M2/M3 PIKAT, eksportet dhe Discord M2. Arsyeja
   ruhet në `task_daily_rlz_states` pas migrimit 0210. Mbyllja si DONE e detyrave
   që kërkojnë koment për rezultatin përdor një rregull më vete.
+- `Planifikim javor` (`WEEKLY_PLANNING`) është arsye për shtyrjen e datës
+  Start/Due në dialogun e përbashkët dhe në kërkesat e shtyrjes në Discord.
+  Ruhet pa koment dhe shfaqet te historiku, Realization ditor/javor, Kontrolli
+  ditor RLZ, M1/M2/M3 dhe eksportet që lexojnë evidencën e shtyrjes.
+  Lista e shpjegimeve të zakonshme te RLZ dhe M2 ruan opsionet e saj. Për
+  bazat ekzistuese, migrimi `0218_weekly_planning_reason` lejon kodin e ri.
 
 - Done në Finance, Edit në Finance dhe System Task Instances, si dhe Edit te
   All Today në Product Content përdorin përgjigjen e API-së së detyrës për të
@@ -1136,6 +1142,8 @@ detyrim dhe nuk nënkuptojnë se ngjyra përditësohet automatikisht gjithkund.
   endpoint më vete (`/exports/ga-notes.xlsx`) dhe lexon edhe këto PX JAV përmes
   të njëjtit filtër në server. Lista e zakonshme e PX JAV dhe raportet e tjera
   ruajnë filtrat e tyre.
+  Filtri `Task assignee` i PX Notes përdor përgjegjësit e kolonës `PER` për
+  detyrat nga të dy burimet. Zgjedhja vlen vetëm për tabelën në ekran.
 - Takimet externe/interne mund të kenë pjesëmarrës të përbashkët, përsëritje,
   statuse sipas datës dhe taska PARA/PAS ose përgatitjeje. Kontrollo këto lidhje
   edhe kur ndryshon ose anulohet takimi. 1H Reports preket nga taskat përkatëse,

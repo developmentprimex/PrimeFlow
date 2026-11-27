@@ -4,7 +4,7 @@ import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { parseMarkedNoteContent } from "@/lib/note-markup"
-import { DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
+import { TASK_POSTPONEMENT_REASONS } from "@/lib/daily-rlz-ui"
 import type { RealizationPersonResult, RealizationTaskFact } from "@/lib/types"
 
 export function weeklyPostponements(result: RealizationPersonResult) {
@@ -43,7 +43,7 @@ export function RealizationWeeklyPostponements({ result, canEdit, busy, onDecide
           const dirty = status !== task.adjustment_status || comment.trim() !== (task.manager_decision?.comment || "")
           return <tr key={task.task_id} className="divide-x divide-slate-200 border-t border-slate-200 align-middle even:bg-slate-50">
             <th scope="row" className="px-3 py-1.5 text-left font-medium"><p className="truncate" title={title}>{title}</p><p className="mt-0.5 text-[10px] font-normal text-slate-500">Dita: {dateLabel(date)}</p>
-              {event.metadata?.reason ? <p className="mt-1 break-words text-xs font-normal text-slate-600"><b>Arsyeja e shtyrjes:</b> {DAILY_RLZ_REASONS.find(([code]) => code === event.metadata?.reason)?.[1] || event.metadata.reason}</p> : null}
+              {event.metadata?.reason ? <p className="mt-1 break-words text-xs font-normal text-slate-600"><b>Arsyeja e shtyrjes:</b> {TASK_POSTPONEMENT_REASONS.find(([code]) => code === event.metadata?.reason)?.[1] || event.metadata.reason}</p> : null}
               {event.metadata?.comment ? <p className="mt-1 whitespace-pre-wrap break-words text-xs font-normal text-slate-600"><b>Komenti i shtyrjes:</b> {event.metadata.comment}</p> : null}
             </th>
             <td className="px-2 py-1.5 tabular-nums text-slate-600">{dateLabel(event.old_value)}</td>

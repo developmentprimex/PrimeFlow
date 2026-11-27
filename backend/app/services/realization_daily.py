@@ -27,6 +27,7 @@ from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_user_comment import TaskUserComment
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
+from app.services.daily_realization_explanation import reason_requires_comment
 from app.services.realization_calculator import build_live_questions, build_project_progress
 from app.services.realization_evidence import _snapshot_tasks
 from app.services.realization_people import load_active_users_and_common_leave
@@ -663,7 +664,9 @@ async def calculate_daily_period(
         else []
     )
     comments = _effective_task_comment_map(comment_rows, daily_comment_rows)
-    pv_reasons = {(row.task_id, row.user_id) for row in daily_comment_rows if row.reason_code == "PV"}
+    comment_exempt_tasks = {
+        (row.task_id, row.user_id) for row in daily_comment_rows if not reason_requires_comment(row.reason_code)
+    }
 
     observation_rows = (
         await db.execute(
@@ -783,10 +786,10 @@ async def calculate_daily_period(
             task_id_raw = task_fact.get("task_id")
             task_uuid = uuid.UUID(str(task_id_raw)) if task_id_raw else None
             comment = comments.get((task_uuid, user_id), "") if task_uuid else ""
-            pv_reason = (task_uuid, user_id) in pv_reasons
+            comment_exempt = (task_uuid, user_id) in comment_exempt_tasks
             task_fact["user_comment"] = comment or None
             task_fact["comment_required_before_close"] = task_fact.get("source_type") != "system" and (
-                not pv_reason or task_fact.get("classification") == "completed"
+                not comment_exempt or task_fact.get("classification") == "completed"
             )
             task_fact["rlz_impact"] = (
                 "PINK_ACTION_REQUIRED"
@@ -797,7 +800,7 @@ async def calculate_daily_period(
                 else "ADDITIONAL_EVIDENCE"
             )
             task_fact["explanation_missing"] = bool(
-                task_fact["rlz_impact"] == "PINK_ACTION_REQUIRED" and not comment and not pv_reason
+                task_fact["rlz_impact"] == "PINK_ACTION_REQUIRED" and not comment and not comment_exempt
             )
             if task_fact["explanation_missing"]:
                 missing_pink_explanations += 1

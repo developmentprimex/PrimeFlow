@@ -1318,11 +1318,13 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
   const creatingTaskRef = React.useRef(false)
   const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("all")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
+  const [assigneeFilter, setAssigneeFilter] = React.useState("all")
   const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
   const [oneHMarkerFilter, setOneHMarkerFilter] = React.useState<OneHMarkerFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const deferredSearchQuery = React.useDeferredValue(searchQuery)
   const [notesRenderLimit, setNotesRenderLimit] = React.useState(INITIAL_NOTES_RENDER_LIMIT)
+  const [renderingPrintTable, setRenderingPrintTable] = React.useState(false)
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [showLegend, setShowLegend] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
@@ -3214,7 +3216,19 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
       setTaskPriority("NORMAL")
     }
   }, [availablePriorityOptions, taskDialogNoteId, taskPriority])
-  const visibleNotes = React.useMemo(() => {
+  const assigneeFilterOptions = React.useMemo(() => {
+    const options = new Map(users.map((person) => [person.id, person.full_name || person.username || person.email]))
+    for (const { assignees } of noteTaskInfo.values()) {
+      for (const person of assignees) {
+        if (person.id && !options.has(person.id)) {
+          options.set(person.id, person.full_name || person.username || person.email || person.id)
+        }
+      }
+    }
+    return [...options].sort(([, a], [, b]) => a.localeCompare(b))
+  }, [users, noteTaskInfo])
+
+  const notesMatchingExistingFilters = React.useMemo(() => {
     const now = Date.now()
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000
     const closedCutoff = now - 30 * 24 * 60 * 60 * 1000
@@ -3338,9 +3352,16 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
     return sorted
   }, [notes, rangeFilter, taskStatusFilter, contentFilter, oneHMarkerFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
 
+  const visibleNotes = React.useMemo(() => {
+    if (assigneeFilter === "all") return notesMatchingExistingFilters
+    return notesMatchingExistingFilters.filter((note) =>
+      noteTaskInfo.get(note.id)?.assignees.some((person) => person.id === assigneeFilter)
+    )
+  }, [assigneeFilter, notesMatchingExistingFilters, noteTaskInfo])
+
   React.useEffect(() => {
     setNotesRenderLimit(INITIAL_NOTES_RENDER_LIMIT)
-  }, [contentFilter, deferredSearchQuery, departmentId, oneHMarkerFilter, projectId, rangeFilter, taskStatusFilter])
+  }, [assigneeFilter, contentFilter, deferredSearchQuery, departmentId, oneHMarkerFilter, projectId, rangeFilter, taskStatusFilter])
 
   const renderedNotes = React.useMemo(
     () => visibleNotes.slice(0, notesRenderLimit),
@@ -4380,6 +4401,19 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 </SelectContent>
               </Select>
             </div>
+            <div className="min-w-0 space-y-1">
+              <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+                <SelectTrigger aria-label="Task assignee" className="h-9 w-full min-w-0 gap-1 px-2 text-xs sm:w-[180px] sm:gap-2 sm:px-3 sm:text-sm [&_[data-slot=select-value]]:min-w-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All assignees</SelectItem>
+                  {assigneeFilterOptions.map(([id, label]) => (
+                    <SelectItem key={id} value={id}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="col-span-2 min-w-0 space-y-1">
               <Input
                 value={searchQuery}
@@ -4393,30 +4427,28 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
             <Button
               variant="outline"
               className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-              onClick={async () => {
+              onClick={() => {
                 const printWindow = window.open('', '_blank')
                 if (!printWindow) return
 
-                const previousNotesRenderLimit = notesRenderLimit
-                if (notesRenderLimit < visibleNotes.length) {
-                  setNotesRenderLimit(visibleNotes.length)
-                  await new Promise<void>((resolve) => {
-                    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+                // Print all rows that match the existing filters, regardless of the screen's assignee.
+                let clonedTable: HTMLTableElement
+                flushSync(() => setRenderingPrintTable(true))
+                try {
+                  const table = document.querySelector<HTMLTableElement>('.notes-table-container table')
+                  if (!table) {
+                    printWindow.close()
+                    return
+                  }
+                  clonedTable = table.cloneNode(true) as HTMLTableElement
+                  const noteCells = table.querySelectorAll<HTMLTableCellElement>('tbody > tr > td:nth-child(2)')
+                  const clonedNoteCells = clonedTable.querySelectorAll<HTMLTableCellElement>('tbody > tr > td:nth-child(2)')
+                  clonedNoteCells.forEach((cell, index) => {
+                    const originalCell = noteCells[index]
+                    if (originalCell) cell.style.backgroundColor = window.getComputedStyle(originalCell).backgroundColor
                   })
-                }
-
-                const tableContainer = document.querySelector('.notes-table-container')
-                if (!tableContainer) {
-                  setNotesRenderLimit(previousNotesRenderLimit)
-                  printWindow.close()
-                  return
-                }
-
-                const table = tableContainer.querySelector('table')
-                if (!table) {
-                  setNotesRenderLimit(previousNotesRenderLimit)
-                  printWindow.close()
-                  return
+                } finally {
+                  flushSync(() => setRenderingPrintTable(false))
                 }
                 
                 // Get user initials
@@ -4435,15 +4467,6 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                 const hoursStr = hours.toString().padStart(2, "0")
                 const dateTimeStr = `${day}.${month}.${year}, ${hoursStr}:${minutes} ${ampm}`
                 
-                // Clone the table and clean up React-specific attributes
-                const clonedTable = table.cloneNode(true) as HTMLElement
-                const noteCells = table.querySelectorAll<HTMLTableCellElement>('tbody > tr > td:nth-child(2)')
-                const clonedNoteCells = clonedTable.querySelectorAll<HTMLTableCellElement>('tbody > tr > td:nth-child(2)')
-                clonedNoteCells.forEach((cell, index) => {
-                  const originalCell = noteCells[index]
-                  if (originalCell) cell.style.backgroundColor = window.getComputedStyle(originalCell).backgroundColor
-                })
-                setNotesRenderLimit(previousNotesRenderLimit)
                 const allElements = clonedTable.querySelectorAll('*')
                 allElements.forEach((el) => {
                   // Remove React event handlers and other attributes
@@ -4664,6 +4687,8 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
             <div className="text-sm text-muted-foreground">Loading notes...</div>
           ) : notes.length === 0 ? (
             <div className="text-sm text-muted-foreground">No notes yet.</div>
+          ) : !renderingPrintTable && assigneeFilter !== "all" && visibleNotes.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No tasks match the selected filters.</div>
           ) : (
             <div
               className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full"
@@ -4695,7 +4720,7 @@ export default function PxNotesWorkspace({ editorNote, onEditorClose, onEditorSa
                     </tr>
                   </thead>
                   <tbody>
-                  {renderedNotes.map((note, idx) => {
+                  {(renderingPrintTable ? notesMatchingExistingFilters : renderedNotes).map((note, idx) => {
                     const isPxJavNote = note.source === "PX_JAV"
                     const creator = note.created_by ? userMap.get(note.created_by) : null
                     const creatorLabel =

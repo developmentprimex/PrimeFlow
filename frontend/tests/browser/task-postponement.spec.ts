@@ -29,7 +29,7 @@ async function shell(page: Page, initialStatus = "TODO") {
       const movesDateForward = ["start_date", "due_date"].some(field =>
         body[field]?.slice(0, 10) > task[field as "due_date"].slice(0, 10),
       )
-      const explained = body.postponement_reason_code === "PV"
+      const explained = ["PV", "WEEKLY_PLANNING"].includes(body.postponement_reason_code)
         || (body.postponement_reason_code && body.postponement_comment?.trim())
       if (movesDateForward && !explained) {
         return route.fulfill({ status: 409, json: { detail: { code: "TASK_POSTPONEMENT_EXPLANATION_REQUIRED",
@@ -107,6 +107,18 @@ test("PV allows saving a postponement with a blank comment", async ({ page }) =>
   await dialog.getByRole("button", { name: "Ruaj shtyrjen" }).click()
   await expect(page.getByRole("dialog", { name: "Edit task" })).toHaveCount(0)
   expect(writes[1]).toMatchObject({ postponement_reason_code: "PV", postponement_comment: "" })
+})
+
+test("weekly planning saves a postponement without asking for a comment", async ({ page }) => {
+  const { writes } = await shell(page)
+  await page.getByLabel("Due date", { exact: true }).fill(inputDay(21))
+  await page.getByRole("button", { name: "Save changes" }).click()
+  const dialog = page.getByRole("dialog", { name: "Arsyeja e shtyrjes" })
+  await dialog.getByLabel("Arsyeja *", { exact: true }).selectOption({ label: "Planifikim javor" })
+  await expect(dialog.getByRole("textbox")).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Ruaj shtyrjen" }).click()
+  await expect(page.getByRole("dialog", { name: "Edit task" })).toHaveCount(0)
+  expect(writes[1]).toMatchObject({ postponement_reason_code: "WEEKLY_PLANNING", postponement_comment: "" })
 })
 
 test("canceling the explanation keeps the edit form and does not retry the date write", async ({ page }) => {

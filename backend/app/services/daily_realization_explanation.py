@@ -4,9 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+WEEKLY_PLANNING_REASON = "WEEKLY_PLANNING"
+
 
 def reason_requires_comment(reason_code: str | None) -> bool:
-    return reason_code != "PV"
+    return reason_code not in {"PV", WEEKLY_PLANNING_REASON}
 
 
 @dataclass(frozen=True)
@@ -31,7 +33,7 @@ def requires_daily_explanation(
     """Return the final reason/comment rule for one task/day.
 
     TODO, postponed work, and IN_PROGRESS work due today/overdue require a
-    reason and, except for PV, a comment. Future IN_PROGRESS and DONE do not.
+    reason and, depending on the reason, a comment. Future IN_PROGRESS and DONE do not.
     """
     normalized = (status or "TODO").upper()
     if normalized == "DONE":

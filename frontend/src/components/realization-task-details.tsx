@@ -4,7 +4,7 @@ import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { firstLineTitle } from "@/components/realization-deadline-tasks"
-import { dailyRlzReasonLabel, DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
+import { dailyRlzReasonLabel, TASK_POSTPONEMENT_REASONS } from "@/lib/daily-rlz-ui"
 import { useAuth } from "@/lib/auth"
 import type { DailyRealizationPerson, DailyRealizationTask, RealizationItem } from "@/lib/types"
 
@@ -73,7 +73,7 @@ function TaskDetails({ selection, day, canConfirm, busy, onClose, onConfirm }: {
       {moves.map(event => <section key={event.id} className="space-y-1 rounded-lg border p-3">
         <p className="font-semibold">Shtyrë nga {dateLabel(event.old_value)} për {dateLabel(event.new_value)}</p>
         <p className="text-xs text-slate-500">{event.actor_name ? `Nga ${event.actor_name} · ` : ""}{event.timestamp ? new Intl.DateTimeFormat("sq-AL", { timeZone: "Europe/Tirane", dateStyle: "short", timeStyle: "short" }).format(new Date(event.timestamp)) : dateLabel(day)}</p>
-        <p><b>Arsyeja:</b> {event.metadata?.reason ? DAILY_RLZ_REASONS.find(([code]) => code === event.metadata?.reason)?.[1] || event.metadata.reason : "Nuk është shënuar"}</p>
+        <p><b>Arsyeja:</b> {event.metadata?.reason ? TASK_POSTPONEMENT_REASONS.find(([code]) => code === event.metadata?.reason)?.[1] || event.metadata.reason : "Nuk është shënuar"}</p>
         <p className="whitespace-pre-wrap break-words"><b>Komenti i shtyrjes:</b> {event.metadata?.comment || "Nuk është shënuar"}</p>
       </section>)}
       {task.comment && task.comment !== lastMove?.metadata?.comment ? <p className="whitespace-pre-wrap break-words"><b>Komenti ditor:</b> {task.comment}</p> : null}

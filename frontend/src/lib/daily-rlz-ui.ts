@@ -12,10 +12,14 @@ export const DAILY_RLZ_REASONS = [
   ["OTHER", "Tjetër"],
 ] as const
 
-const DAILY_RLZ_REASON_LABELS = Object.fromEntries(DAILY_RLZ_REASONS)
+export const WEEKLY_PLANNING_REASON = "WEEKLY_PLANNING"
+const WEEKLY_PLANNING_REASON_OPTION = [WEEKLY_PLANNING_REASON, "Planifikim javor"] as const
+export const TASK_POSTPONEMENT_REASONS = [...DAILY_RLZ_REASONS, WEEKLY_PLANNING_REASON_OPTION] as const
+
+const DAILY_RLZ_REASON_LABELS = Object.fromEntries(TASK_POSTPONEMENT_REASONS)
 
 export function dailyRlzReasonRequiresComment(code?: string | null) {
-  return code !== "PV"
+  return code !== "PV" && code !== WEEKLY_PLANNING_REASON
 }
 
 export function dailyRlzReasonLabel(code?: string | null) {

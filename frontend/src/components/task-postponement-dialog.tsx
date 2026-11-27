@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { DAILY_RLZ_REASONS, dailyRlzReasonRequiresComment } from "@/lib/daily-rlz-ui"
+import { TASK_POSTPONEMENT_REASONS, WEEKLY_PLANNING_REASON, dailyRlzReasonRequiresComment } from "@/lib/daily-rlz-ui"
 import type { PostponementDetails, PostponementExplanation } from "@/lib/task-postponement"
 
 type Request<Details, Answer> = { id: number; details: Details; finish: (answer: Answer | null) => void }
@@ -16,17 +16,18 @@ export function TaskPostponementForm({ details, onFinish }: {
   const [reason, setReason] = React.useState("")
   const [comment, setComment] = React.useState("")
   const commentRequired = dailyRlzReasonRequiresComment(reason)
+  const showComment = reason !== WEEKLY_PLANNING_REASON
   const ready = !!reason && (!commentRequired || !!comment.trim())
   const date = (value: string) => value.split("-").reverse().join(".")
   return <Dialog open onOpenChange={(open) => { if (!open) onFinish(null) }}>
     <DialogContent className="sm:max-w-lg" onInteractOutside={(event) => event.preventDefault()}>
       <DialogHeader>
         <DialogTitle>Arsyeja e shtyrjes</DialogTitle>
-        <DialogDescription>Zgjidh arsyen e shtyrjes. Për PV, komenti është opsional.</DialogDescription>
+        <DialogDescription>Zgjidh arsyen e shtyrjes.</DialogDescription>
       </DialogHeader>
       <form className="space-y-4" onSubmit={(event) => {
         event.preventDefault()
-        if (ready) onFinish({ postponement_reason_code: reason, postponement_comment: comment.trim() })
+        if (ready) onFinish({ postponement_reason_code: reason, postponement_comment: showComment ? comment.trim() : "" })
       }}>
         <p className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-sm font-medium">{details.task_title}</p>
         {details.assignee_name ? <p className="text-sm"><strong>Përgjegjësi:</strong> {details.assignee_name}</p> : null}
@@ -38,14 +39,14 @@ export function TaskPostponementForm({ details, onFinish }: {
           <select id="postponement-reason" required value={reason} onChange={(event) => setReason(event.target.value)}
             className="h-10 w-full rounded-md border bg-background px-3 text-sm">
             <option value="">Zgjidh arsyen</option>
-            {DAILY_RLZ_REASONS.map(([code, title]) => <option key={code} value={code}>{title}</option>)}
+            {TASK_POSTPONEMENT_REASONS.map(([code, title]) => <option key={code} value={code}>{title}</option>)}
           </select>
         </div>
-        <div className="space-y-2">
+        {showComment && <div className="space-y-2">
           <Label htmlFor="postponement-comment">{commentRequired ? "Komenti *" : "Komenti (opsional)"}</Label>
           <Textarea id="postponement-comment" required={commentRequired} rows={4} maxLength={10000} value={comment}
             placeholder="Shpjego pse po shtyhet detyra." onChange={(event) => setComment(event.target.value)} />
-        </div>
+        </div>}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={() => onFinish(null)}>Anulo</Button>
           <Button type="submit" disabled={!ready}>Ruaj shtyrjen</Button>

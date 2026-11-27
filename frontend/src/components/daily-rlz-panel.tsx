@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import type { DailyReportResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { DAILY_RLZ_REASONS, dailyRlzReasonRequiresComment } from "@/lib/daily-rlz-ui"
+import { DAILY_RLZ_REASONS, WEEKLY_PLANNING_REASON, dailyRlzReasonLabel, dailyRlzReasonRequiresComment } from "@/lib/daily-rlz-ui"
 
 export { DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
 
@@ -107,6 +107,7 @@ export function DailyRlzReasonCell({ taskId, day, state, subjectUserId, onSaved 
     <SelectTrigger title={state.reason_missing ? "Kërkon sqarim" : undefined} className={cn("h-7 min-w-[150px] bg-white text-[11px]", state.reason_missing && "border-amber-500 bg-amber-50", failed && "border-red-500 bg-red-50 ring-1 ring-red-300")}><SelectValue placeholder="Zgjidh arsyen"/></SelectTrigger>
     <SelectContent>
       <SelectItem value={DAILY_RLZ_EMPTY_REASON}>Empty</SelectItem>
+      {state.reason_code === WEEKLY_PLANNING_REASON && <SelectItem value={WEEKLY_PLANNING_REASON}>{dailyRlzReasonLabel(WEEKLY_PLANNING_REASON)}</SelectItem>}
       {DAILY_RLZ_REASONS.map(([code,label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}
     </SelectContent>
   </Select>

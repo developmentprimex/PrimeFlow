@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 import discord
 from app.config import settings
-from app.services.daily_realization_explanation import reason_requires_comment
+from app.services.daily_realization_explanation import WEEKLY_PLANNING_REASON, reason_requires_comment
 from app.services.primeflow_report import report_timezone
 from app.services.discord_m2_postponements import FIELDS, STATUS_LABELS, iso
 import discord_m2_client as questions
@@ -107,11 +107,13 @@ class ProposalModal(discord.ui.Modal):
                 placeholder='Ndrysho datën nëse dëshiron · DD.MM.YYYY', required=True, max_length=32)
             self.dates[field] = item
             self.add_item(item)
-        comment_required = reason_requires_comment(reason)
-        self.comment = discord.ui.TextInput(label='Pse të duhet shtyrja?' if comment_required else 'Komenti (opsional)',
-            placeholder='P.sh. Pres të dhënat nga klienti. Më duhet edhe një ditë.',
-            required=comment_required, max_length=4000, style=discord.TextStyle.paragraph)
-        self.add_item(self.comment)
+        self.comment = None
+        if reason != WEEKLY_PLANNING_REASON:
+            comment_required = reason_requires_comment(reason)
+            self.comment = discord.ui.TextInput(label='Pse të duhet shtyrja?' if comment_required else 'Komenti (opsional)',
+                placeholder='P.sh. Pres të dhënat nga klienti. Më duhet edhe një ditë.',
+                required=comment_required, max_length=4000, style=discord.TextStyle.paragraph)
+            self.add_item(self.comment)
 
     async def on_submit(self, interaction):
         # Modal submissions originate from the same task message. Acknowledge
@@ -122,7 +124,7 @@ class ProposalModal(discord.ui.Modal):
             source = 'tasks' if self.job.get('source') == 'task' else 'questions'
             result = await self.bot.bridge(f"/bot/m2/postponements/{source}/{self.job['id']}", {
                 **questions.actor(interaction), **dates, 'request_id': str(interaction.id), 'change_kind': change_kind,
-                'reason_code': self.reason, 'comment': str(self.comment)})
+                'reason_code': self.reason, 'comment': str(self.comment) if self.comment is not None else ''})
             await interaction.edit_original_response(content=task_context(self.job) + '\n\n⏳ Kërkesa është në pritje të Diellza Veliut. Datat ndryshojnë vetëm pas konfirmimit.', embed=None, view=back_view(self.job))
             if source == 'tasks':
                 return
@@ -161,7 +163,8 @@ async def handle(bot, interaction):
     if action in {'request', 'dates'}:
         view = discord.ui.View(timeout=None)
         view.add_item(discord.ui.Select(placeholder='Zgjidh arsyen e shtyrjes', custom_id=f'pf:m2a:{prefix}reason:{object_id}:start_due',
-            options=[discord.SelectOption(label=item['label'], value=item['value']) for item in job['reasons']], row=0))
+            options=[discord.SelectOption(label=item['label'], value=item['value'])
+                     for item in (job.get('postponement_reasons') or job['reasons'])], row=0))
         view.add_item(back_button(job))
         await interaction.response.edit_message(content=task_context(job) + '\n\nZgjidh arsyen e shtyrjes. Në formular ndrysho vetëm datën që dëshiron të shtysh; tjetrën lëre siç është.', embed=None, view=view)
     elif action == 'reason':

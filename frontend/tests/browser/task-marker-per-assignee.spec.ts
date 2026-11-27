@@ -33,7 +33,11 @@ async function openEditor(page: Page, source: "ga-notes" | "plan-notes") {
     if (path === "/api/auth/me") return route.fulfill({ json: user })
     if (path === "/api/users") return route.fulfill({ json: owners })
     if (path === "/api/departments") return route.fulfill({ json: [{ id: departmentId, name: "Development", code: "DEV" }] })
-    if (path === `/api/${source}`) return route.fulfill({ json: [note] })
+    if (path === "/api/ga-notes") {
+      const plainNote = { ...note, id: "unassigned-note", content: "Note without a task", is_converted_to_task: false }
+      return route.fulfill({ json: source === "ga-notes" ? [note, plainNote] : [plainNote] })
+    }
+    if (path === "/api/plan-notes" && source === "plan-notes") return route.fulfill({ json: [note] })
     if (path === "/api/tasks/by-ga-notes/summary") return route.fulfill({ json: tasks })
     const markerTask = tasks.find(task => path === `/api/tasks/${task.id}` || path === `/api/tasks/${task.id}/one-h-marker`)
     if (markerTask) {
@@ -77,6 +81,42 @@ test("PX Notes list shows read-only symbols and keeps editing inside Edit Note",
   expect(tasks[1].one_h_marker).toBe('QUESTION')
   await row.getByRole('cell', { name: 'Edit', exact: true }).getByRole('button', { name: 'Edit', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Edit Note', exact: true }).getByRole('button', { name: 'Symbol for First owner', exact: true })).toContainText('KA')
+})
+
+test("PX Notes filters by any task assignee on screen and keeps that filter out of print", async ({ page }) => {
+  await openEditor(page, "plan-notes")
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog", { name: "Edit Note", exact: true })).toHaveCount(0)
+
+  const table = page.locator(".notes-table-container table")
+  const assignee = page.getByRole("combobox", { name: "Task assignee" })
+  await expect(table).toContainText("Note without a task")
+  await assignee.click()
+  await page.getByRole("option", { name: "Second owner", exact: true }).click()
+  await expect(table).toContainText("Shared work")
+  await expect(table).not.toContainText("Note without a task")
+
+  await page.evaluate(() => {
+    window.open = () => ({
+      document: {
+        open() {},
+        write(html: string) { document.body.dataset.printedNotes = html },
+        close() {},
+      },
+      print() {},
+      close() {},
+    }) as unknown as Window
+  })
+  await page.getByRole("button", { name: "Print", exact: true }).click()
+  await expect(page.locator("body")).toHaveAttribute("data-printed-notes", /Note without a task/)
+  await expect(table).not.toContainText("Note without a task")
+
+  await page.getByRole("textbox", { name: "Search notes" }).fill("Note without a task")
+  await expect(page.getByText("No tasks match the selected filters.")).toBeVisible()
+  await assignee.click()
+  await page.getByRole("option", { name: "All assignees", exact: true }).click()
+  await expect(table).toContainText("Note without a task")
+  await expect(table).not.toContainText("Shared work")
 })
 
 for (const source of ["ga-notes", "plan-notes"] as const) {

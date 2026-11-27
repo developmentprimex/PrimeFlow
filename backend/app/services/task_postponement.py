@@ -72,7 +72,7 @@ def require_postponement_explanation(*, task, updates: dict, reason_code: str | 
             return {}
         raise HTTPException(status_code=409, detail={
             "code": "TASK_POSTPONEMENT_EXPLANATION_REQUIRED",
-            "message": "Për ta shtyrë detyrën, zgjidh arsyen dhe plotëso komentin.",
+            "message": "Zgjidh arsyen e shtyrjes dhe plotëso komentin kur kërkohet.",
             "task_id": str(task.id), "task_title": task.title, "changes": changes,
         })
     return {"reason_code": reason_code, "reason": REASON_LABELS[reason_code], "comment": comment}
@@ -100,7 +100,7 @@ def require_note_postponement_explanations(*, tasks, updates_by_assignee: dict, 
     if missing:
         raise HTTPException(status_code=409, detail={
             "code": "TASK_POSTPONEMENT_EXPLANATION_REQUIRED",
-            "message": "Për çdo detyrë të shtyrë, plotëso arsyen dhe komentin.",
+            "message": "Për çdo detyrë të shtyrë, zgjidh arsyen dhe plotëso komentin kur kërkohet.",
             "postponements": missing,
         })
     return saved

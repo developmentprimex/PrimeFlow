@@ -24,7 +24,7 @@ from app.models.user import User
 from app.models.discord_m2_postponement import DiscordM2Postponement
 from app.services import discord_m2 as service, m2_reporting_points as reports
 from app.services.audit import add_audit_log
-from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.daily_rlz_compliance import REASON_DEFINITIONS, REASON_LABELS
 from app.services.primeflow_report import report_timezone
 from app.services.morning_task_follow_up import task_model_groups
 
@@ -64,7 +64,8 @@ def question_payload(question, link):
             'answered_at': question.answered_at.isoformat() if question.answered_at else None,
             'message_id': question.message_id,
             'comment': question.comment, 'choice': question.choice,
-            'reasons': [{'value': code, 'label': label} for code, label in REASON_LABELS.items()]}
+            'reasons': [{'value': code, 'label': label} for code, label in REASON_DEFINITIONS],
+            'postponement_reasons': [{'value': code, 'label': label} for code, label in REASON_LABELS.items()]}
     if question.platform_answered_at and (not question.answered_at or question.platform_answered_at > question.answered_at):
         values = question.platform_answer or {}
         result.update(choice=values.get('choice'), reason_code=values.get('reason_code'), comment=values.get('comment', ''),

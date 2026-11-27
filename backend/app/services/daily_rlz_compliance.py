@@ -28,7 +28,7 @@ from app.services.one_h_slots import effective_slot_date
 from app.services.daily_realization_approval import daily_approval_state
 from app.services.daily_realization_live import day_bounds, local_day
 from app.services.daily_realization_events import semantic_local_day
-from app.services.daily_realization_explanation import requires_daily_explanation
+from app.services.daily_realization_explanation import WEEKLY_PLANNING_REASON, requires_daily_explanation
 from app.services.daily_realization_close_state import resolve_daily_close_state
 
 RLZ_CLOSE_OPEN = time(15, 30)
@@ -46,7 +46,7 @@ REASON_DEFINITIONS = (
     ("PV", "PV"),
     ("OTHER", "Tjetër"),
 )
-REASON_LABELS = dict(REASON_DEFINITIONS)
+REASON_LABELS = {**dict(REASON_DEFINITIONS), WEEKLY_PLANNING_REASON: "Planifikim javor"}
 
 
 def tirana_now() -> datetime:

@@ -7,16 +7,17 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.services.daily_rlz_compliance import (
-    REASON_LABELS, is_closable_day, is_editable_day, next_working_day, relevant_tasks,
+    REASON_DEFINITIONS, REASON_LABELS, is_closable_day, is_editable_day, next_working_day, relevant_tasks,
     task_issue_codes,
 )
 
 
-def test_pv_counts_as_complete_explanation_without_comment():
+@pytest.mark.parametrize("reason_code", ["PV", "WEEKLY_PLANNING"])
+def test_comment_exempt_reason_counts_as_complete_explanation(reason_code):
     day = date(2026, 11, 25)
     fields = dict(status="TODO", due_date=day, requires_one_h_slot=False,
                   one_h_report_slot=None, comment=None, day=day)
-    assert "COMMENT_MISSING" not in task_issue_codes(**fields, reason_code="PV")
+    assert "COMMENT_MISSING" not in task_issue_codes(**fields, reason_code=reason_code)
     assert "COMMENT_MISSING" in task_issue_codes(**fields, reason_code="OTHER")
 from app.services.daily_rlz_control_delivery import render_html, render_plain, subject_for
 from app.api.routers.reports import _daily_rlz_state_out
@@ -55,7 +56,8 @@ def test_friday_moves_to_monday():
 
 
 def test_reason_codes_are_stable_and_complete():
-    assert len(REASON_LABELS) == 11
+    assert len(REASON_DEFINITIONS) == 11
+    assert REASON_LABELS["WEEKLY_PLANNING"] == "Planifikim javor"
     assert REASON_LABELS["PV"] == "PV"
     assert REASON_LABELS["WAITING_CLIENT"] == "Në pritje të klientit"
 
